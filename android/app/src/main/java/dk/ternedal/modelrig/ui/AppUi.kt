@@ -1,16 +1,22 @@
 package dk.ternedal.modelrig.ui
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -46,11 +52,15 @@ fun AppUi() {
 // ---- setup: cloud and/or rig ----
 @Composable
 private fun SetupScreen(store: TokenStore, onDone: () -> Unit) {
-    var refresh by remember { mutableStateOf(0) } // bump to re-read store state
+    var refresh by remember { mutableStateOf(0) }
     val canChat = remember(refresh) { store.hasRig || store.hasCloud }
 
     Column(
-        Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
+        Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .padding(20.dp)
+            .verticalScroll(rememberScrollState()),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("ModelRig", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = TextHigh)
@@ -59,10 +69,10 @@ private fun SetupScreen(store: TokenStore, onDone: () -> Unit) {
         }
         Text("Vælg mindst én kilde", fontSize = 14.sp, color = TextMuted)
         Spacer(Modifier.height(16.dp))
-
         CloudCard(store) { refresh++; onDone() }
         Spacer(Modifier.height(16.dp))
         RigCard(store) { refresh++; onDone() }
+        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -78,16 +88,12 @@ private fun CloudCard(store: TokenStore, onSaved: () -> Unit) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Text("Ollama Cloud", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextHigh)
             Text("Chat uden at rig'en kører. Modeller i skyen.", fontSize = 12.sp, color = TextMuted)
-            Spacer(Modifier.height(4.dp))
-            if (configured) {
-                Text("✓ konfigureret", color = Signal, fontSize = 13.sp)
-            }
+            if (configured) { Spacer(Modifier.height(4.dp)); Text("✓ konfigureret", color = Signal, fontSize = 13.sp) }
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = key, onValueChange = { key = it },
                 label = { Text(if (configured) "Ny API-nøgle (valgfri)" else "API-nøgle", fontSize = 12.sp) },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
+                singleLine = true, visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
             )
             Text("Hentes på ollama.com/settings/keys", fontSize = 11.sp, color = TextMuted)
@@ -95,15 +101,13 @@ private fun CloudCard(store: TokenStore, onSaved: () -> Unit) {
             OutlinedTextField(
                 value = model, onValueChange = { model = it },
                 label = { Text("Model (fx gpt-oss:120b)", fontSize = 12.sp) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                singleLine = true, modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = system, onValueChange = { system = it; store.cloudSystem = it },
                 label = { Text("System-instruktion (valgfri)", fontSize = 12.sp) },
-                minLines = 2, maxLines = 5,
-                modifier = Modifier.fillMaxWidth(),
+                minLines = 2, maxLines = 5, modifier = Modifier.fillMaxWidth(),
             )
             Text("Rolle/baggrund modellen altid får. Fx: Du er en skarp dansk backend-udvikler. Svar kort.",
                 fontSize = 11.sp, color = TextMuted, lineHeight = 15.sp)
@@ -116,16 +120,13 @@ private fun CloudCard(store: TokenStore, onSaved: () -> Unit) {
                             if (key.isNotBlank()) store.cloudKey = key.trim()
                             store.cloudModel = model.trim().ifBlank { "gpt-oss:120b" }
                             store.chatMode = "cloud"
-                        }.onSuccess {
-                            key = ""; configured = true; msg = null; onSaved()
-                        }.onFailure { msg = "Kunne ikke gemme nøgle: ${it.message}" }
+                        }.onSuccess { key = ""; configured = true; msg = null; onSaved() }
+                            .onFailure { msg = "Kunne ikke gemme nøgle: ${it.message}" }
                     },
                 ) { Text("Gem & brug cloud") }
                 if (configured) {
                     Spacer(Modifier.width(8.dp))
-                    TextButton(onClick = { store.clearCloud(); configured = false; key = "" }) {
-                        Text("Ryd", color = Danger)
-                    }
+                    TextButton(onClick = { store.clearCloud(); configured = false; key = "" }) { Text("Ryd", color = Danger) }
                 }
             }
             msg?.let { Spacer(Modifier.height(6.dp)); Text(it, color = Danger, fontSize = 12.sp) }
@@ -148,22 +149,18 @@ private fun RigCard(store: TokenStore, onConnected: () -> Unit) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Text("Din rig (backend)", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextHigh)
             Text("Lokale modeller + RAG. Kræver at rig'en kører.", fontSize = 12.sp, color = TextMuted)
-            Spacer(Modifier.height(4.dp))
-            if (connected) Text("✓ forbundet", color = Signal, fontSize = 13.sp)
+            if (connected) { Spacer(Modifier.height(4.dp)); Text("✓ forbundet", color = Signal, fontSize = 13.sp) }
             Spacer(Modifier.height(8.dp))
             Field("Server-URL", baseUrl) { baseUrl = it }
             Field("Parringskode (XXXX-XXXX)", code) { code = it }
             Field("Enhedsnavn", deviceName) { deviceName = it }
-            Text(
-                "Serveren skal binde 0.0.0.0 / Tailscale-IP — ikke 127.0.0.1. Brug LAN-IP.",
-                color = TextMuted, fontSize = 11.sp, lineHeight = 15.sp,
-            )
+            Text("Serveren skal binde 0.0.0.0 / Tailscale-IP — ikke 127.0.0.1. Brug LAN-IP.",
+                color = TextMuted, fontSize = 11.sp, lineHeight = 15.sp)
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = system, onValueChange = { system = it; store.rigSystem = it },
                 label = { Text("System-instruktion (valgfri)", fontSize = 12.sp) },
-                minLines = 2, maxLines = 5,
-                modifier = Modifier.fillMaxWidth(),
+                minLines = 2, maxLines = 5, modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -173,21 +170,15 @@ private fun RigCard(store: TokenStore, onConnected: () -> Unit) {
                         busy = true; msg = null
                         val url = baseUrl.trim(); val c = code.trim(); val n = deviceName.trim()
                         scope.launch {
-                            val res = withContext(Dispatchers.IO) {
-                                runCatching { ModelRigClient(url).claimPairing(n, c) }
-                            }
-                            res.onSuccess {
-                                store.baseUrl = url; store.token = it; store.chatMode = "rig"
-                                busy = false; connected = true; onConnected()
-                            }.onFailure { msg = it.message ?: "Kunne ikke forbinde"; busy = false }
+                            val res = withContext(Dispatchers.IO) { runCatching { ModelRigClient(url).claimPairing(n, c) } }
+                            res.onSuccess { store.baseUrl = url; store.token = it; store.chatMode = "rig"; busy = false; connected = true; onConnected() }
+                                .onFailure { msg = it.message ?: "Kunne ikke forbinde"; busy = false }
                         }
                     },
                 ) { Text(if (busy) "Forbinder…" else "Forbind") }
                 if (connected) {
                     Spacer(Modifier.width(8.dp))
-                    TextButton(onClick = { store.clearRig(); connected = false }) {
-                        Text("Afbryd", color = Danger)
-                    }
+                    TextButton(onClick = { store.clearRig(); connected = false }) { Text("Afbryd", color = Danger) }
                 }
             }
             msg?.let { Spacer(Modifier.height(6.dp)); Text(it, color = Danger, fontSize = 12.sp) }
@@ -223,183 +214,205 @@ private fun ChatScreen(store: TokenStore, onOpenSettings: () -> Unit) {
         if (messages.isNotEmpty()) listState.scrollToItem(messages.size - 1)
     }
 
+    val onSend: () -> Unit = onSend@{
+        val t = input.trim()
+        if (t.isEmpty() || busy) return@onSend
+        messages.add(Msg("user", t)); input = ""; busy = true
+        val useCloud = mode == "cloud"
+        val sys = (if (useCloud) store.cloudSystem else store.rigSystem).trim()
+        val convo = messages.map { it.role to it.text }
+        val history = if (sys.isNotEmpty()) listOf("system" to sys) + convo else convo
+        val idx = messages.size
+        messages.add(Msg("assistant", "", streaming = true))
+        val rigModel = currentModel
+        scope.launch {
+            val err = withContext(Dispatchers.IO) {
+                runCatching {
+                    val onDelta: (String) -> Unit = { delta ->
+                        scope.launch {
+                            val cur = messages[idx]
+                            messages[idx] = cur.copy(text = cur.text + delta)
+                        }
+                    }
+                    if (useCloud) {
+                        val key = store.cloudKey ?: throw RuntimeException("ingen cloud-nøgle")
+                        CloudClient(key).chatStream(store.cloudModel, history, onDelta = onDelta)
+                    } else {
+                        ModelRigClient(store.baseUrl ?: "", store.token).chatStream(rigModel, history, onDelta = onDelta)
+                    }
+                }.exceptionOrNull()
+            }
+            val cur = messages[idx]
+            messages[idx] = cur.copy(
+                streaming = false,
+                text = when {
+                    err == null -> cur.text
+                    cur.text.isEmpty() -> "⚠️ Fejl: ${err.message}"
+                    else -> cur.text + "\n\n_[afbrudt]_"
+                },
+            )
+            busy = false
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
+        // top bar
         Surface(color = GraphiteSurface, tonalElevation = 2.dp) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("ModelRig", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextHigh)
-                    Spacer(Modifier.weight(1f))
+            Row(
+                Modifier.fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (mode == "cloud") {
+                    ModelChip("☁  ${store.cloudModel}", onClick = onOpenSettings)
+                } else {
                     Box {
-                        TextButton(onClick = { overflow = true }) { Text("⋮", color = TextHigh, fontSize = 20.sp) }
-                        DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
-                            DropdownMenuItem(text = { Text("Ryd samtale") }, onClick = { overflow = false; messages.clear() })
-                            DropdownMenuItem(text = { Text("Indstillinger") }, onClick = { overflow = false; onOpenSettings() })
+                        ModelChip("$currentModel  ▾", onClick = { modelMenu = true })
+                        DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("↻  Genindlæs modeller", color = Signal) },
+                                onClick = {
+                                    modelMenu = false
+                                    scope.launch {
+                                        val res = withContext(Dispatchers.IO) {
+                                            runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listModels() }
+                                        }
+                                        res.onSuccess { models = it }
+                                    }
+                                },
+                            )
+                            if (models.isNotEmpty()) HorizontalDivider()
+                            models.forEach { m ->
+                                DropdownMenuItem(text = { Text(m) }, onClick = {
+                                    currentModel = m; store.model = m; modelMenu = false
+                                })
+                            }
                         }
                     }
                 }
-                Spacer(Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // source selector (only when both are configured)
-                    if (hasRig && hasCloud) {
-                        SourceChip("Rig", mode == "rig") { mode = "rig"; store.chatMode = "rig" }
-                        Spacer(Modifier.width(6.dp))
-                        SourceChip("Cloud", mode == "cloud") { mode = "cloud"; store.chatMode = "cloud" }
-                        Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.weight(1f))
+                Text(
+                    if (mode == "cloud") "Cloud" else "Rig",
+                    color = if (mode == "cloud") Amber else Signal,
+                    fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                )
+                if (hasRig && hasCloud) {
+                    TextButton(
+                        onClick = { val m = if (mode == "cloud") "rig" else "cloud"; mode = m; store.chatMode = m },
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                    ) { Text("Skift", color = Signal, fontSize = 13.sp) }
+                }
+                Box {
+                    TextButton(onClick = { overflow = true }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                        Text("⋮", color = TextHigh, fontSize = 20.sp)
                     }
-                    // model area
-                    if (mode == "cloud") {
-                        AssistChipLike("☁ ${store.cloudModel}") { onOpenSettings() }
-                    } else {
-                        Box {
-                            OutlinedButton(
-                                onClick = { modelMenu = true },
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                            ) { Text("$currentModel  ▾", color = TextHigh, fontSize = 12.sp) }
-                            DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
-                                DropdownMenuItem(
-                                    text = { Text("↻  Genindlæs modeller", color = Signal) },
-                                    onClick = {
-                                        modelMenu = false
-                                        scope.launch {
-                                            val res = withContext(Dispatchers.IO) {
-                                                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listModels() }
-                                            }
-                                            res.onSuccess { models = it }
-                                        }
-                                    },
-                                )
-                                if (models.isNotEmpty()) HorizontalDivider()
-                                models.forEach { m ->
-                                    DropdownMenuItem(text = { Text(m) }, onClick = {
-                                        currentModel = m; store.model = m; modelMenu = false
-                                    })
-                                }
-                            }
-                        }
+                    DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
+                        DropdownMenuItem(text = { Text("Ryd samtale") }, onClick = { overflow = false; messages.clear() })
+                        DropdownMenuItem(text = { Text("Indstillinger") }, onClick = { overflow = false; onOpenSettings() })
                     }
                 }
             }
         }
 
+        // messages
         if (messages.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text(
-                    if (mode == "cloud") "Cloud-tilstand · skriv en besked" else "Rig-tilstand · skriv en besked",
-                    color = TextMuted, fontSize = 14.sp,
-                )
+            Column(
+                Modifier.weight(1f).fillMaxWidth().padding(32.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(if (mode == "cloud") "☁" else "◉", fontSize = 40.sp, color = if (mode == "cloud") Amber else Signal)
+                Spacer(Modifier.height(12.dp))
+                Text(if (mode == "cloud") "Cloud-tilstand" else "Rig-tilstand", color = TextHigh, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                Text("Skriv en besked for at starte", color = TextMuted, fontSize = 13.sp)
             }
         } else {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
             ) { items(messages) { m -> Bubble(m) } }
         }
 
+        // input bar
         Surface(color = GraphiteSurface, tonalElevation = 3.dp) {
-            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.Bottom) {
+            Row(
+                Modifier.fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 OutlinedTextField(
                     value = input, onValueChange = { input = it },
                     modifier = Modifier.weight(1f), enabled = !busy, maxLines = 5,
                     placeholder = { Text("Besked…") },
+                    shape = RoundedCornerShape(24.dp),
                 )
                 Spacer(Modifier.width(8.dp))
-                Button(
-                    enabled = !busy && input.isNotBlank(),
-                    modifier = Modifier.height(52.dp),
-                    onClick = {
-                        val t = input.trim()
-                        if (t.isEmpty()) return@Button
-                        messages.add(Msg("user", t)); input = ""; busy = true
-                        val useCloud = mode == "cloud"
-                        val sys = (if (useCloud) store.cloudSystem else store.rigSystem).trim()
-                        val convo = messages.map { it.role to it.text }
-                        val history = if (sys.isNotEmpty()) listOf("system" to sys) + convo else convo
-                        val idx = messages.size
-                        messages.add(Msg("assistant", "", streaming = true))
-                        val rigModel = currentModel
-                        scope.launch {
-                            val err = withContext(Dispatchers.IO) {
-                                runCatching {
-                                    val onDelta: (String) -> Unit = { delta ->
-                                        scope.launch {
-                                            val cur = messages[idx]
-                                            messages[idx] = cur.copy(text = cur.text + delta)
-                                        }
-                                    }
-                                    if (useCloud) {
-                                        val key = store.cloudKey ?: throw RuntimeException("ingen cloud-nøgle")
-                                        CloudClient(key).chatStream(store.cloudModel, history, onDelta = onDelta)
-                                    } else {
-                                        ModelRigClient(store.baseUrl ?: "", store.token)
-                                            .chatStream(rigModel, history, onDelta = onDelta)
-                                    }
-                                }.exceptionOrNull()
-                            }
-                            val cur = messages[idx]
-                            messages[idx] = cur.copy(
-                                streaming = false,
-                                text = when {
-                                    err == null -> cur.text
-                                    cur.text.isEmpty() -> "⚠️ Fejl: ${err.message}"
-                                    else -> cur.text + "\n\n_[afbrudt]_"
-                                },
-                            )
-                            busy = false
-                        }
-                    },
-                ) { Text(if (busy) "…" else "Send") }
+                val canSend = !busy && input.isNotBlank()
+                Surface(
+                    shape = CircleShape,
+                    color = if (canSend) Signal else GraphiteSurfaceHigh,
+                    modifier = Modifier.size(48.dp).clickable(enabled = canSend, onClick = onSend),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        SendGlyph(color = if (canSend) Color.White else TextMuted, modifier = Modifier.size(20.dp))
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun SourceChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    if (selected) {
-        Button(onClick = onClick, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) {
-            Text(label, fontSize = 12.sp)
-        }
-    } else {
-        OutlinedButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) {
-            Text(label, color = TextMuted, fontSize = 12.sp)
-        }
+private fun ModelChip(label: String, onClick: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = GraphiteSurfaceHigh,
+        modifier = Modifier.clickable(onClick = onClick),
+    ) {
+        Text(label, color = TextHigh, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
     }
 }
 
 @Composable
-private fun AssistChipLike(label: String, onClick: () -> Unit) {
-    OutlinedButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) {
-        Text(label, color = TextHigh, fontSize = 12.sp)
+private fun SendGlyph(color: Color, modifier: Modifier) {
+    Canvas(modifier) {
+        val w = size.width; val h = size.height
+        val p = Path().apply {
+            moveTo(w * 0.08f, h * 0.12f)
+            lineTo(w * 0.92f, h * 0.5f)
+            lineTo(w * 0.08f, h * 0.88f)
+            lineTo(w * 0.30f, h * 0.5f)
+            close()
+        }
+        drawPath(p, color)
     }
 }
 
 @Composable
 private fun Bubble(m: Msg) {
     val isUser = m.role == "user"
-    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                if (isUser) "dig" else "modelrig",
-                color = if (isUser) TextMuted else Signal,
-                fontSize = 11.sp, fontWeight = FontWeight.Medium,
-            )
-            if (m.streaming) {
-                Spacer(Modifier.width(6.dp))
-                CircularProgressIndicator(Modifier.size(11.dp), strokeWidth = 2.dp, color = Signal)
-            }
-        }
-        Spacer(Modifier.height(3.dp))
+    val maxW = (LocalConfiguration.current.screenWidthDp * 0.82f).dp
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+    ) {
         Surface(
-            color = if (isUser) GraphiteSurfaceHigh else GraphiteSurface,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth(),
+            color = if (isUser) Signal else GraphiteSurfaceHigh,
+            shape = RoundedCornerShape(
+                topStart = 16.dp, topEnd = 16.dp,
+                bottomStart = if (isUser) 16.dp else 4.dp,
+                bottomEnd = if (isUser) 4.dp else 16.dp,
+            ),
+            modifier = Modifier.widthIn(max = maxW),
         ) {
-            Box(Modifier.padding(12.dp)) {
-                if (isUser || m.streaming) {
-                    Text(m.text.ifEmpty { " " }, color = TextHigh, fontSize = 15.sp, lineHeight = 22.sp)
-                } else {
-                    MarkdownText(m.text, color = TextHigh)
+            Box(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                when {
+                    isUser -> Text(m.text, color = Color.White, fontSize = 15.sp, lineHeight = 21.sp)
+                    m.streaming -> Text(m.text + "▍", color = TextHigh, fontSize = 15.sp, lineHeight = 21.sp)
+                    else -> MarkdownText(m.text, color = TextHigh)
                 }
             }
         }
@@ -411,7 +424,6 @@ private fun Field(label: String, value: String, onChange: (String) -> Unit) {
     OutlinedTextField(
         value = value, onValueChange = onChange,
         label = { Text(label, fontSize = 12.sp) },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        singleLine = true, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
     )
 }

@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.13.0** — "Android per-source system instructions". Autonomous session, **2026-07-02/03**.
+Version **0.14.0** — "Android chat UX overhaul + edge-to-edge fix". Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -14,6 +14,16 @@ compiler, no Gradle, no Android SDK**. So:
 - backend + worker were genuinely compiled/run/tested here.
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
+
+## What's new in 0.14.0
+- **Chat UX overhaul** (Android). Fixes the status-bar collision (targetSdk 35
+  forces edge-to-edge; the app now calls `enableEdgeToEdge()` and applies status /
+  ime / navigation-bar insets) and turns the chat into a real messaging layout:
+  **right-aligned blue user bubbles, left-aligned surface assistant bubbles**
+  (~82% max width, tail corner), a blinking streaming cursor, a circular send
+  button (Canvas-drawn arrow, no icon dep), model chip + source badge + Skift in
+  the top bar, and a centered empty state. Compile-verified + APK built; the
+  layout/insets are the on-device check.
 
 ## What's new in 0.13.0
 - **Per-source system instructions** (Android): rig and cloud each get an optional

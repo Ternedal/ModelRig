@@ -44,9 +44,15 @@ stays in plain prefs (LAN-only, lower value).
 
 ## UI
 Material 3, dark-first, brand palette shared with the desktop client
-(`ui/theme/Theme.kt`). Custom top bar (model dropdown + overflow: clear / unpair),
-chat bubbles with auto-scroll, a streaming spinner on the in-flight reply, and a
-multiline input.
+(`ui/theme/Theme.kt`). **Edge-to-edge** (targetSdk 35 requires it): the activity
+calls `enableEdgeToEdge()` and the top bar / input bar apply status-bar and
+ime+navigation-bar insets, so nothing collides with the system bars or keyboard.
+
+Chat is a proper messaging layout: **user messages right-aligned in a blue bubble,
+assistant left-aligned in a surface bubble**, both capped at ~82% width with a
+tail corner; a blinking cursor on the streaming reply; a circular send button
+(the arrow is drawn with Canvas — no icon dependency); model chip + source
+badge + Skift toggle in the top bar; a centered empty state.
 
 **Markdown rendering** (`ui/Markdown.kt`) is a small, **dependency-free** Compose
 renderer: headings, bold/italic, inline code, fenced **code blocks with a copy
