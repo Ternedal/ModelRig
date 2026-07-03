@@ -70,6 +70,7 @@ private fun SetupScreen(store: TokenStore, onDone: () -> Unit) {
 private fun CloudCard(store: TokenStore, onSaved: () -> Unit) {
     var key by remember { mutableStateOf("") }
     var model by remember { mutableStateOf(store.cloudModel) }
+    var system by remember { mutableStateOf(store.cloudSystem) }
     var configured by remember { mutableStateOf(store.hasCloud) }
     var msg by remember { mutableStateOf<String?>(null) }
 
@@ -97,6 +98,15 @@ private fun CloudCard(store: TokenStore, onSaved: () -> Unit) {
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = system, onValueChange = { system = it; store.cloudSystem = it },
+                label = { Text("System-instruktion (valgfri)", fontSize = 12.sp) },
+                minLines = 2, maxLines = 5,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text("Rolle/baggrund modellen altid får. Fx: Du er en skarp dansk backend-udvikler. Svar kort.",
+                fontSize = 11.sp, color = TextMuted, lineHeight = 15.sp)
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Button(
@@ -130,6 +140,7 @@ private fun RigCard(store: TokenStore, onConnected: () -> Unit) {
     var deviceName by remember { mutableStateOf(android.os.Build.MODEL ?: "android") }
     var connected by remember { mutableStateOf(store.hasRig) }
     var busy by remember { mutableStateOf(false) }
+    var system by remember { mutableStateOf(store.rigSystem) }
     var msg by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
@@ -146,6 +157,13 @@ private fun RigCard(store: TokenStore, onConnected: () -> Unit) {
             Text(
                 "Serveren skal binde 0.0.0.0 / Tailscale-IP — ikke 127.0.0.1. Brug LAN-IP.",
                 color = TextMuted, fontSize = 11.sp, lineHeight = 15.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = system, onValueChange = { system = it; store.rigSystem = it },
+                label = { Text("System-instruktion (valgfri)", fontSize = 12.sp) },
+                minLines = 2, maxLines = 5,
+                modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -293,10 +311,12 @@ private fun ChatScreen(store: TokenStore, onOpenSettings: () -> Unit) {
                         val t = input.trim()
                         if (t.isEmpty()) return@Button
                         messages.add(Msg("user", t)); input = ""; busy = true
-                        val history = messages.map { it.role to it.text }
+                        val useCloud = mode == "cloud"
+                        val sys = (if (useCloud) store.cloudSystem else store.rigSystem).trim()
+                        val convo = messages.map { it.role to it.text }
+                        val history = if (sys.isNotEmpty()) listOf("system" to sys) + convo else convo
                         val idx = messages.size
                         messages.add(Msg("assistant", "", streaming = true))
-                        val useCloud = mode == "cloud"
                         val rigModel = currentModel
                         scope.launch {
                             val err = withContext(Dispatchers.IO) {

@@ -46,6 +46,15 @@ class TokenStore(context: Context) {
         get() = prefs.getString("chat_mode", "rig") ?: "rig"
         set(v) { prefs.edit().putString("chat_mode", v).apply() }
 
+    /** Optional system instruction sent as the first message, per source. */
+    var rigSystem: String
+        get() = prefs.getString("rig_system", "") ?: ""
+        set(v) { prefs.edit().putString("rig_system", v).apply() }
+
+    var cloudSystem: String
+        get() = prefs.getString("cloud_system", "") ?: ""
+        set(v) { prefs.edit().putString("cloud_system", v).apply() }
+
     val hasRig: Boolean get() = token != null
     val hasCloud: Boolean get() = prefs.getString("cloud_key_enc", null) != null
 

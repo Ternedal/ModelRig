@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.12.0** — "Android cloud mode: chat without the rig". Autonomous session, **2026-07-02/03**.
+Version **0.13.0** — "Android per-source system instructions". Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -14,6 +14,14 @@ compiler, no Gradle, no Android SDK**. So:
 - backend + worker were genuinely compiled/run/tested here.
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
+
+## What's new in 0.13.0
+- **Per-source system instructions** (Android): rig and cloud each get an optional
+  multiline system prompt (`TokenStore.rigSystem` / `cloudSystem`), sent as the
+  first `role:"system"` message on every request for that source. Set on the setup
+  screen (saves as you type). Compile-verified + APK built; runtime is the usual
+  on-device check (the prompt is just prepended to the existing, working message
+  flow, so low risk). 0.12.0's cloud path was confirmed working on-device.
 
 ## What's new in 0.12.0
 The point: **use the phone with cloud when the rig is off.**

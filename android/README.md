@@ -30,6 +30,12 @@ Ollama Cloud** — the latter needs no rig running at all. Setup screen has both
 If both are configured, the chat screen shows a **Rig / Cloud** toggle. The choice
 persists (`TokenStore.chatMode`).
 
+**System instruction** (per source): each of rig and cloud has an optional
+multiline system prompt (`TokenStore.rigSystem` / `cloudSystem`). When set, it's
+sent as the first `role:"system"` message on every request for that source — so
+you can run one persona against the rig (e.g. a terse backend dev) and another in
+the cloud. Edit it on the setup screen; it saves as you type.
+
 **Cloud key security**: the API key can cost real money if leaked, so it's
 **encrypted at rest** with an AES-256-GCM key held in the **AndroidKeystore**
 (`data/Crypto.kt`) — no external dependency (Jetpack Security's
