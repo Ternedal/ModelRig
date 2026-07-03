@@ -1,0 +1,17 @@
+[Unit]
+Description=ModelRig RAG worker (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=modelrig
+WorkingDirectory=/opt/modelrig/worker
+EnvironmentFile=/opt/modelrig/modelrig.env
+# Use the venv's uvicorn if you installed into one, e.g. /opt/modelrig/worker/.venv/bin/uvicorn
+ExecStart=/usr/bin/env uvicorn app.main:app --host 127.0.0.1 --port 8099
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

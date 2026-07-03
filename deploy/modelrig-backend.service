@@ -1,0 +1,17 @@
+[Unit]
+Description=ModelRig backend (control-plane + reverse proxy)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust User and paths to your install.
+User=modelrig
+WorkingDirectory=/opt/modelrig/backend
+EnvironmentFile=/opt/modelrig/modelrig.env
+ExecStart=/opt/modelrig/backend/modelrig-server
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

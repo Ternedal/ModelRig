@@ -1,0 +1,28 @@
+# Go
+/backend/modelrig-server
+*.exe
+modelrig-data.json
+modelrig-data.json.tmp
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+modelrig-rag.db
+
+# Gradle / Kotlin / Android
+.gradle/
+build/
+/desktop/composeApp/build/
+/android/app/build/
+local.properties
+*.apk
+*.aab
+.idea/
+*.iml
+.kotlin/
+
+# OS
+.DS_Store
+Thumbs.db
