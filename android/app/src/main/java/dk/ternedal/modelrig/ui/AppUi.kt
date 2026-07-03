@@ -7,7 +7,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -206,6 +205,9 @@ private fun ChatScreen(store: TokenStore, onOpenSettings: () -> Unit) {
     var currentModel by remember { mutableStateOf(store.model) }
     var models by remember { mutableStateOf(listOf<String>()) }
     var modelMenu by remember { mutableStateOf(false) }
+    var cloudModel by remember { mutableStateOf(store.cloudModel) }
+    var cloudModels by remember { mutableStateOf(listOf<String>()) }
+    var cloudMenu by remember { mutableStateOf(false) }
     var overflow by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -265,7 +267,30 @@ private fun ChatScreen(store: TokenStore, onOpenSettings: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (mode == "cloud") {
-                    ModelChip("☁  ${store.cloudModel}", onClick = onOpenSettings)
+                    Box {
+                        ModelChip("☁  $cloudModel  ▾", onClick = { cloudMenu = true })
+                        DropdownMenu(expanded = cloudMenu, onDismissRequest = { cloudMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("↻  Genindlæs modeller", color = Signal) },
+                                onClick = {
+                                    cloudMenu = false
+                                    val key = store.cloudKey
+                                    if (key != null) scope.launch {
+                                        val res = withContext(Dispatchers.IO) { runCatching { CloudClient(key).listModels() } }
+                                        res.onSuccess { cloudModels = it }
+                                    }
+                                },
+                            )
+                            if (cloudModels.isNotEmpty()) HorizontalDivider()
+                            cloudModels.forEach { m ->
+                                DropdownMenuItem(text = { Text(m) }, onClick = {
+                                    cloudModel = m; store.cloudModel = m; cloudMenu = false
+                                })
+                            }
+                            HorizontalDivider()
+                            DropdownMenuItem(text = { Text("Indstillinger…", color = TextMuted) }, onClick = { cloudMenu = false; onOpenSettings() })
+                        }
+                    }
                 } else {
                     Box {
                         ModelChip("$currentModel  ▾", onClick = { modelMenu = true })
@@ -292,11 +317,7 @@ private fun ChatScreen(store: TokenStore, onOpenSettings: () -> Unit) {
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text(
-                    if (mode == "cloud") "Cloud" else "Rig",
-                    color = if (mode == "cloud") Amber else Signal,
-                    fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                )
+                SourceBadge(mode)
                 if (hasRig && hasCloud) {
                     TextButton(
                         onClick = { val m = if (mode == "cloud") "rig" else "cloud"; mode = m; store.chatMode = m },
@@ -346,19 +367,16 @@ private fun ChatScreen(store: TokenStore, onOpenSettings: () -> Unit) {
                 OutlinedTextField(
                     value = input, onValueChange = { input = it },
                     modifier = Modifier.weight(1f), enabled = !busy, maxLines = 5,
-                    placeholder = { Text("Besked…") },
+                    placeholder = { Text("Skriv til modellen…") },
                     shape = RoundedCornerShape(24.dp),
                 )
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
                 val canSend = !busy && input.isNotBlank()
-                Surface(
-                    shape = CircleShape,
-                    color = if (canSend) Signal else GraphiteSurfaceHigh,
-                    modifier = Modifier.size(48.dp).clickable(enabled = canSend, onClick = onSend),
+                Box(
+                    Modifier.size(44.dp).clickable(enabled = canSend, onClick = onSend),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        SendGlyph(color = if (canSend) Color.White else TextMuted, modifier = Modifier.size(20.dp))
-                    }
+                    SendGlyph(color = if (canSend) Signal else TextMuted, modifier = Modifier.size(26.dp))
                 }
             }
         }
@@ -373,6 +391,19 @@ private fun ModelChip(label: String, onClick: () -> Unit) {
         modifier = Modifier.clickable(onClick = onClick),
     ) {
         Text(label, color = TextHigh, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+    }
+}
+
+@Composable
+private fun SourceBadge(mode: String) {
+    val isCloud = mode == "cloud"
+    Surface(shape = RoundedCornerShape(999.dp), color = if (isCloud) Amber else Signal) {
+        Text(
+            if (isCloud) "☁ Cloud" else "◈ Rig",
+            color = if (isCloud) Graphite else Color.White,
+            fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+        )
     }
 }
 

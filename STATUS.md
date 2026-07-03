@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.14.0** — "Android chat UX overhaul + edge-to-edge fix". Autonomous session, **2026-07-02/03**.
+Version **0.15.0** — "Android brand alignment + cloud model dropdown". Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -14,6 +14,18 @@ compiler, no Gradle, no Android SDK**. So:
 - backend + worker were genuinely compiled/run/tested here.
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
+
+## What's new in 0.15.0
+- **Real brand applied** (Android). The theme now uses the **ModelRig brand
+  handoff v3** palette (now committed under `/brand/` so it can't be lost again),
+  sampled from the brand board: sapphire `#306CFC`, champagne `#DEC08A`, obsidian/
+  graphite base, cloud-white text. Earlier builds used an invented palette; this
+  matches the brand direction (premium dark, sapphire actions, champagne accent).
+  Source badge is now a champagne/sapphire pill; send is a clean sapphire arrow.
+- **Cloud model dropdown**: `CloudClient.listModels()` (tries `/api/tags`, then
+  `/v1/models`) populates a dropdown for cloud — same UX as the rig model picker.
+  Manual model entry in settings remains as a fallback.
+- Compile-verified + APK built.
 
 ## What's new in 0.14.0
 - **Chat UX overhaul** (Android). Fixes the status-bar collision (targetSdk 35

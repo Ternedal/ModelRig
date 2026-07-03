@@ -30,6 +30,41 @@ class CloudClient(private val apiKey: String, baseUrl: String = "https://ollama.
 
     private val jsonType = "application/json".toMediaType()
 
+    /** Fetch available cloud model names. Tries the native /api/tags, then the
+     *  OpenAI-compatible /v1/models. Returns empty on failure (caller falls back
+     *  to the manually-typed model). */
+    fun listModels(): List<String> {
+        for (path in listOf("/api/tags", "/v1/models")) {
+            try {
+                val req = Request.Builder()
+                    .url("$base$path")
+                    .header("Authorization", "Bearer $apiKey")
+                    .get()
+                    .build()
+                http.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use
+                    val obj = JSONObject(resp.body?.string() ?: return@use)
+                    val names = mutableListOf<String>()
+                    when {
+                        obj.has("models") -> {
+                            val arr = obj.getJSONArray("models")
+                            for (i in 0 until arr.length()) names.add(arr.getJSONObject(i).optString("name"))
+                        }
+                        obj.has("data") -> {
+                            val arr = obj.getJSONArray("data")
+                            for (i in 0 until arr.length()) names.add(arr.getJSONObject(i).optString("id"))
+                        }
+                    }
+                    val clean = names.filter { it.isNotBlank() }
+                    if (clean.isNotEmpty()) return clean
+                }
+            } catch (_: Exception) {
+                // try next path
+            }
+        }
+        return emptyList()
+    }
+
     fun chatStream(
         model: String,
         messages: List<Pair<String, String>>,

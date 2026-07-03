@@ -15,8 +15,9 @@ Networking: OkHttp + `org.json` (both minimal, `org.json` is built into Android)
 Token in `SharedPreferences` (see hardening note in `data/TokenStore.kt`).
 
 **Streaming**: replies stream token-by-token (`chatStream`, OkHttp line reader).
-**Model picker**: "Genindlæs modeller" pulls `/api/v1/models` into a dropdown; the
-choice persists via `TokenStore`.
+**Model picker**: both rig and cloud have a dropdown. Rig pulls `/api/v1/models`;
+cloud pulls `/api/tags` (falls back to `/v1/models`) via `CloudClient.listModels()`.
+"Genindlæs modeller" refreshes; the choice persists via `TokenStore`.
 
 ## Two sources: rig and cloud
 The app can talk to **your rig** (backend → local Ollama + RAG) **or directly to
@@ -43,8 +44,10 @@ EncryptedSharedPreferences is deprecated, so it's avoided). The rig device token
 stays in plain prefs (LAN-only, lower value).
 
 ## UI
-Material 3, dark-first, brand palette shared with the desktop client
-(`ui/theme/Theme.kt`). **Edge-to-edge** (targetSdk 35 requires it): the activity
+Material 3, dark-first. Colours come from the **ModelRig brand handoff v3**
+(`/brand/`): verified **sapphire** `#306CFC` (actions/focus) + **champagne**
+`#DEC08A` (accent) on an obsidian/graphite base with cloud-white text, radius
+8/12/16/pill (`ui/theme/Theme.kt`). **Edge-to-edge** (targetSdk 35 requires it): the activity
 calls `enableEdgeToEdge()` and the top bar / input bar apply status-bar and
 ime+navigation-bar insets, so nothing collides with the system bars or keyboard.
 
