@@ -356,13 +356,14 @@ private fun ChatScreen(store: TokenStore, onOpenSettings: () -> Unit) {
             ) { items(messages) { m -> Bubble(m) } }
         }
 
-        // input bar — the window resizes for the keyboard, so we only need the
-        // navigation-bar inset (for when the keyboard is down). Adding an ime inset
-        // here would double-count and push the field up by the keyboard height.
+        // input bar — with adjustResize (manifest) + edge-to-edge the window does
+        // NOT resize; the keyboard is delivered as WindowInsets.ime, so imePadding
+        // lifts the field above it. union() with navigationBars covers the
+        // keyboard-down state and takes the max per side (no double-count).
         Surface(color = GraphiteSurface, tonalElevation = 3.dp) {
             Row(
                 Modifier.fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.15.1** — "Android keyboard/inset fix". Autonomous session, **2026-07-02/03**.
+Version **0.15.2** — "Android keyboard/inset fix (correct combo)". Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -14,6 +14,14 @@ compiler, no Gradle, no Android SDK**. So:
 - backend + worker were genuinely compiled/run/tested here.
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
+
+## What's new in 0.15.2
+- **Keyboard/inset, take 2 (correct this time).** Pinned down from two on-device
+  data points: with no `softInputMode` the window *resized* (so ime-padding
+  double-lifted the input); with `adjustResize` the window does *not* resize (so
+  removing the padding hid the input behind the keyboard). The correct, documented
+  edge-to-edge combo is **`adjustResize` (window doesn't resize) + `imePadding`**
+  (lifts the input by the keyboard height). Both are now in place.
 
 ## What's new in 0.15.1
 - **Fix: input field jumped to the top when the keyboard opened.** Classic
