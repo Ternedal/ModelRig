@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.15.0** — "Android brand alignment + cloud model dropdown". Autonomous session, **2026-07-02/03**.
+Version **0.15.1** — "Android keyboard/inset fix". Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -14,6 +14,14 @@ compiler, no Gradle, no Android SDK**. So:
 - backend + worker were genuinely compiled/run/tested here.
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
+
+## What's new in 0.15.1
+- **Fix: input field jumped to the top when the keyboard opened.** Classic
+  edge-to-edge double-inset — the window already resizes for the keyboard, so the
+  extra `ime` padding on the input bar pushed it up by the keyboard height. The
+  input now uses only the navigation-bar inset, and the activity declares
+  `windowSoftInputMode="adjustResize"` so the resize behaviour is deterministic.
+  On-device check: keyboard-up should keep the input just above the keyboard.
 
 ## What's new in 0.15.0
 - **Real brand applied** (Android). The theme now uses the **ModelRig brand
