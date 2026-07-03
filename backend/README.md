@@ -21,6 +21,7 @@ Status: **built, vetted and smoke-tested** (11/11) in the generator environment.
 | POST   | `/api/v1/chat`          | bearer | → Ollama `/api/chat` (streamed)          |
 | POST   | `/api/v1/rag/query`     | bearer | → worker `/rag/query`                    |
 | POST   | `/api/v1/rag/ingest`    | bearer | → worker `/rag/ingest`                   |
+| POST   | `/api/v1/rag/chat`      | bearer | → worker `/rag/chat` (streamed RAG answer) |
 | GET    | `/api/v1/rag/sources`   | bearer | → worker `/rag/sources`                  |
 | GET    | `/api/v1/rag/stats`     | bearer | → worker `/rag/stats`                    |
 | DELETE | `/api/v1/rag/source`    | bearer | → worker `/rag/source` (query forwarded) |
@@ -106,7 +107,8 @@ after use).
 V1 also covers **token rotation** (rotate → new token works, old token 401, same
 device id). Beyond these, an **end-to-end test** (`tests/e2e.py`) runs this
 backend together with the real RAG worker and a fake Ollama, driving the whole
-flow through the reference CLI (27 assertions, incl. deep health + rotation). That test is what surfaced the proxy forwarding
+flow through the reference CLI (28 assertions, incl. deep health + rotation +
+streaming RAG chat). That test is what surfaced the proxy forwarding
 request bodies as chunked with no `Content-Length`; the proxy now preserves the
 incoming `Content-Length` (and forwards query strings) so upstreams work too.
 

@@ -267,6 +267,11 @@ func (s *server) handleRagIngest(w http.ResponseWriter, r *http.Request) {
 	s.Worker.Forward(w, r, "/rag/ingest")
 }
 
+// handleRagChat proxies the worker's streaming RAG answer (retrieve + stream).
+func (s *server) handleRagChat(w http.ResponseWriter, r *http.Request) {
+	s.Worker.Forward(w, r, "/rag/chat")
+}
+
 func (s *server) handleRagSources(w http.ResponseWriter, r *http.Request) {
 	s.Worker.Forward(w, r, "/rag/sources")
 }

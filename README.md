@@ -4,7 +4,7 @@ A local-first AI platform: run models on your own hardware via Ollama, reach the
 from a desktop app and an Android phone, with an optional RAG service and an
 Ollama Cloud fallback for when local isn't enough.
 
-Version: **0.9.0** (V1 backbone + RAG management + observability + ops hardening)
+Version: **0.10.0** (V1 backbone + RAG management + streaming RAG chat + observability + ops)
 
 ## Architecture
 ```
@@ -41,8 +41,8 @@ Ollama Cloud (https://ollama.com, model :cloud) with OLLAMA_API_KEY.
   claim, then reverse-proxies chat/models to Ollama (streaming) and RAG to the
   worker. Auth is loopback-free.
 - **worker/** — Python FastAPI. RAG: **chunk** (overlapping) → embed via Ollama →
-  SQLite → cosine retrieval → optional synthesis. Plus **source management**: list
-  sources, corpus stats, delete a source.
+  SQLite → cosine retrieval → optional synthesis, plus **streaming RAG chat**
+  (retrieve + stream the answer). Source management: list, stats, delete, filter.
 - **desktop/** — Compose Desktop (JVM). **Streaming** chat with local-first +
   Ollama Cloud fallback, model picker, branded UI.
 - **android/** — Compose Android V1. Pair with the backend, then **streaming**
@@ -103,15 +103,15 @@ sh tests/run_tests.sh
 | Module   | State in this drop                    | Verified here                    |
 |----------|---------------------------------------|----------------------------------|
 | backend  | compiled binary + tests               | ✅ `go build`/`vet`, 28 (smoke 11 + V1 17) |
-| worker   | runs, logic tested                    | ✅ 31 (unit 9 + RAG 22, Ollama stubbed) |
-| e2e      | backend + worker run together         | ✅ 27 (full chain via the CLI)    |
+| worker   | runs, logic tested                    | ✅ 34 (unit 9 + RAG 25, Ollama stubbed) |
+| e2e      | backend + worker run together         | ✅ 28 (full chain via the CLI)    |
 | desktop  | complete source, **build locally**    | ⚠️ no JVM/Gradle here             |
 | android  | complete source, **build locally**    | ⚠️ no Android SDK here            |
 
-**86 assertions** total (`sh tests/run_tests.sh`): cross-service request tracing,
-`doctor` (incl. `--deep` embedding round-trip, both green + upstreams-down paths),
-and token rotation. Streaming and the model picker in the clients are written but
-not compiled here — build locally.
+**90 assertions** total (`sh tests/run_tests.sh`): streaming RAG chat,
+cross-service request tracing, `doctor --deep` (embedding round-trip), and token
+rotation. Streaming and the model picker in the clients are written but not
+compiled here — build locally.
 
 See **STATUS.md** for the honest breakdown: what's proven, what's only source,
 versions/assumptions, and known limitations.

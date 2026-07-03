@@ -5,19 +5,21 @@ The backend proxies /api/v1/rag/* here; clients never call it directly.
 """
 from __future__ import annotations
 
+import json
 import logging as pylog
 import sys
 import time as pytime
 import uuid
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import ollama_client as oc
 from . import rag
 from .store import DocStore
 
-VERSION = "0.9.0"
+VERSION = "0.10.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -111,6 +113,45 @@ async def query(req: QueryReq) -> dict:
         )
     except oc.OllamaError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.post("/rag/chat")
+async def rag_chat(req: QueryReq):
+    """Retrieve context, then STREAM the answer as NDJSON.
+
+    The retrieval (embedding) happens first, so an Ollama failure there returns a
+    clean 502. The first streamed line is `{"sources": [...]}` (what context was
+    used); the remaining lines are Ollama's chat NDJSON (message.content deltas).
+    A chat failure mid-stream is surfaced as a final `{"error": ...}` line.
+    """
+    try:
+        matches = (await rag.query(
+            store, req.query, top_k=req.top_k, synthesize=False, source=req.source,
+        ))["matches"]
+    except oc.OllamaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    context = "\n\n".join(f"[{m['source'] or m['id']}] {m['text']}" for m in matches)
+    messages = [
+        {"role": "system",
+         "content": "Answer using ONLY the provided context. "
+                    "If the answer is not in the context, say you don't know."},
+        {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {req.query}"},
+    ]
+
+    async def gen():
+        head = {"sources": [
+            {"source": m["source"], "chunk_index": m["chunk_index"], "score": m["score"]}
+            for m in matches
+        ]}
+        yield (json.dumps(head) + "\n").encode()
+        try:
+            async for chunk in oc.chat_stream(messages, model=req.model):
+                yield chunk
+        except oc.OllamaError as e:
+            yield (json.dumps({"error": str(e)}) + "\n").encode()
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson")
 
 
 @app.get("/rag/sources")

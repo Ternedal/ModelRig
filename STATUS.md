@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.9.0** — "V1 backbone + RAG management + observability + ops hardening". Autonomous session, **2026-07-02/03**.
+Version **0.10.0** — "V1 backbone + RAG mgmt + streaming RAG chat + observability + ops". Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -14,6 +14,17 @@ compiler, no Gradle, no Android SDK**. So:
 - backend + worker were genuinely compiled/run/tested here.
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
+
+## What's new in 0.10.0
+- **Streaming RAG chat** — `POST /rag/chat` (proxied at `/api/v1/rag/chat`,
+  CLI: `rag-chat`) retrieves context and then **streams** the answer, instead of
+  the blocking synthesis path. The first NDJSON line is `{"sources":[…]}` (what
+  context was used); the rest are Ollama chat deltas. Retrieval failure returns a
+  clean 502 before the stream starts; a chat failure mid-stream is surfaced as a
+  final `{"error":…}` line. Verified: worker reassembles the streamed answer, and
+  the whole chain streams through the backend to the CLI (`stream-ok`, sources on
+  stderr).
+- Tests: **90 assertions**.
 
 ## What's new in 0.9.0
 - **Token rotation** — `POST /api/v1/token/rotate` (CLI: `rotate`) re-issues the
@@ -97,10 +108,10 @@ compiler, no Gradle, no Android SDK**. So:
 | Backend behaviour | **28** assertions: core smoke (11) + V1 (17, incl. token rotation) |
 | Backend persistence | store JSON inspected: token hash stored, pairings emptied after single use |
 | Worker imports & runs | FastAPI app loads; `/healthz` 200 |
-| Worker logic | **31**: cosine, validation, 502, chunking, retrieval, source management, source-filtered query |
-| **Integrated stack** | **27** e2e assertions: real backend + real worker + fake Ollama via the CLI; request-id tracing, `doctor --deep`, token rotation |
+| Worker logic | **34**: cosine, validation, 502, chunking, retrieval, source mgmt, source-filtered query, streaming RAG chat |
+| **Integrated stack** | **28** e2e assertions: real backend + real worker + fake Ollama via the CLI; request-id tracing, `doctor --deep`, token rotation, streaming RAG chat |
 
-**86 assertions total** via `sh tests/run_tests.sh`.
+**90 assertions total** via `sh tests/run_tests.sh`.
 
 **Backend V1 test highlights:** streamed chat reassembled from 3 chunks ("Hej fra
 ModelRig") · model-list proxy · devices list without `token_hash` · revoke →

@@ -14,6 +14,7 @@ with Ollama stubbed out; live embedding/generation needs a running Ollama).
 | GET    | `/healthz`    | liveness + version + document count            |
 | POST   | `/rag/ingest` | `{documents:[{text, source?}], chunk_size?, overlap?}` → chunk + embed + store |
 | POST   | `/rag/query`  | `{query, top_k?, synthesize?, model?, source?}` → matches (text, source, chunk_index, score) (+ answer); `source` restricts retrieval to one source |
+| POST   | `/rag/chat`   | `{query, top_k?, model?, source?}` → **streamed** NDJSON: first line `{sources:[…]}`, then Ollama chat deltas (retrieve + stream answer) |
 | GET    | `/health/deep`| round-trip an embedding through Ollama → `ok` + dims/latency (or error) |
 | GET    | `/rag/sources`| list ingested sources with chunk counts + last-ingested time |
 | GET    | `/rag/stats`  | corpus totals: distinct sources + total chunks |
@@ -64,7 +65,8 @@ for both endpoints, **chunking** unit tests (empty/short/long, size bounds, no
 word loss), the full **chunk → embed → store → retrieve** path with stubbed
 embeddings, and **source management** (stats, per-source chunk counts, delete a
 source → gone from retrieval, delete unknown → 404), plus **source-filtered
-queries** (retrieval restricted to one source). 31 cases total.
+queries** (retrieval restricted to one source) and **streaming RAG chat**
+(`/rag/chat` first-line sources + reassembled streamed answer). 34 cases total.
 
 Every request is logged as a structured `level=info req=… method=… path=…
 status=… dur_ms=…` line; the `req` id is taken from the backend's `X-Request-ID`

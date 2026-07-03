@@ -182,6 +182,10 @@ def main():
         srcs = {m["source"] for m in json.loads(p.stdout).get("matches", [])} if p.returncode == 0 else set()
         check(srcs == {"docs"}, f"CLI rag-query --source docs returns only docs (got {srcs})")
 
+        p = cli("rag-chat", "what does it bind", "--source", "docs")
+        check(p.returncode == 0 and p.stdout.strip() == "stream-ok" and "context:" in p.stderr,
+              f"CLI rag-chat streams answer + shows sources (out={p.stdout.strip()!r})")
+
         # ---- request-id propagation (cross-service tracing) ----
         tok = json.loads(open(CFG).read())["token"]
         req = urllib.request.Request(BACKEND + "/api/v1/rag/stats",

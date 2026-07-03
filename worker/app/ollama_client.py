@@ -48,3 +48,23 @@ async def chat(messages: list[dict], model: str | None = None) -> str:
     if r.status_code != 200:
         raise OllamaError(f"chat failed ({r.status_code}): {r.text[:200]}")
     return r.json().get("message", {}).get("content", "")
+
+
+async def chat_stream(messages: list[dict], model: str | None = None):
+    """Async generator yielding raw NDJSON lines (bytes) from Ollama's streaming
+    chat. Raises OllamaError (before the first yield) if the request can't start."""
+    model = model or GEN_MODEL
+    client = httpx.AsyncClient(timeout=TIMEOUT)
+    try:
+        async with client.stream("POST", f"{OLLAMA_URL}/api/chat",
+                                 json={"model": model, "messages": messages, "stream": True}) as r:
+            if r.status_code != 200:
+                body = await r.aread()
+                raise OllamaError(f"chat failed ({r.status_code}): {body[:200]!r}")
+            async for line in r.aiter_lines():
+                if line:
+                    yield (line + "\n").encode()
+    except httpx.HTTPError as e:
+        raise OllamaError(f"cannot reach Ollama at {OLLAMA_URL}: {e}") from e
+    finally:
+        await client.aclose()

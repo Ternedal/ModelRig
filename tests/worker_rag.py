@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, tempfile
+import json, os, tempfile
 os.environ["MODELRIG_DB"] = tempfile.mktemp(suffix=".db")
 
 # Stub embeddings BEFORE any request: 26-dim lowercase letter-count vector so
@@ -18,6 +18,13 @@ async def fake_embed(text, model=None):
     return _vec(text)
 
 oc.embed = fake_embed  # rag calls oc.embed at runtime → picks this up
+
+
+async def fake_chat_stream(messages, model=None):
+    for c in ["ctx", "-", "ans"]:
+        yield (json.dumps({"message": {"content": c}}) + "\n").encode()
+
+oc.chat_stream = fake_chat_stream
 
 from fastapi.testclient import TestClient
 from app.main import app
@@ -95,6 +102,15 @@ r = client.post("/rag/query", json={"query": "word5 word6", "top_k": 5,
                                      "synthesize": False, "source": "big"})
 srcs = {m["source"] for m in r.json()["matches"]}
 check(srcs <= {"big"} and srcs, f"source filter 'big' -> only big (got {srcs})")
+
+# ---- streaming RAG chat: first line = sources, rest = answer deltas ----
+r = client.post("/rag/chat", json={"query": "xray yankee zulu", "top_k": 2})
+check(r.status_code == 200, "rag-chat -> 200")
+lines = [l for l in r.text.splitlines() if l.strip()]
+head = json.loads(lines[0])
+check("sources" in head and len(head["sources"]) >= 1, "rag-chat first line carries sources")
+answer = "".join(json.loads(l).get("message", {}).get("content", "") for l in lines[1:])
+check(answer == "ctx-ans", f"rag-chat streams the reassembled answer (got {answer!r})")
 
 print(f"\n===== WORKER V1: {passed} passed, {failed} failed =====")
 raise SystemExit(0 if failed == 0 else 1)

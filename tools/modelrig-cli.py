@@ -144,6 +144,54 @@ def cmd_rag_query(args):
     print(call(args, "POST", "/api/v1/rag/query", body=body))
 
 
+def cmd_rag_chat(args):
+    """Streaming RAG answer: retrieve context, then stream the answer. The context
+    sources are printed to stderr; the answer streams to stdout (clean for piping)."""
+    url, token, _ = resolve(args)
+    if not url:
+        die("no server URL — run 'pair' first or pass --url")
+    if not token:
+        die("no token — run 'pair' first or pass --token")
+    body = {"query": args.query, "top_k": args.top_k}
+    if args.model:
+        body["model"] = args.model
+    if args.source:
+        body["source"] = args.source
+    r = urllib.request.Request(url.rstrip("/") + "/api/v1/rag/chat",
+                               data=json.dumps(body).encode(), method="POST")
+    r.add_header("Content-Type", "application/json")
+    r.add_header("Authorization", "Bearer " + token)
+    try:
+        resp = urllib.request.urlopen(r, timeout=300)
+    except urllib.error.HTTPError as e:
+        die(f"rag-chat failed ({e.code}): {e.read().decode()[:300]}")
+    except urllib.error.URLError as e:
+        die(f"cannot reach {url}: {e.reason}")
+    head_seen = False
+    for raw in resp:
+        line = raw.decode(errors="replace").strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        if not head_seen and "sources" in obj:
+            names = ", ".join(str(s.get("source")) for s in obj["sources"]) or "(none)"
+            sys.stderr.write(f"[context: {names}]\n")
+            sys.stderr.flush()
+            head_seen = True
+            continue
+        if "error" in obj:
+            sys.stderr.write(f"\n[error: {obj['error']}]\n")
+            break
+        delta = obj.get("message", {}).get("content", "")
+        if delta:
+            sys.stdout.write(delta)
+            sys.stdout.flush()
+    sys.stdout.write("\n")
+
+
 def cmd_rag_sources(args):
     data = json.loads(call(args, "GET", "/api/v1/rag/sources"))
     srcs = data.get("sources", [])
@@ -333,6 +381,13 @@ def build_parser():
     qp.add_argument("--model")
     qp.add_argument("--source", help="restrict retrieval to a single source")
     qp.set_defaults(fn=cmd_rag_query)
+
+    rc = sub.add_parser("rag-chat", help="streaming RAG answer (retrieve + stream)")
+    rc.add_argument("query")
+    rc.add_argument("--top-k", type=int, default=4, dest="top_k")
+    rc.add_argument("--model")
+    rc.add_argument("--source")
+    rc.set_defaults(fn=cmd_rag_chat)
 
     sub.add_parser("rag-sources", help="list ingested sources + chunk counts").set_defaults(fn=cmd_rag_sources)
     sub.add_parser("rag-stats", help="corpus totals (sources, chunks)").set_defaults(fn=cmd_rag_stats)
