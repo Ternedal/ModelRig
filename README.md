@@ -116,5 +116,9 @@ compiled here — build locally.
 See **STATUS.md** for the honest breakdown: what's proven, what's only source,
 versions/assumptions, and known limitations.
 
+**Building and testing the clients?** See **CLIENT_BUILD_AND_TEST.md** — a
+step-by-step handoff: build order, a smoke-test checklist, and the most likely
+Compose/Kotlin failure points with fixes.
+
 ## License
 MIT — see LICENSE.
