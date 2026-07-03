@@ -19,6 +19,12 @@ Token in `SharedPreferences` (see hardening note in `data/TokenStore.kt`).
 cloud pulls `/api/tags` (falls back to `/v1/models`) via `CloudClient.listModels()`.
 "Genindlæs modeller" refreshes; the choice persists via `TokenStore`.
 
+## App icon
+Adaptive icon (`res/mipmap-anydpi-v26/ic_launcher*.xml` + `res/drawable/ic_launcher_*`):
+the brand **M drawn as a node-graph** — a sapphire stroke through four corner
+nodes with a champagne centre node, on an obsidian gradient. Vector, so it's
+crisp at all densities.
+
 ## Two sources: rig and cloud
 The app can talk to **your rig** (backend → local Ollama + RAG) **or directly to
 Ollama Cloud** — the latter needs no rig running at all. Setup screen has both:

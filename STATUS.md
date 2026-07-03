@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.15.2** — "Android keyboard/inset fix (correct combo)". Autonomous session, **2026-07-02/03**.
+Version **0.15.3** — "Android app icon (brand M-graph)". Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -14,6 +14,14 @@ compiler, no Gradle, no Android SDK**. So:
 - backend + worker were genuinely compiled/run/tested here.
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
+
+## What's new in 0.15.3
+- **Real app icon.** The app had no `android:icon`, so it showed the default
+  Android robot. Added a proper **adaptive icon** (vector, crisp at every size):
+  the ModelRig **"M" drawn as a node-graph** — one continuous sapphire stroke
+  through four corner nodes with a **champagne accent node** in the centre, on an
+  obsidian gradient. Matches the brand mark direction. Wired via
+  `android:icon`/`android:roundIcon`. (A PNG preview ships with this release.)
 
 ## What's new in 0.15.2
 - **Keyboard/inset, take 2 (correct this time).** Pinned down from two on-device
