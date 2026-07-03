@@ -198,6 +198,28 @@ def main():
         p = cli("doctor")
         check(p.returncode == 0 and "all systems go" in p.stdout, f"CLI doctor -> all green (rc={p.returncode})")
 
+        p = cli("doctor", "--deep")
+        check(p.returncode == 0 and "round-trip" in p.stdout and "all systems go" in p.stdout,
+              "CLI doctor --deep round-trips ollama + worker")
+
+        # ---- token rotation through the CLI ----
+        old_tok = json.loads(open(CFG).read())["token"]
+        p = cli("rotate")
+        check(p.returncode == 0 and "rotated" in p.stdout, "CLI rotate -> ok")
+        new_tok = json.loads(open(CFG).read())["token"]
+        check(new_tok and new_tok != old_tok, "rotate stored a new token")
+        st_old = None
+        try:
+            urllib.request.urlopen(urllib.request.Request(
+                BACKEND + "/api/v1/status", headers={"Authorization": "Bearer " + old_tok}), timeout=5)
+        except urllib.error.HTTPError as e:
+            st_old = e.code
+        check(st_old == 401, "old token rejected after rotate (401)")
+        with urllib.request.urlopen(urllib.request.Request(
+                BACKEND + "/api/v1/status", headers={"Authorization": "Bearer " + new_tok}), timeout=5) as r:
+            st_new = r.status
+        check(st_new == 200, "new token accepted after rotate (200)")
+
         p = cli("devices")
         check(p.returncode == 0 and "e2e" in p.stdout, "CLI devices lists the paired device")
 

@@ -4,7 +4,7 @@ A local-first AI platform: run models on your own hardware via Ollama, reach the
 from a desktop app and an Android phone, with an optional RAG service and an
 Ollama Cloud fallback for when local isn't enough.
 
-Version: **0.8.0** (V1 backbone + RAG management + observability)
+Version: **0.9.0** (V1 backbone + RAG management + observability + ops hardening)
 
 ## Architecture
 ```
@@ -48,7 +48,8 @@ Ollama Cloud (https://ollama.com, model :cloud) with OLLAMA_API_KEY.
 - **android/** — Compose Android V1. Pair with the backend, then **streaming**
   chat with a model picker.
 - **tools/** — `modelrig-cli.py`, a dependency-free reference client (pair, chat,
-  RAG, device mgmt). Runnable today; used to drive the e2e test.
+  RAG, device mgmt, `doctor` health check, token `rotate`). Runnable today; used
+  to drive the e2e test.
 - **tests/** — worker unit + RAG tests, backend smoke + V1 tests, and an
   end-to-end integration test. `sh tests/run_tests.sh` runs all 55 assertions.
 - **deploy/** — env reference, a Windows launcher (`run-windows.ps1`), and systemd
@@ -101,16 +102,16 @@ sh tests/run_tests.sh
 ## Build status at a glance
 | Module   | State in this drop                    | Verified here                    |
 |----------|---------------------------------------|----------------------------------|
-| backend  | compiled binary + tests               | ✅ `go build`/`vet`, 23 (smoke 11 + V1 12) |
+| backend  | compiled binary + tests               | ✅ `go build`/`vet`, 28 (smoke 11 + V1 17) |
 | worker   | runs, logic tested                    | ✅ 31 (unit 9 + RAG 22, Ollama stubbed) |
-| e2e      | backend + worker run together         | ✅ 22 (full chain via the CLI)    |
+| e2e      | backend + worker run together         | ✅ 27 (full chain via the CLI)    |
 | desktop  | complete source, **build locally**    | ⚠️ no JVM/Gradle here             |
 | android  | complete source, **build locally**    | ⚠️ no Android SDK here            |
 
-**76 assertions** total (`sh tests/run_tests.sh`), including cross-service request
-tracing (same `X-Request-ID` in backend + worker logs) and the CLI `doctor`
-health check. Streaming and the model picker in the clients are written but not
-compiled here — build locally.
+**86 assertions** total (`sh tests/run_tests.sh`): cross-service request tracing,
+`doctor` (incl. `--deep` embedding round-trip, both green + upstreams-down paths),
+and token rotation. Streaming and the model picker in the clients are written but
+not compiled here — build locally.
 
 See **STATUS.md** for the honest breakdown: what's proven, what's only source,
 versions/assumptions, and known limitations.

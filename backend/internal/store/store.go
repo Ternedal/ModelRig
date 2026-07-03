@@ -155,3 +155,19 @@ func (s *Store) TouchByTokenHash(hash string, now time.Time) (Device, bool) {
 	}
 	return Device{}, false
 }
+
+// RotateToken replaces a device's token hash by ID (used when re-issuing a token
+// without re-pairing). The old hash stops validating immediately. Returns the
+// updated device.
+func (s *Store) RotateToken(id, newHash string) (Device, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.d.Devices {
+		if s.d.Devices[i].ID == id {
+			s.d.Devices[i].TokenHash = newHash
+			_ = s.persistLocked()
+			return s.d.Devices[i], true
+		}
+	}
+	return Device{}, false
+}

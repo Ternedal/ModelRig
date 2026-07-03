@@ -12,9 +12,11 @@ Status: **built, vetted and smoke-tested** (11/11) in the generator environment.
 | GET    | `/healthz`              | none   | liveness + version                       |
 | POST   | `/api/v1/pair/start`    | admin* | mint a pairing code                      |
 | POST   | `/api/v1/pair/claim`    | none** | exchange a code for a device token       |
-| GET    | `/api/v1/status`        | bearer | device + upstream (ollama/worker) health |
+| GET    | `/api/v1/status`        | bearer | device + upstream (ollama/worker) reachability |
+| GET    | `/api/v1/health/deep`   | bearer | actively round-trips Ollama + worker (embeds); `ok` + per-check latency |
 | GET    | `/api/v1/devices`       | bearer | list paired devices (no token hashes)    |
 | DELETE | `/api/v1/devices/{id}`  | bearer | revoke a device (its token dies at once) |
+| POST   | `/api/v1/token/rotate`  | bearer | re-issue the calling device's token; old one dies |
 | GET    | `/api/v1/models`        | bearer | → Ollama `/api/tags`                     |
 | POST   | `/api/v1/chat`          | bearer | → Ollama `/api/chat` (streamed)          |
 | POST   | `/api/v1/rag/query`     | bearer | → worker `/rag/query`                    |
@@ -101,9 +103,10 @@ running server is claimable), and **rate limiting** (attempts allowed up to the
 limit, then 429). Store persistence verified (token hash stored, pairings emptied
 after use).
 
-Beyond these, an **end-to-end test** (`tests/e2e.py`) runs this backend together
-with the real RAG worker and a fake Ollama, driving the whole flow through the
-reference CLI (22 assertions). That test is what surfaced the proxy forwarding
+V1 also covers **token rotation** (rotate → new token works, old token 401, same
+device id). Beyond these, an **end-to-end test** (`tests/e2e.py`) runs this
+backend together with the real RAG worker and a fake Ollama, driving the whole
+flow through the reference CLI (27 assertions, incl. deep health + rotation). That test is what surfaced the proxy forwarding
 request bodies as chunked with no `Content-Length`; the proxy now preserves the
 incoming `Content-Length` (and forwards query strings) so upstreams work too.
 
@@ -117,4 +120,8 @@ level=info req=1a2b3c… ip=192.168.1.20 method=POST path=/api/v1/rag/query stat
 ```
 
 The worker logs the same `req` id, so one request traces across both services.
-The reference CLI's `doctor` command surfaces upstream health at a glance.
+The reference CLI's `doctor` command surfaces upstream health at a glance;
+`doctor --deep` hits `/api/v1/health/deep`, which actually round-trips an
+embedding through the worker + Ollama (proving the models respond, not just that
+ports are open). If a token leaks, `POST /api/v1/token/rotate` (CLI: `rotate`)
+issues a fresh one and kills the old — no re-pairing needed.

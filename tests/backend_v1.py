@@ -97,6 +97,18 @@ try:
     check(s == 200 and dev_id in b, "devices list -> 200 + contains device")
     check("token_hash" not in b, "devices list does NOT leak token_hash")
 
+    # token rotation: new token works, old token dies, same device id
+    s, b = req("POST", "/api/v1/token/rotate", BASE, token=tok)
+    check(s == 200, "rotate -> 200")
+    new_tok = json.loads(b)["token"]
+    check(new_tok != tok, "rotate issues a different token")
+    check(json.loads(b)["device_id"] == dev_id, "rotate keeps the same device id")
+    s, _ = req("GET", "/api/v1/status", BASE, token=tok)
+    check(s == 401, "old token invalid after rotation -> 401")
+    s, _ = req("GET", "/api/v1/status", BASE, token=new_tok)
+    check(s == 200, "new token valid after rotation -> 200")
+    tok = new_tok  # continue with the rotated token
+
     # revoke device -> token immediately invalid
     s, _ = req("DELETE", f"/api/v1/devices/{dev_id}", BASE, token=tok)
     check(s == 200, "revoke device -> 200")

@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.8.0** — "V1 backbone + RAG management + observability". Autonomous session, **2026-07-02/03**.
+Version **0.9.0** — "V1 backbone + RAG management + observability + ops hardening". Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -14,6 +14,19 @@ compiler, no Gradle, no Android SDK**. So:
 - backend + worker were genuinely compiled/run/tested here.
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
+
+## What's new in 0.9.0
+- **Token rotation** — `POST /api/v1/token/rotate` (CLI: `rotate`) re-issues the
+  calling device's token without re-pairing; the old token stops validating
+  immediately. For when a token leaks. Verified: new token works, old → 401, same
+  device id.
+- **Deep health** — `GET /api/v1/health/deep` (CLI: `doctor --deep`) actively
+  round-trips: it lists Ollama models *and* asks the worker to embed a token
+  (which calls Ollama), reporting `ok` + per-check latency. Proves the models
+  respond, not just that ports are open. Verified both paths: all-green, and a
+  dead Ollama surfaced as `worker error: cannot reach Ollama at … All connection
+  attempts failed` with exit 1.
+- Tests: **86 assertions**.
 
 ## What's new in 0.8.0
 - **Source-filtered RAG query** — `POST /rag/query` accepts `source` to restrict
@@ -81,13 +94,13 @@ compiler, no Gradle, no Android SDK**. So:
 | Item | How |
 |------|-----|
 | Backend compiles / vets | `go build ./...` + `go vet ./...` clean |
-| Backend behaviour | **23** assertions: core smoke (11) + V1 (12) |
+| Backend behaviour | **28** assertions: core smoke (11) + V1 (17, incl. token rotation) |
 | Backend persistence | store JSON inspected: token hash stored, pairings emptied after single use |
 | Worker imports & runs | FastAPI app loads; `/healthz` 200 |
 | Worker logic | **31**: cosine, validation, 502, chunking, retrieval, source management, source-filtered query |
-| **Integrated stack** | **22** e2e assertions: real backend + real worker + fake Ollama, driven through the CLI; incl. request-id tracing + `doctor` |
+| **Integrated stack** | **27** e2e assertions: real backend + real worker + fake Ollama via the CLI; request-id tracing, `doctor --deep`, token rotation |
 
-**76 assertions total** via `sh tests/run_tests.sh`.
+**86 assertions total** via `sh tests/run_tests.sh`.
 
 **Backend V1 test highlights:** streamed chat reassembled from 3 chunks ("Hej fra
 ModelRig") · model-list proxy · devices list without `token_hash` · revoke →

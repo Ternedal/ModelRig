@@ -13,7 +13,8 @@ Runs on Python 3.9+, Windows included. Config (server URL + token) is saved to
 ```
 pair --code XXXX-XXXX [--name NAME]   claim a code, save the token
 status                                device + upstream health
-doctor                                diagnose backend / worker / ollama, print a verdict
+doctor [--deep]                       diagnose backend/worker/ollama; --deep round-trips an embedding
+rotate                                re-issue this device's token (old one dies)
 models                                list model names
 chat [--model M] "message"            streaming chat (tokens print as they arrive)
 rag-ingest [--source S] [--chunk-size N] [--overlap N] "text"

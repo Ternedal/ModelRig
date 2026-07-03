@@ -14,6 +14,7 @@ with Ollama stubbed out; live embedding/generation needs a running Ollama).
 | GET    | `/healthz`    | liveness + version + document count            |
 | POST   | `/rag/ingest` | `{documents:[{text, source?}], chunk_size?, overlap?}` → chunk + embed + store |
 | POST   | `/rag/query`  | `{query, top_k?, synthesize?, model?, source?}` → matches (text, source, chunk_index, score) (+ answer); `source` restricts retrieval to one source |
+| GET    | `/health/deep`| round-trip an embedding through Ollama → `ok` + dims/latency (or error) |
 | GET    | `/rag/sources`| list ingested sources with chunk counts + last-ingested time |
 | GET    | `/rag/stats`  | corpus totals: distinct sources + total chunks |
 | DELETE | `/rag/source?source=X` | delete every chunk for source `X` (404 if none); `(none)` clears NULL-source chunks |

@@ -17,7 +17,7 @@ from . import ollama_client as oc
 from . import rag
 from .store import DocStore
 
-VERSION = "0.8.0"
+VERSION = "0.9.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -72,6 +72,22 @@ def healthz() -> dict:
         "version": VERSION,
         "documents": store.count(),
     }
+
+
+@app.get("/health/deep")
+async def health_deep() -> dict:
+    """Actually round-trip an embedding through Ollama, so this proves the model
+    responds — not just that the worker process is up. Returns ok + dims/latency,
+    or ok=false + error (still HTTP 200; the body carries the verdict)."""
+    import time as _t
+    start = _t.perf_counter()
+    try:
+        vec = await oc.embed("ping")
+        dur_ms = int((_t.perf_counter() - start) * 1000)
+        return {"ok": True, "embed_dims": len(vec), "latency_ms": dur_ms}
+    except oc.OllamaError as e:
+        dur_ms = int((_t.perf_counter() - start) * 1000)
+        return {"ok": False, "error": str(e), "latency_ms": dur_ms}
 
 
 @app.post("/rag/ingest")

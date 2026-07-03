@@ -167,6 +167,93 @@ func (s *server) handleModels(w http.ResponseWriter, r *http.Request) {
 	s.Ollama.Forward(w, r, "/api/tags")
 }
 
+// handleHealthDeep actively round-trips both upstreams: it lists Ollama models
+// and asks the worker to embed a token (which itself calls Ollama). This proves
+// the models actually respond, not just that the ports are open. Always HTTP 200;
+// the `ok` field carries the verdict so scripts can branch on the body.
+func (s *server) handleHealthDeep(w http.ResponseWriter, r *http.Request) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	overall := true
+
+	ollama := map[string]any{}
+	{
+		start := time.Now()
+		ok := false
+		if resp, err := client.Get(s.Ollama.BaseURL + "/api/tags"); err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				var body struct {
+					Models []struct {
+						Name string `json:"name"`
+					} `json:"models"`
+				}
+				if json.NewDecoder(resp.Body).Decode(&body) == nil {
+					ok = true
+					ollama["models"] = len(body.Models)
+				}
+			} else {
+				ollama["status"] = resp.StatusCode
+			}
+		} else {
+			ollama["error"] = err.Error()
+		}
+		ollama["ok"] = ok
+		ollama["latency_ms"] = time.Since(start).Milliseconds()
+		overall = overall && ok
+	}
+
+	worker := map[string]any{}
+	{
+		start := time.Now()
+		ok := false
+		if resp, err := client.Get(s.Worker.BaseURL + "/health/deep"); err == nil {
+			defer resp.Body.Close()
+			var body map[string]any
+			if json.NewDecoder(resp.Body).Decode(&body) == nil {
+				if b, _ := body["ok"].(bool); b {
+					ok = true
+					if d, has := body["embed_dims"]; has {
+						worker["embed_dims"] = d
+					}
+				} else if e, has := body["error"]; has {
+					worker["error"] = e
+				}
+			}
+		} else {
+			worker["error"] = err.Error()
+		}
+		worker["ok"] = ok
+		worker["latency_ms"] = time.Since(start).Milliseconds()
+		overall = overall && ok
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     overall,
+		"checks": map[string]any{"ollama": ollama, "worker": worker},
+	})
+}
+
+// handleTokenRotate re-issues the calling device's own token without re-pairing.
+// The old token stops validating immediately (its hash is overwritten).
+func (s *server) handleTokenRotate(w http.ResponseWriter, r *http.Request) {
+	dv, _ := r.Context().Value(deviceKey).(store.Device)
+	token, hash, err := auth.NewToken()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "token generation failed")
+		return
+	}
+	updated, ok := s.Store.RotateToken(dv.ID, hash)
+	if !ok {
+		writeErr(w, http.StatusNotFound, "device not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"device_id":   updated.ID,
+		"device_name": updated.Name,
+		"token":       token,
+	})
+}
+
 // handleChat proxies Ollama chat (POST /api/chat), streaming NDJSON through.
 func (s *server) handleChat(w http.ResponseWriter, r *http.Request) {
 	s.Ollama.Forward(w, r, "/api/chat")

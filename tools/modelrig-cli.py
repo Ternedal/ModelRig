@@ -116,6 +116,16 @@ def cmd_revoke(args):
     print(call(args, "DELETE", f"/api/v1/devices/{args.device_id}"))
 
 
+def cmd_rotate(args):
+    """Re-issue this device's token without re-pairing (e.g. after a leak)."""
+    out = json.loads(call(args, "POST", "/api/v1/token/rotate"))
+    cfg = load_config()
+    cfg["token"] = out["token"]
+    save_config(cfg)
+    print(f"token rotated for device {out['device_id']} ({out['device_name']}); "
+          f"new token saved. The old token is now invalid.")
+
+
 def cmd_rag_ingest(args):
     body = {
         "documents": [{"text": args.text, "source": args.source}],
@@ -254,6 +264,23 @@ def cmd_doctor(args):
         problems.append("Ollama is down — start it (ollama serve) and check MODELRIG_OLLAMA_URL")
     if not up.get("worker"):
         problems.append("RAG worker is down — start uvicorn and check MODELRIG_WORKER_URL")
+
+    if args.deep:
+        st, body = _probe(url, "/api/v1/health/deep", token=token, timeout=20)
+        if st == 200:
+            d = json.loads(body)
+            o = d.get("checks", {}).get("ollama", {})
+            wk = d.get("checks", {}).get("worker", {})
+            print(f"  [{' OK ' if o.get('ok') else 'FAIL'}] ollama round-trip: models={o.get('models', '?')} ({o.get('latency_ms', '?')}ms)")
+            print(f"  [{' OK ' if wk.get('ok') else 'FAIL'}] worker round-trip: embed_dims={wk.get('embed_dims', '?')} ({wk.get('latency_ms', '?')}ms)")
+            if not wk.get("ok") and wk.get("error"):
+                print(f"         worker error: {wk['error']}")
+            if not d.get("ok"):
+                problems.append("deep check failed — a model did not respond (embeddings)")
+        else:
+            print(f"  [FAIL] deep health returned {st}: {body}")
+            problems.append("deep health endpoint failed")
+
     if problems:
         print("\ndiagnosis:")
         for p in problems:
@@ -275,7 +302,10 @@ def build_parser():
     sp.set_defaults(fn=cmd_pair)
 
     sub.add_parser("status", help="device + upstream health").set_defaults(fn=cmd_status)
-    sub.add_parser("doctor", help="diagnose backend / worker / ollama reachability").set_defaults(fn=cmd_doctor)
+    dp = sub.add_parser("doctor", help="diagnose backend / worker / ollama reachability")
+    dp.add_argument("--deep", action="store_true", help="also round-trip an embedding through the worker + Ollama")
+    dp.set_defaults(fn=cmd_doctor)
+    sub.add_parser("rotate", help="re-issue this device's token (invalidates the old one)").set_defaults(fn=cmd_rotate)
     sub.add_parser("models", help="list available models").set_defaults(fn=cmd_models)
     sub.add_parser("devices", help="list paired devices").set_defaults(fn=cmd_devices)
     sub.add_parser("whoami", help="show saved config").set_defaults(fn=cmd_whoami)
