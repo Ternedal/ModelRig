@@ -180,6 +180,18 @@ func (s *server) handleRagIngest(w http.ResponseWriter, r *http.Request) {
 	s.Worker.Forward(w, r, "/rag/ingest")
 }
 
+func (s *server) handleRagSources(w http.ResponseWriter, r *http.Request) {
+	s.Worker.Forward(w, r, "/rag/sources")
+}
+
+func (s *server) handleRagStats(w http.ResponseWriter, r *http.Request) {
+	s.Worker.Forward(w, r, "/rag/stats")
+}
+
+func (s *server) handleRagSourceDelete(w http.ResponseWriter, r *http.Request) {
+	s.Worker.Forward(w, r, "/rag/source")
+}
+
 // clientIP extracts the remote host for rate-limiting. Behind a trusted reverse
 // proxy you'd honor X-Forwarded-For; for a direct LAN server RemoteAddr is right.
 func clientIP(r *http.Request) string {

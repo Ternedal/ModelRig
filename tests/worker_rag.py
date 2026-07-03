@@ -59,5 +59,31 @@ check(len(matches) == 1 and matches[0]["source"] == "B",
       f"retrieval returns nearest source (got {matches[0]['source'] if matches else None})")
 check("chunk_index" in matches[0] and "score" in matches[0], "match carries chunk_index + score")
 
+# ---- source management: stats / sources / delete ----
+# state now: "big" (len(cs) chunks), "A" (1), "B" (1)
+r = client.get("/rag/stats")
+st = r.json()
+check(r.status_code == 200 and st["sources"] == 3, f"stats sources == 3 (got {st.get('sources')})")
+check(st["chunks"] == len(cs) + 2, f"stats chunks == {len(cs)+2} (got {st.get('chunks')})")
+
+r = client.get("/rag/sources")
+srcs = {s["source"]: s["chunks"] for s in r.json()["sources"]}
+check(r.status_code == 200 and set(srcs) == {"big", "A", "B"}, f"sources lists all (got {set(srcs)})")
+check(srcs.get("big") == len(cs) and srcs.get("A") == 1, "per-source chunk counts correct")
+
+r = client.delete("/rag/source", params={"source": "A"})
+check(r.status_code == 200 and r.json()["removed"] == 1, "delete source A -> removed 1")
+check(r.json()["total"] == len(cs) + 1, "total drops after delete")
+
+r = client.get("/rag/stats")
+check(r.json()["sources"] == 2, "stats sources == 2 after delete")
+
+r = client.delete("/rag/source", params={"source": "does-not-exist"})
+check(r.status_code == 404, "delete unknown source -> 404")
+
+r = client.post("/rag/query", json={"query": "alpha bravo", "top_k": 3, "synthesize": False})
+returned_sources = {m["source"] for m in r.json()["matches"]}
+check("A" not in returned_sources, "deleted source no longer retrievable")
+
 print(f"\n===== WORKER V1: {passed} passed, {failed} failed =====")
 raise SystemExit(0 if failed == 0 else 1)

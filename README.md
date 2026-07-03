@@ -4,7 +4,7 @@ A local-first AI platform: run models on your own hardware via Ollama, reach the
 from a desktop app and an Android phone, with an optional RAG service and an
 Ollama Cloud fallback for when local isn't enough.
 
-Version: **0.6.0** (V1 backbone + integration-tested)
+Version: **0.7.0** (V1 backbone + RAG management, integration-tested)
 
 ## Architecture
 ```
@@ -41,7 +41,8 @@ Ollama Cloud (https://ollama.com, model :cloud) with OLLAMA_API_KEY.
   claim, then reverse-proxies chat/models to Ollama (streaming) and RAG to the
   worker. Auth is loopback-free.
 - **worker/** — Python FastAPI. RAG: **chunk** (overlapping) → embed via Ollama →
-  SQLite → cosine retrieval → optional synthesis.
+  SQLite → cosine retrieval → optional synthesis. Plus **source management**: list
+  sources, corpus stats, delete a source.
 - **desktop/** — Compose Desktop (JVM). **Streaming** chat with local-first +
   Ollama Cloud fallback, model picker, branded UI.
 - **android/** — Compose Android V1. Pair with the backend, then **streaming**
@@ -99,16 +100,15 @@ sh tests/run_tests.sh
 ## Build status at a glance
 | Module   | State in this drop                    | Verified here                    |
 |----------|---------------------------------------|----------------------------------|
-| backend  | compiled binary + tests               | ✅ `go build`/`vet`, 35 across 3 suites |
-| worker   | runs, logic tested                    | ✅ 20 (Ollama stubbed)            |
-| e2e      | backend + worker run together         | ✅ 12 (full chain via the CLI)    |
+| backend  | compiled binary + tests               | ✅ `go build`/`vet`, 23 (smoke 11 + V1 12) |
+| worker   | runs, logic tested                    | ✅ 29 (unit 9 + RAG 20, Ollama stubbed) |
+| e2e      | backend + worker run together         | ✅ 17 (full chain via the CLI)    |
 | desktop  | complete source, **build locally**    | ⚠️ no JVM/Gradle here             |
 | android  | complete source, **build locally**    | ⚠️ no Android SDK here            |
 
-The integration test is what caught (and drove the fix for) the reverse proxy
-sending upstream request bodies as chunked with no `Content-Length`. Streaming and
-the model picker in the clients are written but, like the rest of the Kotlin, were
-not compiled here — build locally.
+**69 assertions** total (`sh tests/run_tests.sh`). The integration test drove the
+proxy fix (preserve `Content-Length`; forward query strings). Streaming and the
+model picker in the clients are written but not compiled here — build locally.
 
 See **STATUS.md** for the honest breakdown: what's proven, what's only source,
 versions/assumptions, and known limitations.

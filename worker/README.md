@@ -14,6 +14,9 @@ with Ollama stubbed out; live embedding/generation needs a running Ollama).
 | GET    | `/healthz`    | liveness + version + document count            |
 | POST   | `/rag/ingest` | `{documents:[{text, source?}], chunk_size?, overlap?}` → chunk + embed + store |
 | POST   | `/rag/query`  | `{query, top_k?, synthesize?, model?}` → matches (text, source, chunk_index, score) (+ answer) |
+| GET    | `/rag/sources`| list ingested sources with chunk counts + last-ingested time |
+| GET    | `/rag/stats`  | corpus totals: distinct sources + total chunks |
+| DELETE | `/rag/source?source=X` | delete every chunk for source `X` (404 if none); `(none)` clears NULL-source chunks |
 
 Any Ollama failure → HTTP 502 with a readable detail (never a stack trace).
 
@@ -57,6 +60,6 @@ curl -X POST http://localhost:8099/rag/query -H 'Content-Type: application/json'
 Cosine unit tests (identical/orthogonal/mismatched/empty), `/healthz` 200, request
 validation (missing `query` → 422, `top_k` > 20 → 422), Ollama-down → clean 502
 for both endpoints, **chunking** unit tests (empty/short/long, size bounds, no
-word loss), and the full **chunk → embed → store → retrieve** path with stubbed
-embeddings (a query correctly returns the nearest source; matches carry
-`chunk_index` + `score`). 20 cases total.
+word loss), the full **chunk → embed → store → retrieve** path with stubbed
+embeddings, and **source management** (stats, per-source chunk counts, delete a
+source → gone from retrieval, delete unknown → 404). 29 cases total.

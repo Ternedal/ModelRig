@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.6.0** — "V1 backbone + integration-tested". Autonomous session, **2026-07-02**.
+Version **0.7.0** — "V1 backbone + RAG management, integration-tested". Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -15,7 +15,19 @@ compiler, no Gradle, no Android SDK**. So:
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
 
-## What's new in 0.6.0
+## What's new in 0.7.0
+- **RAG source management** — the RAG is now operable, not just write-and-query:
+  - `GET /rag/sources` — sources with chunk counts + last-ingested time.
+  - `GET /rag/stats` — corpus totals (distinct sources, total chunks).
+  - `DELETE /rag/source?source=X` — remove every chunk for a source (404 if none).
+  - All proxied through the backend (`/api/v1/rag/*`) and exposed in the CLI
+    (`rag-sources`, `rag-stats`, `rag-delete --source`).
+- **Proxy now forwards query strings** to upstream (needed for the DELETE above);
+  general fix, benefits any query-param endpoint.
+- Tests grew to **69 assertions**; the e2e now ingests two sources, lists, deletes
+  one, and confirms it's gone — through the CLI against live processes.
+
+## What landed in 0.6.0
 - **Reference CLI** (`tools/modelrig-cli.py`) — a dependency-free client: pair,
   streaming chat, models, RAG, device list/revoke. A real client you can run today
   while the Kotlin clients await a local build.
@@ -58,10 +70,10 @@ compiler, no Gradle, no Android SDK**. So:
 | Backend behaviour | **23** assertions: core smoke (11) + V1 (12) |
 | Backend persistence | store JSON inspected: token hash stored, pairings emptied after single use |
 | Worker imports & runs | FastAPI app loads; `/healthz` 200 |
-| Worker logic | **20**: cosine, validation, 502 handling, chunking, full retrieval path |
-| **Integrated stack** | **12** e2e assertions: real backend + real worker + fake Ollama, driven through the CLI |
+| Worker logic | **29**: cosine, validation, 502 handling, chunking, retrieval, source management |
+| **Integrated stack** | **17** e2e assertions: real backend + real worker + fake Ollama, driven through the CLI |
 
-**55 assertions total** via `sh tests/run_tests.sh`.
+**69 assertions total** via `sh tests/run_tests.sh`.
 
 **Backend V1 test highlights:** streamed chat reassembled from 3 chunks ("Hej fra
 ModelRig") · model-list proxy · devices list without `token_hash` · revoke →

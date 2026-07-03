@@ -12,7 +12,7 @@ from . import ollama_client as oc
 from . import rag
 from .store import DocStore
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -67,3 +67,25 @@ async def query(req: QueryReq) -> dict:
         )
     except oc.OllamaError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/rag/sources")
+def sources() -> dict:
+    return {"sources": [
+        {"source": s, "chunks": n, "last_ingested_at": ts}
+        for (s, n, ts) in store.sources()
+    ]}
+
+
+@app.get("/rag/stats")
+def stats() -> dict:
+    return store.stats()
+
+
+@app.delete("/rag/source")
+def delete_source(source: str) -> dict:
+    """Delete all chunks for a source. 404 if the source has no chunks."""
+    removed = store.delete_source(source)
+    if removed == 0:
+        raise HTTPException(status_code=404, detail=f"no chunks for source {source!r}")
+    return {"source": source, "removed": removed, "total": store.count()}

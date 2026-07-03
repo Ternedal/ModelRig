@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -31,7 +32,15 @@ func (c *Client) WithHealthPath(p string) *Client {
 
 // Forward proxies r to c.BaseURL+upstreamPath and streams the response to w.
 func (c *Client) Forward(w http.ResponseWriter, r *http.Request, upstreamPath string) {
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, c.BaseURL+upstreamPath, r.Body)
+	target := c.BaseURL + upstreamPath
+	if r.URL.RawQuery != "" {
+		if strings.Contains(upstreamPath, "?") {
+			target += "&" + r.URL.RawQuery
+		} else {
+			target += "?" + r.URL.RawQuery
+		}
+	}
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, target, r.Body)
 	if err != nil {
 		http.Error(w, "bad upstream request", http.StatusInternalServerError)
 		return

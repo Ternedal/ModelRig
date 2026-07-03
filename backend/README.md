@@ -19,6 +19,9 @@ Status: **built, vetted and smoke-tested** (11/11) in the generator environment.
 | POST   | `/api/v1/chat`          | bearer | → Ollama `/api/chat` (streamed)          |
 | POST   | `/api/v1/rag/query`     | bearer | → worker `/rag/query`                    |
 | POST   | `/api/v1/rag/ingest`    | bearer | → worker `/rag/ingest`                   |
+| GET    | `/api/v1/rag/sources`   | bearer | → worker `/rag/sources`                  |
+| GET    | `/api/v1/rag/stats`     | bearer | → worker `/rag/stats`                    |
+| DELETE | `/api/v1/rag/source`    | bearer | → worker `/rag/source` (query forwarded) |
 
 \* `pair/start` requires header `X-Admin-Key` **iff** `MODELRIG_ADMIN_KEY` is set;
 otherwise it is open (dev mode) and the server logs a warning.

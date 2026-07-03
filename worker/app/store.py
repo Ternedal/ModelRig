@@ -56,3 +56,33 @@ class DocStore:
     def count(self) -> int:
         with self._lock:
             return int(self._conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0])
+
+    def sources(self) -> list[tuple[str, int, float]]:
+        """Return (source, chunk_count, last_ingested_at) grouped by source,
+        newest first. A NULL source is reported as the string '(none)'."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT COALESCE(source, '(none)') AS s, COUNT(*), MAX(created_at) "
+                "FROM documents GROUP BY s ORDER BY MAX(created_at) DESC"
+            ).fetchall()
+        return [(r[0], int(r[1]), float(r[2])) for r in rows]
+
+    def delete_source(self, source: str) -> int:
+        """Delete every chunk for a source. Pass '(none)' to clear NULL-source
+        chunks. Returns the number of chunks removed."""
+        with self._lock:
+            if source == "(none)":
+                cur = self._conn.execute("DELETE FROM documents WHERE source IS NULL")
+            else:
+                cur = self._conn.execute("DELETE FROM documents WHERE source = ?", (source,))
+            self._conn.commit()
+            return int(cur.rowcount)
+
+    def stats(self) -> dict:
+        """Corpus totals: distinct sources and total chunks."""
+        with self._lock:
+            chunks = int(self._conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0])
+            srcs = int(self._conn.execute(
+                "SELECT COUNT(DISTINCT COALESCE(source, '(none)')) FROM documents"
+            ).fetchone()[0])
+        return {"sources": srcs, "chunks": chunks}

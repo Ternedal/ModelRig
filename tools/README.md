@@ -17,6 +17,9 @@ models                                list model names
 chat [--model M] "message"            streaming chat (tokens print as they arrive)
 rag-ingest [--source S] [--chunk-size N] [--overlap N] "text"
 rag-query [--top-k K] [--no-synth] [--model M] "query"
+rag-sources                           list ingested sources + chunk counts
+rag-stats                             corpus totals (sources, chunks)
+rag-delete --source S                 delete all chunks for a source
 devices                               list paired devices
 revoke DEVICE_ID                      revoke a device (its token dies)
 whoami                                show saved config (token masked)

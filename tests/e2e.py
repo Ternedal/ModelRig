@@ -162,6 +162,22 @@ def main():
         check(p.returncode == 0 and json.loads(p.stdout).get("answer") == "SYNTH-ANSWER",
               "CLI rag-query with synthesis -> answer from (fake) Ollama")
 
+        # ---- source management through the CLI ----
+        p = cli("rag-ingest", "second document about modelrig deployment on windows", "--source", "docs2")
+        check(p.returncode == 0 and json.loads(p.stdout).get("chunks_added", 0) >= 1, "CLI rag-ingest second source")
+
+        p = cli("rag-sources")
+        check(p.returncode == 0 and "docs" in p.stdout and "docs2" in p.stdout, "CLI rag-sources lists both sources")
+
+        p = cli("rag-stats")
+        check(p.returncode == 0 and json.loads(p.stdout).get("sources") == 2, "CLI rag-stats -> 2 sources")
+
+        p = cli("rag-delete", "--source", "docs2")
+        check(p.returncode == 0 and json.loads(p.stdout).get("removed", 0) >= 1, "CLI rag-delete removes source")
+
+        p = cli("rag-sources")
+        check(p.returncode == 0 and "docs2" not in p.stdout and "docs" in p.stdout, "CLI rag-sources after delete -> only docs")
+
         p = cli("devices")
         check(p.returncode == 0 and "e2e" in p.stdout, "CLI devices lists the paired device")
 

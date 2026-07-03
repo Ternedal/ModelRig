@@ -132,6 +132,25 @@ def cmd_rag_query(args):
     print(call(args, "POST", "/api/v1/rag/query", body=body))
 
 
+def cmd_rag_sources(args):
+    data = json.loads(call(args, "GET", "/api/v1/rag/sources"))
+    srcs = data.get("sources", [])
+    if not srcs:
+        print("(no sources)")
+    for s in srcs:
+        print(f"{s['source']}  chunks={s['chunks']}")
+
+
+def cmd_rag_stats(args):
+    print(call(args, "GET", "/api/v1/rag/stats"))
+
+
+def cmd_rag_delete(args):
+    import urllib.parse
+    q = urllib.parse.quote(args.source, safe="")
+    print(call(args, "DELETE", f"/api/v1/rag/source?source={q}"))
+
+
 def cmd_chat(args):
     url, token, _ = resolve(args)
     if not url:
@@ -218,6 +237,13 @@ def build_parser():
     qp.add_argument("--no-synth", action="store_true", help="skip LLM synthesis, return matches only")
     qp.add_argument("--model")
     qp.set_defaults(fn=cmd_rag_query)
+
+    sub.add_parser("rag-sources", help="list ingested sources + chunk counts").set_defaults(fn=cmd_rag_sources)
+    sub.add_parser("rag-stats", help="corpus totals (sources, chunks)").set_defaults(fn=cmd_rag_stats)
+
+    dp = sub.add_parser("rag-delete", help="delete all chunks for a source")
+    dp.add_argument("--source", required=True)
+    dp.set_defaults(fn=cmd_rag_delete)
 
     return p
 
