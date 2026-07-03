@@ -18,6 +18,24 @@ Token in `SharedPreferences` (see hardening note in `data/TokenStore.kt`).
 **Model picker**: "Genindlæs modeller" pulls `/api/v1/models` into a dropdown; the
 choice persists via `TokenStore`.
 
+## Two sources: rig and cloud
+The app can talk to **your rig** (backend → local Ollama + RAG) **or directly to
+Ollama Cloud** — the latter needs no rig running at all. Setup screen has both:
+
+- **Ollama Cloud** (`net/CloudClient.kt`): streams from `https://ollama.com/api/chat`
+  with your account API key. No rig required. Get a key at
+  `ollama.com/settings/keys`; the model name is used directly (e.g. `gpt-oss:120b`).
+- **Rig** (`net/ModelRigClient.kt`): pair with the backend for local models + RAG.
+
+If both are configured, the chat screen shows a **Rig / Cloud** toggle. The choice
+persists (`TokenStore.chatMode`).
+
+**Cloud key security**: the API key can cost real money if leaked, so it's
+**encrypted at rest** with an AES-256-GCM key held in the **AndroidKeystore**
+(`data/Crypto.kt`) — no external dependency (Jetpack Security's
+EncryptedSharedPreferences is deprecated, so it's avoided). The rig device token
+stays in plain prefs (LAN-only, lower value).
+
 ## UI
 Material 3, dark-first, brand palette shared with the desktop client
 (`ui/theme/Theme.kt`). Custom top bar (model dropdown + overflow: clear / unpair),

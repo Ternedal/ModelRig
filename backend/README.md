@@ -68,7 +68,8 @@ Defaults → optional JSON file (`MODELRIG_CONFIG=path`) → env overrides.
 |------------------------|-----------------------------|------------------------------------|
 | `MODELRIG_HOST`        | `127.0.0.1`                 | **set 0.0.0.0 for LAN/Android**    |
 | `MODELRIG_PORT`        | `8080`                      |                                    |
-| `MODELRIG_OLLAMA_URL`  | `http://127.0.0.1:11434`    |                                    |
+| `MODELRIG_OLLAMA_URL`  | `http://127.0.0.1:11434`    | `https://ollama.com` for cloud     |
+| `MODELRIG_OLLAMA_KEY`  | *(unset)*                   | Ollama API key, sent as `Bearer`   |
 | `MODELRIG_WORKER_URL`  | `http://127.0.0.1:8099`     |                                    |
 | `MODELRIG_DATA`        | `./modelrig-data.json`      | device + pairing store             |
 | `MODELRIG_PAIRING_TTL` | `300` (seconds)             |                                    |

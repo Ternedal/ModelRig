@@ -179,7 +179,11 @@ func (s *server) handleHealthDeep(w http.ResponseWriter, r *http.Request) {
 	{
 		start := time.Now()
 		ok := false
-		if resp, err := client.Get(s.Ollama.BaseURL + "/api/tags"); err == nil {
+		req, _ := http.NewRequest(http.MethodGet, s.Ollama.BaseURL+"/api/tags", nil)
+		if s.Ollama.AuthToken != "" {
+			req.Header.Set("Authorization", "Bearer "+s.Ollama.AuthToken)
+		}
+		if resp, err := client.Do(req); err == nil {
 			defer resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				var body struct {

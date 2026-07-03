@@ -88,6 +88,13 @@ færdigt skifter det til renderet markdown. Det er med vilje (undgår jank og
 halvåbne kodeblokke). Tabeller og dyb list-nesting understøttes ikke — se
 `android/ui/Markdown.kt` hvis du vil skifte til fuld CommonMark.
 
+**Cloud uden rig (0.12.0):** På setup-skærmen kan du vælge **Ollama Cloud** i
+stedet for (eller udover) rig'en. Indtast din API-nøgle (fra
+`ollama.com/settings/keys`) + et modelnavn (fx `gpt-oss:120b`), tryk "Gem & brug
+cloud" → chat streamer direkte fra skyen, rig slukket. Er begge sat op, får du en
+Rig/Cloud-toggle øverst. Tjek også at nøglen overlever app-genstart (den gemmes
+Keystore-krypteret — det er den mindst-testede kode, så sig til hvis "Gem" fejler).
+
 ## 4. Mest sandsynlige fejl (og fix)
 Ærligt: risiko #1 er **version-drift i Compose/Kotlin**. De pinnede versioner er
 plausible, men ikke verificeret sammen.

@@ -11,6 +11,7 @@ import (
 type Client struct {
 	BaseURL    string
 	HealthPath string
+	AuthToken  string // if set, sent as "Authorization: Bearer <token>" (e.g. Ollama Cloud)
 	http       *http.Client
 }
 
@@ -27,6 +28,13 @@ func New(baseURL string, timeout time.Duration) *Client {
 // WithHealthPath sets the path used by Reachable and returns the client.
 func (c *Client) WithHealthPath(p string) *Client {
 	c.HealthPath = p
+	return c
+}
+
+// WithAuthToken sets a bearer token forwarded on every upstream request. Empty
+// token is a no-op (local Ollama needs none; Ollama Cloud needs its API key).
+func (c *Client) WithAuthToken(t string) *Client {
+	c.AuthToken = t
 	return c
 }
 
@@ -57,6 +65,9 @@ func (c *Client) Forward(w http.ResponseWriter, r *http.Request, upstreamPath st
 	}
 	if rid := r.Header.Get("X-Request-ID"); rid != "" {
 		req.Header.Set("X-Request-ID", rid)
+	}
+	if c.AuthToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.AuthToken)
 	}
 
 	resp, err := c.http.Do(req)
@@ -92,7 +103,14 @@ func (c *Client) Forward(w http.ResponseWriter, r *http.Request, upstreamPath st
 // Reachable does a short GET against HealthPath to check upstream availability.
 func (c *Client) Reachable() bool {
 	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(c.BaseURL + c.HealthPath)
+	req, err := http.NewRequest(http.MethodGet, c.BaseURL+c.HealthPath, nil)
+	if err != nil {
+		return false
+	}
+	if c.AuthToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.AuthToken)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return false
 	}

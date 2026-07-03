@@ -4,7 +4,7 @@ A local-first AI platform: run models on your own hardware via Ollama, reach the
 from a desktop app and an Android phone, with an optional RAG service and an
 Ollama Cloud fallback for when local isn't enough.
 
-Version: **0.11.0** (server V1 + Android UI overhaul with Markdown)
+Version: **0.12.0** (Android cloud mode — chat without the rig)
 
 ## Architecture
 ```
@@ -45,9 +45,10 @@ Ollama Cloud (https://ollama.com, model :cloud) with OLLAMA_API_KEY.
   (retrieve + stream the answer). Source management: list, stats, delete, filter.
 - **desktop/** — Compose Desktop (JVM). **Streaming** chat with local-first +
   Ollama Cloud fallback, model picker, branded UI.
-- **android/** — Compose Android V1. Pair with the backend, then **streaming**
-  chat with a model picker. **Material 3 dark UI** with a dependency-free
-  **Markdown renderer** (code blocks + copy button). Source — build locally.
+- **android/** — Compose Android V1. Talk to your **rig** (backend → local models
+  + RAG) **or directly to Ollama Cloud** (no rig needed). Material 3 dark UI,
+  dependency-free **Markdown** rendering (code blocks + copy), Keystore-encrypted
+  cloud key. Source — build locally (an APK ships on the GitHub release).
 - **tools/** — `modelrig-cli.py`, a dependency-free reference client (pair, chat,
   RAG, device mgmt, `doctor` health check, token `rotate`). Runnable today; used
   to drive the e2e test.

@@ -77,8 +77,18 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         }
     }
 
-    /** Streaming chat: invokes onDelta per NDJSON token chunk as it arrives. */
-    fun chatStream(model: String, messages: List<Pair<String, String>>, onDelta: (String) -> Unit) {
+    /**
+     * Streaming chat: invokes onDelta per NDJSON token chunk as it arrives.
+     * `registerCall` (optional) hands back the underlying OkHttp Call so the UI
+     * can cancel an in-flight generation (Stop button). Cancelling makes the
+     * blocking read throw, which ends the stream cleanly.
+     */
+    fun chatStream(
+        model: String,
+        messages: List<Pair<String, String>>,
+        registerCall: ((okhttp3.Call) -> Unit)? = null,
+        onDelta: (String) -> Unit,
+    ) {
         val arr = JSONArray()
         for ((role, content) in messages) {
             arr.put(JSONObject().put("role", role).put("content", content))
@@ -93,7 +103,9 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         val builder = Request.Builder().url("$base/api/v1/chat").post(body)
         token?.let { builder.header("Authorization", "Bearer $it") }
 
-        http.newCall(builder.build()).execute().use { resp ->
+        val call = http.newCall(builder.build())
+        registerCall?.invoke(call)
+        call.execute().use { resp ->
             if (!resp.isSuccessful) {
                 throw ModelRigException("chat failed (${resp.code}): ${resp.body?.string().orEmpty()}")
             }

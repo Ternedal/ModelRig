@@ -8,13 +8,14 @@ import (
 )
 
 // Version is the ModelRig backend version.
-const Version = "0.11.0"
+const Version = "0.12.0"
 
 // Config holds the effective runtime configuration.
 type Config struct {
 	ServerHost     string
 	ServerPort     int
 	OllamaBaseURL  string
+	OllamaKey      string // Ollama API key; set for Ollama Cloud, empty for local
 	WorkerBaseURL  string
 	PairingTTL     time.Duration
 	DataPath       string
@@ -29,6 +30,7 @@ type fileConfig struct {
 	} `json:"server"`
 	Ollama struct {
 		BaseURL string `json:"base_url"`
+		APIKey  string `json:"api_key"`
 	} `json:"ollama"`
 	Worker struct {
 		BaseURL string `json:"base_url"`
@@ -91,6 +93,9 @@ func applyFile(c *Config, path string) error {
 	if fc.Ollama.BaseURL != "" {
 		c.OllamaBaseURL = fc.Ollama.BaseURL
 	}
+	if fc.Ollama.APIKey != "" {
+		c.OllamaKey = fc.Ollama.APIKey
+	}
 	if fc.Worker.BaseURL != "" {
 		c.WorkerBaseURL = fc.Worker.BaseURL
 	}
@@ -114,6 +119,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("MODELRIG_OLLAMA_URL"); v != "" {
 		c.OllamaBaseURL = v
+	}
+	if v := os.Getenv("MODELRIG_OLLAMA_KEY"); v != "" {
+		c.OllamaKey = v
 	}
 	if v := os.Getenv("MODELRIG_WORKER_URL"); v != "" {
 		c.WorkerBaseURL = v

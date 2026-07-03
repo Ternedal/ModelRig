@@ -3,16 +3,17 @@ package dk.ternedal.modelrig.data
 import android.content.Context
 
 /**
- * V1 token storage in plain SharedPreferences.
+ * Local settings storage.
  *
- * NOTE: stores the device bearer token in cleartext prefs — acceptable for a
- * LAN-only V1. For hardening, move to DataStore + an Android Keystore-wrapped
- * key. (Jetpack Security's EncryptedSharedPreferences is deprecated/unmaintained,
- * so it is intentionally NOT used here.)
+ * - Rig token / baseUrl / model: plain SharedPreferences. Acceptable for a
+ *   LAN-only device token (low value). Harden with DataStore + Keystore later.
+ * - Cloud API key: encrypted at rest via the AndroidKeystore (see Crypto) — it
+ *   can cost real money if leaked, so it gets stronger protection than the token.
  */
 class TokenStore(context: Context) {
     private val prefs = context.getSharedPreferences("modelrig", Context.MODE_PRIVATE)
 
+    // ---- rig (backend) ----
     var baseUrl: String?
         get() = prefs.getString("base_url", null)
         set(v) { prefs.edit().putString("base_url", v).apply() }
@@ -25,5 +26,30 @@ class TokenStore(context: Context) {
         get() = prefs.getString("model", "qwen2.5-coder:7b") ?: "qwen2.5-coder:7b"
         set(v) { prefs.edit().putString("model", v).apply() }
 
+    // ---- cloud (Ollama Cloud, no rig needed) ----
+    /** Ollama Cloud API key, stored encrypted. Returns null if unset or undecryptable. */
+    var cloudKey: String?
+        get() = prefs.getString("cloud_key_enc", null)?.let { runCatching { Crypto.decrypt(it) }.getOrNull() }
+        set(v) {
+            val e = prefs.edit()
+            if (v.isNullOrEmpty()) e.remove("cloud_key_enc")
+            else e.putString("cloud_key_enc", Crypto.encrypt(v))
+            e.apply()
+        }
+
+    var cloudModel: String
+        get() = prefs.getString("cloud_model", "gpt-oss:120b") ?: "gpt-oss:120b"
+        set(v) { prefs.edit().putString("cloud_model", v).apply() }
+
+    /** "rig" or "cloud" — which source the chat screen uses. */
+    var chatMode: String
+        get() = prefs.getString("chat_mode", "rig") ?: "rig"
+        set(v) { prefs.edit().putString("chat_mode", v).apply() }
+
+    val hasRig: Boolean get() = token != null
+    val hasCloud: Boolean get() = prefs.getString("cloud_key_enc", null) != null
+
+    fun clearRig() { prefs.edit().remove("token").remove("base_url").apply() }
+    fun clearCloud() { prefs.edit().remove("cloud_key_enc").apply() }
     fun clear() { prefs.edit().clear().apply() }
 }

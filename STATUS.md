@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.11.0** — "server V1 + Android UI overhaul". Autonomous session, **2026-07-02/03**.
+Version **0.12.0** — "Android cloud mode: chat without the rig". Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -14,6 +14,32 @@ compiler, no Gradle, no Android SDK**. So:
 - backend + worker were genuinely compiled/run/tested here.
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
+
+## What's new in 0.12.0
+The point: **use the phone with cloud when the rig is off.**
+- **Android direct Ollama Cloud** (`net/CloudClient.kt`): streams from
+  `https://ollama.com/api/chat` with your account key — no rig needed. Setup screen
+  now offers **rig and/or cloud**; if both are set, chat has a Rig/Cloud toggle.
+- **Cloud key encrypted at rest** via AndroidKeystore AES-256-GCM (`data/Crypto.kt`),
+  no external dependency.
+- **Backend can also use cloud** (bonus): `MODELRIG_OLLAMA_KEY` → the proxy sends
+  `Authorization: Bearer` to Ollama, so pointing `MODELRIG_OLLAMA_URL` at
+  `https://ollama.com` makes the whole rig cloud-backed.
+
+**Verified here:**
+- The Android app **compiles and builds to a real APK** (full toolchain: JDK 21,
+  Gradle 8.9, Android SDK 35). Compile-clean.
+- The backend cloud path: with `MODELRIG_OLLAMA_KEY` set, a fake cloud that
+  requires the bearer header received `Authorization: Bearer …` and the chat
+  streamed through. Existing suite still green (90 assertions unchanged; proxy
+  auth is a no-op when no key).
+
+**NOT verified (needs your device + a real key):**
+- That the app *runs* the cloud path end to end (streaming from ollama.com).
+- That the **Keystore encrypt/decrypt** round-trips on a device (least-tested code
+  — it compiles, but crypto only runs on-device). Failure is caught, not crashy:
+  a save error shows a message rather than killing the app.
+- Actual cloud model names / availability on your account.
 
 ## What's new in 0.11.0
 - **Android UI overhaul** (source only, **not compiled here** — like all the
