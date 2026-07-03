@@ -5,17 +5,44 @@ The backend proxies /api/v1/rag/* here; clients never call it directly.
 """
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+import logging as pylog
+import sys
+import time as pytime
+import uuid
+
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from . import ollama_client as oc
 from . import rag
 from .store import DocStore
 
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
+
+# Structured request logging with a request id that the backend propagates via
+# X-Request-ID, so one request can be traced across backend + worker logs.
+_logger = pylog.getLogger("modelrig.worker")
+if not _logger.handlers:
+    _h = pylog.StreamHandler(sys.stdout)
+    _h.setFormatter(pylog.Formatter("%(asctime)s %(message)s"))
+    _logger.addHandler(_h)
+    _logger.setLevel(pylog.INFO)
+    _logger.propagate = False
+
+
+@app.middleware("http")
+async def request_logger(request: Request, call_next):
+    rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:16]
+    start = pytime.perf_counter()
+    response = await call_next(request)
+    dur_ms = int((pytime.perf_counter() - start) * 1000)
+    response.headers["x-request-id"] = rid
+    _logger.info("level=info req=%s method=%s path=%s status=%d dur_ms=%d",
+                 rid, request.method, request.url.path, response.status_code, dur_ms)
+    return response
 
 
 class IngestDoc(BaseModel):
@@ -34,6 +61,7 @@ class QueryReq(BaseModel):
     top_k: int = Field(default=4, ge=1, le=20)
     synthesize: bool = True
     model: str | None = None
+    source: str | None = None
 
 
 @app.get("/healthz")
@@ -63,7 +91,7 @@ async def query(req: QueryReq) -> dict:
     try:
         return await rag.query(
             store, req.query, top_k=req.top_k,
-            synthesize=req.synthesize, model=req.model,
+            synthesize=req.synthesize, model=req.model, source=req.source,
         )
     except oc.OllamaError as e:
         raise HTTPException(status_code=502, detail=str(e))

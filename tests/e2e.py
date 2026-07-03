@@ -178,6 +178,26 @@ def main():
         p = cli("rag-sources")
         check(p.returncode == 0 and "docs2" not in p.stdout and "docs" in p.stdout, "CLI rag-sources after delete -> only docs")
 
+        p = cli("rag-query", "what does it bind", "--source", "docs", "--no-synth", "--top-k", "3")
+        srcs = {m["source"] for m in json.loads(p.stdout).get("matches", [])} if p.returncode == 0 else set()
+        check(srcs == {"docs"}, f"CLI rag-query --source docs returns only docs (got {srcs})")
+
+        # ---- request-id propagation (cross-service tracing) ----
+        tok = json.loads(open(CFG).read())["token"]
+        req = urllib.request.Request(BACKEND + "/api/v1/rag/stats",
+                                     headers={"Authorization": "Bearer " + tok, "X-Request-ID": "e2e-trace-xyz"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            echoed = r.headers.get("X-Request-ID")
+        check(echoed == "e2e-trace-xyz", "backend echoes X-Request-ID back to client")
+        time.sleep(0.3)
+        blog = open("/tmp/e2e-backend.log").read()
+        wlog = open("/tmp/e2e-worker.log").read()
+        check("e2e-trace-xyz" in blog, "backend logs the request id")
+        check("e2e-trace-xyz" in wlog, "worker logs the propagated request id (cross-service trace)")
+
+        p = cli("doctor")
+        check(p.returncode == 0 and "all systems go" in p.stdout, f"CLI doctor -> all green (rc={p.returncode})")
+
         p = cli("devices")
         check(p.returncode == 0 and "e2e" in p.stdout, "CLI devices lists the paired device")
 

@@ -13,7 +13,7 @@ with Ollama stubbed out; live embedding/generation needs a running Ollama).
 |--------|---------------|------------------------------------------------|
 | GET    | `/healthz`    | liveness + version + document count            |
 | POST   | `/rag/ingest` | `{documents:[{text, source?}], chunk_size?, overlap?}` → chunk + embed + store |
-| POST   | `/rag/query`  | `{query, top_k?, synthesize?, model?}` → matches (text, source, chunk_index, score) (+ answer) |
+| POST   | `/rag/query`  | `{query, top_k?, synthesize?, model?, source?}` → matches (text, source, chunk_index, score) (+ answer); `source` restricts retrieval to one source |
 | GET    | `/rag/sources`| list ingested sources with chunk counts + last-ingested time |
 | GET    | `/rag/stats`  | corpus totals: distinct sources + total chunks |
 | DELETE | `/rag/source?source=X` | delete every chunk for source `X` (404 if none); `(none)` clears NULL-source chunks |
@@ -62,4 +62,9 @@ validation (missing `query` → 422, `top_k` > 20 → 422), Ollama-down → clea
 for both endpoints, **chunking** unit tests (empty/short/long, size bounds, no
 word loss), the full **chunk → embed → store → retrieve** path with stubbed
 embeddings, and **source management** (stats, per-source chunk counts, delete a
-source → gone from retrieval, delete unknown → 404). 29 cases total.
+source → gone from retrieval, delete unknown → 404), plus **source-filtered
+queries** (retrieval restricted to one source). 31 cases total.
+
+Every request is logged as a structured `level=info req=… method=… path=…
+status=… dur_ms=…` line; the `req` id is taken from the backend's `X-Request-ID`
+header, so a single request can be traced across backend + worker logs.

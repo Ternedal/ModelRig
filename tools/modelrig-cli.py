@@ -129,6 +129,8 @@ def cmd_rag_query(args):
     body = {"query": args.query, "top_k": args.top_k, "synthesize": not args.no_synth}
     if args.model:
         body["model"] = args.model
+    if args.source:
+        body["source"] = args.source
     print(call(args, "POST", "/api/v1/rag/query", body=body))
 
 
@@ -198,6 +200,68 @@ def cmd_whoami(args):
     print(f"url={cfg.get('url')}  device_id={cfg.get('device_id')}  token={masked}")
 
 
+def _probe(url, path, token=None, timeout=5):
+    """Best-effort GET returning (status_or_None, body_or_reason). Never raises."""
+    r = urllib.request.Request(url.rstrip("/") + path)
+    if token:
+        r.add_header("Authorization", "Bearer " + token)
+    try:
+        with urllib.request.urlopen(r, timeout=timeout) as resp:
+            return resp.status, resp.read().decode(errors="replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode(errors="replace")
+    except urllib.error.URLError as e:
+        return None, str(e.reason)
+
+
+def cmd_doctor(args):
+    url, token, _ = resolve(args)
+    if not url:
+        die("no server URL — run 'pair' first or pass --url")
+    print(f"ModelRig doctor — target {url}")
+
+    st, body = _probe(url, "/healthz")
+    if st != 200:
+        print(f"  [FAIL] backend unreachable: {body}")
+        print("\ndiagnosis: backend is not responding. Is modelrig-server running and is the URL correct?")
+        sys.exit(1)
+    try:
+        ver = json.loads(body).get("version", "?")
+    except Exception:
+        ver = "?"
+    print(f"  [ OK ] backend reachable (version {ver})")
+
+    if not token:
+        print("  [WARN] no token saved — run 'pair' to check auth + upstreams")
+        return
+
+    st, body = _probe(url, "/api/v1/status", token=token)
+    if st == 401:
+        print("  [FAIL] token rejected (401) — device may be revoked; re-pair")
+        sys.exit(1)
+    if st != 200:
+        print(f"  [FAIL] status endpoint returned {st}: {body}")
+        sys.exit(1)
+
+    d = json.loads(body)
+    up, dev = d.get("upstream", {}), d.get("device", {})
+    print(f"  [ OK ] token valid (device {dev.get('name')} / {dev.get('id')})")
+    print(f"  [{' OK ' if up.get('ollama') else 'FAIL'}] ollama {'reachable' if up.get('ollama') else 'DOWN'} (chat / models / embeddings)")
+    print(f"  [{' OK ' if up.get('worker') else 'FAIL'}] worker {'reachable' if up.get('worker') else 'DOWN'} (RAG)")
+
+    problems = []
+    if not up.get("ollama"):
+        problems.append("Ollama is down — start it (ollama serve) and check MODELRIG_OLLAMA_URL")
+    if not up.get("worker"):
+        problems.append("RAG worker is down — start uvicorn and check MODELRIG_WORKER_URL")
+    if problems:
+        print("\ndiagnosis:")
+        for p in problems:
+            print("  - " + p)
+        sys.exit(1)
+    print("\ndiagnosis: all systems go.")
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="modelrig", description="ModelRig reference CLI")
     p.add_argument("--url", help="server base URL (overrides saved config)")
@@ -211,6 +275,7 @@ def build_parser():
     sp.set_defaults(fn=cmd_pair)
 
     sub.add_parser("status", help="device + upstream health").set_defaults(fn=cmd_status)
+    sub.add_parser("doctor", help="diagnose backend / worker / ollama reachability").set_defaults(fn=cmd_doctor)
     sub.add_parser("models", help="list available models").set_defaults(fn=cmd_models)
     sub.add_parser("devices", help="list paired devices").set_defaults(fn=cmd_devices)
     sub.add_parser("whoami", help="show saved config").set_defaults(fn=cmd_whoami)
@@ -236,6 +301,7 @@ def build_parser():
     qp.add_argument("--top-k", type=int, default=4, dest="top_k")
     qp.add_argument("--no-synth", action="store_true", help="skip LLM synthesis, return matches only")
     qp.add_argument("--model")
+    qp.add_argument("--source", help="restrict retrieval to a single source")
     qp.set_defaults(fn=cmd_rag_query)
 
     sub.add_parser("rag-sources", help="list ingested sources + chunk counts").set_defaults(fn=cmd_rag_sources)

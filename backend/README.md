@@ -103,6 +103,18 @@ after use).
 
 Beyond these, an **end-to-end test** (`tests/e2e.py`) runs this backend together
 with the real RAG worker and a fake Ollama, driving the whole flow through the
-reference CLI (12 assertions). That test is what surfaced the proxy forwarding
+reference CLI (22 assertions). That test is what surfaced the proxy forwarding
 request bodies as chunked with no `Content-Length`; the proxy now preserves the
-incoming `Content-Length` so upstreams that don't decode chunked bodies work too.
+incoming `Content-Length` (and forwards query strings) so upstreams work too.
+
+## Observability
+Every request gets an `X-Request-ID` (generated, or taken from the incoming
+header if a client sets one). It's returned to the client, forwarded to the
+upstream (Ollama/worker), and logged in a structured line:
+
+```
+level=info req=1a2b3c… ip=192.168.1.20 method=POST path=/api/v1/rag/query status=200 dur_ms=42
+```
+
+The worker logs the same `req` id, so one request traces across both services.
+The reference CLI's `doctor` command surfaces upstream health at a glance.

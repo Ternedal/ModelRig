@@ -4,7 +4,7 @@ A local-first AI platform: run models on your own hardware via Ollama, reach the
 from a desktop app and an Android phone, with an optional RAG service and an
 Ollama Cloud fallback for when local isn't enough.
 
-Version: **0.7.0** (V1 backbone + RAG management, integration-tested)
+Version: **0.8.0** (V1 backbone + RAG management + observability)
 
 ## Architecture
 ```
@@ -89,6 +89,7 @@ cd ../android && ./gradlew assembleDebug
 
 # 4c. Or the reference CLI (works today, no build)
 python tools/modelrig-cli.py --url http://localhost:8080 pair --code XXXX-XXXX
+python tools/modelrig-cli.py doctor    # backend / worker / ollama health
 python tools/modelrig-cli.py chat "hello"
 ```
 
@@ -101,14 +102,15 @@ sh tests/run_tests.sh
 | Module   | State in this drop                    | Verified here                    |
 |----------|---------------------------------------|----------------------------------|
 | backend  | compiled binary + tests               | ✅ `go build`/`vet`, 23 (smoke 11 + V1 12) |
-| worker   | runs, logic tested                    | ✅ 29 (unit 9 + RAG 20, Ollama stubbed) |
-| e2e      | backend + worker run together         | ✅ 17 (full chain via the CLI)    |
+| worker   | runs, logic tested                    | ✅ 31 (unit 9 + RAG 22, Ollama stubbed) |
+| e2e      | backend + worker run together         | ✅ 22 (full chain via the CLI)    |
 | desktop  | complete source, **build locally**    | ⚠️ no JVM/Gradle here             |
 | android  | complete source, **build locally**    | ⚠️ no Android SDK here            |
 
-**69 assertions** total (`sh tests/run_tests.sh`). The integration test drove the
-proxy fix (preserve `Content-Length`; forward query strings). Streaming and the
-model picker in the clients are written but not compiled here — build locally.
+**76 assertions** total (`sh tests/run_tests.sh`), including cross-service request
+tracing (same `X-Request-ID` in backend + worker logs) and the CLI `doctor`
+health check. Streaming and the model picker in the clients are written but not
+compiled here — build locally.
 
 See **STATUS.md** for the honest breakdown: what's proven, what's only source,
 versions/assumptions, and known limitations.

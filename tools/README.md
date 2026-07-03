@@ -13,10 +13,11 @@ Runs on Python 3.9+, Windows included. Config (server URL + token) is saved to
 ```
 pair --code XXXX-XXXX [--name NAME]   claim a code, save the token
 status                                device + upstream health
+doctor                                diagnose backend / worker / ollama, print a verdict
 models                                list model names
 chat [--model M] "message"            streaming chat (tokens print as they arrive)
 rag-ingest [--source S] [--chunk-size N] [--overlap N] "text"
-rag-query [--top-k K] [--no-synth] [--model M] "query"
+rag-query [--top-k K] [--no-synth] [--model M] [--source S] "query"
 rag-sources                           list ingested sources + chunk counts
 rag-stats                             corpus totals (sources, chunks)
 rag-delete --source S                 delete all chunks for a source

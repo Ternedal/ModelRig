@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,6 +71,7 @@ func (s *server) routes() {
 type ctxKey string
 
 const deviceKey ctxKey = "device"
+const requestIDKey ctxKey = "request_id"
 
 // statusRecorder captures the status code and forwards Flush for streaming.
 type statusRecorder struct {
@@ -88,12 +90,28 @@ func (r *statusRecorder) Flush() {
 	}
 }
 
+// logging assigns (or accepts) a request ID, propagates it downstream and back to
+// the client via X-Request-ID, and emits one structured key=value line per
+// request. The same ID is forwarded to upstreams by the proxy, so a single
+// request can be traced across backend and worker logs.
 func logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		id := r.Header.Get("X-Request-ID")
+		if id == "" {
+			if v, err := auth.NewID(); err == nil {
+				id = v
+			} else {
+				id = "req-" + strconv.FormatInt(time.Now().UnixNano(), 16)
+			}
+		}
+		r.Header.Set("X-Request-ID", id) // so handlers + proxy can read/forward it
+		w.Header().Set("X-Request-ID", id)
+		ctx := context.WithValue(r.Context(), requestIDKey, id)
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(rec, r)
-		log.Printf("%s %s -> %d (%s)", r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Millisecond))
+		next.ServeHTTP(rec, r.WithContext(ctx))
+		log.Printf("level=info req=%s ip=%s method=%s path=%s status=%d dur_ms=%d",
+			id, clientIP(r), r.Method, r.URL.Path, rec.status, time.Since(start).Milliseconds())
 	})
 }
 

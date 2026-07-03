@@ -85,5 +85,16 @@ r = client.post("/rag/query", json={"query": "alpha bravo", "top_k": 3, "synthes
 returned_sources = {m["source"] for m in r.json()["matches"]}
 check("A" not in returned_sources, "deleted source no longer retrievable")
 
+# ---- query restricted to a single source ----
+# remaining state: "big" (many chunks), "B" (1)
+r = client.post("/rag/query", json={"query": "xray yankee zulu", "top_k": 5,
+                                     "synthesize": False, "source": "B"})
+srcs = {m["source"] for m in r.json()["matches"]}
+check(srcs == {"B"}, f"source filter returns only that source (got {srcs})")
+r = client.post("/rag/query", json={"query": "word5 word6", "top_k": 5,
+                                     "synthesize": False, "source": "big"})
+srcs = {m["source"] for m in r.json()["matches"]}
+check(srcs <= {"big"} and srcs, f"source filter 'big' -> only big (got {srcs})")
+
 print(f"\n===== WORKER V1: {passed} passed, {failed} failed =====")
 raise SystemExit(0 if failed == 0 else 1)

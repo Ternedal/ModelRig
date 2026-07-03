@@ -5,15 +5,15 @@ Run the whole suite (Unix / WSL; needs Go + Python with worker deps):
 sh tests/run_tests.sh
 ```
 It builds the backend to a temp path, exports `MODELRIG_BIN`, frees ports, and
-runs everything below. **69 assertions** total.
+runs everything below. **76 assertions** total.
 
 | File | What it covers | Count |
 |------|----------------|-------|
 | `worker_unit.py` | cosine math, `/healthz`, request validation (422), Ollama-down 502 | 9 |
-| `worker_rag.py`  | chunking + full chunk→embed→store→retrieve + source management (sources/stats/delete) | 20 |
+| `worker_rag.py`  | chunking + full retrieval + source management (sources/stats/delete) + source-filtered query | 22 |
 | `backend_smoke.py` | health, auth (401), pairing start/claim, single-use codes, token issuance, Ollama-down 502 | 11 |
 | `backend_v1.py` | streaming passthrough, model proxy, device list/revoke, `-pair` HTTP path, rate limiting | 12 |
-| `e2e.py` | **real backend + real worker + fake Ollama**, full flow (incl. RAG source mgmt) via the CLI | 17 |
+| `e2e.py` | **real backend + real worker + fake Ollama** via the CLI; RAG mgmt, request-id tracing, `doctor` | 22 |
 
 ## What's genuinely exercised
 - **backend** and **worker** are compiled/run and hit over real sockets.

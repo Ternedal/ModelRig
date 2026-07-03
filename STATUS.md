@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.7.0** — "V1 backbone + RAG management, integration-tested". Autonomous session, **2026-07-02/03**.
+Version **0.8.0** — "V1 backbone + RAG management + observability". Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -15,7 +15,21 @@ compiler, no Gradle, no Android SDK**. So:
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
 
-## What's new in 0.7.0
+## What's new in 0.8.0
+- **Source-filtered RAG query** — `POST /rag/query` accepts `source` to restrict
+  retrieval to one source (CLI: `rag-query --source X`). Filtered in SQL.
+- **CLI `doctor`** — one command checks backend reachability, token validity, and
+  Ollama + worker health (via `/api/v1/status`), then prints a verdict and a
+  concrete fix per failure. Exit code reflects health (0 green, 1 problem).
+- **Request IDs + structured logging** — every request gets an `X-Request-ID`
+  (or reuses an incoming one), returned to the client, **forwarded to upstreams**,
+  and logged as `level=info req=… ip=… method=… path=… status=… dur_ms=…`. The
+  worker logs the same id, so one request traces across both services. Verified in
+  the e2e: a custom id appears in both the backend and worker logs.
+- Tests: **76 assertions**. Both `doctor` paths (all-green and upstreams-down) and
+  cross-service tracing are covered.
+
+## What landed in 0.7.0
 - **RAG source management** — the RAG is now operable, not just write-and-query:
   - `GET /rag/sources` — sources with chunk counts + last-ingested time.
   - `GET /rag/stats` — corpus totals (distinct sources, total chunks).
@@ -70,10 +84,10 @@ compiler, no Gradle, no Android SDK**. So:
 | Backend behaviour | **23** assertions: core smoke (11) + V1 (12) |
 | Backend persistence | store JSON inspected: token hash stored, pairings emptied after single use |
 | Worker imports & runs | FastAPI app loads; `/healthz` 200 |
-| Worker logic | **29**: cosine, validation, 502 handling, chunking, retrieval, source management |
-| **Integrated stack** | **17** e2e assertions: real backend + real worker + fake Ollama, driven through the CLI |
+| Worker logic | **31**: cosine, validation, 502, chunking, retrieval, source management, source-filtered query |
+| **Integrated stack** | **22** e2e assertions: real backend + real worker + fake Ollama, driven through the CLI; incl. request-id tracing + `doctor` |
 
-**69 assertions total** via `sh tests/run_tests.sh`.
+**76 assertions total** via `sh tests/run_tests.sh`.
 
 **Backend V1 test highlights:** streamed chat reassembled from 3 chunks ("Hej fra
 ModelRig") · model-list proxy · devices list without `token_hash` · revoke →

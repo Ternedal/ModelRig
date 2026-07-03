@@ -70,12 +70,13 @@ async def query(
     top_k: int = 4,
     synthesize: bool = True,
     model: str | None = None,
+    source: str | None = None,
 ) -> dict:
     q_emb = await oc.embed(q)
     scored = [
-        {"id": doc_id, "text": text, "source": source,
+        {"id": doc_id, "text": text, "source": src,
          "chunk_index": chunk_index, "score": cosine(q_emb, emb)}
-        for doc_id, text, source, chunk_index, emb in store.all()
+        for doc_id, text, src, chunk_index, emb in store.all(source=source)
     ]
     scored.sort(key=lambda x: x["score"], reverse=True)
     matches = scored[:top_k]

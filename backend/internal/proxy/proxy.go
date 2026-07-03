@@ -55,6 +55,9 @@ func (c *Client) Forward(w http.ResponseWriter, r *http.Request, upstreamPath st
 	if acc := r.Header.Get("Accept"); acc != "" {
 		req.Header.Set("Accept", acc)
 	}
+	if rid := r.Header.Get("X-Request-ID"); rid != "" {
+		req.Header.Set("X-Request-ID", rid)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {

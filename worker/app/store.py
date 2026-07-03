@@ -46,11 +46,22 @@ class DocStore:
             self._conn.commit()
             return int(cur.lastrowid)
 
-    def all(self) -> list[tuple[int, str, str | None, int, list[float]]]:
+    def all(self, source: str | None = None) -> list[tuple[int, str, str | None, int, list[float]]]:
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT id, text, source, chunk_index, embedding FROM documents"
-            ).fetchall()
+            if source is None:
+                rows = self._conn.execute(
+                    "SELECT id, text, source, chunk_index, embedding FROM documents"
+                ).fetchall()
+            elif source == "(none)":
+                rows = self._conn.execute(
+                    "SELECT id, text, source, chunk_index, embedding FROM documents "
+                    "WHERE source IS NULL"
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT id, text, source, chunk_index, embedding FROM documents "
+                    "WHERE source = ?", (source,)
+                ).fetchall()
         return [(r[0], r[1], r[2], r[3], json.loads(r[4])) for r in rows]
 
     def count(self) -> int:
