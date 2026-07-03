@@ -1,73 +1,33 @@
 package dk.ternedal.modelrig.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.net.ModelRigClient
+import dk.ternedal.modelrig.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private val Graphite = Color(0xFF0E1116)
-private val Surface = Color(0xFF171B22)
-private val SurfaceHigh = Color(0xFF1F242D)
-private val Signal = Color(0xFF4C8DFF)
-private val TextHigh = Color(0xFFE6E9EF)
-private val TextMuted = Color(0xFF9AA4B2)
-private val Danger = Color(0xFFF2555A)
-
-private val Colors = darkColorScheme(
-    primary = Signal,
-    onPrimary = Graphite,
-    background = Graphite,
-    onBackground = TextHigh,
-    surface = Surface,
-    onSurface = TextHigh,
-)
-
 @Composable
 fun AppUi() {
-    MaterialTheme(colorScheme = Colors) {
+    ModelRigTheme {
         val context = LocalContext.current
         val store = remember { TokenStore(context) }
         var token by remember { mutableStateOf(store.token) }
 
-        Box(Modifier.fillMaxSize().background(Graphite)) {
+        Surface(color = Graphite, modifier = Modifier.fillMaxSize()) {
             if (token == null) {
                 PairScreen(store) { token = it }
             } else {
@@ -77,6 +37,7 @@ fun AppUi() {
     }
 }
 
+// ---- pairing ----
 @Composable
 private fun PairScreen(store: TokenStore, onPaired: (String) -> Unit) {
     var baseUrl by remember { mutableStateOf(store.baseUrl ?: "http://192.168.1.10:8080") }
@@ -86,20 +47,26 @@ private fun PairScreen(store: TokenStore, onPaired: (String) -> Unit) {
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    Column(Modifier.fillMaxSize().padding(20.dp)) {
-        Text("Pair with ModelRig", color = TextHigh, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(4.dp))
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text("ModelRig", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = TextHigh)
+        Text("Forbind din enhed", fontSize = 15.sp, color = Signal)
+        Spacer(Modifier.height(20.dp))
+        Field("Server-URL", baseUrl) { baseUrl = it }
+        Field("Parringskode (XXXX-XXXX)", code) { code = it }
+        Field("Enhedsnavn", deviceName) { deviceName = it }
+        Spacer(Modifier.height(8.dp))
         Text(
-            "The server must bind 0.0.0.0 or a Tailscale IP — a 127.0.0.1 server is unreachable from the phone.",
-            color = TextMuted, fontSize = 12.sp,
+            "Serveren skal binde 0.0.0.0 eller en Tailscale-IP. En 127.0.0.1-server " +
+                "kan ikke nås fra telefonen. Brug maskinens LAN-IP her.",
+            color = TextMuted, fontSize = 12.sp, lineHeight = 17.sp,
         )
         Spacer(Modifier.height(16.dp))
-        Fld("Server base URL", baseUrl) { baseUrl = it }
-        Fld("Pairing code (XXXX-XXXX)", code) { code = it }
-        Fld("Device name", deviceName) { deviceName = it }
-        Spacer(Modifier.height(12.dp))
         Button(
-            enabled = !busy,
+            enabled = !busy && code.isNotBlank() && baseUrl.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
             onClick = {
                 busy = true; status = null
                 val url = baseUrl.trim(); val c = code.trim(); val n = deviceName.trim()
@@ -111,11 +78,11 @@ private fun PairScreen(store: TokenStore, onPaired: (String) -> Unit) {
                         store.baseUrl = url; store.token = it
                         busy = false; onPaired(it)
                     }.onFailure {
-                        status = it.message; busy = false
+                        status = it.message ?: "Kunne ikke forbinde"; busy = false
                     }
                 }
             },
-        ) { Text(if (busy) "Pairing…" else "Pair") }
+        ) { Text(if (busy) "Forbinder…" else "Forbind") }
         status?.let {
             Spacer(Modifier.height(12.dp))
             Text(it, color = Danger, fontSize = 13.sp)
@@ -123,7 +90,8 @@ private fun PairScreen(store: TokenStore, onPaired: (String) -> Unit) {
     }
 }
 
-private data class Msg(val role: String, val text: String)
+// ---- chat ----
+private data class Msg(val role: String, val text: String, val streaming: Boolean = false)
 
 @Composable
 private fun ChatScreen(store: TokenStore, onUnpair: () -> Unit) {
@@ -132,89 +100,138 @@ private fun ChatScreen(store: TokenStore, onUnpair: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var currentModel by remember { mutableStateOf(store.model) }
     var models by remember { mutableStateOf(listOf<String>()) }
-    var menuOpen by remember { mutableStateOf(false) }
+    var modelMenu by remember { mutableStateOf(false) }
+    var overflow by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val client = remember { ModelRigClient(store.baseUrl ?: "", store.token) }
+    val listState = rememberLazyListState()
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Text("ModelRig", color = TextHigh, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = onUnpair) { Text("Unpair", color = Signal) }
+    fun loadModels() {
+        scope.launch {
+            val res = withContext(Dispatchers.IO) { runCatching { client.listModels() } }
+            res.onSuccess { models = it }
         }
+    }
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box {
-                OutlinedButton(onClick = { menuOpen = true }) {
-                    Text(currentModel, color = TextHigh, fontSize = 12.sp)
-                }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    if (models.isEmpty()) {
-                        DropdownMenuItem(text = { Text("(load models)") }, onClick = { menuOpen = false })
-                    } else {
+    LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length) {
+        if (messages.isNotEmpty()) listState.scrollToItem(messages.size - 1)
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        // top bar
+        Surface(color = GraphiteSurface, tonalElevation = 2.dp) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("ModelRig", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextHigh)
+                Spacer(Modifier.width(12.dp))
+                Box {
+                    OutlinedButton(
+                        onClick = { modelMenu = true },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    ) {
+                        Text(currentModel, color = TextHigh, fontSize = 12.sp)
+                        Text("  ▾", color = TextMuted, fontSize = 12.sp)
+                    }
+                    DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("↻  Genindlæs modeller", color = Signal) },
+                            onClick = { modelMenu = false; loadModels() },
+                        )
+                        if (models.isNotEmpty()) HorizontalDivider()
                         models.forEach { m ->
                             DropdownMenuItem(text = { Text(m) }, onClick = {
-                                currentModel = m; store.model = m; menuOpen = false
+                                currentModel = m; store.model = m; modelMenu = false
                             })
                         }
                     }
                 }
-            }
-            Spacer(Modifier.width(8.dp))
-            TextButton(onClick = {
-                scope.launch {
-                    val res = withContext(Dispatchers.IO) { runCatching { client.listModels() } }
-                    res.onSuccess { models = it }
+                Spacer(Modifier.weight(1f))
+                Box {
+                    TextButton(onClick = { overflow = true }) {
+                        Text("⋮", color = TextHigh, fontSize = 20.sp)
+                    }
+                    DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Ryd samtale") },
+                            onClick = { overflow = false; messages.clear() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Afbryd forbindelse", color = Danger) },
+                            onClick = { overflow = false; onUnpair() },
+                        )
+                    }
                 }
-            }) { Text("Load models", color = Signal, fontSize = 12.sp) }
+            }
         }
 
-        Spacer(Modifier.height(8.dp))
-        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-            items(messages) { m -> Bubble(m) }
+        // messages
+        if (messages.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("Skriv en besked for at starte", color = TextMuted, fontSize = 14.sp)
+            }
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                items(messages) { m -> Bubble(m) }
+            }
         }
-        Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it },
-                modifier = Modifier.weight(1f),
-                enabled = !busy,
-                singleLine = true,
-                placeholder = { Text("Message…") },
-            )
-            Spacer(Modifier.width(8.dp))
-            Button(
-                enabled = !busy,
-                onClick = {
-                    val t = input.trim()
-                    if (t.isEmpty()) return@Button
-                    messages.add(Msg("user", t)); input = ""; busy = true
-                    val history = messages.map { it.role to it.text }
-                    val model = currentModel
-                    val idx = messages.size
-                    messages.add(Msg("assistant", ""))
-                    scope.launch {
-                        val err = withContext(Dispatchers.IO) {
-                            runCatching {
-                                client.chatStream(model, history) { delta ->
-                                    scope.launch {
-                                        val cur = messages[idx]
-                                        messages[idx] = cur.copy(text = cur.text + delta)
+
+        // input bar
+        Surface(color = GraphiteSurface, tonalElevation = 3.dp) {
+            Row(
+                Modifier.fillMaxWidth().padding(12.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    modifier = Modifier.weight(1f),
+                    enabled = !busy,
+                    maxLines = 5,
+                    placeholder = { Text("Besked…") },
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    enabled = !busy && input.isNotBlank(),
+                    modifier = Modifier.height(52.dp),
+                    onClick = {
+                        val t = input.trim()
+                        if (t.isEmpty()) return@Button
+                        messages.add(Msg("user", t)); input = ""; busy = true
+                        val history = messages.map { it.role to it.text }
+                        val model = currentModel
+                        val idx = messages.size
+                        messages.add(Msg("assistant", "", streaming = true))
+                        scope.launch {
+                            val err = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    client.chatStream(model, history) { delta ->
+                                        scope.launch {
+                                            val cur = messages[idx]
+                                            messages[idx] = cur.copy(text = cur.text + delta)
+                                        }
                                     }
-                                }
-                            }.exceptionOrNull()
-                        }
-                        if (err != null) {
+                                }.exceptionOrNull()
+                            }
                             val cur = messages[idx]
                             messages[idx] = cur.copy(
-                                text = if (cur.text.isEmpty()) "Error: ${err.message}" else cur.text + "\n[afbrudt]"
+                                streaming = false,
+                                text = when {
+                                    err == null -> cur.text
+                                    cur.text.isEmpty() -> "⚠️ Fejl: ${err.message}"
+                                    else -> cur.text + "\n\n_[afbrudt]_"
+                                },
                             )
+                            busy = false
                         }
-                        busy = false
-                    }
-                },
-            ) { Text(if (busy) "…" else "Send") }
+                    },
+                ) { Text(if (busy) "…" else "Send") }
+            }
         }
     }
 }
@@ -222,22 +239,42 @@ private fun ChatScreen(store: TokenStore, onUnpair: () -> Unit) {
 @Composable
 private fun Bubble(m: Msg) {
     val isUser = m.role == "user"
-    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Text(if (isUser) "you" else "modelrig", color = TextMuted, fontSize = 11.sp)
-        Spacer(Modifier.height(2.dp))
-        Box(
-            Modifier.clip(RoundedCornerShape(10.dp))
-                .background(if (isUser) SurfaceHigh else Surface)
-                .fillMaxWidth()
-                .padding(12.dp)
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (isUser) "dig" else "modelrig",
+                color = if (isUser) TextMuted else Signal,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            if (m.streaming) {
+                Spacer(Modifier.width(6.dp))
+                CircularProgressIndicator(
+                    Modifier.size(11.dp),
+                    strokeWidth = 2.dp,
+                    color = Signal,
+                )
+            }
+        }
+        Spacer(Modifier.height(3.dp))
+        Surface(
+            color = if (isUser) GraphiteSurfaceHigh else GraphiteSurface,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            Text(m.text, color = TextHigh, fontSize = 14.sp)
+            Box(Modifier.padding(12.dp)) {
+                if (isUser || m.streaming) {
+                    Text(m.text.ifEmpty { " " }, color = TextHigh, fontSize = 15.sp, lineHeight = 22.sp)
+                } else {
+                    MarkdownText(m.text, color = TextHigh)
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun Fld(label: String, value: String, onChange: (String) -> Unit) {
+private fun Field(label: String, value: String, onChange: (String) -> Unit) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,

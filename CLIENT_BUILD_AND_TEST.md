@@ -76,8 +76,17 @@ og telefonen skal være på samme LAN. Brug maskinens LAN-IP (fx
 
 **Røgtest Android:**
 1. Pair-skærm: indtast LAN-URL + XXXX-XXXX kode → token gemmes.
-2. Chat-skærm: modeldropdown fyldes, besked → svaret streamer ind.
-3. Unpair virker.
+2. Chat-skærm: modeldropdown fyldes, besked → svaret streamer ind (spinner mens
+   det genereres).
+3. **Markdown**: bed om noget med kode (fx "skriv en Kotlin data class") → svaret
+   skal vise **kodeblok med monospace + Kopiér-knap**, ikke rå ``` ```-tegn. Tjek
+   at **fed**/*kursiv*, punktlister og overskrifter renderes.
+4. Overflow-menu (⋮): "Ryd samtale" og "Afbryd forbindelse" virker.
+
+Bemærk om markdown: mens svaret streamer vises det som plain tekst; når det er
+færdigt skifter det til renderet markdown. Det er med vilje (undgår jank og
+halvåbne kodeblokke). Tabeller og dyb list-nesting understøttes ikke — se
+`android/ui/Markdown.kt` hvis du vil skifte til fuld CommonMark.
 
 ## 4. Mest sandsynlige fejl (og fix)
 Ærligt: risiko #1 er **version-drift i Compose/Kotlin**. De pinnede versioner er

@@ -15,8 +15,29 @@ Networking: OkHttp + `org.json` (both minimal, `org.json` is built into Android)
 Token in `SharedPreferences` (see hardening note in `data/TokenStore.kt`).
 
 **Streaming**: replies stream token-by-token (`chatStream`, OkHttp line reader).
-**Model picker**: "Load models" pulls `/api/v1/models` into a dropdown; the choice
-persists via `TokenStore`.
+**Model picker**: "Genindlæs modeller" pulls `/api/v1/models` into a dropdown; the
+choice persists via `TokenStore`.
+
+## UI
+Material 3, dark-first, brand palette shared with the desktop client
+(`ui/theme/Theme.kt`). Custom top bar (model dropdown + overflow: clear / unpair),
+chat bubbles with auto-scroll, a streaming spinner on the in-flight reply, and a
+multiline input.
+
+**Markdown rendering** (`ui/Markdown.kt`) is a small, **dependency-free** Compose
+renderer: headings, bold/italic, inline code, fenced **code blocks with a copy
+button**, bullet/numbered lists, blockquotes, rules, and (styled) links. It does
+**not** do tables, deep list nesting, or images — if you need those, `MarkdownText`
+is the single call site to swap for `com.mikepenz:multiplatform-markdown-renderer-m3`.
+
+Streaming + markdown interact deliberately: the reply is shown as **plain text
+while streaming**, then re-rendered as **markdown once complete** — this avoids
+re-parsing on every token and half-open code fences flickering. UI strings are in
+Danish (inline; move to `res/values/strings.xml` to localize).
+
+> None of the Kotlin (UI included) was compiled in the generator environment.
+> First local build is the real test — see `CLIENT_BUILD_AND_TEST.md` at the repo
+> root.
 
 ## The one thing that will bite you
 The backend defaults to binding `127.0.0.1`. **A loopback-bound server is
@@ -48,6 +69,9 @@ Or open the `android/` folder in Android Studio and Run.
 4. Chat.
 
 ## V1.1 ideas
+- Clickable links (`withLink`/`LinkAnnotation` on Compose 1.7+) and table support
+  (swap in a full CommonMark renderer).
 - Encrypted token storage (DataStore + Keystore).
-- Retry/backoff + offline indicator.
+- Retry/backoff + offline indicator; stop-generation (needs exposing OkHttp
+  `call.cancel()` in `ModelRigClient`).
 - Share the UI layer with desktop via Compose Multiplatform.

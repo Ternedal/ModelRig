@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.10.0** — "V1 backbone + RAG mgmt + streaming RAG chat + observability + ops". Autonomous session, **2026-07-02/03**.
+Version **0.11.0** — "server V1 + Android UI overhaul". Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -14,6 +14,23 @@ compiler, no Gradle, no Android SDK**. So:
 - backend + worker were genuinely compiled/run/tested here.
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
+
+## What's new in 0.11.0
+- **Android UI overhaul** (source only, **not compiled here** — like all the
+  Kotlin). Material 3 dark theme with the shared brand palette; custom top bar
+  (model dropdown + overflow: clear / unpair); chat bubbles with auto-scroll and a
+  streaming spinner; multiline input; Danish UI strings.
+- **Dependency-free Markdown renderer** (`android/ui/Markdown.kt`): headings,
+  bold/italic, inline code, fenced **code blocks with a copy button**,
+  bullet/numbered lists, blockquotes, rules, styled links. No tables / deep
+  nesting / images (swap `MarkdownText` for a CommonMark lib if needed). Chosen
+  over a library specifically because it compiles deterministically without a
+  version/API to get wrong — which matters since it can't be built here.
+- Streaming + markdown interact deliberately: **plain text while streaming**, then
+  **markdown once complete** (no re-parse per token, no half-open code fences).
+- No new dependencies; backend + worker unchanged (version const bumped to 0.11.0
+  so `/healthz` matches the release tag). **This is the biggest single chunk of
+  unverified code in the repo — its first real test is your local Android build.**
 
 ## What's new in 0.10.0
 - **Streaming RAG chat** — `POST /rag/chat` (proxied at `/api/v1/rag/chat`,
