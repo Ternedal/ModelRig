@@ -18,7 +18,13 @@ Desktop chat client for ModelRig with **local-first routing and Ollama Cloud fal
 - **Cloud fallback**: if the local source fails (rig down, model not pulled, HTTP
   error) and an `OLLAMA_API_KEY` is set, it transparently retries against Ollama
   Cloud (`https://ollama.com`, model e.g. `gpt-oss:120b-cloud`). The header shows
-  `LOCAL` or `CLOUD` so you always know who answered.
+  `RIG` or `CLOUD` so you always know who answered.
+- **System prompt per source** (local + cloud, own field each in Settings):
+  prepended as a `role:"system"` message before sending. Known simplification —
+  the prompt follows the *preferred* source (the `preferLocal` toggle), not
+  necessarily whichever one ends up answering after a fallback.
+- **Brand colors** (`Brand.kt`) match Android's verified palette: Sapphire
+  `#306CFC`, Champagne `#DEC08A`. UI strings are Danish, per project convention.
 
 Routing lives in `net/ChatRouter.kt`; the HTTP client is `net/OllamaClient.kt`
 (JDK `java.net.http`, no ktor). Brand tokens in `Brand.kt`.
@@ -51,6 +57,17 @@ Package a native installer (msi/dmg/deb):
 ```bash
 ./gradlew packageDistributionForCurrentOs
 ```
+Or a single runnable jar (bundles Compose Desktop's native rendering layer for
+**whatever OS you build on** — build it on Windows to get a Windows-runnable
+jar; a jar built on Linux/macOS won't run on Windows and vice versa):
+```bash
+./gradlew packageUberJarForCurrentOS
+#   -> composeApp/build/compose/jars/ModelRig-<os>-x64-<version>.jar
+#   run with: java -jar ModelRig-windows-x64-1.0.0.jar
+```
+Both were **confirmed working** in the Linux build sandbox (2026-07-04) — the
+Kotlin/Compose Multiplatform version pairing compiles and packages cleanly.
+Running the actual installer/jar on Windows still needs to happen on Windows.
 
 ## Config (env or in-app settings)
 | Setting            | Env                  | Default                     |
@@ -67,7 +84,9 @@ All are editable at runtime in the Settings panel.
 Compose Multiplatform `1.7.0`. **Confirmed working together** (compiles clean,
 2026-07-04) — no longer just plausible.
 
-## V1.1 ideas
-- Persist settings to disk (currently in-memory + env defaults).
+## Next (see `ROADMAP.md` §4 pt. 5 for the full V2 desktop-parity plan)
+- Markdown rendering (port Android's dependency-free renderer).
+- SQLite persistence (currently in-memory + env defaults; settings/history lost
+  on restart).
+- RAG mode (Android has it since 0.17.0; desktop doesn't yet).
 - Show a per-message source badge history and token/sec.
-- Lift back into full Compose Multiplatform (share UI with Android).

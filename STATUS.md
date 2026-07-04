@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.19.0** — "V1-hærdning: docs rettet, fuld regression, RC-tjekliste". Follows 0.18.0 ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.19.1** — "desktop-klient løftet: verificeret brand, dansk UI, system-prompts". Follows 0.19.0 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).

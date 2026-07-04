@@ -133,26 +133,25 @@ Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
    Ollamas API med streaming download-progress og diskplads-visning. (Endpoints er
    standard Ollama-API; verificeres mod Anders' version ved implementering.)
 4. **Samtale-oplevelse.** Omdøb, søgning, markdown-eksport/deling af samtaler.
-5. **Desktop-paritet.** ✅ **Audit gennemført** (0.19-sessionen, uden nyt tag —
-   ingen kodeændring, kun undersøgelse). Fund:
-   - **Kompilerer nu rent** (`BUILD SUCCESSFUL`, Kotlin 2.0.21 + Compose
-     Multiplatform 1.7.0-pinningen holder) — opgraderet fra "uverificeret
-     kildekode" til "compile-verificeret". Ikke kørt (headless sandbox, intet
-     display) — det er stadig åbent.
+5. **Desktop-paritet.** ✅ **Audit gennemført + første løft leveret** (0.19.1,
+   kørt sideløbende med V1 mens Anders' bekræftelse afventes). Fund fra audit:
+   - **Kompilerer OG pakker nu rent** (`BUILD SUCCESSFUL` for både `build` og
+     `packageUberJarForCurrentOS`) — opgraderet fra "uverificeret kildekode" til
+     "compile- og pakke-verificeret". Ikke *kørt* (headless sandbox, intet
+     display) — det er stadig åbent, og et Linux-bygget jar/installer kan
+     ikke bruges på Windows (native Skiko er OS-specifik selv i en uber-jar).
    - **Netværkskoden er solid**: `ChatRouter`/`OllamaClient` matcher de samme
      verificerede Ollama-API-shapes som Android bruger. Ingen bugs fundet.
    - **Fungerende feature Android mangler**: automatisk local→cloud-fallback
      (Android kræver manuelt Rig/Cloud-skift). Værd at overveje at låne til
      Android i V2.
-   - **Reelt gab til Android-featuresættet**: `Brand.kt` har stadig den
-     **gamle, opfundne palette** (samme farver Android havde før den blev
-     rettet til det verificerede brand) — ikke opdateret. **Ingen** markdown-
-     rendering, **ingen** persistens (kun in-memory, som README selv noterede),
-     **ingen** system-prompts, **ingen** RAG. Reelt: en fungerende men spartansk
-     chat-klient, et helt versionstrin bagud.
-   - **Løft til paritet** (næste desktop-session): brand-farver, markdown, SQLite-
-     persistens, system-prompts, RAG — samme rækkefølge som Android fik dem,
-     minus alt keyboard/inset-arbejdet (irrelevant på desktop).
+   Leveret i 0.19.1: **brand-farver rettet** (matcher nu Androids verificerede
+   palette), **dansk UI** (matchede ikke tidligere projektets faste regel),
+   **system-prompt pr. kilde** (samme mønster som Android, med samme kendte
+   forenkling — prompten følger den *foretrukne* kilde, ikke nødvendigvis den
+   der reelt svarer efter et fallback).
+   **Tilbage** (næste desktop-session): markdown-rendering, SQLite-persistens,
+   RAG. Samme rækkefølge Android fik dem i.
 6. **CI (GitHub Actions).** Tests + APK-build ved tag-push, assets uploades
    automatisk til releasen. Dette er en begrundet cloud-undtagelse: det fjerner
    sandbox-toolchainen som flaskepunkt og gør builds reproducerbare. Gratis-tier
