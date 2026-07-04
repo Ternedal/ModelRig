@@ -302,4 +302,31 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
             }
         }
     }
+
+    /**
+     * Ingests one text document into the RAG index (worker's POST /rag/ingest,
+     * body {"documents":[{"text","source"}]}). Plain JSON — the worker takes
+     * text content, not a file upload, so the caller reads the file's text
+     * itself first (see AppUi.kt's file-picker flow). txt/md content only;
+     * no PDF/DOCX extraction on either side yet.
+     */
+    fun ingestText(source: String, text: String, chunkSize: Int = 800, overlap: Int = 150): IngestResult {
+        val doc = JSONObject().put("text", text).put("source", source)
+        val payload = JSONObject()
+            .put("documents", JSONArray().put(doc))
+            .put("chunk_size", chunkSize)
+            .put("overlap", overlap)
+            .toString()
+            .toRequestBody(jsonType)
+        val builder = Request.Builder().url("$base/api/v1/rag/ingest").post(payload)
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        http.newCall(builder.build()).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("ingest failed (${resp.code}): $body")
+            val o = JSONObject(body)
+            return IngestResult(o.optInt("documents"), o.optInt("chunks_added"), o.optInt("total"))
+        }
+    }
+
+    data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int)
 }

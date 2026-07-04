@@ -1,5 +1,8 @@
 package dk.ternedal.modelrig.ui
 
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -389,6 +392,43 @@ private fun ChatScreen(
     var overflow by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    val context = LocalContext.current
+
+    var ingesting by remember { mutableStateOf(false) }
+    var ingestStatus by remember { mutableStateOf<String?>(null) }
+    var ingestError by remember { mutableStateOf<String?>(null) }
+
+    // Reads the picked document's text content + display name, then POSTs it
+    // to the RAG index. txt/md only — no PDF/DOCX extraction (matches the
+    // worker's plain-text ingest contract).
+    val pickDocument = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        ingesting = true; ingestError = null; ingestStatus = "Læser fil…"
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val resolver = context.contentResolver
+                    var name = uri.lastPathSegment ?: "dokument.txt"
+                    resolver.query(uri, null, null, null, null)?.use { c ->
+                        val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (idx >= 0 && c.moveToFirst()) name = c.getString(idx)
+                    }
+                    val text = resolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                        ?: throw RuntimeException("kunne ikke læse filen")
+                    if (text.isBlank()) throw RuntimeException("filen er tom")
+                    name to ModelRigClient(store.baseUrl ?: "", store.token).ingestText(name, text)
+                }
+            }
+            ingesting = false
+            result.onSuccess { (name, r) ->
+                ingestStatus = "Ingesteret: $name (${r.chunksAdded} chunks)"
+                val res2 = withContext(Dispatchers.IO) {
+                    runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRagSources() }
+                }
+                res2.onSuccess { ragSources = it }
+            }.onFailure { ingestError = it.message }
+        }
+    }
 
     // Load the requested conversation (or none). Restores source/model from its
     // metadata when that source is still configured.
@@ -552,6 +592,7 @@ private fun ChatScreen(
     Column(Modifier.fillMaxSize()) {
         // top bar
         Surface(color = GraphiteSurface, tonalElevation = 2.dp) {
+            Column {
             Row(
                 Modifier.fillMaxWidth()
                     .windowInsetsPadding(WindowInsets.statusBars)
@@ -633,6 +674,11 @@ private fun ChatScreen(
                                     HorizontalDivider()
                                     DropdownMenuItem(text = { Text("Ingen kilder ingesteret endnu", color = TextMuted) }, onClick = { ragSourceMenu = false })
                                 }
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("+ Tilføj dokument (txt/md)…", color = Signal) },
+                                    onClick = { ragSourceMenu = false; pickDocument.launch(arrayOf("text/plain", "text/markdown", "application/octet-stream")) },
+                                )
                             }
                         }
                     }
@@ -658,6 +704,16 @@ private fun ChatScreen(
                         DropdownMenuItem(text = { Text("Indstillinger") }, onClick = { overflow = false; onOpenSettings() })
                     }
                 }
+            }
+            if (ingesting || ingestStatus != null || ingestError != null) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+                    when {
+                        ingesting -> Text("Ingesterer…", color = TextMuted, fontSize = 11.sp)
+                        ingestError != null -> Text("Fejl: $ingestError", color = Danger, fontSize = 11.sp)
+                        ingestStatus != null -> Text(ingestStatus!!, color = Signal, fontSize = 11.sp)
+                    }
+                }
+            }
             }
         }
 

@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.1** — "model-administration (desktop) — parity med Android". Follows 0.20.0 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.20.2** — "RAG-ingest fra Android-appen". Follows 0.20.1 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -39,6 +39,25 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.2  (roadmap V2 pt.1 — RAG-ingest fra appen)
+- **Filvælger i Android** (Storage Access Framework,
+  `ActivityResultContracts.OpenDocument()`) tilgængelig fra RAG-kilde-
+  dropdownen ("+ Tilføj dokument"). Læser filens tekst + filnavn, POST'er til
+  `POST /api/v1/rag/ingest` via ny `ModelRigClient.ingestText()`. Status/fejl
+  vises inline i top-baren; kildelisten genindlæses automatisk efter succes.
+- **Ny API-overflade for denne session** (fil-vælger/ContentResolver) — ikke
+  brugt tidligere, så lidt højere risiko end de foregående features.
+- **Backend-kontrakten var allerede verificeret**, ikke gættet: `ingestText()`
+  sender præcis den JSON-form (`{"documents":[{"text","source"}]}`) som
+  `tests/worker_rag.py` og `tests/e2e.py` allerede tester end-to-end (direkte
+  på worker'en og gennem backend-proxyen via CLI). Solidt fundament selvom
+  selve Android-koden kun er compile-verificeret.
+- **Kendt begrænsning** (uændret, ikke ny): kun txt/md-tekstindhold — ingen
+  PDF/DOCX-udtræk, hverken på Android eller worker-siden.
+- Kompilerer og bygger til signeret APK (samme nøgle). Ikke on-device-testet.
+- Ingen backend-kodeændring udover versionsbump; alle 99 assertions fortsat
+  grønne.
 
 ## What's new in 0.20.1  (model-administration på desktop — lukker parity-gap)
 - **Samme feature som 0.20.0, nu på desktop**: nye metoder i `OllamaClient.kt`

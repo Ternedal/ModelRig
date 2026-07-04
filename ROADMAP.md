@@ -123,10 +123,12 @@ CI, RAG-ingest fra telefonen. Alt sammen bevidst skubbet — se V2.
 
 Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
 
-1. **RAG-administration fra appen.** Upload via Androids filvælger →
-   backend → worker-ingest; liste/slet kilder; stats-skærm. Formater: `.txt`/`.md`
-   først; PDF kræver ekstraktion i worker (ny dependency, fx pypdf — begrundes når
-   vi når dertil, PDF-parsing er notorisk rodet, så scope holdes smalt).
+1. **RAG-administration fra appen.** ✅ **Leveret i `v0.20.2`** (Android).
+   Filvælger (Storage Access Framework) i RAG-kilde-dropdownen, læser
+   txt/md-tekst og ingester via `ModelRigClient.ingestText()`. Backend-
+   kontrakten var allerede permanent testet (`worker_rag.py`/`e2e.py`); ny
+   Android-side kode er compile-verificeret, ikke on-device-testet endnu.
+   PDF/DOCX-udtræk fortsat udenfor scope. Desktop mangler samme feature.
 2. **Presets/personaer.** ✅ **Leveret** — Android i `v0.19.8`, desktop i
    `v0.19.9` (samme skema, samme UX). Gemte system-prompts pr. kilde med
    hurtigskift (SQLite-tabel, chips). Kørt tidligt, uafhængigt af
