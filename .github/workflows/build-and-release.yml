@@ -127,8 +127,13 @@ jobs:
 
       - name: Build source zip (same exclude pattern used throughout this project)
         run: |
-          cd ..
-          zip -r "modelrig-${{ github.ref_name }}.zip" modelrig \
+          # The checkout directory is named after the exact repo name on GitHub
+          # (ModelRig, capital R) -- not this project's local lowercase sandbox
+          # convention. Resolve it dynamically instead of hardcoding either case,
+          # so this keeps working regardless.
+          cd "$GITHUB_WORKSPACE/.."
+          dirname=$(basename "$GITHUB_WORKSPACE")
+          zip -r "modelrig-${{ github.ref_name }}.zip" "$dirname" \
             -x '*/__pycache__/*' -x '*.pyc' -x '*/.git/*' \
             -x '*/build/*' -x '*/.gradle/*' -x '*/local.properties' -x '*.apk'
           mv "modelrig-${{ github.ref_name }}.zip" "$GITHUB_WORKSPACE/"
