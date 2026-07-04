@@ -86,7 +86,11 @@ Compose Multiplatform `1.7.0`. **Confirmed working together** (compiles clean,
 
 ## Next (see `ROADMAP.md` §4 pt. 5 for the full V2 desktop-parity plan)
 > Markdown rendering: done (2026-07-04) — ported from Android, compiles clean.
-- SQLite persistence (currently in-memory + env defaults; settings/history lost
-  on restart).
+> SQLite persistence: done (2026-07-04) — `data/DesktopChatDb.kt`, plain JDBC
+> (`org.xerial:sqlite-jdbc`), DB at `~/.modelrig/modelrig.db`. Runtime-verified
+> with a temporary smoke test (insert/read/list/delete/cascade, all passed) —
+> removed after verification. Settings (URLs/keys/models) still in-memory;
+> only conversations persist. Latest conversation auto-resumes on startup; no
+> conversation browser (list/switch/delete) yet.
 - RAG mode (Android has it since 0.17.0; desktop doesn't yet).
 - Show a per-message source badge history and token/sec.

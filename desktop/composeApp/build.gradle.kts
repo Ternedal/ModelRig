@@ -18,6 +18,11 @@ dependencies {
     implementation(compose.material3)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    // SQLite-first, per project convention. Android uses its built-in SQLite;
+    // plain JVM needs an explicit embedded driver -- this is that driver, not a
+    // server (no network, single file, no separate process). Version verified
+    // against Maven Central 2026-07-04.
+    implementation("org.xerial:sqlite-jdbc:3.49.1.0")
 }
 
 compose.desktop {

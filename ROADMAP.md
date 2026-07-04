@@ -152,7 +152,11 @@ Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
    der reelt svarer efter et fallback).
    Leveret i 0.19.2: **markdown-rendering** portet fra Android (næsten ordret —
    ingen Android-specifikke API'er i den originale fil).
-   **Tilbage** (næste desktop-session): SQLite-persistens, RAG.
+   Leveret i 0.19.3: **SQLite-persistens** (`org.xerial:sqlite-jdbc`, samme
+   skema som Android), runtime-verificeret med en midlertidig smoke-test mod
+   rigtig SQLite (ikke kun compile-verificeret). Kun stille genindlæsning af
+   seneste samtale — ingen samtale-browser endnu.
+   **Tilbage** (næste desktop-session): RAG, samtale-browser.
 6. **CI (GitHub Actions).** Tests + APK-build ved tag-push, assets uploades
    automatisk til releasen. Dette er en begrundet cloud-undtagelse: det fjerner
    sandbox-toolchainen som flaskepunkt og gør builds reproducerbare. Gratis-tier

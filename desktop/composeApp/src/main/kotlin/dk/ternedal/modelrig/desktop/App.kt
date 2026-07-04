@@ -23,6 +23,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dk.ternedal.modelrig.desktop.data.DesktopChatDb
 import dk.ternedal.modelrig.desktop.net.ChatMessage
 import dk.ternedal.modelrig.desktop.net.ChatResult
 import dk.ternedal.modelrig.desktop.net.ChatRouter
@@ -72,6 +74,20 @@ fun App() {
         var modelMenuOpen by remember { mutableStateOf(false) }
         var modelError by remember { mutableStateOf<String?>(null) }
         val scope = rememberCoroutineScope()
+        val db = remember { DesktopChatDb() }
+        var convId by remember { mutableStateOf<Long?>(null) }
+
+        // Silently resume the latest conversation on startup, if any. No
+        // conversation *browser* yet (list/switch/delete) -- next increment.
+        LaunchedEffect(Unit) {
+            val latest = withContext(Dispatchers.IO) { db.latestConversationId() }
+            if (latest != null) {
+                val loaded = withContext(Dispatchers.IO) { db.loadMessages(latest) }
+                messages.clear()
+                loaded.forEach { (role, content) -> messages.add(UiMessage(role, content)) }
+                convId = latest
+            }
+        }
 
         fun loadModels() {
             scope.launch {
@@ -108,6 +124,20 @@ fun App() {
             val assistantIdx = messages.size
             messages.add(UiMessage("assistant", "", null, streaming = true))
             scope.launch {
+                // Best-effort source label for the DB row: since ChatRouter can
+                // fall back dynamically, we label by the PREFERRED source
+                // (preferLocal), same known simplification as the system prompt.
+                val cid = withContext(Dispatchers.IO) {
+                    val id = convId ?: db.newConversation(
+                        source = if (preferLocal) "rig" else "cloud",
+                        model = if (preferLocal) localModel else cloudModel,
+                        title = text,
+                    )
+                    db.addMessage(id, "user", text)
+                    id
+                }
+                if (convId == null) convId = cid
+
                 val err = withContext(Dispatchers.IO) {
                     runCatching {
                         val local = OllamaClient(baseUrl = localUrl, chatPath = localPath, bearer = deviceToken.ifBlank { null })
@@ -124,10 +154,15 @@ fun App() {
                     }.exceptionOrNull()
                 }
                 val cur = messages[assistantIdx]
+                val cancelled = err != null && cur.text.isNotEmpty()
                 val msg = if (err == null) cur.text
                     else if (cur.text.isEmpty()) "Fejl: ${err.message}"
                     else cur.text + "\n[afbrudt: ${err.message}]"
                 messages[assistantIdx] = cur.copy(text = msg, streaming = false)
+                if (err == null || cancelled) {
+                    val finalText = messages[assistantIdx].text
+                    withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText) }
+                }
                 busy = false
             }
         }
