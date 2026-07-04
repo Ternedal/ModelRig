@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.19.8** — "presets/personaer (Android)". Follows 0.19.7 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.19.9** — "presets/personaer (desktop) — parity med Android". Follows 0.19.8 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -39,6 +39,20 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.19.9  (presets/personaer på desktop — lukker parity-gap)
+- **Samme feature som 0.19.8, nu på desktop**: preset-tabel i
+  `DesktopChatDb.kt` (plain JDBC, samme skema som Android), chips under
+  system-instruktion-felterne i `SettingsCard` for både lokal og cloud.
+  Tryk for at anvende, "✕" for at slette, "+ Gem som preset" for at gemme
+  den aktuelle tekst.
+- **Ægte runtime-verifikation** (samme metode som 0.19.3/0.19.4): midlertidig
+  smoke-test kørt via `gradle run` mod en rigtig SQLite-fil — gemte 3
+  presets, bekræftede kilde-filtrering, sletning, og at eksisterende
+  samtale/besked-funktionalitet ikke er brudt (regressionstjek). Testfil
+  fjernet efter verifikation.
+- Kompilerer rent (`BUILD SUCCESSFUL`).
+- Ingen backend-kodeændring udover versionsbump.
 
 ## What's new in 0.19.8  (roadmap V2 pt.2 — presets/personaer, kørt tidligt)
 - **Gemte system-prompt-presets pr. kilde** (Android): ny `preset`-tabel i

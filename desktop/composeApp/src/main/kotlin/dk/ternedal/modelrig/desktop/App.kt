@@ -1,6 +1,8 @@
 package dk.ternedal.modelrig.desktop
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,7 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -219,6 +223,7 @@ fun App() {
                     cloudModel, { cloudModel = it },
                     cloudSystem, { cloudSystem = it },
                     preferLocal, { preferLocal = it },
+                    db,
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -373,6 +378,7 @@ private fun SettingsCard(
     cloudModel: String, onCloudModel: (String) -> Unit,
     cloudSystem: String, onCloudSystem: (String) -> Unit,
     preferLocal: Boolean, onPreferLocal: (Boolean) -> Unit,
+    db: DesktopChatDb,
 ) {
     Box(Modifier.clip(RoundedCornerShape(12.dp)).background(Brand.Surface).fillMaxWidth().padding(14.dp)) {
         Column {
@@ -383,12 +389,14 @@ private fun SettingsCard(
             Field("Lokal model", localModel, onLocalModel)
             Field("Enhedstoken (kun ved brug af ModelRig-backend)", token, onToken)
             Field("System-instruktion, lokal (valgfri)", localSystem, onLocalSystem)
+            PresetRow(db, "rig", localSystem, onLocalSystem)
             Spacer(Modifier.height(8.dp))
             Text("Ollama Cloud-fallback", color = Brand.Amber, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
             Field("OLLAMA_API_KEY", cloudKey, onCloudKey)
             Field("Cloud-model (fx gpt-oss:120b-cloud)", cloudModel, onCloudModel)
             Field("System-instruktion, cloud (valgfri)", cloudSystem, onCloudSystem)
+            PresetRow(db, "cloud", cloudSystem, onCloudSystem)
             Spacer(Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(checked = preferLocal, onCheckedChange = onPreferLocal)
@@ -396,6 +404,85 @@ private fun SettingsCard(
                 Text("Foretræk lokal, brug cloud som fallback", color = Brand.TextMuted, fontSize = 13.sp)
             }
         }
+    }
+}
+
+/**
+ * Saved system-instruction presets for one source ("rig" or "cloud"), shown as
+ * chips under the system-instruction field. Same feature/UX as Android's
+ * PresetRow (ui/AppUi.kt), ported to desktop's plain-JDBC DesktopChatDb.
+ */
+@Composable
+private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, onApply: (String) -> Unit) {
+    var presets by remember { mutableStateOf(db.listPresets(source)) }
+    var showSaveDialog by remember { mutableStateOf(false) }
+    var newName by remember { mutableStateOf("") }
+
+    Spacer(Modifier.height(6.dp))
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        presets.forEach { p ->
+            Box(
+                Modifier.clip(RoundedCornerShape(999.dp))
+                    .background(Brand.SurfaceHigh)
+                    .clickable { onApply(p.prompt) }
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(p.name, color = Brand.TextHigh, fontSize = 12.sp)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "✕", color = Brand.TextMuted, fontSize = 11.sp,
+                        modifier = Modifier.clickable {
+                            db.deletePreset(p.id)
+                            presets = db.listPresets(source)
+                        },
+                    )
+                }
+            }
+            Spacer(Modifier.width(6.dp))
+        }
+        Box(
+            Modifier.clip(RoundedCornerShape(999.dp))
+                .background(Brand.Graphite)
+                .clickable(enabled = currentPrompt.isNotBlank()) { showSaveDialog = true }
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+        ) {
+            Text(
+                "+ Gem som preset",
+                color = if (currentPrompt.isNotBlank()) Brand.Signal else Brand.TextMuted,
+                fontSize = 12.sp,
+            )
+        }
+    }
+
+    if (showSaveDialog) {
+        AlertDialog(
+            onDismissRequest = { showSaveDialog = false; newName = "" },
+            title = { Text("Gem preset") },
+            text = {
+                OutlinedTextField(
+                    value = newName, onValueChange = { newName = it },
+                    label = { Text("Navn (fx \"Kort & teknisk\")", fontSize = 12.sp) },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = newName.isNotBlank(),
+                    onClick = {
+                        db.savePreset(source, newName.trim(), currentPrompt)
+                        presets = db.listPresets(source)
+                        newName = ""; showSaveDialog = false
+                    },
+                ) { Text("Gem", color = Brand.Signal) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSaveDialog = false; newName = "" }) { Text("Annullér", color = Brand.TextMuted) }
+            },
+        )
     }
 }
 

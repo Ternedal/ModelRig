@@ -40,6 +40,13 @@ class DesktopChatDb(dbPath: String = defaultDbPath()) {
         val updatedAt: Long,
     )
 
+    data class PresetMeta(
+        val id: Long,
+        val source: String,
+        val name: String,
+        val prompt: String,
+    )
+
     private val conn: Connection = DriverManager.getConnection("jdbc:sqlite:$dbPath").also { c ->
         c.createStatement().use { it.execute("PRAGMA foreign_keys=ON") }
         c.createStatement().use { st ->
@@ -61,6 +68,14 @@ class DesktopChatDb(dbPath: String = defaultDbPath()) {
                      created_at INTEGER NOT NULL)""",
             )
             st.execute("CREATE INDEX IF NOT EXISTS idx_message_conv ON message(conv_id)")
+            st.execute(
+                """CREATE TABLE IF NOT EXISTS preset(
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     source TEXT NOT NULL,
+                     name TEXT NOT NULL,
+                     prompt TEXT NOT NULL,
+                     created_at INTEGER NOT NULL)""",
+            )
         }
     }
 
@@ -138,6 +153,37 @@ class DesktopChatDb(dbPath: String = defaultDbPath()) {
     fun deleteConversation(convId: Long) {
         conn.prepareStatement("DELETE FROM conversation WHERE id=?").use { ps ->
             ps.setLong(1, convId); ps.executeUpdate()
+        }
+    }
+
+    // ---- presets (saved system instructions per source, for quick-switch) ----
+
+    fun savePreset(source: String, name: String, prompt: String): Long {
+        conn.prepareStatement(
+            "INSERT INTO preset(source, name, prompt, created_at) VALUES (?,?,?,?)",
+            Statement.RETURN_GENERATED_KEYS,
+        ).use { ps ->
+            ps.setString(1, source); ps.setString(2, name.take(40)); ps.setString(3, prompt)
+            ps.setLong(4, System.currentTimeMillis())
+            ps.executeUpdate()
+            ps.generatedKeys.use { rs -> rs.next(); return rs.getLong(1) }
+        }
+    }
+
+    fun listPresets(source: String): List<PresetMeta> {
+        val out = mutableListOf<PresetMeta>()
+        conn.prepareStatement("SELECT id, source, name, prompt FROM preset WHERE source=? ORDER BY created_at DESC").use { ps ->
+            ps.setString(1, source)
+            ps.executeQuery().use { rs ->
+                while (rs.next()) out.add(PresetMeta(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4)))
+            }
+        }
+        return out
+    }
+
+    fun deletePreset(id: Long) {
+        conn.prepareStatement("DELETE FROM preset WHERE id=?").use { ps ->
+            ps.setLong(1, id); ps.executeUpdate()
         }
     }
 
