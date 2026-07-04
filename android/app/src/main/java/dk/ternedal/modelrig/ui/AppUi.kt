@@ -210,7 +210,30 @@ private data class Msg(
     val text: String,
     val streaming: Boolean = false,
     val error: Boolean = false, // shown in UI, but never persisted or sent as history
+    val sources: List<String> = emptyList(), // RAG source names, if this reply used RAG
 )
+
+/**
+ * Bounds what's sent as chat history: last [maxMessages] messages, further
+ * trimmed from the front if their combined length exceeds [maxChars]. Keeps the
+ * system prompt (if any) first and untouched. Applies to both rig and cloud —
+ * without this, a long conversation resends its entire text on every turn
+ * (slow, and burns cloud quota for no benefit).
+ */
+private fun trimHistory(
+    sys: String,
+    convo: List<Pair<String, String>>,
+    maxMessages: Int = 20,
+    maxChars: Int = 24_000,
+): List<Pair<String, String>> {
+    val tail = if (convo.size > maxMessages) convo.takeLast(maxMessages) else convo
+    val list = tail.toMutableList()
+    var total = list.sumOf { it.second.length }
+    while (list.size > 1 && total > maxChars) {
+        total -= list.removeAt(0).second.length
+    }
+    return if (sys.isNotEmpty()) listOf("system" to sys) + list else list
+}
 
 @Composable
 private fun ChatScreen(
@@ -244,6 +267,10 @@ private fun ChatScreen(
     var cloudModel by remember { mutableStateOf(store.cloudModel) }
     var cloudModels by remember { mutableStateOf(listOf<String>()) }
     var cloudMenu by remember { mutableStateOf(false) }
+    var ragMode by remember { mutableStateOf(false) }
+    var ragSources by remember { mutableStateOf(listOf<String>()) }
+    var ragSourceFilter by remember { mutableStateOf<String?>(null) }
+    var ragSourceMenu by remember { mutableStateOf(false) }
     var overflow by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -260,8 +287,9 @@ private fun ChatScreen(
             val (meta, msgs) = loaded
             msgs.forEach { (role, content) -> messages.add(Msg(role, content)) }
             if (meta != null) {
-                if (meta.source == "cloud" && hasCloud) { mode = "cloud"; if (meta.model.isNotBlank()) { cloudModel = meta.model } }
-                if (meta.source == "rig" && hasRig) { mode = "rig"; if (meta.model.isNotBlank()) { currentModel = meta.model } }
+                if (meta.source == "cloud" && hasCloud) { mode = "cloud"; ragMode = false; if (meta.model.isNotBlank()) { cloudModel = meta.model } }
+                if (meta.source == "rag" && hasRig) { mode = "rig"; ragMode = true; if (meta.model.isNotBlank()) { currentModel = meta.model } }
+                if (meta.source == "rig" && hasRig) { mode = "rig"; ragMode = false; if (meta.model.isNotBlank()) { currentModel = meta.model } }
             }
         }
     }
@@ -275,18 +303,20 @@ private fun ChatScreen(
         if (t.isEmpty() || busy) return@onSend
         messages.add(Msg("user", t)); input = ""; busy = true
         val useCloud = mode == "cloud"
+        val useRag = mode == "rig" && ragMode
         val sys = (if (useCloud) store.cloudSystem else store.rigSystem).trim()
         val convo = messages.filter { !it.error }.map { it.role to it.text }
-        val history = if (sys.isNotEmpty()) listOf("system" to sys) + convo else convo
+        val history = trimHistory(sys, convo)
         val idx = messages.size
         messages.add(Msg("assistant", "", streaming = true))
         val rigModel = currentModel
         val cModel = cloudModel
+        val srcFilter = ragSourceFilter
         scope.launch {
             // persist: create conversation lazily, then the user message
             val cid = withContext(Dispatchers.IO) {
                 val id = convId ?: db.newConversation(
-                    source = if (useCloud) "cloud" else "rig",
+                    source = if (useCloud) "cloud" else if (useRag) "rag" else "rig",
                     model = if (useCloud) cModel else rigModel,
                     title = t,
                 )
@@ -295,20 +325,34 @@ private fun ChatScreen(
             }
             if (convId == null) { convId = cid; onConvChanged(cid) }
 
+            val onDelta: (String) -> Unit = { delta ->
+                scope.launch {
+                    val cur = messages[idx]
+                    messages[idx] = cur.copy(text = cur.text + delta)
+                }
+            }
+            val onSources: (List<String>) -> Unit = { srcs ->
+                scope.launch {
+                    val cur = messages[idx]
+                    messages[idx] = cur.copy(sources = srcs)
+                }
+            }
+            val hook: (okhttp3.Call) -> Unit = { activeCall = it }
+
             val err = withContext(Dispatchers.IO) {
                 runCatching {
-                    val onDelta: (String) -> Unit = { delta ->
-                        scope.launch {
-                            val cur = messages[idx]
-                            messages[idx] = cur.copy(text = cur.text + delta)
+                    when {
+                        // RAG: single-shot retrieval over the current question, not the
+                        // full conversation — that's how the worker's /rag/chat is built
+                        // (one query in, sources + answer out). History still shows and
+                        // persists locally; it isn't replayed as context to the model.
+                        useRag -> ModelRigClient(store.baseUrl ?: "", store.token)
+                            .ragChatStream(t, rigModel, srcFilter, registerCall = hook, onSources = onSources, onDelta = onDelta)
+                        useCloud -> {
+                            val key = store.cloudKey ?: throw RuntimeException("ingen cloud-nøgle")
+                            CloudClient(key).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
                         }
-                    }
-                    val hook: (okhttp3.Call) -> Unit = { activeCall = it }
-                    if (useCloud) {
-                        val key = store.cloudKey ?: throw RuntimeException("ingen cloud-nøgle")
-                        CloudClient(key).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
-                    } else {
-                        ModelRigClient(store.baseUrl ?: "", store.token)
+                        else -> ModelRigClient(store.baseUrl ?: "", store.token)
                             .chatStream(rigModel, history, registerCall = hook, onDelta = onDelta)
                     }
                 }.exceptionOrNull()
@@ -389,11 +433,40 @@ private fun ChatScreen(
                         }
                     }
                 }
+                if (mode == "rig") {
+                    Spacer(Modifier.width(6.dp))
+                    RagToggle(ragMode) { on ->
+                        ragMode = on
+                        if (on) scope.launch {
+                            val res = withContext(Dispatchers.IO) {
+                                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRagSources() }
+                            }
+                            res.onSuccess { ragSources = it }
+                        }
+                    }
+                    if (ragMode) {
+                        Spacer(Modifier.width(6.dp))
+                        Box {
+                            ModelChip(ragSourceFilter?.let { "⌕ $it" } ?: "⌕ Alle kilder", onClick = { ragSourceMenu = true })
+                            DropdownMenu(expanded = ragSourceMenu, onDismissRequest = { ragSourceMenu = false }) {
+                                DropdownMenuItem(text = { Text("Alle kilder") }, onClick = { ragSourceFilter = null; ragSourceMenu = false })
+                                if (ragSources.isNotEmpty()) HorizontalDivider()
+                                ragSources.forEach { s ->
+                                    DropdownMenuItem(text = { Text(s) }, onClick = { ragSourceFilter = s; ragSourceMenu = false })
+                                }
+                                if (ragSources.isEmpty()) {
+                                    HorizontalDivider()
+                                    DropdownMenuItem(text = { Text("Ingen kilder ingesteret endnu", color = TextMuted) }, onClick = { ragSourceMenu = false })
+                                }
+                            }
+                        }
+                    }
+                }
                 Spacer(Modifier.weight(1f))
                 SourceBadge(mode)
                 if (hasRig && hasCloud) {
                     TextButton(
-                        onClick = { val m = if (mode == "cloud") "rig" else "cloud"; mode = m; store.chatMode = m },
+                        onClick = { val m = if (mode == "cloud") "rig" else "cloud"; mode = m; store.chatMode = m; if (m == "cloud") ragMode = false },
                         contentPadding = PaddingValues(horizontal = 8.dp),
                     ) { Text("Skift", color = Signal, fontSize = 13.sp) }
                 }
@@ -419,10 +492,16 @@ private fun ChatScreen(
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(if (mode == "cloud") "☁" else "◉", fontSize = 40.sp, color = if (mode == "cloud") Amber else Signal)
+                Text(if (mode == "cloud") "☁" else if (ragMode) "⌕" else "◉", fontSize = 40.sp, color = if (mode == "cloud") Amber else Signal)
                 Spacer(Modifier.height(12.dp))
-                Text(if (mode == "cloud") "Cloud-tilstand" else "Rig-tilstand", color = TextHigh, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                Text("Skriv en besked for at starte", color = TextMuted, fontSize = 13.sp)
+                Text(
+                    when { mode == "cloud" -> "Cloud-tilstand"; ragMode -> "RAG-tilstand"; else -> "Rig-tilstand" },
+                    color = TextHigh, fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    if (ragMode) "Spørg om dine ingesterede dokumenter" else "Skriv en besked for at starte",
+                    color = TextMuted, fontSize = 13.sp,
+                )
             }
         } else {
             LazyColumn(
@@ -553,13 +632,32 @@ private fun ModelChip(label: String, onClick: () -> Unit) {
 
 @Composable
 private fun SourceBadge(mode: String) {
-    val isCloud = mode == "cloud"
-    Surface(shape = RoundedCornerShape(999.dp), color = if (isCloud) Amber else Signal) {
+    val (label, color, onColor) = when (mode) {
+        "cloud" -> Triple("☁ Cloud", Amber, Graphite)
+        "rag" -> Triple("⌕ RAG", Signal, Color.White)
+        else -> Triple("◈ Rig", Signal, Color.White)
+    }
+    Surface(shape = RoundedCornerShape(999.dp), color = color) {
         Text(
-            if (isCloud) "☁ Cloud" else "◈ Rig",
-            color = if (isCloud) Graphite else Color.White,
+            label, color = onColor,
             fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+    }
+}
+
+@Composable
+private fun RagToggle(active: Boolean, onToggle: (Boolean) -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = if (active) Signal else GraphiteSurfaceHigh,
+        modifier = Modifier.clickable { onToggle(!active) },
+    ) {
+        Text(
+            "⌕ RAG",
+            color = if (active) Color.White else TextMuted,
+            fontSize = 12.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
         )
     }
 }
@@ -604,11 +702,30 @@ private fun Bubble(m: Msg) {
             modifier = Modifier.widthIn(max = maxW),
         ) {
             Box(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                when {
-                    isUser -> Text(m.text, color = Color.White, fontSize = 15.sp, lineHeight = 21.sp)
-                    m.error -> Text(m.text, color = Danger, fontSize = 14.sp, lineHeight = 20.sp)
-                    m.streaming -> Text(m.text + "▍", color = TextHigh, fontSize = 15.sp, lineHeight = 21.sp)
-                    else -> MarkdownText(m.text, color = TextHigh)
+                Column {
+                    if (!isUser && m.sources.isNotEmpty()) {
+                        Row(Modifier.padding(bottom = 6.dp)) {
+                            m.sources.take(4).forEach { s ->
+                                Surface(
+                                    shape = RoundedCornerShape(999.dp),
+                                    color = GraphiteSurfaceHigh,
+                                    modifier = Modifier.padding(end = 4.dp),
+                                ) {
+                                    Text(
+                                        s, fontSize = 10.sp, color = TextMuted,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    when {
+                        isUser -> Text(m.text, color = Color.White, fontSize = 15.sp, lineHeight = 21.sp)
+                        m.error -> Text(m.text, color = Danger, fontSize = 14.sp, lineHeight = 20.sp)
+                        m.streaming && m.text.isEmpty() -> Text("…", color = TextMuted, fontSize = 15.sp, lineHeight = 21.sp)
+                        m.streaming -> Text(m.text + "▍", color = TextHigh, fontSize = 15.sp, lineHeight = 21.sp)
+                        else -> MarkdownText(m.text, color = TextHigh)
+                    }
                 }
             }
         }

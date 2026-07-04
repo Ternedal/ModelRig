@@ -83,7 +83,7 @@ telefonen, og kan installere nye versioner oven på gamle uden afinstallation.
   allerede hook'en); send-knappen bliver stop-ikon under streaming.
   *Acceptkriterie:* streaming stopper < 1 sekund efter tryk.
 
-### 0.17 — RAG i lommen (1–2 sessioner)
+### 0.17 — RAG i lommen (1–2 sessioner) — ✅ leveret i `v0.17.0` (afventer on-device-verifikation)
 - **RAG-tilstand i appen** (kun synlig når rig er aktiv): toggle Chat/RAG der
   kalder backendens streaming RAG-chat i stedet for ren chat. Kilderne fra
   første NDJSON-linje vises som chips over svaret (kilde-transparens er hele

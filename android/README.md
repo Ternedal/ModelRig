@@ -33,6 +33,19 @@ Adaptive icon: foreground is the **official mark** extracted from the approved
 `modelrig_app_icon_final.png` export (sharp 755 px source), background gradient
 sampled from the same icon. Source exports live in `/brand/`.
 
+## RAG mode
+Only available when the rig is active (RAG runs in the worker, not against
+Ollama Cloud). A toggle in the top bar switches plain chat to RAG: the app calls
+the backend's streaming `/api/v1/rag/chat` — retrieval happens first, then the
+answer streams. Sources used are shown as chips above the reply. A source-filter
+dropdown (from `/api/v1/rag/sources`) narrows retrieval to one ingested document,
+or all of them.
+
+**Limitation, inherited from the worker's endpoint design**: RAG is single-shot
+per question — it doesn't feed prior turns into the model as retrieval context
+(the worker's `/rag/chat` takes one `query` string, not a message list). The
+transcript still shows and persists; only the model's input is single-turn.
+
 ## Two sources: rig and cloud
 The app can talk to **your rig** (backend → local Ollama + RAG) **or directly to
 Ollama Cloud** — the latter needs no rig running at all. Setup screen has both:

@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.16.1** — "icon background matched to real asset". Follows 0.16.0 ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.17.0** — "roadmap 0.17: RAG i lommen". Follows 0.16.1 ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -14,6 +14,29 @@ compiler, no Gradle, no Android SDK**. So:
 - backend + worker were genuinely compiled/run/tested here.
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
+
+## What's new in 0.17.0  (roadmap milestone 0.17 — "RAG i lommen")
+- **RAG mode in the app** (rig only — RAG runs against the worker, not cloud). A
+  toggle in the top bar switches the chat between plain chat and RAG; RAG mode
+  calls the backend's streaming `/api/v1/rag/chat` (retrieval, then a streamed
+  answer). The first NDJSON line's sources are shown as small chips above the
+  reply — the whole point of RAG is knowing what it's citing.
+- **Source filter**: a dropdown (populated from `/api/v1/rag/sources`) narrows
+  retrieval to one ingested source, or "Alle kilder" (all).
+- **History trimming** (both rig and cloud, non-RAG chat): sends the system
+  prompt + last 20 messages, further trimmed to a ~24,000-character budget from
+  the front. Without this, a long conversation resent its *entire* text on every
+  turn — slow, and wasteful against cloud quota.
+- **Known limitation, by design of the existing worker endpoint**: RAG mode is
+  single-shot per question (query in, sources + answer out) — it does not feed
+  prior conversation turns into the model as context. The transcript still
+  displays and persists locally; the model just doesn't see earlier turns while
+  in RAG mode. This isn't a new restriction I introduced — the worker's
+  `/rag/chat` was already built this way (`QueryReq.query` is one string, not a
+  message list); the app now simply exposes it. Multi-turn RAG (folding recent
+  turns into the retrieval query) is a reasonable V2 follow-up if it turns out
+  to matter in practice.
+- Same signing key as 0.16.x — installs straight over 0.16.1, no reinstall.
 
 ## What's new in 0.16.1
 - **Icon background now sampled from Anders' own delivered asset**
