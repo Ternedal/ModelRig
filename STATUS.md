@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.19.9** — "presets/personaer (desktop) — parity med Android". Follows 0.19.8 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.20.0** — "model-administration (backend + Android)". Follows 0.19.9 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -40,6 +40,34 @@ not blind source. Everything below is labelled by how it was actually verified.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
 
+## What's new in 0.20.0  (roadmap V2 pt.3 — model-administration)
+- **Tre nye backend-endpoints**, alle bag samme bearer-auth som resten af
+  API'et: `GET /api/v1/models/running` (Ollamas `/api/ps` — kørende modeller +
+  VRAM), `POST /api/v1/models/pull` (Ollamas `/api/pull` — streamer download-
+  fremgang som NDJSON), `DELETE /api/v1/models/delete` (Ollamas
+  `/api/delete`). Genbruger den eksisterende, generiske `proxy.Forward()` —
+  ingen ny proxy-logik, samme mønster som chat/RAG.
+- **Ollamas faktiske API-kontrakt verificeret** (ikke gættet) før
+  implementering: feltnavnet er `model` (ikke det ældre `name`) i
+  pull/delete-body, og `/api/ps`-svarets `size_vram`/`expires_at`-felter er
+  bekræftet mod officiel dokumentation.
+- **Permanent regressionstest tilføjet** (`tests/backend_v1.py`, ikke en
+  engangs-smoke-test): udvidede den falske Ollama-server med `/api/ps`,
+  streaming `/api/pull`, `/api/delete`. 9 nye assertions — bekræfter
+  NDJSON-progress-rækkefølge, at request-body videresendes uændret, og at
+  auth håndhæves på alle tre nye endpoints. **Total: 99 assertions, alle
+  grønne** (var 90).
+- **Ny "Modeller"-skærm i Android** (tilgængelig fra ⋮-menuen, kræver rig):
+  installerede modeller med størrelse + slet-knap (med bekræftelses-dialog,
+  da sletning er irreversibel), kørende modeller med VRAM-forbrug, og et felt
+  til at hente en ny model med **levende download-fremgang** (status + %).
+- **Verificeret**: backend-endpoints er runtime-testet mod en fake Ollama-
+  server (ikke bare compile-verificeret). Android-appen kompilerer og bygger
+  til en signeret APK (samme nøgle — installerer oven på). UI'en er ikke
+  on-device-testet endnu.
+- Desktop mangler samme feature (naturlig fortsættelse, ligesom presets var).
+
+## What's new in 0.19.9  (presets/personaer på desktop — lukker parity-gap)
 ## What's new in 0.19.9  (presets/personaer på desktop — lukker parity-gap)
 - **Samme feature som 0.19.8, nu på desktop**: preset-tabel i
   `DesktopChatDb.kt` (plain JDBC, samme skema som Android), chips under

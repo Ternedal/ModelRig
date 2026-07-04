@@ -167,6 +167,29 @@ func (s *server) handleModels(w http.ResponseWriter, r *http.Request) {
 	s.Ollama.Forward(w, r, "/api/tags")
 }
 
+// handleModelsRunning proxies Ollama's list of currently loaded models
+// (GET /api/ps) -- shows VRAM usage and expiry, for a "what's actually
+// running right now" view distinct from "what's installed" (handleModels).
+func (s *server) handleModelsRunning(w http.ResponseWriter, r *http.Request) {
+	s.Ollama.Forward(w, r, "/api/ps")
+}
+
+// handleModelsPull proxies a model download (POST /api/pull, body
+// {"model":"<name>"}). Ollama streams NDJSON download progress
+// ({"status","digest","total","completed"} lines); Forward() already
+// flushes as bytes arrive, so progress reaches the client live, same as
+// streaming chat.
+func (s *server) handleModelsPull(w http.ResponseWriter, r *http.Request) {
+	s.Ollama.Forward(w, r, "/api/pull")
+}
+
+// handleModelsDelete proxies model removal (DELETE /api/delete, body
+// {"model":"<name>"}). Irreversible on the Ollama side -- the client is
+// expected to confirm with the user before calling this.
+func (s *server) handleModelsDelete(w http.ResponseWriter, r *http.Request) {
+	s.Ollama.Forward(w, r, "/api/delete")
+}
+
 // handleHealthDeep actively round-trips both upstreams: it lists Ollama models
 // and asks the worker to embed a token (which itself calls Ollama). This proves
 // the models actually respond, not just that the ports are open. Always HTTP 200;

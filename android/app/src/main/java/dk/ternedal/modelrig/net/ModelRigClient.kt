@@ -216,4 +216,90 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
             return out
         }
     }
+
+    data class ModelInfo(val name: String, val sizeBytes: Long)
+    data class RunningModel(val name: String, val sizeVramBytes: Long, val expiresAt: String)
+
+    /** Installed models with size, for the model-management screen (vs. listModels()'s plain names for the chat picker). */
+    fun listModelsDetailed(): List<ModelInfo> {
+        val rb = Request.Builder().url("$base/api/v1/models")
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        http.newCall(rb.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("models failed (${resp.code}): $text")
+            val arr = JSONObject(text).optJSONArray("models") ?: return emptyList()
+            val out = mutableListOf<ModelInfo>()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val name = o.optString("name")
+                if (name.isNotEmpty()) out.add(ModelInfo(name, o.optLong("size", 0L)))
+            }
+            return out
+        }
+    }
+
+    /** Models currently loaded in memory (Ollama's /api/ps), with VRAM usage and expiry. */
+    fun listRunningModels(): List<RunningModel> {
+        val rb = Request.Builder().url("$base/api/v1/models/running")
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        http.newCall(rb.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("running models failed (${resp.code}): $text")
+            val arr = JSONObject(text).optJSONArray("models") ?: return emptyList()
+            val out = mutableListOf<RunningModel>()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val name = o.optString("name")
+                if (name.isNotEmpty()) out.add(RunningModel(name, o.optLong("size_vram", 0L), o.optString("expires_at")))
+            }
+            return out
+        }
+    }
+
+    /**
+     * Pulls (downloads) a model, streaming Ollama's NDJSON progress lines back
+     * via [onProgress] (status text, bytes completed, bytes total — total/
+     * completed are 0 until the download phase reports them). Can take minutes
+     * for a large model; pass [registerCall] to get the underlying OkHttp Call
+     * so the caller can cancel it (same pattern as chatStream/ragChatStream).
+     */
+    fun pullModel(
+        name: String,
+        registerCall: ((okhttp3.Call) -> Unit)? = null,
+        onProgress: (status: String, completed: Long, total: Long) -> Unit,
+    ) {
+        val body = JSONObject().put("model", name).toString().toRequestBody(jsonType)
+        val builder = Request.Builder().url("$base/api/v1/models/pull").post(body)
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        val call = http.newCall(builder.build())
+        registerCall?.invoke(call)
+        call.execute().use { resp ->
+            if (!resp.isSuccessful) {
+                throw ModelRigException("pull failed (${resp.code}): ${resp.body?.string().orEmpty()}")
+            }
+            val source = resp.body?.source() ?: throw ModelRigException("empty response body")
+            while (!source.exhausted()) {
+                val line = source.readUtf8Line() ?: break
+                if (line.isBlank()) continue
+                runCatching {
+                    val o = JSONObject(line)
+                    val err = o.optString("error")
+                    if (err.isNotEmpty()) throw ModelRigException("pull error: $err")
+                    onProgress(o.optString("status"), o.optLong("completed", 0L), o.optLong("total", 0L))
+                }.onFailure { if (it is ModelRigException) throw it }
+            }
+        }
+    }
+
+    /** Deletes an installed model. Irreversible on the rig — confirm with the user before calling this. */
+    fun deleteModel(name: String) {
+        val body = JSONObject().put("model", name).toString().toRequestBody(jsonType)
+        val builder = Request.Builder().url("$base/api/v1/models/delete").delete(body)
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        http.newCall(builder.build()).execute().use { resp ->
+            if (!resp.isSuccessful) {
+                throw ModelRigException("delete failed (${resp.code}): ${resp.body?.string().orEmpty()}")
+            }
+        }
+    }
 }

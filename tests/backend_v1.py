@@ -17,6 +17,15 @@ class FakeOllama(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers(); self.wfile.write(body)
+        elif self.path == "/api/ps":
+            body = json.dumps({"models": [
+                {"name": "qwen2.5-coder:7b", "model": "qwen2.5-coder:7b",
+                 "size": 4700000000, "size_vram": 4700000000,
+                 "expires_at": "2026-01-01T00:00:00Z"}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers(); self.wfile.write(body)
         else:
             self.send_response(404); self.end_headers()
     def do_POST(self):
@@ -29,8 +38,35 @@ class FakeOllama(BaseHTTPRequestHandler):
                 self.wfile.flush(); time.sleep(0.05)
             self.wfile.write((json.dumps({"message": {"role": "assistant", "content": ""}, "done": True}) + "\n").encode())
             self.wfile.flush()
+        elif self.path == "/api/pull":
+            n = int(self.headers.get("Content-Length", "0")); body = self.rfile.read(n)
+            global seen_pull_body
+            seen_pull_body = body.decode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson"); self.end_headers()
+            for line in [
+                {"status": "pulling manifest"},
+                {"status": "pulling digestabc", "digest": "digestabc", "total": 1000, "completed": 500},
+                {"status": "pulling digestabc", "digest": "digestabc", "total": 1000, "completed": 1000},
+                {"status": "verifying sha256 digest"},
+                {"status": "success"},
+            ]:
+                self.wfile.write((json.dumps(line) + "\n").encode()); self.wfile.flush(); time.sleep(0.02)
         else:
             self.send_response(404); self.end_headers()
+    def do_DELETE(self):
+        if self.path == "/api/delete":
+            n = int(self.headers.get("Content-Length", "0")); body = self.rfile.read(n)
+            global seen_delete_body
+            seen_delete_body = body.decode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", "2")
+            self.end_headers(); self.wfile.write(b"{}")
+        else:
+            self.send_response(404); self.end_headers()
+
+seen_pull_body = None
+seen_delete_body = None
 
 srv = HTTPServer(("127.0.0.1", OLLAMA_PORT), FakeOllama)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -81,6 +117,30 @@ try:
     # models proxy (GET passthrough)
     s, b = req("GET", "/api/v1/models", BASE, token=tok)
     check(s == 200 and "qwen2.5-coder:7b" in b, "models proxy -> 200 + model names")
+
+    # running models (GET /api/ps passthrough) -- distinct from installed-models list
+    s, b = req("GET", "/api/v1/models/running", BASE, token=tok)
+    check(s == 200 and "size_vram" in b, "models/running proxy -> 200 + size_vram present")
+
+    # pull a model: request body reaches Ollama untouched, NDJSON progress streams through
+    s, b = req("POST", "/api/v1/models/pull", BASE, token=tok, body={"model": "llama3.2:3b"})
+    pull_lines = [json.loads(l) for l in b.strip().splitlines() if l.strip()]
+    check(s == 200 and len(pull_lines) == 5, f"pull streams all progress lines -> got {len(pull_lines)}")
+    check(pull_lines[-1].get("status") == "success", f"pull final line is success -> {pull_lines[-1] if pull_lines else None}")
+    check(seen_pull_body == json.dumps({"model": "llama3.2:3b"}), f"pull request body forwarded untouched -> {seen_pull_body}")
+
+    # delete a model: request body reaches Ollama untouched
+    s, b = req("DELETE", "/api/v1/models/delete", BASE, token=tok, body={"model": "llama3.2:3b"})
+    check(s == 200, "delete model -> 200")
+    check(seen_delete_body == json.dumps({"model": "llama3.2:3b"}), f"delete request body forwarded untouched -> {seen_delete_body}")
+
+    # auth still enforced on the new endpoints (no token -> 401)
+    s, b = req("GET", "/api/v1/models/running", BASE, token=None)
+    check(s == 401, "models/running without token -> 401")
+    s, b = req("POST", "/api/v1/models/pull", BASE, token=None, body={"model": "x"})
+    check(s == 401, "models/pull without token -> 401")
+    s, b = req("DELETE", "/api/v1/models/delete", BASE, token=None, body={"model": "x"})
+    check(s == 401, "models/delete without token -> 401")
 
     # streaming chat passthrough: all three NDJSON chunks arrive, in order
     s, b = req("POST", "/api/v1/chat", BASE, token=tok,

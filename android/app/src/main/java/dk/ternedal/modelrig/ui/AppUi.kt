@@ -35,7 +35,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class Screen { Setup, Chat, Convos }
+private enum class Screen { Setup, Chat, Convos, Models }
 
 @Composable
 fun AppUi() {
@@ -56,6 +56,7 @@ fun AppUi() {
                     store, db, openConvId,
                     onOpenSettings = { screen = Screen.Setup },
                     onOpenConversations = { screen = Screen.Convos },
+                    onOpenModels = { screen = Screen.Models },
                     onConvChanged = { openConvId = it },
                 )
                 Screen.Convos -> ConversationsScreen(
@@ -64,6 +65,7 @@ fun AppUi() {
                     onNew = { openConvId = null; screen = Screen.Chat },
                     onBack = { screen = Screen.Chat },
                 )
+                Screen.Models -> ModelsScreen(store, onBack = { screen = Screen.Chat })
             }
         }
     }
@@ -354,6 +356,7 @@ private fun ChatScreen(
     openConvId: Long?,
     onOpenSettings: () -> Unit,
     onOpenConversations: () -> Unit,
+    onOpenModels: () -> Unit,
     onConvChanged: (Long?) -> Unit,
 ) {
     val hasRig = store.hasRig
@@ -651,6 +654,7 @@ private fun ChatScreen(
                             overflow = false; messages.clear(); convId = null; onConvChanged(null)
                         })
                         DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
+                        DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
                         DropdownMenuItem(text = { Text("Indstillinger") }, onClick = { overflow = false; onOpenSettings() })
                     }
                 }
@@ -790,7 +794,182 @@ private fun ConversationsScreen(
     }
 }
 
-// ---- small components ----
+/**
+ * Model administration: installed models (with size + delete), currently
+ * running models (VRAM usage), and pulling a new model with live progress.
+ * Only meaningful against the rig — Ollama Cloud doesn't expose these
+ * management endpoints, and this screen isn't shown as a cloud-mode option.
+ */
+@Composable
+private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val client = remember { ModelRigClient(store.baseUrl ?: "", store.token) }
+
+    var installed by remember { mutableStateOf<List<ModelRigClient.ModelInfo>>(emptyList()) }
+    var running by remember { mutableStateOf<List<ModelRigClient.RunningModel>>(emptyList()) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
+
+    var pullName by remember { mutableStateOf("") }
+    var pulling by remember { mutableStateOf(false) }
+    var pullStatus by remember { mutableStateOf<String?>(null) }
+    var pullError by remember { mutableStateOf<String?>(null) }
+
+    var confirmDelete by remember { mutableStateOf<String?>(null) }
+
+    fun refresh() {
+        loading = true; loadError = null
+        scope.launch {
+            val res = withContext(Dispatchers.IO) {
+                runCatching { client.listModelsDetailed() to client.listRunningModels() }
+            }
+            res.onSuccess { (i, r) -> installed = i; running = r }
+                .onFailure { loadError = it.message }
+            loading = false
+        }
+    }
+    LaunchedEffect(Unit) { refresh() }
+
+    Column(Modifier.fillMaxSize()) {
+        Surface(color = GraphiteSurface, tonalElevation = 2.dp) {
+            Row(
+                Modifier.fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onBack) { Text("←", color = TextHigh, fontSize = 18.sp) }
+                Text("Modeller", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextHigh)
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { refresh() }) { Text(if (loading) "…" else "Genindlæs", color = Signal) }
+            }
+        }
+
+        if (!store.hasRig) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("Kræver rig-forbindelse", color = TextMuted, fontSize = 14.sp)
+            }
+            return@Column
+        }
+
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
+            // ---- pull new model ----
+            Text("Hent ny model", color = TextHigh, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = pullName, onValueChange = { pullName = it },
+                    placeholder = { Text("fx llama3.2:3b", fontSize = 13.sp) },
+                    singleLine = true, enabled = !pulling,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    enabled = !pulling && pullName.isNotBlank(),
+                    onClick = {
+                        val name = pullName.trim()
+                        pulling = true; pullError = null; pullStatus = "Starter…"
+                        scope.launch {
+                            val err = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    client.pullModel(name) { status, completed, total ->
+                                        scope.launch {
+                                            pullStatus = if (total > 0) {
+                                                val pct = (completed * 100 / total)
+                                                "$status ($pct% — ${completed / 1_000_000}MB/${total / 1_000_000}MB)"
+                                            } else status
+                                        }
+                                    }
+                                }.exceptionOrNull()
+                            }
+                            pulling = false
+                            if (err != null) {
+                                pullError = err.message; pullStatus = null
+                            } else {
+                                pullStatus = "Færdig: $name"; pullName = ""
+                                refresh()
+                            }
+                        }
+                    },
+                ) { Text(if (pulling) "Henter…" else "Hent") }
+            }
+            pullStatus?.let { Spacer(Modifier.height(6.dp)); Text(it, color = Signal, fontSize = 12.sp) }
+            pullError?.let { Spacer(Modifier.height(6.dp)); Text("Fejl: $it", color = Danger, fontSize = 12.sp) }
+
+            Spacer(Modifier.height(20.dp))
+
+            // ---- running now ----
+            Text("Kører nu", color = TextHigh, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Spacer(Modifier.height(8.dp))
+            if (running.isEmpty()) {
+                Text("Ingen modeller indlæst i hukommelsen lige nu", color = TextMuted, fontSize = 13.sp)
+            } else {
+                running.forEach { m ->
+                    Surface(
+                        color = GraphiteSurface, shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(m.name, color = TextHigh, fontSize = 13.sp)
+                                Text(
+                                    "${m.sizeVramBytes / 1_000_000_000.0} GB VRAM",
+                                    color = TextMuted, fontSize = 11.sp,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            // ---- installed ----
+            Text("Installeret", color = TextHigh, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Spacer(Modifier.height(8.dp))
+            loadError?.let { Text("Fejl: $it", color = Danger, fontSize = 12.sp); Spacer(Modifier.height(6.dp)) }
+            installed.forEach { m ->
+                Surface(
+                    color = GraphiteSurface, shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(m.name, color = TextHigh, fontSize = 13.sp)
+                            Text("${m.sizeBytes / 1_000_000_000.0} GB", color = TextMuted, fontSize = 11.sp)
+                        }
+                        TextButton(onClick = { confirmDelete = m.name }) { Text("Slet", color = Danger, fontSize = 12.sp) }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.windowInsetsPadding(WindowInsets.navigationBars))
+    }
+
+    confirmDelete?.let { name ->
+        AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            title = { Text("Slet $name?") },
+            text = { Text("Dette kan ikke fortrydes — modellen skal hentes igen for at bruges.", fontSize = 13.sp) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = null
+                    scope.launch {
+                        val err = withContext(Dispatchers.IO) { runCatching { client.deleteModel(name) }.exceptionOrNull() }
+                        if (err == null) refresh() else loadError = err.message
+                    }
+                }) { Text("Slet", color = Danger) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Annullér", color = TextMuted) } },
+        )
+    }
+}
 @Composable
 private fun ModelChip(label: String, onClick: () -> Unit) {
     Surface(

@@ -131,9 +131,13 @@ Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
    `v0.19.9` (samme skema, samme UX). Gemte system-prompts pr. kilde med
    hurtigskift (SQLite-tabel, chips). Kørt tidligt, uafhængigt af
    V1-tjeklisten. Ikke on-device-testet endnu.
-3. **Model-administration.** Pull/slet/kørende modeller via backend-proxy mod
-   Ollamas API med streaming download-progress og diskplads-visning. (Endpoints er
-   standard Ollama-API; verificeres mod Anders' version ved implementering.)
+3. **Model-administration.** ✅ **Leveret i `v0.20.0`** (backend + Android).
+   Pull/slet/kørende modeller via backend-proxy mod Ollamas API
+   (`/api/pull`, `/api/delete`, `/api/ps` — feltnavne verificeret mod
+   officiel dokumentation, ikke gættet), streaming download-fremgang. Ny
+   "Modeller"-skærm i Android. 9 permanente backend-tests tilføjet (99
+   assertions total). Ikke on-device-testet endnu. Desktop mangler samme
+   feature.
 4. **Samtale-oplevelse.** Omdøb, søgning, markdown-eksport/deling af samtaler.
 5. **Desktop-paritet.** ✅ **Audit gennemført + første løft leveret** (0.19.1,
    kørt sideløbende med V1 mens Anders' bekræftelse afventes). Fund fra audit:
