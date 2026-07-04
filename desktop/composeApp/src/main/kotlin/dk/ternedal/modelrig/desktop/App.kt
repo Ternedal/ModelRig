@@ -54,6 +54,8 @@ fun App() {
         var deviceToken by remember { mutableStateOf(System.getenv("MODELRIG_TOKEN") ?: "") }
         var cloudKey by remember { mutableStateOf(System.getenv("OLLAMA_API_KEY") ?: "") }
         var cloudModel by remember { mutableStateOf("gpt-oss:120b-cloud") }
+        var localSystem by remember { mutableStateOf("") }
+        var cloudSystem by remember { mutableStateOf("") }
         var preferLocal by remember { mutableStateOf(true) }
         var showSettings by remember { mutableStateOf(true) }
 
@@ -85,9 +87,19 @@ fun App() {
             messages.add(UiMessage("user", text))
             input = ""
             busy = true
-            val history = messages
-                .filter { it.role == "user" || it.role == "assistant" }
-                .map { ChatMessage(it.role, it.text) }
+            // System prompt reflects the PREFERRED source (preferLocal), not
+            // necessarily whichever one ends up answering after a fallback —
+            // a known simplification since the router picks the actual source
+            // only at call time. Fine for the common case; a mid-call switch
+            // is the rare edge case (rig went down mid-session).
+            val sys = (if (preferLocal) localSystem else cloudSystem).trim()
+            val history = buildList {
+                if (sys.isNotEmpty()) add(ChatMessage("system", sys))
+                addAll(
+                    messages.filter { it.role == "user" || it.role == "assistant" }
+                        .map { ChatMessage(it.role, it.text) },
+                )
+            }
             val assistantIdx = messages.size
             messages.add(UiMessage("assistant", "", null))
             scope.launch {
@@ -108,7 +120,7 @@ fun App() {
                 }
                 if (err != null) {
                     val cur = messages[assistantIdx]
-                    val msg = if (cur.text.isEmpty()) "Error: ${err.message}" else cur.text + "\n[afbrudt: ${err.message}]"
+                    val msg = if (cur.text.isEmpty()) "Fejl: ${err.message}" else cur.text + "\n[afbrudt: ${err.message}]"
                     messages[assistantIdx] = cur.copy(text = msg)
                 }
                 busy = false
@@ -124,14 +136,16 @@ fun App() {
                     localPath, { localPath = it },
                     localModel, { localModel = it },
                     deviceToken, { deviceToken = it },
+                    localSystem, { localSystem = it },
                     cloudKey, { cloudKey = it },
                     cloudModel, { cloudModel = it },
+                    cloudSystem, { cloudSystem = it },
                     preferLocal, { preferLocal = it },
                 )
                 Spacer(Modifier.height(8.dp))
             }
             TextButton(onClick = { showSettings = !showSettings }) {
-                Text(if (showSettings) "Hide settings" else "Show settings", color = Brand.Signal)
+                Text(if (showSettings) "Skjul indstillinger" else "Vis indstillinger", color = Brand.Signal)
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -141,7 +155,7 @@ fun App() {
                     }
                     DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
                         if (models.isEmpty()) {
-                            DropdownMenuItem(text = { Text("(load models first)") }, onClick = { modelMenuOpen = false })
+                            DropdownMenuItem(text = { Text("(genindlæs modeller først)") }, onClick = { modelMenuOpen = false })
                         } else {
                             models.forEach { m ->
                                 DropdownMenuItem(text = { Text(m) }, onClick = { localModel = m; modelMenuOpen = false })
@@ -150,9 +164,9 @@ fun App() {
                     }
                 }
                 Spacer(Modifier.width(8.dp))
-                TextButton(onClick = { loadModels() }) { Text("Load models", color = Brand.Signal) }
+                TextButton(onClick = { loadModels() }) { Text("Genindlæs modeller", color = Brand.Signal) }
             }
-            modelError?.let { Text("Models: $it", color = Brand.Danger, fontSize = 11.sp) }
+            modelError?.let { Text("Modeller: $it", color = Brand.Danger, fontSize = 11.sp) }
             Spacer(Modifier.height(8.dp))
 
             LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
@@ -165,7 +179,7 @@ fun App() {
                     value = input,
                     onValueChange = { input = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("Ask ModelRig…") },
+                    placeholder = { Text("Skriv til modellen…") },
                     enabled = !busy,
                     singleLine = true,
                 )
@@ -185,9 +199,9 @@ private fun Header(source: ChatResult.Source?) {
         Spacer(Modifier.width(10.dp))
         val label: String
         val color = when (source) {
-            ChatResult.Source.LOCAL -> { label = "LOCAL"; Brand.Signal }
+            ChatResult.Source.LOCAL -> { label = "RIG"; Brand.Signal }
             ChatResult.Source.CLOUD -> { label = "CLOUD"; Brand.Amber }
-            null -> { label = "IDLE"; Brand.TextMuted }
+            null -> { label = "—"; Brand.TextMuted }
         }
         Box(
             Modifier.clip(RoundedCornerShape(6.dp))
@@ -204,9 +218,9 @@ private fun MessageBubble(m: UiMessage) {
     val isUser = m.role == "user"
     val bg = if (isUser) Brand.SurfaceHigh else Brand.Surface
     val badge = when {
-        isUser -> "you"
+        isUser -> "dig"
         m.source == ChatResult.Source.CLOUD -> "modelrig · cloud"
-        m.source == ChatResult.Source.LOCAL -> "modelrig · local"
+        m.source == ChatResult.Source.LOCAL -> "modelrig · rig"
         else -> "modelrig"
     }
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
@@ -224,28 +238,32 @@ private fun SettingsCard(
     localPath: String, onLocalPath: (String) -> Unit,
     localModel: String, onLocalModel: (String) -> Unit,
     token: String, onToken: (String) -> Unit,
+    localSystem: String, onLocalSystem: (String) -> Unit,
     cloudKey: String, onCloudKey: (String) -> Unit,
     cloudModel: String, onCloudModel: (String) -> Unit,
+    cloudSystem: String, onCloudSystem: (String) -> Unit,
     preferLocal: Boolean, onPreferLocal: (Boolean) -> Unit,
 ) {
     Box(Modifier.clip(RoundedCornerShape(12.dp)).background(Brand.Surface).fillMaxWidth().padding(14.dp)) {
         Column {
-            Text("Connection", color = Brand.TextHigh, fontWeight = FontWeight.SemiBold)
+            Text("Forbindelse", color = Brand.TextHigh, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
-            Field("Local base URL (Ollama or ModelRig backend)", localUrl, onLocalUrl)
-            Field("Local chat path (/api/chat direct · /api/v1/chat via backend)", localPath, onLocalPath)
-            Field("Local model", localModel, onLocalModel)
-            Field("Device token (only when going via ModelRig backend)", token, onToken)
+            Field("Lokal base-URL (Ollama eller ModelRig-backend)", localUrl, onLocalUrl)
+            Field("Lokal chat-sti (/api/chat direkte · /api/v1/chat via backend)", localPath, onLocalPath)
+            Field("Lokal model", localModel, onLocalModel)
+            Field("Enhedstoken (kun ved brug af ModelRig-backend)", token, onToken)
+            Field("System-instruktion, lokal (valgfri)", localSystem, onLocalSystem)
             Spacer(Modifier.height(8.dp))
-            Text("Ollama Cloud fallback", color = Brand.Amber, fontWeight = FontWeight.SemiBold)
+            Text("Ollama Cloud-fallback", color = Brand.Amber, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
             Field("OLLAMA_API_KEY", cloudKey, onCloudKey)
-            Field("Cloud model (e.g. gpt-oss:120b-cloud)", cloudModel, onCloudModel)
+            Field("Cloud-model (fx gpt-oss:120b-cloud)", cloudModel, onCloudModel)
+            Field("System-instruktion, cloud (valgfri)", cloudSystem, onCloudSystem)
             Spacer(Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(checked = preferLocal, onCheckedChange = onPreferLocal)
                 Spacer(Modifier.width(8.dp))
-                Text("Prefer local, fall back to cloud", color = Brand.TextMuted, fontSize = 13.sp)
+                Text("Foretræk lokal, brug cloud som fallback", color = Brand.TextMuted, fontSize = 13.sp)
             }
         }
     }
