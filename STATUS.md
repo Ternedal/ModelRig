@@ -1,19 +1,44 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.18.0** — "roadmap 0.18: fejl-UX og drift". Follows 0.17.0 ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.19.0** — "V1-hærdning: docs rettet, fuld regression, RC-tjekliste". Follows 0.18.0 ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+
+## V1 release-candidate checklist (read this first)
+Server-side is fully verified (90 assertions, backend + worker, see below).
+**Android compiles and builds to a real, signed APK here** (JDK 21 + Gradle 8.9 +
+Android SDK 35 installed in the build environment) — it is not blind source
+anymore. What's still open is **on-device confirmation** on Anders' actual
+hardware, which I cannot do myself. Desktop is deliberately **out of scope for
+V1** (see `ROADMAP.md` §3/§8 — audited and brought to parity in V2).
+
+Tick through this on the phone, then `v1.0.0` gets tagged:
+
+- [ ] **Keyboard** (0.15.2 combo): input stays just above the keyboard, top bar visible, no gap/overlap.
+- [ ] **App icon** (0.16.1): real ModelRig mark shows on the launcher, not the Android robot.
+- [ ] **Signing** (0.16.0): this and all future APKs install straight over each other — no more reinstalls.
+- [ ] **Conversation persistence** (0.16.0): write a message, kill the app, reopen → conversation is still there; Samtaler-list opens/deletes correctly.
+- [ ] **Stop button** (0.16.0): mid-stream, tap stop → generation halts immediately, reply marked "[afbrudt]".
+- [ ] **Cloud model dropdown** (0.15.x): "Genindlæs modeller" actually populates cloud models on Anders' Ollama Cloud account.
+- [ ] **RAG mode** (0.17.0): toggle works, source-filter dropdown lists ingested sources, replies show source chips.
+- [ ] **Error UX + retry** (0.18.0): killing the rig mid-chat shows a readable Danish error with a working "↻ Prøv igen" button.
+
+If everything above is green: say so, and `v1.0.0` ships immediately (docs +
+tag, no new code expected). If something's off: the exact symptom + which item,
+and it gets fixed targeted rather than guessed at.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
 verified code, then pushed toward V1. Structure and design are faithful, but this
-is a *fresh* build — not byte-for-byte the earlier artifact. Everything below is
-labelled by how it was actually verified.
+was originally a *fresh* build — not byte-for-byte the earliest artifact. Since
+then (0.11.0 onward) the full Android toolchain has been installed in the build
+environment and every release has been an actually-compiled, signed, real APK —
+not blind source. Everything below is labelled by how it was actually verified.
 
-Environment had **Go** (installed on the fly) and **Python**, but **no Kotlin
-compiler, no Gradle, no Android SDK**. So:
-
-- backend + worker were genuinely compiled/run/tested here.
-- desktop + android are **complete source you build locally** — written to
-  compile, not compiled here. Treat first local build as the real test.
+- backend + worker: compiled, run, and tested here (90 assertions).
+- android: compiled and built to a signed APK here on every release since 0.11.0.
+  On-device behavior (the checklist above) still needs Anders' hardware — that
+  part genuinely can't be verified from the build environment.
+- desktop: **not touched or audited in this V1 push** — out of scope until V2
+  per `ROADMAP.md`. Treat it as unverified legacy source until then.
 
 ## What's new in 0.18.0  (roadmap milestone 0.18 — "Fejl-UX og drift")
 - **Human error messages** (`friendlyError()`): network unreachable, timeout, 401

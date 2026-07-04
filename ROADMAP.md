@@ -102,11 +102,14 @@ telefonen, og kan installere nye versioner oven på gamle uden afinstallation.
 - **Driftdokumentation:** Tailscale-opsætning (rig nås uden for hjemmenetværk),
   backup/restore af `modelrig-data.json` + worker-databasen, geninstallations-guide.
 
-### 0.19 — V1-hærdning (1 session)
-- Luk verifikationslisten (tastatur, ikon, cloud-dropdown) med Anders'
-  bekræftelser; fix det der falder.
-- Fuld regression: server-suiten grøn, on-device-tjekliste gennemgået.
-- Docs ajour (README, STATUS, CLIENT_BUILD_AND_TEST) → **tag `v1.0.0`**.
+### 0.19 — V1-hærdning — ✅ delvist leveret i `v0.19.0` (afventer Anders' bekræftelse for `v1.0.0`)
+- Fuld regression: server-suiten grøn (90/90 — bekræftet). ✅
+- Docs ajour (README, STATUS, ROADMAP, CLIENT_BUILD_AND_TEST — rettede en
+  forældet "intet Android SDK"-påstand i STATUS.md, tilføjede RAG/retry-tjek). ✅
+- **Tilbage (kræver Anders, ikke mere kode):** luk V1-tjeklisten i `STATUS.md`
+  (8 punkter) → så tags `v1.0.0` med det samme. `v0.19.0` er bevidst *ikke*
+  `v1.0.0` — den tag sætter jeg ikke uden bekræftelse; det ville være falsk
+  sikkerhed.
 
 ### Bevidste fravalg i V1
 Multitråds-UI ud over simpel liste, summarization, automatisk retry, desktop-paritet,
@@ -197,21 +200,29 @@ Uprioriteret liste — rækkefølge afgøres når V2 nærmer sig:
 
 ## 8. Åbne spørgsmål
 
-1. **Desktop i V1 eller V2?** Anbefaling: V2 (Android er dagligdags-fladen).
-2. **Findes logoets SVG/kildefil?** (Figma/Illustrator) → gør ikonet pixel-skarpt
-   på 5 minutter.
-3. **CI via GitHub Actions ok** trods "ingen cloud uden grund"? Anbefaling: ja,
-   begrundet i reproducerbarhed og fjernet flaskehals.
-4. **RAG-dokumenttyper:** hvad er vigtigst efter txt/md — PDF? DOCX?
-5. **Release-keystore-placering:** i privat repo (enklest, lav risiko) eller kun i
-   Notion Secrets (mere friktion, aldrig i git)? Anbefaling: privat repo.
+1. ~~**Desktop i V1 eller V2?**~~ **Afgjort: V2.** Anders sagde "kør efter
+   roadmap" uden indsigelse mod anbefalingen; 0.16–0.18 er bygget derefter.
+2. **Findes logoets SVG/kildefil?** Delvist afgjort — Anders leverede
+   `ModelRig_logo_icon_exports.zip` (rasterexports af det godkendte design,
+   ikke vektor), brugt siden 0.16.0. En ægte SVG ville stadig gøre ikonet
+   pixel-skarpt, men er ikke blokerende for V1.
+3. **CI via GitHub Actions ok** trods "ingen cloud uden grund"? Stadig åbent —
+   relevant først i V2 (§4 pkt. 6).
+4. **RAG-dokumenttyper:** hvad er vigtigst efter txt/md — PDF? DOCX? Stadig
+   åbent — relevant først i V2 (§4 pkt. 1).
+5. ~~**Release-keystore-placering?**~~ **Afgjort: privat repo**
+   (`android/signing/`), password også i Notion Secrets som backup. Implementeret
+   i 0.16.0.
 
 ---
 
 ## 9. Konkrete næste skridt
 
-1. **Anders:** luk verifikationslisten (screenshot med tastatur åbent, launcher-ikon,
-   cloud-dropdown) og svar på åbne spørgsmål **1** og **5**.
-2. **Claude (næste byggesession):** kør **0.16** — release-keystore, SQLite-
-   samtale-persistens, stop-knap → tag `v0.16.0` med APK.
-3. Derefter 0.17 (RAG i lommen) som beskrevet.
+1. **Anders:** kør V1-tjeklisten i `STATUS.md` igennem på telefonen (8 punkter,
+   ~10 minutter) — det er nu det eneste der står mellem 0.18.0 og `v1.0.0`.
+2. **Hvis alt er grønt:** sig det, og `v1.0.0` tagges med det samme (docs +
+   tag, ingen ny kode ventet).
+3. **Hvis noget fejler:** giv symptom + hvilket punkt, så rettes det målrettet
+   (ikke gættet på).
+4. **Efter v1.0.0:** V2 starter med RAG-ingest fra appen (0.19/2.0-serien, se
+   §4) — først når V1 reelt er lukket, ikke før.

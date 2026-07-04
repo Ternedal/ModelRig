@@ -91,6 +91,15 @@ versioner opdaterer oven på.
    samtalen er der stadig. Tjek også Samtaler-listen (åbn/slet).
 6. **Stop**: start et langt svar, tryk på stop-firkanten → streaming stopper
    straks og teksten får et "[afbrudt]"-mærke.
+7. **RAG-tilstand** (0.17, kræver mindst én ingesteret kilde — se `rag-ingest`
+   ovenfor eller CLI'en): tryk RAG-toggle i top-baren (kun synlig når Rig er
+   aktiv) → skal hente kildeliste. Stil et spørgsmål om det ingesterede indhold
+   → svaret skal vise **kilde-chips** over teksten (ikke bare rå tekst). Prøv
+   "Alle kilder"-dropdown vs. et specifikt filter.
+8. **Fejl-UX + retry** (0.18): sluk rig'en (stop backend/worker) midt i en
+   samtale, send en besked → skal vise en **læselig dansk fejlbesked** (ikke en
+   rå exception-streng) og en **"↻ Prøv igen"**-knap. Tænd rig'en igen, tryk
+   "Prøv igen" → svaret kommer, ingen dobbelt bruger-boble.
 
 Bemærk om markdown: mens svaret streamer vises det som plain tekst; når det er
 færdigt skifter det til renderet markdown. Det er med vilje (undgår jank og
@@ -118,9 +127,13 @@ plausible, men ikke verificeret sammen.
 | Desktop: `Dispatchers.Main` mangler | JVM-desktop uden coroutines-swing | Allerede undgået (bruger `scope.launch { }` på composition-scopet). Hvis du selv tilføjer kode, gør det samme. |
 
 ## 5. Hvad "1.0-klar" betyder
-Server-siden er der. **1.0-taggen sætter vi først når begge klienter er bygget og
-røgtestet på rigtig hardware** (punkt 2 + 3 grønne). Indtil da er klienterne
-kildekode, ikke en verificeret artefakt — det er den ærlige status.
+Server-siden er der (90 assertions grønne). Ifølge `ROADMAP.md` er **desktop-
+klienten bevidst skubbet til V2** (audit + løft til Android-featuresættet) — den
+er ikke en del af V1-gaten. **V1 hænger udelukkende på Android** (punkt 3):
+verifikationslisten ovenfor (tastatur, ikon, cloud-dropdown, persistens, stop,
+RAG, retry) skal være kørt igennem og bekræftet grøn på rigtig hardware, før
+`v1.0.0` tags. Indtil da er det compile-verificeret + delvist on-device-testet —
+ærlig status, ikke en færdig 1.0.
 
 Når du har kørt igennem: sig hvad der fejlede (fejlbesked + hvilket trin), så
-retter vi det målrettet. Hvis alt spiller, tagger vi 1.0.
+retter vi det målrettet. Bekræfter alle punkter, tagger vi `v1.0.0`.
