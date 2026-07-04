@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -235,6 +236,34 @@ private fun trimHistory(
     return if (sys.isNotEmpty()) listOf("system" to sys) + list else list
 }
 
+/**
+ * Maps a raised exception to a short, human Danish message. Network/auth/model
+ * errors are common enough (rig asleep, phone off Tailscale, stale pairing,
+ * typo'd model name) that a raw stack-trace-ish message isn't good enough for
+ * daily use.
+ */
+private fun friendlyError(err: Throwable): String {
+    val msg = err.message ?: ""
+    return when {
+        err is java.net.UnknownHostException || err is java.net.ConnectException ->
+            "Kan ikke oprette forbindelse. Tjek at rig'en kører, og at telefonen er på samme netværk (eller Tailscale)."
+        err is java.net.SocketTimeoutException ->
+            "Tidsudløb — modellen svarede ikke i tide. Prøv igen, eller vælg en mindre model."
+        msg.contains("ingen cloud-nøgle") ->
+            "Ingen cloud-nøgle gemt. Tilføj en under Indstillinger."
+        msg.contains("(401)") ->
+            "Ikke godkendt. Parringen er nok udløbet — genpar enheden under Indstillinger."
+        msg.contains("(404)") ->
+            "Modellen eller endpointet blev ikke fundet. Tjek modelnavnet under Indstillinger."
+        msg.contains("(502)") || msg.contains("(503)") ->
+            "Rig'en/Ollama svarer ikke lige nu. Tjek at Ollama kører på maskinen."
+        msg.startsWith("rag chat error:") ->
+            "RAG-fejl: ${msg.removePrefix("rag chat error:").trim()}"
+        msg.isEmpty() -> "Noget gik galt (ukendt fejl)."
+        else -> "Noget gik galt: $msg"
+    }
+}
+
 @Composable
 private fun ChatScreen(
     store: TokenStore,
@@ -362,13 +391,73 @@ private fun ChatScreen(
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[idx] = when {
                 err == null -> cur.copy(streaming = false)
-                cur.text.isEmpty() -> cur.copy(streaming = false, error = true, text = "Fejl: ${err.message}")
+                cur.text.isEmpty() -> cur.copy(streaming = false, error = true, text = friendlyError(err!!))
                 else -> cur.copy(streaming = false, text = cur.text + "\n\n_[afbrudt]_")
             }
             // persist the assistant reply (full or partial-cancelled), never errors
             val finalText = messages[idx].text
             if (err == null || cancelled) {
                 withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText) }
+            }
+            busy = false
+        }
+    }
+
+    // Retries the user message that precedes an errored assistant bubble at
+    // index [i]. Re-runs generation in place — no duplicate user message, no
+    // duplicate DB row. Uses the CURRENT mode/model/RAG settings, which is
+    // usually what you want (you just hit retry right after the failure).
+    val retry: (Int) -> Unit = retry@{ i ->
+        if (busy) return@retry
+        val errMsg = messages.getOrNull(i) ?: return@retry
+        if (!errMsg.error) return@retry
+        val userMsg = messages.getOrNull(i - 1) ?: return@retry
+        if (userMsg.role != "user") return@retry
+        val t = userMsg.text
+        val useCloud = mode == "cloud"
+        val useRag = mode == "rig" && ragMode
+        val sys = (if (useCloud) store.cloudSystem else store.rigSystem).trim()
+        val convo = messages.filterIndexed { idx2, mm -> idx2 != i && !mm.error }.map { it.role to it.text }
+        val history = trimHistory(sys, convo)
+        val rigModel = currentModel
+        val cModel = cloudModel
+        val srcFilter = ragSourceFilter
+        val cidNow = convId
+        messages[i] = Msg("assistant", "", streaming = true)
+        busy = true
+        scope.launch {
+            val onDelta: (String) -> Unit = { delta ->
+                scope.launch { val cur = messages[i]; messages[i] = cur.copy(text = cur.text + delta) }
+            }
+            val onSources: (List<String>) -> Unit = { srcs ->
+                scope.launch { val cur = messages[i]; messages[i] = cur.copy(sources = srcs) }
+            }
+            val hook: (okhttp3.Call) -> Unit = { activeCall = it }
+            val err = withContext(Dispatchers.IO) {
+                runCatching {
+                    when {
+                        useRag -> ModelRigClient(store.baseUrl ?: "", store.token)
+                            .ragChatStream(t, rigModel, srcFilter, registerCall = hook, onSources = onSources, onDelta = onDelta)
+                        useCloud -> {
+                            val key = store.cloudKey ?: throw RuntimeException("ingen cloud-nøgle")
+                            CloudClient(key).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
+                        }
+                        else -> ModelRigClient(store.baseUrl ?: "", store.token)
+                            .chatStream(rigModel, history, registerCall = hook, onDelta = onDelta)
+                    }
+                }.exceptionOrNull()
+            }
+            activeCall = null
+            val cur = messages[i]
+            val cancelled = err != null && cur.text.isNotEmpty()
+            messages[i] = when {
+                err == null -> cur.copy(streaming = false)
+                cur.text.isEmpty() -> cur.copy(streaming = false, error = true, text = friendlyError(err!!))
+                else -> cur.copy(streaming = false, text = cur.text + "\n\n_[afbrudt]_")
+            }
+            val finalText = messages[i].text
+            if (cidNow != null && (err == null || cancelled)) {
+                withContext(Dispatchers.IO) { db.addMessage(cidNow, "assistant", finalText) }
             }
             busy = false
         }
@@ -508,7 +597,7 @@ private fun ChatScreen(
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-            ) { items(messages) { m -> Bubble(m) } }
+            ) { itemsIndexed(messages) { i, m -> Bubble(m, onRetry = { retry(i) }) } }
         }
 
         // input bar — adjustResize + edge-to-edge: the keyboard arrives as the ime
@@ -685,7 +774,7 @@ private fun StopGlyph(color: Color, modifier: Modifier) {
 }
 
 @Composable
-private fun Bubble(m: Msg) {
+private fun Bubble(m: Msg, onRetry: (() -> Unit)? = null) {
     val isUser = m.role == "user"
     val maxW = (LocalConfiguration.current.screenWidthDp * 0.82f).dp
     Row(
@@ -725,6 +814,12 @@ private fun Bubble(m: Msg) {
                         m.streaming && m.text.isEmpty() -> Text("…", color = TextMuted, fontSize = 15.sp, lineHeight = 21.sp)
                         m.streaming -> Text(m.text + "▍", color = TextHigh, fontSize = 15.sp, lineHeight = 21.sp)
                         else -> MarkdownText(m.text, color = TextHigh)
+                    }
+                    if (m.error && onRetry != null) {
+                        Spacer(Modifier.height(6.dp))
+                        TextButton(onClick = onRetry, contentPadding = PaddingValues(0.dp)) {
+                            Text("↻ Prøv igen", color = Signal, fontSize = 12.sp)
+                        }
                     }
                 }
             }

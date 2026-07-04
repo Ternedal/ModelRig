@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.17.0** — "roadmap 0.17: RAG i lommen". Follows 0.16.1 ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.18.0** — "roadmap 0.18: fejl-UX og drift". Follows 0.17.0 ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -14,6 +14,22 @@ compiler, no Gradle, no Android SDK**. So:
 - backend + worker were genuinely compiled/run/tested here.
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
+
+## What's new in 0.18.0  (roadmap milestone 0.18 — "Fejl-UX og drift")
+- **Human error messages** (`friendlyError()`): network unreachable, timeout, 401
+  (stale pairing), 404 (unknown model/endpoint), 502/503 (Ollama down), missing
+  cloud key, and RAG-specific errors each get a short, actionable Danish message
+  instead of a raw exception string.
+- **"↻ Prøv igen" (retry) button** on any failed reply. Retries the same user
+  message in place — no duplicate user bubble, no duplicate DB row — using the
+  mode/model/RAG settings active *at retry time* (documented; usually what you
+  want since you just hit retry right after the failure).
+- **DRIFT.md**: Tailscale setup (phone ↔ rig off-LAN), backup/restore of
+  `modelrig-data.json` (pairing/tokens) and `modelrig-rag.db` (RAG index) with
+  copy-paste commands, full-reinstall guide for Android, and a quick health-check
+  cheatsheet. Also spells out what's *not* backed up (Android's local
+  conversation history + cloud key live only on-device).
+- Same signing key as 0.16.x/0.17.0 — installs straight over 0.17.0, no reinstall.
 
 ## What's new in 0.17.0  (roadmap milestone 0.17 — "RAG i lommen")
 - **RAG mode in the app** (rig only — RAG runs against the worker, not cloud). A

@@ -95,7 +95,7 @@ telefonen, og kan installere nye versioner oven på gamle uden afinstallation.
   *Acceptkriterier:* RAG-svar med synlige kilder on-device; payload er bounded
   uanset samtalelængde.
 
-### 0.18 — Fejl-UX og drift (1 session)
+### 0.18 — Fejl-UX og drift (1 session) — ✅ leveret i `v0.18.0` (afventer on-device-verifikation)
 - Pæn fejlhåndtering: netværk nede / 401 / ukendt model vises menneskeligt, med
   **"Prøv igen"** på sidste besked (manuel retry — automatisk backoff er fravalgt
   i V1 for enkelhed).
