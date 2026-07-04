@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dk.ternedal.modelrig.data.ChatDb
 import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.net.CloudClient
 import dk.ternedal.modelrig.net.ModelRigClient
@@ -28,21 +29,39 @@ import dk.ternedal.modelrig.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-private enum class Screen { Setup, Chat }
+private enum class Screen { Setup, Chat, Convos }
 
 @Composable
 fun AppUi() {
     ModelRigTheme {
         val context = LocalContext.current
         val store = remember { TokenStore(context) }
+        val db = remember { ChatDb(context) }
         var screen by remember {
             mutableStateOf(if (store.hasRig || store.hasCloud) Screen.Chat else Screen.Setup)
         }
+        // conversation to open in ChatScreen; null = start fresh / latest
+        var openConvId by remember { mutableStateOf(db.latestConversationId()) }
+
         Surface(color = Graphite, modifier = Modifier.fillMaxSize()) {
             when (screen) {
                 Screen.Setup -> SetupScreen(store, onDone = { screen = Screen.Chat })
-                Screen.Chat -> ChatScreen(store, onOpenSettings = { screen = Screen.Setup })
+                Screen.Chat -> ChatScreen(
+                    store, db, openConvId,
+                    onOpenSettings = { screen = Screen.Setup },
+                    onOpenConversations = { screen = Screen.Convos },
+                    onConvChanged = { openConvId = it },
+                )
+                Screen.Convos -> ConversationsScreen(
+                    db,
+                    onOpen = { openConvId = it; screen = Screen.Chat },
+                    onNew = { openConvId = null; screen = Screen.Chat },
+                    onBack = { screen = Screen.Chat },
+                )
             }
         }
     }
@@ -186,22 +205,39 @@ private fun RigCard(store: TokenStore, onConnected: () -> Unit) {
 }
 
 // ---- chat ----
-private data class Msg(val role: String, val text: String, val streaming: Boolean = false)
+private data class Msg(
+    val role: String,
+    val text: String,
+    val streaming: Boolean = false,
+    val error: Boolean = false, // shown in UI, but never persisted or sent as history
+)
 
 @Composable
-private fun ChatScreen(store: TokenStore, onOpenSettings: () -> Unit) {
+private fun ChatScreen(
+    store: TokenStore,
+    db: ChatDb,
+    openConvId: Long?,
+    onOpenSettings: () -> Unit,
+    onOpenConversations: () -> Unit,
+    onConvChanged: (Long?) -> Unit,
+) {
     val hasRig = store.hasRig
     val hasCloud = store.hasCloud
-    val initialMode = when {
-        hasRig && hasCloud -> store.chatMode
-        hasCloud -> "cloud"
-        else -> "rig"
+    var mode by remember {
+        mutableStateOf(
+            when {
+                hasRig && hasCloud -> store.chatMode
+                hasCloud -> "cloud"
+                else -> "rig"
+            },
+        )
     }
-    var mode by remember { mutableStateOf(initialMode) }
 
     val messages = remember { mutableStateListOf<Msg>() }
+    var convId by remember { mutableStateOf<Long?>(null) }
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var activeCall by remember { mutableStateOf<okhttp3.Call?>(null) }
     var currentModel by remember { mutableStateOf(store.model) }
     var models by remember { mutableStateOf(listOf<String>()) }
     var modelMenu by remember { mutableStateOf(false) }
@@ -211,6 +247,24 @@ private fun ChatScreen(store: TokenStore, onOpenSettings: () -> Unit) {
     var overflow by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+
+    // Load the requested conversation (or none). Restores source/model from its
+    // metadata when that source is still configured.
+    LaunchedEffect(openConvId) {
+        messages.clear()
+        convId = openConvId
+        if (openConvId != null) {
+            val loaded = withContext(Dispatchers.IO) {
+                db.conversationMeta(openConvId) to db.loadMessages(openConvId)
+            }
+            val (meta, msgs) = loaded
+            msgs.forEach { (role, content) -> messages.add(Msg(role, content)) }
+            if (meta != null) {
+                if (meta.source == "cloud" && hasCloud) { mode = "cloud"; if (meta.model.isNotBlank()) { cloudModel = meta.model } }
+                if (meta.source == "rig" && hasRig) { mode = "rig"; if (meta.model.isNotBlank()) { currentModel = meta.model } }
+            }
+        }
+    }
 
     LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length) {
         if (messages.isNotEmpty()) listState.scrollToItem(messages.size - 1)
@@ -222,12 +276,25 @@ private fun ChatScreen(store: TokenStore, onOpenSettings: () -> Unit) {
         messages.add(Msg("user", t)); input = ""; busy = true
         val useCloud = mode == "cloud"
         val sys = (if (useCloud) store.cloudSystem else store.rigSystem).trim()
-        val convo = messages.map { it.role to it.text }
+        val convo = messages.filter { !it.error }.map { it.role to it.text }
         val history = if (sys.isNotEmpty()) listOf("system" to sys) + convo else convo
         val idx = messages.size
         messages.add(Msg("assistant", "", streaming = true))
         val rigModel = currentModel
+        val cModel = cloudModel
         scope.launch {
+            // persist: create conversation lazily, then the user message
+            val cid = withContext(Dispatchers.IO) {
+                val id = convId ?: db.newConversation(
+                    source = if (useCloud) "cloud" else "rig",
+                    model = if (useCloud) cModel else rigModel,
+                    title = t,
+                )
+                db.addMessage(id, "user", t)
+                id
+            }
+            if (convId == null) { convId = cid; onConvChanged(cid) }
+
             val err = withContext(Dispatchers.IO) {
                 runCatching {
                     val onDelta: (String) -> Unit = { delta ->
@@ -236,23 +303,29 @@ private fun ChatScreen(store: TokenStore, onOpenSettings: () -> Unit) {
                             messages[idx] = cur.copy(text = cur.text + delta)
                         }
                     }
+                    val hook: (okhttp3.Call) -> Unit = { activeCall = it }
                     if (useCloud) {
                         val key = store.cloudKey ?: throw RuntimeException("ingen cloud-nøgle")
-                        CloudClient(key).chatStream(store.cloudModel, history, onDelta = onDelta)
+                        CloudClient(key).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
                     } else {
-                        ModelRigClient(store.baseUrl ?: "", store.token).chatStream(rigModel, history, onDelta = onDelta)
+                        ModelRigClient(store.baseUrl ?: "", store.token)
+                            .chatStream(rigModel, history, registerCall = hook, onDelta = onDelta)
                     }
                 }.exceptionOrNull()
             }
+            activeCall = null
             val cur = messages[idx]
-            messages[idx] = cur.copy(
-                streaming = false,
-                text = when {
-                    err == null -> cur.text
-                    cur.text.isEmpty() -> "⚠️ Fejl: ${err.message}"
-                    else -> cur.text + "\n\n_[afbrudt]_"
-                },
-            )
+            val cancelled = err != null && cur.text.isNotEmpty()
+            messages[idx] = when {
+                err == null -> cur.copy(streaming = false)
+                cur.text.isEmpty() -> cur.copy(streaming = false, error = true, text = "Fejl: ${err.message}")
+                else -> cur.copy(streaming = false, text = cur.text + "\n\n_[afbrudt]_")
+            }
+            // persist the assistant reply (full or partial-cancelled), never errors
+            val finalText = messages[idx].text
+            if (err == null || cancelled) {
+                withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText) }
+            }
             busy = false
         }
     }
@@ -329,7 +402,10 @@ private fun ChatScreen(store: TokenStore, onOpenSettings: () -> Unit) {
                         Text("⋮", color = TextHigh, fontSize = 20.sp)
                     }
                     DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
-                        DropdownMenuItem(text = { Text("Ryd samtale") }, onClick = { overflow = false; messages.clear() })
+                        DropdownMenuItem(text = { Text("Ny samtale") }, onClick = {
+                            overflow = false; messages.clear(); convId = null; onConvChanged(null)
+                        })
+                        DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
                         DropdownMenuItem(text = { Text("Indstillinger") }, onClick = { overflow = false; onOpenSettings() })
                     }
                 }
@@ -356,10 +432,9 @@ private fun ChatScreen(store: TokenStore, onOpenSettings: () -> Unit) {
             ) { items(messages) { m -> Bubble(m) } }
         }
 
-        // input bar — with adjustResize (manifest) + edge-to-edge the window does
-        // NOT resize; the keyboard is delivered as WindowInsets.ime, so imePadding
-        // lifts the field above it. union() with navigationBars covers the
-        // keyboard-down state and takes the max per side (no double-count).
+        // input bar — adjustResize + edge-to-edge: the keyboard arrives as the ime
+        // inset, so ime.union(navigationBars) lifts the field above it (max per
+        // side, no double-count).
         Surface(color = GraphiteSurface, tonalElevation = 3.dp) {
             Row(
                 Modifier.fillMaxWidth()
@@ -374,18 +449,97 @@ private fun ChatScreen(store: TokenStore, onOpenSettings: () -> Unit) {
                     shape = RoundedCornerShape(24.dp),
                 )
                 Spacer(Modifier.width(6.dp))
-                val canSend = !busy && input.isNotBlank()
-                Box(
-                    Modifier.size(44.dp).clickable(enabled = canSend, onClick = onSend),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    SendGlyph(color = if (canSend) Signal else TextMuted, modifier = Modifier.size(26.dp))
+                if (busy) {
+                    Box(
+                        Modifier.size(44.dp).clickable(onClick = { activeCall?.cancel() }),
+                        contentAlignment = Alignment.Center,
+                    ) { StopGlyph(color = Danger, modifier = Modifier.size(20.dp)) }
+                } else {
+                    val canSend = input.isNotBlank()
+                    Box(
+                        Modifier.size(44.dp).clickable(enabled = canSend, onClick = onSend),
+                        contentAlignment = Alignment.Center,
+                    ) { SendGlyph(color = if (canSend) Signal else TextMuted, modifier = Modifier.size(26.dp)) }
                 }
             }
         }
     }
 }
 
+// ---- conversations list ----
+@Composable
+private fun ConversationsScreen(
+    db: ChatDb,
+    onOpen: (Long) -> Unit,
+    onNew: () -> Unit,
+    onBack: () -> Unit,
+) {
+    var convos by remember { mutableStateOf(db.listConversations()) }
+    val fmt = remember { SimpleDateFormat("d/M HH:mm", Locale.getDefault()) }
+
+    Column(Modifier.fillMaxSize()) {
+        Surface(color = GraphiteSurface, tonalElevation = 2.dp) {
+            Row(
+                Modifier.fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onBack) { Text("←", color = TextHigh, fontSize = 18.sp) }
+                Text("Samtaler", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextHigh)
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = onNew) { Text("+ Ny", color = Signal) }
+            }
+        }
+        if (convos.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("Ingen samtaler endnu", color = TextMuted, fontSize = 14.sp)
+            }
+        } else {
+            LazyColumn(
+                Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                items(convos, key = { it.id }) { c ->
+                    Surface(
+                        color = GraphiteSurface,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clickable { onOpen(c.id) },
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    c.title.ifBlank { "(uden titel)" },
+                                    color = TextHigh, fontSize = 14.sp,
+                                    maxLines = 1,
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    SourceBadge(c.source)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(fmt.format(Date(c.updatedAt)), color = TextMuted, fontSize = 11.sp)
+                                }
+                            }
+                            TextButton(onClick = {
+                                db.deleteConversation(c.id)
+                                convos = db.listConversations()
+                            }) { Text("Slet", color = Danger, fontSize = 12.sp) }
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.windowInsetsPadding(WindowInsets.navigationBars))
+    }
+}
+
+// ---- small components ----
 @Composable
 private fun ModelChip(label: String, onClick: () -> Unit) {
     Surface(
@@ -426,6 +580,13 @@ private fun SendGlyph(color: Color, modifier: Modifier) {
 }
 
 @Composable
+private fun StopGlyph(color: Color, modifier: Modifier) {
+    Canvas(modifier) {
+        drawRoundRect(color = color, cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.width * 0.18f))
+    }
+}
+
+@Composable
 private fun Bubble(m: Msg) {
     val isUser = m.role == "user"
     val maxW = (LocalConfiguration.current.screenWidthDp * 0.82f).dp
@@ -445,6 +606,7 @@ private fun Bubble(m: Msg) {
             Box(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                 when {
                     isUser -> Text(m.text, color = Color.White, fontSize = 15.sp, lineHeight = 21.sp)
+                    m.error -> Text(m.text, color = Danger, fontSize = 14.sp, lineHeight = 20.sp)
                     m.streaming -> Text(m.text + "▍", color = TextHigh, fontSize = 15.sp, lineHeight = 21.sp)
                     else -> MarkdownText(m.text, color = TextHigh)
                 }

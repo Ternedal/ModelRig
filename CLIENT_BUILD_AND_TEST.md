@@ -74,6 +74,11 @@ cd android
 og telefonen skal være på samme LAN. Brug maskinens LAN-IP (fx
 `http://192.168.1.20:8080`) i pairing-skærmen — ikke `localhost`.
 
+**⚠️ 0.16.0 — ENGANGS-AFINSTALLATION:** signaturen er skiftet til den faste
+release-keystore. Afinstallér den gamle app én gang før du installerer 0.16.0
+(cloud-nøgle + system-instruktioner skal indtastes igen). Alle fremtidige
+versioner opdaterer oven på.
+
 **Røgtest Android:**
 1. Pair-skærm: indtast LAN-URL + XXXX-XXXX kode → token gemmes.
 2. Chat-skærm: modeldropdown fyldes, besked → svaret streamer ind (spinner mens
@@ -81,7 +86,11 @@ og telefonen skal være på samme LAN. Brug maskinens LAN-IP (fx
 3. **Markdown**: bed om noget med kode (fx "skriv en Kotlin data class") → svaret
    skal vise **kodeblok med monospace + Kopiér-knap**, ikke rå ``` ```-tegn. Tjek
    at **fed**/*kursiv*, punktlister og overskrifter renderes.
-4. Overflow-menu (⋮): "Ryd samtale" og "Afbryd forbindelse" virker.
+4. Overflow-menu (⋮): "Ny samtale", "Samtaler" og "Indstillinger" virker.
+5. **Persistens**: skriv en besked, luk appen helt (swipe væk), åbn igen →
+   samtalen er der stadig. Tjek også Samtaler-listen (åbn/slet).
+6. **Stop**: start et langt svar, tryk på stop-firkanten → streaming stopper
+   straks og teksten får et "[afbrudt]"-mærke.
 
 Bemærk om markdown: mens svaret streamer vises det som plain tekst; når det er
 færdigt skifter det til renderet markdown. Det er med vilje (undgår jank og

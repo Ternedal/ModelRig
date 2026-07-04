@@ -65,7 +65,7 @@ og runtime-verificeret, alle leverancer tagget og released på GitHub.
 miste data, kan afbryde svar, kan stille RAG-spørgsmål mod sit eget indeks fra
 telefonen, og kan installere nye versioner oven på gamle uden afinstallation.
 
-### 0.16 — Fundament der ikke smuldrer (1–2 sessioner)
+### 0.16 — Fundament der ikke smuldrer (1–2 sessioner) — ✅ leveret i `v0.16.0` (afventer on-device-verifikation)
 - **Stabil app-signering.** Dedikeret release-keystore med fast signatur på tværs
   af sessioner. Anbefaling: keystore committes i det private repo; password i
   Notion Secrets (hentes pr. session ligesom PAT). Éngangsomkostning: skiftet fra

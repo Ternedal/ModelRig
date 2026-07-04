@@ -19,11 +19,19 @@ Token in `SharedPreferences` (see hardening note in `data/TokenStore.kt`).
 cloud pulls `/api/tags` (falls back to `/v1/models`) via `CloudClient.listModels()`.
 "Genindlæs modeller" refreshes; the choice persists via `TokenStore`.
 
+## Persistence & signing
+- **Conversations persist** in Android's built-in SQLite (`data/ChatDb.kt`, no new
+  dependency). Latest conversation reopens on launch; the Samtaler screen lists,
+  opens and deletes. Replies are stored once complete.
+- **Stable signing**: both build types sign with `android/signing/modelrig.keystore`
+  (checked in — private repo; password in `keystore.properties`, keep a backup in
+  Notion Secrets). Any machine/session produces install-over-updatable APKs.
+  Build releases with `gradle :app:assembleRelease`.
+
 ## App icon
-Adaptive icon (`res/mipmap-anydpi-v26/ic_launcher*.xml` + `res/drawable/ic_launcher_*`):
-the brand **M drawn as a node-graph** — a sapphire stroke through four corner
-nodes with a champagne centre node, on an obsidian gradient. Vector, so it's
-crisp at all densities.
+Adaptive icon: foreground is the **official mark** extracted from the approved
+`modelrig_app_icon_final.png` export (sharp 755 px source), background gradient
+sampled from the same icon. Source exports live in `/brand/`.
 
 ## Two sources: rig and cloud
 The app can talk to **your rig** (backend → local Ollama + RAG) **or directly to

@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.15.5** — "Android icon uses the real brand mark (extracted)". Autonomous session, **2026-07-02/03**.
+Version **0.16.0** — "V1 milestone 0.16: stable signing, conversation persistence, stop button, official icon". Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -14,6 +14,39 @@ compiler, no Gradle, no Android SDK**. So:
 - backend + worker were genuinely compiled/run/tested here.
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
+
+## What's new in 0.16.0  (roadmap milestone 0.16 — "Fundament der ikke smuldrer")
+**⚠️ ONE-TIME REINSTALL REQUIRED:** this release switches from the session-local
+debug signature to a **stable release keystore** (committed under
+`android/signing/`, password in keystore.properties — keep a backup copy in
+Notion Secrets). Android refuses to update across a signature change, so
+**uninstall the old app once**, then install this APK. Cloud key + system
+prompts must be re-entered once. Every future APK installs over the top, from
+any session or machine.
+
+- **Stable signing** (both debug and release build types use the repo keystore).
+  Cert: CN=ModelRig, SHA-256 `6563 92B0 3A32 1501 …` — verified with apksigner.
+  Ships as a **release** build from now on (`versionCode 16`, `versionName 0.16.0`).
+- **Conversation persistence** (`data/ChatDb.kt`, Android built-in SQLite, no new
+  dependency): conversations + messages survive app kill and phone restart; the
+  latest conversation reopens on launch; a **Samtaler** screen lists all
+  (open / new / delete). Assistant replies are written once on completion — an
+  in-flight reply is lost on a crash (accepted V1 tradeoff).
+- **Stop button**: the send button becomes a stop square while streaming;
+  cancels the underlying OkHttp call (<1 s), keeps the partial text with an
+  "[afbrudt]" marker, and persists the partial.
+- **Error hygiene**: failed replies are shown in red but are **never persisted
+  and never sent back to the model as history** (previously an error bubble
+  leaked into the next request's context).
+- **Official app icon**: foreground extracted from the approved
+  `modelrig_app_icon_final.png` export (755 px source — sharp), background
+  gradient sampled from the same icon. Exports preserved under `/brand/`.
+
+**Verified here:** compiles; signed release APK; signature fingerprint matches
+keystore; versionCode/Name correct; server suite smoke green (11/11) after the
+version bump.
+**Needs on-device:** persistence round-trip, conversation list UX, stop button,
+icon on the launcher, and the still-open 0.15.2 keyboard check.
 
 ## What's new in 0.15.5
 - **Icon now uses the REAL brand mark**, not a hand-drawn approximation. The

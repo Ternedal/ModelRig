@@ -1,7 +1,18 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     kotlin("android")
     kotlin("plugin.compose")
+}
+
+// Stable signing identity across build machines/sessions. Keystore + properties
+// live in the (private) repo on purpose: this is a personal, sideloaded app —
+// the win is that every APK, from any session or CI, installs over the previous
+// one. Keep a copy of the password in Notion Secrets as backup.
+val ksProps = Properties().apply {
+    val f = rootProject.file("signing/keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
@@ -12,13 +23,26 @@ android {
         applicationId = "dk.ternedal.modelrig"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 16          // tracks minor: 0.16.0 -> 16, 0.17.0 -> 17, 1.0.0 -> 100
+        versionName = "0.16.0"
+    }
+
+    signingConfigs {
+        create("modelrig") {
+            storeFile = rootProject.file(ksProps.getProperty("storeFile") ?: "signing/modelrig.keystore")
+            storePassword = ksProps.getProperty("storePassword")
+            keyAlias = ksProps.getProperty("keyAlias") ?: "modelrig"
+            keyPassword = ksProps.getProperty("keyPassword")
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("modelrig")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("modelrig")
         }
     }
 
