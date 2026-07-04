@@ -2,8 +2,13 @@
 
 Desktop chat client for ModelRig with **local-first routing and Ollama Cloud fallback**.
 
-> Not built in the generator environment (no Kotlin/Gradle/JDK-desktop toolchain
-> there). This is complete source you build locally. See version note below.
+> **Compile-verified** (2026-07-04): builds clean here (`./gradlew build` →
+> `BUILD SUCCESSFUL`, Kotlin 2.0.21 + Compose Multiplatform 1.7.0). **Not run**
+> — no display in the build sandbox, so actual on-screen behavior is still
+> unverified. Feature-wise this lags Android: no brand-real colors (`Brand.kt`
+> still has the old invented palette), no markdown rendering, no persistence,
+> no system prompts, no RAG — see `ROADMAP.md` §4 pt. 5 for the full audit and
+> the planned lift to parity in V2.
 
 ## What it does
 - Talks to any Ollama-compatible `/api/chat` endpoint.
@@ -59,9 +64,8 @@ All are editable at runtime in the Settings panel.
 
 ## Version note
 `build.gradle.kts` pins Kotlin `2.0.21`, Compose Compiler plugin `2.0.21`,
-Compose Multiplatform `1.7.0`. This pairing is plausible but unverified here. If
-Gradle complains, bump to the current matched pair from the Compose Multiplatform
-releases page.
+Compose Multiplatform `1.7.0`. **Confirmed working together** (compiles clean,
+2026-07-04) — no longer just plausible.
 
 ## V1.1 ideas
 - Persist settings to disk (currently in-memory + env defaults).
