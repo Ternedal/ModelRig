@@ -111,7 +111,11 @@ jobs:
         run: |
           jar=$(find composeApp/build/compose/jars -name "*.jar" | head -1)
           echo "Found: $jar"
-          echo "path=$jar" >> "$GITHUB_OUTPUT"
+          # upload-artifact runs from the job's default working directory
+          # (repo root), not this step's `working-directory: desktop` -- so
+          # the recorded path must include that prefix or the next step can't
+          # find the file (this bit v0.19.6: "No files were found").
+          echo "path=desktop/$jar" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:

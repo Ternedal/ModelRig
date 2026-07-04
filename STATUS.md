@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.19.6** — "CI-fix: zip-step case-sensitivity". Follows 0.19.5 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.19.7** — "CI-fix: desktop-jar artifact path". Follows 0.19.6 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
