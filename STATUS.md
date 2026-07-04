@@ -40,6 +40,148 @@ not blind source. Everything below is labelled by how it was actually verified.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
 
+## What's new in 0.19.7  (CI-fix #2: desktop-jar artifact path — found via artifacts API, not step status)
+- v0.19.6 ran green on every job, but only delivered 1 of 4 expected release
+  assets (the APK; no desktop jars). Caught by checking the actual
+  `GET .../actions/runs/{id}/artifacts` endpoint rather than trusting green
+  step icons: "Found 1 artifact(s)" at download time, "No files were found"
+  in every desktop-build matrix job's upload step.
+- **Root cause**: "Locate the packaged jar" ran with `working-directory:
+  desktop` and recorded a path relative to that directory
+  (`composeApp/build/...`). The following `upload-artifact` step runs from the
+  repo root instead, so the recorded path was missing the `desktop/` prefix
+  and matched nothing. `upload-artifact` doesn't hard-fail on an empty match
+  (just a warning), so the job still showed `conclusion: success` despite
+  uploading nothing real.
+- **Fix**: the recorded path now includes the `desktop/` prefix.
+- **Re-verified properly this time**: checked both the artifacts API and the
+  actual release asset list, not just job status. All 5 assets present:
+  `modelrig-v0.19.7.apk`, `modelrig-v0.19.7.zip`,
+  `ModelRig-linux-x64-1.0.0.jar`, `ModelRig-windows-x64-1.0.0.jar`,
+  `ModelRig-macos-arm64-1.0.0.jar` — the last two built natively on real
+  Windows/macOS GitHub-hosted runners. **CI pipeline now genuinely works
+  end-to-end.** Lesson kept in mind going forward: a green job conclusion only
+  means no step errored, not that it produced the expected output.
+- No backend/worker/Android source changed beyond the workflow file itself.
+
+## What's new in 0.19.6  (CI-fix #1: zip-step case-sensitivity)
+- v0.19.5's workflow run revealed a real bug, caught by actually tagging and
+  observing the run rather than assuming it worked: `server-tests`,
+  `android-build`, and all three `desktop-build` matrix jobs
+  (ubuntu/windows/macos) succeeded, but `release` failed at the zip step:
+  `zip warning: name not matched: modelrig` / `zip error: Nothing to do!`.
+- **Root cause**: GitHub Actions checks out into a directory named after the
+  exact repo name (`ModelRig`, capital R) — the workflow incorrectly assumed
+  the local sandbox's lowercase convention (`modelrig`).
+- **Fix**: resolve the checkout directory name dynamically via
+  `basename "$GITHUB_WORKSPACE"` instead of hardcoding either case.
+- v0.19.5 is left as-is on GitHub — an honest record of the run that found the
+  bug, not deleted/hidden.
+
+## What's new in 0.19.5  (CI via GitHub Actions — first live test, found a bug)
+- Added `.github/workflows/build-and-release.yml`: on tag push (`v*`), runs
+  the full 90-assertion server suite, builds the Android debug APK, builds
+  genuinely OS-native desktop jars on real Windows/macOS/Linux runners (fixes
+  the caveat from 0.19.1 — a jar built in the Linux sandbox can't run on
+  Windows, but a Windows-hosted runner can build a real Windows-native one),
+  and publishes everything to the release automatically.
+- Verified the external actions used (`android-actions/setup-android@v4`,
+  `softprops/action-gh-release@v2`) were current before writing them into the
+  workflow, rather than guessing versions. YAML syntax validated with a
+  parser before committing.
+- **First push was rejected**: the fine-grained PAT lacked the `workflow`
+  scope needed to add/modify files under `.github/workflows/`. Anders granted
+  it; push succeeded on retry.
+- **First real run found a genuine bug** (see 0.19.6) — the point of actually
+  triggering and checking a live run rather than assuming a workflow file is
+  correct just because it's syntactically valid.
+- No backend/worker/Android source changed beyond the workflow file itself.
+
+## What's new in 0.19.4  (desktop-parity list complete: RAG mode)
+- **RAG mode on desktop** (`net/RagClient.kt`): separate from `ChatRouter` —
+  RAG only makes sense against the backend+worker, never local Ollama directly
+  or Ollama Cloud. UI toggle + source-filter dropdown + source chips above
+  replies, same pattern as Android. Same known simplification as Android:
+  single-shot per question (the worker's `/rag/chat` takes one `query` string,
+  not a message list).
+- **Genuine runtime verification, not just compile**: temporarily pointed
+  `mainClass` at a throwaway smoke test that spun up a real local HTTP server
+  (JDK's built-in `com.sun.net.httpserver`), pointed `RagClient` at it, and
+  confirmed NDJSON sources-header parsing, streaming content deltas, the
+  Bearer auth header, and the source-filter request all work correctly. Test
+  file removed after verification.
+- **Desktop-parity list from `ROADMAP.md` §4 pt. 5 is now complete**: brand
+  colors, Danish UI, system prompts, markdown, persistence, RAG all delivered
+  and verified. Remaining, out of original scope: a conversation browser UI
+  (list/switch/delete), like Android's Samtaler screen.
+- No Android/backend code changed. No new APK (unchanged since 0.19.0).
+
+## What's new in 0.19.3  (desktop: SQLite persistence, runtime-verified)
+- **SQLite persistence** (`data/DesktopChatDb.kt`): plain JDBC
+  (`org.xerial:sqlite-jdbc:3.49.1.0`, version verified against Maven Central),
+  same `conversation`+`message` schema as Android's `ChatDb.kt`. DB file:
+  `~/.modelrig/modelrig.db`. Latest conversation silently auto-resumes on
+  startup; no conversation browser yet (list/switch/delete) — natural next
+  increment.
+- **New dependency justified**: plain JVM has no built-in SQLite (Android
+  does). `sqlite-jdbc` is a single embedded driver — no server, no network —
+  in keeping with the project's SQLite-first convention, not breaking it.
+- **Genuine runtime verification**: temporarily pointed `mainClass` at a
+  throwaway smoke test, ran it via `gradle run` against a real SQLite file,
+  confirmed insert/read/latest-conversation/metadata/list/delete **and
+  cascade-delete of messages** all correct. Test file removed after.
+- No Android/backend code changed. No new APK (unchanged since 0.19.0).
+
+## What's new in 0.19.2  (desktop: markdown rendering ported from Android)
+- Ported Android's dependency-free Markdown renderer to desktop
+  (`desktop/.../Markdown.kt`) — near-verbatim, since the original used no
+  Android-specific APIs (pure Compose Foundation/Material3/UI-text, shared
+  across Compose Multiplatform).
+- `UiMessage` gained a `streaming` flag so the same plain-text-while-streaming
+  / markdown-when-done pattern from Android applies here too.
+- Compiles clean (`BUILD SUCCESSFUL`, verified here).
+- No Android/backend code changed. No new APK (unchanged since 0.19.0).
+
+## What's new in 0.19.1  (desktop lifted toward Android parity — V2 work, run early)
+- **Brand.kt corrected**: replaced an old invented palette (never fixed here
+  before) with the same verified brand colors as Android's `Theme.kt` —
+  Sapphire `#306CFC`, Champagne `#DEC08A`.
+- **Danish UI**: all visible strings translated (was English — didn't match
+  the project's standing Danish-UI convention). Header badges RIG/CLOUD
+  instead of LOCAL/CLOUD/IDLE.
+- **Per-source system prompt** (local + cloud), prepended as `role:"system"`
+  before send — same pattern as Android 0.13.0. Documented simplification:
+  follows the *preferred* source, not necessarily whichever answers after a
+  fallback.
+- Confirmed the full build+package pipeline works here: `./gradlew build` and
+  `packageUberJarForCurrentOS` both `BUILD SUCCESSFUL` — first real
+  verification for desktop, not just written-to-compile source. **Honest
+  caveat**: the packaged jar bundles Linux-native Skiko (this sandbox's OS)
+  and will not run on Windows — not shipped as a download for that reason;
+  the value is confirming the Kotlin/Compose Multiplatform version pairing
+  actually compiles+packages.
+- No Android/backend code changed. No new APK (unchanged since 0.19.0).
+
+## What's new in 0.19.0  (roadmap milestone 0.19 — "V1-hærdning")
+- **Fixed a genuinely stale claim** in this file ("no Kotlin/Gradle/Android
+  SDK in the environment") — the full Android toolchain has been installed
+  and every release since 0.11.0 has been an actually-compiled, signed APK,
+  not blind source. Corrected.
+- Added the **V1 release-candidate checklist** above (8 items) — consolidates
+  0.16–0.18's on-device-pending items into one place instead of scattered
+  across separate release notes.
+- `CLIENT_BUILD_AND_TEST.md`: added RAG-mode and error/retry smoke-test steps
+  that were missing since those features shipped after the doc was last
+  touched; corrected the 1.0-readiness gate to reflect desktop being deferred
+  to V2.
+- `ROADMAP.md`: resolved 2 of 5 open questions (desktop→V2, keystore→private
+  repo — both settled by Anders saying "kør efter roadmap" with no objection
+  since); refreshed the stale "next steps" section.
+- **Full regression: all 90 assertions green** (smoke 11, v1 17, worker_unit
+  9, worker_rag 25, e2e 28). No Android source changed; version bump only.
+  Deliberately tagged `v0.19.0`, **not** `v1.0.0` — that tag is withheld until
+  Anders confirms the on-device checklist himself.
+
 ## What's new in 0.18.0  (roadmap milestone 0.18 — "Fejl-UX og drift")
 - **Human error messages** (`friendlyError()`): network unreachable, timeout, 401
   (stale pairing), 404 (unknown model/endpoint), 502/503 (Ollama down), missing
