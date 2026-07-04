@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.16.0** — "V1 milestone 0.16: stable signing, conversation persistence, stop button, official icon". Autonomous session, **2026-07-02/03**.
+Version **0.16.1** — "icon background matched to real asset". Follows 0.16.0 ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -14,6 +14,13 @@ compiler, no Gradle, no Android SDK**. So:
 - backend + worker were genuinely compiled/run/tested here.
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
+
+## What's new in 0.16.1
+- **Icon background now sampled from Anders' own delivered asset**
+  (`modelrig_app_icon_final.png`), not an invented gradient — averaged the inner
+  background corners (excluding one sample that caught the gold border bevel):
+  `#0F1422` → `#020713`. Foreground (the symbol) was already his real artwork
+  since 0.16.0. Same signing key — installs straight over 0.16.0, no reinstall.
 
 ## What's new in 0.16.0  (roadmap milestone 0.16 — "Fundament der ikke smuldrer")
 **⚠️ ONE-TIME REINSTALL REQUIRED:** this release switches from the session-local
