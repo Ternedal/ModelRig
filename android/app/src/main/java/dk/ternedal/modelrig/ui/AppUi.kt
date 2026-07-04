@@ -221,9 +221,10 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
  */
 @Composable
 private fun PresetRow(db: ChatDb, source: String, currentPrompt: String, onApply: (String) -> Unit) {
-    var presets by remember { mutableStateOf(db.listPresets(source)) }
+    var presets by remember { mutableStateOf(runCatching { db.listPresets(source) }.getOrElse { emptyList() }) }
     var showSaveDialog by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
+    var presetError by remember { mutableStateOf<String?>(null) }
 
     Spacer(Modifier.height(8.dp))
     Row(
@@ -245,8 +246,10 @@ private fun PresetRow(db: ChatDb, source: String, currentPrompt: String, onApply
                     Text(
                         "✕", color = TextMuted, fontSize = 11.sp,
                         modifier = Modifier.clickable {
-                            db.deletePreset(p.id)
-                            presets = db.listPresets(source)
+                            runCatching {
+                                db.deletePreset(p.id)
+                                presets = db.listPresets(source)
+                            }.onFailure { presetError = "Kunne ikke slette: ${it.message}" }
                         },
                     )
                 }
@@ -256,7 +259,7 @@ private fun PresetRow(db: ChatDb, source: String, currentPrompt: String, onApply
             shape = RoundedCornerShape(999.dp),
             color = Graphite,
             modifier = Modifier
-                .clickable(enabled = currentPrompt.isNotBlank()) { showSaveDialog = true }
+                .clickable(enabled = currentPrompt.isNotBlank()) { showSaveDialog = true; presetError = null }
                 .padding(horizontal = 10.dp, vertical = 5.dp),
         ) {
             Text(
@@ -266,6 +269,7 @@ private fun PresetRow(db: ChatDb, source: String, currentPrompt: String, onApply
             )
         }
     }
+    presetError?.let { Text(it, color = Danger, fontSize = 11.sp) }
 
     if (showSaveDialog) {
         AlertDialog(
@@ -282,11 +286,13 @@ private fun PresetRow(db: ChatDb, source: String, currentPrompt: String, onApply
                 TextButton(
                     enabled = newName.isNotBlank(),
                     onClick = {
-                        db.savePreset(source, newName.trim(), currentPrompt)
-                        presets = db.listPresets(source)
+                        runCatching {
+                            db.savePreset(source, newName.trim(), currentPrompt)
+                            presets = db.listPresets(source)
+                        }.onFailure { presetError = "Kunne ikke gemme: ${it.message}" }
                         newName = ""; showSaveDialog = false
                     },
-                ) { Text("Gem", color = Signal) }
+                ) { Text("Gem", color = if (newName.isNotBlank()) Signal else TextMuted) }
             },
             dismissButton = {
                 TextButton(onClick = { showSaveDialog = false; newName = "" }) { Text("Annullér", color = TextMuted) }

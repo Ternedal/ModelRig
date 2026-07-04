@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.2** — "RAG-ingest fra Android-appen". Follows 0.20.1 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.20.3** — "bugfix: preset-'Gem'-knap virkede ikke visuelt". Follows 0.20.2 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -20,7 +20,7 @@ Tick through this on the phone, then `v1.0.0` gets tagged:
 - [ ] **Cloud model dropdown** (0.15.x): "Genindlæs modeller" actually populates cloud models on Anders' Ollama Cloud account.
 - [ ] **RAG mode** (0.17.0): toggle works, source-filter dropdown lists ingested sources, replies show source chips.
 - [ ] **Error UX + retry** (0.18.0): killing the rig mid-chat shows a readable Danish error with a working "↻ Prøv igen" button.
-- [ ] **Presets** (0.19.8): save the current system-instruction as a named preset, tap it to reapply, delete it — on both Rig and Cloud cards.
+- [ ] **Presets** (0.19.8, bug found+fixed in 0.20.3 — retest this one specifically): save the current system-instruction as a named preset, tap it to reapply, delete it — on both Rig and Cloud cards.
 - [ ] **Model management** (0.20.0): the "Modeller" screen (⋮ menu) lists installed models with size, shows running models with VRAM, pulls a new model with live progress, deletes one with confirmation.
 - [ ] **RAG-ingest** (0.20.2, newest and least-tested — new file-picker API surface): from the RAG source dropdown, "+ Tilføj dokument" opens Android's file picker, picks a .txt/.md file, and it appears in the source list after ingesting.
 
@@ -42,6 +42,26 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.3  (bugfix: preset "Gem"-knap fandt af Anders' on-device-test)
+- **Reelt bug-fund**: Anders rapporterede at "Gem"-knappen i preset-dialogen
+  (introduceret 0.19.8) ikke reagerede. Kodegennemgang fandt årsagen: knappens
+  tekst var hardkodet til Signal-blå **uanset** om den var aktiveret
+  (`enabled = newName.isNotBlank()`) — så en deaktiveret knap (tomt navnefelt)
+  så visuelt identisk ud med en aktiv knap. Trykkede man "Gem" før man havde
+  skrevet et navn, skete der (korrekt) ingenting — men UI'en gav intet visuelt
+  signal om hvorfor.
+- **Fix**: knappens tekstfarve følger nu faktisk `enabled`-tilstanden (dæmpet
+  grå når deaktiveret). Samme fix i både Android og desktop (samme bug var
+  kopieret til begge i 0.19.8/0.19.9).
+- **Defensiv fejlhåndtering tilføjet oveni** (ikke kun den fundne bug): gem/
+  anvend/slet-preset-kald er nu wrappet i `runCatching`, og eventuelle fejl
+  (fx en database-fejl) vises som synlig rød tekst i stedet for at fejle
+  stille — så *enhver* fremtidig fejl i denne flow er synlig, ikke kun den
+  specifikke jeg fandt.
+- **Ikke on-device-bekræftet endnu** — afventer at Anders tester igen.
+- Kompilerer rent på begge klienter. Ingen backend-kodeændring udover
+  versionsbump.
 
 ## What's new in 0.20.2  (roadmap V2 pt.1 — RAG-ingest fra appen)
 - **Filvælger i Android** (Storage Access Framework,

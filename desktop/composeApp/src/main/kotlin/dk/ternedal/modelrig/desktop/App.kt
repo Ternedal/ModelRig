@@ -491,7 +491,7 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
                         presets = db.listPresets(source)
                         newName = ""; showSaveDialog = false
                     },
-                ) { Text("Gem", color = Brand.Signal) }
+                ) { Text("Gem", color = if (newName.isNotBlank()) Brand.Signal else Brand.TextMuted) }
             },
             dismissButton = {
                 TextButton(onClick = { showSaveDialog = false; newName = "" }) { Text("Annullér", color = Brand.TextMuted) }
