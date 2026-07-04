@@ -14,6 +14,7 @@ object Brand {
     val SurfaceHigh = Color(0xFF19212E)
     val Signal = Color(0xFF306CFC)   // sapphire — actions/focus
     val Amber = Color(0xFFDEC08A)    // champagne — accent
+    val CodeSurface = Color(0xFF0A0E16)
     val TextHigh = Color(0xFFEEF1F6)
     val TextMuted = Color(0xFF8A94A6)
     val Danger = Color(0xFFE5534B)

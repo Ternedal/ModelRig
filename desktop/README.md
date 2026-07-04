@@ -85,7 +85,7 @@ Compose Multiplatform `1.7.0`. **Confirmed working together** (compiles clean,
 2026-07-04) — no longer just plausible.
 
 ## Next (see `ROADMAP.md` §4 pt. 5 for the full V2 desktop-parity plan)
-- Markdown rendering (port Android's dependency-free renderer).
+> Markdown rendering: done (2026-07-04) — ported from Android, compiles clean.
 - SQLite persistence (currently in-memory + env defaults; settings/history lost
   on restart).
 - RAG mode (Android has it since 0.17.0; desktop doesn't yet).

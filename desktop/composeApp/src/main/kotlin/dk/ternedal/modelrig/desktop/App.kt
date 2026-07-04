@@ -43,7 +43,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private data class UiMessage(val role: String, val text: String, val source: ChatResult.Source? = null)
+private data class UiMessage(
+    val role: String,
+    val text: String,
+    val source: ChatResult.Source? = null,
+    val streaming: Boolean = false,
+)
 
 @Composable
 fun App() {
@@ -101,7 +106,7 @@ fun App() {
                 )
             }
             val assistantIdx = messages.size
-            messages.add(UiMessage("assistant", "", null))
+            messages.add(UiMessage("assistant", "", null, streaming = true))
             scope.launch {
                 val err = withContext(Dispatchers.IO) {
                     runCatching {
@@ -118,11 +123,11 @@ fun App() {
                         }
                     }.exceptionOrNull()
                 }
-                if (err != null) {
-                    val cur = messages[assistantIdx]
-                    val msg = if (cur.text.isEmpty()) "Fejl: ${err.message}" else cur.text + "\n[afbrudt: ${err.message}]"
-                    messages[assistantIdx] = cur.copy(text = msg)
-                }
+                val cur = messages[assistantIdx]
+                val msg = if (err == null) cur.text
+                    else if (cur.text.isEmpty()) "Fejl: ${err.message}"
+                    else cur.text + "\n[afbrudt: ${err.message}]"
+                messages[assistantIdx] = cur.copy(text = msg, streaming = false)
                 busy = false
             }
         }
@@ -227,7 +232,12 @@ private fun MessageBubble(m: UiMessage) {
         Text(badge, color = Brand.TextMuted, fontSize = 11.sp)
         Spacer(Modifier.height(2.dp))
         Box(Modifier.clip(RoundedCornerShape(10.dp)).background(bg).fillMaxWidth().padding(12.dp)) {
-            Text(m.text, color = Brand.TextHigh, fontSize = 14.sp)
+            when {
+                isUser -> Text(m.text, color = Brand.TextHigh, fontSize = 14.sp)
+                m.streaming && m.text.isEmpty() -> Text("…", color = Brand.TextMuted, fontSize = 14.sp)
+                m.streaming -> Text(m.text + "▍", color = Brand.TextHigh, fontSize = 14.sp)
+                else -> MarkdownText(m.text, color = Brand.TextHigh)
+            }
         }
     }
 }

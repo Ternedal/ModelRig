@@ -150,8 +150,9 @@ Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
    **system-prompt pr. kilde** (samme mønster som Android, med samme kendte
    forenkling — prompten følger den *foretrukne* kilde, ikke nødvendigvis den
    der reelt svarer efter et fallback).
-   **Tilbage** (næste desktop-session): markdown-rendering, SQLite-persistens,
-   RAG. Samme rækkefølge Android fik dem i.
+   Leveret i 0.19.2: **markdown-rendering** portet fra Android (næsten ordret —
+   ingen Android-specifikke API'er i den originale fil).
+   **Tilbage** (næste desktop-session): SQLite-persistens, RAG.
 6. **CI (GitHub Actions).** Tests + APK-build ved tag-push, assets uploades
    automatisk til releasen. Dette er en begrundet cloud-undtagelse: det fjerner
    sandbox-toolchainen som flaskepunkt og gør builds reproducerbare. Gratis-tier
