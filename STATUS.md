@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.15.4** — "Android app icon refined to the real mark". Autonomous session, **2026-07-02/03**.
+Version **0.15.5** — "Android icon uses the real brand mark (extracted)". Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -14,6 +14,16 @@ compiler, no Gradle, no Android SDK**. So:
 - backend + worker were genuinely compiled/run/tested here.
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
+
+## What's new in 0.15.5
+- **Icon now uses the REAL brand mark**, not a hand-drawn approximation. The
+  designer's actual symbol (an M-truss whose diagonals **cross** in the centre with
+  a stem to a bottom node) was extracted straight from the brand PNG by keying out
+  everything except the sapphire+champagne artwork, then placed on the obsidian
+  background. Shape verified before shipping.
+- Caveat: the source art in the handoff is modest resolution, so the extracted mark
+  is a little soft; for pixel-perfect crispness, export the symbol as SVG from the
+  source file and drop it in as `ic_launcher_foreground`.
 
 ## What's new in 0.15.4
 - **Icon refined to match the real brand mark.** The 0.15.3 icon was a simplified
