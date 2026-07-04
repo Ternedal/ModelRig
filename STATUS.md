@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.0** — "model-administration (backend + Android)". Follows 0.19.9 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.20.1** — "model-administration (desktop) — parity med Android". Follows 0.20.0 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -39,6 +39,22 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.1  (model-administration på desktop — lukker parity-gap)
+- **Samme feature som 0.20.0, nu på desktop**: nye metoder i `OllamaClient.kt`
+  (`listModelsDetailed`, `listRunningModels`, `pullModel` med streaming
+  progress, `deleteModel`), plus et "Modelstyring"-panel i UI'en (toggle-knap
+  ved siden af RAG-tilstand).
+- **Virker mod begge kilder** (lokal Ollama direkte eller via backend) —
+  samme sti-udledningsmønster som `loadModels()` allerede brugte
+  (`/api/v1/...` via backend, `/api/...` direkte mod Ollama).
+- **Ægte runtime-verifikation** (samme metode som RAG-klientens smoke-test):
+  midlertidig test der startede en rigtig lokal HTTP-server, bekræftede
+  detaljeret model-liste (med størrelse), kørende modeller (VRAM),
+  streaming pull-progress (4 linjer, korrekt rækkefølge, request-body
+  uændret), og DELETE-kald (metode + body korrekt). Testfil fjernet efter.
+- Kompilerer rent (`BUILD SUCCESSFUL`).
+- Ingen backend-kodeændring udover versionsbump.
 
 ## What's new in 0.20.0  (roadmap V2 pt.3 — model-administration)
 - **Tre nye backend-endpoints**, alle bag samme bearer-auth som resten af

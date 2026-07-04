@@ -84,6 +84,7 @@ fun App() {
         var ragSourceFilter by remember { mutableStateOf<String?>(null) }
         var ragSourceMenuOpen by remember { mutableStateOf(false) }
         var ragError by remember { mutableStateOf<String?>(null) }
+        var showModels by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
         val db = remember { DesktopChatDb() }
         var convId by remember { mutableStateOf<Long?>(null) }
@@ -281,6 +282,19 @@ fun App() {
                 }
             }
             ragError?.let { Text("RAG-kilder: $it", color = Brand.Danger, fontSize = 11.sp) }
+
+            Spacer(Modifier.height(6.dp))
+            TextButton(onClick = { showModels = !showModels }) {
+                Text(if (showModels) "Skjul modelstyring" else "Modelstyring", color = Brand.Signal, fontSize = 12.sp)
+            }
+            if (showModels) {
+                ModelsPanel(
+                    baseUrl = localUrl,
+                    isBackend = localPath.contains("/api/v1/"),
+                    bearer = deviceToken.ifBlank { null },
+                    onModelsChanged = { models = it },
+                )
+            }
             Spacer(Modifier.height(8.dp))
 
             LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
@@ -482,6 +496,130 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
             dismissButton = {
                 TextButton(onClick = { showSaveDialog = false; newName = "" }) { Text("Annullér", color = Brand.TextMuted) }
             },
+        )
+    }
+}
+
+/**
+ * Model administration panel: installed models (size + delete), running
+ * models (VRAM), and pulling a new model with live progress. Works against
+ * either local Ollama directly or the backend, using the same path-derivation
+ * as loadModels() ("/api/v1/..." when going via the backend, "/api/..." when
+ * talking to Ollama directly) -- same feature as Android's Modeller screen.
+ */
+@Composable
+private fun ModelsPanel(baseUrl: String, isBackend: Boolean, bearer: String?, onModelsChanged: (List<String>) -> Unit) {
+    val scope = rememberCoroutineScope()
+    val runningPath = if (isBackend) "/api/v1/models/running" else "/api/ps"
+    val pullPath = if (isBackend) "/api/v1/models/pull" else "/api/pull"
+    val deletePath = if (isBackend) "/api/v1/models/delete" else "/api/delete"
+    val tagsPath = if (isBackend) "/api/v1/models" else "/api/tags"
+
+    var installed by remember { mutableStateOf<List<OllamaClient.ModelInfo>>(emptyList()) }
+    var running by remember { mutableStateOf<List<OllamaClient.RunningModel>>(emptyList()) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var pullName by remember { mutableStateOf("") }
+    var pulling by remember { mutableStateOf(false) }
+    var pullStatus by remember { mutableStateOf<String?>(null) }
+    var pullErr by remember { mutableStateOf<String?>(null) }
+    var confirmDelete by remember { mutableStateOf<String?>(null) }
+
+    fun refresh() {
+        scope.launch {
+            val client = OllamaClient(baseUrl = baseUrl, bearer = bearer)
+            val res = withContext(Dispatchers.IO) {
+                runCatching { client.listModelsDetailed(tagsPath) to client.listRunningModels(runningPath) }
+            }
+            res.onSuccess { (i, r) ->
+                installed = i; running = r; loadError = null
+                onModelsChanged(i.map { it.name })
+            }.onFailure { loadError = it.message }
+        }
+    }
+    LaunchedEffect(Unit) { refresh() }
+
+    Box(Modifier.clip(RoundedCornerShape(12.dp)).background(Brand.Surface).fillMaxWidth().padding(14.dp)) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Modelstyring", color = Brand.TextHigh, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { refresh() }) { Text("Genindlæs", color = Brand.Signal, fontSize = 12.sp) }
+            }
+            loadError?.let { Spacer(Modifier.height(4.dp)); Text("Fejl: $it", color = Brand.Danger, fontSize = 11.sp) }
+            Spacer(Modifier.height(10.dp))
+
+            Text("Hent ny model", color = Brand.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = pullName, onValueChange = { pullName = it },
+                    placeholder = { Text("fx llama3.2:3b", fontSize = 12.sp) },
+                    singleLine = true, enabled = !pulling,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    enabled = !pulling && pullName.isNotBlank(),
+                    onClick = {
+                        val name = pullName.trim()
+                        pulling = true; pullErr = null; pullStatus = "Starter…"
+                        scope.launch {
+                            val client = OllamaClient(baseUrl = baseUrl, bearer = bearer)
+                            val err = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    client.pullModel(name, pullPath) { status, completed, total ->
+                                        pullStatus = if (total > 0) {
+                                            "$status (${completed * 100 / total}% — ${completed / 1_000_000}MB/${total / 1_000_000}MB)"
+                                        } else status
+                                    }
+                                }.exceptionOrNull()
+                            }
+                            pulling = false
+                            if (err != null) { pullErr = err.message; pullStatus = null }
+                            else { pullStatus = "Færdig: $name"; pullName = ""; refresh() }
+                        }
+                    },
+                ) { Text(if (pulling) "Henter…" else "Hent") }
+            }
+            pullStatus?.let { Text(it, color = Brand.Signal, fontSize = 11.sp) }
+            pullErr?.let { Text("Fejl: $it", color = Brand.Danger, fontSize = 11.sp) }
+
+            Spacer(Modifier.height(10.dp))
+            Text("Kører nu", color = Brand.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            if (running.isEmpty()) {
+                Text("Ingen modeller i hukommelsen", color = Brand.TextMuted, fontSize = 12.sp)
+            } else {
+                running.forEach { m ->
+                    Text("${m.name} — ${m.sizeVramBytes / 1_000_000_000.0} GB VRAM", color = Brand.TextHigh, fontSize = 12.sp)
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+            Text("Installeret", color = Brand.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            installed.forEach { m ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("${m.name} — ${m.sizeBytes / 1_000_000_000.0} GB", color = Brand.TextHigh, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { confirmDelete = m.name }) { Text("Slet", color = Brand.Danger, fontSize = 11.sp) }
+                }
+            }
+        }
+    }
+
+    confirmDelete?.let { name ->
+        AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            title = { Text("Slet $name?") },
+            text = { Text("Kan ikke fortrydes — modellen skal hentes igen for at bruges.", fontSize = 13.sp) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = null
+                    scope.launch {
+                        val client = OllamaClient(baseUrl = baseUrl, bearer = bearer)
+                        val err = withContext(Dispatchers.IO) { runCatching { client.deleteModel(name, deletePath) }.exceptionOrNull() }
+                        if (err == null) refresh() else loadError = err.message
+                    }
+                }) { Text("Slet", color = Brand.Danger) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Annullér", color = Brand.TextMuted) } },
         )
     }
 }

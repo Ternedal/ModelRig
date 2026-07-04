@@ -30,6 +30,29 @@ private data class TagModel(val name: String = "")
 @Serializable
 private data class TagsResponse(val models: List<TagModel> = emptyList())
 
+@Serializable
+private data class DetailedTagModel(val name: String = "", val size: Long = 0)
+
+@Serializable
+private data class DetailedTagsResponse(val models: List<DetailedTagModel> = emptyList())
+
+@Serializable
+private data class RunningModelInfo(val name: String = "", val size_vram: Long = 0, val expires_at: String = "")
+
+@Serializable
+private data class RunningModelsResponse(val models: List<RunningModelInfo> = emptyList())
+
+@Serializable
+private data class PullRequest(val model: String)
+
+@Serializable
+private data class PullProgressLine(
+    val status: String = "",
+    val total: Long = 0,
+    val completed: Long = 0,
+    val error: String = "",
+)
+
 class OllamaException(message: String) : RuntimeException(message)
 
 /**
@@ -130,5 +153,86 @@ class OllamaClient(
         }
         return json.decodeFromString(TagsResponse.serializer(), resp.body())
             .models.map { it.name }.filter { it.isNotEmpty() }
+    }
+
+    data class ModelInfo(val name: String, val sizeBytes: Long)
+    data class RunningModel(val name: String, val sizeVramBytes: Long, val expiresAt: String)
+
+    /** Installed models with size (vs. listModels()'s plain names for the chat picker). */
+    fun listModelsDetailed(modelsPath: String = "/api/tags"): List<ModelInfo> {
+        val builder = HttpRequest.newBuilder()
+            .uri(URI.create(baseUrl.trimEnd('/') + modelsPath))
+            .timeout(Duration.ofSeconds(10))
+            .GET()
+        bearer?.let { builder.header("Authorization", "Bearer $it") }
+        val resp = try {
+            http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+        } catch (e: Exception) {
+            throw OllamaException("cannot reach $baseUrl: ${e.message}")
+        }
+        if (resp.statusCode() !in 200..299) throw OllamaException("models failed (${resp.statusCode()})")
+        return json.decodeFromString(DetailedTagsResponse.serializer(), resp.body())
+            .models.filter { it.name.isNotEmpty() }.map { ModelInfo(it.name, it.size) }
+    }
+
+    /** Models currently loaded in memory (Ollama's /api/ps, direct or via backend), with VRAM usage. */
+    fun listRunningModels(psPath: String = "/api/ps"): List<RunningModel> {
+        val builder = HttpRequest.newBuilder()
+            .uri(URI.create(baseUrl.trimEnd('/') + psPath))
+            .timeout(Duration.ofSeconds(10))
+            .GET()
+        bearer?.let { builder.header("Authorization", "Bearer $it") }
+        val resp = try {
+            http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+        } catch (e: Exception) {
+            throw OllamaException("cannot reach $baseUrl: ${e.message}")
+        }
+        if (resp.statusCode() !in 200..299) throw OllamaException("running models failed (${resp.statusCode()})")
+        return json.decodeFromString(RunningModelsResponse.serializer(), resp.body())
+            .models.filter { it.name.isNotEmpty() }.map { RunningModel(it.name, it.size_vram, it.expires_at) }
+    }
+
+    /**
+     * Pulls (downloads) a model, streaming Ollama's NDJSON progress lines back
+     * via [onProgress] (status text, bytes completed, bytes total). Can take
+     * minutes for a large model.
+     */
+    fun pullModel(model: String, pullPath: String = "/api/pull", onProgress: (String, Long, Long) -> Unit) {
+        val payload = json.encodeToString(PullRequest.serializer(), PullRequest(model))
+        val builder = HttpRequest.newBuilder()
+            .uri(URI.create(baseUrl.trimEnd('/') + pullPath))
+            .timeout(Duration.ofMinutes(30))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(payload))
+        bearer?.let { builder.header("Authorization", "Bearer $it") }
+        val resp = try {
+            http.send(builder.build(), HttpResponse.BodyHandlers.ofLines())
+        } catch (e: Exception) {
+            throw OllamaException("cannot reach $baseUrl: ${e.message}")
+        }
+        if (resp.statusCode() !in 200..299) throw OllamaException("pull failed (${resp.statusCode()})")
+        resp.body().forEach { line ->
+            if (line.isBlank()) return@forEach
+            val p = runCatching { json.decodeFromString(PullProgressLine.serializer(), line) }.getOrNull() ?: return@forEach
+            if (p.error.isNotEmpty()) throw OllamaException("pull error: ${p.error}")
+            onProgress(p.status, p.completed, p.total)
+        }
+    }
+
+    /** Deletes an installed model. Irreversible on the Ollama/rig side. */
+    fun deleteModel(model: String, deletePath: String = "/api/delete") {
+        val payload = json.encodeToString(PullRequest.serializer(), PullRequest(model))
+        val builder = HttpRequest.newBuilder()
+            .uri(URI.create(baseUrl.trimEnd('/') + deletePath))
+            .timeout(Duration.ofSeconds(15))
+            .header("Content-Type", "application/json")
+            .method("DELETE", HttpRequest.BodyPublishers.ofString(payload))
+        bearer?.let { builder.header("Authorization", "Bearer $it") }
+        val resp = try {
+            http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+        } catch (e: Exception) {
+            throw OllamaException("cannot reach $baseUrl: ${e.message}")
+        }
+        if (resp.statusCode() !in 200..299) throw OllamaException("delete failed (${resp.statusCode()}): ${resp.body()}")
     }
 }
