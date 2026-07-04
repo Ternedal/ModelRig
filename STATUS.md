@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.15.3** — "Android app icon (brand M-graph)". Autonomous session, **2026-07-02/03**.
+Version **0.15.4** — "Android app icon refined to the real mark". Autonomous session, **2026-07-02/03**.
 
 ## Read this first
 This repo was rebuilt from architecture after a sandbox reset wiped the earlier
@@ -14,6 +14,13 @@ compiler, no Gradle, no Android SDK**. So:
 - backend + worker were genuinely compiled/run/tested here.
 - desktop + android are **complete source you build locally** — written to
   compile, not compiled here. Treat first local build as the real test.
+
+## What's new in 0.15.4
+- **Icon refined to match the real brand mark.** The 0.15.3 icon was a simplified
+  M. Looked closely at the designer's actual symbol and reproduced it faithfully:
+  an M-truss with a central sapphire **hub**, a **stem** down to a **champagne**
+  node at bottom-centre, and a **champagne** node top-left (sapphire elsewhere).
+  Still a geometric interpretation, not a pixel-trace of the source art.
 
 ## What's new in 0.15.3
 - **Real app icon.** The app had no `android:icon`, so it showed the default
