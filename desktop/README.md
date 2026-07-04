@@ -92,5 +92,14 @@ Compose Multiplatform `1.7.0`. **Confirmed working together** (compiles clean,
 > removed after verification. Settings (URLs/keys/models) still in-memory;
 > only conversations persist. Latest conversation auto-resumes on startup; no
 > conversation browser (list/switch/delete) yet.
-- RAG mode (Android has it since 0.17.0; desktop doesn't yet).
+> RAG mode: done (2026-07-04) — `net/RagClient.kt`, separate from
+> ChatRouter (RAG only makes sense against the backend+worker). Same
+> single-shot-per-question simplification as Android. Runtime-verified
+> against a fake local HTTP server (NDJSON parsing, auth header, source
+> filter all confirmed) — test removed after verification.
+
+**Desktop is now at feature parity with Android's core chat capabilities**
+(brand, Danish UI, system prompts, markdown, persistence, RAG). Remaining
+gap: a conversation browser UI (list/switch/delete) — not in original scope,
+natural next step if needed.
 - Show a per-message source badge history and token/sec.

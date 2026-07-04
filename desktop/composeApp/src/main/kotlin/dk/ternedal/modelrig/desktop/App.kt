@@ -41,6 +41,7 @@ import dk.ternedal.modelrig.desktop.net.ChatMessage
 import dk.ternedal.modelrig.desktop.net.ChatResult
 import dk.ternedal.modelrig.desktop.net.ChatRouter
 import dk.ternedal.modelrig.desktop.net.OllamaClient
+import dk.ternedal.modelrig.desktop.net.RagClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -50,6 +51,7 @@ private data class UiMessage(
     val text: String,
     val source: ChatResult.Source? = null,
     val streaming: Boolean = false,
+    val ragSources: List<String> = emptyList(),
 )
 
 @Composable
@@ -73,6 +75,11 @@ fun App() {
         var models by remember { mutableStateOf(listOf<String>()) }
         var modelMenuOpen by remember { mutableStateOf(false) }
         var modelError by remember { mutableStateOf<String?>(null) }
+        var ragMode by remember { mutableStateOf(false) }
+        var ragSources by remember { mutableStateOf(listOf<String>()) }
+        var ragSourceFilter by remember { mutableStateOf<String?>(null) }
+        var ragSourceMenuOpen by remember { mutableStateOf(false) }
+        var ragError by remember { mutableStateOf<String?>(null) }
         val scope = rememberCoroutineScope()
         val db = remember { DesktopChatDb() }
         var convId by remember { mutableStateOf<Long?>(null) }
@@ -102,6 +109,15 @@ fun App() {
             }
         }
 
+        fun loadRagSources() {
+            scope.launch {
+                val res = withContext(Dispatchers.IO) {
+                    runCatching { RagClient(localUrl, deviceToken.ifBlank { null }).listSources() }
+                }
+                res.onSuccess { ragSources = it; ragError = null }.onFailure { ragError = it.message }
+            }
+        }
+
         fun send() {
             val text = input.trim()
             if (text.isEmpty() || busy) return
@@ -112,7 +128,8 @@ fun App() {
             // necessarily whichever one ends up answering after a fallback —
             // a known simplification since the router picks the actual source
             // only at call time. Fine for the common case; a mid-call switch
-            // is the rare edge case (rig went down mid-session).
+            // is the rare edge case (rig went down mid-session). Irrelevant in
+            // RAG mode -- the worker sets its own system prompt.
             val sys = (if (preferLocal) localSystem else cloudSystem).trim()
             val history = buildList {
                 if (sys.isNotEmpty()) add(ChatMessage("system", sys))
@@ -121,6 +138,8 @@ fun App() {
                         .map { ChatMessage(it.role, it.text) },
                 )
             }
+            val useRag = ragMode
+            val srcFilter = ragSourceFilter
             val assistantIdx = messages.size
             messages.add(UiMessage("assistant", "", null, streaming = true))
             scope.launch {
@@ -129,7 +148,7 @@ fun App() {
                 // (preferLocal), same known simplification as the system prompt.
                 val cid = withContext(Dispatchers.IO) {
                     val id = convId ?: db.newConversation(
-                        source = if (preferLocal) "rig" else "cloud",
+                        source = if (useRag) "rag" else if (preferLocal) "rig" else "cloud",
                         model = if (preferLocal) localModel else cloudModel,
                         title = text,
                     )
@@ -140,15 +159,34 @@ fun App() {
 
                 val err = withContext(Dispatchers.IO) {
                     runCatching {
-                        val local = OllamaClient(baseUrl = localUrl, chatPath = localPath, bearer = deviceToken.ifBlank { null })
-                        val cloud = if (cloudKey.isNotBlank())
-                            OllamaClient(baseUrl = "https://ollama.com", chatPath = "/api/chat", bearer = cloudKey)
-                        else null
-                        ChatRouter(local, localModel, cloud, cloudModel, preferLocal).chatStream(history) { src, delta ->
-                            scope.launch {
-                                lastSource = src
-                                val cur = messages[assistantIdx]
-                                messages[assistantIdx] = cur.copy(text = cur.text + delta, source = src)
+                        if (useRag) {
+                            // RAG only makes sense against the backend+worker --
+                            // never local Ollama directly, never cloud.
+                            val onSources: (List<String>) -> Unit = { srcs ->
+                                scope.launch {
+                                    val cur = messages[assistantIdx]
+                                    messages[assistantIdx] = cur.copy(ragSources = srcs)
+                                }
+                            }
+                            RagClient(localUrl, deviceToken.ifBlank { null })
+                                .chatStream(text, localModel, srcFilter, onSources = onSources) { delta ->
+                                    scope.launch {
+                                        lastSource = ChatResult.Source.LOCAL
+                                        val cur = messages[assistantIdx]
+                                        messages[assistantIdx] = cur.copy(text = cur.text + delta, source = ChatResult.Source.LOCAL)
+                                    }
+                                }
+                        } else {
+                            val local = OllamaClient(baseUrl = localUrl, chatPath = localPath, bearer = deviceToken.ifBlank { null })
+                            val cloud = if (cloudKey.isNotBlank())
+                                OllamaClient(baseUrl = "https://ollama.com", chatPath = "/api/chat", bearer = cloudKey)
+                            else null
+                            ChatRouter(local, localModel, cloud, cloudModel, preferLocal).chatStream(history) { src, delta ->
+                                scope.launch {
+                                    lastSource = src
+                                    val cur = messages[assistantIdx]
+                                    messages[assistantIdx] = cur.copy(text = cur.text + delta, source = src)
+                                }
                             }
                         }
                     }.exceptionOrNull()
@@ -207,6 +245,37 @@ fun App() {
                 TextButton(onClick = { loadModels() }) { Text("Genindlæs modeller", color = Brand.Signal) }
             }
             modelError?.let { Text("Modeller: $it", color = Brand.Danger, fontSize = 11.sp) }
+            Spacer(Modifier.height(6.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(
+                    checked = ragMode,
+                    onCheckedChange = { on -> ragMode = on; if (on) loadRagSources() },
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("RAG-tilstand (mod rig'en, ikke lokal Ollama direkte/cloud)", color = Brand.TextMuted, fontSize = 12.sp)
+                if (ragMode) {
+                    Spacer(Modifier.width(10.dp))
+                    Box {
+                        OutlinedButton(onClick = { ragSourceMenuOpen = true }) {
+                            Text(ragSourceFilter?.let { "Kilde: $it" } ?: "Alle kilder", color = Brand.TextHigh)
+                        }
+                        DropdownMenu(expanded = ragSourceMenuOpen, onDismissRequest = { ragSourceMenuOpen = false }) {
+                            DropdownMenuItem(text = { Text("Alle kilder") }, onClick = { ragSourceFilter = null; ragSourceMenuOpen = false })
+                            if (ragSources.isNotEmpty()) {
+                                ragSources.forEach { s ->
+                                    DropdownMenuItem(text = { Text(s) }, onClick = { ragSourceFilter = s; ragSourceMenuOpen = false })
+                                }
+                            } else {
+                                DropdownMenuItem(text = { Text("(ingen kilder ingesteret endnu)") }, onClick = { ragSourceMenuOpen = false })
+                            }
+                        }
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    TextButton(onClick = { loadRagSources() }) { Text("Genindlæs kilder", color = Brand.Signal, fontSize = 12.sp) }
+                }
+            }
+            ragError?.let { Text("RAG-kilder: $it", color = Brand.Danger, fontSize = 11.sp) }
             Spacer(Modifier.height(8.dp))
 
             LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
@@ -267,11 +336,27 @@ private fun MessageBubble(m: UiMessage) {
         Text(badge, color = Brand.TextMuted, fontSize = 11.sp)
         Spacer(Modifier.height(2.dp))
         Box(Modifier.clip(RoundedCornerShape(10.dp)).background(bg).fillMaxWidth().padding(12.dp)) {
-            when {
-                isUser -> Text(m.text, color = Brand.TextHigh, fontSize = 14.sp)
-                m.streaming && m.text.isEmpty() -> Text("…", color = Brand.TextMuted, fontSize = 14.sp)
-                m.streaming -> Text(m.text + "▍", color = Brand.TextHigh, fontSize = 14.sp)
-                else -> MarkdownText(m.text, color = Brand.TextHigh)
+            Column {
+                if (!isUser && m.ragSources.isNotEmpty()) {
+                    Row(Modifier.padding(bottom = 6.dp)) {
+                        m.ragSources.take(4).forEach { s ->
+                            Box(
+                                Modifier.clip(RoundedCornerShape(999.dp))
+                                    .background(Brand.SurfaceHigh)
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                            ) {
+                                Text(s, fontSize = 10.sp, color = Brand.TextMuted)
+                            }
+                            Spacer(Modifier.width(4.dp))
+                        }
+                    }
+                }
+                when {
+                    isUser -> Text(m.text, color = Brand.TextHigh, fontSize = 14.sp)
+                    m.streaming && m.text.isEmpty() -> Text("…", color = Brand.TextMuted, fontSize = 14.sp)
+                    m.streaming -> Text(m.text + "▍", color = Brand.TextHigh, fontSize = 14.sp)
+                    else -> MarkdownText(m.text, color = Brand.TextHigh)
+                }
             }
         }
     }

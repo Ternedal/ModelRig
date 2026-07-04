@@ -156,7 +156,13 @@ Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
    skema som Android), runtime-verificeret med en midlertidig smoke-test mod
    rigtig SQLite (ikke kun compile-verificeret). Kun stille genindlæsning af
    seneste samtale — ingen samtale-browser endnu.
-   **Tilbage** (næste desktop-session): RAG, samtale-browser.
+   Leveret i 0.19.4: **RAG-tilstand** (`net/RagClient.kt`), samme mønster og
+   forenkling som Android (enkelt-skud pr. spørgsmål), runtime-verificeret mod
+   en rigtig lokal HTTP-server (samme metode som SQLite-testen).
+   **Paritetslisten er nu fuldført** (brand, dansk UI, system-prompts, markdown,
+   persistens, RAG). Tilbage som separat forbedring: samtale-browser
+   (liste/skift/slet, som Android har) — ikke i original scope, naturligt
+   næste skridt hvis det efterspørges.
 6. **CI (GitHub Actions).** Tests + APK-build ved tag-push, assets uploades
    automatisk til releasen. Dette er en begrundet cloud-undtagelse: det fjerner
    sandbox-toolchainen som flaskepunkt og gør builds reproducerbare. Gratis-tier
