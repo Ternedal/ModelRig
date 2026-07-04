@@ -11,7 +11,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * (streaming deltas are not persisted per-token — an in-flight reply is lost on a
  * crash; accepted V1 tradeoff).
  */
-class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 1) {
+class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 2) {
 
     data class ConvMeta(
         val id: Long,
@@ -19,6 +19,13 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
         val source: String,
         val model: String,
         val updatedAt: Long,
+    )
+
+    data class PresetMeta(
+        val id: Long,
+        val source: String,
+        val name: String,
+        val prompt: String,
     )
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -40,10 +47,12 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
                  created_at INTEGER NOT NULL)""",
         )
         db.execSQL("CREATE INDEX idx_message_conv ON message(conv_id)")
+        db.execSQL(PRESET_TABLE_SQL)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldV: Int, newV: Int) {
-        // v1 -> future: add ALTER TABLE migrations here, never drop data.
+        // v1 -> v2: added the preset table. Never drops existing data.
+        if (oldV < 2) db.execSQL(PRESET_TABLE_SQL)
     }
 
     override fun onOpen(db: SQLiteDatabase) {
@@ -113,5 +122,41 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
 
     fun deleteConversation(convId: Long) {
         writableDatabase.delete("conversation", "id=?", arrayOf(convId.toString()))
+    }
+
+    // ---- presets (saved system instructions per source, for quick-switch) ----
+
+    fun savePreset(source: String, name: String, prompt: String): Long {
+        return writableDatabase.insert("preset", null, ContentValues().apply {
+            put("source", source)
+            put("name", name.take(40))
+            put("prompt", prompt)
+            put("created_at", System.currentTimeMillis())
+        })
+    }
+
+    fun listPresets(source: String): List<PresetMeta> {
+        val out = mutableListOf<PresetMeta>()
+        readableDatabase.rawQuery(
+            "SELECT id, source, name, prompt FROM preset WHERE source=? ORDER BY created_at DESC",
+            arrayOf(source),
+        ).use { c ->
+            while (c.moveToNext()) out.add(PresetMeta(c.getLong(0), c.getString(1), c.getString(2), c.getString(3)))
+        }
+        return out
+    }
+
+    fun deletePreset(id: Long) {
+        writableDatabase.delete("preset", "id=?", arrayOf(id.toString()))
+    }
+
+    companion object {
+        private const val PRESET_TABLE_SQL =
+            """CREATE TABLE IF NOT EXISTS preset(
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 source TEXT NOT NULL,
+                 name TEXT NOT NULL,
+                 prompt TEXT NOT NULL,
+                 created_at INTEGER NOT NULL)"""
     }
 }

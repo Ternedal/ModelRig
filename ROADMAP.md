@@ -127,8 +127,11 @@ Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
    backend → worker-ingest; liste/slet kilder; stats-skærm. Formater: `.txt`/`.md`
    først; PDF kræver ekstraktion i worker (ny dependency, fx pypdf — begrundes når
    vi når dertil, PDF-parsing er notorisk rodet, så scope holdes smalt).
-2. **Presets/personaer.** Gemte system-prompts pr. kilde med hurtigskift i chatten
-   (SQLite-tabel; UI-chips).
+2. **Presets/personaer.** ✅ **Leveret i `v0.19.8`** (Android). Gemte
+   system-prompts pr. kilde med hurtigskift i chatten (SQLite-tabel, chips på
+   setup-skærmen). Kørt tidligt, uafhængigt af V1-tjeklisten — samme mønster
+   som desktop-løftet og CI. Ikke on-device-testet endnu. Desktop mangler
+   stadig samme feature (naturlig fortsættelse).
 3. **Model-administration.** Pull/slet/kørende modeller via backend-proxy mod
    Ollamas API med streaming download-progress og diskplads-visning. (Endpoints er
    standard Ollama-API; verificeres mod Anders' version ved implementering.)

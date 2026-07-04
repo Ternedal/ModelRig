@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -50,7 +51,7 @@ fun AppUi() {
 
         Surface(color = Graphite, modifier = Modifier.fillMaxSize()) {
             when (screen) {
-                Screen.Setup -> SetupScreen(store, onDone = { screen = Screen.Chat })
+                Screen.Setup -> SetupScreen(store, db, onDone = { screen = Screen.Chat })
                 Screen.Chat -> ChatScreen(
                     store, db, openConvId,
                     onOpenSettings = { screen = Screen.Setup },
@@ -70,7 +71,7 @@ fun AppUi() {
 
 // ---- setup: cloud and/or rig ----
 @Composable
-private fun SetupScreen(store: TokenStore, onDone: () -> Unit) {
+private fun SetupScreen(store: TokenStore, db: ChatDb, onDone: () -> Unit) {
     var refresh by remember { mutableStateOf(0) }
     val canChat = remember(refresh) { store.hasRig || store.hasCloud }
 
@@ -88,15 +89,15 @@ private fun SetupScreen(store: TokenStore, onDone: () -> Unit) {
         }
         Text("Vælg mindst én kilde", fontSize = 14.sp, color = TextMuted)
         Spacer(Modifier.height(16.dp))
-        CloudCard(store) { refresh++; onDone() }
+        CloudCard(store, db) { refresh++; onDone() }
         Spacer(Modifier.height(16.dp))
-        RigCard(store) { refresh++; onDone() }
+        RigCard(store, db) { refresh++; onDone() }
         Spacer(Modifier.height(24.dp))
     }
 }
 
 @Composable
-private fun CloudCard(store: TokenStore, onSaved: () -> Unit) {
+private fun CloudCard(store: TokenStore, db: ChatDb, onSaved: () -> Unit) {
     var key by remember { mutableStateOf("") }
     var model by remember { mutableStateOf(store.cloudModel) }
     var system by remember { mutableStateOf(store.cloudSystem) }
@@ -130,6 +131,7 @@ private fun CloudCard(store: TokenStore, onSaved: () -> Unit) {
             )
             Text("Rolle/baggrund modellen altid får. Fx: Du er en skarp dansk backend-udvikler. Svar kort.",
                 fontSize = 11.sp, color = TextMuted, lineHeight = 15.sp)
+            PresetRow(db, "cloud", system) { system = it; store.cloudSystem = it }
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Button(
@@ -154,7 +156,7 @@ private fun CloudCard(store: TokenStore, onSaved: () -> Unit) {
 }
 
 @Composable
-private fun RigCard(store: TokenStore, onConnected: () -> Unit) {
+private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
     var baseUrl by remember { mutableStateOf(store.baseUrl ?: "http://192.168.1.10:8080") }
     var code by remember { mutableStateOf("") }
     var deviceName by remember { mutableStateOf(android.os.Build.MODEL ?: "android") }
@@ -181,6 +183,7 @@ private fun RigCard(store: TokenStore, onConnected: () -> Unit) {
                 label = { Text("System-instruktion (valgfri)", fontSize = 12.sp) },
                 minLines = 2, maxLines = 5, modifier = Modifier.fillMaxWidth(),
             )
+            PresetRow(db, "rig", system) { system = it; store.rigSystem = it }
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Button(
@@ -205,7 +208,87 @@ private fun RigCard(store: TokenStore, onConnected: () -> Unit) {
     }
 }
 
-// ---- chat ----
+/**
+ * Saved system-instruction presets for one source ("rig" or "cloud"), shown as
+ * chips under the system-instruction field. Tapping a chip applies its prompt;
+ * "+ Gem" saves the field's CURRENT text as a new named preset. Small "✕"
+ * deletes. Presets are scoped per source (a rig persona doesn't clutter cloud).
+ */
+@Composable
+private fun PresetRow(db: ChatDb, source: String, currentPrompt: String, onApply: (String) -> Unit) {
+    var presets by remember { mutableStateOf(db.listPresets(source)) }
+    var showSaveDialog by remember { mutableStateOf(false) }
+    var newName by remember { mutableStateOf("") }
+
+    Spacer(Modifier.height(8.dp))
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        presets.forEach { p ->
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = GraphiteSurfaceHigh,
+                modifier = Modifier.padding(end = 6.dp),
+            ) {
+                Row(
+                    Modifier.clickable { onApply(p.prompt) }.padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(p.name, color = TextHigh, fontSize = 12.sp)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "✕", color = TextMuted, fontSize = 11.sp,
+                        modifier = Modifier.clickable {
+                            db.deletePreset(p.id)
+                            presets = db.listPresets(source)
+                        },
+                    )
+                }
+            }
+        }
+        Surface(
+            shape = RoundedCornerShape(999.dp),
+            color = Graphite,
+            modifier = Modifier
+                .clickable(enabled = currentPrompt.isNotBlank()) { showSaveDialog = true }
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+        ) {
+            Text(
+                "+ Gem som preset",
+                color = if (currentPrompt.isNotBlank()) Signal else TextMuted,
+                fontSize = 12.sp,
+            )
+        }
+    }
+
+    if (showSaveDialog) {
+        AlertDialog(
+            onDismissRequest = { showSaveDialog = false; newName = "" },
+            title = { Text("Gem preset") },
+            text = {
+                OutlinedTextField(
+                    value = newName, onValueChange = { newName = it },
+                    label = { Text("Navn (fx \"Kort & teknisk\")", fontSize = 12.sp) },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = newName.isNotBlank(),
+                    onClick = {
+                        db.savePreset(source, newName.trim(), currentPrompt)
+                        presets = db.listPresets(source)
+                        newName = ""; showSaveDialog = false
+                    },
+                ) { Text("Gem", color = Signal) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSaveDialog = false; newName = "" }) { Text("Annullér", color = TextMuted) }
+            },
+        )
+    }
+}
 private data class Msg(
     val role: String,
     val text: String,

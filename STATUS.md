@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.19.7** — "CI-fix: desktop-jar artifact path". Follows 0.19.6 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.19.8** — "presets/personaer (Android)". Follows 0.19.7 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -39,6 +39,25 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.19.8  (roadmap V2 pt.2 — presets/personaer, kørt tidligt)
+- **Gemte system-prompt-presets pr. kilde** (Android): ny `preset`-tabel i
+  `ChatDb.kt` (skema-version 1→2, med korrekt migration — eksisterende
+  samtaler/beskeder rører den ikke). Chips under system-instruktion-feltet i
+  både Rig- og Cloud-kortet på setup-skærmen: tryk for at anvende, "✕" for at
+  slette, "+ Gem som preset" for at navngive og gemme den aktuelle tekst.
+  Presets er scoped pr. kilde (en rig-persona roder ikke i cloud-listen).
+- **Verificeret**: appen kompilerer og bygger til en signeret APK (samme
+  nøgle som 0.16.x — installerer oven på uden afinstallation). SQL-skemaet og
+  migrationsvejen (v1→v2, inkl. at gamle samtaler/beskeder overlever) er
+  kørt mod ægte SQLite via et Python-script med de nøjagtige SQL-strenge fra
+  `ChatDb.kt` — men det tester kun selve SQL'en, ikke Androids
+  ContentValues/Cursor-lag omkring den (kræver Robolectric eller en enhed,
+  ingen af delene er til rådighed her).
+- **Ikke on-device-testet endnu**: dette er V2-arbejde kørt tidligt (ligesom
+  desktop-løftet og CI), uafhængigt af den ventende V1-tjekliste. Tilføj det
+  til en fremtidig test-runde.
+- Ingen backend-kodeændring udover versionsbump.
 
 ## What's new in 0.19.7  (CI-fix #2: desktop-jar artifact path — found via artifacts API, not step status)
 - v0.19.6 ran green on every job, but only delivered 1 of 4 expected release
