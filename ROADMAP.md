@@ -163,10 +163,17 @@ Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
    persistens, RAG). Tilbage som separat forbedring: samtale-browser
    (liste/skift/slet, som Android har) — ikke i original scope, naturligt
    næste skridt hvis det efterspørges.
-6. **CI (GitHub Actions).** Tests + APK-build ved tag-push, assets uploades
-   automatisk til releasen. Dette er en begrundet cloud-undtagelse: det fjerner
-   sandbox-toolchainen som flaskepunkt og gør builds reproducerbare. Gratis-tier
-   rækker rigeligt til dette omfang (tjek aktuel kvote ved opsætning).
+6. **CI (GitHub Actions).** ✅ **Leveret** (`.github/workflows/build-and-release.yml`,
+   v0.19.5). Ved tag-push (`v*`): kører hele server-suiten (90 assertions),
+   bygger Android-debug-APK, og bygger **genuint cross-platform desktop-jars**
+   (Windows/macOS/Linux-runnere hver især — løser det jeg selv flaggede i
+   0.19.1: en Linux-bygget jar kan ikke køre på Windows, men en
+   **Windows-runner** kan bygge en ægte Windows-jar). Til sidst pakkes
+   kilde-zip'en (samme excludes som hele sessionen) og alt uploades automatisk
+   til releasen via `softprops/action-gh-release`. Fjerner sandbox-toolchainen
+   som flaskepunkt — reproducerbare builds fremover, ikke afhængige af at jeg
+   geninstallerer JDK/Gradle/Android SDK hver session. Verificeret ved reelt at
+   tagge og observere kørslen (se release-noten for v0.19.5).
 7. *Evt.* Robolectric-tests for kritisk Android-logik (trimning, persistens) —
    ny dependency, tages kun hvis fejl i praksis retfærdiggør den.
 

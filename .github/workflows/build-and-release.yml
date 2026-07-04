@@ -1,0 +1,158 @@
+name: build-and-release
+
+# Triggered by pushing a tag matching v* (this is exactly what every release in
+# this project already does -- creating a GitHub Release via the API also
+# creates the underlying tag, which fires this same trigger).
+#
+# Removes the sandbox-toolchain dependency this project has had all along:
+# server tests, the Android APK, and now genuinely cross-platform desktop
+# jars (built natively on Windows/macOS/Linux runners -- something the
+# Linux-only build sandbox could never produce) all happen here instead.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  server-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install worker deps
+        run: pip install fastapi uvicorn httpx --break-system-packages
+
+      - name: Build backend
+        run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
+
+      - name: Backend smoke
+        run: MODELRIG_BIN=/tmp/modelrig-server python3 tests/backend_smoke.py
+
+      - name: Backend v1
+        run: MODELRIG_BIN=/tmp/modelrig-server python3 tests/backend_v1.py
+
+      - name: E2E
+        run: MODELRIG_BIN=/tmp/modelrig-server python3 tests/e2e.py
+
+      - name: Worker unit
+        run: PYTHONPATH=worker python3 tests/worker_unit.py
+
+      - name: Worker RAG
+        run: PYTHONPATH=worker python3 tests/worker_rag.py
+
+  android-build:
+    needs: server-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install platform + build-tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
+          ./gradlew :app:assembleDebug --no-daemon --console=plain
+
+      - name: Name APK with the release tag
+        working-directory: android
+        run: cp app/build/outputs/apk/debug/app-debug.apk "../modelrig-${{ github.ref_name }}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: modelrig-${{ github.ref_name }}.apk
+          retention-days: 14
+
+  desktop-build:
+    needs: server-tests
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Build + package runnable jar (native to this OS)
+        working-directory: desktop
+        shell: bash
+        run: ./gradlew :composeApp:packageUberJarForCurrentOS --no-daemon --console=plain
+
+      - name: Locate the packaged jar
+        id: findjar
+        working-directory: desktop
+        shell: bash
+        run: |
+          jar=$(find composeApp/build/compose/jars -name "*.jar" | head -1)
+          echo "Found: $jar"
+          echo "path=$jar" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-jar-${{ matrix.os }}
+          path: ${{ steps.findjar.outputs.path }}
+          retention-days: 14
+
+  release:
+    needs: [android-build, desktop-build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build source zip (same exclude pattern used throughout this project)
+        run: |
+          cd ..
+          zip -r "modelrig-${{ github.ref_name }}.zip" modelrig \
+            -x '*/__pycache__/*' -x '*.pyc' -x '*/.git/*' \
+            -x '*/build/*' -x '*/.gradle/*' -x '*/local.properties' -x '*.apk'
+          mv "modelrig-${{ github.ref_name }}.zip" "$GITHUB_WORKSPACE/"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect all release assets into one flat folder
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f \( -name "*.apk" -o -name "*.jar" \) -exec cp {} release-assets/ \;
+          cp "modelrig-${{ github.ref_name }}.zip" release-assets/
+          ls -la release-assets
+
+      - name: Publish / update the GitHub Release with all assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          # Only sets these if the release doesn't already exist yet (this
+          # project usually creates the release via the API first, then the
+          # tag push fires this workflow -- action-gh-release updates the
+          # existing release with assets rather than overwriting its notes).
+          draft: false
+          prerelease: false
