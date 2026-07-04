@@ -20,6 +20,9 @@ Tick through this on the phone, then `v1.0.0` gets tagged:
 - [ ] **Cloud model dropdown** (0.15.x): "Genindlæs modeller" actually populates cloud models on Anders' Ollama Cloud account.
 - [ ] **RAG mode** (0.17.0): toggle works, source-filter dropdown lists ingested sources, replies show source chips.
 - [ ] **Error UX + retry** (0.18.0): killing the rig mid-chat shows a readable Danish error with a working "↻ Prøv igen" button.
+- [ ] **Presets** (0.19.8): save the current system-instruction as a named preset, tap it to reapply, delete it — on both Rig and Cloud cards.
+- [ ] **Model management** (0.20.0): the "Modeller" screen (⋮ menu) lists installed models with size, shows running models with VRAM, pulls a new model with live progress, deletes one with confirmation.
+- [ ] **RAG-ingest** (0.20.2, newest and least-tested — new file-picker API surface): from the RAG source dropdown, "+ Tilføj dokument" opens Android's file picker, picks a .txt/.md file, and it appears in the source list after ingesting.
 
 If everything above is green: say so, and `v1.0.0` ships immediately (docs +
 tag, no new code expected). If something's off: the exact symptom + which item,
