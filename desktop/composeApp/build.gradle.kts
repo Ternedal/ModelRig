@@ -29,9 +29,16 @@ compose.desktop {
     application {
         mainClass = "dk.ternedal.modelrig.desktop.MainKt"
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+            // Only Deb declared: this project ships desktop as OS-native UBER
+            // JARS (packageUberJarForCurrentOS in CI), never native installers.
+            // Dmg/Msi were template leftovers -- and Dmg's config-time
+            // validation rejects any 0.x version outright (verified locally),
+            // which forced the jar filenames to lie about the app version
+            // ("1.0.0" on every release). Deb accepts 0.x, so keeping just it
+            // lets packageVersion tell the truth.
+            targetFormats(TargetFormat.Deb)
             packageName = "ModelRig"
-            packageVersion = "1.0.0"
+            packageVersion = "0.20.12"
         }
     }
 }

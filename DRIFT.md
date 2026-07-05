@@ -114,3 +114,40 @@ curl http://<rig-ip>:8080/api/v1/health/deep  # rundtur til Ollama + worker (kr�
 ```
 Se `CLIENT_BUILD_AND_TEST.md` for fuld røgtest af både server og Android-app efter
 en opgradering.
+
+## 5. API-oversigt (alle bag bearer-token, medmindre andet nævnt)
+
+Tilføjet 0.20.12 — der fandtes ingen samlet oversigt før; endpoints var kun
+dokumenteret spredt i `STATUS.md`-changelogs. Autoritativ kilde er stadig
+koden (`backend/internal/httpapi/server.go`); dette er et driftsopslag.
+
+```
+GET    /healthz                      # ingen auth: oppe + version
+POST   /api/v1/pair/start            # ingen auth: start parring (udsteder kode)
+POST   /api/v1/pair/claim            # ingen auth: byt parringskode til token
+GET    /api/v1/status                # backend-status
+GET    /api/v1/health/deep           # rundtur backend -> Ollama + worker
+GET    /api/v1/devices               # parrede enheder
+DELETE /api/v1/devices/{id}          # revokér en enheds token
+POST   /api/v1/token/rotate          # rotér eget token (gammelt invalideres)
+POST   /api/v1/chat                  # streaming chat-proxy (Ollama /api/chat)
+GET    /api/v1/models                # installerede modeller (Ollama /api/tags)
+GET    /api/v1/models/running        # kørende modeller + VRAM (Ollama /api/ps)      [0.20.0]
+POST   /api/v1/models/pull           # hent model, streamer NDJSON-fremgang          [0.20.0]
+DELETE /api/v1/models/delete         # slet model (irreversibelt på rig'en)          [0.20.0]
+POST   /api/v1/rag/ingest            # ingestér tekst-dokumenter i RAG-indekset
+POST   /api/v1/rag/query             # hent matches (+ evt. syntetiseret svar)
+POST   /api/v1/rag/chat              # RAG-chat, streamer NDJSON (1. linje = kilder)
+GET    /api/v1/rag/sources           # kildeliste med chunk-antal
+DELETE /api/v1/rag/source?source=X   # fjern én kildes chunks
+GET    /api/v1/rag/stats             # kilder/chunks-totaler
+```
+
+**RAG-relevans-tærskel (0.20.11):** `POST /api/v1/rag/query` og `/rag/chat`
+tager et valgfrit `min_score`-felt (0.0–1.0, default **0.3**). Matches under
+tærsklen filtreres FØR `top_k`-afskæringen — så et spørgsmål uden reelt
+relevant indhold giver færre/nul kilder i stedet for at tvinge støj ind som
+kontekst. 0.3 er et fornuftigt udgangspunkt for `nomic-embed-text`, ikke
+empirisk tunet mod dine dokumenter — justér via feltet (ingen kodeændring)
+hvis daglig brug viser for mange/for få kilder.
+

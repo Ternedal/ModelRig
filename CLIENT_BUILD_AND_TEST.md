@@ -47,7 +47,7 @@ python tools\modelrig-cli.py rag-chat "hvad binder den for LAN?"   # streaming R
 Hvis `doctor --deep` er grøn, ved du at backend + worker + Ollama spiller sammen
 på din maskine. **Nu er klient-builds den eneste ukendte.**
 
-## 2. Byg desktop-klienten (uverificeret — forvent småjusteringer)
+## 2. Byg desktop-klienten (verificeret — bygges også af CI på Win/macOS/Linux)
 ```powershell
 cd desktop
 gradle wrapper --gradle-version 8.9      # der er ingen wrapper-jar i repoet
@@ -100,6 +100,27 @@ versioner opdaterer oven på.
    samtale, send en besked → skal vise en **læselig dansk fejlbesked** (ikke en
    rå exception-streng) og en **"↻ Prøv igen"**-knap. Tænd rig'en igen, tryk
    "Prøv igen" → svaret kommer, ingen dobbelt bruger-boble.
+9. **Presets** (0.19.8, genbygget 0.20.4 — bekræftet on-device): skriv en
+   system-instruktion i Rig- eller Cloud-kortet → tryk "+ Gem som preset" →
+   et **inline navnefelt folder ud** (ingen dialogboks) → skriv navn ("Gem"
+   skifter grå→blå) → tryk → chip vises. Tryk chippen for at genanvende,
+   "✕" for at slette.
+10. **Model-administration** (0.20.0, kræver rig): ⋮-menu → "Modeller" →
+    installerede modeller vises med størrelse, kørende med VRAM. Hent en
+    lille model (fx `llama3.2:1b`) → **levende fremgang** (status + %).
+    Slet den igen → bekræftelsesdialog → væk fra listen.
+11. **RAG-ingest fra appen** (0.20.2): RAG-tilstand til → kilde-dropdown →
+    "+ Tilføj dokument (txt/md)…" → Androids filvælger åbner → vælg en
+    .txt/.md → status i topbaren ("Ingesteret: navn (N chunks)") → kilden
+    dukker op i dropdownen. Menupunktet er deaktiveret ("Ingesterer…") mens
+    en ingest kører (0.20.9).
+12. **Samtale-oplevelse** (0.20.6): Samtaler-skærmen → skriv i søgefeltet →
+    listen filtrerer live. "✎" på en samtale → omdøb inline → navnet holder.
+    "Del" → Androids delings-ark åbner med en læselig markdown-udgave.
+13. **Multi-rig-profiler** (0.20.8): forbundet til rig → "+ Gem denne rig"
+    i Rig-kortet → navngiv (fx "Hjemme") → chip vises. Tryk chippen senere →
+    forbinder øjeblikkeligt uden ny parring (gemmer URL + token, ikke
+    engangskoden).
 
 Bemærk om markdown: mens svaret streamer vises det som plain tekst; når det er
 færdigt skifter det til renderet markdown. Det er med vilje (undgår jank og
@@ -127,13 +148,18 @@ plausible, men ikke verificeret sammen.
 | Desktop: `Dispatchers.Main` mangler | JVM-desktop uden coroutines-swing | Allerede undgået (bruger `scope.launch { }` på composition-scopet). Hvis du selv tilføjer kode, gør det samme. |
 
 ## 5. Hvad "1.0-klar" betyder
-Server-siden er der (90 assertions grønne). Ifølge `ROADMAP.md` er **desktop-
-klienten bevidst skubbet til V2** (audit + løft til Android-featuresættet) — den
-er ikke en del af V1-gaten. **V1 hænger udelukkende på Android** (punkt 3):
-verifikationslisten ovenfor (tastatur, ikon, cloud-dropdown, persistens, stop,
-RAG, retry) skal være kørt igennem og bekræftet grøn på rigtig hardware, før
-`v1.0.0` tags. Indtil da er det compile-verificeret + delvist on-device-testet —
-ærlig status, ikke en færdig 1.0.
+Server-siden er der (**108 assertions grønne** — smoke 11, v1 26, e2e 28,
+worker_unit 15, worker_rag 28). Desktop-paritetsløftet fra V2 er siden
+**leveret og løbende verificeret** (brand, dansk UI, system-prompts, markdown,
+persistens, RAG, presets, model-administration, samtale-browser) — og CI
+(`v0.19.5+`) bygger nu APK + OS-native desktop-jars automatisk på hvert
+tag-push, så afsnit 2-3 ovenfor er valgfri lokale alternativer, ikke
+nødvendige. **V1 hænger udelukkende på Android**: den fulde tjekliste (13
+punkter — de 8 originale plus presets, model-administration, RAG-ingest,
+samtale-oplevelse og multi-rig-profiler, se `STATUS.md` for den autoritative
+liste) skal være kørt igennem og bekræftet grøn på rigtig hardware, før
+`v1.0.0` tags. Præcis status pr. punkt vedligeholdes i `STATUS.md` —
+denne fil er kun opskriften.
 
 Når du har kørt igennem: sig hvad der fejlede (fejlbesked + hvilket trin), så
 retter vi det målrettet. Bekræfter alle punkter, tagger vi `v1.0.0`.

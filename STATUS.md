@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.11** — "RAG-kvalitet: relevans-tærskel + sætningsbevidst chunking". Follows 0.20.10 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.20.12** — "slut-audit: docs-frisk + jar-versionsnavne fortæller sandheden". Follows 0.20.11 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-05**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -44,6 +44,32 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.12  (slut-audit — sidste omgang oprydning, ingen ny feature)
+- **Desktop-jar-navnene fortæller nu sandheden**: alle CI-byggede jars har
+  heddet `...-1.0.0.jar` uanset faktisk version (hardkodet Compose
+  `packageVersion`). Rodårsag fundet **empirisk**, ikke antaget: Dmg-formatets
+  konfigurations-tids-validering afviser enhver 0.x-version og fældede hele
+  builden — men Dmg/Msi var template-rester der aldrig bygges (kun uber-jars).
+  Fjernet dem; Deb accepterer 0.x. Verificeret lokalt:
+  `ModelRig-linux-x64-0.20.12.jar`. **Bump-rutinen omfatter nu også
+  `desktop/composeApp/build.gradle.kts`.**
+- **`DRIFT.md` fik en API-oversigt** (fandtes ikke — endpoints var kun spredt
+  i changelogs). Skrevet fra hukommelsen først, derefter **verificeret mod
+  `server.go`s faktiske route-registrering — hvilket fangede 5 manglende
+  endpoints** (pair/start, status, devices, devices-revoke, token/rotate) i
+  første udkast. Inkluderer `min_score`-dokumentation (0.20.11).
+- **`CLIENT_BUILD_AND_TEST.md` bragt fra 0.19.0-æra til nu**: røgtest-trin
+  9–13 tilføjet (presets, model-administration, RAG-ingest,
+  samtale-oplevelse, multi-rig-profiler); forældede påstande rettet
+  ("desktop uverificeret" → bygges af CI på 3 OS'er; "90 assertions" → 108;
+  gaten peger nu på STATUS.md som autoritativ tjekliste).
+- **Småting**: forældet sessions-dato i denne fils header rettet
+  (02/03 → 02→05); `*.db` føjet til `.gitignore` (blev slettet manuelt før
+  hvert commit); `go vet` kørt rent.
+- **TODO-audit**: grep for TODO/FIXME/XXX i hele kodebasen — kun falske
+  positiver (parringskode-formatet "XXXX-XXXX"). Reelt nul åbne TODOs.
+- Fuld regression: **108/108 grønne**. Ingen funktionel kodeændring.
 
 ## What's new in 0.20.11  (backend/worker only — RAG-kvalitet, roadmap §7 pkt.5)
 - **Baggrund**: roadmappens egen risikoliste sagde det ligeud: "RAG-kvalitet:
