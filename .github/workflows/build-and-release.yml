@@ -39,6 +39,14 @@ jobs:
     outputs:
       os_matrix: ${{ steps.calc.outputs.os_matrix }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          # depth 2 so git diff-tree can compare HEAD against its parent (the
+          # desktop-touch check below). Assumes the linear one-commit-per-
+          # release flow this project actually uses; a multi-commit tag would
+          # only be checked against its last commit -- acceptable, and the
+          # workflow_dispatch override exists for that edge.
+          fetch-depth: 2
       - id: calc
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.force_full_matrix }}" = "true" ]; then
@@ -50,9 +58,17 @@ jobs:
             if [ "$PATCH" = "0" ]; then
               echo 'os_matrix=["ubuntu-latest","windows-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
               echo "Milestone release ($TAG, patch=0) -> full 3-OS matrix"
+            elif git diff-tree --no-commit-id --name-only -r HEAD | grep -q '^desktop/'; then
+              # The whole rationale for ubuntu-only patch builds was "a patch
+              # release's desktop code is the same source" -- a patch that
+              # CHANGES desktop code is exactly the exception (learned when
+              # v0.20.13's Windows layout fix needed a Windows jar and the
+              # rule would have skipped building one).
+              echo 'os_matrix=["ubuntu-latest","windows-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
+              echo "Patch release ($TAG) but the tagged commit touches desktop/ -> full 3-OS matrix"
             else
               echo 'os_matrix=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
-              echo "Patch release ($TAG, patch=$PATCH) -> ubuntu-only desktop build"
+              echo "Patch release ($TAG, patch=$PATCH, no desktop changes) -> ubuntu-only desktop build"
             fi
           fi
 

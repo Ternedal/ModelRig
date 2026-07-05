@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.12** — "slut-audit: docs-frisk + jar-versionsnavne fortæller sandheden". Follows 0.20.11 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-05**.
+Version **0.20.13** — "desktop: soft-lock rettet (Anders' Windows-fund) — scroll + nåbare toggles". Follows 0.20.12 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-05**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -44,6 +44,33 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.13  (desktop-soft-lock rettet — fundet af Anders på Windows)
+- **Første rigtige desktop-on-device-fund**: Anders kørte v0.20.9-jaren på
+  Windows og kunne "ikke komme længere" — indstillingskortet fyldte hele
+  vinduet, og **knappen til at lukke det lå i layoutet UNDER kortet**, uden
+  nogen scroll. Kortet er vokset gennem sessionen (presets 0.19.9, inline-
+  gem-felt 0.20.5) og oversteg standardvinduets 720dp → alt nedenunder,
+  inkl. luk-knappen og chat-inputtet, var uden for skærmen. En ægte
+  soft-lock. **Denne fejlklasse (layout-overflow) kan headless smoke-tests
+  aldrig fange** — præcis derfor on-device-test er gaten.
+- **Fix, strukturelt**: (1) panel-toggle-knapperne (Indstillinger / Samtaler
+  / Modelstyring) er samlet i én række ØVERST — altid nåbare uanset panel-
+  højde. (2) Panelerne bor nu i en **scrollbar zone** der bytter plads med
+  chat-listen (præcis ét weighted barn ad gangen — `verticalScroll` omslutter
+  aldrig `LazyColumn`, så ingen nested-scroll-konflikt). Input-feltet er
+  altid synligt i bunden. (3) Standardvindue hævet 980x720 → 1000x820.
+- **CI-reglen lærte af det**: patch-releases byggede kun Ubuntu (0.20.10's
+  besparelse) — men et patch der ÆNDRER desktop-kode er præcis undtagelsen.
+  `determine-matrix` tjekker nu om det taggede commit rører `desktop/` og
+  kører i så fald fuld 3-OS-matrix. **Dette release er selve testen** af den
+  nye regel (det rører desktop → Windows/macOS-jars skal dukke op, korrekt
+  navngivet 0.20.13).
+- **Ærlig grænse**: layout-fixet er compile-verificeret + strukturelt
+  ræsonneret, ikke renderet her (ingen skærm). Bruger kun mønstre der
+  allerede kører (verticalScroll = Androids SetupScreen-mønster, samme
+  Compose Foundation-kode). Anders' næste Windows-kørsel er den reelle test.
+- Ingen backend/Android-kodeændring udover versionsbump.
 
 ## What's new in 0.20.12  (slut-audit — sidste omgang oprydning, ingen ny feature)
 - **Desktop-jar-navnene fortæller nu sandheden**: alle CI-byggede jars har

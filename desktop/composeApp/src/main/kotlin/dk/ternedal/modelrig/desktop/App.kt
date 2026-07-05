@@ -3,6 +3,7 @@ package dk.ternedal.modelrig.desktop
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -218,46 +219,23 @@ fun App() {
         Column(Modifier.fillMaxSize().background(Brand.Graphite).padding(16.dp)) {
             Header(lastSource)
             Spacer(Modifier.height(12.dp))
-            if (showSettings) {
-                SettingsCard(
-                    localUrl, { localUrl = it },
-                    localPath, { localPath = it },
-                    localModel, { localModel = it },
-                    deviceToken, { deviceToken = it },
-                    localSystem, { localSystem = it },
-                    cloudKey, { cloudKey = it },
-                    cloudModel, { cloudModel = it },
-                    cloudSystem, { cloudSystem = it },
-                    preferLocal, { preferLocal = it },
-                    db,
-                )
-                Spacer(Modifier.height(8.dp))
-            }
-            TextButton(onClick = { showSettings = !showSettings }) {
-                Text(if (showSettings) "Skjul indstillinger" else "Vis indstillinger", color = Brand.Signal)
-            }
-            TextButton(onClick = { showConvos = !showConvos }) {
-                Text(if (showConvos) "Skjul samtaler" else "Samtaler", color = Brand.Signal)
-            }
-            if (showConvos) {
-                ConversationsPanel(
-                    db = db,
-                    onOpen = { id ->
-                        scope.launch {
-                            val loaded = withContext(Dispatchers.IO) { db.loadMessages(id) }
-                            messages.clear()
-                            loaded.forEach { (role, content) -> messages.add(UiMessage(role, content)) }
-                            convId = id
-                            showConvos = false
-                        }
-                    },
-                    onNew = {
-                        messages.clear()
-                        convId = null
-                        showConvos = false
-                    },
-                )
-                Spacer(Modifier.height(8.dp))
+            // Panel toggles live ABOVE the panels and are never pushed out of
+            // view. The original layout put the settings card first and its
+            // close-button below it -- once the card grew taller than the
+            // window (no scrolling existed), the close-button and everything
+            // else became unreachable. Found by Anders on Windows (v0.20.9
+            // jar, 980x720 default window): a genuine soft-lock this
+            // session's headless smoke tests could never catch.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { showSettings = !showSettings }) {
+                    Text(if (showSettings) "Skjul indstillinger" else "Indstillinger", color = Brand.Signal)
+                }
+                TextButton(onClick = { showConvos = !showConvos }) {
+                    Text(if (showConvos) "Skjul samtaler" else "Samtaler", color = Brand.Signal)
+                }
+                TextButton(onClick = { showModels = !showModels }) {
+                    Text(if (showModels) "Skjul modelstyring" else "Modelstyring", color = Brand.Signal)
+                }
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -310,23 +288,64 @@ fun App() {
                 }
             }
             ragError?.let { Text("RAG-kilder: $it", color = Brand.Danger, fontSize = 11.sp) }
-
-            Spacer(Modifier.height(6.dp))
-            TextButton(onClick = { showModels = !showModels }) {
-                Text(if (showModels) "Skjul modelstyring" else "Modelstyring", color = Brand.Signal, fontSize = 12.sp)
-            }
-            if (showModels) {
-                ModelsPanel(
-                    baseUrl = localUrl,
-                    isBackend = localPath.contains("/api/v1/"),
-                    bearer = deviceToken.ifBlank { null },
-                    onModelsChanged = { models = it },
-                )
-            }
             Spacer(Modifier.height(8.dp))
 
-            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-                items(messages) { m -> MessageBubble(m) }
+            // Exactly one weighted child at a time: either the (scrollable)
+            // panel area or the chat list. Panels can grow to any height at
+            // any window size without pushing the input row or their own
+            // close-buttons out of reach; verticalScroll never wraps the
+            // LazyColumn, so there's no same-direction nested-scroll conflict.
+            val panelsOpen = showSettings || showConvos || showModels
+            if (panelsOpen) {
+                Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    if (showConvos) {
+                        ConversationsPanel(
+                            db = db,
+                            onOpen = { id ->
+                                scope.launch {
+                                    val loaded = withContext(Dispatchers.IO) { db.loadMessages(id) }
+                                    messages.clear()
+                                    loaded.forEach { (role, content) -> messages.add(UiMessage(role, content)) }
+                                    convId = id
+                                    showConvos = false
+                                }
+                            },
+                            onNew = {
+                                messages.clear()
+                                convId = null
+                                showConvos = false
+                            },
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    if (showSettings) {
+                        SettingsCard(
+                            localUrl, { localUrl = it },
+                            localPath, { localPath = it },
+                            localModel, { localModel = it },
+                            deviceToken, { deviceToken = it },
+                            localSystem, { localSystem = it },
+                            cloudKey, { cloudKey = it },
+                            cloudModel, { cloudModel = it },
+                            cloudSystem, { cloudSystem = it },
+                            preferLocal, { preferLocal = it },
+                            db,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    if (showModels) {
+                        ModelsPanel(
+                            baseUrl = localUrl,
+                            isBackend = localPath.contains("/api/v1/"),
+                            bearer = deviceToken.ifBlank { null },
+                            onModelsChanged = { models = it },
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                    items(messages) { m -> MessageBubble(m) }
+                }
             }
 
             Spacer(Modifier.height(8.dp))
