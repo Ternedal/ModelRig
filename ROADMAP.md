@@ -201,7 +201,10 @@ Uprioriteret liste — rækkefølge afgøres når V2 nærmer sig:
 - **Vision:** send billeder til multimodale modeller (Ollamas chat-API tager
   base64-billeder; afhænger af modeludvalg).
 - **Baggrunds-generering** med notifikation når svaret er klart (foreground service).
-- **Multi-rig-profiler** (hjemme/arbejde) med hurtigskift.
+- **Multi-rig-profiler** (hjemme/arbejde) med hurtigskift. ✅ **Leveret i
+  `v0.20.8`** (Android). Valgt som første V3-punkt fordi det ikke kræver
+  nogen ny Android OS-API — laveste risiko på listen. Ikke on-device-testet
+  endnu. Desktop mangler samme feature.
 - **Widget / Quick Settings-tile** til lynhurtig chat.
 - **Biometrisk lås** (BiometricPrompt) foran cloud-nøglen.
 - **Agent-tools** (modellen kalder værktøjer via rig'en). Bevidst sidst: kræver

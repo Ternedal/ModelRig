@@ -11,7 +11,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * (streaming deltas are not persisted per-token — an in-flight reply is lost on a
  * crash; accepted V1 tradeoff).
  */
-class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 2) {
+class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 3) {
 
     data class ConvMeta(
         val id: Long,
@@ -48,11 +48,14 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
         )
         db.execSQL("CREATE INDEX idx_message_conv ON message(conv_id)")
         db.execSQL(PRESET_TABLE_SQL)
+        db.execSQL(RIG_PROFILE_TABLE_SQL)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldV: Int, newV: Int) {
-        // v1 -> v2: added the preset table. Never drops existing data.
+        // v1 -> v2: added the preset table. v2 -> v3: added rig_profile.
+        // Never drops existing data.
         if (oldV < 2) db.execSQL(PRESET_TABLE_SQL)
+        if (oldV < 3) db.execSQL(RIG_PROFILE_TABLE_SQL)
     }
 
     override fun onOpen(db: SQLiteDatabase) {
@@ -158,6 +161,35 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
         writableDatabase.delete("preset", "id=?", arrayOf(id.toString()))
     }
 
+    // ---- rig profiles (named server-url + device-token pairs, for quick-switch
+    // between e.g. "Hjemme" and "Arbejde" without re-pairing each time) ----
+
+    data class RigProfile(val id: Long, val name: String, val serverUrl: String, val deviceToken: String)
+
+    fun saveRigProfile(name: String, serverUrl: String, deviceToken: String): Long {
+        return writableDatabase.insert("rig_profile", null, ContentValues().apply {
+            put("name", name.take(40))
+            put("server_url", serverUrl)
+            put("device_token", deviceToken)
+            put("created_at", System.currentTimeMillis())
+        })
+    }
+
+    fun listRigProfiles(): List<RigProfile> {
+        val out = mutableListOf<RigProfile>()
+        readableDatabase.rawQuery(
+            "SELECT id, name, server_url, device_token FROM rig_profile ORDER BY created_at DESC",
+            null,
+        ).use { c ->
+            while (c.moveToNext()) out.add(RigProfile(c.getLong(0), c.getString(1), c.getString(2), c.getString(3)))
+        }
+        return out
+    }
+
+    fun deleteRigProfile(id: Long) {
+        writableDatabase.delete("rig_profile", "id=?", arrayOf(id.toString()))
+    }
+
     companion object {
         private const val PRESET_TABLE_SQL =
             """CREATE TABLE IF NOT EXISTS preset(
@@ -165,6 +197,13 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
                  source TEXT NOT NULL,
                  name TEXT NOT NULL,
                  prompt TEXT NOT NULL,
+                 created_at INTEGER NOT NULL)"""
+        private const val RIG_PROFILE_TABLE_SQL =
+            """CREATE TABLE IF NOT EXISTS rig_profile(
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 name TEXT NOT NULL,
+                 server_url TEXT NOT NULL,
+                 device_token TEXT NOT NULL,
                  created_at INTEGER NOT NULL)"""
     }
 }

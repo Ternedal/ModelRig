@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.7** — "desktop: samtale-browser (liste/åbn/ny/slet)". Follows 0.20.6 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.20.8** — "V3-start: multi-rig-profiler (Android)". Follows 0.20.7 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -24,6 +24,7 @@ Tick through this on the phone, then `v1.0.0` gets tagged:
 - [ ] **Model management** (0.20.0): the "Modeller" screen (⋮ menu) lists installed models with size, shows running models with VRAM, pulls a new model with live progress, deletes one with confirmation.
 - [ ] **RAG-ingest** (0.20.2, newest and least-tested — new file-picker API surface): from the RAG source dropdown, "+ Tilføj dokument" opens Android's file picker, picks a .txt/.md file, and it appears in the source list after ingesting.
 - [ ] **Samtale-oplevelse** (0.20.6): in Samtaler, type in the search field and confirm the list filters live; tap "✎" on a conversation, rename it inline, confirm it sticks; tap "Del" and confirm Android's share sheet opens with a readable markdown version of the conversation.
+- [ ] **Multi-rig-profiler** (0.20.8, V3): once connected to the rig, tap "+ Gem denne rig" in the Rig card, name it, confirm a chip appears; disconnect/clear and confirm tapping the chip reconnects instantly without re-pairing.
 
 If everything above is green: say so, and `v1.0.0` ships immediately (docs +
 tag, no new code expected). If something's off: the exact symptom + which item,
@@ -43,6 +44,30 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.8  (roadmap V3 — multi-rig-profiler, Android, første V3-punkt)
+- **Første V3-punkt bygget, bevidst valgt for lavest risiko**: af V3-listen
+  (share-target, voice, vision, baggrunds-generering, multi-rig, widget,
+  biometrisk lås, agent-tools) kræver denne **ingen ny Android OS-API**
+  overhovedet — modsat de øvrige (fil/foto-vælger, mikrofon, intent-filters,
+  App Widget, BiometricPrompt), som alle ville lægge endnu en ubekræftet
+  UI-flade oven på de to der allerede afventer bekræftelse (RAG-ingest,
+  0.20.6-søgning/omdøb/del).
+- **Navngivne rig-forbindelser** ("Hjemme", "Arbejde", osv.) med
+  hurtigskift: chip-række øverst i Rig-kortet, samme bekræftede inline-
+  mønster som presets (0.20.4/0.20.5) — ingen `AlertDialog`.
+  "+ Gem denne rig" gemmer **server-URL + det allerede opnåede token**
+  (IKKE parringskoden — den er engangsbrug og aldrig gemt); kun aktiv når
+  man reelt er forbundet. Tryk på en chip sætter URL+token direkte og
+  markerer forbundet, uden ny parring.
+- Ny `rig_profile`-tabel, skema-version 2→3 (efter preset-tabellens 1→2).
+  SQL + hele migrationskæden (v1→v2→v3, bekræfter at ældre
+  samtale/preset-data overlever begge trin) verificeret mod ægte SQLite.
+- **Ikke on-device-testet endnu**.
+- Desktop mangler samme feature — bevidst ikke rørt endnu (samme
+  forsigtighed som alt andet UI-arbejde denne session: vent på
+  bekræftelse først).
+- Ingen backend-kodeændring udover versionsbump.
 
 ## What's new in 0.20.7  (desktop: samtale-browser — lukker desktops sidste separate gap)
 - **Desktop havde ingen samtale-browser overhovedet** — kun stille

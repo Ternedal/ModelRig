@@ -177,6 +177,20 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
             Text("Din rig (backend)", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextHigh)
             Text("Lokale modeller + RAG. Kræver at rig'en kører.", fontSize = 12.sp, color = TextMuted)
             if (connected) { Spacer(Modifier.height(4.dp)); Text("✓ forbundet", color = Signal, fontSize = 13.sp) }
+            RigProfileRow(
+                db = db,
+                canSaveCurrent = connected,
+                currentUrl = baseUrl,
+                currentToken = store.token,
+                onApply = { profile ->
+                    store.baseUrl = profile.serverUrl
+                    store.token = profile.deviceToken
+                    store.chatMode = "rig"
+                    baseUrl = profile.serverUrl
+                    connected = true
+                    onConnected()
+                },
+            )
             Spacer(Modifier.height(8.dp))
             Field("Server-URL", baseUrl) { baseUrl = it }
             Field("Parringskode (XXXX-XXXX)", code) { code = it }
@@ -215,11 +229,94 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
 }
 
 /**
- * Saved system-instruction presets for one source ("rig" or "cloud"), shown as
- * chips under the system-instruction field. Tapping a chip applies its prompt;
- * "+ Gem" saves the field's CURRENT text as a new named preset. Small "✕"
- * deletes. Presets are scoped per source (a rig persona doesn't clutter cloud).
+ * Saved rig connection profiles (name + server-url + already-obtained device
+ * token), for quick-switching between e.g. "Hjemme" and "Arbejde" without
+ * re-pairing each time. A profile can only be saved once actually connected
+ * (a valid token exists) -- the pairing code itself is single-use and never
+ * stored. Tapping a chip applies the profile directly (bypasses pairing).
+ * Same confirmed-safe inline pattern as PresetRow: no AlertDialog.
  */
+@Composable
+private fun RigProfileRow(
+    db: ChatDb,
+    canSaveCurrent: Boolean,
+    currentUrl: String,
+    currentToken: String?,
+    onApply: (ChatDb.RigProfile) -> Unit,
+) {
+    var profiles by remember { mutableStateOf(runCatching { db.listRigProfiles() }.getOrElse { emptyList() }) }
+    var saving by remember { mutableStateOf(false) }
+    var newName by remember { mutableStateOf("") }
+    var profileError by remember { mutableStateOf<String?>(null) }
+
+    Spacer(Modifier.height(4.dp))
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        profiles.forEach { p ->
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = GraphiteSurfaceHigh,
+                modifier = Modifier.padding(end = 6.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(
+                        onClick = { onApply(p) },
+                        contentPadding = PaddingValues(start = 12.dp, end = 4.dp),
+                    ) { Text(p.name, color = TextHigh, fontSize = 12.sp) }
+                    TextButton(
+                        onClick = {
+                            runCatching {
+                                db.deleteRigProfile(p.id)
+                                profiles = db.listRigProfiles()
+                            }.onFailure { profileError = "Kunne ikke slette: ${it.message}" }
+                        },
+                        contentPadding = PaddingValues(start = 4.dp, end = 12.dp),
+                    ) { Text("✕", color = TextMuted, fontSize = 11.sp) }
+                }
+            }
+        }
+        TextButton(
+            enabled = canSaveCurrent,
+            onClick = { saving = !saving; profileError = null },
+            contentPadding = PaddingValues(horizontal = 8.dp),
+        ) {
+            Text(
+                if (saving) "− Annullér" else "+ Gem denne rig",
+                color = if (canSaveCurrent) Signal else TextMuted,
+                fontSize = 12.sp,
+            )
+        }
+    }
+
+    if (saving) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = newName, onValueChange = { newName = it },
+                label = { Text("Navn (fx \"Hjemme\", \"Arbejde\")", fontSize = 12.sp) },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            TextButton(
+                enabled = newName.isNotBlank() && currentToken != null,
+                onClick = {
+                    val tok = currentToken
+                    if (tok != null) {
+                        runCatching {
+                            db.saveRigProfile(newName.trim(), currentUrl, tok)
+                            profiles = db.listRigProfiles()
+                            newName = ""; saving = false
+                        }.onFailure { profileError = "Kunne ikke gemme: ${it.message}" }
+                    }
+                },
+            ) { Text("Gem", color = if (newName.isNotBlank() && currentToken != null) Signal else TextMuted, fontWeight = FontWeight.Bold) }
+        }
+    }
+    profileError?.let { Text(it, color = Danger, fontSize = 11.sp) }
+}
+
 @Composable
 private fun PresetRow(db: ChatDb, source: String, currentPrompt: String, onApply: (String) -> Unit) {
     var presets by remember { mutableStateOf(runCatching { db.listPresets(source) }.getOrElse { emptyList() }) }
