@@ -124,6 +124,14 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
         writableDatabase.delete("conversation", "id=?", arrayOf(convId.toString()))
     }
 
+    fun renameConversation(convId: Long, newTitle: String) {
+        writableDatabase.update(
+            "conversation",
+            ContentValues().apply { put("title", newTitle.take(80)) },
+            "id=?", arrayOf(convId.toString()),
+        )
+    }
+
     // ---- presets (saved system instructions per source, for quick-switch) ----
 
     fun savePreset(source: String, name: String, prompt: String): Long {

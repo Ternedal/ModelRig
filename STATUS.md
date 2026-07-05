@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.5** — "preset-fixet BEKRÆFTET on-device; mønster portet til desktop". Follows 0.20.4 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.20.6** — "samtale-oplevelse: søgning, omdøb, del/eksport (Android)". Follows 0.20.5 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -23,6 +23,7 @@ Tick through this on the phone, then `v1.0.0` gets tagged:
 - [x] **Presets** ✅ **bekræftet af Anders on-device (0.20.4)** — inline-genbygningen virkede: chip gemmes og vises korrekt. (Historik: 0.19.8-original fejlede, 0.20.3-diagnosen holdt ikke, 0.20.4-genbygning med gennemprøvede komponenter løste det.)
 - [ ] **Model management** (0.20.0): the "Modeller" screen (⋮ menu) lists installed models with size, shows running models with VRAM, pulls a new model with live progress, deletes one with confirmation.
 - [ ] **RAG-ingest** (0.20.2, newest and least-tested — new file-picker API surface): from the RAG source dropdown, "+ Tilføj dokument" opens Android's file picker, picks a .txt/.md file, and it appears in the source list after ingesting.
+- [ ] **Samtale-oplevelse** (0.20.6): in Samtaler, type in the search field and confirm the list filters live; tap "✎" on a conversation, rename it inline, confirm it sticks; tap "Del" and confirm Android's share sheet opens with a readable markdown version of the conversation.
 
 If everything above is green: say so, and `v1.0.0` ships immediately (docs +
 tag, no new code expected). If something's off: the exact symptom + which item,
@@ -42,6 +43,25 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.6  (roadmap V2 pt.4 — samtale-oplevelse, Android)
+- **Søgning**: felt i Samtaler-skærmens header filtrerer titler live, mens du
+  skriver (client-side, ingen ny SQL-forespørgsel pr. tastetryk).
+- **Omdøb**: "✎" pr. samtale folder titlen ud til et redigerbart felt inline
+  — samme bekræftede mønster som preset-gem (0.20.4/0.20.5): ingen
+  `AlertDialog`, "Gem" farvekodet efter faktisk enabled-state.
+  `ChatDb.renameConversation()` tilføjet, SQL verificeret mod ægte SQLite.
+- **Del/eksport**: "Del" pr. samtale bygger en markdown-gengivelse af hele
+  samtalen (titel som H1, **Du:**/**Assistent:**-præfiks pr. besked) og
+  åbner Androids indbyggede deling (`Intent.ACTION_SEND`, tekst — ingen
+  fil, ingen `FileProvider`-kompleksitet). Kan sendes til hvad som helst:
+  Notion, mail, Keep, etc.
+- **Ikke on-device-testet endnu** — kompilerer rent, SQL verificeret, men
+  UI-flowet (særligt "Del" — Android-deling er ny API-overflade i denne
+  session) afventer din test.
+- Desktop mangler samme feature (naturlig fortsættelse — bevidst ikke rørt
+  denne gang, samme forsigtighed som presets: vent på bekræftelse først).
+- Ingen backend-kodeændring udover versionsbump.
 
 ## What's new in 0.20.5  (preset-fixet bekræftet af Anders — mønster portet til desktop)
 - **Anders bekræftede 0.20.4 on-device**: inline-gem-flowet virker — preset

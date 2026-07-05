@@ -138,7 +138,10 @@ Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
    kørende modeller via backend-proxy mod Ollamas API, streaming download-
    fremgang. 9 permanente backend-tests (99 assertions total). Ikke
    on-device-testet endnu.
-4. **Samtale-oplevelse.** Omdøb, søgning, markdown-eksport/deling af samtaler.
+4. **Samtale-oplevelse.** ✅ **Leveret i `v0.20.6`** (Android). Omdøb
+   (inline, samme mønster som presets), søgning (live filter på titler),
+   markdown-eksport/deling via Androids indbyggede deling. Ikke
+   on-device-testet endnu. Desktop mangler samme feature.
 5. **Desktop-paritet.** ✅ **Audit gennemført + første løft leveret** (0.19.1,
    kørt sideløbende med V1 mens Anders' bekræftelse afventes). Fund fra audit:
    - **Kompilerer OG pakker nu rent** (`BUILD SUCCESSFUL` for både `build` og

@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalConfiguration
+import android.content.Intent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -781,62 +782,119 @@ private fun ConversationsScreen(
     onNew: () -> Unit,
     onBack: () -> Unit,
 ) {
+    val context = LocalContext.current
     var convos by remember { mutableStateOf(db.listConversations()) }
+    var query by remember { mutableStateOf("") }
+    var renamingId by remember { mutableStateOf<Long?>(null) }
+    var renameText by remember { mutableStateOf("") }
     val fmt = remember { SimpleDateFormat("d/M HH:mm", Locale.getDefault()) }
+    val visible = remember(convos, query) {
+        if (query.isBlank()) convos else convos.filter { it.title.contains(query, ignoreCase = true) }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Surface(color = GraphiteSurface, tonalElevation = 2.dp) {
-            Row(
+            Column(
                 Modifier.fillMaxWidth()
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = onBack) { Text("←", color = TextHigh, fontSize = 18.sp) }
-                Text("Samtaler", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextHigh)
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = onNew) { Text("+ Ny", color = Signal) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onBack) { Text("←", color = TextHigh, fontSize = 18.sp) }
+                    Text("Samtaler", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextHigh)
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onNew) { Text("+ Ny", color = Signal) }
+                }
+                OutlinedTextField(
+                    value = query, onValueChange = { query = it },
+                    placeholder = { Text("Søg i titler…", fontSize = 13.sp) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                )
             }
         }
-        if (convos.isEmpty()) {
+        if (visible.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("Ingen samtaler endnu", color = TextMuted, fontSize = 14.sp)
+                Text(
+                    if (convos.isEmpty()) "Ingen samtaler endnu" else "Ingen match på \"$query\"",
+                    color = TextMuted, fontSize = 14.sp,
+                )
             }
         } else {
             LazyColumn(
                 Modifier.weight(1f).fillMaxWidth(),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             ) {
-                items(convos, key = { it.id }) { c ->
+                items(visible, key = { it.id }) { c ->
                     Surface(
                         color = GraphiteSurface,
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                            .clickable { onOpen(c.id) },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    c.title.ifBlank { "(uden titel)" },
-                                    color = TextHigh, fontSize = 14.sp,
-                                    maxLines = 1,
-                                )
-                                Spacer(Modifier.height(2.dp))
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+                            if (renamingId == c.id) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    SourceBadge(c.source)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(fmt.format(Date(c.updatedAt)), color = TextMuted, fontSize = 11.sp)
+                                    OutlinedTextField(
+                                        value = renameText, onValueChange = { renameText = it },
+                                        singleLine = true, modifier = Modifier.weight(1f),
+                                    )
+                                    TextButton(
+                                        enabled = renameText.isNotBlank(),
+                                        onClick = {
+                                            db.renameConversation(c.id, renameText.trim())
+                                            convos = db.listConversations()
+                                            renamingId = null
+                                        },
+                                    ) { Text("Gem", color = if (renameText.isNotBlank()) Signal else TextMuted) }
+                                    TextButton(onClick = { renamingId = null }) { Text("✕", color = TextMuted) }
+                                }
+                            } else {
+                                Row(
+                                    Modifier.fillMaxWidth().clickable { onOpen(c.id) },
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            c.title.ifBlank { "(uden titel)" },
+                                            color = TextHigh, fontSize = 14.sp,
+                                            maxLines = 1,
+                                        )
+                                        Spacer(Modifier.height(2.dp))
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            SourceBadge(c.source)
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(fmt.format(Date(c.updatedAt)), color = TextMuted, fontSize = 11.sp)
+                                        }
+                                    }
+                                }
+                                Row {
+                                    TextButton(onClick = {
+                                        renamingId = c.id
+                                        renameText = c.title
+                                    }) { Text("✎", color = TextMuted, fontSize = 13.sp) }
+                                    TextButton(onClick = {
+                                        val md = buildString {
+                                            appendLine("# ${c.title.ifBlank { "ModelRig-samtale" }}")
+                                            appendLine()
+                                            db.loadMessages(c.id).forEach { (role, content) ->
+                                                appendLine(if (role == "user") "**Du:**" else "**Assistent:**")
+                                                appendLine(content)
+                                                appendLine()
+                                            }
+                                        }
+                                        val intent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_SUBJECT, c.title.ifBlank { "ModelRig-samtale" })
+                                            putExtra(Intent.EXTRA_TEXT, md)
+                                        }
+                                        context.startActivity(Intent.createChooser(intent, "Del samtale"))
+                                    }) { Text("Del", color = Signal, fontSize = 12.sp) }
+                                    TextButton(onClick = {
+                                        db.deleteConversation(c.id)
+                                        convos = db.listConversations()
+                                    }) { Text("Slet", color = Danger, fontSize = 12.sp) }
                                 }
                             }
-                            TextButton(onClick = {
-                                db.deleteConversation(c.id)
-                                convos = db.listConversations()
-                            }) { Text("Slet", color = Danger, fontSize = 12.sp) }
                         }
                     }
                 }
