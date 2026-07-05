@@ -50,6 +50,9 @@ import dk.ternedal.modelrig.desktop.net.RagClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private data class UiMessage(
     val role: String,
@@ -86,6 +89,7 @@ fun App() {
         var ragSourceMenuOpen by remember { mutableStateOf(false) }
         var ragError by remember { mutableStateOf<String?>(null) }
         var showModels by remember { mutableStateOf(false) }
+        var showConvos by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
         val db = remember { DesktopChatDb() }
         var convId by remember { mutableStateOf<Long?>(null) }
@@ -232,6 +236,29 @@ fun App() {
             TextButton(onClick = { showSettings = !showSettings }) {
                 Text(if (showSettings) "Skjul indstillinger" else "Vis indstillinger", color = Brand.Signal)
             }
+            TextButton(onClick = { showConvos = !showConvos }) {
+                Text(if (showConvos) "Skjul samtaler" else "Samtaler", color = Brand.Signal)
+            }
+            if (showConvos) {
+                ConversationsPanel(
+                    db = db,
+                    onOpen = { id ->
+                        scope.launch {
+                            val loaded = withContext(Dispatchers.IO) { db.loadMessages(id) }
+                            messages.clear()
+                            loaded.forEach { (role, content) -> messages.add(UiMessage(role, content)) }
+                            convId = id
+                            showConvos = false
+                        }
+                    },
+                    onNew = {
+                        messages.clear()
+                        convId = null
+                        showConvos = false
+                    },
+                )
+                Spacer(Modifier.height(8.dp))
+            }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box {
@@ -315,6 +342,58 @@ fun App() {
                 Spacer(Modifier.width(8.dp))
                 Button(onClick = { send() }, enabled = !busy) {
                     Text(if (busy) "…" else "Send")
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Conversation browser: list, open, start new, delete. Deliberately scoped to
+ * ONLY this confirmed-safe feature set (matches Android's original 0.16.0
+ * conversation list, not the newer 0.20.6 search/rename/share) -- that newer
+ * feature hasn't been on-device confirmed yet, and copying an unconfirmed UI
+ * pattern to a second client is exactly the mistake the preset saga taught
+ * to avoid. Closes desktop's only remaining gap versus Android: previously
+ * this client only silently resumed the latest conversation with no way to
+ * browse, switch, or clean up older ones.
+ */
+@Composable
+private fun ConversationsPanel(db: DesktopChatDb, onOpen: (Long) -> Unit, onNew: () -> Unit) {
+    var convos by remember { mutableStateOf(runCatching { db.listConversations() }.getOrElse { emptyList() }) }
+    var panelError by remember { mutableStateOf<String?>(null) }
+    val fmt = remember { SimpleDateFormat("d/M HH:mm", Locale.getDefault()) }
+
+    Box(Modifier.clip(RoundedCornerShape(12.dp)).background(Brand.Surface).fillMaxWidth().padding(14.dp)) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Samtaler", color = Brand.TextHigh, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = onNew) { Text("+ Ny", color = Brand.Signal, fontSize = 12.sp) }
+            }
+            panelError?.let { Spacer(Modifier.height(4.dp)); Text("Fejl: $it", color = Brand.Danger, fontSize = 11.sp) }
+            Spacer(Modifier.height(8.dp))
+            if (convos.isEmpty()) {
+                Text("Ingen samtaler endnu", color = Brand.TextMuted, fontSize = 13.sp)
+            } else {
+                convos.forEach { c ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(
+                            Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).clickable { onOpen(c.id) }.padding(vertical = 4.dp),
+                        ) {
+                            Text(c.title.ifBlank { "(uden titel)" }, color = Brand.TextHigh, fontSize = 13.sp, maxLines = 1)
+                            Text(
+                                "${c.source} · ${fmt.format(Date(c.updatedAt))}",
+                                color = Brand.TextMuted, fontSize = 11.sp,
+                            )
+                        }
+                        TextButton(onClick = {
+                            runCatching {
+                                db.deleteConversation(c.id)
+                                convos = db.listConversations()
+                            }.onFailure { panelError = it.message }
+                        }) { Text("Slet", color = Brand.Danger, fontSize = 12.sp) }
+                    }
                 }
             }
         }

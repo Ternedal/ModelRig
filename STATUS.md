@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.6** — "samtale-oplevelse: søgning, omdøb, del/eksport (Android)". Follows 0.20.5 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.20.7** — "desktop: samtale-browser (liste/åbn/ny/slet)". Follows 0.20.6 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -43,6 +43,23 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.7  (desktop: samtale-browser — lukker desktops sidste separate gap)
+- **Desktop havde ingen samtale-browser overhovedet** — kun stille
+  genindlæsning af seneste samtale ved opstart (siden 0.19.3). Ny
+  "Samtaler"-panel (toggle-knap ved siden af indstillinger): liste over alle
+  samtaler med kilde + tidsstempel, tryk for at åbne, "+ Ny" for en frisk
+  samtale, "Slet" pr. samtale.
+- **Bevidst afgrænset scope**: kun liste/åbn/ny/slet — Android's *oprindelige*
+  0.16.0-funktionssæt, ikke det nyere 0.20.6 (søgning/omdøb/del), som endnu
+  ikke er on-device-bekræftet. At kopiere et ubekræftet UI-mønster til en
+  anden klient var præcis fejlen i preset-sagaen (0.19.8→0.20.4) — undgås
+  bevidst her.
+- Genbruger udelukkende allerede kørte-verificerede DB-metoder
+  (`listConversations`, `loadMessages`, `newConversation`,
+  `deleteConversation` — alle runtime-testet i 0.19.3's smoke-test). Ny kode
+  er ren UI-wiring oveni, ingen ny databaselogik at verificere.
+- Kompilerer rent. Ingen backend-kodeændring udover versionsbump.
 
 ## What's new in 0.20.6  (roadmap V2 pt.4 — samtale-oplevelse, Android)
 - **Søgning**: felt i Samtaler-skærmens header filtrerer titler live, mens du

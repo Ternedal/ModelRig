@@ -4,7 +4,7 @@ A local-first AI platform: run models on your own hardware via Ollama, reach the
 from a desktop app and an Android phone, with an optional RAG service and an
 Ollama Cloud fallback for when local isn't enough.
 
-Version: **0.20.6** (samtale-søgning/omdøb/del i Android; V1 afventer resterende tjekliste)
+Version: **0.20.7** (desktop: samtale-browser; V1 afventer resterende tjekliste)
 
 ## Architecture
 ```

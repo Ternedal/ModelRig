@@ -169,9 +169,10 @@ Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
    forenkling som Android (enkelt-skud pr. spørgsmål), runtime-verificeret mod
    en rigtig lokal HTTP-server (samme metode som SQLite-testen).
    **Paritetslisten er nu fuldført** (brand, dansk UI, system-prompts, markdown,
-   persistens, RAG). Tilbage som separat forbedring: samtale-browser
-   (liste/skift/slet, som Android har) — ikke i original scope, naturligt
-   næste skridt hvis det efterspørges.
+   persistens, RAG). Samtale-browser (liste/skift/slet) ✅ **leveret i
+   `v0.20.7`** — bevidst afgrænset til Android's oprindelige 0.16.0-scope
+   (ikke det nyere 0.20.6 søgning/omdøb/del, som afventer on-device-
+   bekræftelse først).
 6. **CI (GitHub Actions).** ✅ **Leveret** (`.github/workflows/build-and-release.yml`,
    v0.19.5). Ved tag-push (`v*`): kører hele server-suiten (90 assertions),
    bygger Android-debug-APK, og bygger **genuint cross-platform desktop-jars**
