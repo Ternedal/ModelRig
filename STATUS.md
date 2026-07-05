@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.8** — "V3-start: multi-rig-profiler (Android)". Follows 0.20.7 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.20.9** — "proaktiv audit: RAG-ingest-race fundet+fikset (ingen ny feature)". Follows 0.20.8 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -44,6 +44,33 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.9  (proaktiv audit — ingen ny feature, kun risikoreduktion)
+- **Baggrund**: i stedet for at stable endnu et ubekræftet V3-punkt oveni de
+  allerede ventende (RAG-ingest, 0.20.6, 0.20.8), blev denne omgang brugt på
+  at auditere RAG-ingest (0.20.2) — den feature med mindst indblik (bygget i
+  et hul i denne sessions kontekst) — specifikt for samme bug-klasse som
+  ramte presets (hardkodet UI-tilstand der ikke afspejler faktisk logik).
+- **Betryggende fund**: RAG-ingests trigger ("+ Tilføj dokument" i
+  kilde-dropdownen) bruger `ModelChip`+`DropdownMenu` — **strukturelt
+  identisk** med det allerede bekræftede model-dropdown-mønster
+  ("Genindlæs modeller"), ikke det `AlertDialog`-mønster der fejlede.
+  Netværkskontrakten (`ingestText()` → workerens `/rag/ingest`) blev
+  krydstjekket felt-for-felt mod workerens faktiske Pydantic-model
+  (`IngestDoc`, `IngestReq`) — matcher præcist.
+- **Reelt fund, rettet**: "+ Tilføj dokument"-menupunktet manglede
+  `enabled = !ingesting`-spærring — et andet tryk mens en ingest allerede
+  kører kunne udløse et konkurrerende, overlappende forsøg. Rettet
+  defensivt (samme "farve følger faktisk tilstand"-princip som
+  preset-fixet: grå+"Ingesterer…" mens aktiv, i stedet for at forblive
+  altid-blå).
+- **Selv-tjek af egen nyere kode**: grep'et 0.20.6/0.20.8's kode for samme
+  hardkodet-farve-vs-enabled-mønster — ingen fund, begge er allerede
+  konsekvente.
+- **Ærlig grænse, uændret af denne audit**: selve fil-læsningen
+  (`ContentResolver`/`openInputStream`) er stadig kun compile-verificeret,
+  ikke on-device-testet — det kan kodegennemgang ikke afgøre.
+- Kompilerer rent. Ingen backend-kodeændring udover versionsbump.
 
 ## What's new in 0.20.8  (roadmap V3 — multi-rig-profiler, Android, første V3-punkt)
 - **Første V3-punkt bygget, bevidst valgt for lavest risiko**: af V3-listen

@@ -770,7 +770,8 @@ private fun ChatScreen(
                                 }
                                 HorizontalDivider()
                                 DropdownMenuItem(
-                                    text = { Text("+ Tilføj dokument (txt/md)…", color = Signal) },
+                                    text = { Text(if (ingesting) "Ingesterer…" else "+ Tilføj dokument (txt/md)…", color = if (ingesting) TextMuted else Signal) },
+                                    enabled = !ingesting,
                                     onClick = { ragSourceMenu = false; pickDocument.launch(arrayOf("text/plain", "text/markdown", "application/octet-stream")) },
                                 )
                             }
