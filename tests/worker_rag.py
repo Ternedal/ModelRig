@@ -112,5 +112,25 @@ check("sources" in head and len(head["sources"]) >= 1, "rag-chat first line carr
 answer = "".join(json.loads(l).get("message", {}).get("content", "") for l in lines[1:])
 check(answer == "ctx-ans", f"rag-chat streams the reassembled answer (got {answer!r})")
 
+# ---- min_score: irrelevant matches get filtered, not padded into top_k ----
+# fake_embed is a pure 26-dim letter-count vector, so a query using only a
+# letter absent from the stored text gives an exact, deterministic 0.0 cosine
+# -- no ambiguity about whether the threshold is doing the filtering.
+client.post("/rag/ingest", json={"documents": [
+    {"text": "aeiou aeiou aeiou aeiou", "source": "vowels"}]})
+r = client.post("/rag/query", json={"query": "zzzz", "top_k": 5, "synthesize": False,
+                                     "min_score": 0.3, "source": "vowels"})
+check(r.status_code == 200, "min_score query -> 200")
+check(r.json()["matches"] == [],
+      f"min_score=0.3 filters a zero-similarity match instead of padding top_k (got {r.json()['matches']})")
+
+# same query, min_score=0.0 -- the same match now returns, proving the empty
+# result above was the threshold filtering and not some unrelated bug
+# (e.g. an empty store or a broken source filter)
+r2 = client.post("/rag/query", json={"query": "zzzz", "top_k": 5, "synthesize": False,
+                                      "min_score": 0.0, "source": "vowels"})
+check(r2.status_code == 200 and len(r2.json()["matches"]) == 1,
+      f"min_score=0.0 -> the same match returns, confirming it's the threshold (got {r2.json()['matches']})")
+
 print(f"\n===== WORKER V1: {passed} passed, {failed} failed =====")
 raise SystemExit(0 if failed == 0 else 1)

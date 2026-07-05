@@ -235,10 +235,14 @@ Uprioriteret liste — rækkefølge afgøres når V2 nærmer sig:
    Pixel/Android 15, andre enheder kan afvige.
 3. **Ollama Cloud-drift:** endpoints/kvoter/modelnavne kan ændre sig; isoleret i
    `CloudClient` (ét sted at rette).
-4. **Sandbox-toolchain pr. session:** ~5–10 min reinstallations-overhead og risiko
-   for versionsdrift indtil CI (V2 pkt. 6) fjerner afhængigheden.
-5. **RAG-kvalitet:** chunking/embedding "virker" men er ikke tunet — forvent
-   iteration når den bruges dagligt fra telefonen.
+4. ~~**Sandbox-toolchain pr. session:** ~5–10 min reinstallations-overhead og risiko
+   for versionsdrift indtil CI (V2 pkt. 6) fjerner afhængigheden.~~ **Løst:**
+   CI (`v0.19.5+`) fjerner afhængigheden — 6+ releases bevist stabilt siden.
+5. **RAG-kvalitet:** delvist adresseret i `v0.20.11` (relevans-tærskel så
+   irrelevante matches ikke tvinges ind som kontekst; sætningsbevidst
+   chunking). Tærsklen (0.3) er et fornuftigt udgangspunkt, **ikke**
+   empirisk tunet mod Anders' faktiske dokumenter — forvent justering når
+   den bruges dagligt fra telefonen.
 6. **PDF-ingest (V2)** er en kendt scope-fælde; startes smalt og udvides kun ved behov.
 7. **Ikon-skarphed:** afhænger af SVG fra kildefilen (åbent spørgsmål 2).
 

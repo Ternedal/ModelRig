@@ -20,10 +20,11 @@ def cosine(a: list[float], b: list[float]) -> float:
 
 
 def chunk_text(text: str, chunk_size: int = 800, overlap: int = 150) -> list[str]:
-    """Split text into overlapping chunks, preferring whitespace break points.
+    """Split text into overlapping chunks, preferring sentence-ending
+    punctuation, then whitespace, as break points.
 
-    Overlap preserves context across chunk boundaries so a fact split mid-way is
-    still retrievable. Short text passes through as a single chunk.
+    Overlap preserves context across chunk boundaries so a fact split mid-way
+    is still retrievable. Short text passes through as a single chunk.
     """
     text = text.strip()
     if not text:
@@ -37,9 +38,18 @@ def chunk_text(text: str, chunk_size: int = 800, overlap: int = 150) -> list[str
     start, n = 0, len(text)
     while start < n:
         end = min(start + chunk_size, n)
-        if end < n:  # try to break on whitespace within the window's back half
-            brk = max(text.rfind(" ", start + overlap, end),
-                      text.rfind("\n", start + overlap, end))
+        if end < n:  # try to break within the window's back half
+            window_start = start + overlap
+            # Prefer a sentence boundary (". ", "? ", "! ", or a real newline)
+            # over a plain space -- keeps chunks semantically whole more often,
+            # which matters for retrieval quality more than raw character count.
+            brk = -1
+            for punct in (". ", "? ", "! ", "\n"):
+                idx = text.rfind(punct, window_start, end)
+                if idx > brk:
+                    brk = idx + (len(punct) - 1) if punct != "\n" else idx
+            if brk <= start:
+                brk = text.rfind(" ", window_start, end)
             if brk > start:
                 end = brk
         piece = text[start:end].strip()
@@ -71,13 +81,23 @@ async def query(
     synthesize: bool = True,
     model: str | None = None,
     source: str | None = None,
+    min_score: float = 0.3,
 ) -> dict:
+    """Retrieve the top_k most relevant chunks, but only ones that clear
+    min_score first -- without this, a query with no genuinely relevant
+    content still forces top_k chunks into the context (even ones with a
+    near-zero cosine score), which can lead the model to answer from noise
+    instead of correctly saying it doesn't know. Filtering happens before the
+    top_k cut, not after, so a good min_score can return fewer than top_k
+    matches (including zero) rather than padding with irrelevant ones.
+    """
     q_emb = await oc.embed(q)
     scored = [
         {"id": doc_id, "text": text, "source": src,
          "chunk_index": chunk_index, "score": cosine(q_emb, emb)}
         for doc_id, text, src, chunk_index, emb in store.all(source=source)
     ]
+    scored = [m for m in scored if m["score"] >= min_score]
     scored.sort(key=lambda x: x["score"], reverse=True)
     matches = scored[:top_k]
 

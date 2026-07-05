@@ -19,7 +19,7 @@ from . import ollama_client as oc
 from . import rag
 from .store import DocStore
 
-VERSION = "0.20.10"
+VERSION = "0.20.11"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -64,6 +64,11 @@ class QueryReq(BaseModel):
     synthesize: bool = True
     model: str | None = None
     source: str | None = None
+    # Starting default, not empirically tuned against real documents/queries --
+    # nomic-embed-text cosine scores for genuinely related content typically
+    # sit well above 0.5, unrelated content often around 0.1-0.3. Adjust via
+    # this field once real usage data suggests a better cutoff.
+    min_score: float = Field(default=0.3, ge=0.0, le=1.0)
 
 
 @app.get("/healthz")
@@ -110,6 +115,7 @@ async def query(req: QueryReq) -> dict:
         return await rag.query(
             store, req.query, top_k=req.top_k,
             synthesize=req.synthesize, model=req.model, source=req.source,
+            min_score=req.min_score,
         )
     except oc.OllamaError as e:
         raise HTTPException(status_code=502, detail=str(e))
@@ -127,6 +133,7 @@ async def rag_chat(req: QueryReq):
     try:
         matches = (await rag.query(
             store, req.query, top_k=req.top_k, synthesize=False, source=req.source,
+            min_score=req.min_score,
         ))["matches"]
     except oc.OllamaError as e:
         raise HTTPException(status_code=502, detail=str(e))

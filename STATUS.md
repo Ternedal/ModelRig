@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.10** — "CI-besparelse: macOS/Windows kun ved milepæle". Follows 0.20.9 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.20.11** — "RAG-kvalitet: relevans-tærskel + sætningsbevidst chunking". Follows 0.20.10 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -44,6 +44,34 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.11  (backend/worker only — RAG-kvalitet, roadmap §7 pkt.5)
+- **Baggrund**: roadmappens egen risikoliste sagde det ligeud: "RAG-kvalitet:
+  chunking/embedding virker men er ikke tunet." Eneste reelle, substantielle
+  tekniske gæld tilbage der ikke kræver telefonen — backend/worker-only.
+- **Reel bug rettet, ikke tal-gætteri**: `rag.query()` returnerede altid
+  `top_k` matches uanset relevans-score — selv et helt urelateret spørgsmål
+  fik `top_k` chunks tvunget ind som "kontekst", hvilket kan få modellen til
+  at svare ud fra støj i stedet for korrekt at sige "det ved jeg ikke". Ny
+  `min_score`-parameter (default 0.3, eksplicit dokumenteret som et
+  fornuftigt udgangspunkt — **ikke** empirisk tunet mod Anders' egne
+  dokumenter/forespørgsler) filtrerer nu FØR `top_k`-afskæringen.
+- **Chunking forbedret, verificerbart**: `chunk_text()` foretrækker nu
+  sætningsafslutning (". ", "? ", "! ", linjeskift) frem for blot mellemrum
+  som brudpunkt, når et findes inden for overlap-vinduet — holder chunks
+  semantisk mere hele. Falder korrekt tilbage til mellemrum når ingen
+  sætningsgrænse findes.
+- **9 nye permanente tests, alle grønne**: 6 i `worker_unit.py`
+  (sætningsgrænse-brud verificeret med et konkret eksempel, fallback til
+  mellemrum bekræftet stadig virker), 3 i `worker_rag.py` (min_score=0.3
+  filtrerer en kendt nul-similaritets-match fra; samme forespørgsel med
+  min_score=0.0 beviser at det var tærsklen og ikke en anden fejl). Ingen
+  regression i e2e/backend_v1 (kørt eksplicit for at udelukke det).
+  **Total: 108 assertions** (var 99).
+- **Ærlig grænse**: 0.3 er en fornuftig start-værdi for `nomic-embed-text`,
+  ikke empirisk valideret mod Anders' faktiske dokumenter. Justerbar via
+  API'et uden kodeændring, hvis reel brug viser en bedre værdi.
+- Ingen Android/desktop-kodeændring — kun backend/worker.
 
 ## What's new in 0.20.10  (CI-besparelse — macOS/Windows kun ved milepæle)
 - **Baggrund**: beregnede det faktiske forbrug af GitHub Actions-minutter fra
