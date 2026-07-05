@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.3** — "bugfix: preset-'Gem'-knap virkede ikke visuelt". Follows 0.20.2 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.20.4** — "preset-gem-flow genbygget inline (0.20.3-diagnosen var forkert)". Follows 0.20.3 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -20,7 +20,7 @@ Tick through this on the phone, then `v1.0.0` gets tagged:
 - [ ] **Cloud model dropdown** (0.15.x): "Genindlæs modeller" actually populates cloud models on Anders' Ollama Cloud account.
 - [ ] **RAG mode** (0.17.0): toggle works, source-filter dropdown lists ingested sources, replies show source chips.
 - [ ] **Error UX + retry** (0.18.0): killing the rig mid-chat shows a readable Danish error with a working "↻ Prøv igen" button.
-- [ ] **Presets** (0.19.8, bug found+fixed in 0.20.3 — retest this one specifically): save the current system-instruction as a named preset, tap it to reapply, delete it — on both Rig and Cloud cards.
+- [ ] **Presets** (0.19.8; 0.20.3-fix didn't hold, flow rebuilt inline in 0.20.4 — retest): tap "+ Gem som preset" → an inline name field unfolds (no dialog anymore) → type a name → "Gem" turns blue → tap → chip appears. Also tap a chip to reapply, "✕" to delete.
 - [ ] **Model management** (0.20.0): the "Modeller" screen (⋮ menu) lists installed models with size, shows running models with VRAM, pulls a new model with live progress, deletes one with confirmation.
 - [ ] **RAG-ingest** (0.20.2, newest and least-tested — new file-picker API surface): from the RAG source dropdown, "+ Tilføj dokument" opens Android's file picker, picks a .txt/.md file, and it appears in the source list after ingesting.
 
@@ -42,6 +42,31 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.4  (preset-gem genbygget — ærlig omgang: 0.20.3-diagnosen holdt ikke)
+- **Anders gentestede 0.20.3: fejlen består** — "Gem" reagerer slet ikke.
+  Det falsificerer 0.20.3's diagnose (deaktiveret knap uden visuelt signal):
+  fejlen ligger tidligere i flowet, sandsynligvis ved at dialogen aldrig
+  åbner, eller at den åbner usynligt.
+- **Rodårsagen er IKKE endeligt identificeret** — det siges ligeud.
+  Kodegennemgang kunne ikke afgøre den: chip-mønsteret (Surface+clickable)
+  er identisk med ModelChip, som beviseligt virker på enheden (cloud-model-
+  dropdownen); temaets colorScheme er korrekt; logikken er triviel. Uden at
+  kunne køre UI'en kan fejlen ikke reproduceres herfra.
+- **Strategiskift i stedet for tredje gæt**: hele gem-flowet er genbygget
+  med udelukkende komponenter der beviseligt virker på Anders' enhed i denne
+  app: `TextButton` (bruges i overflow-menu, "Genindlæs modeller", "Til chat
+  →") og `OutlinedTextField` (bruges i alle setup-felter). `AlertDialog` er
+  **helt fjernet** — gem-flowet er nu inline: tryk "+ Gem som preset" →
+  navnefelt folder ud direkte under chipsene → skriv navn → "Gem" bliver blå
+  → tryk → chip dukker op. Hvert trin giver synlig feedback, så et evt.
+  fortsat fejlpunkt kan udpeges præcist.
+- Preset-chipsene (anvend/slet) er også konverteret til TextButtons — de
+  var aldrig blevet testet (gem virkede jo ikke), så samme forsigtighed.
+- Desktop er bevidst IKKE ændret endnu — den venter på Anders' bekræftelse
+  af at dette mønster virker, før det kopieres (modsat 0.19.8/0.19.9 hvor
+  en bug blev kopieret til begge klienter).
+- Kompilerer rent. Ingen backend-kodeændring udover versionsbump.
 
 ## What's new in 0.20.3  (bugfix: preset "Gem"-knap fandt af Anders' on-device-test)
 - **Reelt bug-fund**: Anders rapporterede at "Gem"-knappen i preset-dialogen

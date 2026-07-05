@@ -222,11 +222,11 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
 @Composable
 private fun PresetRow(db: ChatDb, source: String, currentPrompt: String, onApply: (String) -> Unit) {
     var presets by remember { mutableStateOf(runCatching { db.listPresets(source) }.getOrElse { emptyList() }) }
-    var showSaveDialog by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     var presetError by remember { mutableStateOf<String?>(null) }
 
-    Spacer(Modifier.height(8.dp))
+    Spacer(Modifier.height(4.dp))
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         verticalAlignment = Alignment.CenterVertically,
@@ -237,68 +237,58 @@ private fun PresetRow(db: ChatDb, source: String, currentPrompt: String, onApply
                 color = GraphiteSurfaceHigh,
                 modifier = Modifier.padding(end = 6.dp),
             ) {
-                Row(
-                    Modifier.clickable { onApply(p.prompt) }.padding(horizontal = 10.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(p.name, color = TextHigh, fontSize = 12.sp)
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "✕", color = TextMuted, fontSize = 11.sp,
-                        modifier = Modifier.clickable {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(
+                        onClick = { onApply(p.prompt) },
+                        contentPadding = PaddingValues(start = 12.dp, end = 4.dp),
+                    ) { Text(p.name, color = TextHigh, fontSize = 12.sp) }
+                    TextButton(
+                        onClick = {
                             runCatching {
                                 db.deletePreset(p.id)
                                 presets = db.listPresets(source)
                             }.onFailure { presetError = "Kunne ikke slette: ${it.message}" }
                         },
-                    )
+                        contentPadding = PaddingValues(start = 4.dp, end = 12.dp),
+                    ) { Text("✕", color = TextMuted, fontSize = 11.sp) }
                 }
             }
         }
-        Surface(
-            shape = RoundedCornerShape(999.dp),
-            color = Graphite,
-            modifier = Modifier
-                .clickable(enabled = currentPrompt.isNotBlank()) { showSaveDialog = true; presetError = null }
-                .padding(horizontal = 10.dp, vertical = 5.dp),
+        TextButton(
+            enabled = currentPrompt.isNotBlank(),
+            onClick = { saving = !saving; presetError = null },
+            contentPadding = PaddingValues(horizontal = 8.dp),
         ) {
             Text(
-                "+ Gem som preset",
+                if (saving) "− Annullér" else "+ Gem som preset",
                 color = if (currentPrompt.isNotBlank()) Signal else TextMuted,
                 fontSize = 12.sp,
             )
         }
     }
-    presetError?.let { Text(it, color = Danger, fontSize = 11.sp) }
 
-    if (showSaveDialog) {
-        AlertDialog(
-            onDismissRequest = { showSaveDialog = false; newName = "" },
-            title = { Text("Gem preset") },
-            text = {
-                OutlinedTextField(
-                    value = newName, onValueChange = { newName = it },
-                    label = { Text("Navn (fx \"Kort & teknisk\")", fontSize = 12.sp) },
-                    singleLine = true,
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = newName.isNotBlank(),
-                    onClick = {
-                        runCatching {
-                            db.savePreset(source, newName.trim(), currentPrompt)
-                            presets = db.listPresets(source)
-                        }.onFailure { presetError = "Kunne ikke gemme: ${it.message}" }
-                        newName = ""; showSaveDialog = false
-                    },
-                ) { Text("Gem", color = if (newName.isNotBlank()) Signal else TextMuted) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSaveDialog = false; newName = "" }) { Text("Annullér", color = TextMuted) }
-            },
-        )
+    if (saving) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = newName, onValueChange = { newName = it },
+                label = { Text("Preset-navn (fx \"Kort & teknisk\")", fontSize = 12.sp) },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            TextButton(
+                enabled = newName.isNotBlank(),
+                onClick = {
+                    runCatching {
+                        db.savePreset(source, newName.trim(), currentPrompt)
+                        presets = db.listPresets(source)
+                        newName = ""; saving = false
+                    }.onFailure { presetError = "Kunne ikke gemme: ${it.message}" }
+                },
+            ) { Text("Gem", color = if (newName.isNotBlank()) Signal else TextMuted, fontWeight = FontWeight.Bold) }
+        }
     }
+    presetError?.let { Text(it, color = Danger, fontSize = 11.sp) }
 }
 private data class Msg(
     val role: String,
