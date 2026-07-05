@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.4** — "preset-gem-flow genbygget inline (0.20.3-diagnosen var forkert)". Follows 0.20.3 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.20.5** — "preset-fixet BEKRÆFTET on-device; mønster portet til desktop". Follows 0.20.4 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -20,7 +20,7 @@ Tick through this on the phone, then `v1.0.0` gets tagged:
 - [ ] **Cloud model dropdown** (0.15.x): "Genindlæs modeller" actually populates cloud models on Anders' Ollama Cloud account.
 - [ ] **RAG mode** (0.17.0): toggle works, source-filter dropdown lists ingested sources, replies show source chips.
 - [ ] **Error UX + retry** (0.18.0): killing the rig mid-chat shows a readable Danish error with a working "↻ Prøv igen" button.
-- [ ] **Presets** (0.19.8; 0.20.3-fix didn't hold, flow rebuilt inline in 0.20.4 — retest): tap "+ Gem som preset" → an inline name field unfolds (no dialog anymore) → type a name → "Gem" turns blue → tap → chip appears. Also tap a chip to reapply, "✕" to delete.
+- [x] **Presets** ✅ **bekræftet af Anders on-device (0.20.4)** — inline-genbygningen virkede: chip gemmes og vises korrekt. (Historik: 0.19.8-original fejlede, 0.20.3-diagnosen holdt ikke, 0.20.4-genbygning med gennemprøvede komponenter løste det.)
 - [ ] **Model management** (0.20.0): the "Modeller" screen (⋮ menu) lists installed models with size, shows running models with VRAM, pulls a new model with live progress, deletes one with confirmation.
 - [ ] **RAG-ingest** (0.20.2, newest and least-tested — new file-picker API surface): from the RAG source dropdown, "+ Tilføj dokument" opens Android's file picker, picks a .txt/.md file, and it appears in the source list after ingesting.
 
@@ -42,6 +42,21 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.5  (preset-fixet bekræftet af Anders — mønster portet til desktop)
+- **Anders bekræftede 0.20.4 on-device**: inline-gem-flowet virker — preset
+  gemmes og chip vises (screenshot med chip "ny" + ✕). Preset-punktet i
+  V1-tjeklisten er hermed afkrydset. Rodårsagen til at det oprindelige
+  dialog-baserede flow fejlede forbliver uidentificeret (kan ikke
+  reproduceres uden enheden) — men den fejlende komponentkombination er nu
+  helt ude af kodebasen.
+- **Mønstret portet til desktop** — bevidst FØRST efter bekræftelsen
+  (0.20.4-beslutningen): samme inline-flow, TextButtons i stedet for
+  clickable-Box'e, AlertDialog fjernet, samme synlige fejlhåndtering.
+  Preset-databaselaget på desktop var allerede runtime-verificeret
+  (0.19.9's smoke-test), så kun UI-mønsteret er nyt — og det er nu det
+  on-device-bekræftede.
+- Kompilerer rent. Ingen backend-kodeændring udover versionsbump.
 
 ## What's new in 0.20.4  (preset-gem genbygget — ærlig omgang: 0.20.3-diagnosen holdt ikke)
 - **Anders gentestede 0.20.3: fejlen består** — "Gem" reagerer slet ikke.

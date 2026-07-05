@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -423,81 +424,81 @@ private fun SettingsCard(
 
 /**
  * Saved system-instruction presets for one source ("rig" or "cloud"), shown as
- * chips under the system-instruction field. Same feature/UX as Android's
- * PresetRow (ui/AppUi.kt), ported to desktop's plain-JDBC DesktopChatDb.
+ * chips under the system-instruction field. Inline save flow (no dialog) --
+ * the pattern Anders confirmed working on-device in Android 0.20.4, after the
+ * original dialog-based flow (0.19.8/0.19.9) failed on-device with a root
+ * cause that couldn't be pinned down remotely. Ported here for parity AFTER
+ * that confirmation, not before.
  */
 @Composable
 private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, onApply: (String) -> Unit) {
-    var presets by remember { mutableStateOf(db.listPresets(source)) }
-    var showSaveDialog by remember { mutableStateOf(false) }
+    var presets by remember { mutableStateOf(runCatching { db.listPresets(source) }.getOrElse { emptyList() }) }
+    var saving by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
+    var presetError by remember { mutableStateOf<String?>(null) }
 
-    Spacer(Modifier.height(6.dp))
+    Spacer(Modifier.height(4.dp))
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         presets.forEach { p ->
             Box(
-                Modifier.clip(RoundedCornerShape(999.dp))
-                    .background(Brand.SurfaceHigh)
-                    .clickable { onApply(p.prompt) }
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                Modifier.clip(RoundedCornerShape(999.dp)).background(Brand.SurfaceHigh),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(p.name, color = Brand.TextHigh, fontSize = 12.sp)
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "✕", color = Brand.TextMuted, fontSize = 11.sp,
-                        modifier = Modifier.clickable {
-                            db.deletePreset(p.id)
-                            presets = db.listPresets(source)
+                    TextButton(
+                        onClick = { onApply(p.prompt) },
+                        contentPadding = PaddingValues(start = 12.dp, end = 4.dp),
+                    ) { Text(p.name, color = Brand.TextHigh, fontSize = 12.sp) }
+                    TextButton(
+                        onClick = {
+                            runCatching {
+                                db.deletePreset(p.id)
+                                presets = db.listPresets(source)
+                            }.onFailure { presetError = "Kunne ikke slette: ${it.message}" }
                         },
-                    )
+                        contentPadding = PaddingValues(start = 4.dp, end = 12.dp),
+                    ) { Text("✕", color = Brand.TextMuted, fontSize = 11.sp) }
                 }
             }
             Spacer(Modifier.width(6.dp))
         }
-        Box(
-            Modifier.clip(RoundedCornerShape(999.dp))
-                .background(Brand.Graphite)
-                .clickable(enabled = currentPrompt.isNotBlank()) { showSaveDialog = true }
-                .padding(horizontal = 10.dp, vertical = 5.dp),
+        TextButton(
+            enabled = currentPrompt.isNotBlank(),
+            onClick = { saving = !saving; presetError = null },
+            contentPadding = PaddingValues(horizontal = 8.dp),
         ) {
             Text(
-                "+ Gem som preset",
+                if (saving) "− Annullér" else "+ Gem som preset",
                 color = if (currentPrompt.isNotBlank()) Brand.Signal else Brand.TextMuted,
                 fontSize = 12.sp,
             )
         }
     }
 
-    if (showSaveDialog) {
-        AlertDialog(
-            onDismissRequest = { showSaveDialog = false; newName = "" },
-            title = { Text("Gem preset") },
-            text = {
-                OutlinedTextField(
-                    value = newName, onValueChange = { newName = it },
-                    label = { Text("Navn (fx \"Kort & teknisk\")", fontSize = 12.sp) },
-                    singleLine = true,
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = newName.isNotBlank(),
-                    onClick = {
+    if (saving) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = newName, onValueChange = { newName = it },
+                label = { Text("Preset-navn (fx \"Kort & teknisk\")", fontSize = 12.sp) },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            TextButton(
+                enabled = newName.isNotBlank(),
+                onClick = {
+                    runCatching {
                         db.savePreset(source, newName.trim(), currentPrompt)
                         presets = db.listPresets(source)
-                        newName = ""; showSaveDialog = false
-                    },
-                ) { Text("Gem", color = if (newName.isNotBlank()) Brand.Signal else Brand.TextMuted) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSaveDialog = false; newName = "" }) { Text("Annullér", color = Brand.TextMuted) }
-            },
-        )
+                        newName = ""; saving = false
+                    }.onFailure { presetError = "Kunne ikke gemme: ${it.message}" }
+                },
+            ) { Text("Gem", color = if (newName.isNotBlank()) Brand.Signal else Brand.TextMuted, fontWeight = FontWeight.Bold) }
+        }
     }
+    presetError?.let { Text(it, color = Brand.Danger, fontSize = 11.sp) }
 }
 
 /**
