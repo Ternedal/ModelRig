@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.9** — "proaktiv audit: RAG-ingest-race fundet+fikset (ingen ny feature)". Follows 0.20.8 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
+Version **0.20.10** — "CI-besparelse: macOS/Windows kun ved milepæle". Follows 0.20.9 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous session, **2026-07-02/03**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -44,6 +44,29 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.10  (CI-besparelse — macOS/Windows kun ved milepæle)
+- **Baggrund**: beregnede det faktiske forbrug af GitHub Actions-minutter fra
+  ægte job-tider (ikke gæt): ~446 af 2000 gratis minutter/måned brugt over
+  denne sessions 15 kørsler. macOS-runnere koster 10x multiplier, Windows 2x
+  — kun 23 faktiske macOS-minutter kostede 229 minutter af kvoten, mere end
+  Ubuntu og Windows tilsammen.
+- **Fix**: ny `determine-matrix`-job beregner om et tag er en "milepæl"
+  (patch-version = 0, fx `v0.20.0`, `v1.0.0`) eller en almindelig
+  patch-release (`v0.20.10` osv.). Milepæle bygger stadig alle tre OS'er;
+  patch-releases bygger kun Ubuntu (server-tests, Android-APK,
+  Linux-desktop-jar). Windows/macOS-jars udelades kun fra release-assets på
+  patch-releases — ikke fra selve builden ved milepæle.
+- **Manuel override**: `workflow_dispatch` tilføjet med et
+  `force_full_matrix`-flag, hvis en patch-release specifikt rører
+  desktop-kode og bør fuld-testes alligevel. **Ærligt forbehold**: dette er
+  ikke selv testet — hvis det dispatches fra en branch uden et tag, kan
+  release-jobbet fejle (ingen tag at hænge assets på). Mindre risiko, da det
+  ikke er hovedstien.
+- **Denne release ER selve testen**: v0.20.10 er bevidst en patch (ikke en
+  milepæl), så CI-kørslen for denne tag bekræfter reelt at kun Ubuntu bygges
+  — ikke bare antaget.
+- Ingen Android/desktop-kodeændring. Kun `.github/workflows/build-and-release.yml`.
 
 ## What's new in 0.20.9  (proaktiv audit — ingen ny feature, kun risikoreduktion)
 - **Baggrund**: i stedet for at stable endnu et ubekræftet V3-punkt oveni de

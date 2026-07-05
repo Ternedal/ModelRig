@@ -12,11 +12,50 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      force_full_matrix:
+        description: "Build all 3 desktop OSes even if this isn't a milestone tag"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
 
 jobs:
+  determine-matrix:
+    # Cost control: macOS runners bill at 10x, Windows at 2x, against GitHub's
+    # free-tier Actions minutes for private repos. Building all three OSes on
+    # every single patch release (this project bumps the patch version on
+    # almost every push) burns quota fast for little marginal benefit -- a
+    # patch release's desktop code is the same Kotlin/Compose source on every
+    # OS; what actually needs testing per-OS is new/changed desktop code,
+    # which milestone releases (versions ending in .0, e.g. v0.19.0, v0.20.0,
+    # v1.0.0) are the natural checkpoint for. Patch releases (.1, .2, ...)
+    # build ubuntu only; a full 3-OS matrix is still one click away via
+    # workflow_dispatch if a patch release specifically touches desktop code
+    # and needs full verification.
+    runs-on: ubuntu-latest
+    outputs:
+      os_matrix: ${{ steps.calc.outputs.os_matrix }}
+    steps:
+      - id: calc
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.force_full_matrix }}" = "true" ]; then
+            echo 'os_matrix=["ubuntu-latest","windows-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
+            echo "Manual dispatch with force_full_matrix -> full 3-OS matrix"
+          else
+            TAG="${{ github.ref_name }}"
+            PATCH="${TAG##*.}"
+            if [ "$PATCH" = "0" ]; then
+              echo 'os_matrix=["ubuntu-latest","windows-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
+              echo "Milestone release ($TAG, patch=0) -> full 3-OS matrix"
+            else
+              echo 'os_matrix=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+              echo "Patch release ($TAG, patch=$PATCH) -> ubuntu-only desktop build"
+            fi
+          fi
+
   server-tests:
     runs-on: ubuntu-latest
     steps:
@@ -85,11 +124,11 @@ jobs:
           retention-days: 14
 
   desktop-build:
-    needs: server-tests
+    needs: [server-tests, determine-matrix]
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: ${{ fromJSON(needs.determine-matrix.outputs.os_matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
