@@ -305,3 +305,4 @@ jobs:
           # existing release with assets rather than overwriting its notes).
           draft: false
           prerelease: false
+          make_latest: true
