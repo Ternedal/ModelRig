@@ -34,9 +34,17 @@ if (-not (Test-Path $backendExe)) {
 }
 
 Write-Host "Starting RAG worker on 127.0.0.1:8099 ..." -ForegroundColor Cyan
-$worker = Start-Process -FilePath "python" `
-    -ArgumentList "-m","uvicorn","app.main:app","--host","127.0.0.1","--port","8099" `
-    -WorkingDirectory $workerDir -PassThru -NoNewWindow
+$workerExe = Get-ChildItem -Path $workerDir -Filter "modelrig-worker*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($workerExe) {
+    # Prebuilt exe from the GitHub release (no Python needed on the rig)
+    Write-Host "  (prebuilt exe: $($workerExe.Name))" -ForegroundColor DarkGray
+    $worker = Start-Process -FilePath $workerExe.FullName `
+        -WorkingDirectory $workerDir -PassThru -NoNewWindow
+} else {
+    $worker = Start-Process -FilePath "python" `
+        -ArgumentList "-m","uvicorn","app.main:app","--host","127.0.0.1","--port","8099" `
+        -WorkingDirectory $workerDir -PassThru -NoNewWindow
+}
 
 try {
     Start-Sleep -Seconds 2

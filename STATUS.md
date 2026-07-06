@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.13** — "desktop: soft-lock rettet (Anders' Windows-fund) — scroll + nåbare toggles". Follows 0.20.12 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-05**.
+Version **0.20.14** — "færdigbyggede Windows-exe'er til rig'en (ingen Go/Python nødvendig)". Follows 0.20.13 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-05**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -44,6 +44,35 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.14  (færdigbyggede server-exe'er — Anders' ønske under Windows-opsætning)
+- **Baggrund**: Anders ramte den fulde toolchain-mur under rig-opsætning
+  ("go build" kræver Go, worker kræver Python+pip) og bad om ét pakket
+  artefakt. En .jar giver teknisk ikke mening (backend er Go, worker er
+  Python — .jar er JVM-format; desktop-klienten ER allerede en jar), men
+  behovet bag er legitimt: **kør uden toolchain**.
+- **Leverancen**: to enkeltfils Windows-exe'er på releasen —
+  `modelrig-server-windows-x64.exe` (native Go-build) og
+  `modelrig-worker-windows-x64.exe` (PyInstaller onefile via ny
+  `worker/run_worker.py`, som importerer app-OBJEKTET statisk så
+  PyInstaller ser hele afhængighedsgrafen).
+- **CI-røgtestet på ægte Windows før release**: nyt `server-binaries`-job
+  (windows-latest) bygger begge, starter dem, poller `/healthz` (onefile-
+  exe'er selv-udpakker ved første start — polling frem for gæt-sleep), og
+  kræver at serverens rapporterede version matcher taggets præcist, før
+  filerne når release-assets. Fejler smoke, fejler releasen.
+- **Kvotebevidst**: jobbet kører kun når det taggede commit rører
+  `backend/`, `worker/` eller `deploy/` (samme diff-tree-mekanik som
+  desktop-reglen), samt på milepæle. Release-jobbet blokeres ikke af et
+  legitimt skippet binaries-job (`!failure() && !cancelled()`).
+- `deploy/run-windows.ps1` foretrækker nu automatisk en
+  `modelrig-worker*.exe` i worker-mappen over python; ellers uændret
+  fallback. `CLIENT_BUILD_AND_TEST.md` §1 fik hurtigvejen dokumenteret,
+  inkl. standalone-kørsel helt uden repo.
+- **Ærlig grænse**: exe'ernes healthz-røgtest beviser at de starter og
+  svarer på ægte Windows — ikke den fulde RAG-runde mod en rigtig Ollama
+  (findes ikke på runneren). `doctor --deep` hos Anders er stadig dommeren.
+- Ingen funktionel kodeændring i backend/worker udover versionsbump.
 
 ## What's new in 0.20.13  (desktop-soft-lock rettet — fundet af Anders på Windows)
 - **Første rigtige desktop-on-device-fund**: Anders kørte v0.20.9-jaren på

@@ -22,6 +22,19 @@ Dette dokument er den checkliste, du kører når du sætter dig ned. Rækkefølg
 Dette virker allerede — brug det som referencekæde og til at bekræfte at din
 Ollama svarer, før du kaster dig over klient-builds.
 
+**Hurtig vej uden Go/Python-toolchain (fra 0.20.14):** releasen indeholder
+færdigbyggede, CI-røgtestede Windows-exe'er — `modelrig-server-windows-x64.exe`
+og `modelrig-worker-windows-x64.exe`. Læg server-exe'en som
+`backend\modelrig-server.exe` og worker-exe'en i `worker\`-mappen (run-scriptet
+finder selv `modelrig-worker*.exe` og foretrækker den over python). Så kan du
+springe `go build` og `pip install` over og gå direkte til run-scriptet.
+Helt uden repo kan de også køres standalone fra én mappe:
+```powershell
+$env:MODELRIG_HOST = "0.0.0.0"          # så telefonen kan nå den
+Start-Process .\modelrig-worker-windows-x64.exe
+.\modelrig-server-windows-x64.exe        # forgrund; Ctrl+C stopper
+```
+
 ```powershell
 # byg backend + installér worker-deps (én gang)
 go build -o backend\modelrig-server.exe .\backend\cmd\modelrig-server

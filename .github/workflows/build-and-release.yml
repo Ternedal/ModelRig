@@ -38,6 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       os_matrix: ${{ steps.calc.outputs.os_matrix }}
+      server_bins: ${{ steps.calc.outputs.server_bins }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,27 +50,37 @@ jobs:
           fetch-depth: 2
       - id: calc
         run: |
+          FULL='["ubuntu-latest","windows-latest","macos-latest"]'
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.force_full_matrix }}" = "true" ]; then
-            echo 'os_matrix=["ubuntu-latest","windows-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
-            echo "Manual dispatch with force_full_matrix -> full 3-OS matrix"
+            echo "os_matrix=$FULL" >> "$GITHUB_OUTPUT"
+            echo "server_bins=true" >> "$GITHUB_OUTPUT"
+            echo "Manual dispatch with force_full_matrix -> full 3-OS matrix + server exes"
+            exit 0
+          fi
+          TAG="${{ github.ref_name }}"
+          PATCH="${TAG##*.}"
+          CHANGED=$(git diff-tree --no-commit-id --name-only -r HEAD)
+          # Prebuilt Windows server/worker exes: build whenever the code they
+          # package (or their launcher) changed, and on milestones.
+          if [ "$PATCH" = "0" ] || echo "$CHANGED" | grep -qE '^(backend|worker|deploy)/'; then
+            echo "server_bins=true" >> "$GITHUB_OUTPUT"
           else
-            TAG="${{ github.ref_name }}"
-            PATCH="${TAG##*.}"
-            if [ "$PATCH" = "0" ]; then
-              echo 'os_matrix=["ubuntu-latest","windows-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
-              echo "Milestone release ($TAG, patch=0) -> full 3-OS matrix"
-            elif git diff-tree --no-commit-id --name-only -r HEAD | grep -q '^desktop/'; then
-              # The whole rationale for ubuntu-only patch builds was "a patch
-              # release's desktop code is the same source" -- a patch that
-              # CHANGES desktop code is exactly the exception (learned when
-              # v0.20.13's Windows layout fix needed a Windows jar and the
-              # rule would have skipped building one).
-              echo 'os_matrix=["ubuntu-latest","windows-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
-              echo "Patch release ($TAG) but the tagged commit touches desktop/ -> full 3-OS matrix"
-            else
-              echo 'os_matrix=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
-              echo "Patch release ($TAG, patch=$PATCH, no desktop changes) -> ubuntu-only desktop build"
-            fi
+            echo "server_bins=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$PATCH" = "0" ]; then
+            echo "os_matrix=$FULL" >> "$GITHUB_OUTPUT"
+            echo "Milestone release ($TAG, patch=0) -> full 3-OS matrix"
+          elif echo "$CHANGED" | grep -q '^desktop/'; then
+            # The whole rationale for ubuntu-only patch builds was "a patch
+            # release's desktop code is the same source" -- a patch that
+            # CHANGES desktop code is exactly the exception (learned when
+            # v0.20.13's Windows layout fix needed a Windows jar and the
+            # rule would have skipped building one).
+            echo "os_matrix=$FULL" >> "$GITHUB_OUTPUT"
+            echo "Patch release ($TAG) but the tagged commit touches desktop/ -> full 3-OS matrix"
+          else
+            echo 'os_matrix=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+            echo "Patch release ($TAG, patch=$PATCH, no desktop changes) -> ubuntu-only desktop build"
           fi
 
   server-tests:
@@ -178,8 +189,73 @@ jobs:
           path: ${{ steps.findjar.outputs.path }}
           retention-days: 14
 
+  server-binaries:
+    # Prebuilt single-file Windows exes for the rig: no Go, no Python, no pip
+    # needed on the machine. Built AND smoke-tested on a real Windows runner
+    # -- both exes must answer /healthz (and the server must report the tag's
+    # exact version) before they're allowed onto the release.
+    needs: [determine-matrix, server-tests]
+    if: needs.determine-matrix.outputs.server_bins == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build backend exe
+        run: go build -o modelrig-server-windows-x64.exe ./backend/cmd/modelrig-server
+      - name: Build worker exe (PyInstaller)
+        run: |
+          pip install -r worker/requirements.txt pyinstaller
+          pyinstaller --onefile --name modelrig-worker-windows-x64 --paths worker worker/run_worker.py
+      - name: Smoke test both exes on the real Windows runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # Dead Ollama URL on purpose: /healthz must not depend on it
+          $env:MODELRIG_OLLAMA_URL = "http://127.0.0.1:9"
+          $worker = Start-Process -FilePath ".\dist\modelrig-worker-windows-x64.exe" -PassThru -NoNewWindow
+          $server = $null
+          try {
+            # onefile exes self-extract on first start; poll instead of guessing a sleep
+            $wh = $null
+            foreach ($i in 1..15) {
+              try { $wh = Invoke-RestMethod -Uri http://127.0.0.1:8099/healthz -TimeoutSec 3; break }
+              catch { Start-Sleep -Seconds 2 }
+            }
+            if (-not $wh -or $wh.service -ne "modelrig-worker") { throw "worker healthz failed: $($wh | ConvertTo-Json -Compress)" }
+            Write-Host "worker exe OK: $($wh.service) $($wh.version)"
+
+            $server = Start-Process -FilePath ".\modelrig-server-windows-x64.exe" -PassThru -NoNewWindow
+            $sh = $null
+            foreach ($i in 1..10) {
+              try { $sh = Invoke-RestMethod -Uri http://127.0.0.1:8080/healthz -TimeoutSec 3; break }
+              catch { Start-Sleep -Seconds 2 }
+            }
+            $expected = $env:GITHUB_REF_NAME.TrimStart("v")
+            if (-not $sh -or $sh.version -ne $expected) { throw "server healthz failed or wrong version: got '$($sh.version)', expected '$expected'" }
+            Write-Host "server exe OK: version $($sh.version)"
+          }
+          finally {
+            if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
+            if ($worker -and -not $worker.HasExited) { Stop-Process -Id $worker.Id -Force -ErrorAction SilentlyContinue }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-binaries-windows
+          path: |
+            modelrig-server-windows-x64.exe
+            dist/modelrig-worker-windows-x64.exe
+
   release:
-    needs: [android-build, desktop-build]
+    needs: [android-build, desktop-build, server-binaries]
+    # !failure() && !cancelled(): server-binaries may legitimately be SKIPPED
+    # (patch release not touching backend/worker/deploy) -- that must not
+    # block the release; an actual failure anywhere still does.
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -204,7 +280,7 @@ jobs:
       - name: Collect all release assets into one flat folder
         run: |
           mkdir -p release-assets
-          find artifacts -type f \( -name "*.apk" -o -name "*.jar" \) -exec cp {} release-assets/ \;
+          find artifacts -type f \( -name "*.apk" -o -name "*.jar" -o -name "*.exe" \) -exec cp {} release-assets/ \;
           cp "modelrig-${{ github.ref_name }}.zip" release-assets/
           ls -la release-assets
 
