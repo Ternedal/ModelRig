@@ -70,7 +70,13 @@ jobs:
           if [ "$PATCH" = "0" ]; then
             echo "os_matrix=$FULL" >> "$GITHUB_OUTPUT"
             echo "Milestone release ($TAG, patch=0) -> full 3-OS matrix"
-          elif echo "$CHANGED" | grep -q '^desktop/'; then
+          elif echo "$CHANGED" | grep '^desktop/' | grep -vq '^desktop/composeApp/build.gradle.kts$'; then
+            # Any desktop change EXCEPT the gradle file alone: that file gets
+            # its packageVersion bumped on EVERY release (0.20.12's jar-naming
+            # fix), which silently re-triggered the full expensive matrix on
+            # every single patch -- discovered live on v0.20.14's run. A real
+            # desktop build-config change beyond the bump still gets full
+            # coverage at the next milestone, or via workflow_dispatch.
             # The whole rationale for ubuntu-only patch builds was "a patch
             # release's desktop code is the same source" -- a patch that
             # CHANGES desktop code is exactly the exception (learned when
@@ -206,7 +212,10 @@ jobs:
         with:
           python-version: '3.11'
       - name: Build backend exe
-        run: go build -o modelrig-server-windows-x64.exe ./backend/cmd/modelrig-server
+        # go.mod lives in backend/, not the repo root -- v0.20.14's first run
+        # failed on exactly this (built from root, no module found).
+        working-directory: backend
+        run: go build -o ../modelrig-server-windows-x64.exe ./cmd/modelrig-server
       - name: Build worker exe (PyInstaller)
         run: |
           pip install -r worker/requirements.txt pyinstaller

@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.14** — "færdigbyggede Windows-exe'er til rig'en (ingen Go/Python nødvendig)". Follows 0.20.13 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-05**.
+Version **0.20.15** — "server-exe'erne, anden ombæring: 0.20.14's CI-job fejlede". Follows 0.20.14 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-05**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -44,6 +44,25 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.15  (server-exe'erne, anden ombæring — to CI-fejl fundet og rettet)
+- **0.20.14's `server-binaries`-job fejlede på første kørsel** — releasen nåede
+  aldrig at få exe'erne (og blev slettet; 0.20.15 er den reelle leverance).
+  Rodårsag, bekræftet: `go.mod` ligger i `backend/`, ikke i repo-roden — CI-
+  steppet byggede fra roden, hvor der intet Go-modul findes. Hver eneste
+  lokale build i denne session har kørt `cd backend &&`; det manglede i det
+  nye job. Rettet med `working-directory: backend`.
+- **Selvforskyldt matrix-læk fundet på samme kørsel**: 0.20.12 gjorde
+  `desktop/composeApp/build.gradle.kts` til en del af versionsbump-rutinen —
+  hvilket betød at HVERT release nu "rørte desktop/" og stille gen-udløste
+  den dyre fulde 3-OS-matrix (0.20.14 byggede alle tre OS'er uden grund).
+  Desktop-tjekket ekskluderer nu netop dén fil; en reel desktop-ændring
+  udover bumpet giver stadig fuld matrix.
+- Denne kørsel er den dobbelte live-test: `server-binaries` skal være grøn
+  på Windows-runneren (backend rører config.go → jobbet kører), og desktop
+  skal være ubuntu-only (kun gradle-bumpet rørt → ekskluderet).
+- Indholdsmæssigt identisk med 0.20.14 i øvrigt (run_worker.py,
+  run-windows.ps1-exe-detektion, docs-hurtigvej).
 
 ## What's new in 0.20.14  (færdigbyggede server-exe'er — Anders' ønske under Windows-opsætning)
 - **Baggrund**: Anders ramte den fulde toolchain-mur under rig-opsætning
