@@ -60,7 +60,7 @@ python tools\modelrig-cli.py rag-chat "hvad binder den for LAN?"   # streaming R
 Hvis `doctor --deep` er grøn, ved du at backend + worker + Ollama spiller sammen
 på din maskine. **Nu er klient-builds den eneste ukendte.**
 
-## 2. Byg desktop-klienten (verificeret — bygges også af CI på Win/macOS/Linux)
+## 2. Byg desktop-klienten (verificeret — CI bygger Windows-jar ved desktop-ændringer og milepæle)
 ```powershell
 cd desktop
 gradle wrapper --gradle-version 8.9      # der er ingen wrapper-jar i repoet

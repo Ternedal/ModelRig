@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.16** — "UX-batch fra desktop-testaftenen: selvforklarende fejl + panel-auto-refresh". Follows 0.20.15 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-07**.
+Version **0.20.17** — "CI: Linux/macOS-builds droppet — kun Windows + Android (Anders' beslutning)". Follows 0.20.16 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-07**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -45,6 +45,28 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.17  (CI-only — platformliste skåret til virkeligheden)
+- **Anders' beslutning 7/7: drop Linux- og macOS-desktop-builds.** Projektet
+  kører på præcis to platforme — Windows (rig: jar + server-exes) og Android
+  (telefon). Linux/macOS-jars var rene spild-artefakter, og macOS-runneren
+  (10x-multiplier) var den suverænt største kvotepost målt over hele
+  0.19/0.20-serien.
+- **`desktop-build` er nu et enkelt Windows-job** (matrix-strategien fjernet
+  helt) og kører KUN når desktop-kode faktisk er ændret, ved milepæle
+  (patch=0), eller via workflow_dispatch — samme "komponent genbygges når
+  dens kilde ændres"-politik som server-exe'erne. Windows-builden fungerer
+  samtidig som CI-compile-check for desktop-koden (når koden er uændret, er
+  der intet nyt at checke).
+- **Ren-backend-patches bygger nu KUN Android-APK + kilde-zip** — den
+  hidtil-obligatoriske Ubuntu-jar er også væk. Jar'en fra seneste
+  desktop-ændring forbliver den aktuelle (komponent-versionspolitikken).
+- **Denne release er selv testen af den slankeste sti**: rører kun
+  `.github/` + docs → forventet: desktop-build SKIPPET, server-binaries
+  SKIPPET, release udgiver alligevel (apk + zip). Kørslen verificeres
+  efter tag-push, som altid. Android-koden er fortsat identisk med
+  0.20.15/0.20.16 (kun versionstal) — telefontesten er gyldig på alle tre.
+
 
 ## What's new in 0.20.16  (UX-batch fra desktop-testaftenen 6/7 — desktop + docs, Android kode-identisk)
 - **Baggrund**: Anders gennemførte 6/7 hele desktop-testrunden on-device
