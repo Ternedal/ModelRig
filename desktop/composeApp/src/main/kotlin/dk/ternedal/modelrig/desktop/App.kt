@@ -49,6 +49,7 @@ import dk.ternedal.modelrig.desktop.net.ChatRouter
 import dk.ternedal.modelrig.desktop.net.OllamaClient
 import dk.ternedal.modelrig.desktop.net.RagClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -116,7 +117,7 @@ fun App() {
                             .listModels(path)
                     }
                 }
-                res.onSuccess { models = it; modelError = null }.onFailure { modelError = it.message }
+                res.onSuccess { models = it; modelError = null }.onFailure { modelError = apiErrorHint(it.message) }
             }
         }
 
@@ -125,7 +126,7 @@ fun App() {
                 val res = withContext(Dispatchers.IO) {
                     runCatching { RagClient(localUrl, deviceToken.ifBlank { null }).listSources() }
                 }
-                res.onSuccess { ragSources = it; ragError = null }.onFailure { ragError = it.message }
+                res.onSuccess { ragSources = it; ragError = null }.onFailure { ragError = apiErrorHint(it.message) }
             }
         }
 
@@ -205,7 +206,7 @@ fun App() {
                 val cur = messages[assistantIdx]
                 val cancelled = err != null && cur.text.isNotEmpty()
                 val msg = if (err == null) cur.text
-                    else if (cur.text.isEmpty()) "Fejl: ${err.message}"
+                    else if (cur.text.isEmpty()) "Fejl: ${apiErrorHint(err.message)}"
                     else cur.text + "\n[afbrudt: ${err.message}]"
                 messages[assistantIdx] = cur.copy(text = msg, streaming = false)
                 if (err == null || cancelled) {
@@ -606,6 +607,24 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
  * as loadModels() ("/api/v1/..." when going via the backend, "/api/..." when
  * talking to Ollama directly) -- same feature as Android's Modeller screen.
  */
+/**
+ * Decorates raw API error strings (e.g. "rag sources failed (401)") with a
+ * one-line explanation of the two failure modes that actually bit during
+ * on-device testing (6/7-2026): a missing/stale token (401 -- fresh server
+ * data file, or the pairing CODE pasted where the claimed token belongs),
+ * and pointing the client at raw Ollama while asking for backend-only
+ * features (404 -- Ollama has no /rag or /api/v1 endpoints). The raw message
+ * stays first so screenshots/logs still show the real status code.
+ */
+private fun apiErrorHint(raw: String?): String {
+    val msg = raw ?: "ukendt fejl"
+    return when {
+        "(401)" in msg -> "$msg — enhedstoken mangler eller er ugyldigt. Mint en kode (server: -pair), byt den til et token via /api/v1/pair/claim, og indsæt token'et under Indstillinger."
+        "(404)" in msg -> "$msg — endpointet findes ikke på serveren. Peger du på Ollama direkte? Denne funktion kræver ModelRig-backenden: base-URL http://<rig>:8080 og chat-sti /api/v1/chat. Kører backenden, er den måske for gammel."
+        else -> msg
+    }
+}
+
 @Composable
 private fun ModelsPanel(baseUrl: String, isBackend: Boolean, bearer: String?, onModelsChanged: (List<String>) -> Unit) {
     val scope = rememberCoroutineScope()
@@ -632,10 +651,20 @@ private fun ModelsPanel(baseUrl: String, isBackend: Boolean, bearer: String?, on
             res.onSuccess { (i, r) ->
                 installed = i; running = r; loadError = null
                 onModelsChanged(i.map { it.name })
-            }.onFailure { loadError = it.message }
+            }.onFailure { loadError = apiErrorHint(it.message) }
         }
     }
-    LaunchedEffect(Unit) { refresh() }
+    // Re-fetch when the connection settings change -- keyed on the actual
+    // inputs instead of Unit, so a token pasted AFTER the panel was opened
+    // clears the stale 401 by itself (bit Anders live 6/7-2026: the panel
+    // kept showing its first, pre-token failure until a manual refresh).
+    // The 400 ms delay is a debounce: these params change per KEYSTROKE
+    // while typing in settings, and LaunchedEffect cancels the previous
+    // block on every key change, so only the settled value fires a request.
+    LaunchedEffect(baseUrl, isBackend, bearer) {
+        delay(400)
+        refresh()
+    }
 
     Box(Modifier.clip(RoundedCornerShape(12.dp)).background(Brand.Surface).fillMaxWidth().padding(14.dp)) {
         Column {
@@ -714,7 +743,7 @@ private fun ModelsPanel(baseUrl: String, isBackend: Boolean, bearer: String?, on
                     scope.launch {
                         val client = OllamaClient(baseUrl = baseUrl, bearer = bearer)
                         val err = withContext(Dispatchers.IO) { runCatching { client.deleteModel(name, deletePath) }.exceptionOrNull() }
-                        if (err == null) refresh() else loadError = err.message
+                        if (err == null) refresh() else loadError = apiErrorHint(err.message)
                     }
                 }) { Text("Slet", color = Brand.Danger) }
             },

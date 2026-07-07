@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.15** — "server-exe'erne, anden ombæring: 0.20.14's CI-job fejlede". Follows 0.20.14 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-05**.
+Version **0.20.16** — "UX-batch fra desktop-testaftenen: selvforklarende fejl + panel-auto-refresh". Follows 0.20.15 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-07**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -22,6 +22,7 @@ Tick through this on the phone, then `v1.0.0` gets tagged:
 - [ ] **Error UX + retry** (0.18.0): killing the rig mid-chat shows a readable Danish error with a working "↻ Prøv igen" button.
 - [x] **Presets** ✅ **bekræftet af Anders on-device (0.20.4)** — inline-genbygningen virkede: chip gemmes og vises korrekt. (Historik: 0.19.8-original fejlede, 0.20.3-diagnosen holdt ikke, 0.20.4-genbygning med gennemprøvede komponenter løste det.)
 - [ ] **Model management** (0.20.0): the "Modeller" screen (⋮ menu) lists installed models with size, shows running models with VRAM, pulls a new model with live progress, deletes one with confirmation.
+- [ ] **FØR ALT ANDET — par telefonen forfra**: serveren kører nu fra exe'erne med en FRISK datafil (`modelrig-data.json` i mappen exe'erne startes fra) — telefonens gamle token er dødt. Genstart serveren med `MODELRIG_HOST=0.0.0.0`, mint en kode (`-pair`), og par i appen. Uden dette fejler alle rig-punkter med 401.
 - [ ] **RAG-ingest** (0.20.2, newest and least-tested — new file-picker API surface): from the RAG source dropdown, "+ Tilføj dokument" opens Android's file picker, picks a .txt/.md file, and it appears in the source list after ingesting.
 - [ ] **Samtale-oplevelse** (0.20.6): in Samtaler, type in the search field and confirm the list filters live; tap "✎" on a conversation, rename it inline, confirm it sticks; tap "Del" and confirm Android's share sheet opens with a readable markdown version of the conversation.
 - [ ] **Multi-rig-profiler** (0.20.8, V3): once connected to the rig, tap "+ Gem denne rig" in the Rig card, name it, confirm a chip appears; disconnect/clear and confirm tapping the chip reconnects instantly without re-pairing.
@@ -44,6 +45,43 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.16  (UX-batch fra desktop-testaftenen 6/7 — desktop + docs, Android kode-identisk)
+- **Baggrund**: Anders gennemførte 6/7 hele desktop-testrunden on-device
+  (Windows, server-exe'erne). ALT bestod — og tre UX-svagheder blev
+  observeret live undervejs. Denne release er præcis dén batch, bevidst
+  holdt tilbage til testrunden var slut. **Android-koden er urørt**
+  (versionName/Code bump only, badging = release-tag) — telefonens
+  tjekliste-run sker på et stillestående artefakt; 0.20.15- og
+  0.20.16-APK'en er kodeidentiske.
+- **Selvforklarende fejltekster (desktop)**: `apiErrorHint()` dekorerer nu
+  alle fem fejl-visningssteder (RAG-kilder, RAG-chat-boble, model-liste,
+  Modelstyring-load, model-slet). 401 → "token mangler/ugyldigt + par-igen-
+  opskrift"; 404 → "peger du på Ollama direkte? Backend kræver /api/v1/chat
+  + token". Rå statuskode bevares først i beskeden (screenshots/logs viser
+  stadig fakta). Begge tekster svarer 1:1 til de to fejl Anders faktisk
+  ramte.
+- **Modelstyring auto-genhenter** ved ændrede forbindelsesindstillinger:
+  `LaunchedEffect` nøglet på (baseUrl, isBackend, bearer) i stedet for
+  `Unit` — et token indsat EFTER panelet blev åbnet rydder nu selv den
+  forældede 401 (bed Anders live 6/7). 400 ms debounce via LaunchedEffect-
+  cancellation, da parametrene ændres pr. tastetryk under indtastning.
+- **On-device-bekræftet 6/7 (Anders, Windows)** — hele desktop-fladen:
+  soft-lock-fixet (0.20.13-layoutet, paneler + scroll + altid-nåbare
+  toggles), samtale-browser (0.20.7), Modelstyring inkl. VRAM-visning
+  (0.20.1), server-exe'erne + pairing-flow (0.20.15), RAG-kæden end-to-end
+  (ingest → kilde-dropdown → svar med kilde-chip), OG **min_score live**
+  (0.20.11): "hej" mod test-kilden gav ærligt "I don't know" uden kilder —
+  tærsklen filtrerer som designet, nu bevist på rigtig hardware, ikke kun
+  i deterministiske tests.
+- **Komponent-versionspolitik gjort eksplicit** (fulgt siden 0.20.14's
+  matrix-læk-lærdom): hver komponents versionsstreng = versionen af dens
+  seneste ÆNDRING, ikke seneste release. Backend/worker står derfor bevidst
+  på 0.20.15 her (urørte) — det holder også server-exe-genbygningen
+  skippet. **Denne release er første live-kørsel af server_bins=false-
+  grenen** (release-jobbet skal udgive assets selvom server-binaries-jobbet
+  er skippet — `if: !failure() && !cancelled()` var forberedt, aldrig kørt).
+- Ingen backend/worker-kodeændring.
 
 ## What's new in 0.20.15  (server-exe'erne, anden ombæring — to CI-fejl fundet og rettet)
 - **0.20.14's `server-binaries`-job fejlede på første kørsel** — releasen nåede

@@ -240,9 +240,10 @@ Uprioriteret liste — rækkefølge afgøres når V2 nærmer sig:
    CI (`v0.19.5+`) fjerner afhængigheden — 6+ releases bevist stabilt siden.
 5. **RAG-kvalitet:** delvist adresseret i `v0.20.11` (relevans-tærskel så
    irrelevante matches ikke tvinges ind som kontekst; sætningsbevidst
-   chunking). Tærsklen (0.3) er et fornuftigt udgangspunkt, **ikke**
-   empirisk tunet mod Anders' faktiske dokumenter — forvent justering når
-   den bruges dagligt fra telefonen.
+   chunking) — og **tærskel-adfærden er nu live-bekræftet on-device**
+   (6/7-2026: "hej" mod en reel kilde gav ærligt "I don't know" uden
+   kilder, i stedet for støj-kontekst). Selve 0.3-værdien er stadig et
+   udgangspunkt, ikke empirisk tunet — forvent justering ved daglig brug.
 6. **PDF-ingest (V2)** er en kendt scope-fælde; startes smalt og udvides kun ved behov.
 7. **Ikon-skarphed:** afhænger af SVG fra kildefilen (åbent spørgsmål 2).
 

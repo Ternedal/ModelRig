@@ -38,7 +38,7 @@ compose.desktop {
             // lets packageVersion tell the truth.
             targetFormats(TargetFormat.Deb)
             packageName = "ModelRig"
-            packageVersion = "0.20.15"
+            packageVersion = "0.20.16"
         }
     }
 }
