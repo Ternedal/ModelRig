@@ -19,7 +19,7 @@ from . import ollama_client as oc
 from . import rag
 from .store import DocStore
 
-VERSION = "1.5.1"
+VERSION = "1.6.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -327,3 +327,64 @@ async def voice_converse(req: ConverseReq) -> dict:
     except oc.OllamaError as e:
         # LLM unreachable / model not pulled -> 502 (upstream dependency).
         raise HTTPException(status_code=502, detail=f"LLM error: {e}")
+
+
+class ConverseUploadReq(BaseModel):
+    # base64-encoded audio bytes (16 kHz mono WAV) uploaded from the phone.
+    # The existing /voice/converse takes a rig file path, useless over the
+    # network -- this variant is what the Android app calls. Mirrors the vision
+    # base64 pattern the app already uses.
+    audio_base64: str
+    language: str = "da"
+    model: str | None = None
+
+
+@app.post("/voice/converse/upload")
+async def voice_converse_upload(req: ConverseUploadReq) -> dict:
+    """Phone-facing voice turn: decode uploaded audio -> run the full pipeline
+    -> return transcript + reply text + a single combined reply WAV (base64) for
+    easy playback. Same clean errors as /voice/converse."""
+    from . import voice_pipeline
+    import base64, tempfile, os as _os, wave, glob
+    try:
+        raw = base64.b64decode(req.audio_base64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="audio_base64 is not valid base64")
+    tmp_dir = tempfile.mkdtemp(prefix="alva_voice_up_")
+    in_path = _os.path.join(tmp_dir, "input.wav")
+    with open(in_path, "wb") as f:
+        f.write(raw)
+    try:
+        result = await voice_pipeline.converse(
+            in_path, language=req.language, model=req.model, out_dir=tmp_dir,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=501, detail=str(e))
+    except oc.OllamaError as e:
+        raise HTTPException(status_code=502, detail=f"LLM error: {e}")
+
+    # Concatenate the per-sentence reply WAVs into one WAV for simple playback.
+    # Piper uses one voice, so all chunks share format -> we can splice frames.
+    chunk_paths = [c["wav"] for c in result.get("chunks", [])]
+    audio_b64 = ""
+    if chunk_paths:
+        combined = _os.path.join(tmp_dir, "reply_combined.wav")
+        params = None
+        frames = b""
+        for p in chunk_paths:
+            with wave.open(p, "rb") as wf:
+                if params is None:
+                    params = wf.getparams()
+                frames += wf.readframes(wf.getnframes())
+        if params is not None:
+            with wave.open(combined, "wb") as out:
+                out.setparams(params)
+                out.writeframes(frames)
+            import base64 as _b64
+            with open(combined, "rb") as f:
+                audio_b64 = _b64.b64encode(f.read()).decode()
+    # Drop the on-disk chunk paths from the response (they're temp + phone-
+    # irrelevant); return the combined audio instead.
+    result.pop("chunks", None)
+    result["audio_base64"] = audio_b64
+    return result

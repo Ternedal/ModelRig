@@ -78,6 +78,42 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
     }
 
     /**
+     * Alva Voice: whether ASR/TTS are enabled on the rig. Returns the parsed
+     * status object, or throws. Lets the UI tell the user to install the Voice
+     * backends before recording (rather than failing mid-turn).
+     */
+    fun voiceStatus(): JSONObject {
+        val builder = Request.Builder().url("$base/api/v1/voice/status").get()
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        http.newCall(builder.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("voice status failed (${resp.code}): $text")
+            return JSONObject(text)
+        }
+    }
+
+    /**
+     * Alva Voice: one spoken turn. Uploads recorded audio (base64 WAV, 16 kHz
+     * mono) to the rig, which runs ASR -> LLM -> TTS and returns the transcript,
+     * the reply text, and a combined reply WAV (base64) to play back. Voice runs
+     * on the rig (that's where ASR/TTS live), so it needs the rig reachable --
+     * there's no cloud fallback for voice, unlike text chat.
+     * Returns {transcript, reply, audio_base64, time_to_first_audio_s}.
+     */
+    fun voiceConverse(audioB64: String, language: String = "da", model: String? = null): JSONObject {
+        val payload = JSONObject().put("audio_base64", audioB64).put("language", language)
+        if (model != null) payload.put("model", model)
+        val body = payload.toString().toRequestBody(jsonType)
+        val builder = Request.Builder().url("$base/api/v1/voice/converse").post(body)
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        http.newCall(builder.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("voice failed (${resp.code}): $text")
+            return JSONObject(text)
+        }
+    }
+
+    /**
      * Streaming chat: invokes onDelta per NDJSON token chunk as it arrives.
      * `registerCall` (optional) hands back the underlying OkHttp Call so the UI
      * can cancel an in-flight generation (Stop button). Cancelling makes the

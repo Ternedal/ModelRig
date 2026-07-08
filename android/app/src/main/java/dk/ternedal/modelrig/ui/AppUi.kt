@@ -524,6 +524,61 @@ private fun ChatScreen(
     // persisted, not resent with history (same scope as RAG document context).
     var pendingImageB64 by remember { mutableStateOf<String?>(null) }
     var pendingImageError by remember { mutableStateOf<String?>(null) }
+
+    // Alva Voice: push-to-talk state. Voice runs on the rig (ASR/TTS live
+    // there), so the mic button only shows in rig mode. recording = mic is
+    // live; voiceBusy = uploaded audio is being transcribed/answered/spoken.
+    val voiceCapture = remember { dk.ternedal.modelrig.voice.VoiceCapture() }
+    var recording by remember { mutableStateOf(false) }
+    var voiceBusy by remember { mutableStateOf(false) }
+    var voiceError by remember { mutableStateOf<String?>(null) }
+    var hasMicPermission by remember {
+        mutableStateOf(
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.RECORD_AUDIO,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED,
+        )
+    }
+    val micPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> hasMicPermission = granted; if (!granted) voiceError = "Mikrofon-adgang nægtet" }
+
+    // One spoken turn: stop recording -> upload WAV -> rig runs ASR->LLM->TTS
+    // -> show transcript + reply in chat -> play the reply audio. No cloud
+    // fallback (voice needs the rig). Runs off the main thread.
+    fun runVoiceTurn(wav: ByteArray) {
+        voiceBusy = true; voiceError = null
+        scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val b64 = android.util.Base64.encodeToString(wav, android.util.Base64.NO_WRAP)
+                    ModelRigClient(store.baseUrl ?: "", store.token).voiceConverse(b64, language = "da")
+                }
+                val transcript = result.optString("transcript").trim()
+                val reply = result.optString("reply").trim()
+                val audioB64 = result.optString("audio_base64")
+                if (transcript.isNotEmpty()) messages.add(Msg("user", transcript))
+                if (reply.isNotEmpty()) messages.add(Msg("assistant", reply))
+                // Persist like a normal rig turn.
+                withContext(Dispatchers.IO) {
+                    val cid = convId ?: db.newConversation("rig", currentModel, transcript.take(40))
+                    if (convId == null) convId = cid
+                    if (transcript.isNotEmpty()) db.addMessage(cid, "user", transcript)
+                    if (reply.isNotEmpty()) db.addMessage(cid, "assistant", reply)
+                }
+                if (audioB64.isNotEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        val bytes = android.util.Base64.decode(audioB64, android.util.Base64.DEFAULT)
+                        dk.ternedal.modelrig.voice.VoiceCapture.playWav(bytes)
+                    }
+                }
+            } catch (e: Exception) {
+                voiceError = e.message ?: "stemme-fejl"
+            } finally {
+                voiceBusy = false
+            }
+        }
+    }
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         pendingImageError = null
@@ -946,6 +1001,19 @@ private fun ChatScreen(
                 pendingImageError?.let {
                     Text("Billedfejl: $it", color = Danger, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
                 }
+                // Alva Voice status line (recording / working / error).
+                if (recording || voiceBusy || voiceError != null) {
+                    val vt = when {
+                        recording -> "🎙 Optager… tryk igen for at sende"
+                        voiceBusy -> "🔊 Alva lytter og svarer…"
+                        else -> "Stemme-fejl: ${voiceError.orEmpty()}"
+                    }
+                    Text(
+                        vt,
+                        color = if (voiceError != null && !recording && !voiceBusy) Danger else Signal,
+                        fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     // Vision is chat-only (cloud/rig), not RAG. Requires a
                     // vision-capable model; the button just attaches — the
@@ -958,6 +1026,28 @@ private fun ChatScreen(
                             }),
                             contentAlignment = Alignment.Center,
                         ) { Text("📎", fontSize = 20.sp) }
+                        Spacer(Modifier.width(2.dp))
+                    }
+                    // Alva Voice mic button: rig mode only (voice runs on the
+                    // rig). Tap to start recording, tap again to send. Disabled
+                    // while a voice turn is in flight.
+                    if (mode == "rig") {
+                        Box(
+                            Modifier.size(44.dp).clickable(enabled = !busy && !voiceBusy, onClick = {
+                                voiceError = null
+                                if (!hasMicPermission) {
+                                    micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                } else if (recording) {
+                                    recording = false
+                                    val wav = voiceCapture.stopToWav()
+                                    if (wav != null) runVoiceTurn(wav) else voiceError = "ingen lyd optaget"
+                                } else {
+                                    try { voiceCapture.start(); recording = true }
+                                    catch (e: Exception) { voiceError = e.message ?: "kunne ikke optage" }
+                                }
+                            }),
+                            contentAlignment = Alignment.Center,
+                        ) { Text(if (recording) "⏺" else "🎙", fontSize = 20.sp) }
                         Spacer(Modifier.width(2.dp))
                     }
                     OutlinedTextField(

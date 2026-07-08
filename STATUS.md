@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.5.1** — "ASR Windows-fix: dekod lyd med soundfile i stedet for PyAV (Windows Application Control blokerede PyAV). ASR + TTS nu hardware-bekræftet på Anders' rig". Follows 1.5.0. Autonomous sessions, **2026-07-02 → 07-08**.
+Version **1.6.0** — "🎙️ Alva Voice på Android: push-to-talk i appen — optag → rig kører ASR→LLM→TTS → Alva svarer i tale. KOMPILERET, IKKE telefon-testet". Follows 1.5.1. Autonomous sessions, **2026-07-02 → 07-08**.
 
 > **🎉 MILEPÆL 8/7 aften:** Hele Alva Voice-kæden er nu bevist på Anders' rig — ASR→LLM→TTS kørte ende-til-ende. Input-WAV → dansk transskription → llama3.2-svar → tale delt i sætnings-WAV'er. Alle tre Voice-lag + LLM koblet sammen og kørende. (Svar-kvaliteten var svag med den lille 1b-model — vrøvl + engelsk-indblanding — men det beviser rørene; hermes3:8b/qwen giver gode svar. TTFA-metrikken fejlede i test-one-lineren men er verificeret korrekt i selve voice_pipeline.py-modulet.)
 
@@ -47,6 +47,37 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.6.0  🎙️  (Alva Voice på Android — push-to-talk)
+- **Stemme i selve appen**: en 🎙-knap i input-baren (kun i rig-mode, da Voice
+  kører på rig'en). Tryk → optag → tryk igen → send. Rig'en kører hele
+  ASR→LLM→TTS-pipelinen, og Alva svarer i tale — transskription + svar vises
+  også som chat-beskeder.
+- **Arkitektur** (bevidste valg): ny endpoint `/voice/converse/upload` tager
+  base64-lyd (samme mønster som vision-billeder, som Anders har testet); den
+  eksisterende `/voice/converse` tager en fil-sti på rig'en, ubrugelig over
+  netværket. Go-backend proxer til worker (`/api/v1/voice/converse` +
+  `/api/v1/voice/status`), præcis som RAG. Worker samler sætnings-WAV'erne til
+  én WAV og returnerer den som base64 til afspilning.
+- **Android-lyd** (`voice/VoiceCapture.kt`): AudioRecord optager 16kHz mono
+  PCM16 → WAV-header; AudioTrack afspiller svar-WAV'en. RECORD_AUDIO-permission
+  tilføjet + runtime-anmodning. Verificeret i APK.
+- **Ingen cloud-fallback for Voice** (i modsætning til tekst-chat): Voice
+  kræver rig'en, fordi ASR/TTS bor der. Barge-in og wake word er IKKE med —
+  senere, og barge-in kræver Anders' headset-beslutning.
+- **Verificeret hvad der KAN verificeres**: backend + worker bygger, alle 43
+  backend+worker-assertions grønne, upload-endpoint håndterer base64 korrekt
+  (gyldig → 501 uden backends, ugyldig → 400), Android KOMPILERER, RECORD_AUDIO
+  i APK, signatur uændret.
+- **ÆRLIGT — IKKE telefon-testet**: hele Android-lyd-laget (mikrofon-optagelse,
+  WAV-encoding, afspilning via AudioTrack) er OEM-specifikt og kan KUN bevises
+  på Anders' telefon. Dette er compile-verificeret kode. Rig-side-pipelinen ER
+  hardware-bevist (1.5.1), men koblingen telefon→rig→telefon er ny og utestet.
+  Sandsynligt at noget skal justeres efter første kørsel på telefonen.
+- **Forudsætning for test**: rig'en skal have faster-whisper + piper + dansk
+  stemme installeret (som Anders gjorde 8/7), Ollama kørende, og telefonen
+  forbundet til rig'en. Brug en god model (hermes3:8b), ikke llama3.2:1b.
+- Backend + worker + Android rørt → bygger APK + Windows-jar + server-exes.
 
 ## What's new in 1.5.1  (ASR virker på Windows — PyAV-blokering omgået + Voice hardware-bekræftet)
 - **🎉 STORT: ASR og TTS er nu on-device-bekræftet på Anders' rig (8/7).** Ikke

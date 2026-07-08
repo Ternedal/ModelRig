@@ -311,6 +311,19 @@ func (s *server) handleRagSourceDelete(w http.ResponseWriter, r *http.Request) {
 	s.Worker.Forward(w, r, "/rag/source")
 }
 
+// handleVoiceConverse proxies a phone voice turn to the worker: uploaded audio
+// (base64) -> ASR -> LLM -> TTS -> reply audio (base64). The worker returns 501
+// if the optional Voice backends aren't installed on the rig.
+func (s *server) handleVoiceConverse(w http.ResponseWriter, r *http.Request) {
+	s.Worker.Forward(w, r, "/voice/converse/upload")
+}
+
+// handleVoiceStatus proxies the worker's ASR/TTS availability so the app can
+// show whether voice is usable on this rig before recording.
+func (s *server) handleVoiceStatus(w http.ResponseWriter, r *http.Request) {
+	s.Worker.Forward(w, r, "/voice/asr/status")
+}
+
 // clientIP extracts the remote host for rate-limiting. Behind a trusted reverse
 // proxy you'd honor X-Forwarded-For; for a direct LAN server RemoteAddr is right.
 func clientIP(r *http.Request) string {
