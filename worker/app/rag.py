@@ -102,15 +102,26 @@ async def query(
     matches = scored[:top_k]
 
     result: dict = {"matches": matches}
-    if synthesize and matches:
-        context = "\n\n".join(f"[{m['source'] or m['id']}] {m['text']}" for m in matches)
-        messages = [
-            {
-                "role": "system",
-                "content": "Answer using ONLY the provided context. "
-                           "If the answer is not in the context, say you don't know.",
-            },
-            {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {q}"},
-        ]
-        result["answer"] = await oc.chat(messages, model=model)
+    if synthesize:
+        if matches:
+            context = "\n\n".join(f"[{m['source'] or m['id']}] {m['text']}" for m in matches)
+            messages = [
+                {
+                    "role": "system",
+                    "content": "Answer using ONLY the provided context. "
+                               "If the answer is not in the context, say you don't know.",
+                },
+                {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {q}"},
+            ]
+            result["answer"] = await oc.chat(messages, model=model)
+        else:
+            # No chunk cleared min_score -> there is no grounded context to
+            # answer from. Return an explicit, deterministic "don't know"
+            # here rather than letting matches=[] fall through: without this
+            # the caller got no answer field and silently degraded to a
+            # context-free chat, which is why the phone answered "hej" with a
+            # generic greeting while desktop (with context) said "I don't
+            # know" -- same query, divergent behavior. Now both clients get
+            # the same honest reply, in the query's language where trivial.
+            result["answer"] = "Jeg kan ikke finde noget relevant i kilderne til at besvare det. / I don't have relevant context to answer that."
     return result

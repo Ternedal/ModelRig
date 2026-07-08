@@ -132,5 +132,26 @@ r2 = client.post("/rag/query", json={"query": "zzzz", "top_k": 5, "synthesize": 
 check(r2.status_code == 200 and len(r2.json()["matches"]) == 1,
       f"min_score=0.0 -> the same match returns, confirming it's the threshold (got {r2.json()['matches']})")
 
+# empty-match synthesis: when min_score filters everything, /rag/query must
+# still return an explicit answer (not omit the field and let the caller
+# degrade to context-free chat -- the phone-vs-desktop divergence seen 7/7).
+r3 = client.post("/rag/query", json={"query": "zzzz", "top_k": 5, "synthesize": True,
+                                     "min_score": 0.3, "source": "vowels"})
+check(r3.status_code == 200 and r3.json()["matches"] == [] and "answer" in r3.json()
+      and r3.json()["answer"].strip() != "",
+      f"empty matches still yields a non-empty answer field (got {r3.json()})")
+
+# same for the streaming /rag/chat path: with no matches it must emit a chat
+# delta (the don't-know message) and NOT call Ollama (which is dead here --
+# if it tried, we'd see an error line instead of a clean message).
+rc = client.post("/rag/chat", json={"query": "zzzz", "top_k": 5,
+                                     "min_score": 0.3, "source": "vowels"})
+lines_c = [json.loads(l) for l in rc.text.strip().splitlines()]
+head_c = lines_c[0]
+body_c = "".join(x.get("message", {}).get("content", "") for x in lines_c[1:])
+has_error = any("error" in x for x in lines_c)
+check(rc.status_code == 200 and head_c.get("sources") == [] and body_c.strip() != "" and not has_error,
+      f"rag-chat with no matches streams a don't-know message without hitting Ollama (got {rc.text!r})")
+
 print(f"\n===== WORKER V1: {passed} passed, {failed} failed =====")
 raise SystemExit(0 if failed == 0 else 1)

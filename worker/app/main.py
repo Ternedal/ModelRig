@@ -19,7 +19,7 @@ from . import ollama_client as oc
 from . import rag
 from .store import DocStore
 
-VERSION = "0.20.15"
+VERSION = "0.20.18"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -152,6 +152,16 @@ async def rag_chat(req: QueryReq):
             for m in matches
         ]}
         yield (json.dumps(head) + "\n").encode()
+        if not matches:
+            # min_score filtered everything -> no grounded context. Emit an
+            # explicit don't-know as a chat delta and skip the LLM call
+            # entirely (both honest AND one less Ollama round-trip). Shaped
+            # like an Ollama message chunk so the client's existing NDJSON
+            # parser renders it with no special-casing. Mirrors the
+            # non-streaming /rag/query branch so both clients behave the same.
+            msg = "Jeg kan ikke finde noget relevant i kilderne til at besvare det. / I don't have relevant context to answer that."
+            yield (json.dumps({"message": {"content": msg}, "done": True}) + "\n").encode()
+            return
         try:
             async for chunk in oc.chat_stream(messages, model=req.model):
                 yield chunk

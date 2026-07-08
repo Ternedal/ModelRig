@@ -431,6 +431,20 @@ private fun friendlyError(err: Throwable): String {
             "Kan ikke oprette forbindelse. Tjek at rig'en kører, og at telefonen er på samme netværk (eller Tailscale)."
         err is java.net.SocketTimeoutException ->
             "Tidsudløb — modellen svarede ikke i tide. Prøv igen, eller vælg en mindre model."
+        else -> friendlyError(msg)
+    }
+}
+
+/**
+ * String overload: the model-management / ingest / pull panels hold a raw
+ * error String (not a Throwable), and were showing it verbatim ("Fejl:
+ * models failed (401)"). This routes them through the same status-code
+ * explanations chat already used, so a 401 there also tells the user to
+ * re-pair instead of leaving them to decode it (bit Anders live 6/7 --
+ * Modelstyring showed a bare 401 until refreshed).
+ */
+private fun friendlyError(msg: String): String {
+    return when {
         msg.contains("ingen cloud-nøgle") ->
             "Ingen cloud-nøgle gemt. Tilføj en under Indstillinger."
         msg.contains("(401)") ->
@@ -804,7 +818,7 @@ private fun ChatScreen(
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
                     when {
                         ingesting -> Text("Ingesterer…", color = TextMuted, fontSize = 11.sp)
-                        ingestError != null -> Text("Fejl: $ingestError", color = Danger, fontSize = 11.sp)
+                        ingestError != null -> Text("Fejl: ${friendlyError(ingestError!!)}", color = Danger, fontSize = 11.sp)
                         ingestStatus != null -> Text(ingestStatus!!, color = Signal, fontSize = 11.sp)
                     }
                 }
@@ -1102,7 +1116,7 @@ private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
                 ) { Text(if (pulling) "Henter…" else "Hent") }
             }
             pullStatus?.let { Spacer(Modifier.height(6.dp)); Text(it, color = Signal, fontSize = 12.sp) }
-            pullError?.let { Spacer(Modifier.height(6.dp)); Text("Fejl: $it", color = Danger, fontSize = 12.sp) }
+            pullError?.let { Spacer(Modifier.height(6.dp)); Text("Fejl: ${friendlyError(it)}", color = Danger, fontSize = 12.sp) }
 
             Spacer(Modifier.height(20.dp))
 
@@ -1138,7 +1152,7 @@ private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
             // ---- installed ----
             Text("Installeret", color = TextHigh, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             Spacer(Modifier.height(8.dp))
-            loadError?.let { Text("Fejl: $it", color = Danger, fontSize = 12.sp); Spacer(Modifier.height(6.dp)) }
+            loadError?.let { Text("Fejl: ${friendlyError(it)}", color = Danger, fontSize = 12.sp); Spacer(Modifier.height(6.dp)) }
             installed.forEach { m ->
                 Surface(
                     color = GraphiteSurface, shape = RoundedCornerShape(10.dp),
@@ -1264,7 +1278,12 @@ private fun Bubble(m: Msg, onRetry: (() -> Unit)? = null) {
                 Column {
                     if (!isUser && m.sources.isNotEmpty()) {
                         Row(Modifier.padding(bottom = 6.dp)) {
-                            m.sources.take(4).forEach { s ->
+                            // distinct(): a source split into several chunks is
+                            // still one source -- the RAG answer returns one
+                            // chip per matched chunk, so without this a single
+                            // file cited twice showed as two identical chips
+                            // (seen on-device 7/7: "test" appeared twice).
+                            m.sources.distinct().take(4).forEach { s ->
                                 Surface(
                                     shape = RoundedCornerShape(999.dp),
                                     color = GraphiteSurfaceHigh,
