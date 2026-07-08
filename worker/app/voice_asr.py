@@ -98,10 +98,43 @@ def transcribe_wav(path: str, language: str = "da") -> dict:
         (For real-time STREAMING chunks it must be False to avoid drift -- that
         belongs to a later streaming phase, not this file-based MVP step.)
       - language='da' skips the ~50ms auto-detect pass and forces Danish.
+
+    AUDIO DECODE -- soundfile, NOT PyAV: faster-whisper by default decodes audio
+    via PyAV (the `av` package), whose native DLLs are blocked by Windows
+    Application Control / Smart App Control on some machines ("En politik for
+    programkontrol har blokeret denne fil"). Verified on Anders' rig 2026-07-08.
+    So when the input is a real file, we decode it ourselves with soundfile
+    (small signed DLL, not blocked) into a mono float32 array and hand Whisper
+    the samples -- PyAV is never touched. Whisper accepts a numpy array in place
+    of a path. If soundfile isn't available or the input is already an array, we
+    fall back to passing it straight through.
     """
     model = _get_model()
+    audio_input = path
+    if isinstance(path, str):
+        try:
+            import soundfile as sf
+            data, sr = sf.read(path, dtype="float32")
+            # Whisper wants 16 kHz mono. Downmix to mono; resample if needed.
+            if getattr(data, "ndim", 1) > 1:
+                data = data.mean(axis=1)
+            if sr != 16000:
+                # Lightweight linear resample to 16 kHz (avoids pulling in scipy).
+                import numpy as np
+                n_out = int(round(len(data) * 16000 / sr))
+                if n_out > 0:
+                    xp = np.linspace(0, 1, num=len(data), endpoint=False)
+                    xq = np.linspace(0, 1, num=n_out, endpoint=False)
+                    data = np.interp(xq, xp, data).astype("float32")
+            audio_input = data
+        except ImportError:
+            # soundfile not installed -> let faster-whisper try its own decode
+            # (may hit the PyAV block on Windows; the install note recommends
+            # soundfile for exactly this reason).
+            audio_input = path
+
     segments, info = model.transcribe(
-        path,
+        audio_input,
         language=language,
         beam_size=5,
         vad_filter=True,

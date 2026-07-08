@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.5.0** — "🎙️→🔊 Alva Voice fase 3: fuld ASR→LLM→TTS-pipeline på rig'en med time-to-first-audio. Kode + testopskrift, IKKE hardware-testet". Follows 1.4.0. Autonomous sessions, **2026-07-02 → 07-08**.
+Version **1.5.1** — "ASR Windows-fix: dekod lyd med soundfile i stedet for PyAV (Windows Application Control blokerede PyAV). ASR + TTS nu hardware-bekræftet på Anders' rig". Follows 1.5.0. Autonomous sessions, **2026-07-02 → 07-08**.
 
 ## V1 checklist — ✅ COMPLETE (all 13 confirmed, v1.0.0 tagged)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -45,6 +45,34 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.5.1  (ASR virker på Windows — PyAV-blokering omgået + Voice hardware-bekræftet)
+- **🎉 STORT: ASR og TTS er nu on-device-bekræftet på Anders' rig (8/7).** Ikke
+  længere "kode + opskrift" — faktisk kørt og verificeret:
+  - **TTS**: Piper dansk stemme (`da_DK-talesyntese-medium`) lavede forståelig
+    dansk tale. Anders bekræftede lyden.
+  - **ASR**: transskriberede TTS-outputtet tilbage næsten ordret — TTS sagde
+    "Hej, jeg er Alva. Kan du høre mig?", ASR hørte "Hej, jeg er Elve. Kan du
+    røre mig?" (kun egennavnet Alva + ét ord forskudt — høj dansk kvalitet).
+  - De to lag "talte sammen": TTS→lyd→ASR→tekst, og var enige.
+- **Rodårsag fundet på hardware**: faster-whisper dekoder lyd via PyAV (`av`),
+  hvis native DLL'er blokeres af **Windows Application Control / Smart App
+  Control** ("En politik for programkontrol har blokeret denne fil"). Det er
+  præcis den slags systemforhindring der KUN kan opdages ved at køre på ægte
+  hardware — headless build ville aldrig fange den.
+- **Fix**: `voice_asr.py` dekoder nu selv lydfilen med **soundfile** (lille
+  underskrevet DLL, ikke blokeret) → mono float32 → resample til 16kHz →
+  giver Whisper de rå samples. PyAV røres aldrig. Defensivt: hvis soundfile
+  ikke er installeret, falder den tilbage til faster-whispers egen dekodning.
+  `soundfile` tilføjet til ASR-opsætnings-noten i requirements.
+- Verificeret: worker + voice_asr importerer stadig uden soundfile installeret;
+  alle 47 worker-assertions grønne; healthz/RAG uændret.
+- **Status: ASR ✅ + TTS ✅ hardware-bekræftet. Kun den fulde pipeline**
+  (ASR→LLM→TTS, V-MVP.3) mangler on-device-test — den kræver Ollama kørende
+  med en model. Sætnings-chunkingen er allerede isoleret-bevist.
+- **Android-lyd-laget** (push-to-talk, mikrofon, afspilning) + **barge-in** er
+  stadig ikke bygget (kun testbart på telefonen / kræver beslutninger).
+- Worker rørt → bygger APK + Windows-jar + server-exes.
 
 ## What's new in 1.5.0  🎙️→🔊  (Alva Voice fase 3 — fuld pipeline på rig'en)
 - **Hele stemme-kæden koblet sammen** (V-MVP.3): `worker/app/voice_pipeline.py`

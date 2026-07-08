@@ -4,7 +4,7 @@ A local-first AI platform: run models on your own hardware via Ollama, reach the
 from a desktop app and an Android phone, with an optional RAG service and an
 Ollama Cloud fallback for when local isn't enough.
 
-Version: **1.5.0** 🎙️→🔊 (Alva Voice fase 3: fuld ASR→LLM→TTS-pipeline på rig'en; kode+opskrift, ikke hardware-testet)
+Version: **1.5.1** (ASR Windows-fix via soundfile; ASR+TTS hardware-bekræftet på rig'en)
 
 ## Architecture
 ```

@@ -5,6 +5,8 @@ pydantic>=2.7,<3.0
 # Optional -- Alva Voice ASR only. NOT installed by default (keeps the base
 # worker light). Install on the rig with: pip install faster-whisper
 # faster-whisper>=1.0
+# soundfile>=0.12   # decode audio without PyAV (PyAV's DLLs are blocked by
+#                     # Windows Application Control on some machines)
 # Optional -- Alva Voice TTS only. NOT installed by default. GPL-3.0.
 # Install on the rig with: pip install piper-tts
 # piper-tts>=1.4
