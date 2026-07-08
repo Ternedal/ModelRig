@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.4.0** — "🔊 Alva Voice fase 2: valgfrit TTS-modul (Piper, dansk) i worker. Kode + testopskrift, IKKE hardware-testet". Follows 1.3.0. Autonomous sessions, **2026-07-02 → 07-08**.
+Version **1.5.0** — "🎙️→🔊 Alva Voice fase 3: fuld ASR→LLM→TTS-pipeline på rig'en med time-to-first-audio. Kode + testopskrift, IKKE hardware-testet". Follows 1.4.0. Autonomous sessions, **2026-07-02 → 07-08**.
 
 ## V1 checklist — ✅ COMPLETE (all 13 confirmed, v1.0.0 tagged)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -45,6 +45,40 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.5.0  🎙️→🔊  (Alva Voice fase 3 — fuld pipeline på rig'en)
+- **Hele stemme-kæden koblet sammen** (V-MVP.3): `worker/app/voice_pipeline.py`
+  + endpoint `POST /voice/converse`. Én talt tur: lydfil → ASR → dansk tekst →
+  LLM (streaming) → sætnings-chunking → TTS pr. sætning → audio-chunks.
+- **Nøglemetrikken time-to-first-audio er implementeret**: mens LLM'en streamer,
+  splittes svaret på sætningsgrænser (. ! ?), og HVER komplet sætning
+  synthesizes med det samme — så Alva kan begynde at tale første sætning mens
+  LLM'en stadig genererer resten. Pipelinen måler og returnerer denne
+  first-audio-latenstid. **Sætnings-chunking-logikken er isoleret-testet
+  token-for-token** (ren Python, ingen backend nødvendig — den ene del jeg
+  KAN verificere uden hardware, og den passerer).
+- **Genbruger verificeret infrastruktur**: workerens eksisterende
+  `chat_stream` (async NDJSON-generator mod Ollama) driver streaming'en — ikke
+  ny netværkskode.
+- **Fejl-håndtering**: manglende ASR/TTS-backend → 501 (peger på den præcise
+  manglende pakke), Ollama nede/model ikke pullet → 502. Verificeret:
+  converse giver 501 uden backends, 400 ved manglende fil, healthz + RAG +
+  ASR/TTS-status alle uændrede, alle 47 worker-assertions grønne.
+- **Testopskrift**: `tools/alva_voice_pipeline_test.py` — Anders installerer
+  begge backends + kører Ollama, giver en dansk WAV, og får: transskription,
+  LLM-svar, time-to-first-audio, og en WAV pr. sætning at afspille i rækkefølge.
+- **ÆRLIGT — tredje utestede Voice-lag, som Anders bevidst valgte**: ASR
+  (1.3.0) + TTS (1.4.0) + pipeline (1.5.0) er alle kode + opskrift, INGEN kørt
+  på rig'en. Den fulde kæde (hører den dig, svarer den, taler den — og hvor
+  hurtigt?) kan KUN bevises på Anders' maskine. Sætnings-chunkingen er dog
+  bevist isoleret. **Anbefaling står: kør pipeline-opskriften nu** — den
+  tester alle tre lag på én gang og giver time-to-first-audio, som afgør om
+  det føles som en assistent.
+- **Rig-side MVP er hermed kode-komplet.** Tilbage af Voice-MVP'en:
+  **Android-lyd-laget** (push-to-talk, mikrofon-capture, live afspilning) —
+  kun testbart på telefonen — og **barge-in** (kræver Anders' headset-først-
+  beslutning + akustisk ekko-håndtering). Disse kan IKKE bygges i blinde.
+- Worker rørt → bygger APK + Windows-jar + server-exes.
 
 ## What's new in 1.4.0  🔊  (Alva Voice fase 2 — TTS-modul, valgfrit)
 - **Andet Voice-lag**: et selvstændigt TTS-modul (`worker/app/voice_tts.py`)

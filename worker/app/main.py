@@ -19,7 +19,7 @@ from . import ollama_client as oc
 from . import rag
 from .store import DocStore
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -295,3 +295,35 @@ def voice_tts_synthesize(req: TtsReq) -> dict:
         return voice_tts.synthesize_to_wav(req.text, req.out_path)
     except RuntimeError as e:
         raise HTTPException(status_code=501, detail=str(e))
+
+
+# ---- Alva Voice: full pipeline (ASR -> LLM -> TTS) --------------------------
+# Phase 3 (V-MVP.3). Orchestrates one spoken turn and reports time-to-first-
+# audio. Needs BOTH ASR and TTS backends installed; 501 with the specific
+# missing one otherwise. See app/voice_pipeline.py. NOT YET HARDWARE-TESTED.
+
+class ConverseReq(BaseModel):
+    # Path to a 16 kHz mono audio file on the rig (the recorded utterance).
+    path: str
+    language: str = "da"
+    model: str | None = None
+    out_dir: str = "/tmp/alva_voice"
+
+
+@app.post("/voice/converse")
+async def voice_converse(req: ConverseReq) -> dict:
+    from . import voice_pipeline
+    import os as _os
+    if not _os.path.exists(req.path):
+        raise HTTPException(status_code=400, detail=f"audio file not found: {req.path}")
+    try:
+        return await voice_pipeline.converse(
+            req.path, language=req.language, model=req.model, out_dir=req.out_dir,
+        )
+    except RuntimeError as e:
+        # A missing Voice backend (ASR/TTS not installed) -> 501 with the
+        # specific actionable message from the pipeline.
+        raise HTTPException(status_code=501, detail=str(e))
+    except oc.OllamaError as e:
+        # LLM unreachable / model not pulled -> 502 (upstream dependency).
+        raise HTTPException(status_code=502, detail=f"LLM error: {e}")
