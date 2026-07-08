@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.2.0** — "🎨 Rebrand: Android-appen hedder nu Alva (motoren forbliver ModelRig) + Voice prioriteret i roadmap". Follows 1.1.0. Autonomous sessions, **2026-07-02 → 07-08**.
+Version **1.2.1** — "Alva-ikon rettet: bruger de rene safe-zone-assets fra brand-pakke v2 (mit 1.2.0-ikon croppede forkert)". Follows 1.2.0. Autonomous sessions, **2026-07-02 → 07-08**.
 
 ## V1 checklist — ✅ COMPLETE (all 13 confirmed, v1.0.0 tagged)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -45,6 +45,32 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.2.1  (Alva-ikon rettet — rene assets, ingen crop)
+- **Mit 1.2.0-ikon var lavet forkert.** Anders' designer sendte en v2-pakke
+  med en direkte (berettiget) kritik: jeg havde brugt hele det færdig-
+  komponerede board-ikon som forgrund på 100%, så launcher-masken klippede
+  kanterne. Pakken indeholdt endda mine egne problem-previews som bevis.
+- **Fix: brug de RENE assets direkte, ingen crop, ingen regenerering** (som
+  pakken eksplicit instruerede). Ny adaptiv forgrund er et **transparent**
+  PNG hvor rune-symbolet fylder **38%** (godt inden for 66%-safe-zonen), og
+  baggrunden er en separat mørk gradient (matcher assettets farver). Det er
+  den korrekte adaptiv-ikon-struktur — forgrund/baggrund adskilt, symbol i
+  safe-zone — i modsætning til 1.2.0's fulde-billede-på-100%.
+- **Verificeret i cirkel + squircle FØR byg**: symbolet sidder centreret med
+  luft hele vejen rundt, ingen klipning uanset launcher-form. PNG-mipmaps i
+  alle densiteter bruger nu pakkens færdige square/circle-app-icons direkte.
+- **Source of truth gemt i repo** (`android/brand/`): SVG-symbolet (rigtig
+  vektor), brand_tokens.json, og app-ikon-PNG. Så fremtidige ikon-ændringer
+  starter fra vektoren, ikke et board-crop.
+- Signatur uændret (installerer henover), label stadig 'Alva', applicationId
+  uændret. Ren Android-ændring. Bygger APK + Windows-jar + server-exes.
+- **NB — Voice**: v2-pakken indeholder også en opdateret Voice I/O-spec.
+  Den ændrer ikke `ALVA_VOICE_ROADMAP_DELTA.md`'s konklusioner (samme
+  modeller, samme licens-flag). Voice forbliver et dokument-spor der afventer
+  Anders' beslutninger — urørt af denne ikon-fix.
+- **Ærligt**: ikonet er nu korrekt i preview, men stadig ikke on-device-set.
+  Anders' launcher-screenshot er den endelige bekræftelse.
 
 ## What's new in 1.2.0  🎨  (Alva-rebrand — Android-appen + Voice-roadmap)
 - **Android-appen er rebrandet til "Alva"** (Anders' beslutning 8/7, fra en

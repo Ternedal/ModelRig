@@ -1,0 +1,33 @@
+{
+  "project": "Alva",
+  "backend": "ModelRig",
+  "asset_pack_version": "v2-fixed-safe-area",
+  "colors": {
+    "deep_forest": "#13241E",
+    "nordic_charcoal": "#1A1D1F",
+    "stone_gray": "#5A5F60",
+    "bone_white": "#E7E3DA",
+    "antique_gold": "#B89A5D",
+    "soft_gold": "#D0B174",
+    "black": "#070908",
+    "transparent": "#00000000"
+  },
+  "logo_principles": [
+    "Rune-inspired connected-node symbol derived from the original ModelRig mark.",
+    "Do not crop from brandboards. Use clean PNG/SVG assets only.",
+    "Keep symbol inside 60-68% of canvas for app icons.",
+    "Avoid Bluetooth-like single vertical bindrune shapes. This mark should read as connected M/A/V node-rune."
+  ],
+  "typography": {
+    "brand_headline_candidate": "Cinzel / Cormorant Garamond / Trajan-style serif",
+    "ui_body": "Inter"
+  },
+  "voice_io_core": {
+    "wake_word": "Hey Alva",
+    "vad": "Silero VAD",
+    "asr_primary": "nvidia/parakeet-rnnt-110m-da-dk",
+    "llm": "Ollama local or Ollama Cloud",
+    "tts_primary": "CoRal Røst v3 Chatterbox 350M",
+    "tts_fallback": "Piper da_DK/talesyntese/medium"
+  }
+}

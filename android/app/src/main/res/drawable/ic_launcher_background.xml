@@ -1,10 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Alva: solid Deep Forest. The adaptive foreground is the full pre-composed
-     Alva icon (rune mark on its own Deep Forest field), so this background only
-     shows if a launcher masks beyond the foreground edge. Matching the
-     foreground field keeps the seam invisible. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:pathData="M0,0h108v108H0z" android:fillColor="#FF13241E"/>
+    <path android:pathData="M0,0h108v108H0z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear"
+                android:startX="54" android:startY="0"
+                android:endX="54" android:endY="108">
+                <item android:offset="0" android:color="#FF0A1511"/>
+                <item android:offset="1" android:color="#FF060E0B"/>
+            </gradient>
+        </aapt:attr>
+    </path>
 </vector>

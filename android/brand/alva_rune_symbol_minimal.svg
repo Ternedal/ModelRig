@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>Alva runic assistant symbol</title>
+  <desc>Rune-inspired Alva symbol derived from the original connected-node ModelRig mark. Safe-area friendly. Not a crop from a brandboard.</desc>
+  <g fill="none" stroke="#B89A5D" stroke-width="34" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M332 280 L332 740"/>
+    <path d="M692 280 L692 740"/>
+    <path d="M332 305 L692 720"/>
+    <path d="M692 305 L332 720"/>
+    <path d="M356 742 L512 610 L668 742"/>
+    <path d="M332 740 L285 835"/>
+    <path d="M692 740 L739 835"/>
+    <circle cx="512" cy="515" r="28" fill="#B89A5D" stroke="none"/>
+    <circle cx="332" cy="280" r="48"/>
+    <circle cx="692" cy="280" r="48"/>
+    <circle cx="332" cy="740" r="48"/>
+    <circle cx="692" cy="740" r="48"/>
+  </g>
+  <g fill="none" stroke="#B89A5D" stroke-width="22" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M512 85 L512 205 M512 125 L562 155 M512 165 L554 193"/>
+    <path d="M512 820 L512 940 M512 860 L462 890 M512 900 L470 928"/>
+      </g>
+</svg>
