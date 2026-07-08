@@ -400,4 +400,29 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
             return IngestResult(1, o.optInt("chunks_added"), o.optInt("total"))
         }
     }
+
+    /**
+     * Ingests a .docx into the RAG index by uploading its bytes (base64) to the
+     * rig, which extracts text with python-docx (paragraphs + tables) and runs
+     * the same pipeline as ingestText. Mirrors ingestPdf. 501 if python-docx
+     * isn't installed, 400 for a legacy .doc, 422 if there's no text.
+     */
+    fun ingestDocx(source: String, docxBytes: ByteArray, chunkSize: Int = 800, overlap: Int = 150): IngestResult {
+        val b64 = android.util.Base64.encodeToString(docxBytes, android.util.Base64.NO_WRAP)
+        val payload = JSONObject()
+            .put("docx_base64", b64)
+            .put("source", source)
+            .put("chunk_size", chunkSize)
+            .put("overlap", overlap)
+            .toString()
+            .toRequestBody(jsonType)
+        val builder = Request.Builder().url("$base/api/v1/rag/ingest/docx").post(payload)
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        http.newCall(builder.build()).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("DOCX ingest failed (${resp.code}): $body")
+            val o = JSONObject(body)
+            return IngestResult(1, o.optInt("chunks_added"), o.optInt("total"))
+        }
+    }
 }

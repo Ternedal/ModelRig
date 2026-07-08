@@ -19,7 +19,7 @@ from . import ollama_client as oc
 from . import rag
 from .store import DocStore
 
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -164,6 +164,63 @@ async def ingest_pdf(req: IngestPdfReq) -> dict:
     return {
         "source": req.source,
         "pages": extracted["pages"],
+        "chars": extracted["chars"],
+        "chunks_added": chunks,
+        "total": store.count(),
+    }
+
+
+@app.get("/rag/ingest/docx/status")
+def rag_docx_status() -> dict:
+    """Whether DOCX ingest is available (python-docx installed)."""
+    from . import rag_docx
+    return {"available": rag_docx.is_available()}
+
+
+class IngestDocxReq(BaseModel):
+    # base64-encoded .docx bytes. Extraction happens on the worker
+    # (python-docx), then the text goes through the same pipeline as
+    # /rag/ingest. Mirrors /rag/ingest/pdf.
+    docx_base64: str
+    source: str | None = None
+    chunk_size: int = Field(default=800, ge=100, le=4000)
+    overlap: int = Field(default=150, ge=0, le=1000)
+
+
+@app.post("/rag/ingest/docx")
+async def ingest_docx(req: IngestDocxReq) -> dict:
+    """Extract text from an uploaded .docx and ingest it into the RAG index.
+    Returns {source, paragraphs, chars, chunks_added, total}. Clean errors: 501
+    if python-docx isn't installed, 400 for bad base64 / unreadable / legacy
+    .doc, 422 if there's no extractable text."""
+    from . import rag_docx
+    import base64
+    if not rag_docx.is_available():
+        raise HTTPException(
+            status_code=501,
+            detail="DOCX ingest is not enabled on this rig. Install it with: pip install python-docx",
+        )
+    try:
+        raw = base64.b64decode(req.docx_base64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="docx_base64 is not valid base64")
+    try:
+        extracted = rag_docx.extract_text(raw)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not extracted["text"]:
+        raise HTTPException(status_code=422, detail="no extractable text in DOCX")
+    try:
+        chunks = await rag.ingest(
+            store,
+            [{"text": extracted["text"], "source": req.source}],
+            chunk_size=req.chunk_size, overlap=req.overlap,
+        )
+    except oc.OllamaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {
+        "source": req.source,
+        "paragraphs": extracted["paragraphs"],
         "chars": extracted["chars"],
         "chunks_added": chunks,
         "total": store.count(),

@@ -613,19 +613,23 @@ private fun ChatScreen(
                         if (idx >= 0 && c.moveToFirst()) name = c.getString(idx)
                     }
                     val mime = resolver.getType(uri) ?: ""
-                    val isPdf = mime == "application/pdf" || name.lowercase().endsWith(".pdf")
+                    val lower = name.lowercase()
+                    val isPdf = mime == "application/pdf" || lower.endsWith(".pdf")
+                    val isDocx = mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+                        lower.endsWith(".docx")
                     val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
                         ?: throw RuntimeException("kunne ikke læse filen")
                     if (bytes.isEmpty()) throw RuntimeException("filen er tom")
                     val client = ModelRigClient(store.baseUrl ?: "", store.token)
-                    if (isPdf) {
-                        // PDF: upload bytes, the rig extracts text (PyMuPDF).
-                        name to client.ingestPdf(name, bytes)
-                    } else {
-                        // Plain text/markdown: send decoded text as before.
-                        val text = bytes.toString(Charsets.UTF_8)
-                        if (text.isBlank()) throw RuntimeException("filen er tom")
-                        name to client.ingestText(name, text)
+                    when {
+                        isPdf -> name to client.ingestPdf(name, bytes)
+                        isDocx -> name to client.ingestDocx(name, bytes)
+                        else -> {
+                            // Plain text/markdown: send decoded text as before.
+                            val text = bytes.toString(Charsets.UTF_8)
+                            if (text.isBlank()) throw RuntimeException("filen er tom")
+                            name to client.ingestText(name, text)
+                        }
                     }
                 }
             }
@@ -920,7 +924,7 @@ private fun ChatScreen(
                                 DropdownMenuItem(
                                     text = { Text(if (ingesting) "Ingesterer…" else "+ Tilføj dokument (txt/md)…", color = if (ingesting) TextMuted else Signal) },
                                     enabled = !ingesting,
-                                    onClick = { ragSourceMenu = false; pickDocument.launch(arrayOf("text/plain", "text/markdown", "application/pdf", "application/octet-stream")) },
+                                    onClick = { ragSourceMenu = false; pickDocument.launch(arrayOf("text/plain", "text/markdown", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/octet-stream")) },
                                 )
                             }
                         }

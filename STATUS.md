@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.7.0** — "📄 RAG PDF-ingest: upload PDF → rig udtrækker tekst (PyMuPDF) → chunk/embed/store. Udtræk HARDWARE-testet (i container), Android-picker kompileret". Follows 1.6.0. Autonomous sessions, **2026-07-02 → 07-08**.
+Version **1.8.0** — "📝 RAG DOCX-ingest: upload .docx → rig udtrækker tekst inkl. tabeller (python-docx) → chunk/embed/store. Udtræk HARDWARE-testet". Follows 1.7.0. Autonomous sessions, **2026-07-02 → 07-08**.
 
 > **🎉 MILEPÆL 8/7 aften:** Hele Alva Voice-kæden er nu bevist på Anders' rig — ASR→LLM→TTS kørte ende-til-ende. Input-WAV → dansk transskription → llama3.2-svar → tale delt i sætnings-WAV'er. Alle tre Voice-lag + LLM koblet sammen og kørende. (Svar-kvaliteten var svag med den lille 1b-model — vrøvl + engelsk-indblanding — men det beviser rørene; hermes3:8b/qwen giver gode svar. TTFA-metrikken fejlede i test-one-lineren men er verificeret korrekt i selve voice_pipeline.py-modulet.)
 
@@ -47,6 +47,30 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.8.0  📝  (RAG DOCX-ingest — python-docx)
+- **Word-dokumenter kan nu ingestes til RAG**: upload en .docx → rig'en
+  udtrækker teksten (python-docx) → samme chunk/embed/store-pipeline. Præcis
+  samme mønster som PDF (1.7.0), bare python-docx i stedet for PyMuPDF.
+- **Udtrækker BÅDE afsnit OG tabeller**: rigtige Word-dokumenter har ofte data
+  i tabeller; at springe dem over ville tabe indhold lydløst. Tabel-rækker
+  bliver til "celle | celle | celle"-linjer.
+- **Arkitektur** (identisk med PDF): udtræk på worker'en, ny endpoint
+  `/rag/ingest/docx` (base64), Go-backend proxer via `/api/v1/rag/ingest/docx`,
+  Android-picker branch'er nu tekst/PDF/DOCX.
+- **VALGFRIT**: python-docx ikke hård afhængighed; fraværende → pæn 501.
+- **Fejlhåndtering**: ugyldig/ikke-zip → 400, **legacy binær .doc → 400 med
+  ærlig besked** ("save as .docx and retry" — python-docx kan ikke læse .doc),
+  ingen tekst → 422, embed-fejl → 502.
+- **🎉 UDTRÆK HARDWARE-TESTET** (i container): lavede en dansk test-DOCX med
+  afsnit + tabel, python-docx udtrak BEGGE dele korrekt inkl. æøå og
+  GPU-tabellen. Endpoint verificeret på alle stier inkl. legacy-.doc-afvisning.
+  Rigtig DOCX udtrak+chunkede og nåede embed (502 kun uden Ollama). Alle 58
+  assertions grønne.
+- **Testopskrift**: `tools/rag_docx_test.py` — udtræk + ingest + query, beviser
+  hele DOCX→RAG-kæden inkl. at tabel-indhold er søgbart.
+- **Android-picker kun kompileret** (som PDF): bør bekræftes på telefon.
+- Backend + worker + Android rørt → bygger APK + Windows-jar + server-exes.
 
 ## What's new in 1.7.0  📄  (RAG PDF-ingest — PyMuPDF)
 - **PDF'er kan nu ingestes til RAG**: upload en PDF → rig'en udtrækker teksten

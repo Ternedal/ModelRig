@@ -330,6 +330,12 @@ func (s *server) handleRagIngestPdf(w http.ResponseWriter, r *http.Request) {
 	s.Worker.Forward(w, r, "/rag/ingest/pdf")
 }
 
+// handleRagIngestDocx proxies a .docx upload to the worker, which extracts text
+// (python-docx) and ingests it. 501 if python-docx isn't installed.
+func (s *server) handleRagIngestDocx(w http.ResponseWriter, r *http.Request) {
+	s.Worker.Forward(w, r, "/rag/ingest/docx")
+}
+
 // clientIP extracts the remote host for rate-limiting. Behind a trusted reverse
 // proxy you'd honor X-Forwarded-For; for a direct LAN server RemoteAddr is right.
 func clientIP(r *http.Request) string {

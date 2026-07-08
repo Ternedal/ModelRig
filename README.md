@@ -4,7 +4,7 @@ A local-first AI platform: run models on your own hardware via Ollama, reach the
 from a desktop app and an Android phone, with an optional RAG service and an
 Ollama Cloud fallback for when local isn't enough.
 
-Version: **1.7.0** 📄 (RAG PDF-ingest via PyMuPDF; udtræk hardware-testet, Android-picker kompileret)
+Version: **1.8.0** 📝 (RAG DOCX-ingest via python-docx, afsnit+tabeller; udtræk hardware-testet)
 
 ## Architecture
 ```

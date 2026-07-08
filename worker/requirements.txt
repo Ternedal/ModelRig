@@ -13,3 +13,6 @@ pydantic>=2.7,<3.0
 # Optional -- RAG PDF ingest only. NOT installed by default. Extracts text from
 # uploaded PDFs (PyMuPDF). Install on the rig with: pip install pymupdf
 # pymupdf>=1.24
+# Optional -- RAG DOCX ingest only. NOT installed by default. Extracts text from
+# uploaded .docx (python-docx, paragraphs + tables). pip install python-docx
+# python-docx>=1.1
