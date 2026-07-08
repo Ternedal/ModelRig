@@ -721,8 +721,24 @@ private fun ChatScreen(
                             val key = store.cloudKey ?: throw RuntimeException("ingen cloud-nøgle")
                             CloudClient(key).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
                         }
-                        else -> ModelRigClient(store.baseUrl ?: "", store.token)
-                            .chatStream(rigModel, history, registerCall = hook, onDelta = onDelta)
+                        else -> {
+                            // Same local-first cloud fallback as the main send
+                            // path: retrying a rig message while the rig is down
+                            // should still fall back to cloud (before any
+                            // output), not just fail. A mid-stream failure is
+                            // surfaced, not retried.
+                            val cloudKey = store.cloudKey
+                            var rigEmitted = 0
+                            try {
+                                ModelRigClient(store.baseUrl ?: "", store.token)
+                                    .chatStream(rigModel, history, registerCall = hook,
+                                        onDelta = { d -> rigEmitted++; onDelta(d) })
+                            } catch (e: Exception) {
+                                if (rigEmitted == 0 && cloudKey != null) {
+                                    CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
+                                } else throw e
+                            }
+                        }
                     }
                 }.exceptionOrNull()
             }

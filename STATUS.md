@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.0.2** — "V2 komplet: Android får automatisk local→cloud-fallback (sidste V2-brik)". Follows 1.0.1. Autonomous sessions, **2026-07-02 → 07-08**.
+Version **1.0.3** — "retry-sti fik samme cloud-fallback som hovedstien (1.0.2 fiksede kun hovedstien)". Follows 1.0.2. Autonomous sessions, **2026-07-02 → 07-08**.
 
 ## V1 checklist — ✅ COMPLETE (all 13 confirmed, v1.0.0 tagged)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -45,6 +45,23 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.0.3  (fallback-konsistens: retry-stien manglede den)
+- **1.0.2 gav den primære send-sti automatisk local→cloud-fallback, men
+  overså retry-stien.** "Prøv igen"-knappens rig-gren ramte rig'en direkte
+  (`else -> ModelRigClient(...).chatStream(...)`) uden fallback — så hvis
+  rig'en var nede og man trykkede Prøv igen, fejlede den, selvom det
+  oprindelige forsøg (efter 1.0.2) ville have faldet tilbage til cloud.
+  Inkonsistent adfærd mellem de to send-stier.
+- **Fix**: retry-stiens rig-gren spejler nu præcis hovedstiens fallback
+  (samme `rigEmitted == 0`-gate før fallback, samme `cloudKey`-tjek,
+  mid-stream-fejl overflades i stedet for at genstartes). Begge stier
+  konsistente.
+- Ren Android-fix. Bygger APK + server-exes (versionsbump), IKKE Windows-jar.
+- **V2 er nu reelt komplet på begge send-stier.** ROADMAP rettet: fallbacken
+  fandtes allerede (1.0.2 for hovedstien), var bare ikke dokumenteret som
+  leveret. Kandidat til v2.0.0 når de seneste Android/desktop-ændringer er
+  on-device-bekræftet.
 
 ## What's new in 1.0.2  (V2 KOMPLET — Android får automatisk cloud-fallback)
 - **Sidste V2-udestående lukket.** Desktop har haft automatisk local→cloud-

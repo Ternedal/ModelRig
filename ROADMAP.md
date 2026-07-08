@@ -151,9 +151,15 @@ Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
      ikke bruges på Windows (native Skiko er OS-specifik selv i en uber-jar).
    - **Netværkskoden er solid**: `ChatRouter`/`OllamaClient` matcher de samme
      verificerede Ollama-API-shapes som Android bruger. Ingen bugs fundet.
-   - **Fungerende feature Android mangler**: automatisk local→cloud-fallback
-     (Android kræver manuelt Rig/Cloud-skift). Værd at overveje at låne til
-     Android i V2.
+   - **Local→cloud-fallback: findes nu på begge platforme.** ~~Android kræver
+     manuelt Rig/Cloud-skift.~~ **Rettelse (1.0.2)**: Android HAVDE allerede
+     automatisk fallback i den primære send-sti (rig-chat prøver rig'en, falder
+     transparent tilbage til cloud hvis den fejler før noget emitteres — samme
+     "fald ikke tilbage midt-stream"-kontrakt som desktops `ChatRouter`, med et
+     `fellBackToCloud`-flag vist til brugeren). ROADMAP var forældet på dette
+     punkt. Det REELLE hul var at **retry-stien manglede samme fallback** —
+     "Prøv igen" mod en nede rig fejlede i stedet for at falde tilbage. Fikset
+     i 1.0.2, så begge send-stier er konsistente.
    Leveret i 0.19.1: **brand-farver rettet** (matcher nu Androids verificerede
    palette), **dansk UI** (matchede ikke tidligere projektets faste regel),
    **system-prompt pr. kilde** (samme mønster som Android, med samme kendte
