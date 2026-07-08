@@ -374,4 +374,30 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
     }
 
     data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int)
+
+    /**
+     * Ingests a PDF into the RAG index by uploading its bytes (base64) to the
+     * rig, which extracts text with PyMuPDF and runs the same chunk/embed/store
+     * pipeline as ingestText. Returns chunks added. The worker returns 501 if
+     * PyMuPDF isn't installed, 422 if the PDF has no extractable text (a scan).
+     */
+    fun ingestPdf(source: String, pdfBytes: ByteArray, chunkSize: Int = 800, overlap: Int = 150): IngestResult {
+        val b64 = android.util.Base64.encodeToString(pdfBytes, android.util.Base64.NO_WRAP)
+        val payload = JSONObject()
+            .put("pdf_base64", b64)
+            .put("source", source)
+            .put("chunk_size", chunkSize)
+            .put("overlap", overlap)
+            .toString()
+            .toRequestBody(jsonType)
+        val builder = Request.Builder().url("$base/api/v1/rag/ingest/pdf").post(payload)
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        http.newCall(builder.build()).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("PDF ingest failed (${resp.code}): $body")
+            val o = JSONObject(body)
+            // PDF response has no "documents" field; report 1 doc for the UI.
+            return IngestResult(1, o.optInt("chunks_added"), o.optInt("total"))
+        }
+    }
 }

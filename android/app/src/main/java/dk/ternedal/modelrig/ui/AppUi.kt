@@ -607,15 +607,26 @@ private fun ChatScreen(
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val resolver = context.contentResolver
-                    var name = uri.lastPathSegment ?: "dokument.txt"
+                    var name = uri.lastPathSegment ?: "dokument"
                     resolver.query(uri, null, null, null, null)?.use { c ->
                         val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                         if (idx >= 0 && c.moveToFirst()) name = c.getString(idx)
                     }
-                    val text = resolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                    val mime = resolver.getType(uri) ?: ""
+                    val isPdf = mime == "application/pdf" || name.lowercase().endsWith(".pdf")
+                    val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
                         ?: throw RuntimeException("kunne ikke læse filen")
-                    if (text.isBlank()) throw RuntimeException("filen er tom")
-                    name to ModelRigClient(store.baseUrl ?: "", store.token).ingestText(name, text)
+                    if (bytes.isEmpty()) throw RuntimeException("filen er tom")
+                    val client = ModelRigClient(store.baseUrl ?: "", store.token)
+                    if (isPdf) {
+                        // PDF: upload bytes, the rig extracts text (PyMuPDF).
+                        name to client.ingestPdf(name, bytes)
+                    } else {
+                        // Plain text/markdown: send decoded text as before.
+                        val text = bytes.toString(Charsets.UTF_8)
+                        if (text.isBlank()) throw RuntimeException("filen er tom")
+                        name to client.ingestText(name, text)
+                    }
                 }
             }
             ingesting = false
@@ -909,7 +920,7 @@ private fun ChatScreen(
                                 DropdownMenuItem(
                                     text = { Text(if (ingesting) "Ingesterer…" else "+ Tilføj dokument (txt/md)…", color = if (ingesting) TextMuted else Signal) },
                                     enabled = !ingesting,
-                                    onClick = { ragSourceMenu = false; pickDocument.launch(arrayOf("text/plain", "text/markdown", "application/octet-stream")) },
+                                    onClick = { ragSourceMenu = false; pickDocument.launch(arrayOf("text/plain", "text/markdown", "application/pdf", "application/octet-stream")) },
                                 )
                             }
                         }

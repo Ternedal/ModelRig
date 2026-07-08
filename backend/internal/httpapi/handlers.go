@@ -324,6 +324,12 @@ func (s *server) handleVoiceStatus(w http.ResponseWriter, r *http.Request) {
 	s.Worker.Forward(w, r, "/voice/asr/status")
 }
 
+// handleRagIngestPdf proxies a PDF upload to the worker, which extracts text
+// (PyMuPDF) and ingests it into the RAG index. 501 if PyMuPDF isn't installed.
+func (s *server) handleRagIngestPdf(w http.ResponseWriter, r *http.Request) {
+	s.Worker.Forward(w, r, "/rag/ingest/pdf")
+}
+
 // clientIP extracts the remote host for rate-limiting. Behind a trusted reverse
 // proxy you'd honor X-Forwarded-For; for a direct LAN server RemoteAddr is right.
 func clientIP(r *http.Request) string {

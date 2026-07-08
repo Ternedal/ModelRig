@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.6.0** — "🎙️ Alva Voice på Android: push-to-talk i appen — optag → rig kører ASR→LLM→TTS → Alva svarer i tale. KOMPILERET, IKKE telefon-testet". Follows 1.5.1. Autonomous sessions, **2026-07-02 → 07-08**.
+Version **1.7.0** — "📄 RAG PDF-ingest: upload PDF → rig udtrækker tekst (PyMuPDF) → chunk/embed/store. Udtræk HARDWARE-testet (i container), Android-picker kompileret". Follows 1.6.0. Autonomous sessions, **2026-07-02 → 07-08**.
 
 > **🎉 MILEPÆL 8/7 aften:** Hele Alva Voice-kæden er nu bevist på Anders' rig — ASR→LLM→TTS kørte ende-til-ende. Input-WAV → dansk transskription → llama3.2-svar → tale delt i sætnings-WAV'er. Alle tre Voice-lag + LLM koblet sammen og kørende. (Svar-kvaliteten var svag med den lille 1b-model — vrøvl + engelsk-indblanding — men det beviser rørene; hermes3:8b/qwen giver gode svar. TTFA-metrikken fejlede i test-one-lineren men er verificeret korrekt i selve voice_pipeline.py-modulet.)
 
@@ -47,6 +47,33 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.7.0  📄  (RAG PDF-ingest — PyMuPDF)
+- **PDF'er kan nu ingestes til RAG**: upload en PDF → rig'en udtrækker teksten
+  (PyMuPDF/fitz) → samme chunk/embed/store-pipeline som tekst-ingest. Ingen ny
+  RAG-logik, bare et tekst-udtræks-lag foran.
+- **PyMuPDF valgt** (Anders' beslutning): hurtigere + mere robust tekstudtræk
+  end pypdf, let afhængighed (én wheel, ingen system-libs).
+- **Arkitektur**: udtræk sker på WORKER'en (klienter kan ikke nemt udtrække
+  PDF-tekst). Ny endpoint `/rag/ingest/pdf` tager base64-PDF (samme mønster som
+  vision/voice). Go-backend proxer via `/api/v1/rag/ingest/pdf`. Android-
+  file-pickeren accepterer nu PDF'er og sender bytes; tekstfiler går stadig via
+  den eksisterende tekst-sti.
+- **VALGFRIT**: PyMuPDF er ikke en hård afhængighed; fraværende → pæn 501 +
+  installationsanvisning. RAG-tekst-ingest upåvirket.
+- **Fejlhåndtering**: ugyldig base64 → 400, ulæselig/krypteret PDF → 400, PDF
+  uden tekst (scannet uden OCR) → 422 med ærlig besked, embed-fejl → 502.
+- **🎉 UDTRÆK ER FAKTISK HARDWARE-TESTET** (i container, ikke bare kompileret):
+  lavede en dansk test-PDF, PyMuPDF udtrak teksten korrekt inkl. æøå. Endpointet
+  verificeret: status→available, ugyldig base64→400, ikke-PDF→400, rigtig PDF
+  udtrak+chunkede og nåede embed-trinnet (502 kun fordi Ollama ikke kørte i
+  container). På rig'en med Ollama går PDF'en hele vejen. Alle 58 assertions
+  grønne.
+- **Testopskrift**: `tools/rag_pdf_test.py` — udtræk + ingest + query på rig'en,
+  beviser hele PDF→RAG-kæden (spørg om PDF-indhold, få grounded svar).
+- **Android-picker kun kompileret** (ikke telefon-testet): fil-valg + base64-
+  upload følger det beviste mønster, men picker-adfærd bør bekræftes på telefon.
+- Backend + worker + Android rørt → bygger APK + Windows-jar + server-exes.
 
 ## What's new in 1.6.0  🎙️  (Alva Voice på Android — push-to-talk)
 - **Stemme i selve appen**: en 🎙-knap i input-baren (kun i rig-mode, da Voice

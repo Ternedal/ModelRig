@@ -19,7 +19,7 @@ from . import ollama_client as oc
 from . import rag
 from .store import DocStore
 
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -107,6 +107,67 @@ async def ingest(req: IngestReq) -> dict:
     except oc.OllamaError as e:
         raise HTTPException(status_code=502, detail=str(e))
     return {"documents": len(req.documents), "chunks_added": chunks, "total": store.count()}
+
+
+@app.get("/rag/ingest/pdf/status")
+def rag_pdf_status() -> dict:
+    """Whether PDF ingest is available (PyMuPDF installed)."""
+    from . import rag_pdf
+    return {"available": rag_pdf.is_available()}
+
+
+class IngestPdfReq(BaseModel):
+    # base64-encoded PDF bytes uploaded from a client. Extraction happens here
+    # on the worker (PyMuPDF), then the text goes through the same chunk/embed/
+    # store pipeline as /rag/ingest -- clients can't extract PDF text easily.
+    pdf_base64: str
+    source: str | None = None
+    chunk_size: int = Field(default=800, ge=100, le=4000)
+    overlap: int = Field(default=150, ge=0, le=1000)
+
+
+@app.post("/rag/ingest/pdf")
+async def ingest_pdf(req: IngestPdfReq) -> dict:
+    """Extract text from an uploaded PDF and ingest it into the RAG index.
+    Returns {source, pages, chars, chunks_added, total}. Clean errors: 501 if
+    PyMuPDF isn't installed, 400 for bad base64 / unreadable / encrypted PDF,
+    422 if the PDF has no extractable text (e.g. a scan with no OCR layer)."""
+    from . import rag_pdf
+    import base64
+    if not rag_pdf.is_available():
+        raise HTTPException(
+            status_code=501,
+            detail="PDF ingest is not enabled on this rig. Install it with: pip install pymupdf",
+        )
+    try:
+        raw = base64.b64decode(req.pdf_base64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="pdf_base64 is not valid base64")
+    try:
+        extracted = rag_pdf.extract_text(raw)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not extracted["text"]:
+        # No selectable text -- almost always a scanned PDF with no OCR layer.
+        raise HTTPException(
+            status_code=422,
+            detail="no extractable text in PDF (is it a scan? OCR isn't supported yet)",
+        )
+    try:
+        chunks = await rag.ingest(
+            store,
+            [{"text": extracted["text"], "source": req.source}],
+            chunk_size=req.chunk_size, overlap=req.overlap,
+        )
+    except oc.OllamaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {
+        "source": req.source,
+        "pages": extracted["pages"],
+        "chars": extracted["chars"],
+        "chunks_added": chunks,
+        "total": store.count(),
+    }
 
 
 @app.post("/rag/query")

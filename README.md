@@ -4,7 +4,7 @@ A local-first AI platform: run models on your own hardware via Ollama, reach the
 from a desktop app and an Android phone, with an optional RAG service and an
 Ollama Cloud fallback for when local isn't enough.
 
-Version: **1.6.0** 🎙️ (Alva Voice på Android: push-to-talk; kompileret, ikke telefon-testet)
+Version: **1.7.0** 📄 (RAG PDF-ingest via PyMuPDF; udtræk hardware-testet, Android-picker kompileret)
 
 ## Architecture
 ```

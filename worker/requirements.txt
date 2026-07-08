@@ -10,3 +10,6 @@ pydantic>=2.7,<3.0
 # Optional -- Alva Voice TTS only. NOT installed by default. GPL-3.0.
 # Install on the rig with: pip install piper-tts
 # piper-tts>=1.4
+# Optional -- RAG PDF ingest only. NOT installed by default. Extracts text from
+# uploaded PDFs (PyMuPDF). Install on the rig with: pip install pymupdf
+# pymupdf>=1.24
