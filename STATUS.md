@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.0.3** — "retry-sti fik samme cloud-fallback som hovedstien (1.0.2 fiksede kun hovedstien)". Follows 1.0.2. Autonomous sessions, **2026-07-02 → 07-08**.
+Version **1.1.0** — "🖼 Vision: send billeder til vision-kapable modeller (første V3-feature, oplåst af den beviste filvælger)". Follows 1.0.3. Autonomous sessions, **2026-07-02 → 07-08**.
 
 ## V1 checklist — ✅ COMPLETE (all 13 confirmed, v1.0.0 tagged)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -45,6 +45,37 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.1.0  🖼  (Vision — første V3-feature)
+- **Send billeder til modellen (Android).** En 📎-knap i input-baren åbner
+  billed-vælgeren (samme `OpenDocument`-mønster som RAG-ingest, som Anders
+  bekræftede on-device 7/7 — så mønsteret var bevist før genbrug). Vælg et
+  billede → "🖼 Billede vedhæftet"-chip → send. Billedet base64-kodes og
+  hæftes på den aktuelle brugerbesked via Ollamas `images`-felt.
+- **Virker på både rig og cloud** (chat-stier), IKKE i RAG-tilstand (RAG er
+  tekst-retrieval, ikke vision — billed-knappen skjules dér). Både rig- og
+  cloud-vejen fører billedet uændret til Ollama; den automatiske cloud-
+  fallback bærer også billedet med.
+- **Billed-kun-beskeder tilladt**: send-knappen aktiveres af tekst ELLER et
+  vedhæftet billede (vision-prompts er ofte "hvad er dette?" uden tekst).
+- **VIGTIG BEGRÆNSNING (ærlig)**: virker kun med en **vision-kapabel model**
+  (fx `llama3.2-vision` på rig'en, eller en multimodal cloud-model). Sender
+  du et billede til en ren tekst-model (`qwen2.5-coder`, `gpt-oss` uden
+  vision), ignoreres det eller fejler — det er Ollama/modellen, ikke
+  ModelRig. Appen tvinger ikke et modelvalg; det er brugerens ansvar at
+  vælge en vision-model.
+- **Kendte afgrænsninger**: billedet er kun på DEN aktuelle tur (ikke gemt,
+  ikke gensendt med history — samme scope som RAG-kontekst). "Prøv igen"
+  medtager IKKE billedet (billedet er forbrugt ved afsendelse). Max ~8 MB rå
+  fil (undgår OOM/oversized base64). Ingen inline-visning af billedet i
+  chatboblen endnu — kun en "vedhæftet"-chip før afsendelse.
+- Ren Android-feature. Klienterne (`CloudClient`, `ModelRigClient`) fik et
+  valgfrit `imageB64`-parameter (bagudkompatibelt — default null). Bygger
+  APK + server-exes (versionsbump), IKKE Windows-jar (desktop urørt; vision
+  på desktop er en separat fremtidig opgave).
+- **Ærlig status**: compile-verificeret, IKKE on-device-testet. Første V3-
+  feature. Kræver Anders' test med en faktisk vision-model — og den test
+  afgør om flowet (vælg → vedhæft → send → svar) reelt virker.
 
 ## What's new in 1.0.3  (fallback-konsistens: retry-stien manglede den)
 - **1.0.2 gav den primære send-sti automatisk local→cloud-fallback, men

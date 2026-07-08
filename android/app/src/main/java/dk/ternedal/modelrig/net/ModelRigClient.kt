@@ -87,11 +87,20 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         model: String,
         messages: List<Pair<String, String>>,
         registerCall: ((okhttp3.Call) -> Unit)? = null,
+        imageB64: String? = null,
         onDelta: (String) -> Unit,
     ) {
         val arr = JSONArray()
-        for ((role, content) in messages) {
-            arr.put(JSONObject().put("role", role).put("content", content))
+        for ((i, m) in messages.withIndex()) {
+            val (role, content) = m
+            val msg = JSONObject().put("role", role).put("content", content)
+            // Vision: attach base64 image to the current (last) user message
+            // only. The backend forwards it to Ollama unchanged. Requires a
+            // vision-capable model pulled on the rig (e.g. llama3.2-vision).
+            if (imageB64 != null && i == messages.lastIndex && role == "user") {
+                msg.put("images", JSONArray().put(imageB64))
+            }
+            arr.put(msg)
         }
         val body = JSONObject()
             .put("model", model)

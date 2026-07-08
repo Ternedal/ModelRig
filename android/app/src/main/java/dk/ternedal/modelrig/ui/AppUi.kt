@@ -518,6 +518,30 @@ private fun ChatScreen(
     var ingestStatus by remember { mutableStateOf<String?>(null) }
     var ingestError by remember { mutableStateOf<String?>(null) }
 
+    // Vision: an image picked to send with the next message, held as base64
+    // (no data-URI prefix, as Ollama's images field expects). Cleared after
+    // the message is sent. Only attached to the current user turn -- not
+    // persisted, not resent with history (same scope as RAG document context).
+    var pendingImageB64 by remember { mutableStateOf<String?>(null) }
+    var pendingImageError by remember { mutableStateOf<String?>(null) }
+    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        pendingImageError = null
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw RuntimeException("kunne ikke læse billedet")
+                    // Cap at ~8 MB raw to avoid oversized base64 payloads / OOM.
+                    if (bytes.size > 8 * 1024 * 1024) throw RuntimeException("billedet er for stort (max 8 MB)")
+                    android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                }
+            }
+            result.onSuccess { pendingImageB64 = it }
+                .onFailure { pendingImageError = it.message }
+        }
+    }
+
     // Reads the picked document's text content + display name, then POSTs it
     // to the RAG index. txt/md only — no PDF/DOCX extraction (matches the
     // worker's plain-text ingest contract).
@@ -586,7 +610,8 @@ private fun ChatScreen(
 
     val onSend: () -> Unit = onSend@{
         val t = input.trim()
-        if (t.isEmpty() || busy) return@onSend
+        // Allow an image-only turn (vision: "describe this" with no text).
+        if ((t.isEmpty() && pendingImageB64 == null) || busy) return@onSend
         messages.add(Msg("user", t)); input = ""; busy = true
         val useCloud = mode == "cloud"
         val useRag = mode == "rig" && ragMode
@@ -598,6 +623,11 @@ private fun ChatScreen(
         val rigModel = currentModel
         val cModel = cloudModel
         val srcFilter = ragSourceFilter
+        // Capture + clear the pending image now (this turn owns it). RAG is
+        // text retrieval, not vision, so images are only sent on cloud/rig
+        // chat, never the RAG branch.
+        val imageB64 = if (useRag) null else pendingImageB64
+        pendingImageB64 = null
         scope.launch {
             // persist: create conversation lazily, then the user message
             val cid = withContext(Dispatchers.IO) {
@@ -642,7 +672,7 @@ private fun ChatScreen(
                             .ragChatStream(t, rigModel, srcFilter, registerCall = hook, onSources = onSources, onDelta = onDelta)
                         useCloud -> {
                             val key = store.cloudKey ?: throw RuntimeException("ingen cloud-nøgle")
-                            CloudClient(key).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
+                            CloudClient(key).chatStream(cModel, history, registerCall = hook, imageB64 = imageB64, onDelta = onDelta)
                         }
                         else -> {
                             // Rig chat, local-first with automatic cloud fallback:
@@ -653,12 +683,12 @@ private fun ChatScreen(
                             val cloudKey = store.cloudKey
                             try {
                                 ModelRigClient(store.baseUrl ?: "", store.token)
-                                    .chatStream(rigModel, history, registerCall = hook,
+                                    .chatStream(rigModel, history, registerCall = hook, imageB64 = imageB64,
                                         onDelta = { d -> rigEmitted++; onDelta(d) })
                             } catch (e: Exception) {
                                 if (rigEmitted == 0 && cloudKey != null) {
                                     didFallback = true
-                                    CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
+                                    CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, imageB64 = imageB64, onDelta = onDelta)
                                 } else throw e
                             }
                         }
@@ -894,30 +924,63 @@ private fun ChatScreen(
         // inset, so ime.union(navigationBars) lifts the field above it (max per
         // side, no double-count).
         Surface(color = GraphiteSurface, tonalElevation = 3.dp) {
-            Row(
+            Column(
                 Modifier.fillMaxWidth()
                     .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
                     .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedTextField(
-                    value = input, onValueChange = { input = it },
-                    modifier = Modifier.weight(1f), enabled = !busy, maxLines = 5,
-                    placeholder = { Text("Skriv til modellen…") },
-                    shape = RoundedCornerShape(24.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                if (busy) {
-                    Box(
-                        Modifier.size(44.dp).clickable(onClick = { activeCall?.cancel() }),
-                        contentAlignment = Alignment.Center,
-                    ) { StopGlyph(color = Danger, modifier = Modifier.size(20.dp)) }
-                } else {
-                    val canSend = input.isNotBlank()
-                    Box(
-                        Modifier.size(44.dp).clickable(enabled = canSend, onClick = onSend),
-                        contentAlignment = Alignment.Center,
-                    ) { SendGlyph(color = if (canSend) Signal else TextMuted, modifier = Modifier.size(26.dp)) }
+                // Pending image chip: shows an image is attached to the next
+                // message, with an ✕ to remove it before sending.
+                pendingImageB64?.let {
+                    Row(
+                        Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("🖼 Billede vedhæftet", color = Signal, fontSize = 12.sp)
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = { pendingImageB64 = null }) {
+                            Text("✕ Fjern", color = TextMuted, fontSize = 12.sp)
+                        }
+                    }
+                }
+                pendingImageError?.let {
+                    Text("Billedfejl: $it", color = Danger, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Vision is chat-only (cloud/rig), not RAG. Requires a
+                    // vision-capable model; the button just attaches — the
+                    // model choice is the user's.
+                    if (mode != "rig" || !ragMode) {
+                        Box(
+                            Modifier.size(44.dp).clickable(enabled = !busy, onClick = {
+                                pendingImageError = null
+                                pickImage.launch(arrayOf("image/*"))
+                            }),
+                            contentAlignment = Alignment.Center,
+                        ) { Text("📎", fontSize = 20.sp) }
+                        Spacer(Modifier.width(2.dp))
+                    }
+                    OutlinedTextField(
+                        value = input, onValueChange = { input = it },
+                        modifier = Modifier.weight(1f), enabled = !busy, maxLines = 5,
+                        placeholder = { Text("Skriv til modellen…") },
+                        shape = RoundedCornerShape(24.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    if (busy) {
+                        Box(
+                            Modifier.size(44.dp).clickable(onClick = { activeCall?.cancel() }),
+                            contentAlignment = Alignment.Center,
+                        ) { StopGlyph(color = Danger, modifier = Modifier.size(20.dp)) }
+                    } else {
+                        // Can send with text OR just an image (vision prompts
+                        // are often "what's in this?" with an image and no text).
+                        val canSend = input.isNotBlank() || pendingImageB64 != null
+                        Box(
+                            Modifier.size(44.dp).clickable(enabled = canSend, onClick = onSend),
+                            contentAlignment = Alignment.Center,
+                        ) { SendGlyph(color = if (canSend) Signal else TextMuted, modifier = Modifier.size(26.dp)) }
+                    }
                 }
             }
         }

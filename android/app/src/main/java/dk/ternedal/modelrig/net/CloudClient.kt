@@ -69,11 +69,21 @@ class CloudClient(private val apiKey: String, baseUrl: String = "https://ollama.
         model: String,
         messages: List<Pair<String, String>>,
         registerCall: ((okhttp3.Call) -> Unit)? = null,
+        imageB64: String? = null,
         onDelta: (String) -> Unit,
     ) {
         val arr = JSONArray()
-        for ((role, content) in messages) {
-            arr.put(JSONObject().put("role", role).put("content", content))
+        for ((i, m) in messages.withIndex()) {
+            val (role, content) = m
+            val msg = JSONObject().put("role", role).put("content", content)
+            // Ollama vision: attach base64 images (no data-URI prefix) to a
+            // message via an "images" array. We only ever attach to the LAST
+            // message (the current user turn) -- history images aren't resent,
+            // same pragmatic scope as RAG. Requires a vision-capable model.
+            if (imageB64 != null && i == messages.lastIndex && role == "user") {
+                msg.put("images", JSONArray().put(imageB64))
+            }
+            arr.put(msg)
         }
         val body = JSONObject()
             .put("model", model)
