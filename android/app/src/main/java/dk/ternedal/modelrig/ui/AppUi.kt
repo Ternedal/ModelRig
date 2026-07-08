@@ -126,9 +126,11 @@ private fun CloudCard(store: TokenStore, db: ChatDb, onSaved: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = model, onValueChange = { model = it },
-                label = { Text("Model (fx gpt-oss:120b)", fontSize = 12.sp) },
+                label = { Text("Standardmodel (fx gpt-oss:120b)", fontSize = 12.sp) },
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
             )
+            Text("Modellen der bruges som standard. Du kan også vælge fra din cloud-kontos liste via ☁-menuen øverst i chatten.",
+                fontSize = 11.sp, color = TextMuted, lineHeight = 15.sp)
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = system, onValueChange = { system = it; store.cloudSystem = it },
@@ -540,6 +542,19 @@ private fun ChatScreen(
 
     // Load the requested conversation (or none). Restores source/model from its
     // metadata when that source is still configured.
+    // Auto-load the cloud model list when entering cloud mode with a key set,
+    // so the dropdown is populated without a manual "Genindlæs" first. Only
+    // fetches when empty (avoids re-hitting the API on every mode toggle).
+    LaunchedEffect(mode) {
+        if (mode == "cloud" && cloudModels.isEmpty()) {
+            val key = store.cloudKey
+            if (key != null) {
+                val res = withContext(Dispatchers.IO) { runCatching { CloudClient(key).listModels() } }
+                res.onSuccess { cloudModels = it }
+            }
+        }
+    }
+
     LaunchedEffect(openConvId) {
         messages.clear()
         convId = openConvId
@@ -710,7 +725,11 @@ private fun ChatScreen(
                 if (mode == "cloud") {
                     Box {
                         ModelChip("☁  $cloudModel  ▾", onClick = { cloudMenu = true })
-                        DropdownMenu(expanded = cloudMenu, onDismissRequest = { cloudMenu = false }) {
+                        DropdownMenu(
+                            expanded = cloudMenu,
+                            onDismissRequest = { cloudMenu = false },
+                            modifier = Modifier.heightIn(max = 420.dp),
+                        ) {
                             DropdownMenuItem(
                                 text = { Text("↻  Genindlæs modeller", color = Signal) },
                                 onClick = {
@@ -722,11 +741,33 @@ private fun ChatScreen(
                                     }
                                 },
                             )
-                            if (cloudModels.isNotEmpty()) HorizontalDivider()
+                            if (cloudModels.isNotEmpty()) {
+                                HorizontalDivider()
+                                Text(
+                                    "Standardmodel (☁ Cloud)",
+                                    color = TextMuted, fontSize = 11.sp,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                                )
+                            }
                             cloudModels.forEach { m ->
-                                DropdownMenuItem(text = { Text(m) }, onClick = {
-                                    cloudModel = m; store.cloudModel = m; cloudMenu = false
-                                })
+                                val selected = m == cloudModel
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                if (selected) "✓" else "",
+                                                color = Signal, fontSize = 13.sp,
+                                                modifier = Modifier.width(20.dp),
+                                            )
+                                            Text(
+                                                m,
+                                                color = if (selected) Signal else TextHigh,
+                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                            )
+                                        }
+                                    },
+                                    onClick = { cloudModel = m; store.cloudModel = m; cloudMenu = false },
+                                )
                             }
                             HorizontalDivider()
                             DropdownMenuItem(text = { Text("Indstillinger…", color = TextMuted) }, onClick = { cloudMenu = false; onOpenSettings() })

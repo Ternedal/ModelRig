@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.20** — "nyt app-ikon (Anders' coin-design) — Android alle densiteter + adaptivt + desktop-vinduesikon". Follows 0.20.19 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-07**.
+Version **0.20.21** — "cloud-model-dropdown forbedret: scrollbar, ✓ på standardmodel, auto-hentet". Follows 0.20.20 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-07**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -45,6 +45,27 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.21  (cloud-model-valg forbedret — Anders' ønske under ikon-testen)
+- **Anders' observation 8/7**: cloud-model-dropdownen rullede ud over hele
+  skærmen (hans konto har ~20 modeller), og der var ingen synlig markering
+  af hvilken der var valgt som standard.
+- **Vigtig afklaring**: modellerne var ALDRIG hardkodede — de hentes live fra
+  brugerens Ollama-cloud-konto (`CloudClient.listModels()`). Og "default"
+  fandtes allerede som `store.cloudModel`; den var bare hverken synlig eller
+  nem at sætte.
+- **Fixet**: (1) dropdownen er nu højdebegrænset (`heightIn(max=420dp)`) og
+  scrollbar — dækker ikke længere skærmen. (2) Den valgte/standardmodel har
+  nu **✓ + fremhævet farve** i listen, under en "Standardmodel (☁ Cloud)"-
+  overskrift — et tryk sætter den som standard (gemmes i `store.cloudModel`,
+  bruges næste gang). (3) Listen **auto-hentes** når man går i cloud-mode
+  (LaunchedEffect på mode, kun når tom) — ingen manuel "Genindlæs" først.
+  (4) Cloud-kortets felt omdøbt "Model" → "Standardmodel" med hjælpetekst
+  der peger på ☁-menuen.
+- Ren Android-UI-ændring. Bygger APK + server-exes (versionsbump i worker),
+  IKKE Windows-jar (desktop urørt).
+- **Bemærk V1-status**: dette er en V2-kontrolflade-forbedring, IKKE et
+  V1-tjeklistepunkt. V1 hænger stadig KUN på ikon-bekræftelsen (0.20.20).
 
 ## What's new in 0.20.20  (nyt app-ikon — det SIDSTE V1-punkt)
 - **Anders leverede ikon-billedet** (1024×1024 coin-design: node-graf i
