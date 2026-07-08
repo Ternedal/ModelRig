@@ -112,6 +112,22 @@ check("sources" in head and len(head["sources"]) >= 1, "rag-chat first line carr
 answer = "".join(json.loads(l).get("message", {}).get("content", "") for l in lines[1:])
 check(answer == "ctx-ans", f"rag-chat streams the reassembled answer (got {answer!r})")
 
+# ---- source chips are deduped per source name, not per chunk ----
+# Ingest a doc long enough to split into multiple chunks, all sharing one
+# source name, then confirm the rag/chat head emits ONE entry for that
+# source (with a chunks count), not one-per-chunk. This is the exact
+# on-device dup ("test.txt" shown twice for a 2-chunk file).
+long_text = ("kanariefugl " * 60).strip()  # ~700 chars -> multiple chunks
+client.post("/rag/ingest", json={"documents": [
+    {"text": long_text, "source": "dedup-doc"}], "chunk_size": 200, "overlap": 40})
+r = client.post("/rag/chat", json={"query": "kanariefugl", "top_k": 10, "source": "dedup-doc"})
+head = json.loads(r.text.strip().split("\n")[0])
+dedup_entries = [s for s in head["sources"] if s["source"] == "dedup-doc"]
+check(len(dedup_entries) == 1,
+      f"multiple chunks from one source -> exactly ONE source chip (got {len(dedup_entries)}: {head['sources']})")
+check(dedup_entries and dedup_entries[0].get("chunks", 0) >= 2,
+      f"deduped source entry carries a chunks count >= 2 (got {dedup_entries})")
+
 # ---- min_score: irrelevant matches get filtered, not padded into top_k ----
 # fake_embed is a pure 26-dim letter-count vector, so a query using only a
 # letter absent from the stored text gives an exact, deterministic 0.0 cosine

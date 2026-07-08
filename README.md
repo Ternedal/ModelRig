@@ -4,7 +4,7 @@ A local-first AI platform: run models on your own hardware via Ollama, reach the
 from a desktop app and an Android phone, with an optional RAG service and an
 Ollama Cloud fallback for when local isn't enough.
 
-Version: **0.20.18** (kosmetiske testfund samlet; V1 afventer KUN nyt ikon — 12/13 grønne)
+Version: **0.20.19** (kilde-chip-dedup gjort rigtigt i workeren; V1 afventer KUN nyt ikon)
 
 ## Architecture
 ```

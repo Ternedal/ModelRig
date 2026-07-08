@@ -19,7 +19,7 @@ from . import ollama_client as oc
 from . import rag
 from .store import DocStore
 
-VERSION = "0.20.18"
+VERSION = "0.20.19"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -147,9 +147,25 @@ async def rag_chat(req: QueryReq):
     ]
 
     async def gen():
+        # One chip per SOURCE, not per chunk. Several chunks from the same
+        # file share a source name; emitting one head entry each produced
+        # duplicate chips client-side (e.g. "test.txt" twice for a 2-chunk
+        # file -- seen on-device 6/7 & 7/7-2026). Client .distinct() couldn't
+        # collapse them because each entry's chunk_index differed. Dedup here,
+        # once, for every client; keep the best (highest) score per source and
+        # count how many chunks matched so the UI can show it if it wants.
+        best: dict[str, dict] = {}
+        for m in matches:
+            key = m["source"] or m["id"]
+            prev = best.get(key)
+            if prev is None or m["score"] > prev["score"]:
+                best[key] = {"source": m["source"], "score": m["score"],
+                             "chunks": (prev["chunks"] if prev else 0) + 1}
+            else:
+                prev["chunks"] += 1
         head = {"sources": [
-            {"source": m["source"], "chunk_index": m["chunk_index"], "score": m["score"]}
-            for m in matches
+            {"source": v["source"], "score": v["score"], "chunks": v["chunks"]}
+            for v in sorted(best.values(), key=lambda x: x["score"], reverse=True)
         ]}
         yield (json.dumps(head) + "\n").encode()
         if not matches:

@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.18** — "kosmetiske testfund samlet: kilde-chip-dedup, ærligt ved-ikke-svar, hjælpsomme fejltekster". Follows 0.20.17 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-07**.
+Version **0.20.19** — "kilde-chip-dedup gjort RIGTIGT (0.20.18's klient-fix holdt ikke — samme klasse som preset-sagaen)". Follows 0.20.18 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-07**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -45,6 +45,30 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.19  (kilde-chip-dedup gjort rigtigt — 0.20.18's fix holdt ikke)
+- **0.20.18's kilde-chip-dedup virkede ikke** — samme fejlklasse som
+  preset-sagaen: en klient-side fix på et problem der bor server-side.
+  0.20.18 lagde `.distinct()` på Android-klienten, MEN workeren sendte
+  stadig én kilde-post PR. CHUNK med hvert sit `chunk_index` — så to poster
+  fra samme fil er distinkte objekter, og `.distinct()` kollapser dem ikke.
+  "test" ville stadig optræde to gange for en 2-chunk-fil.
+- **Rigtig fix, i workeren, ét sted for alle klienter**: `/rag/chat`-headeren
+  deduperer nu pr. KILDENAVN — én chip pr. fil uanset chunk-antal — beholder
+  bedste (højeste) score og tæller matchende chunks (`{"source","score",
+  "chunks"}`). `chunk_index` fjernet fra headeren (ingen klient brugte det —
+  verificeret: desktop læser kun `source`, Android kun `source` via
+  `optString`, begge tolererer manglende felter).
+- **Deterministisk bevis**: ny test ingesterer en fil der splittes i 5
+  chunks under ét kildenavn og bekræfter headeren giver PRÆCIS én post,
+  med `chunks: 5`. Suite: **112 assertions** (var 110).
+- **Klient-koden urørt** — Androids nu-overflødige `.distinct()` skader ikke
+  (én post ind → én ud). APK'en er kodeidentisk med 0.20.18; kun
+  worker/backend ændret. Bygger APK + server-exes (worker ændret), IKKE
+  Windows-jar (desktop urørt).
+- **Ærlig status**: dette lukker det sidste REELLE kosmetiske testfund.
+  Tilbage før v1.0.0: KUN det nye ikon (afventer Anders' billedfil). 12/13
+  grønne — uændret fra 0.20.18.
 
 ## What's new in 0.20.18  (kosmetiske fund fra Android-testrunden 7/7 — polish, ikke ny funktion)
 - **Baggrund**: Anders gennemførte hele Android-tjeklisten on-device 7/7 —
