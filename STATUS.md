@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.19** — "kilde-chip-dedup gjort RIGTIGT (0.20.18's klient-fix holdt ikke — samme klasse som preset-sagaen)". Follows 0.20.18 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-07**.
+Version **0.20.20** — "nyt app-ikon (Anders' coin-design) — Android alle densiteter + adaptivt + desktop-vinduesikon". Follows 0.20.19 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-07**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -45,6 +45,28 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.20  (nyt app-ikon — det SIDSTE V1-punkt)
+- **Anders leverede ikon-billedet** (1024×1024 coin-design: node-graf i
+  gul→blå→lilla gradient på mørk cirkulær "coin"). Det gamle ikon var for
+  zoomet/beskåret i launcheren.
+- **Rodårsag til det gamle beskårne look, målt konkret**: coin'en fyldte 88%
+  af canvas'et (kun 64px margin), men Android adaptive icons viser kun
+  midterste ~72% garanteret — så cirkelmasken bed kanten af coin'en. Løst
+  ved at skalere coin'en til **82%** i forgrunden: fyldig, men med lige nok
+  luft til at hverken cirkel- ELLER squircle-maske klipper (begge verificeret
+  med maskerede previews før byg — ikke gæt).
+- **Android**: adaptiv forgrund opdateret (drawable-nodpi, 432×432, 82%),
+  PLUS nye PNG-mipmaps i alle 5 densiteter (mdpi→xxxhdpi, både `ic_launcher`
+  og `ic_launcher_round`) som fallback for pre-API26 — fandtes ikke før
+  (kun adaptivt). Den mørke gradient-baggrund beholdt. Verificeret pakket i
+  APK via aapt; signatur uændret (installerer henover).
+- **Desktop**: fik for første gang et vinduesikon (`icon.png` i resources,
+  sat via `painterResource` i Main.kt) — kørte default før.
+- **Ærlig status**: dette er det 13. og SIDSTE V1-tjeklistepunkt. Afventer
+  KUN Anders' on-device-bekræftelse af at ikonet ser godt ud i launcheren —
+  så tagges v1.0.0. Bygger APK + Windows-jar (både android/ og desktop/
+  rørt) + server-exes (versionsbump i worker).
 
 ## What's new in 0.20.19  (kilde-chip-dedup gjort rigtigt — 0.20.18's fix holdt ikke)
 - **0.20.18's kilde-chip-dedup virkede ikke** — samme fejlklasse som
