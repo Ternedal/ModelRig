@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.3.0** — "🎙️ Alva Voice fase 1: valgfrit ASR-modul (faster-whisper, dansk) i worker. Kode + testopskrift, IKKE hardware-testet". Follows 1.2.1. Autonomous sessions, **2026-07-02 → 07-08**.
+Version **1.4.0** — "🔊 Alva Voice fase 2: valgfrit TTS-modul (Piper, dansk) i worker. Kode + testopskrift, IKKE hardware-testet". Follows 1.3.0. Autonomous sessions, **2026-07-02 → 07-08**.
 
 ## V1 checklist — ✅ COMPLETE (all 13 confirmed, v1.0.0 tagged)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -45,6 +45,40 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.4.0  🔊  (Alva Voice fase 2 — TTS-modul, valgfrit)
+- **Andet Voice-lag**: et selvstændigt TTS-modul (`worker/app/voice_tts.py`)
+  + to endpoints (`GET /voice/tts/status`, `POST /voice/tts/synthesize`).
+  Fase 2 fra delta-dokumentet, bygget på Anders' eksplicitte "byg TTS alligevel".
+- **Piper (2026-verificeret)**: CPU-only, ~10× real-time på moderne desktop-CPU
+  (frigør GPU'en helt til ASR + LLM), stemmer ~tiental MB. Web-tjekket 8/7:
+  aktiv pakke er nu `pip install piper-tts` (OHF-Voice/piper1-gpl v1.4.2,
+  april-2026); gl. rhasspy/piper er arkiveret.
+- **LICENS RETTET**: delta-dokumentet kaldte Piper "fri" — det er forkert.
+  Aktiv Piper er **GPL-3.0** (gl. MIT-repo arkiveret okt-2025). Fint for Anders'
+  private brug, men flagget i både modulet og delta-dok'et hvis projektet
+  nogensinde skal deles. Individuelle stemme-modeller har egne MODEL_CARD-
+  licenser der skal tjekkes ved deling.
+- **VALGFRIT og bryder intet** (samme mønster som ASR): piper-tts er IKKE en
+  hård afhængighed; fraværende → pæn 501 + installationsanvisning. Verificeret:
+  worker starter uden piper, tts-status giver available:false, synthesize giver
+  501 (ikke crash), ASR-modulet upåvirket (begge sameksisterer), healthz
+  uændret, alle 47 worker-assertions grønne.
+- **Config via env**: ALVA_TTS_VOICE (default da_DK-talesyntese-medium),
+  ALVA_TTS_VOICES_DIR (~/.alva/piper-voices).
+- **Testopskrift**: `tools/alva_voice_tts_test.py` — Anders installerer piper,
+  henter dansk stemme, kører scriptet, lytter til alva_tts_out.wav og
+  rapporterer kvalitet + RTF tilbage.
+- **ÆRLIGT — to utestede Voice-lag stablet nu**: både ASR (1.3.0) og TTS
+  (1.4.0) er kode + opskrift, INGEN kørt på Anders' rig. Anders valgte
+  bevidst "byg TTS alligevel" velvidende dette. Om dansk-stemmen lyder godt
+  kan KUN høres på hans maskine. Anbefaling står stadig: kør begge test-
+  opskrifter (ASR + TTS) før næste lag bygges, så vi ikke fejlsøger to
+  ubeviste lag på én gang.
+- **Næste (ikke bygget)**: kobling ASR→LLM→TTS på rig'en (V-MVP.3, time-to-
+  first-audio), derefter Android-lyd-laget (push-to-talk, capture, afspilning
+  — kun testbart på telefonen), derefter barge-in.
+- Worker rørt → bygger APK + Windows-jar + server-exes.
 
 ## What's new in 1.3.0  🎙️  (Alva Voice fase 1 — ASR-modul, valgfrit)
 - **Første kode mod Alva Voice**: et selvstændigt ASR-modul (`worker/app/

@@ -19,7 +19,7 @@ from . import ollama_client as oc
 from . import rag
 from .store import DocStore
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -253,4 +253,45 @@ def voice_asr_transcribe(req: AsrReq) -> dict:
         return voice_asr.transcribe_wav(req.path, language=req.language)
     except RuntimeError as e:
         # Model load / device errors -> 501 with the module's actionable message.
+        raise HTTPException(status_code=501, detail=str(e))
+
+
+# ---- Alva Voice: TTS (optional) --------------------------------------------
+# Phase 2 of Alva Voice. Same optional pattern as ASR: piper-tts is NOT a hard
+# dependency; absent -> 501 with instructions, worker otherwise unaffected. See
+# app/voice_tts.py. NOT YET HARDWARE-TESTED. Piper is GPL-3.0 (fine for private
+# use; flagged for redistribution).
+
+@app.get("/voice/tts/status")
+def voice_tts_status() -> dict:
+    """Whether TTS is available (piper-tts installed) + configured voice."""
+    from . import voice_tts
+    return {
+        "available": voice_tts.is_available(),
+        "voice": voice_tts._voice_name(),
+        "voices_dir": voice_tts._voices_dir(),
+    }
+
+
+class TtsReq(BaseModel):
+    text: str
+    # Where to write the synthesized WAV on the rig. The Android layer fetches
+    # or streams it; file-based for the MVP.
+    out_path: str = "/tmp/alva_tts_out.wav"
+
+
+@app.post("/voice/tts/synthesize")
+def voice_tts_synthesize(req: TtsReq) -> dict:
+    from . import voice_tts
+    if not voice_tts.is_available():
+        raise HTTPException(
+            status_code=501,
+            detail="Alva Voice TTS is not enabled on this rig. Install it with: "
+                   "pip install piper-tts",
+        )
+    if not req.text.strip():
+        raise HTTPException(status_code=400, detail="text is empty")
+    try:
+        return voice_tts.synthesize_to_wav(req.text, req.out_path)
+    except RuntimeError as e:
         raise HTTPException(status_code=501, detail=str(e))

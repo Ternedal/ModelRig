@@ -36,7 +36,7 @@ fase 2+.
 | `nvidia/parakeet-tdt-0.6b-v3` (ikke i pakken — mit fund) | ✅ Ja, 25 EU-sprog inkl. dansk (600M) | ✅ **CC-BY-4.0** (friere) | NeMo | **Værd at overveje** som friere-licens-alternativ, hvis størrelsen er OK |
 | `faster-whisper` (ASR fallback) | ✅ Ja, velkendt | ✅ MIT | CTranslate2 (let) | Solid, letvægts fallback — måske bedre startpunkt end Parakeet |
 | `CoRal-project/roest-v3-chatterbox-350m` (primær TTS) | ⚠️ Skal verificeres on-device | Skal tjekkes | Ukendt runtime | **Ikke bekræftet endnu** — behandl som kandidat |
-| Piper `da_DK/...medium` (TTS fallback) | ✅ Ja, velkendt dansk Piper | ✅ Fri | ONNX (let) | **Bedste MVP-startpunkt** — let, hurtig, fri |
+| Piper `da_DK-talesyntese-medium` (TTS) | ✅ Ja, dansk Piper | ⚠️ **GPL-3.0** (aktiv piper1-gpl; gl. MIT-repo arkiveret okt-2025) | ONNX (let, CPU-only) | **MVP-startpunkt** — let, hurtig, men GPL (fint privat, tjek ved deling) |
 | Silero VAD | ✅ Ja | ✅ MIT | let (ONNX/torch) | Godt valg |
 | openwakeword (wake word) | ✅ Ja | ✅ Apache | let | Fint — men fase 2, ikke MVP |
 
