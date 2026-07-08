@@ -4,7 +4,7 @@ A local-first AI platform: run models on your own hardware via Ollama, reach the
 from a desktop app and an Android phone, with an optional RAG service and an
 Ollama Cloud fallback for when local isn't enough.
 
-Version: **1.1.0** 🖼 (Vision — send billeder til vision-modeller; første V3-feature)
+Version: **1.2.0** 🎨 (Android-appen rebrandet til Alva; motoren forbliver ModelRig; Voice prioriteret)
 
 ## Architecture
 ```

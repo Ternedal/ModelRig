@@ -197,25 +197,47 @@ Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
 
 ---
 
-## 5. V3 — "Udvidet platform" (horisont, ikke plan)
+## 5. V3 — "Alva: personlig assistent" (brand-reframe 8/7-2026)
 
-Uprioriteret liste — rækkefølge afgøres når V2 nærmer sig:
+**Navnehierarki (Anders' beslutning 8/7):** appen hedder nu **Alva**, motoren
+forbliver **ModelRig**. Android-appen er rebrandet i `v1.2.0` (app-navn +
+UI-titel + ikon → Alva; `applicationId` og backend uændret). Undersystemer:
+Alva Voice, Alva Memory, Alva Tools, Alva UI — se `BRAND_IDENTITY.md` og
+`ALVA_VOICE_ROADMAP_DELTA.md`.
 
-- **Share-target:** "Del til ModelRig" fra enhver app → RAG-ingest eller chat.
-- **Voice-input** (Androids SpeechRecognizer; on-device på nyere Pixels, ellers
-  enheds-afhængigt — ærligt forbehold).
-- **Vision:** send billeder til multimodale modeller (Ollamas chat-API tager
-  base64-billeder; afhænger af modeludvalg).
-- **Baggrunds-generering** med notifikation når svaret er klart (foreground service).
-- **Multi-rig-profiler** (hjemme/arbejde) med hurtigskift. ✅ **Leveret i
-  `v0.20.8`** (Android). Valgt som første V3-punkt fordi det ikke kræver
-  nogen ny Android OS-API — laveste risiko på listen. Ikke on-device-testet
-  endnu. Desktop mangler samme feature.
-- **Widget / Quick Settings-tile** til lynhurtig chat.
-- **Biometrisk lås** (BiometricPrompt) foran cloud-nøglen.
-- **Agent-tools** (modellen kalder værktøjer via rig'en). Bevidst sidst: kræver
-  tool-calling-modne modeller og en gennemtænkt sikkerhedsmodel — størst usikkerhed
-  i hele roadmappen.
+Flere af undersystemerne findes allerede under andre navne:
+- **Alva Memory** = eksisterende RAG + samtale-persistens + presets (leveret).
+- **Alva UI** = eksisterende Android/desktop-oplevelse (rebrandet, ikke ny).
+- **ModelRig Core** = eksisterende Go-backend + worker + Ollama-routing.
+
+### 🎙️ Alva Voice — PRIORITERET spor (nyt, stort)
+
+Samlet Voice I/O: push-to-talk → VAD → ASR → LLM-streaming → sentence-chunking
+→ TTS → audio-queue → barge-in. **Dette er hovedsporet fremad.** Fuld
+kvalitetssikring, modelverifikation, licens-flag, MVP-scope og milepæle med
+acceptkriterier ligger i **`ALVA_VOICE_ROADMAP_DELTA.md`**. Kernepunkter:
+- **MVP holdes smalt**: push-to-talk + Silero VAD + faster-whisper (MIT, let)
+  + eksisterende Ollama-streaming + Piper TTS (fri). Beviser latency-kæden med
+  mindst mulig ny afhængighed.
+- **Parakeet dansk ASR er kandidat, ikke låst**: bedre dansk kvalitet, MEN
+  NVIDIA Open Model License + tung NeMo-afhængighed (bryder exe-simpliciteten).
+  Verificeret 8/7. Fase 2, som isoleret modelbytte.
+- **Nøglemetrik**: time-to-first-audio — Alva taler efter første sætnings-chunk.
+- **Barge-in er V1-krav** men teknisk svært (akustisk ekko) — headset-først i MVP.
+- **Kræver beslutninger fra Anders før kode**: NeMo-afhængighed ja/nej,
+  headset-først ja/nej, Parakeet-licens-accept. Se delta-dok §6.
+
+### Øvrige V3-punkter (uprioriteret, efter Voice-MVP)
+
+- **Vision:** ✅ **Leveret i `v1.1.0`** (Android — billeder til vision-modeller
+  via Ollamas images-felt). Compile-verificeret, afventer on-device-test med en
+  vision-model.
+- **Share-target:** "Del til Alva" fra enhver app → RAG-ingest eller chat.
+- **Baggrunds-generering** med notifikation (foreground service).
+- **Multi-rig-profiler** ✅ **Leveret i `v0.20.8`**, on-device-bekræftet 8/7.
+- **Widget / Quick Settings-tile**; **Biometrisk lås** foran cloud-nøglen.
+- **Alva Tools / agent-tools** (modellen kalder værktøjer via rig'en). Kræver
+  stadig den gennemtænkte sikkerhedsmodel — størst usikkerhed i hele roadmappen.
 
 ---
 

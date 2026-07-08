@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.1.0** — "🖼 Vision: send billeder til vision-kapable modeller (første V3-feature, oplåst af den beviste filvælger)". Follows 1.0.3. Autonomous sessions, **2026-07-02 → 07-08**.
+Version **1.2.0** — "🎨 Rebrand: Android-appen hedder nu Alva (motoren forbliver ModelRig) + Voice prioriteret i roadmap". Follows 1.1.0. Autonomous sessions, **2026-07-02 → 07-08**.
 
 ## V1 checklist — ✅ COMPLETE (all 13 confirmed, v1.0.0 tagged)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -45,6 +45,33 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.2.0  🎨  (Alva-rebrand — Android-appen + Voice-roadmap)
+- **Android-appen er rebrandet til "Alva"** (Anders' beslutning 8/7, fra en
+  brand-pakke leveret af en anden Claude-session). App-navn, UI-titel og
+  app-ikon → Alva. **Motoren forbliver ModelRig** — backend, worker, desktop
+  og alle tekniske klasse-navne (`ModelRigClient` osv.) er UÆNDREDE. Kun
+  Android-appens brugervendte identitet skiftede.
+- **`applicationId` UÆNDRET** (`dk.ternedal.modelrig`): kritisk — at ændre det
+  ville bryde signaturen og forhindre opdatering hen over den installerede
+  app. Signatur bekræftet identisk. APK'en installerer henover som altid.
+- **Nyt app-ikon**: Alvas runiske bindmark (guld på Deep Forest) fra
+  brand-pakken. Hele det færdig-komponerede ikon bruges som adaptiv forgrund
+  (designeren havde allerede korrekt margin); adaptiv baggrund sat til Deep
+  Forest (#13241E) så masken er sømløs. Verificeret i cirkel + squircle FØR
+  byg. PNG-mipmaps i alle densiteter opdateret.
+- **🎙️ Voice er nu et PRIORITERET roadmap-spor** (Anders' krav). Fuld
+  kvalitetssikring i **`ALVA_VOICE_ROADMAP_DELTA.md`**: modelverifikation
+  (Parakeet dansk ASR bekræftet reel, MEN NVIDIA-licens + tung NeMo-
+  afhængighed — verificeret via web 8/7), en radikalt smal MVP (faster-whisper
+  + Piper, begge frie/lette), milepæle med acceptkriterier, og de beslutninger
+  Anders skal træffe før kode. ROADMAP §5 omskrevet til Alva-hierarkiet.
+- **Ærlig afgrænsning**: rebrandet er compile-verificeret (label='Alva'
+  bekræftet i APK), IKKE on-device-set endnu. Voice er KUN dokument — ingen
+  Voice-kode skrevet (ville være spekulativt uden Anders' beslutninger og en
+  RTX 3060 at måle på). Brand-assets kopieret til `android/brand/`.
+- Ren Android + docs. Bygger APK + Windows-jar (packageVersion-bump) +
+  server-exes (worker versionsbump).
 
 ## What's new in 1.1.0  🖼  (Vision — første V3-feature)
 - **Send billeder til modellen (Android).** En 📎-knap i input-baren åbner

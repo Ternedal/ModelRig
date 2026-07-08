@@ -98,7 +98,7 @@ private fun SetupScreen(store: TokenStore, db: ChatDb, onDone: () -> Unit) {
             .verticalScroll(rememberScrollState()),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("ModelRig", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = TextHigh)
+            Text("Alva", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = TextHigh)
             Spacer(Modifier.weight(1f))
             if (canChat) TextButton(onClick = onDone) { Text("Til chat →", color = Signal) }
         }
@@ -1087,7 +1087,7 @@ private fun ConversationsScreen(
                                     }) { Text("✎", color = TextMuted, fontSize = 13.sp) }
                                     TextButton(onClick = {
                                         val md = buildString {
-                                            appendLine("# ${c.title.ifBlank { "ModelRig-samtale" }}")
+                                            appendLine("# ${c.title.ifBlank { "Alva-samtale" }}")
                                             appendLine()
                                             db.loadMessages(c.id).forEach { (role, content) ->
                                                 appendLine(if (role == "user") "**Du:**" else "**Assistent:**")
@@ -1097,7 +1097,7 @@ private fun ConversationsScreen(
                                         }
                                         val intent = Intent(Intent.ACTION_SEND).apply {
                                             type = "text/plain"
-                                            putExtra(Intent.EXTRA_SUBJECT, c.title.ifBlank { "ModelRig-samtale" })
+                                            putExtra(Intent.EXTRA_SUBJECT, c.title.ifBlank { "Alva-samtale" })
                                             putExtra(Intent.EXTRA_TEXT, md)
                                         }
                                         context.startActivity(Intent.createChooser(intent, "Del samtale"))
