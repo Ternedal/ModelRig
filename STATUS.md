@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.21** — "cloud-model-dropdown forbedret: scrollbar, ✓ på standardmodel, auto-hentet". Follows 0.20.20 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-07**.
+Version **0.20.22** — "cloud-model-vælger: fuldskærm med søgning + standard øverst (dropdown erstattet)". Follows 0.20.21 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-07**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -45,6 +45,32 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.22  (cloud-model-vælger genbygget som fuldskærm — 0.20.21's dropdown var stadig forkert)
+- **0.20.21's dropdown-forbedring var ikke nok** — Anders 8/7: "kan ikke gå
+  frem i listen" (en DropdownMenu med 20+ modeller er umulig at scrolle),
+  rækkefølgen virkede tilfældig, og valget føltes ikke husket.
+- **Rigtig løsning: fuldskærms-vælger** (`CloudModelPickerScreen`), samme
+  bekræftede mønster som "Modeller"-skærmen Anders allerede har testet —
+  IKKE en dropdown. Med: (1) **søgefelt** der filtrerer de 20+ modeller
+  live, (2) **"Nuværende standard" pinnet øverst** med ✓ og fremhævet farve,
+  (3) resten **alfabetisk sorteret** (`it.sorted()`) under "Alle modeller",
+  (4) auto-hentet ved åbning. Et tryk gemmer som standard og går tilbage.
+- **"Huskes ikke"-afklaring**: modelvalget BLEV faktisk gemt korrekt hele
+  tiden (`store.cloudModel`, læst som default ved app-start). Problemet var
+  at den elendige dropdown gjorde det for besværligt at vælge — ikke at
+  valget gik tabt. At åbne en gammel samtale skifter kun den VISTE model for
+  den samtale (lokal state), ikke den gemte standard — bevidst uændret.
+- **Oprydning**: fjernede nu-ubrugt cloud-dropdown-state (`cloudMenu`,
+  `cloudModels`) og den redundante auto-load-LaunchedEffect fra ChatScreen;
+  pickeren ejer det nu. `cloudModelTick` får ChatScreen til at re-læse den
+  gemte model når pickeren har ændret den.
+- To selv-fangede kompileringsfejl undervejs (tabt ModelChip-hoved ved
+  str_replace + friendlyError-overload) — begge rettet før commit, ingen nåede
+  Anders.
+- Ren Android-UI. Bygger APK + server-exes (worker-bump), IKKE Windows-jar.
+- **V1-status uændret**: 13/13 grønne (ikon bekræftet 8/7). Dette er en
+  V2-kontrolflade-forbedring oven på en færdig V1.
 
 ## What's new in 0.20.21  (cloud-model-valg forbedret — Anders' ønske under ikon-testen)
 - **Anders' observation 8/7**: cloud-model-dropdownen rullede ud over hele

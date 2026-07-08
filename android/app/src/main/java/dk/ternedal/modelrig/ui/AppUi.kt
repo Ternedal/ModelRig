@@ -39,7 +39,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class Screen { Setup, Chat, Convos, Models }
+private enum class Screen { Setup, Chat, Convos, Models, CloudPicker }
 
 @Composable
 fun AppUi() {
@@ -52,15 +52,19 @@ fun AppUi() {
         }
         // conversation to open in ChatScreen; null = start fresh / latest
         var openConvId by remember { mutableStateOf(db.latestConversationId()) }
+        // bumped when the cloud model is changed elsewhere (picker), so
+        // ChatScreen re-reads store.cloudModel when it comes back into view.
+        var cloudModelTick by remember { mutableStateOf(0) }
 
         Surface(color = Graphite, modifier = Modifier.fillMaxSize()) {
             when (screen) {
                 Screen.Setup -> SetupScreen(store, db, onDone = { screen = Screen.Chat })
                 Screen.Chat -> ChatScreen(
-                    store, db, openConvId,
+                    store, db, openConvId, cloudModelTick,
                     onOpenSettings = { screen = Screen.Setup },
                     onOpenConversations = { screen = Screen.Convos },
                     onOpenModels = { screen = Screen.Models },
+                    onOpenCloudPicker = { screen = Screen.CloudPicker },
                     onConvChanged = { openConvId = it },
                 )
                 Screen.Convos -> ConversationsScreen(
@@ -70,6 +74,11 @@ fun AppUi() {
                     onBack = { screen = Screen.Chat },
                 )
                 Screen.Models -> ModelsScreen(store, onBack = { screen = Screen.Chat })
+                Screen.CloudPicker -> CloudModelPickerScreen(
+                    store,
+                    onPicked = { cloudModelTick++; screen = Screen.Chat },
+                    onBack = { screen = Screen.Chat },
+                )
             }
         }
     }
@@ -467,9 +476,11 @@ private fun ChatScreen(
     store: TokenStore,
     db: ChatDb,
     openConvId: Long?,
+    cloudModelTick: Int,
     onOpenSettings: () -> Unit,
     onOpenConversations: () -> Unit,
     onOpenModels: () -> Unit,
+    onOpenCloudPicker: () -> Unit,
     onConvChanged: (Long?) -> Unit,
 ) {
     val hasRig = store.hasRig
@@ -493,8 +504,6 @@ private fun ChatScreen(
     var models by remember { mutableStateOf(listOf<String>()) }
     var modelMenu by remember { mutableStateOf(false) }
     var cloudModel by remember { mutableStateOf(store.cloudModel) }
-    var cloudModels by remember { mutableStateOf(listOf<String>()) }
-    var cloudMenu by remember { mutableStateOf(false) }
     var ragMode by remember { mutableStateOf(false) }
     var ragSources by remember { mutableStateOf(listOf<String>()) }
     var ragSourceFilter by remember { mutableStateOf<String?>(null) }
@@ -542,18 +551,8 @@ private fun ChatScreen(
 
     // Load the requested conversation (or none). Restores source/model from its
     // metadata when that source is still configured.
-    // Auto-load the cloud model list when entering cloud mode with a key set,
-    // so the dropdown is populated without a manual "Genindlæs" first. Only
-    // fetches when empty (avoids re-hitting the API on every mode toggle).
-    LaunchedEffect(mode) {
-        if (mode == "cloud" && cloudModels.isEmpty()) {
-            val key = store.cloudKey
-            if (key != null) {
-                val res = withContext(Dispatchers.IO) { runCatching { CloudClient(key).listModels() } }
-                res.onSuccess { cloudModels = it }
-            }
-        }
-    }
+    // Re-read the persisted cloud model when the picker changed it.
+    LaunchedEffect(cloudModelTick) { cloudModel = store.cloudModel }
 
     LaunchedEffect(openConvId) {
         messages.clear()
@@ -723,56 +722,7 @@ private fun ChatScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (mode == "cloud") {
-                    Box {
-                        ModelChip("☁  $cloudModel  ▾", onClick = { cloudMenu = true })
-                        DropdownMenu(
-                            expanded = cloudMenu,
-                            onDismissRequest = { cloudMenu = false },
-                            modifier = Modifier.heightIn(max = 420.dp),
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("↻  Genindlæs modeller", color = Signal) },
-                                onClick = {
-                                    cloudMenu = false
-                                    val key = store.cloudKey
-                                    if (key != null) scope.launch {
-                                        val res = withContext(Dispatchers.IO) { runCatching { CloudClient(key).listModels() } }
-                                        res.onSuccess { cloudModels = it }
-                                    }
-                                },
-                            )
-                            if (cloudModels.isNotEmpty()) {
-                                HorizontalDivider()
-                                Text(
-                                    "Standardmodel (☁ Cloud)",
-                                    color = TextMuted, fontSize = 11.sp,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                                )
-                            }
-                            cloudModels.forEach { m ->
-                                val selected = m == cloudModel
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                if (selected) "✓" else "",
-                                                color = Signal, fontSize = 13.sp,
-                                                modifier = Modifier.width(20.dp),
-                                            )
-                                            Text(
-                                                m,
-                                                color = if (selected) Signal else TextHigh,
-                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                            )
-                                        }
-                                    },
-                                    onClick = { cloudModel = m; store.cloudModel = m; cloudMenu = false },
-                                )
-                            }
-                            HorizontalDivider()
-                            DropdownMenuItem(text = { Text("Indstillinger…", color = TextMuted) }, onClick = { cloudMenu = false; onOpenSettings() })
-                        }
-                    }
+                    ModelChip("☁  $cloudModel  ▾", onClick = { onOpenCloudPicker() })
                 } else {
                     Box {
                         ModelChip("$currentModel  ▾", onClick = { modelMenu = true })
@@ -1233,6 +1183,107 @@ private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
         )
     }
 }
+
+/**
+ * Fullscreen cloud model picker -- replaces the old cramped dropdown that
+ * couldn't scroll a 20+ model list. Same shape as ModelsScreen (top bar +
+ * back). The currently-selected default is pinned at the top with a check;
+ * the rest are listed alphabetically below a search field that filters as you
+ * type. Picking one persists it as store.cloudModel (the default used on every
+ * open) and returns to chat. Auto-loads the list on entry if empty.
+ */
+@Composable
+private fun CloudModelPickerScreen(store: TokenStore, onPicked: () -> Unit, onBack: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var models by remember { mutableStateOf(listOf<String>()) }
+    var query by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val selected = store.cloudModel
+
+    fun reload() {
+        val key = store.cloudKey ?: return
+        loading = true; error = null
+        scope.launch {
+            val res = withContext(Dispatchers.IO) { runCatching { CloudClient(key).listModels() } }
+            res.onSuccess { models = it.sorted(); loading = false }
+                .onFailure { error = friendlyError(it); loading = false }
+        }
+    }
+    LaunchedEffect(Unit) { if (models.isEmpty()) reload() }
+
+    val shown = remember(models, query) {
+        val others = models.filter { it != selected }
+        (if (query.isBlank()) others else others.filter { it.contains(query, ignoreCase = true) })
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Surface(color = GraphiteSurface, tonalElevation = 2.dp) {
+            Column(
+                Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onBack) { Text("←", color = TextHigh, fontSize = 18.sp) }
+                    Text("Vælg cloud-model", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextHigh)
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { reload() }) { Text("↻", color = Signal, fontSize = 16.sp) }
+                }
+                OutlinedTextField(
+                    value = query, onValueChange = { query = it },
+                    placeholder = { Text("Søg i modeller…", fontSize = 13.sp) },
+                    singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                )
+            }
+        }
+        error?.let { Text(it, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(12.dp)) }
+        if (loading && models.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("Henter modeller…", color = TextMuted, fontSize = 14.sp)
+            }
+        } else {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(vertical = 8.dp)) {
+                // pinned selected/default
+                item {
+                    Text("Nuværende standard", color = TextMuted, fontSize = 11.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                    Row(
+                        Modifier.fillMaxWidth().clickable { onBack() }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("✓", color = Signal, fontSize = 15.sp, modifier = Modifier.width(24.dp))
+                        Text(selected, color = Signal, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    }
+                    if (shown.isNotEmpty()) {
+                        HorizontalDivider()
+                        Text("Alle modeller", color = TextMuted, fontSize = 11.sp,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                    }
+                }
+                items(shown, key = { it }) { m ->
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .clickable { store.cloudModel = m; onPicked() }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Spacer(Modifier.width(24.dp))
+                        Text(m, color = TextHigh, fontSize = 15.sp)
+                    }
+                }
+                if (shown.isEmpty() && query.isNotBlank()) {
+                    item {
+                        Text("Ingen match på \"$query\"", color = TextMuted, fontSize = 14.sp,
+                            modifier = Modifier.padding(16.dp))
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.windowInsetsPadding(WindowInsets.navigationBars))
+    }
+}
+
 @Composable
 private fun ModelChip(label: String, onClick: () -> Unit) {
     Surface(
