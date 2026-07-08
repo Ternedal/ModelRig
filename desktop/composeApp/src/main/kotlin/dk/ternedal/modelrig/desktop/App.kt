@@ -39,6 +39,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -382,7 +384,18 @@ fun App() {
 private fun ConversationsPanel(db: DesktopChatDb, onOpen: (Long) -> Unit, onNew: () -> Unit) {
     var convos by remember { mutableStateOf(runCatching { db.listConversations() }.getOrElse { emptyList() }) }
     var panelError by remember { mutableStateOf<String?>(null) }
+    var query by remember { mutableStateOf("") }
+    var renamingId by remember { mutableStateOf<Long?>(null) }
+    var renameText by remember { mutableStateOf("") }
+    var copiedId by remember { mutableStateOf<Long?>(null) }
+    val clipboard = LocalClipboardManager.current
     val fmt = remember { SimpleDateFormat("d/M HH:mm", Locale.getDefault()) }
+
+    // Live title filter -- mirrors Android's conversation search (0.20.6).
+    val shown = remember(convos, query) {
+        if (query.isBlank()) convos
+        else convos.filter { it.title.contains(query, ignoreCase = true) }
+    }
 
     Box(Modifier.clip(RoundedCornerShape(12.dp)).background(Brand.Surface).fillMaxWidth().padding(14.dp)) {
         Column {
@@ -393,26 +406,65 @@ private fun ConversationsPanel(db: DesktopChatDb, onOpen: (Long) -> Unit, onNew:
             }
             panelError?.let { Spacer(Modifier.height(4.dp)); Text("Fejl: $it", color = Brand.Danger, fontSize = 11.sp) }
             Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = query, onValueChange = { query = it },
+                placeholder = { Text("Søg i titler…", fontSize = 12.sp, color = Brand.TextMuted) },
+                singleLine = true, modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
             if (convos.isEmpty()) {
                 Text("Ingen samtaler endnu", color = Brand.TextMuted, fontSize = 13.sp)
+            } else if (shown.isEmpty()) {
+                Text("Ingen match på \"$query\"", color = Brand.TextMuted, fontSize = 13.sp)
             } else {
-                convos.forEach { c ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(
-                            Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).clickable { onOpen(c.id) }.padding(vertical = 4.dp),
-                        ) {
-                            Text(c.title.ifBlank { "(uden titel)" }, color = Brand.TextHigh, fontSize = 13.sp, maxLines = 1)
-                            Text(
-                                "${c.source} · ${fmt.format(Date(c.updatedAt))}",
-                                color = Brand.TextMuted, fontSize = 11.sp,
+                shown.forEach { c ->
+                    if (renamingId == c.id) {
+                        // Inline rename row -- same inline-field pattern as presets.
+                        Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = renameText, onValueChange = { renameText = it },
+                                singleLine = true, modifier = Modifier.weight(1f),
                             )
+                            TextButton(onClick = {
+                                runCatching {
+                                    db.renameConversation(c.id, renameText.trim())
+                                    convos = db.listConversations()
+                                }.onFailure { panelError = it.message }
+                                renamingId = null
+                            }) { Text("Gem", color = Brand.Signal, fontSize = 12.sp) }
+                            TextButton(onClick = { renamingId = null }) {
+                                Text("Annullér", color = Brand.TextMuted, fontSize = 12.sp)
+                            }
                         }
-                        TextButton(onClick = {
-                            runCatching {
-                                db.deleteConversation(c.id)
-                                convos = db.listConversations()
-                            }.onFailure { panelError = it.message }
-                        }) { Text("Slet", color = Brand.Danger, fontSize = 12.sp) }
+                    } else {
+                        Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(
+                                Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).clickable { onOpen(c.id) }.padding(vertical = 4.dp),
+                            ) {
+                                Text(c.title.ifBlank { "(uden titel)" }, color = Brand.TextHigh, fontSize = 13.sp, maxLines = 1)
+                                Text(
+                                    "${c.source} · ${fmt.format(Date(c.updatedAt))}",
+                                    color = Brand.TextMuted, fontSize = 11.sp,
+                                )
+                            }
+                            TextButton(onClick = { renamingId = c.id; renameText = c.title }) {
+                                Text("✎", color = Brand.Signal, fontSize = 13.sp)
+                            }
+                            TextButton(onClick = {
+                                runCatching {
+                                    clipboard.setText(AnnotatedString(db.conversationAsMarkdown(c.id)))
+                                    copiedId = c.id
+                                }.onFailure { panelError = it.message }
+                            }) {
+                                Text(if (copiedId == c.id) "Kopieret" else "Kopiér", color = Brand.Signal, fontSize = 12.sp)
+                            }
+                            TextButton(onClick = {
+                                runCatching {
+                                    db.deleteConversation(c.id)
+                                    convos = db.listConversations()
+                                }.onFailure { panelError = it.message }
+                            }) { Text("Slet", color = Brand.Danger, fontSize = 12.sp) }
+                        }
                     }
                 }
             }

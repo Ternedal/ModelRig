@@ -156,6 +156,30 @@ class DesktopChatDb(dbPath: String = defaultDbPath()) {
         }
     }
 
+    // Rename a conversation's title. Mirrors Android's ChatDb.renameConversation
+    // (UPDATE conversation SET title=? WHERE id=?). Title is trimmed by the
+    // caller; an empty title is allowed (the list falls back to "(uden titel)").
+    fun renameConversation(convId: Long, newTitle: String) {
+        conn.prepareStatement("UPDATE conversation SET title=? WHERE id=?").use { ps ->
+            ps.setString(1, newTitle); ps.setLong(2, convId); ps.executeUpdate()
+        }
+    }
+
+    // Render a conversation as readable markdown for export (desktop has no
+    // Android share-sheet -- the panel writes this to a .md file / clipboard).
+    // Same shape as Android's share text: "# <title>" then alternating
+    // "**Du:**" / "**Model:**" blocks.
+    fun conversationAsMarkdown(convId: Long): String {
+        val meta = conversationMeta(convId)
+        val title = meta?.title?.ifBlank { "Samtale" } ?: "Samtale"
+        val sb = StringBuilder("# $title\n\n")
+        loadMessages(convId).forEach { (role, content) ->
+            val who = if (role == "user") "**Du:**" else "**Model:**"
+            sb.append(who).append('\n').append(content).append("\n\n")
+        }
+        return sb.toString().trimEnd() + "\n"
+    }
+
     // ---- presets (saved system instructions per source, for quick-switch) ----
 
     fun savePreset(source: String, name: String, prompt: String): Long {

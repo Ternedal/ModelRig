@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.0.0** — "🎉 Stabil daglig driver. Alle 13 V1-tjeklistepunkter on-device-bekræftet af Anders (7/7–8/7-2026)". Autonomous sessions, **2026-07-02 → 07-08**.
+Version **1.0.1** — "V2-haleende: desktop-port af samtale-søg/omdøb/eksport". Follows 1.0.0. Autonomous sessions, **2026-07-02 → 07-08**.
 
 ## V1 checklist — ✅ COMPLETE (all 13 confirmed, v1.0.0 tagged)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -45,6 +45,28 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.0.1  (V2-haleende: desktop får samtale-søg/omdøb/eksport)
+- **Første post-1.0-arbejde mod komplet V2.** Desktop-samtalepanelet havde
+  kun liste/åbn/ny/slet; nu har det samme oplevelse som Android's (0.20.6,
+  som Anders bekræftede on-device 7/7 — så mønsteret var frit at portere,
+  jf. preset-lærdommen om at vente på bekræftelse først).
+- **Tilføjet til desktop**: (1) **søgefelt** der filtrerer titler live
+  (samme "Ingen match"-adfærd som Android). (2) **Inline-omdøb** via ✎ —
+  samme udfoldende-felt-mønster som presets; ny `renameConversation()` i
+  DesktopChatDb spejler Android's SQL (`UPDATE conversation SET title=?`).
+  (3) **Eksport** via "Kopiér" — desktop har ingen Android-share-sheet, så
+  samtalen kopieres som markdown til udklipsholderen (`# titel` + **Du:**/
+  **Model:**-blokke, samme form som Android's del-tekst) via
+  `conversationAsMarkdown()`.
+- **Verificeret mod ægte SQLite**: renameConversation bruger prepared
+  statement mod det faktiske skema (title-kolonnen bekræftet i CREATE TABLE).
+  Compile-verificeret; on-device-bekræftelse på Windows udestår (samme
+  ærlige forbehold som altid for UI).
+- Ren desktop-ændring. Bygger APK + Windows-jar (desktop rørt), IKKE
+  server-exes (worker urørt).
+- **V2-status**: ét af to udeståender lukket. Tilbage mod v2.0.0: Androids
+  automatiske local→cloud-fallback (desktop har det, Android mangler).
 
 ## What's new in 1.0.0  🎉  (V1 færdig — stabil daglig driver)
 - **Alle 13 V1-tjeklistepunkter er on-device-bekræftet af Anders** (7/7–8/7):
