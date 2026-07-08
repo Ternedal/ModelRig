@@ -77,7 +77,7 @@ fun AppUi() {
                 Screen.CloudPicker -> CloudModelPickerScreen(
                     store,
                     onPicked = { cloudModelTick++; screen = Screen.Chat },
-                    onBack = { screen = Screen.Chat },
+                    onBack = { cloudModelTick++; screen = Screen.Chat },
                 )
             }
         }
@@ -564,10 +564,18 @@ private fun ChatScreen(
             val (meta, msgs) = loaded
             msgs.forEach { (role, content) -> messages.add(Msg(role, content)) }
             if (meta != null) {
-                if (meta.source == "cloud" && hasCloud) { mode = "cloud"; ragMode = false; if (meta.model.isNotBlank()) { cloudModel = meta.model } }
+                // NB: for cloud we deliberately do NOT restore the model from
+                // the conversation's metadata. store.cloudModel (set in the
+                // picker) is the single authority for which cloud model runs;
+                // restoring per-conversation here fought the picker and left
+                // the chip showing a stale model after a switch (Anders, 8/7).
+                if (meta.source == "cloud" && hasCloud) { mode = "cloud"; ragMode = false }
                 if (meta.source == "rag" && hasRig) { mode = "rig"; ragMode = true; if (meta.model.isNotBlank()) { currentModel = meta.model } }
                 if (meta.source == "rig" && hasRig) { mode = "rig"; ragMode = false; if (meta.model.isNotBlank()) { currentModel = meta.model } }
             }
+            // Cloud model always reflects the current default, even after
+            // loading an old conversation.
+            cloudModel = store.cloudModel
         }
     }
 

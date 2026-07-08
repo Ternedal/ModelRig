@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.22** — "cloud-model-vælger: fuldskærm med søgning + standard øverst (dropdown erstattet)". Follows 0.20.21 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-07**.
+Version **0.20.23** — "cloud-modelskift slår nu igennem i chatten (samtale-metadata overskrev picker-valget)". Follows 0.20.22 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-07**.
 
 ## V1 release-candidate checklist (read this first)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -45,6 +45,26 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 0.20.23  (bugfix: cloud-modelskift slog ikke igennem i chatten)
+- **Anders 8/7**: valgte en model i den nye fuldskærms-picker (✓ på
+  gemma4:31b), men chat-chippen viste stadig gpt-oss:120b — valget slog ikke
+  igennem i en ÅBEN samtale.
+- **Rodårsag**: to konkurrerende kilder til `cloudModel`. Picker-valget
+  gemmes i `store.cloudModel`, MEN når en cloud-samtale var indlæst,
+  gendannede `LaunchedEffect(openConvId)` modellen fra samtalens egen
+  metadata (`meta.model`) — som stod til den GAMLE model. Samtale-metadataen
+  vandt over det friske valg.
+- **Fix (design A — standardmodellen er autoritativ for cloud)**: cloud-
+  samtaler gendanner IKKE længere model fra metadata; `store.cloudModel`
+  (sat i picker) er den ene kilde. `cloudModel` sættes nu = `store.cloudModel`
+  ved hver samtaleindlæsning OG ved picker-retur (også når man vælger den
+  allerede-valgte, via onBack). Rig-modellen er uændret pr. samtale (kun
+  cloud ændret — cloud har ikke samme per-samtale-behov).
+- Ren Android-UI-fix. Bygger APK + server-exes (versionsbump), IKKE
+  Windows-jar (desktop urørt).
+- **V1-status uændret**: 13/13 grønne (ikon bekræftet 0.20.20). Dette er en
+  V2-polish-fix oveni. v1.0.0 kan tagges når Anders siger til.
 
 ## What's new in 0.20.22  (cloud-model-vælger genbygget som fuldskærm — 0.20.21's dropdown var stadig forkert)
 - **0.20.21's dropdown-forbedring var ikke nok** — Anders 8/7: "kan ikke gå
