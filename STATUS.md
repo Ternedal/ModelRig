@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.2.1** — "Alva-ikon rettet: bruger de rene safe-zone-assets fra brand-pakke v2 (mit 1.2.0-ikon croppede forkert)". Follows 1.2.0. Autonomous sessions, **2026-07-02 → 07-08**.
+Version **1.3.0** — "🎙️ Alva Voice fase 1: valgfrit ASR-modul (faster-whisper, dansk) i worker. Kode + testopskrift, IKKE hardware-testet". Follows 1.2.1. Autonomous sessions, **2026-07-02 → 07-08**.
 
 ## V1 checklist — ✅ COMPLETE (all 13 confirmed, v1.0.0 tagged)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -45,6 +45,41 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.3.0  🎙️  (Alva Voice fase 1 — ASR-modul, valgfrit)
+- **Første kode mod Alva Voice**: et selvstændigt ASR-modul (`worker/app/
+  voice_asr.py`) + to endpoints (`GET /voice/asr/status`, `POST /voice/asr/
+  transcribe`). Fase 1 fra `ALVA_VOICE_ROADMAP_DELTA.md`.
+- **Bevidst faster-whisper, IKKE Parakeet/NeMo**: MIT-licens, ingen tung
+  toolchain. Web-verificeret 8/7: large-v3 INT8 = ~2.5GB VRAM (kan køre
+  SAMMEN med LLM'en på RTX 3060), RTF ~0.15 (rigeligt real-time), Silero VAD
+  indbygget (så intet separat VAD-modul til MVP). Det løser flere af
+  delta-dokumentets åbne tekniske spørgsmål — RTX 3060 er faktisk anført
+  minimum for real-time large-v3.
+- **KRITISK: Voice er VALGFRIT og bryder intet.** faster-whisper er IKKE en
+  hård worker-afhængighed (ville bryde den lette "download exe"-opsætning for
+  folk uden Voice). Modulet importeres lazily; hvis faster-whisper ikke er
+  installeret, svarer endpointet med en pæn **501 + installationsanvisning**,
+  og RAG/chat er upåvirket. Verificeret: worker starter uden faster-whisper,
+  status giver available:false, transcribe giver 501 (ikke crash), healthz
+  uændret, alle 47 worker-assertions grønne.
+- **Model-config via env**: ALVA_ASR_MODEL (default large-v3), ALVA_ASR_COMPUTE
+  (int8), ALVA_ASR_DEVICE (cuda) — så mindre GPU'er kan vælge medium/small
+  eller cpu.
+- **Testopskrift til rig'en**: `tools/alva_voice_asr_test.py` — Anders
+  installerer faster-whisper, optager 10s dansk WAV, kører scriptet, og
+  rapporterer transskription + RTF + VRAM tilbage.
+- **ÆRLIGT — ikke hardware-testet**: dette er kode + opskrift. Jeg har ingen
+  RTX 3060 og ingen dansk lydfil. Om ASR-kvaliteten på dansk er god nok, og om
+  VRAM'en reelt sameksisterer med LLM'en, kan KUN bevises på Anders' rig. Det
+  er fase 1's acceptkriterie (V-MVP.1 i delta-dok §5).
+- **Stadig udestående før Voice går videre**: de tre beslutninger fra Anders
+  (NeMo-afhængighed ja/nej for evt. Parakeet-opgradering, headset-først for
+  barge-in, licens-accept) + TTS-fase (Piper) + Android-lyd-lag. ASR alene er
+  ikke en stemme-assistent — det er første brik.
+- Worker rørt → bygger APK + Windows-jar + server-exes (worker-exe indeholder
+  nu ASR-endpointet, men faster-whisper følger IKKE med exe'en — installeres
+  separat hvis Voice ønskes).
 
 ## What's new in 1.2.1  (Alva-ikon rettet — rene assets, ingen crop)
 - **Mit 1.2.0-ikon var lavet forkert.** Anders' designer sendte en v2-pakke

@@ -19,7 +19,7 @@ from . import ollama_client as oc
 from . import rag
 from .store import DocStore
 
-VERSION = "1.2.1"
+VERSION = "1.3.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -207,3 +207,50 @@ def delete_source(source: str) -> dict:
     if removed == 0:
         raise HTTPException(status_code=404, detail=f"no chunks for source {source!r}")
     return {"source": source, "removed": removed, "total": store.count()}
+
+
+# ---- Alva Voice: ASR (optional) --------------------------------------------
+# Phase 1 of Alva Voice. Optional: faster-whisper is NOT a hard worker
+# dependency. If it's not installed, this returns 501 with instructions and the
+# rest of the worker is unaffected. See app/voice_asr.py and
+# ALVA_VOICE_ROADMAP_DELTA.md. NOT YET HARDWARE-TESTED.
+
+@app.get("/voice/asr/status")
+def voice_asr_status() -> dict:
+    """Whether ASR is available (faster-whisper installed) + configured model."""
+    from . import voice_asr
+    return {
+        "available": voice_asr.is_available(),
+        "model": voice_asr._model_name(),
+        "device": voice_asr._device(),
+        "compute_type": voice_asr._compute_type(),
+    }
+
+
+class AsrReq(BaseModel):
+    # Path to a 16 kHz mono audio file readable by the worker. File-based for
+    # the MVP (push-to-talk records a file, then transcribes); real-time
+    # streaming is a later phase.
+    path: str
+    language: str = "da"
+
+
+@app.post("/voice/asr/transcribe")
+def voice_asr_transcribe(req: AsrReq) -> dict:
+    from . import voice_asr
+    if not voice_asr.is_available():
+        # 501 Not Implemented: the feature exists but its optional backend isn't
+        # installed here. Clear, actionable message rather than a 500 stack.
+        raise HTTPException(
+            status_code=501,
+            detail="Alva Voice ASR is not enabled on this rig. Install it with: "
+                   "pip install faster-whisper",
+        )
+    import os as _os
+    if not _os.path.exists(req.path):
+        raise HTTPException(status_code=400, detail=f"audio file not found: {req.path}")
+    try:
+        return voice_asr.transcribe_wav(req.path, language=req.language)
+    except RuntimeError as e:
+        # Model load / device errors -> 501 with the module's actionable message.
+        raise HTTPException(status_code=501, detail=str(e))
