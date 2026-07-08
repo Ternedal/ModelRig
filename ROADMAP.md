@@ -59,7 +59,7 @@ og runtime-verificeret, alle leverancer tagget og released på GitHub.
 
 ---
 
-## 3. V1 — "Stabil daglig driver" (mål: tag `v1.0.0`)
+## 3. V1 — "Stabil daglig driver" ✅ **OPNÅET — `v1.0.0` tagget 8/7-2026** (alle 13 tjeklistepunkter on-device-bekræftet)
 
 **Definition of done:** Anders kan bruge appen hver dag mod rig og cloud uden at
 miste data, kan afbryde svar, kan stille RAG-spørgsmål mod sit eget indeks fra

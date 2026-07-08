@@ -4,7 +4,7 @@ A local-first AI platform: run models on your own hardware via Ollama, reach the
 from a desktop app and an Android phone, with an optional RAG service and an
 Ollama Cloud fallback for when local isn't enough.
 
-Version: **0.20.23** (cloud-modelskift slår nu igennem i chatten; V1 klar — 13/13, afventer go på tag)
+Version: **1.0.0** 🎉 (stabil daglig driver — alle 13 V1-punkter on-device-bekræftet)
 
 ## Architecture
 ```

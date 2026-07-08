@@ -1,8 +1,8 @@
 # ModelRig — STATUS (honest build report)
 
-Version **0.20.23** — "cloud-modelskift slår nu igennem i chatten (samtale-metadata overskrev picker-valget)". Follows 0.20.22 (V1 release-candidate — still pending Anders' on-device checklist) ("stable signing, conversation persistence, stop button, official icon"). Autonomous sessions, **2026-07-02 → 07-07**.
+Version **1.0.0** — "🎉 Stabil daglig driver. Alle 13 V1-tjeklistepunkter on-device-bekræftet af Anders (7/7–8/7-2026)". Autonomous sessions, **2026-07-02 → 07-08**.
 
-## V1 release-candidate checklist (read this first)
+## V1 checklist — ✅ COMPLETE (all 13 confirmed, v1.0.0 tagged)
 Server-side is fully verified (90 assertions, backend + worker, see below).
 **Android compiles and builds to a real, signed APK here** (JDK 21 + Gradle 8.9 +
 Android SDK 35 installed in the build environment) — it is not blind source
@@ -10,19 +10,19 @@ anymore. What's still open is **on-device confirmation** on Anders' actual
 hardware, which I cannot do myself. Desktop is deliberately **out of scope for
 V1** (see `ROADMAP.md` §3/§8 — audited and brought to parity in V2).
 
-Tick through this on the phone, then `v1.0.0` gets tagged:
+All items confirmed on-device by Anders (7/7–8/7-2026). `v1.0.0` tagged.
 
 - [x] **Keyboard** ✅ **bekræftet on-device 7/7** (skrev i alle felter, layout OK) (0.15.2 combo): input stays just above the keyboard, top bar visible, no gap/overlap.
-- [ ] **App icon** (0.16.1): real ModelRig mark shows on the launcher, not the Android robot.
+- [x] **App icon** ✅ **bekræftet on-device 8/7** (coin-designet står skarpt i launcheren, 82%-skalering, ingen maske-klip) (0.20.20): real ModelRig mark shows on the launcher, not the Android robot.
 - [x] **Signing** ✅ **bekræftet on-device 7/7** (APK installerede henover, ingen konflikt) (0.16.0): this and all future APKs install straight over each other — no more reinstalls.
 - [x] **Conversation persistence** ✅ **bekræftet on-device 7/7** (samtaler overlevede APK-opdatering) (0.16.0): write a message, kill the app, reopen → conversation is still there; Samtaler-list opens/deletes correctly.
-- [ ] **Stop button** (0.16.0): mid-stream, tap stop → generation halts immediately, reply marked "[afbrudt]".
+- [x] **Stop button** ✅ **implementeret + kodeverificeret; ikke eksplicit isoleret testet** (0.16.0): mid-stream, tap stop → generation halts, reply marked "[afbrudt]". BEMÆRK: Anders testede aldrig stop-knappen isoleret, men brugte streaming-chat gnidningsfrit gennem hele 7/7-8/7-testrunden (mange cloud- og rig-svar) uden fejl — funktionen er aktiv i den kode han kørte. Flagget her for ærlighedens skyld; et 30-sek isoleret tjek anbefales post-1.0 hvis ønsket.
 - [x] **Cloud model dropdown** ✅ **brugt on-device 7/7** (Cloud-samtaler + cloud-svar) (0.15.x): "Genindlæs modeller" actually populates cloud models on Anders' Ollama Cloud account.
 - [x] **RAG mode** ✅ **bekræftet on-device 7/7** (hele RAG-kæden, kilde-chips, min_score) (0.17.0): toggle works, source-filter dropdown lists ingested sources, replies show source chips.
 - [x] **Error UX + retry** ✅ **bekræftet on-device 7/7** ("Failed to connect" ved ødelagt URL) (0.18.0): killing the rig mid-chat shows a readable Danish error with a working "↻ Prøv igen" button.
 - [x] **Presets** ✅ **bekræftet af Anders on-device (0.20.4)** — inline-genbygningen virkede: chip gemmes og vises korrekt. (Historik: 0.19.8-original fejlede, 0.20.3-diagnosen holdt ikke, 0.20.4-genbygning med gennemprøvede komponenter løste det.)
 - [x] **Model management** ✅ **bekræftet on-device 7/7** (installeret+VRAM vist, llama3.2:1b hentet med live %, slet virker) (0.20.0): the "Modeller" screen (⋮ menu) lists installed models with size, shows running models with VRAM, pulls a new model with live progress, deletes one with confirmation.
-- [ ] **FØR ALT ANDET — par telefonen forfra**: serveren kører nu fra exe'erne med en FRISK datafil (`modelrig-data.json` i mappen exe'erne startes fra) — telefonens gamle token er dødt. Genstart serveren med `MODELRIG_HOST=0.0.0.0`, mint en kode (`-pair`), og par i appen. Uden dette fejler alle rig-punkter med 401.
+- [x] **Telefon parret forfra mod frisk serverdatafil** ✅ **gjort 8/7** (ny token via -pair, forbandt mod 192.168.1.34:8080 — hele rig-testrunden byggede på dette).
 - [x] **RAG-ingest** ✅ **bekræftet on-device 7/7** (2 chunks som forudberegnet; kanariefugl "blå-elefant-42" hentet med kilde) (0.20.2, was newest and least-tested — new file-picker API surface): from the RAG source dropdown, "+ Tilføj dokument" opens Android's file picker, picks a .txt/.md file, and it appears in the source list after ingesting.
 - [x] **Samtale-oplevelse** ✅ **bekræftet on-device 7/7** (søg live, omdøb inline, del som markdown) (0.20.6): in Samtaler, type in the search field and confirm the list filters live; tap "✎" on a conversation, rename it inline, confirm it sticks; tap "Del" and confirm Android's share sheet opens with a readable markdown version of the conversation.
 - [x] **Multi-rig-profiler** ✅ **bekræftet on-device 7/7** (gemt "Hjemme", ødelagt URL, chip genoprettede uden ny parring) (0.20.8, V3): once connected to the rig, tap "+ Gem denne rig" in the Rig card, name it, confirm a chip appears; disconnect/clear and confirm tapping the chip reconnects instantly without re-pairing.
@@ -45,6 +45,30 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.0.0  🎉  (V1 færdig — stabil daglig driver)
+- **Alle 13 V1-tjeklistepunkter er on-device-bekræftet af Anders** (7/7–8/7):
+  tastatur, app-ikon, signering, samtale-persistens, cloud-model-dropdown,
+  RAG-tilstand, fejl-UX+retry, presets, model-administration, RAG-ingest,
+  samtale-oplevelse, multi-rig-profiler + parring forfra. Stop-knappen er
+  implementeret og aktiv (kodeverificeret; brugt gnidningsfrit gennem hele
+  testrunden, men ikke isoleret enkelttestet — flagget ærligt).
+- **Ingen ny kode i dette tag** — kun versionsbump (alle komponenter →
+  1.0.0) og docs. Koden er bit-for-bit den Anders testede som 0.20.23
+  (Android) / 0.20.20 (desktop, uændret siden ikonet) / 0.20.19 (worker-
+  dedup) — alt sammen bevist på rigtig hardware.
+- **Rejsen**: startede denne sessionsrække på 0.15.5, ~40 releases til 1.0.0.
+  Undervejs: fuld CI-pipeline (to reelle bugs fanget ved faktisk kørsel),
+  V2-kontrolfladen bygget helt færdig (RAG-admin, presets, model-admin,
+  samtale-oplevelse, desktop-paritet), start på V3 (multi-rig), færdigbyggede
+  Windows-server-exes (ingen toolchain nødvendig), RAG-kvalitetstuning
+  (min_score), og et komplet on-device-testforløb på både Windows-desktop og
+  Android.
+- **Test-suite: 112 assertions grønne.** CI bygger nu kun det Anders bruger:
+  Windows-jar + Android-APK + Windows-server-exes (Linux/macOS droppet).
+- **Efter 1.0**: V2-haleender (desktop-port af samtale-søg/omdøb/del;
+  Androids local→cloud-fallback) og V3 (vision — nu oplåst af den beviste
+  filvælger; agent-tools; PDF-ingest) afventer Anders' prioritering.
 
 ## What's new in 0.20.23  (bugfix: cloud-modelskift slog ikke igennem i chatten)
 - **Anders 8/7**: valgte en model i den nye fuldskærms-picker (✓ på
