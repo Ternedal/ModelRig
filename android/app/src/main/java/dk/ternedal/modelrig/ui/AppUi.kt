@@ -405,6 +405,7 @@ private data class Msg(
     val streaming: Boolean = false,
     val error: Boolean = false, // shown in UI, but never persisted or sent as history
     val sources: List<String> = emptyList(), // RAG source names, if this reply used RAG
+    val fellBackToCloud: Boolean = false, // rig was unreachable -> answered via cloud
 )
 
 /**
@@ -624,6 +625,12 @@ private fun ChatScreen(
             }
             val hook: (okhttp3.Call) -> Unit = { activeCall = it }
 
+            // Track whether the rig stream emitted anything, so we only fall
+            // back to cloud on a clean pre-emit failure (never mid-stream --
+            // that would double the visible output). Mirrors desktop's
+            // ChatRouter.chatStream contract.
+            var rigEmitted = 0
+            var didFallback = false
             val err = withContext(Dispatchers.IO) {
                 runCatching {
                     when {
@@ -637,8 +644,24 @@ private fun ChatScreen(
                             val key = store.cloudKey ?: throw RuntimeException("ingen cloud-nøgle")
                             CloudClient(key).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
                         }
-                        else -> ModelRigClient(store.baseUrl ?: "", store.token)
-                            .chatStream(rigModel, history, registerCall = hook, onDelta = onDelta)
+                        else -> {
+                            // Rig chat, local-first with automatic cloud fallback:
+                            // try the rig; if it fails BEFORE emitting anything and a
+                            // cloud key is set, transparently answer via cloud instead
+                            // (rig down / model not pulled / HTTP error). A mid-stream
+                            // rig failure is surfaced, not retried.
+                            val cloudKey = store.cloudKey
+                            try {
+                                ModelRigClient(store.baseUrl ?: "", store.token)
+                                    .chatStream(rigModel, history, registerCall = hook,
+                                        onDelta = { d -> rigEmitted++; onDelta(d) })
+                            } catch (e: Exception) {
+                                if (rigEmitted == 0 && cloudKey != null) {
+                                    didFallback = true
+                                    CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
+                                } else throw e
+                            }
+                        }
                     }
                 }.exceptionOrNull()
             }
@@ -646,7 +669,7 @@ private fun ChatScreen(
             val cur = messages[idx]
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[idx] = when {
-                err == null -> cur.copy(streaming = false)
+                err == null -> cur.copy(streaming = false, fellBackToCloud = didFallback)
                 cur.text.isEmpty() -> cur.copy(streaming = false, error = true, text = friendlyError(err!!))
                 else -> cur.copy(streaming = false, text = cur.text + "\n\n_[afbrudt]_")
             }
@@ -1376,6 +1399,20 @@ private fun Bubble(m: Msg, onRetry: (() -> Unit)? = null) {
         ) {
             Box(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                 Column {
+                    if (!isUser && m.fellBackToCloud) {
+                        Row(Modifier.padding(bottom = 6.dp)) {
+                            Surface(
+                                shape = RoundedCornerShape(999.dp),
+                                color = GraphiteSurfaceHigh,
+                            ) {
+                                Text(
+                                    "☁ via cloud (rig utilgængelig)",
+                                    fontSize = 10.sp, color = TextMuted,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                )
+                            }
+                        }
+                    }
                     if (!isUser && m.sources.isNotEmpty()) {
                         Row(Modifier.padding(bottom = 6.dp)) {
                             // distinct(): a source split into several chunks is

@@ -119,7 +119,7 @@ CI, RAG-ingest fra telefonen. Alt sammen bevidst skubbet — se V2.
 
 ---
 
-## 4. V2 — "Kontrolflade" (leveres som v1.1 → v1.x; tag `v2.0.0` når komplet)
+## 4. V2 — "Kontrolflade" (leveres som v1.1 → v1.x; tag `v2.0.0` når komplet) ✅ **KOMPLET — udløser `v2.0.0`** (8/7-2026: alle 6 punkter + begge haleender leveret)
 
 Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
 

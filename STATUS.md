@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.0.1** — "V2-haleende: desktop-port af samtale-søg/omdøb/eksport". Follows 1.0.0. Autonomous sessions, **2026-07-02 → 07-08**.
+Version **1.0.2** — "V2 komplet: Android får automatisk local→cloud-fallback (sidste V2-brik)". Follows 1.0.1. Autonomous sessions, **2026-07-02 → 07-08**.
 
 ## V1 checklist — ✅ COMPLETE (all 13 confirmed, v1.0.0 tagged)
 Server-side is fully verified (90 assertions, backend + worker, see below).
@@ -45,6 +45,30 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.0.2  (V2 KOMPLET — Android får automatisk cloud-fallback)
+- **Sidste V2-udestående lukket.** Desktop har haft automatisk local→cloud-
+  fallback (ChatRouter); Android manglede det. Nu har Android samme adfærd:
+  i rig-tilstand (ikke RAG, ikke ren cloud) prøves rig'en først, og hvis den
+  fejler — utilgængelig, model ikke hentet, HTTP-fejl — svarer appen
+  transparent via Ollama Cloud i stedet, forudsat en cloud-nøgle er sat.
+- **Samme kontrakt som desktops ChatRouter**: fald KUN tilbage hvis rig-
+  strømmen fejler FØR den har sendt noget (sporet via emit-tæller). En
+  midt-i-strømmen-fejl overflades i stedet for at genstartes — ellers ville
+  det synlige svar blive fordoblet.
+- **Synligt for brugeren**: et svar leveret via fallback får en chip
+  "☁ via cloud (rig utilgængelig)", så man ved hvorfor svaret kom fra cloud
+  selvom man var i rig-tilstand. Nyt `fellBackToCloud`-felt på beskeden.
+- **Bevidst afgrænsning**: fallback gælder ren rig-chat, IKKE RAG (RAG kræver
+  rig-workeren; cloud har ikke dine dokumenter — en cloud-fallback dér ville
+  give et svar uden kilder, hvilket er værre end en ærlig fejl). Retry-stien
+  bruger stadig den valgte kilde direkte; fallback er i hovedsendingen.
+- Ren Android-ændring. Bygger APK + server-exes (versionsbump i worker),
+  IKKE Windows-jar (desktop urørt).
+- **🎉 V2 er hermed komplet** — alle 6 punkter + begge haleender leveret.
+  Ifølge ROADMAP udløser det v2.0.0. Compile-verificeret; on-device-
+  bekræftelse af fallbacken udestår (kræver at slukke rig'en midt i en
+  session — nemt at teste).
 
 ## What's new in 1.0.1  (V2-haleende: desktop får samtale-søg/omdøb/eksport)
 - **Første post-1.0-arbejde mod komplet V2.** Desktop-samtalepanelet havde
