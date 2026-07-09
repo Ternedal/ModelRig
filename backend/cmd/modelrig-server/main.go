@@ -43,12 +43,18 @@ func main() {
 
 	ollamaClient := proxy.New(cfg.OllamaBaseURL, cfg.RequestTimeout).WithHealthPath("/api/tags").WithAuthToken(cfg.OllamaKey)
 	workerClient := proxy.New(cfg.WorkerBaseURL, cfg.RequestTimeout).WithHealthPath("/healthz")
+	// Voice turns and large ingests legitimately exceed the chat timeout:
+	// the first voice turn loads Whisper large-v3 into VRAM before the LLM
+	// even runs. The shortest timeout in the chain wins, so the server
+	// needs its own long-timeout client, not just the Android app.
+	workerSlowClient := proxy.New(cfg.WorkerBaseURL, 10*time.Minute).WithHealthPath("/healthz")
 
 	handler := httpapi.New(httpapi.Deps{
 		Cfg:    cfg,
 		Store:  st,
 		Ollama: ollamaClient,
 		Worker: workerClient,
+		WorkerSlow: workerSlowClient,
 	})
 
 	httpServer := &http.Server{

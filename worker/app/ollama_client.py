@@ -13,7 +13,14 @@ import httpx
 OLLAMA_URL = os.getenv("MODELRIG_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 EMBED_MODEL = os.getenv("MODELRIG_EMBED_MODEL", "nomic-embed-text")
 GEN_MODEL = os.getenv("MODELRIG_GEN_MODEL", "qwen2.5-coder:7b")
-TIMEOUT = float(os.getenv("MODELRIG_OLLAMA_TIMEOUT", "60"))
+# Timeout for calls to Ollama. The default must accommodate a COLD model: a
+# first voice turn (or first chat) makes Ollama load e.g. hermes3:8b (~4.7 GB)
+# into VRAM before generating a single token, which alone can exceed 60s.
+# Verified on Anders' rig 2026-07-09: a too-short timeout anywhere in the chain
+# (Android -> Go server -> worker -> Ollama) surfaces on the phone as
+# "Software caused connection abort". The shortest timeout wins, so all three
+# layers had to be raised.
+TIMEOUT = float(os.getenv("MODELRIG_OLLAMA_TIMEOUT", "600"))
 
 
 class OllamaError(RuntimeError):

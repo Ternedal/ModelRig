@@ -21,6 +21,10 @@ type Deps struct {
 	Store  *store.Store
 	Ollama *proxy.Client
 	Worker *proxy.Client
+	// WorkerSlow is the same worker upstream with a long timeout, for
+	// requests that legitimately take minutes: voice turns (Whisper loads
+	// into VRAM first) and large document ingest (many embedding calls).
+	WorkerSlow *proxy.Client
 }
 
 type server struct {

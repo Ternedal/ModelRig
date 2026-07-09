@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.8.1** — "Voice-timeout-fix: første stemme-tur timede ud mens rig'en stadig arbejdede (Whisper-load i VRAM). Voice + dokument-ingest får nu 5 min timeout". Follows 1.8.0. Autonomous sessions, **2026-07-02 → 07-09**.
+Version **1.8.2** — "Voice-timeout-fix DEL 2: der var TRE timeouts i kæden, ikke én. Go-server (120s) og worker→Ollama (60s) skar også forbindelsen". Follows 1.8.1. Autonomous sessions, **2026-07-02 → 07-09**.
 
 > **🎉 MILEPÆL 8/7 aften:** Hele Alva Voice-kæden er nu bevist på Anders' rig — ASR→LLM→TTS kørte ende-til-ende. Input-WAV → dansk transskription → llama3.2-svar → tale delt i sætnings-WAV'er. Alle tre Voice-lag + LLM koblet sammen og kørende. (Svar-kvaliteten var svag med den lille 1b-model — vrøvl + engelsk-indblanding — men det beviser rørene; hermes3:8b/qwen giver gode svar. TTFA-metrikken fejlede i test-one-lineren men er verificeret korrekt i selve voice_pipeline.py-modulet.)
 
@@ -47,6 +47,32 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.8.2  (Voice-timeout DEL 2 — hele kæden, ikke bare Android)
+- **1.8.1's fix var utilstrækkelig.** Anders testede igen: SAMME fejl
+  ("Software caused connection abort"). Min diagnose var rigtig i art men
+  ufuldstændig — jeg fiksede kun ét af TRE timeout-lag.
+- **Rodårsag: den korteste timeout i kæden vinder.** Kæden er
+  `Android → Go-server → worker → Ollama`, og hvert lag havde sin egen:
+  | Lag | Var | Nu |
+  |---|---|---|
+  | Android OkHttp | 120s | 5 min (1.8.1) |
+  | **Go-server → worker** | **120s** | **10 min** |
+  | **worker → Ollama** | **60s** | **10 min** |
+  Selv med Androids 5 min skar Go-serveren forbindelsen efter 2 min, og
+  worker'en efter 1 min mod Ollama.
+- **Hvorfor så lang tid**: første stemme-tur på en kold rig loader Whisper
+  large-v3 i VRAM (~2.5GB), DEREFTER loader Ollama hermes3:8b (~4.7GB),
+  DEREFTER genereres svaret, DEREFTER syntetiseres tale. 60s rækker ikke.
+- **Fix**: `proxy.WithTimeout()` giver en klon af proxy-klienten med anden
+  timeout. Ny `WorkerSlow`-klient (10 min) bruges til `/voice/converse` +
+  `/rag/ingest/pdf` + `/rag/ingest/docx`. Worker→Ollama-defaulten hævet
+  60s → 600s (stadig env-konfigurerbar via MODELRIG_OLLAMA_TIMEOUT).
+  Almindelig chat beholder 120s bevidst.
+- **Lærdom** (skrevet ind i koden): når en request krydser flere processer,
+  skal ALLE lags timeouts hæves — at fikse klienten alene ser ud til at virke
+  i test, men fejler i produktion. Kun on-device-test afslørede det.
+- Alle 58 assertions grønne. Backend + worker + Android rørt.
 
 ## What's new in 1.8.1  (Voice-timeout-fix — fundet på Anders' telefon)
 - **FØRSTE RIGTIGE ANDROID-VOICE-FEJL, fundet 9/7 på Anders' Pixel 6a**:

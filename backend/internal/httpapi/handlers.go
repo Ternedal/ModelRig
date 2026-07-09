@@ -315,7 +315,8 @@ func (s *server) handleRagSourceDelete(w http.ResponseWriter, r *http.Request) {
 // (base64) -> ASR -> LLM -> TTS -> reply audio (base64). The worker returns 501
 // if the optional Voice backends aren't installed on the rig.
 func (s *server) handleVoiceConverse(w http.ResponseWriter, r *http.Request) {
-	s.Worker.Forward(w, r, "/voice/converse/upload")
+	// WorkerSlow: the first voice turn loads Whisper into VRAM (minutes).
+	s.WorkerSlow.Forward(w, r, "/voice/converse/upload")
 }
 
 // handleVoiceStatus proxies the worker's ASR/TTS availability so the app can
@@ -327,13 +328,15 @@ func (s *server) handleVoiceStatus(w http.ResponseWriter, r *http.Request) {
 // handleRagIngestPdf proxies a PDF upload to the worker, which extracts text
 // (PyMuPDF) and ingests it into the RAG index. 501 if PyMuPDF isn't installed.
 func (s *server) handleRagIngestPdf(w http.ResponseWriter, r *http.Request) {
-	s.Worker.Forward(w, r, "/rag/ingest/pdf")
+	// WorkerSlow: a large PDF means many embedding calls.
+	s.WorkerSlow.Forward(w, r, "/rag/ingest/pdf")
 }
 
 // handleRagIngestDocx proxies a .docx upload to the worker, which extracts text
 // (python-docx) and ingests it. 501 if python-docx isn't installed.
 func (s *server) handleRagIngestDocx(w http.ResponseWriter, r *http.Request) {
-	s.Worker.Forward(w, r, "/rag/ingest/docx")
+	// WorkerSlow: a large document means many embedding calls.
+	s.WorkerSlow.Forward(w, r, "/rag/ingest/docx")
 }
 
 // clientIP extracts the remote host for rate-limiting. Behind a trusted reverse

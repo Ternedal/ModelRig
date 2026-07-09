@@ -4,7 +4,7 @@ A local-first AI platform: run models on your own hardware via Ollama, reach the
 from a desktop app and an Android phone, with an optional RAG service and an
 Ollama Cloud fallback for when local isn't enough.
 
-Version: **1.8.1** (Voice-timeout-fix; første stemme-tur timede ud mens rig'en arbejdede)
+Version: **1.8.2** (Voice-timeout-fix del 2: alle tre lag i kæden — Android, Go-server, worker→Ollama)
 
 ## Architecture
 ```

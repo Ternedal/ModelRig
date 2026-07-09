@@ -31,6 +31,20 @@ func (c *Client) WithHealthPath(p string) *Client {
 	return c
 }
 
+// WithTimeout returns a COPY of the client with a different request timeout.
+// Needed because the default (120s) is right for chat but far too short for
+// slow upstream work: the first voice turn loads Whisper large-v3 into VRAM
+// before it even reaches the LLM, and ingesting a large PDF means many
+// embedding calls. Verified on Anders' rig 2026-07-09: the 120s server-side
+// timeout cut the voice request and surfaced on the phone as "Software caused
+// connection abort" -- fixing only the Android client wasn't enough, because
+// the shortest timeout in the chain wins.
+func (c *Client) WithTimeout(d time.Duration) *Client {
+	clone := *c
+	clone.http = &http.Client{Timeout: d}
+	return &clone
+}
+
 // WithAuthToken sets a bearer token forwarded on every upstream request. Empty
 // token is a no-op (local Ollama needs none; Ollama Cloud needs its API key).
 func (c *Client) WithAuthToken(t string) *Client {
