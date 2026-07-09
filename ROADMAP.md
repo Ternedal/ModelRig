@@ -1,4 +1,11 @@
-# ModelRig — Roadmap: V1 → V2 → V3
+# ModelRig / Kaliv — Roadmap
+
+> **Status 9/7-2026 aften (v1.12.3):** V1 ✅, V2 ✅, V3-kernen (Voice) er nu
+> **hardware-bevist på GPU** — tale → large-v3 (CUDA) → hermes3:8b → dansk
+> Piper, ende-til-ende på telefonen. Dagens root cause (CUDA-DLL-søgesti)
+> fundet og fixet i v1.12.3 (CI grøn, 4 assets). Appen omdøbes **Alva →
+> Kaliv** (navn i v1.13.0; ikon afventer Anders' brand-pakke). Udestående
+> og nye horisonter: se §9–10.
 
 **Gældende version:** 0.15.5 · **Dato:** 2026-07-04 · **Ejer:** Anders
 **Estimat-enhed:** "byggesession" = én autonom arbejdsblok med Claude; leverer typisk 1 tagget release.
@@ -197,12 +204,17 @@ Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
 
 ---
 
-## 5. V3 — "Alva: personlig assistent" (brand-reframe 8/7-2026)
+## 5. V3 — "Kaliv: personlig assistent" (brand: Alva 8/7 → **Kaliv** 9/7-2026)
 
-**Navnehierarki (Anders' beslutning 8/7):** appen hedder nu **Alva**, motoren
-forbliver **ModelRig**. Android-appen er rebrandet i `v1.2.0` (app-navn +
-UI-titel + ikon → Alva; `applicationId` og backend uændret). Undersystemer:
-Alva Voice, Alva Memory, Alva Tools, Alva UI — se `BRAND_IDENTITY.md` og
+**Navnehierarki (Anders' beslutninger):** appen hed **Alva** fra 8/7
+(`v1.2.0`) og hedder fra 9/7 aften **Kaliv**; motoren forbliver **ModelRig**,
+`applicationId` er urørlig (`dk.ternedal.modelrig`, APK-signatur).
+Navne-rebranden (launcher, UI, persona, docs; env-vars som `KALIV_*` med
+`ALVA_*`-fallback så riggen ikke knækker) lander i `v1.13.0`. **Ikonet
+afventer Anders' brand-pakke** (leverancekrav sendt 9/7: transparent
+forgrund ≤40 %, separat baggrund, valgfri monokrom) og skibes som egen
+lille release. Undersystemer følger med: Kaliv Voice, Kaliv Memory, Kaliv
+Tools, Kaliv UI — historik i `BRAND_IDENTITY.md` og
 `ALVA_VOICE_ROADMAP_DELTA.md`.
 
 Flere af undersystemerne findes allerede under andre navne:
@@ -295,13 +307,52 @@ acceptkriterier ligger i **`ALVA_VOICE_ROADMAP_DELTA.md`**. Kernepunkter:
 
 ---
 
-## 9. Konkrete næste skridt
+## 9. V4 — Horisonter (tilføjet 9/7-2026 aften)
 
-1. **Anders:** kør V1-tjeklisten i `STATUS.md` igennem på telefonen (8 punkter,
-   ~10 minutter) — det er nu det eneste der står mellem 0.18.0 og `v1.0.0`.
-2. **Hvis alt er grønt:** sig det, og `v1.0.0` tagges med det samme (docs +
-   tag, ingen ny kode ventet).
-3. **Hvis noget fejler:** giv symptom + hvilket punkt, så rettes det målrettet
-   (ikke gættet på).
-4. **Efter v1.0.0:** V2 starter med RAG-ingest fra appen (0.19/2.0-serien, se
-   §4) — først når V1 reelt er lukket, ikke før.
+Retninger EFTER at V3-kernen (Voice) er hardware-bevist. Uprioriteret indtil
+Anders vælger; hvert punkt er markeret med hvad der kræves.
+
+### Nær (ingen nye beslutninger nødvendige)
+- **v1.13.0 — tap-to-stop + Kaliv-navnerebrand** (næste session; §5 + §10)
+- **Kaliv-ikon** som egen release [venter: Anders' brand-pakke]
+- **Barge-in-kalibrering**: live-RMS-udlæsning i appen, så `rmsThreshold`
+  sættes på målinger i stedet for gæt [bygges autonomt; tallene skal komme
+  fra Anders' telefon]
+- **PPTX/HTML-ingest** — samme mønster som PDF/DOCX [autonomt byggbart]
+
+### Mellem (små beslutninger, kendt teknik)
+- **Streaming-ASR**: delvis transskription mens der tales (i dag sendes hele
+  filen efter slip). Største oplevede latency-gevinst efter TTFA-chunking
+  [kræver protokol-ændring app↔worker]
+- **Wake word "Hey Kaliv"** (openwakeword, opt-in) [beslutning:
+  altid-lyttende mikrofon ja/nej]
+- **OCR for scannede PDF'er** — i dag ærlig 422 [beslutning: Tesseract
+  (Apache-2.0) vs. alternativer]
+- **Desktop-voice**: paritet på Windows-klienten [efter mobil er poleret]
+- **Kaliv Memory v2**: RAG over egne samtaler ("hvad sagde vi om X i
+  sidste uge?") — alt lokalt [design: indeksering + sletning]
+
+### Horisont (kræver arkitektur- og sikkerhedsbeslutninger)
+- **Kaliv Tools / agent-tools**: modellen kalder værktøjer via riggen.
+  Fortsat størst usikkerhed i roadmappen: whitelist, bekræftelses-UX,
+  prompt-injection-værn [kravspec før kode]
+- **Multi-enhed**: flere klienter mod samme rig, per-enheds-parring
+  [moderat backend-arbejde]
+- **Proaktiv Kaliv**: påmindelser/baggrundsopgaver med notifikationer
+  [foreground service; beslutning om hvor "levende" Kaliv skal være]
+
+---
+
+## 10. Konkrete næste skridt (pr. 9/7-2026 ~23:00)
+
+1. **Anders:** brand-pakke til Kaliv-ikonet (kravene er sendt).
+2. **Anders, 2 min ved næste rig-opstart:** hent `v1.12.3`-zip → normal
+   start UDEN manuelle PATH-linjer → én stemmetur. [Ikke verificeret:
+   kun den MANUELLE PATH-test er hardware-bevist; kold start med det
+   indbyggede fix mangler.]
+3. **Næste session:** `v1.13.0` — tap-to-stop + Kaliv-navnerebrand,
+   compile-verificeret Android før tag.
+4. **Anders, valgfrit:** barge-in med headset (✋-chip til) — rå
+   kalibreringsdata til v1.13.0.
+5. **Token-hygiejne:** revokér dagens PAT ved "i mål"; fine-grained
+   7-dages token fremover.

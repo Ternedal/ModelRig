@@ -19,13 +19,17 @@ Copy/paste dette som første besked i en ny chat.
 3. **Anders har flere kopier af repoet** (`modelrig`, `modelrig-new`,
    `modelrig-mono`) med forskellig kode-alder. Det har forårsaget flere falske
    fejlspor. Ryd op: behold én mappe.
+4. **Appen hedder nu KALIV** (Anders' beslutning 9/7 aften; før: Alva).
+   Navne-rebrand (launcher, UI, persona, docs; env-vars `KALIV_*` med
+   `ALVA_*`-fallback) → `v1.13.0` sammen med tap-to-stop. Ikonet afventer
+   Anders' brand-pakke og skibes separat. `applicationId` røres ALDRIG.
 
 ---
 
 ## 1. Hvad projektet er
 
-**ModelRig** er en selvhostet LLM-platform. **Alva** er Android-appen (samme
-kodebase; motoren hedder stadig ModelRig).
+**ModelRig** er en selvhostet LLM-platform. **Kaliv** (før 9/7: Alva) er
+Android-appen (samme kodebase; motoren hedder stadig ModelRig).
 
 **Anders' opsætning:**
 - Rig: Windows-PC, RTX 3060 12GB, IP ændrer sig (var `.34`, så `.5`)
@@ -317,12 +321,12 @@ git push <url> main:main
 - Forbedringer til markdown-strip, chunking, fejlbeskeder
 
 **Kræver Anders' test:**
-- Tap-to-stop på stemme-afspilning (bygges som v1.13.0 — fundet 9/7)
+- Tap-to-stop + Kaliv-navnerebrand (bygges som v1.13.0)
 - Barge-in-kalibrering (rmsThreshold)
 - De resterende tests i §4
 
 **Kræver Anders' beslutning:**
-- **Wake word** ("Hey Alva") — openwakeword, valgfri mode
+- **Wake word** ("Hey Kaliv") — openwakeword, valgfri mode
 - **Agent-tools** — modellen kalder værktøjer via rig'en. Kræver en gennemtænkt
   sikkerhedsmodel (hvad må kaldes, bekræftelse, prompt injection). Størst
   usikkerhed i hele roadmappen.
