@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.8.2** — "Voice-timeout-fix DEL 2: der var TRE timeouts i kæden, ikke én. Go-server (120s) og worker→Ollama (60s) skar også forbindelsen". Follows 1.8.1. Autonomous sessions, **2026-07-02 → 07-09**.
+Version **1.9.0** — "🎉 Voice BEVIST ende-til-ende på telefonen + tre app-bugs fra Anders' test fikset (forbindelses-løgn, tvungen re-parring, tavs model-fejl)". Follows 1.8.2. Autonomous sessions, **2026-07-02 → 07-09**.
 
 > **🎉 MILEPÆL 8/7 aften:** Hele Alva Voice-kæden er nu bevist på Anders' rig — ASR→LLM→TTS kørte ende-til-ende. Input-WAV → dansk transskription → llama3.2-svar → tale delt i sætnings-WAV'er. Alle tre Voice-lag + LLM koblet sammen og kørende. (Svar-kvaliteten var svag med den lille 1b-model — vrøvl + engelsk-indblanding — men det beviser rørene; hermes3:8b/qwen giver gode svar. TTFA-metrikken fejlede i test-one-lineren men er verificeret korrekt i selve voice_pipeline.py-modulet.)
 
@@ -47,6 +47,43 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.9.0  🎉  (Voice bevist på telefonen + tre bugs fra Anders' test)
+
+### 🎉 ALVA VOICE VIRKER — bevist ende-til-ende 9/7 på Anders' Pixel 6a
+Hele kæden kørte: **stemme → mikrofon → WAV → base64-upload → Go-server →
+worker → ASR → hermes3:8b → sætnings-chunking → Piper TTS → afspilning**.
+Alva forstår dansk tale og svarer i dansk tale, på Anders' egen hardware.
+
+**Tre bugs skulle fanges undervejs — ingen af dem kunne findes headless:**
+1. PyAV blokeret af Windows Application Control (fikset 1.5.1, soundfile)
+2. TRE for korte timeouts i kæden (fikset 1.8.1 + 1.8.2)
+3. CUDA-DLL'er ikke på PATH → ASR kører pt. på **CPU med `small`-modellen**
+
+### Tre app-bugs fikset (alle fundet af Anders under testen)
+- **"✓ forbundet" LØJ**: den viste blot at en parring var gemt, ikke at rig'en
+  svarede. Anders' rig skiftede IP, appen sagde "forbundet", og hver besked
+  faldt tavst tilbage til cloud. **Fix**: ny `ping()` mod uautentificeret
+  `/healthz`; statuslinjen viser nu "✓ forbundet", "⚠ parret, men rig'en svarer
+  ikke — tjek IP og at serveren kører", eller "… tjekker forbindelsen".
+- **"Forbind" krævede parringskode selv med gyldigt token**: da IP'en ændrede
+  sig, kunne Anders ikke bare rette URL'en — knappen var deaktiveret uden en
+  kode, hvilket tvang unødig re-parring. **Fix**: har man et token, forbinder
+  tom kode blot til den nye URL (token er ikke bundet til adressen) og
+  verificerer med et ping.
+- **Model-dropdown fejlede tavst**: `res.onSuccess { ... }` uden `onFailure`.
+  "Genindlæs modeller" så bare død ud når rig'en ikke svarede. **Fix**: fejlen
+  vises nu ("Kan ikke hente modeller: rig'en svarer ikke"), og en tom liste fra
+  en svarende rig får sin egen besked.
+
+### Åbent punkt: ASR kører på CPU
+CTranslate2 på Windows kræver CUDA-runtime-DLL'er (`cublas64_12.dll`, cudnn) på
+PATH. `pip install nvidia-cublas-cu12 nvidia-cudnn-cu12` var **ikke nok** —
+DLL'erne havner i `site-packages/nvidia/...` som Windows ikke søger i. Noteret i
+`voice_asr.py`. Indtil videre: `ALVA_ASR_DEVICE=cpu` + `ALVA_ASR_MODEL=small`
+(sådan blev Voice bevist). RTX 3060 udnyttes altså endnu ikke til ASR.
+
+- Alle 58 assertions grønne. Ren Android + docs + én worker-kommentar.
 
 ## What's new in 1.8.2  (Voice-timeout DEL 2 — hele kæden, ikke bare Android)
 - **1.8.1's fix var utilstrækkelig.** Anders testede igen: SAMME fejl

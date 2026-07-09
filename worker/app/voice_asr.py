@@ -46,6 +46,12 @@ def _compute_type() -> str:
 
 
 def _device() -> str:
+    # Default cuda. NOTE (Anders' rig, 2026-07-09): CTranslate2 on Windows needs
+    # the CUDA runtime DLLs (cublas64_12.dll, cudnn) discoverable on PATH.
+    # `pip install nvidia-cublas-cu12 nvidia-cudnn-cu12` alone was NOT enough --
+    # the DLLs land in site-packages/nvidia/... which Windows doesn't search.
+    # Until that's resolved, set ALVA_ASR_DEVICE=cpu (with ALVA_ASR_MODEL=small
+    # for acceptable speed). Voice was proven end-to-end on CPU this way.
     return os.environ.get("ALVA_ASR_DEVICE", "cuda")
 
 

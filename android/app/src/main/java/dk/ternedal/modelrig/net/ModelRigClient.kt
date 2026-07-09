@@ -261,6 +261,29 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
     }
 
     /** Lists available model names via the backend's /api/v1/models. */
+    /**
+     * Actually checks the rig responds, rather than trusting that a URL and
+     * token are stored. GET /healthz is unauthenticated, so this works even if
+     * the token has gone stale. Short timeout: this is a liveness check, not a
+     * request that should hang the UI.
+     *
+     * Exists because "✓ forbundet" used to mean only "a pairing is saved" --
+     * Anders hit this on 2026-07-09: the app showed "forbundet" while every
+     * message silently fell back to cloud, because the rig's IP had changed.
+     */
+    fun ping(): Boolean {
+        return try {
+            val pingHttp = OkHttpClient.Builder()
+                .connectTimeout(3, TimeUnit.SECONDS)
+                .readTimeout(3, TimeUnit.SECONDS)
+                .build()
+            val req = Request.Builder().url("$base/healthz").get().build()
+            pingHttp.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun listModels(): List<String> {
         val rb = Request.Builder().url("$base/api/v1/models")
         token?.let { rb.header("Authorization", "Bearer $it") }

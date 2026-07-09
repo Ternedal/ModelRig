@@ -177,17 +177,42 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
     var baseUrl by remember { mutableStateOf(store.baseUrl ?: "http://192.168.1.10:8080") }
     var code by remember { mutableStateOf("") }
     var deviceName by remember { mutableStateOf(android.os.Build.MODEL ?: "android") }
+    // "connected" = a pairing is stored. That is NOT the same as the rig being
+    // reachable -- Anders' rig changed IP and the app still claimed "forbundet"
+    // while every message fell back to cloud. So we also ping the rig and show
+    // its real state. null = not checked yet.
     var connected by remember { mutableStateOf(store.hasRig) }
+    var reachable by remember { mutableStateOf<Boolean?>(null) }
     var busy by remember { mutableStateOf(false) }
     var system by remember { mutableStateOf(store.rigSystem) }
     var msg by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
+    // Check reachability whenever we have a stored pairing (on entry, and after
+    // the URL changes), so the status line tells the truth.
+    LaunchedEffect(store.hasRig, baseUrl) {
+        if (!store.hasRig || baseUrl.isBlank()) { reachable = null; return@LaunchedEffect }
+        reachable = null
+        reachable = withContext(Dispatchers.IO) {
+            runCatching { ModelRigClient(baseUrl.trim(), store.token).ping() }.getOrDefault(false)
+        }
+    }
+
     Surface(color = GraphiteSurface, shape = RoundedCornerShape(14.dp)) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Text("Din rig (backend)", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextHigh)
             Text("Lokale modeller + RAG. Kræver at rig'en kører.", fontSize = 12.sp, color = TextMuted)
-            if (connected) { Spacer(Modifier.height(4.dp)); Text("✓ forbundet", color = Signal, fontSize = 13.sp) }
+            if (connected) {
+                Spacer(Modifier.height(4.dp))
+                when (reachable) {
+                    true -> Text("✓ forbundet", color = Signal, fontSize = 13.sp)
+                    false -> Text(
+                        "⚠ parret, men rig'en svarer ikke — tjek IP og at serveren kører",
+                        color = Danger, fontSize = 13.sp,
+                    )
+                    null -> Text("… tjekker forbindelsen", color = TextMuted, fontSize = 13.sp)
+                }
+            }
             RigProfileRow(
                 db = db,
                 canSaveCurrent = connected,
@@ -217,21 +242,46 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
             PresetRow(db, "rig", system) { system = it; store.rigSystem = it }
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // A pairing code is only needed for a FIRST pairing. If a token
+                // is already stored (e.g. the rig just changed IP), the user
+                // should be able to update the URL and reconnect without
+                // re-pairing -- the token isn't tied to the address. Anders hit
+                // this on 2026-07-09: the button stayed disabled with an empty
+                // code, forcing an unnecessary re-pair.
+                val hasToken = store.token != null
                 Button(
-                    enabled = !busy && code.isNotBlank() && baseUrl.isNotBlank(),
+                    enabled = !busy && baseUrl.isNotBlank() && (code.isNotBlank() || hasToken),
                     onClick = {
                         busy = true; msg = null
                         val url = baseUrl.trim(); val c = code.trim(); val n = deviceName.trim()
                         scope.launch {
-                            val res = withContext(Dispatchers.IO) { runCatching { ModelRigClient(url).claimPairing(n, c) } }
-                            res.onSuccess { store.baseUrl = url; store.token = it; store.chatMode = "rig"; busy = false; connected = true; onConnected() }
-                                .onFailure { msg = it.message ?: "Kunne ikke forbinde"; busy = false }
+                            if (c.isBlank() && hasToken) {
+                                // Reconnect with the existing token: save the new
+                                // URL, then verify the rig actually answers there.
+                                val ok = withContext(Dispatchers.IO) {
+                                    runCatching { ModelRigClient(url, store.token).ping() }.getOrDefault(false)
+                                }
+                                busy = false
+                                if (ok) {
+                                    store.baseUrl = url; store.chatMode = "rig"
+                                    connected = true; reachable = true; onConnected()
+                                } else {
+                                    reachable = false
+                                    msg = "Rig'en svarer ikke på $url. Tjek IP'en og at serveren kører."
+                                }
+                            } else {
+                                val res = withContext(Dispatchers.IO) { runCatching { ModelRigClient(url).claimPairing(n, c) } }
+                                res.onSuccess {
+                                    store.baseUrl = url; store.token = it; store.chatMode = "rig"
+                                    busy = false; connected = true; reachable = true; onConnected()
+                                }.onFailure { msg = it.message ?: "Kunne ikke forbinde"; busy = false }
+                            }
                         }
                     },
                 ) { Text(if (busy) "Forbinder…" else "Forbind") }
                 if (connected) {
                     Spacer(Modifier.width(8.dp))
-                    TextButton(onClick = { store.clearRig(); connected = false }) { Text("Afbryd", color = Danger) }
+                    TextButton(onClick = { store.clearRig(); connected = false; reachable = null }) { Text("Afbryd", color = Danger) }
                 }
             }
             msg?.let { Spacer(Modifier.height(6.dp)); Text(it, color = Danger, fontSize = 12.sp) }
@@ -532,6 +582,9 @@ private fun ChatScreen(
     var recording by remember { mutableStateOf(false) }
     var voiceBusy by remember { mutableStateOf(false) }
     var voiceError by remember { mutableStateOf<String?>(null) }
+    // Model-list load failures used to be swallowed silently: "Genindlæs
+    // modeller" looked dead when the rig was unreachable. Surface the reason.
+    var modelError by remember { mutableStateOf<String?>(null) }
     var hasMicPermission by remember {
         mutableStateOf(
             androidx.core.content.ContextCompat.checkSelfPermission(
@@ -879,10 +932,18 @@ private fun ChatScreen(
                                 onClick = {
                                     modelMenu = false
                                     scope.launch {
+                                        modelError = null
                                         val res = withContext(Dispatchers.IO) {
                                             runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listModels() }
                                         }
-                                        res.onSuccess { models = it }
+                                        res.onSuccess {
+                                            models = it
+                                            if (it.isEmpty()) modelError = "Rig'en svarede, men har ingen modeller"
+                                        }.onFailure {
+                                            // Don't fail silently -- the user just
+                                            // sees a dead button otherwise.
+                                            modelError = "Kan ikke hente modeller: rig'en svarer ikke"
+                                        }
                                     }
                                 },
                             )
@@ -1028,6 +1089,9 @@ private fun ChatScreen(
                         color = if (voiceError != null && !recording && !voiceBusy) Danger else Signal,
                         fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp),
                     )
+                }
+                modelError?.let {
+                    Text(it, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     // Vision is chat-only (cloud/rig), not RAG. Requires a
