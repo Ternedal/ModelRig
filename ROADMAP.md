@@ -5,7 +5,7 @@
 > Piper, ende-til-ende på telefonen. Dagens root cause (CUDA-DLL-søgesti)
 > fundet og fixet i v1.12.3 (CI grøn, 4 assets). Appen omdøbes **Alva →
 > Kaliv** (navn i v1.13.0; ikon afventer Anders' brand-pakke). Udestående
-> og nye horisonter: se §9–10.
+> og nye horisonter: se §9–12.
 
 **Gældende version:** 0.15.5 · **Dato:** 2026-07-04 · **Ejer:** Anders
 **Estimat-enhed:** "byggesession" = én autonom arbejdsblok med Claude; leverer typisk 1 tagget release.
@@ -127,6 +127,13 @@ CI, RAG-ingest fra telefonen. Alt sammen bevidst skubbet — se V2.
 ---
 
 ## 4. V2 — "Kontrolflade" (leveres som v1.1 → v1.x; tag `v2.0.0` når komplet) ✅ **KOMPLET — udløser `v2.0.0`** (8/7-2026: alle 6 punkter + begge haleender leveret)
+
+> **Formel lukning (besluttet 9/7-2026 aften):** `v2.0.0`-tagget blev aldrig
+> sat — release-tags fortsatte som `v1.x`, og det bliver de ved med. Faser
+> lukkes fremover med dato + notat her i docs, ikke med tags. **Reel lukning
+> udestår dog on-device** (~10 min, 3 tjek): (1) txt/md-ingest via
+> filvælgeren fra telefonen, (2) model-administration: pull + slet en lille
+> model fra appen, (3) samtale: omdøb → søg → del som markdown. Se §12.
 
 Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
 
@@ -343,7 +350,58 @@ Anders vælger; hvert punkt er markeret med hvad der kræves.
 
 ---
 
-## 10. Konkrete næste skridt (pr. 9/7-2026 ~23:00)
+## 10. V5 — "Kaliv handler" (agent-laget, MCP-først)
+
+Tema: fra samtale til handling — Kaliv må røre ting på riggen, men kun
+gennem en sikkerhedsmodel der er designet FØR første linje tool-kode.
+Løfter V4's største "kræver beslutning"-punkt til et fuldt spor.
+
+0. **Kravspec før kode** [Anders godkender spec før implementering]:
+   whitelist pr. tool, eksplicit bekræftelse pr. skrivende handling
+   (ingen auto-exec), audit-log på riggen, tool-output behandles som
+   DATA (prompt-injection-værn), rate limits.
+1. **MCP-fundament i workeren** [arkitekturvalg — anbefaling: MCP frem
+   for eget format; fremtidssikret og genbrugeligt]: ModelRig som
+   MCP-klient mod lokale MCP-servere; tool-registry i appen med
+   enable/disable pr. tool.
+2. **Første tools — read-only** [lav risiko]: filsøgning/-læsning i
+   udpegede mapper på riggen; rig-status (GPU/VRAM/disk/modeller).
+3. **Skrivende tools bag bekræftelse**: notater til fil, påmindelser.
+4. **Tools i voice-flowet**: Kaliv siger højt hvad den vil gøre og
+   venter på "ja" før eksekvering.
+
+**Exit-kriterium:** ét læsende og ét skrivende tool virker fra både
+tekst og stemme, med bekræftelse + audit-log, on-device-bekræftet.
+Estimat: 5–8 byggesessioner — spec-arbejdet er det usikre led.
+
+---
+
+## 11. V6 — "Kaliv omkring dig" (ambient & multi-enhed)
+
+Tema: altid tilgængelig, flere enheder, proaktiv — med samtykke og alt
+lokalt. Bygger på V4's streaming-ASR og V5's tool-lag.
+
+1. **Wake word "Hey Kaliv"** som opt-in mode [beslutning: altid-lyttende
+   mikrofon ja/nej] — openwakeword på enheden; intet forlader telefonen
+   før wake-ordet er hørt.
+2. **Flydende samtaleloop**: streaming-ASR + kalibreret barge-in →
+   dialog uden knapper.
+3. **Multi-enhed**: per-enheds-parring; flere Android-klienter mod samme
+   rig — evt. en pensioneret Android-enhed som fast Kaliv-station i
+   hjemmet [moderat backend-arbejde].
+4. **Proaktiv Kaliv** [beslutning: hvor "levende" må den være]:
+   påmindelser og baggrundsjobs med notifikationer (foreground service).
+5. **Kaliv Memory v3 — profil**: langtidspræferencer på tværs af
+   samtaler, alt lokalt, med se/redigér/slet-UI [privacy-design].
+6. **Desktop-voice**: fuld paritet på Windows-klienten.
+
+**Exit-kriterium:** "Hey Kaliv" → svar → opfølgning håndfrit på mindst
+to enheder; en proaktiv påmindelse leveres uden at appen er åben.
+Estimat: 6–10 byggesessioner.
+
+---
+
+## 12. Konkrete næste skridt (pr. 9/7-2026 ~23:30)
 
 1. **Anders:** brand-pakke til Kaliv-ikonet (kravene er sendt).
 2. **Anders, 2 min ved næste rig-opstart:** hent `v1.12.3`-zip → normal
@@ -354,5 +412,7 @@ Anders vælger; hvert punkt er markeret med hvad der kræves.
    compile-verificeret Android før tag.
 4. **Anders, valgfrit:** barge-in med headset (✋-chip til) — rå
    kalibreringsdata til v1.13.0.
-5. **Token-hygiejne:** revokér dagens PAT ved "i mål"; fine-grained
+5. **Anders, valgfrit (~10 min):** V2-lukketjek på telefonen —
+   txt/md-filvælger-ingest, model-pull/-slet, samtale omdøb/søg/del.
+6. **Token-hygiejne:** revokér dagens PAT ved "i mål"; fine-grained
    7-dages token fremover.
