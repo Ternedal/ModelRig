@@ -32,6 +32,46 @@ from typing import Optional
 _model = None
 _model_lock = threading.Lock()
 _load_error: Optional[str] = None
+_dll_dirs_added = False
+
+
+def _add_cuda_dll_dirs() -> list[str]:
+    """Make CUDA runtime DLLs findable on Windows. Returns the dirs added.
+
+    CTranslate2 (faster-whisper's backend) needs cublas64_12.dll and cuDNN at
+    load time. `pip install nvidia-cublas-cu12 nvidia-cudnn-cu12` puts them in
+    site-packages/nvidia/<pkg>/bin, which Windows does NOT search -- so the load
+    fails with "Library cublas64_12.dll is not found or cannot be loaded".
+    Verified on Anders' rig 2026-07-09: installing the pip packages alone wasn't
+    enough, and he had to fall back to CPU.
+
+    Python 3.8+ on Windows only searches directories registered via
+    os.add_dll_directory(), so we register the nvidia package bin dirs
+    ourselves. No-op on Linux/macOS (where the loader uses RPATH/LD_LIBRARY_PATH)
+    and harmless if the packages aren't installed.
+    """
+    global _dll_dirs_added
+    if _dll_dirs_added or not hasattr(os, "add_dll_directory"):
+        return []
+    added: list[str] = []
+    try:
+        import nvidia  # the namespace package created by nvidia-* wheels
+    except Exception:
+        _dll_dirs_added = True
+        return []
+    for root in getattr(nvidia, "__path__", []):
+        if not os.path.isdir(root):
+            continue
+        for pkg in os.listdir(root):
+            bin_dir = os.path.join(root, pkg, "bin")
+            if os.path.isdir(bin_dir):
+                try:
+                    os.add_dll_directory(bin_dir)
+                    added.append(bin_dir)
+                except OSError:
+                    pass
+    _dll_dirs_added = True
+    return added
 
 
 def _model_name() -> str:
@@ -46,12 +86,10 @@ def _compute_type() -> str:
 
 
 def _device() -> str:
-    # Default cuda. NOTE (Anders' rig, 2026-07-09): CTranslate2 on Windows needs
-    # the CUDA runtime DLLs (cublas64_12.dll, cudnn) discoverable on PATH.
-    # `pip install nvidia-cublas-cu12 nvidia-cudnn-cu12` alone was NOT enough --
-    # the DLLs land in site-packages/nvidia/... which Windows doesn't search.
-    # Until that's resolved, set ALVA_ASR_DEVICE=cpu (with ALVA_ASR_MODEL=small
-    # for acceptable speed). Voice was proven end-to-end on CPU this way.
+    # Default cuda. On Windows the CUDA runtime DLLs shipped by the nvidia-*
+    # pip wheels live where Windows won't look; _add_cuda_dll_dirs() registers
+    # them before the model loads (see that function). If CUDA still won't come
+    # up, fall back with ALVA_ASR_DEVICE=cpu + ALVA_ASR_MODEL=small.
     return os.environ.get("ALVA_ASR_DEVICE", "cuda")
 
 
@@ -80,14 +118,31 @@ def _get_model():
                 "install it on the rig with: pip install faster-whisper"
             )
             raise RuntimeError(_load_error) from e
+        # Register the CUDA DLL dirs BEFORE constructing the model -- CTranslate2
+        # resolves cublas/cuDNN at load time, not at import time.
+        if _device() == "cuda":
+            _add_cuda_dll_dirs()
         try:
             _model = WhisperModel(_model_name(), device=_device(), compute_type=_compute_type())
         except Exception as e:
-            # Common causes: no CUDA, wrong compute_type for the GPU, OOM.
-            _load_error = (
-                f"failed to load ASR model '{_model_name()}' on {_device()}/{_compute_type()}: {e}. "
-                f"On a machine without a GPU, set ALVA_ASR_DEVICE=cpu ALVA_ASR_COMPUTE=int8."
-            )
+            # Common causes: no CUDA, missing CUDA runtime DLLs, wrong
+            # compute_type for the GPU, OOM.
+            msg = str(e).lower()
+            if "cublas" in msg or "cudnn" in msg or "dll" in msg:
+                _load_error = (
+                    f"failed to load ASR model on CUDA: {e}\n"
+                    "The CUDA runtime libraries aren't loadable. Install them into THIS "
+                    "Python with:\n"
+                    "  pip install nvidia-cublas-cu12 nvidia-cudnn-cu12\n"
+                    "(the worker registers their DLL directories automatically). If it "
+                    "still fails, run ASR on CPU:\n"
+                    "  set ALVA_ASR_DEVICE=cpu & set ALVA_ASR_COMPUTE=int8 & set ALVA_ASR_MODEL=small"
+                )
+            else:
+                _load_error = (
+                    f"failed to load ASR model '{_model_name()}' on {_device()}/{_compute_type()}: {e}. "
+                    f"On a machine without a GPU, set ALVA_ASR_DEVICE=cpu ALVA_ASR_COMPUTE=int8."
+                )
             raise RuntimeError(_load_error) from e
         return _model
 

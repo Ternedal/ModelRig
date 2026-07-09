@@ -191,6 +191,9 @@ async def converse(
         "transcript": transcript,
         "reply": reply,
         "model": model or oc.GEN_MODEL,
+        # Which brain answered. The app shows this so it's obvious whether the
+        # spoken reply came from the rig or from a cloud model.
+        "via_cloud": bool(llm_base_url),
         "language": asr["language"],
         "time_to_first_audio_s": ttfa,
         "total_s": round(time.time() - t_start, 2),

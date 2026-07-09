@@ -19,7 +19,7 @@ from . import ollama_client as oc
 from . import rag
 from .store import DocStore
 
-VERSION = "1.10.1"
+VERSION = "1.11.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -335,13 +335,20 @@ def delete_source(source: str) -> dict:
 
 @app.get("/voice/asr/status")
 def voice_asr_status() -> dict:
-    """Whether ASR is available (faster-whisper installed) + configured model."""
+    """Whether ASR is available (faster-whisper installed) + configured model.
+
+    cuda_dll_dirs shows which NVIDIA runtime directories were registered for the
+    DLL search path. Empty on a cuda device means cublas/cuDNN will likely fail
+    to load -- pip install nvidia-cublas-cu12 nvidia-cudnn-cu12.
+    """
     from . import voice_asr
+    dll_dirs = voice_asr._add_cuda_dll_dirs() if voice_asr._device() == "cuda" else []
     return {
         "available": voice_asr.is_available(),
         "model": voice_asr._model_name(),
         "device": voice_asr._device(),
         "compute_type": voice_asr._compute_type(),
+        "cuda_dll_dirs": dll_dirs,
     }
 
 

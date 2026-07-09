@@ -456,6 +456,11 @@ private data class Msg(
     val error: Boolean = false, // shown in UI, but never persisted or sent as history
     val sources: List<String> = emptyList(), // RAG source names, if this reply used RAG
     val fellBackToCloud: Boolean = false, // rig was unreachable -> answered via cloud
+    // For a spoken turn: which model answered, and whether it was a cloud model.
+    // Deliberately separate from fellBackToCloud -- using cloud for voice is a
+    // deliberate choice, not a fallback, and conflating them would mislead.
+    val voiceModel: String? = null,
+    val voiceViaCloud: Boolean = false,
 )
 
 /**
@@ -625,8 +630,12 @@ private fun ChatScreen(
                 val transcript = result.optString("transcript").trim()
                 val reply = result.optString("reply").trim()
                 val audioB64 = result.optString("audio_base64")
+                val usedModel = result.optString("model").ifBlank { null }
+                val usedCloud = result.optBoolean("via_cloud", false)
                 if (transcript.isNotEmpty()) messages.add(Msg("user", transcript))
-                if (reply.isNotEmpty()) messages.add(Msg("assistant", reply))
+                if (reply.isNotEmpty()) {
+                    messages.add(Msg("assistant", reply, voiceModel = usedModel, voiceViaCloud = usedCloud))
+                }
                 // Persist like a normal rig turn.
                 withContext(Dispatchers.IO) {
                     val cid = convId ?: db.newConversation("rig", currentModel, transcript.take(40))
@@ -1683,6 +1692,20 @@ private fun Bubble(m: Msg, onRetry: (() -> Unit)? = null) {
         ) {
             Box(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                 Column {
+                    // Spoken replies say which brain answered -- otherwise it's
+                    // invisible whether the rig or a cloud model did the thinking.
+                    if (!isUser && m.voiceModel != null) {
+                        Row(Modifier.padding(bottom = 6.dp)) {
+                            Surface(shape = RoundedCornerShape(999.dp), color = GraphiteSurfaceHigh) {
+                                Text(
+                                    (if (m.voiceViaCloud) "☁ " else "◈ ") + "🎙 ${m.voiceModel}",
+                                    fontSize = 10.sp,
+                                    color = if (m.voiceViaCloud) Signal else TextMuted,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                )
+                            }
+                        }
+                    }
                     if (!isUser && m.fellBackToCloud) {
                         Row(Modifier.padding(bottom = 6.dp)) {
                             Surface(

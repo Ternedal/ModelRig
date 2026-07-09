@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.10.1** — "🔇 Stemmen læser ikke længere markdown-tegn op ('stjerne stjerne'). Strippes før TTS; chatten viser stadig markdown". Follows 1.10.0. Autonomous sessions, **2026-07-02 → 07-09**.
+Version **1.11.0** — "🔍 Stemme-svar viser hvilken model der svarede + 🎮 CUDA-DLL'er findes nu automatisk, så ASR kan køre på GPU". Follows 1.10.1. Autonomous sessions, **2026-07-02 → 07-09**.
 
 > **🎉 MILEPÆL 8/7 aften:** Hele Alva Voice-kæden er nu bevist på Anders' rig — ASR→LLM→TTS kørte ende-til-ende. Input-WAV → dansk transskription → llama3.2-svar → tale delt i sætnings-WAV'er. Alle tre Voice-lag + LLM koblet sammen og kørende. (Svar-kvaliteten var svag med den lille 1b-model — vrøvl + engelsk-indblanding — men det beviser rørene; hermes3:8b/qwen giver gode svar. TTFA-metrikken fejlede i test-one-lineren men er verificeret korrekt i selve voice_pipeline.py-modulet.)
 
@@ -47,6 +47,39 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.11.0  (Gennemsigtighed i stemme + CUDA løst i kode)
+
+### 🔍 Stemme-svar viser hvilken model der svarede
+- Anders' observation efter at have testet cloud-voice: *"det er ikke helt
+  gennemsigtigt hvad der svarer."* Han havde ret — svaret så ens ud uanset om
+  hermes3 eller kimi-k2.6 tænkte.
+- Pipelinen returnerer nu `via_cloud`, og hver talt besvarelse får en chip:
+  **`◈ 🎙 hermes3:8b`** (rig) eller **`☁ 🎙 kimi-k2.6`** (cloud, i signalfarve).
+- **Bevidst adskilt fra `fellBackToCloud`**: at bruge cloud til stemme er et
+  VALG, ikke en fallback. At blande dem ville være vildledende.
+
+### 🎮 CUDA-DLL'er findes nu automatisk (ASR kan køre på GPU)
+- **Rodårsagen fra 9/7 er løst i kode, ikke i en instruktion.** CTranslate2
+  skal bruge `cublas64_12.dll` + cuDNN ved load-tid. `pip install
+  nvidia-cublas-cu12 nvidia-cudnn-cu12` lægger dem i
+  `site-packages/nvidia/*/bin` — som Windows **ikke** søger i. Derfor fejlede
+  Anders' GPU-forsøg trods installerede pakker.
+- **Fix**: `_add_cuda_dll_dirs()` finder `nvidia`-namespace-pakkens bin-mapper
+  og registrerer dem via `os.add_dll_directory()` (Python 3.8+ på Windows
+  søger kun i registrerede mapper). Kaldes lige før modellen loades — ikke ved
+  import, for CTranslate2 resolver DLL'erne på load-tidspunktet.
+- **No-op udenfor Windows** og harmløs hvis pakkerne mangler. Verificeret på
+  Linux: returnerer tom liste, ingen crash.
+- **Diagnosticerbart**: `/voice/asr/status` viser nu `cuda_dll_dirs`. Er den
+  tom mens device er `cuda`, mangler nvidia-pakkerne.
+- **Fejlbeskeden er handlingsanvisende**: rammer den en cublas/cudnn/DLL-fejl,
+  fortæller den præcis hvad man skal installere, og hvordan man falder tilbage
+  til CPU.
+- **Ikke GPU-testet** (jeg har ingen NVIDIA-GPU) — Anders skal prøve
+  `ALVA_ASR_DEVICE=cuda` med `large-v3` og se om den loader nu.
+
+- Alle 68 assertions grønne. Worker + Android.
 
 ## What's new in 1.10.1  🔇  (Stemmen læser ikke markdown op)
 - **Fundet af Anders 9/7 under brug**: LLM'en skriver markdown (`**fed**`,
