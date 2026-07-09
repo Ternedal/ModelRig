@@ -5,7 +5,7 @@
 > Piper, ende-til-ende på telefonen. Dagens root cause (CUDA-DLL-søgesti)
 > fundet og fixet i v1.12.3 (CI grøn, 4 assets). Appen omdøbes **Alva →
 > Kaliv** (navn i v1.13.0; ikon afventer Anders' brand-pakke). Udestående
-> og nye horisonter: se §9–12.
+> og nye horisonter: se §9–15 (inkl. målarkitektur i §14).
 
 **Gældende version:** 0.15.5 · **Dato:** 2026-07-04 · **Ejer:** Anders
 **Estimat-enhed:** "byggesession" = én autonom arbejdsblok med Claude; leverer typisk 1 tagget release.
@@ -133,7 +133,7 @@ CI, RAG-ingest fra telefonen. Alt sammen bevidst skubbet — se V2.
 > lukkes fremover med dato + notat her i docs, ikke med tags. **Reel lukning
 > udestår dog on-device** (~10 min, 3 tjek): (1) txt/md-ingest via
 > filvælgeren fra telefonen, (2) model-administration: pull + slet en lille
-> model fra appen, (3) samtale: omdøb → søg → del som markdown. Se §12.
+> model fra appen, (3) samtale: omdøb → søg → del som markdown. Se §15.
 
 Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
 
@@ -401,7 +401,100 @@ Estimat: 6–10 byggesessioner.
 
 ---
 
-## 12. Konkrete næste skridt (pr. 9/7-2026 ~23:30)
+## 12. V7 — "Kaliv som apparat" (drift & robusthed)
+
+Tema: fra tre cmd-vinduer til et apparat. Når Kaliv er ambient (V6) og må
+handle (V5), bliver DRIFTEN det svageste led — riggen skal overleve
+genstart, opdatere sig selv og kunne reddes.
+
+1. **Windows-services**: Ollama, worker og server som services med
+   autostart + watchdog (genstart ved crash). Erstatter
+   tre-vinduers-ritualet i HANDOFF §2.
+2. **Selvopdatering**: rig-agent der ser nye GitHub-releases, henter,
+   verificerer (checksum) og ruller tilbage ved fejl [beslutning:
+   fuldautomatisk vs. ét-kliks-godkendelse].
+3. **Backup/restore**: SQLite + RAG-indeks + memory + audit-log som én
+   pakke; planlagt + manuel; test-restore indgår i release-tjek.
+4. **Sundhed & observabilitet**: samlet health for hele kæden,
+   GPU/VRAM/disk-metrikker, logrotation — og Kaliv kan selv svare på
+   "hvordan har riggen det?" via V5's rig-status-tool.
+5. **Hærdning**: TLS på LAN [beslutning: selvsigneret + pinning i
+   appen], token-rotation, rate limits.
+6. **Strøm/termik** [valgfrit]: GPU-idle-politik, planlagt dvale/vågn.
+
+**Exit-kriterium:** koldt strømsvigt → riggen kommer op af sig selv; en
+ny release installeres uden manuel zip-dans; restore fra backup er
+bevist én gang. Estimat: 4–7 sessioner.
+*Note:* pkt. 1–3 kan trækkes frem før V5/V6, hvis dagligbrug kræver det.
+
+---
+
+## 13. V8 — "Kaliv i huset" (flere mennesker)
+
+Tema: fra personlig til fælles — husstand og gæster, uden at nogen kan
+se andres data. Forudsætter V5's sikkerhedsmodel og V7's robusthed.
+
+1. **Multi-bruger-model**: profiler pr. person, per-bruger-parring af
+   enheder; roller (ejer / husstand / gæst).
+2. **Data-isolation**: samtaler, RAG-kilder og memory adskilt pr.
+   bruger; delte kilder som eksplicit tilvalg.
+3. **Tool-rettigheder pr. rolle**: gæst = read-only eller intet; kun
+   ejer godkender nye tools [bygger på V5-whitelist].
+4. **Stemmeprofil (eksperiment)** [beslutning: biometri i hjemmet
+   ja/nej]: lokal speaker-id — "hvem taler?" — forlader aldrig huset.
+5. **Husstands-koordination**: fælles lister/påmindelser med ejerskab.
+
+**Exit-kriterium:** to personer bruger samme rig fra hver sin telefon
+uden at kunne se hinandens data; en gæsteprofil kan chatte men intet
+ændre. Estimat: 5–8 sessioner.
+
+> **Efter V8 (åben note, ikke et løfte):** "Kaliv lærer" — lokal
+> finjustering (QLoRA på egne data; 12 GB rækker til 7–8B) med
+> eval-harness. Dokumenteres først når/hvis det prioriteres.
+
+---
+
+## 14. Målarkitektur — slutbilledet V1→V8 konvergerer mod
+
+```
+        ┌─────────────── Klienter ────────────────┐
+        │ Kaliv Android ×N · desktop · station     │
+        └───────────────────┬──────────────────────┘
+                            │  parring pr. enhed/bruger · TLS
+                   ┌────────▼─────────┐
+                   │  Go-server :8080 │  adgang · proxy · rate limit
+                   └────────┬─────────┘
+                   ┌────────▼─────────┐        ┌──────────────────┐
+                   │  Worker :8099    │◄──────►│ MCP-servere      │
+                   │  RAG · ASR/TTS   │  tools │ (lokale, whitelist)│
+                   │  Memory · Audit  │        └──────────────────┘
+                   └───┬─────────┬────┘
+                       │         │  kun LLM-trin · eksplicit toggle
+                ┌──────▼───┐  ┌──▼─────────────┐
+                │  Ollama   │  │  Ollama Cloud  │
+                │  :11434   │  │  (valgfrit)    │
+                └───────────┘  └────────────────┘
+   Lager (alt lokalt): SQLite · RAG-indeks · Memory · Audit-log
+   Drift: services + watchdog · selvopdatering · backup/restore
+```
+
+**Invarianter — gælder i alle versioner, brydes aldrig:**
+- `applicationId` = `dk.ternedal.modelrig` (APK-signaturen fryses for evigt)
+- **Lyd forlader aldrig huset.** Kun det transskriberede spørgsmål kan gå
+  til cloud, kun ved eksplicit toggle; nøgler bruges én gang, gemmes aldrig
+- Alt persistent er lokalt, synligt og sletbart af ejeren
+- Ingen skrivende tool-handling uden eksplicit bekræftelse; alt i audit-log
+- Én statuskode = én betydning; status-endpoints laver ikke arbejde
+- Faser lukkes med dato i docs; release-tags forbliver `v1.x`
+- CI bygger kun Windows + Android — aldrig Linux/macOS-desktop
+
+**Komponentansvar:** server = adgang og routing, aldrig forretningslogik;
+worker = al orkestrering (RAG, voice, tools, memory) på loopback;
+klienter = tynde og danske; Ollama = eneste lokale LLM-runtime.
+
+---
+
+## 15. Konkrete næste skridt (pr. 9/7-2026 ~23:45)
 
 1. **Anders:** brand-pakke til Kaliv-ikonet (kravene er sendt).
 2. **Anders, 2 min ved næste rig-opstart:** hent `v1.12.3`-zip → normal
