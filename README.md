@@ -4,7 +4,7 @@ A local-first AI platform: run models on your own hardware via Ollama, reach the
 from a desktop app and an Android phone, with an optional RAG service and an
 Ollama Cloud fallback for when local isn't enough.
 
-Version: **1.11.0** (Stemme viser hvilken model svarede; CUDA-DLL'er findes automatisk)
+Version: **1.12.0** ✋ (Barge-in: afbryd Alva ved at tale; kompileret, ikke telefon-testet)
 
 ## Architecture
 ```

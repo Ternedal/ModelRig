@@ -596,6 +596,12 @@ private fun ChatScreen(
     // (kimi-k2.6) instead of what fits in 12 GB of VRAM. Off by default: the
     // transcript would leave the house, and the local path is the private one.
     var voiceUsesCloud by remember { mutableStateOf(store.voiceUsesCloud) }
+
+    // Barge-in: let the user cut Alva off by speaking while she talks. Needs
+    // echo cancellation on speaker (the mic hears Alva otherwise); trivially
+    // safe on a headset. Off by default until it's proven on a device.
+    var bargeInEnabled by remember { mutableStateOf(store.bargeInEnabled) }
+    var wasInterrupted by remember { mutableStateOf(false) }
     var hasMicPermission by remember {
         mutableStateOf(
             androidx.core.content.ContextCompat.checkSelfPermission(
@@ -611,7 +617,7 @@ private fun ChatScreen(
     // -> show transcript + reply in chat -> play the reply audio. No cloud
     // fallback (voice needs the rig). Runs off the main thread.
     fun runVoiceTurn(wav: ByteArray) {
-        voiceBusy = true; voiceError = null
+        voiceBusy = true; voiceError = null; wasInterrupted = false
         scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
@@ -644,10 +650,14 @@ private fun ChatScreen(
                     if (reply.isNotEmpty()) db.addMessage(cid, "assistant", reply)
                 }
                 if (audioB64.isNotEmpty()) {
-                    withContext(Dispatchers.IO) {
+                    val cut = withContext(Dispatchers.IO) {
                         val bytes = android.util.Base64.decode(audioB64, android.util.Base64.DEFAULT)
-                        dk.ternedal.modelrig.voice.VoiceCapture.playWav(bytes)
+                        val detector = if (bargeInEnabled && hasMicPermission) {
+                            dk.ternedal.modelrig.voice.BargeInDetector()
+                        } else null
+                        dk.ternedal.modelrig.voice.VoiceCapture.playWav(bytes, detector)
                     }
+                    wasInterrupted = cut
                 }
             } catch (e: Exception) {
                 voiceError = e.message ?: "stemme-fejl"
@@ -970,8 +980,27 @@ private fun ChatScreen(
                                         modelMenu = false
                                     },
                                 )
-                                HorizontalDivider()
                             }
+                            // Barge-in: speak to cut Alva off mid-reply. Needs the
+                            // mic while she talks, hence the permission check.
+                            if (mode == "rig") {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            (if (bargeInEnabled) "✋ " else "◇ ") +
+                                                "Afbryd Alva ved at tale",
+                                            color = if (bargeInEnabled) Signal else TextMuted,
+                                            fontSize = 13.sp,
+                                        )
+                                    },
+                                    onClick = {
+                                        bargeInEnabled = !bargeInEnabled
+                                        store.bargeInEnabled = bargeInEnabled
+                                        modelMenu = false
+                                    },
+                                )
+                            }
+                            if (mode == "rig") HorizontalDivider()
                             DropdownMenuItem(
                                 text = { Text("↻  Genindlæs modeller", color = Signal) },
                                 onClick = {
@@ -1138,6 +1167,13 @@ private fun ChatScreen(
                 modelError?.let {
                     Text(it, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
                 }
+                if (wasInterrupted && !voiceBusy && !recording) {
+                    Text(
+                        "✋ Du afbrød Alva — tryk 🎙 for at sige noget",
+                        color = TextMuted, fontSize = 12.sp,
+                        modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     // Vision is chat-only (cloud/rig), not RAG. Requires a
                     // vision-capable model; the button just attaches — the
@@ -1166,6 +1202,7 @@ private fun ChatScreen(
                                     val wav = voiceCapture.stopToWav()
                                     if (wav != null) runVoiceTurn(wav) else voiceError = "ingen lyd optaget"
                                 } else {
+                                    wasInterrupted = false
                                     try { voiceCapture.start(); recording = true }
                                     catch (e: Exception) { voiceError = e.message ?: "kunne ikke optage" }
                                 }

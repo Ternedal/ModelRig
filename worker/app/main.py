@@ -19,7 +19,7 @@ from . import ollama_client as oc
 from . import rag
 from .store import DocStore
 
-VERSION = "1.11.0"
+VERSION = "1.12.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()

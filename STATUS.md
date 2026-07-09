@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.11.0** — "🔍 Stemme-svar viser hvilken model der svarede + 🎮 CUDA-DLL'er findes nu automatisk, så ASR kan køre på GPU". Follows 1.10.1. Autonomous sessions, **2026-07-02 → 07-09**.
+Version **1.12.0** — "✋ Barge-in: afbryd Alva ved at tale. Afspilning gjort afbrydelig (MODE_STREAM) + ekko-annullering. KOMPILERET, IKKE telefon-testet". Follows 1.11.0. Autonomous sessions, **2026-07-02 → 07-09**.
 
 > **🎉 MILEPÆL 8/7 aften:** Hele Alva Voice-kæden er nu bevist på Anders' rig — ASR→LLM→TTS kørte ende-til-ende. Input-WAV → dansk transskription → llama3.2-svar → tale delt i sætnings-WAV'er. Alle tre Voice-lag + LLM koblet sammen og kørende. (Svar-kvaliteten var svag med den lille 1b-model — vrøvl + engelsk-indblanding — men det beviser rørene; hermes3:8b/qwen giver gode svar. TTFA-metrikken fejlede i test-one-lineren men er verificeret korrekt i selve voice_pipeline.py-modulet.)
 
@@ -47,6 +47,37 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.12.0  ✋  (Barge-in — afbryd Alva ved at tale)
+- **Sidste store Voice-brik.** Tal mens Alva svarer, og hun stopper.
+- **Afspilningen skulle omskrives**: den gamle `playWav` brugte `MODE_STATIC` +
+  `Thread.sleep` — hele bufferen blev afleveret til hardwaren og kunne ikke
+  stoppes midt i en sætning. Nu `MODE_STREAM` med en skrive-løkke der tjekker
+  for afbrydelse mellem hver chunk.
+- **Ekko-annullering, to lag** (ellers hører mikrofonen Alvas egen stemme
+  gennem højttaleren og afbryder konstant):
+  1. `AudioSource.VOICE_COMMUNICATION` — den kilde telefonopkald bruger, som
+     beder platformen om AEC/NS/AGC
+  2. `AcousticEchoCanceler` bundet til sessionen, når enheden tilbyder den
+- **Detektion**: simpel energi-gate med hangover — RMS skal overstige en
+  tærskel i flere sammenhængende frames, så en smækkende dør ikke klipper Alva
+  af midt i en sætning.
+- **Én kodesti til både headset og højttaler** (Anders' spørgsmål: kan man
+  begge dele?). På headset er der intet ekko at annullere, så det er trivielt
+  pålideligt. På højttaler afhænger det af telefonens AEC — **kvaliteten er
+  stærkt OEM-afhængig**. `BargeInDetector.available` afslører om enheden
+  overhovedet tilbyder AEC.
+- **Slået fra som standard**: en falsk afbrydelse midt i en sætning er mere
+  irriterende end at undvære funktionen. Kontakt i model-dropdownen:
+  "✋ Afbryd Alva ved at tale". Statuslinjen bekræfter: "Du afbrød Alva".
+- **Sikkerhed verificeret i kode**: uden detektor er afspilningen UÆNDRET
+  (null-safe kald); ressourcer frigives i `finally`; manglende
+  mikrofon-tilladelse degraderer pænt (barge-in fyrer bare ikke).
+- **ÆRLIGT — ikke telefon-testet.** Særligt `rmsThreshold` (1500.0) er et
+  kvalificeret startgæt der sandsynligvis skal kalibreres mod din faktiske
+  telefon og højttaler. For lav: Alva afbryder sig selv. For høj: du skal råbe.
+  Prøv headset først (intet ekko), så højttaler.
+- Alle 68 assertions grønne. Ren Android-ændring.
 
 ## What's new in 1.11.0  (Gennemsigtighed i stemme + CUDA løst i kode)
 

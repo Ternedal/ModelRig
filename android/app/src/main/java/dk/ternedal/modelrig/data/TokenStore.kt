@@ -50,6 +50,16 @@ class TokenStore(context: Context) {
         get() = prefs.getBoolean("voice_uses_cloud", false)
         set(v) { prefs.edit().putBoolean("voice_uses_cloud", v).apply() }
 
+    /**
+     * When true, speaking while Alva talks cuts her off (barge-in). Relies on
+     * the platform's acoustic echo canceler when on speaker; a headset removes
+     * the problem entirely. Off by default -- a false trigger mid-sentence is
+     * more annoying than not having the feature.
+     */
+    var bargeInEnabled: Boolean
+        get() = prefs.getBoolean("barge_in", false)
+        set(v) { prefs.edit().putBoolean("barge_in", v).apply() }
+
     /** "rig" or "cloud" — which source the chat screen uses. */
     var chatMode: String
         get() = prefs.getString("chat_mode", "rig") ?: "rig"
