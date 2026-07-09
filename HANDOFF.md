@@ -1,6 +1,6 @@
 # ModelRig / Alva — handoff til ny chat
 
-**Dato:** 2026-07-09 · **Version:** v1.12.1 · **Repo:** `github.com/Ternedal/ModelRig` (privat)
+**Dato:** 2026-07-09 (opdateret ~22:00) · **Version:** v1.12.3 · **Repo:** `github.com/Ternedal/ModelRig` (privat)
 
 Copy/paste dette som første besked i en ny chat.
 
@@ -10,10 +10,12 @@ Copy/paste dette som første besked i en ny chat.
 
 1. **⚠️ GitHub PAT'en er stadig aktiv** og er brugt til ~15 releases i dag.
    Revokér den: `github.com/settings/tokens`. Dette er højeste prioritet.
-2. **Der er en åben fejl** (se §5): voice fejlede med 501, men både ASR og
-   TTS loader fint isoleret (verificeret 9/7 aften). Efter v1.12.2 printer
-   worker-konsollen selv den rigtige fejl — start worker, prøv voice én
-   gang, læs vindue 2.
+2. **Voice-fejlen er LØST** (se §5): root cause var CUDA-DLL-søgestien.
+   Fundet via v1.12.2's fejllogning, hardware-bekræftet med manuel PATH-test
+   og fixet i v1.12.3 (workeren sætter nu selv PATH). GPU-voice kørte
+   ende-til-ende på telefonen 9/7 ~21:50: large-v3 på cuda + hermes3:8b +
+   Piper. Ny kendt mangel fundet samme aften: ingen manuel stop af
+   afspilning (se §4).
 3. **Anders har flere kopier af repoet** (`modelrig`, `modelrig-new`,
    `modelrig-mono`) med forskellig kode-alder. Det har forårsaget flere falske
    fejlspor. Ryd op: behold én mappe.
@@ -103,6 +105,10 @@ python -m piper.download_voices da_DK-talesyntese-medium
 
 - **Barge-in** (v1.12.0) — kompileret, aldrig prøvet. `rmsThreshold = 1500.0`
   er et gæt der skal kalibreres. **Prøv headset først** (intet ekko).
+- **⚠️ Stop af afspilning MANGLER** (fundet on-device 9/7 ~21:50, første
+  fungerende GPU-voice-tur): mens Alva taler er der ingen manuel afbrydelse
+  — eneste vej er barge-in, som er ukalibreret. Tap-to-stop er næste
+  app-opgave (v1.13.0, se §10).
 - **Model-chip på stemme-svar** (v1.11.0) — `◈ 🎙 hermes3:8b` / `☁ 🎙 kimi-k2.6`
 - **PDF/DOCX-upload fra telefonen** (kun testet på rig'en)
 - **Vision** (v1.1.0) — kræver `ollama pull llama3.2-vision`
@@ -110,10 +116,26 @@ python -m piper.download_voices da_DK-talesyntese-medium
 
 ---
 
-## 5. ÅBEN FEJL — status pr. 9/7 aften
+## 5. LØST 9/7 ~21:50 — CUDA-DLL-søgestien (fixet i v1.12.3)
 
-**Symptom:** `POST /voice/converse/upload` → `501` i worker-loggen. Appen
-viser "Stemme-fejl: Software caused connection abort" (skjuler detail).
+**Root cause:** `os.add_dll_directory()` er ikke nok på Windows for
+CTranslate2. Beviskæden fra riggen: mapperne VAR registreret
+(`cuda_dll_dirs` udfyldt), `cublas64_12.dll` LÅ på disken (102 MB) — og
+encode fejlede alligevel, fordi CTranslate2 slår cuBLAS op ad den klassiske
+søgesti, som kun kigger i PATH. Manuel `set PATH=...nvidia\cublas\bin;...`
+→ voice virkede øjeblikkeligt, ende-til-ende på telefonen.
+
+**Fix (v1.12.3):** `_add_cuda_dll_dirs()` prepender nu også bin-mapperne
+til `PATH`. Ingen manuelle env-linjer ved normal start.
+
+**Vigtig detalje:** fejlen udløses først ved første `encode()` — IKKE ved
+model-konstruktion. Derfor var gårsdagens isolerede "MODEL LOADED OK" falsk
+tryghed: konstruktionen rører ikke cuBLAS.
+
+Historik nedenfor bevaret som dokumentation af diagnosen.
+
+**Oprindeligt symptom:** `POST /voice/converse/upload` → `501` i
+worker-loggen. Appen viste "Software caused connection abort".
 
 **Udført 9/7 aften (denne + forrige session):**
 - ASR isoleret: BESTÅET (`cuda`, `large-v3`, MODEL LOADED OK)
@@ -129,11 +151,10 @@ viser "Stemme-fejl: Software caused connection abort" (skjuler detail).
 - **Worker-konsollen logger fejlen med fuld traceback** — appen behøver
   ikke vise noget; svaret står i vindue 2
 
-**Næste skridt (kræver Anders' rig):**
-1. Hent v1.12.2-zip, pak ud, start worker fra kildekoden (§2)
-2. Prøv voice fra telefonen én gang
-3. Læs fejlen i vindue 2 (`pipeline_failure=...` + traceback) — det ER
-   root cause. Alternativt, uden telefon:
+**Sådan blev den fundet (udført 9/7 aften):** worker startet fra ren
+v1.12.2, voice prøvet fra telefonen, fejlen læst i vindue 2
+(`pipeline_failure='Library cublas64_12.dll is not found...'` + traceback).
+Diagnose-kommandoerne, til reference:
 ```cmd
 curl -s http://127.0.0.1:8099/voice/tts/status
 mkdir C:\Temp 2>nul
@@ -142,7 +163,7 @@ curl -s -X POST http://127.0.0.1:8099/voice/tts/synthesize -H "Content-Type: app
 ```
 Sammenlign `voices_dir` fra status med hvor `.onnx`-filen faktisk ligger.
 
-**Stadig sandsynlige root causes** (nu synlige i loggen når de rammes):
+**Hypoteser undervejs** (alle afkræftet af loggen — bevaret som historik):
 - `ALVA_TTS_VOICES_DIR`/`ALVA_TTS_VOICE` sat anderledes i worker-vinduet
 - `piper-tts`/`faster-whisper` i en anden Python end worker'ens
 - Worker startet fra mappe med gammel kode (sket to gange 9/7)
@@ -214,6 +235,12 @@ MODELRIG_HOST       (sæt til 0.0.0.0!)
 
 7. **On-device-test er den eneste sandhed.** Alle tre store Voice-bugs
    (PyAV, timeouts, CUDA) var usynlige for headless builds.
+
+8. **`os.add_dll_directory` er ikke nok på Windows.** CTranslate2 loader
+   cuBLAS ad den klassiske søgesti (kun PATH). Mappen var registreret,
+   DLL'en lå på disken — load fejlede alligevel, og først ved `encode()`,
+   ikke ved konstruktion (så "MODEL LOADED OK" beviser intet om CUDA).
+   Fix i v1.12.3: sæt BÅDE add_dll_directory og PATH.
 
 8. **Fire versionskonstanter bumpes i lockstep:** `worker/app/main.py`
    (VERSION), `backend/internal/config/config.go` (Version),
@@ -290,6 +317,7 @@ git push <url> main:main
 - Forbedringer til markdown-strip, chunking, fejlbeskeder
 
 **Kræver Anders' test:**
+- Tap-to-stop på stemme-afspilning (bygges som v1.13.0 — fundet 9/7)
 - Barge-in-kalibrering (rmsThreshold)
 - De resterende tests i §4
 

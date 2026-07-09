@@ -58,9 +58,13 @@ def _add_cuda_dll_dirs() -> list[str]:
     enough, and he had to fall back to CPU.
 
     Python 3.8+ on Windows only searches directories registered via
-    os.add_dll_directory(), so we register the nvidia package bin dirs
-    ourselves. No-op on Linux/macOS (where the loader uses RPATH/LD_LIBRARY_PATH)
-    and harmless if the packages aren't installed.
+    os.add_dll_directory() -- but that only covers libraries loaded with the
+    new search flags. CTranslate2 resolves cuBLAS via the LEGACY search path,
+    which only consults PATH (hardware-verified 2026-07-09: dirs registered,
+    DLL on disk, load still failed; prepending PATH fixed it). So we do BOTH:
+    register the dirs and prepend them to PATH. No-op on Linux/macOS (where
+    the loader uses RPATH/LD_LIBRARY_PATH) and harmless if the packages
+    aren't installed.
     """
     global _dll_dirs_added
     if _dll_dirs_added or not hasattr(os, "add_dll_directory"):
@@ -82,6 +86,17 @@ def _add_cuda_dll_dirs() -> list[str]:
                     added.append(bin_dir)
                 except OSError:
                     pass
+    if added:
+        # add_dll_directory() alone is NOT enough here. Hardware-verified on
+        # Anders' rig 2026-07-09 (v1.12.2 logging): the dirs WERE registered,
+        # cublas64_12.dll WAS on disk, and CTranslate2 still failed with
+        # "Library cublas64_12.dll is not found or cannot be loaded" -- it
+        # resolves cuBLAS through the legacy search path, which only consults
+        # PATH. Prepending the same dirs to PATH fixed it on the spot
+        # (manual `set PATH=...` -> voice worked end-to-end). We set both.
+        os.environ["PATH"] = (
+            os.pathsep.join(added) + os.pathsep + os.environ.get("PATH", "")
+        )
     _dll_dirs_added = True
     _registered_dll_dirs.extend(added)
     return added
