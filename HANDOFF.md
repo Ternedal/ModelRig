@@ -215,6 +215,12 @@ MODELRIG_HOST       (sæt til 0.0.0.0!)
 7. **On-device-test er den eneste sandhed.** Alle tre store Voice-bugs
    (PyAV, timeouts, CUDA) var usynlige for headless builds.
 
+8. **Fire versionskonstanter bumpes i lockstep:** `worker/app/main.py`
+   (VERSION), `backend/internal/config/config.go` (Version),
+   `desktop/composeApp/build.gradle.kts` (packageVersion),
+   `android/app/build.gradle.kts` (versionName). CI's smoke test fejler
+   releasen hvis server-exe'ens /healthz ikke matcher (fanget 9/7, v1.12.2).
+
 ---
 
 ## 8. Arbejdsform med Anders
