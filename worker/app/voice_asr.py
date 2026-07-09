@@ -33,6 +33,18 @@ _model = None
 _model_lock = threading.Lock()
 _load_error: Optional[str] = None
 _dll_dirs_added = False
+_registered_dll_dirs: list[str] = []
+
+
+def registered_dll_dirs() -> list[str]:
+    """Which CUDA DLL directories have been registered so far.
+
+    Read-only: does NOT trigger registration. Empty until the model has been
+    loaded on a cuda device (registration is lazy), or if the nvidia-* pip
+    packages aren't installed. A status endpoint must answer instantly, so it
+    reads this rather than doing the work.
+    """
+    return list(_registered_dll_dirs)
 
 
 def _add_cuda_dll_dirs() -> list[str]:
@@ -52,7 +64,7 @@ def _add_cuda_dll_dirs() -> list[str]:
     """
     global _dll_dirs_added
     if _dll_dirs_added or not hasattr(os, "add_dll_directory"):
-        return []
+        return list(_registered_dll_dirs)
     added: list[str] = []
     try:
         import nvidia  # the namespace package created by nvidia-* wheels
@@ -71,6 +83,7 @@ def _add_cuda_dll_dirs() -> list[str]:
                 except OSError:
                     pass
     _dll_dirs_added = True
+    _registered_dll_dirs.extend(added)
     return added
 
 

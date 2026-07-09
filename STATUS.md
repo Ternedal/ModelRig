@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.12.0** — "✋ Barge-in: afbryd Alva ved at tale. Afspilning gjort afbrydelig (MODE_STREAM) + ekko-annullering. KOMPILERET, IKKE telefon-testet". Follows 1.11.0. Autonomous sessions, **2026-07-02 → 07-09**.
+Version **1.12.1** — "Status-endpointet laver ikke længere arbejde (hang på Anders' maskine). CUDA-mapper rapporteres nu fra cache". Follows 1.12.0. Autonomous sessions, **2026-07-02 → 07-09**.
 
 > **🎉 MILEPÆL 8/7 aften:** Hele Alva Voice-kæden er nu bevist på Anders' rig — ASR→LLM→TTS kørte ende-til-ende. Input-WAV → dansk transskription → llama3.2-svar → tale delt i sætnings-WAV'er. Alle tre Voice-lag + LLM koblet sammen og kørende. (Svar-kvaliteten var svag med den lille 1b-model — vrøvl + engelsk-indblanding — men det beviser rørene; hermes3:8b/qwen giver gode svar. TTFA-metrikken fejlede i test-one-lineren men er verificeret korrekt i selve voice_pipeline.py-modulet.)
 
@@ -47,6 +47,21 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.12.1  (Status-endpointet skal ikke lave arbejde)
+- **Min fejl i 1.11.0**: jeg lod `/voice/asr/status` kalde
+  `_add_cuda_dll_dirs()` for at rapportere hvilke mapper der var registreret.
+  Et status-endpoint skal svare **øjeblikkeligt** — ikke importere pakker og
+  scanne filsystemet. Hos Anders hang `curl .../voice/asr/status` helt, hvilket
+  gjorde diagnosen sværere præcis når han havde brug for den.
+- **Fix**: `registered_dll_dirs()` er en ren læse-funktion der returnerer hvad
+  der ER blevet registreret (registreringen sker stadig lazily ved første
+  model-load). Status kalder den og laver intet arbejde.
+- Verificeret: status svarer inden for 5 sekunder over HTTP; funktionen
+  returnerer tom liste før første load uden at gøre noget.
+- **Bemærk for Anders**: den 501 du så skyldtes at din lokale `modelrig`-mappe
+  havde GAMMEL kode (`AttributeError: no attribute '_add_cuda_dll_dirs'`) og
+  kørte `device=cuda` uden DLL-fixet. Hent v1.12.1-zip'en for at prøve GPU.
 
 ## What's new in 1.12.0  ✋  (Barge-in — afbryd Alva ved at tale)
 - **Sidste store Voice-brik.** Tal mens Alva svarer, og hun stopper.
