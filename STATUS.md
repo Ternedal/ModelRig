@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.8.0** — "📝 RAG DOCX-ingest: upload .docx → rig udtrækker tekst inkl. tabeller (python-docx) → chunk/embed/store. Udtræk HARDWARE-testet". Follows 1.7.0. Autonomous sessions, **2026-07-02 → 07-08**.
+Version **1.8.1** — "Voice-timeout-fix: første stemme-tur timede ud mens rig'en stadig arbejdede (Whisper-load i VRAM). Voice + dokument-ingest får nu 5 min timeout". Follows 1.8.0. Autonomous sessions, **2026-07-02 → 07-09**.
 
 > **🎉 MILEPÆL 8/7 aften:** Hele Alva Voice-kæden er nu bevist på Anders' rig — ASR→LLM→TTS kørte ende-til-ende. Input-WAV → dansk transskription → llama3.2-svar → tale delt i sætnings-WAV'er. Alle tre Voice-lag + LLM koblet sammen og kørende. (Svar-kvaliteten var svag med den lille 1b-model — vrøvl + engelsk-indblanding — men det beviser rørene; hermes3:8b/qwen giver gode svar. TTFA-metrikken fejlede i test-one-lineren men er verificeret korrekt i selve voice_pipeline.py-modulet.)
 
@@ -47,6 +47,25 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.8.1  (Voice-timeout-fix — fundet på Anders' telefon)
+- **FØRSTE RIGTIGE ANDROID-VOICE-FEJL, fundet 9/7 på Anders' Pixel 6a**:
+  stemme-turen fejlede med `Software caused connection abort`. Statuslinjen
+  viste "Alva lytter og svarer…" — så optagelse, WAV-encoding og upload
+  VIRKEDE. Det var appens HTTP-klient der gav op.
+- **Rodårsag**: én fælles OkHttpClient med `readTimeout(120s)`. Nok til
+  tekst-chat, men den FØRSTE stemme-tur på en kold rig skal loade Whisper
+  large-v3 i VRAM (~2.5GB, titals sekunder), DEREFTER køre LLM'en, DEREFTER
+  syntetisere tale. Det overskrider let 120s.
+- **Fix**: dedikeret `voiceHttp`-klient med **5 min readTimeout** + 2 min
+  writeTimeout (upload af base64-lyd). Tekst-chat beholder 120s bevidst —
+  der er en lang ventetid faktisk et symptom på noget galt.
+- **PDF/DOCX-ingest bruger nu også den lange klient**: et stort dokument =
+  mange embedding-kald til Ollama, samme timeout-risiko. Fanget preemptivt.
+- **Delvist bevis for Android-Voice-laget**: mikrofon-optagelse, WAV-encoding,
+  base64-upload og rig-kommunikation er nu bekræftet på ægte hardware. Kun
+  svar-afspilningen (AudioTrack) er stadig ubevist — den blev aldrig nået.
+- Ren Android-ændring. Bygger APK + Windows-jar + server-exes.
 
 ## What's new in 1.8.0  📝  (RAG DOCX-ingest — python-docx)
 - **Word-dokumenter kan nu ingestes til RAG**: upload en .docx → rig'en

@@ -26,6 +26,21 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         .readTimeout(120, TimeUnit.SECONDS)
         .build()
 
+    /**
+     * Voice turns need a much longer read timeout than text chat. The first
+     * voice turn on a cold rig loads Whisper large-v3 into VRAM (~2.5 GB, tens
+     * of seconds), THEN runs the LLM, THEN synthesizes speech -- easily past
+     * the 120s chat timeout. Confirmed on Anders' phone 2026-07-09: the first
+     * turn died with "Software caused connection abort" while the rig was still
+     * working. Subsequent turns are much faster (models stay cached), but the
+     * first one must be allowed to finish.
+     */
+    private val voiceHttp = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.MINUTES)
+        .writeTimeout(2, TimeUnit.MINUTES)  // uploading base64 audio
+        .build()
+
     private val jsonType = "application/json".toMediaType()
 
     fun claimPairing(deviceName: String, code: String): String {
@@ -106,7 +121,7 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         val body = payload.toString().toRequestBody(jsonType)
         val builder = Request.Builder().url("$base/api/v1/voice/converse").post(body)
         token?.let { builder.header("Authorization", "Bearer $it") }
-        http.newCall(builder.build()).execute().use { resp ->
+        voiceHttp.newCall(builder.build()).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) throw ModelRigException("voice failed (${resp.code}): $text")
             return JSONObject(text)
@@ -392,7 +407,8 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
             .toRequestBody(jsonType)
         val builder = Request.Builder().url("$base/api/v1/rag/ingest/pdf").post(payload)
         token?.let { builder.header("Authorization", "Bearer $it") }
-        http.newCall(builder.build()).execute().use { resp ->
+        // Long timeout: a large PDF means many embedding calls to Ollama.
+        voiceHttp.newCall(builder.build()).execute().use { resp ->
             val body = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) throw ModelRigException("PDF ingest failed (${resp.code}): $body")
             val o = JSONObject(body)
@@ -418,7 +434,8 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
             .toRequestBody(jsonType)
         val builder = Request.Builder().url("$base/api/v1/rag/ingest/docx").post(payload)
         token?.let { builder.header("Authorization", "Bearer $it") }
-        http.newCall(builder.build()).execute().use { resp ->
+        // Long timeout: a large document means many embedding calls to Ollama.
+        voiceHttp.newCall(builder.build()).execute().use { resp ->
             val body = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) throw ModelRigException("DOCX ingest failed (${resp.code}): $body")
             val o = JSONObject(body)
