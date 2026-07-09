@@ -113,11 +113,27 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
      * the reply text, and a combined reply WAV (base64) to play back. Voice runs
      * on the rig (that's where ASR/TTS live), so it needs the rig reachable --
      * there's no cloud fallback for voice, unlike text chat.
+     *
+     * cloudBaseUrl/cloudKey optionally move ONLY the LLM step to Ollama Cloud,
+     * so a spoken question can be answered by a large model (e.g. kimi-k2.6)
+     * that a 12 GB GPU can't host. ASR and TTS stay local either way. The key
+     * goes to the user's own rig over their LAN and isn't stored there.
+     *
      * Returns {transcript, reply, audio_base64, time_to_first_audio_s}.
      */
-    fun voiceConverse(audioB64: String, language: String = "da", model: String? = null): JSONObject {
+    fun voiceConverse(
+        audioB64: String,
+        language: String = "da",
+        model: String? = null,
+        cloudBaseUrl: String? = null,
+        cloudKey: String? = null,
+    ): JSONObject {
         val payload = JSONObject().put("audio_base64", audioB64).put("language", language)
         if (model != null) payload.put("model", model)
+        if (cloudBaseUrl != null && cloudKey != null) {
+            payload.put("llm_base_url", cloudBaseUrl)
+            payload.put("llm_api_key", cloudKey)
+        }
         val body = payload.toString().toRequestBody(jsonType)
         val builder = Request.Builder().url("$base/api/v1/voice/converse").post(body)
         token?.let { builder.header("Authorization", "Bearer $it") }

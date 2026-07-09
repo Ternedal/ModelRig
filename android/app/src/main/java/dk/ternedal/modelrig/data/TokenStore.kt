@@ -41,6 +41,15 @@ class TokenStore(context: Context) {
         get() = prefs.getString("cloud_model", "gpt-oss:120b") ?: "gpt-oss:120b"
         set(v) { prefs.edit().putString("cloud_model", v).apply() }
 
+    /**
+     * When true, a voice turn's LLM step is answered by the cloud model instead
+     * of a local one. ASR and TTS still run on the rig -- only the thinking
+     * moves. Off by default: the local path keeps the transcript in the house.
+     */
+    var voiceUsesCloud: Boolean
+        get() = prefs.getBoolean("voice_uses_cloud", false)
+        set(v) { prefs.edit().putBoolean("voice_uses_cloud", v).apply() }
+
     /** "rig" or "cloud" — which source the chat screen uses. */
     var chatMode: String
         get() = prefs.getString("chat_mode", "rig") ?: "rig"

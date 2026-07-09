@@ -57,13 +57,26 @@ async def chat(messages: list[dict], model: str | None = None) -> str:
     return r.json().get("message", {}).get("content", "")
 
 
-async def chat_stream(messages: list[dict], model: str | None = None):
+async def chat_stream(messages: list[dict], model: str | None = None,
+                      base_url: str | None = None, api_key: str | None = None):
     """Async generator yielding raw NDJSON lines (bytes) from Ollama's streaming
-    chat. Raises OllamaError (before the first yield) if the request can't start."""
+    chat. Raises OllamaError (before the first yield) if the request can't start.
+
+    base_url/api_key let a caller stream from a DIFFERENT Ollama upstream than
+    the local rig -- specifically Ollama Cloud. Used by the voice pipeline so a
+    spoken question can be answered by a large cloud model (e.g. kimi-k2.6)
+    while ASR and TTS stay local. When omitted, behaviour is unchanged: the
+    local rig's Ollama, no auth.
+
+    The key is never persisted; it arrives per-request from the app and is used
+    only for this call.
+    """
     model = model or GEN_MODEL
+    url = (base_url or OLLAMA_URL).rstrip("/")
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     client = httpx.AsyncClient(timeout=TIMEOUT)
     try:
-        async with client.stream("POST", f"{OLLAMA_URL}/api/chat",
+        async with client.stream("POST", f"{url}/api/chat", headers=headers,
                                  json={"model": model, "messages": messages, "stream": True}) as r:
             if r.status_code != 200:
                 body = await r.aread()
@@ -72,6 +85,6 @@ async def chat_stream(messages: list[dict], model: str | None = None):
                 if line:
                     yield (line + "\n").encode()
     except httpx.HTTPError as e:
-        raise OllamaError(f"cannot reach Ollama at {OLLAMA_URL}: {e}") from e
+        raise OllamaError(f"cannot reach Ollama at {url}: {e}") from e
     finally:
         await client.aclose()

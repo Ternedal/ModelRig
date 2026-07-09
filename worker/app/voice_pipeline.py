@@ -55,8 +55,16 @@ async def converse(
     language: str = "da",
     model: str | None = None,
     out_dir: str = "/tmp/alva_voice",
+    llm_base_url: str | None = None,
+    llm_api_key: str | None = None,
 ) -> dict:
     """Run one full spoken turn from an audio file.
+
+    llm_base_url/llm_api_key optionally point the LLM step at a DIFFERENT Ollama
+    upstream -- specifically Ollama Cloud -- so a spoken question can be answered
+    by a large cloud model while ASR and TTS stay local on the rig. ASR/TTS
+    cannot move: the models live here. The key is used for this call only and is
+    never persisted.
 
     Returns:
       {
@@ -99,7 +107,8 @@ async def converse(
         chunks.append({"index": idx, "text": sentence, "wav": wav, "synth_s": synth_s})
 
     idx = 0
-    async for line in oc.chat_stream(messages, model=model):
+    async for line in oc.chat_stream(messages, model=model,
+                                    base_url=llm_base_url, api_key=llm_api_key):
         delta = _extract_delta(line)
         if not delta:
             continue

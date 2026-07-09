@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.9.0** — "🎉 Voice BEVIST ende-til-ende på telefonen + tre app-bugs fra Anders' test fikset (forbindelses-løgn, tvungen re-parring, tavs model-fejl)". Follows 1.8.2. Autonomous sessions, **2026-07-02 → 07-09**.
+Version **1.10.0** — "☁ Stemme kan svares af en cloud-model: ASR/TTS bliver lokalt, kun LLM-trinnet flytter. Løser 12GB-VRAM-loftet for stemme". Follows 1.9.0. Autonomous sessions, **2026-07-02 → 07-09**.
 
 > **🎉 MILEPÆL 8/7 aften:** Hele Alva Voice-kæden er nu bevist på Anders' rig — ASR→LLM→TTS kørte ende-til-ende. Input-WAV → dansk transskription → llama3.2-svar → tale delt i sætnings-WAV'er. Alle tre Voice-lag + LLM koblet sammen og kørende. (Svar-kvaliteten var svag med den lille 1b-model — vrøvl + engelsk-indblanding — men det beviser rørene; hermes3:8b/qwen giver gode svar. TTFA-metrikken fejlede i test-one-lineren men er verificeret korrekt i selve voice_pipeline.py-modulet.)
 
@@ -47,6 +47,39 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.10.0  ☁  (Stemme kan tænke i skyen — hybrid Voice)
+- **Anders' observation**: hvorfor skal en talt tur nøjes med en model der
+  passer i 12GB VRAM? Nu kan den ikke.
+- **Kun LLM-trinnet flytter**: `lyd → ASR (rig) → LLM (rig ELLER cloud) →
+  TTS (rig) → lyd`. ASR og TTS BLIVER på rig'en — modellerne bor der, og lyden
+  forlader aldrig huset. Kun det transskriberede spørgsmål sendes til cloud.
+- **Hvorfor rig'en kalder cloud (ikke appen)**: pipelinen er ét worker-kald, så
+  sætnings-chunking og time-to-first-audio bevares uændret. Alternativet
+  (appen orkestrerer tre kald) ville kræve at chunking-logikken skrives om i
+  Kotlin og gav tre netværksrundture. Cloud-nøglen sendes fra telefonen til
+  **brugerens EGEN rig over deres LAN**, bruges til det ene kald, og
+  **gemmes aldrig på rig'en**.
+- **Implementering**: `chat_stream()` tager nu valgfri `base_url` + `api_key`
+  (uændret adfærd når de udelades). `converse()` sender dem videre.
+  `/voice/converse/upload` accepterer `llm_base_url` + `llm_api_key`.
+  `voiceConverse()` i Android sender dem når toggle'en er slået til.
+- **UI**: en kontakt i model-dropdownen — "☁ Stemme svarer via cloud
+  (kimi-k2.6)". Vises kun i rig-mode med en cloud-nøgle konfigureret.
+  **Slået fra som standard**: den lokale sti er den private.
+- **Bevidst designvalg — eksplicit toggle, ikke automatik**: Voice kræver
+  rig-mode, så chat-modellen dér er altid en rig-model. En skjult "følg
+  chat-modellen"-regel ville aldrig kunne vælge cloud. En kontakt er tydeligere.
+- **Tradeoffs (ærligt)**: cloud-kald over internettet tilføjer latency, men
+  hermes3:8b på en 3060 er heller ikke hurtig — hvad der vinder er ikke oplagt
+  og bør måles. Og det transskriberede spørgsmål forlader huset. Lyden gør ikke.
+- **ASR kan IKKE bruge cloud-modellerne**: Ollama Cloud har chat-modeller, ikke
+  tale-til-tekst. ASR-kvalitet løses ved at fikse CUDA-PATH (så large-v3 kører
+  på GPU), ikke ved cloud.
+- Verificeret: `chat_stream` peger på `base_url` og sender Bearer-header når
+  `api_key` er sat (isoleret-testet); endpointet accepterer begge former;
+  den lokale sti er uændret; alle 58 assertions grønne; Android kompilerer.
+- **IKKE telefon-testet**: kræver at Anders slår toggle'en til og taler.
 
 ## What's new in 1.9.0  🎉  (Voice bevist på telefonen + tre bugs fra Anders' test)
 

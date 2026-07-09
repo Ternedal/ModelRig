@@ -585,6 +585,12 @@ private fun ChatScreen(
     // Model-list load failures used to be swallowed silently: "Genindlæs
     // modeller" looked dead when the rig was unreachable. Surface the reason.
     var modelError by remember { mutableStateOf<String?>(null) }
+
+    // Voice always runs ASR + TTS on the rig, but the LLM step in the middle can
+    // go to the cloud. That lets a spoken question be answered by a big model
+    // (kimi-k2.6) instead of what fits in 12 GB of VRAM. Off by default: the
+    // transcript would leave the house, and the local path is the private one.
+    var voiceUsesCloud by remember { mutableStateOf(store.voiceUsesCloud) }
     var hasMicPermission by remember {
         mutableStateOf(
             androidx.core.content.ContextCompat.checkSelfPermission(
@@ -605,7 +611,16 @@ private fun ChatScreen(
             try {
                 val result = withContext(Dispatchers.IO) {
                     val b64 = android.util.Base64.encodeToString(wav, android.util.Base64.NO_WRAP)
-                    ModelRigClient(store.baseUrl ?: "", store.token).voiceConverse(b64, language = "da")
+                    // Cloud answers the spoken question only if the toggle is on
+                    // AND a cloud key exists. ASR/TTS always stay on the rig.
+                    val key = if (voiceUsesCloud) store.cloudKey else null
+                    ModelRigClient(store.baseUrl ?: "", store.token).voiceConverse(
+                        b64,
+                        language = "da",
+                        model = if (key != null) store.cloudModel else null,
+                        cloudBaseUrl = if (key != null) "https://ollama.com" else null,
+                        cloudKey = key,
+                    )
                 }
                 val transcript = result.optString("transcript").trim()
                 val reply = result.optString("reply").trim()
@@ -927,6 +942,27 @@ private fun ChatScreen(
                     Box {
                         ModelChip("$currentModel  ▾", onClick = { modelMenu = true })
                         DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
+                            // Voice: ASR/TTS always run on the rig, but the LLM
+                            // step can go to a big cloud model. Only meaningful
+                            // in rig mode with a cloud key configured.
+                            if (mode == "rig" && store.cloudKey != null) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            (if (voiceUsesCloud) "☁ " else "◇ ") +
+                                                "Stemme svarer via cloud (${store.cloudModel})",
+                                            color = if (voiceUsesCloud) Signal else TextMuted,
+                                            fontSize = 13.sp,
+                                        )
+                                    },
+                                    onClick = {
+                                        voiceUsesCloud = !voiceUsesCloud
+                                        store.voiceUsesCloud = voiceUsesCloud
+                                        modelMenu = false
+                                    },
+                                )
+                                HorizontalDivider()
+                            }
                             DropdownMenuItem(
                                 text = { Text("↻  Genindlæs modeller", color = Signal) },
                                 onClick = {

@@ -19,7 +19,7 @@ from . import ollama_client as oc
 from . import rag
 from .store import DocStore
 
-VERSION = "1.9.0"
+VERSION = "1.10.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -455,6 +455,15 @@ class ConverseUploadReq(BaseModel):
     audio_base64: str
     language: str = "da"
     model: str | None = None
+    # Optional: answer the spoken question with a CLOUD model instead of the
+    # rig's local Ollama. ASR and TTS always stay on the rig (that's where those
+    # models live) -- only the LLM step moves. Lets a spoken question reach a
+    # large model (e.g. kimi-k2.6) that a 12 GB GPU can't host.
+    #
+    # The key travels from the phone to the user's OWN rig over their LAN, is
+    # used for that single request, and is never written to disk here.
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
 
 
 @app.post("/voice/converse/upload")
@@ -475,6 +484,7 @@ async def voice_converse_upload(req: ConverseUploadReq) -> dict:
     try:
         result = await voice_pipeline.converse(
             in_path, language=req.language, model=req.model, out_dir=tmp_dir,
+            llm_base_url=req.llm_base_url, llm_api_key=req.llm_api_key,
         )
     except RuntimeError as e:
         raise HTTPException(status_code=501, detail=str(e))
