@@ -66,5 +66,23 @@ print("    detail:", r.json().get("detail", "")[:80])
 r = client.post("/rag/ingest", json={"documents": [{"text": "hello", "source": "t"}]})
 check(r.status_code == 502, "POST /rag/ingest, ollama down -> 502")
 
+# 6. Voice: markdown must not be read aloud. The LLM writes **bold**, `code`
+# and bullets; Piper would speak the asterisks. Strip for SPEECH only -- the
+# chat still shows the markdown. Anders hit this on 2026-07-09.
+from app.voice_pipeline import strip_markdown
+
+check(strip_markdown("**Hej** Anders!") == "Hej Anders!", "strip_markdown: bold")
+check(strip_markdown("Det er *vigtigt*.") == "Det er vigtigt.", "strip_markdown: italic")
+check(strip_markdown("Brug `pip install` nu.") == "Brug pip install nu.", "strip_markdown: inline code")
+check(strip_markdown("### Overskrift") == "Overskrift", "strip_markdown: heading")
+check(strip_markdown("- et punkt") == "et punkt", "strip_markdown: bullet")
+check(strip_markdown("Se [docs](https://x.dk).") == "Se docs.", "strip_markdown: link keeps text")
+# Ordinary text must survive untouched.
+check(strip_markdown("Regn 5 * 3 ud.") == "Regn 5 * 3 ud.", "strip_markdown: spaced asterisk survives")
+check(strip_markdown("min_fil_navn.txt") == "min_fil_navn.txt", "strip_markdown: underscores in a word survive")
+# Unspeakable structures are dropped, not read pipe by pipe.
+check(strip_markdown("| GPU | RTX 3060 |") == "", "strip_markdown: table row dropped")
+check(strip_markdown("```\nkode\n```") == "", "strip_markdown: code fence dropped")
+
 print(f"\n===== WORKER: {passed} passed, {failed} failed =====")
 raise SystemExit(0 if failed == 0 else 1)

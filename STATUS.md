@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.10.0** — "☁ Stemme kan svares af en cloud-model: ASR/TTS bliver lokalt, kun LLM-trinnet flytter. Løser 12GB-VRAM-loftet for stemme". Follows 1.9.0. Autonomous sessions, **2026-07-02 → 07-09**.
+Version **1.10.1** — "🔇 Stemmen læser ikke længere markdown-tegn op ('stjerne stjerne'). Strippes før TTS; chatten viser stadig markdown". Follows 1.10.0. Autonomous sessions, **2026-07-02 → 07-09**.
 
 > **🎉 MILEPÆL 8/7 aften:** Hele Alva Voice-kæden er nu bevist på Anders' rig — ASR→LLM→TTS kørte ende-til-ende. Input-WAV → dansk transskription → llama3.2-svar → tale delt i sætnings-WAV'er. Alle tre Voice-lag + LLM koblet sammen og kørende. (Svar-kvaliteten var svag med den lille 1b-model — vrøvl + engelsk-indblanding — men det beviser rørene; hermes3:8b/qwen giver gode svar. TTFA-metrikken fejlede i test-one-lineren men er verificeret korrekt i selve voice_pipeline.py-modulet.)
 
@@ -47,6 +47,29 @@ not blind source. Everything below is labelled by how it was actually verified.
   part genuinely can't be verified from the build environment.
 - desktop: **not touched or audited in this V1 push** — out of scope until V2
   per `ROADMAP.md`. Treat it as unverified legacy source until then.
+
+## What's new in 1.10.1  🔇  (Stemmen læser ikke markdown op)
+- **Fundet af Anders 9/7 under brug**: LLM'en skriver markdown (`**fed**`,
+  `` `kode` ``, `- punkter`, `### overskrifter`), og Piper læste hvert tegn
+  højt — "stjerne stjerne Hej stjerne stjerne". Irriterende og oplagt bagefter.
+- **Fix**: `strip_markdown()` i `voice_pipeline.py` renser teksten **lige før
+  TTS**. Chatten viser stadig den originale markdown — kun det der TALES
+  strippes. To lag, to formål.
+- **Bevidst konservativ**: kun utvetydig formatering fjernes.
+  `Regn 5 * 3 ud` beholder sin asterisk. `min_fil_navn.txt` beholder sine
+  underscores. Kun `**x**`, `*x*`, `` `x` ``, `_x_`, `### x`, `- x`, `1. x`,
+  `> x` og `[tekst](url)` → deres indhold.
+- **Utalelige strukturer droppes helt** frem for at blive læst op: tabelrækker
+  (`| GPU | RTX 3060 |`) og kodeblokke. At læse en tabel op celle for celle er
+  værre end stilhed.
+- **Tom-chunk-beskyttelse**: en sætning der er ren markup (en tabelrække)
+  strippes til ingenting — den springes over i stedet for at syntetisere en
+  tom WAV. `_synth` styrer nu selv chunk-tælleren, så oversprungne chunks ikke
+  laver huller i nummereringen.
+- **10 nye permanente tests** i `worker_unit` (nu 25 assertions, var 15) —
+  inkl. de to kanttilfælde ovenfor, så fixet ikke går i stykker senere.
+  Alle 68 assertions grønne på tværs af suiten.
+- Ren worker-ændring + tests.
 
 ## What's new in 1.10.0  ☁  (Stemme kan tænke i skyen — hybrid Voice)
 - **Anders' observation**: hvorfor skal en talt tur nøjes med en model der

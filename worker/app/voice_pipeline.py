@@ -38,6 +38,54 @@ from . import voice_tts
 # short first utterance). A proper Danish text normalizer is a phase-2 item.
 _SENTENCE_END = re.compile(r"([.!?])(\s|$)")
 
+# --- Markdown -> speakable text ---------------------------------------------
+# The LLM writes markdown (**bold**, `code`, - bullets, ### headings). Piper
+# reads it literally, so Alva says "stjerne stjerne" out loud. Anders hit this
+# on 2026-07-09. We strip formatting from what is SPOKEN; the chat still shows
+# the original markdown.
+#
+# Deliberately conservative: only strip markers where they're unambiguously
+# formatting, so ordinary text survives ("5 * 3" keeps its asterisk, and a
+# lone underscore in a filename isn't touched).
+
+_MD_CODE_FENCE = re.compile(r"```[\s\S]*?```")          # fenced blocks: drop entirely
+_MD_INLINE_CODE = re.compile(r"`([^`\n]+)`")             # `code` -> code
+_MD_BOLD_ITALIC = re.compile(r"(\*{1,3})(\S(?:.*?\S)?)\1")  # **x** *x* ***x*** -> x
+_MD_UNDERSCORE = re.compile(r"(?<!\w)(_{1,3})(\S(?:.*?\S)?)\1(?!\w)")  # _x_ -> x
+_MD_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+", re.MULTILINE)  # ### Title -> Title
+_MD_BULLET = re.compile(r"^\s*[-*+]\s+", re.MULTILINE)   # - item -> item
+_MD_NUMLIST = re.compile(r"^\s*\d+[.)]\s+", re.MULTILINE)  # 1. item -> item
+_MD_BLOCKQUOTE = re.compile(r"^\s*>\s?", re.MULTILINE)
+_MD_LINK = re.compile(r"\[([^\]]+)\]\([^)]+\)")          # [text](url) -> text
+_MD_IMAGE = re.compile(r"!\[([^\]]*)\]\([^)]+\)")        # ![alt](url) -> alt
+_MD_HRULE = re.compile(r"^\s*([-*_])\s*(?:\1\s*){2,}$", re.MULTILINE)
+_MD_TABLE_PIPE = re.compile(r"^\s*\|.*\|\s*$", re.MULTILINE)  # table rows: drop
+_WS = re.compile(r"[ \t]{2,}")
+
+
+def strip_markdown(text: str) -> str:
+    """Turn markdown into something a TTS voice can read naturally.
+
+    Fenced code blocks and table rows are dropped rather than spoken -- reading
+    a table aloud pipe by pipe is worse than silence. Everything else keeps its
+    words and loses its markers.
+    """
+    t = text
+    t = _MD_CODE_FENCE.sub(" ", t)
+    t = _MD_TABLE_PIPE.sub(" ", t)
+    t = _MD_HRULE.sub(" ", t)
+    t = _MD_IMAGE.sub(r"\1", t)
+    t = _MD_LINK.sub(r"\1", t)
+    t = _MD_INLINE_CODE.sub(r"\1", t)
+    t = _MD_BOLD_ITALIC.sub(r"\2", t)
+    t = _MD_UNDERSCORE.sub(r"\2", t)
+    t = _MD_HEADING.sub("", t)
+    t = _MD_BLOCKQUOTE.sub("", t)
+    t = _MD_BULLET.sub("", t)
+    t = _MD_NUMLIST.sub("", t)
+    t = _WS.sub(" ", t)
+    return t.strip()
+
 
 def _extract_delta(ndjson_line: bytes) -> str:
     """Pull the incremental message content out of one Ollama NDJSON line."""
@@ -94,19 +142,27 @@ async def converse(
     reply_parts: list[str] = []
     chunks: list[dict] = []
     first_audio_at: float | None = None
+    idx = 0
     llm_start = time.time()
 
-    async def _synth(sentence: str, idx: int) -> None:
-        nonlocal first_audio_at
+    async def _synth(sentence: str) -> None:
+        nonlocal first_audio_at, idx
+        # Speak the words, not the markup. The chat still shows the original
+        # sentence; only the audio gets the stripped version. A sentence that is
+        # ENTIRELY markup (a table row, a code fence) strips to nothing -- skip
+        # it rather than synthesize an empty WAV.
+        speakable = strip_markdown(sentence)
+        if not speakable:
+            return
         wav = os.path.join(out_dir, f"chunk_{idx:03d}.wav")
         s0 = time.time()
-        voice_tts.synthesize_to_wav(sentence, wav)
+        voice_tts.synthesize_to_wav(speakable, wav)
         synth_s = round(time.time() - s0, 2)
         if first_audio_at is None:
             first_audio_at = time.time()
         chunks.append({"index": idx, "text": sentence, "wav": wav, "synth_s": synth_s})
+        idx += 1
 
-    idx = 0
     async for line in oc.chat_stream(messages, model=model,
                                     base_url=llm_base_url, api_key=llm_api_key):
         delta = _extract_delta(line)
@@ -123,12 +179,11 @@ async def converse(
             sentence = buffer[:end].strip()
             buffer = buffer[end:]
             if sentence:
-                await _synth(sentence, idx)
-                idx += 1
+                await _synth(sentence)
     # Flush any trailing text with no terminal punctuation.
     tail = buffer.strip()
     if tail:
-        await _synth(tail, idx)
+        await _synth(tail)
 
     reply = "".join(reply_parts).strip()
     ttfa = round((first_audio_at - llm_start), 2) if first_audio_at else None
