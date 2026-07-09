@@ -19,7 +19,7 @@ from . import ollama_client as oc
 from . import rag
 from .store import DocStore
 
-VERSION = "1.12.1"
+VERSION = "1.12.2"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -378,8 +378,11 @@ def voice_asr_transcribe(req: AsrReq) -> dict:
     try:
         return voice_asr.transcribe_wav(req.path, language=req.language)
     except RuntimeError as e:
-        # Model load / device errors -> 501 with the module's actionable message.
-        raise HTTPException(status_code=501, detail=str(e))
+        # faster-whisper IS installed (checked above), so this is a model
+        # load / device error -> 503, logged with traceback so the worker
+        # console shows the actual cause.
+        _logger.exception("level=error voice=asr_transcribe failure=%r", str(e))
+        raise HTTPException(status_code=503, detail=str(e))
 
 
 # ---- Alva Voice: TTS (optional) --------------------------------------------
@@ -420,7 +423,11 @@ def voice_tts_synthesize(req: TtsReq) -> dict:
     try:
         return voice_tts.synthesize_to_wav(req.text, req.out_path)
     except RuntimeError as e:
-        raise HTTPException(status_code=501, detail=str(e))
+        # piper-tts IS installed (checked above): a RuntimeError here means
+        # the voice failed to load (missing .onnx, wrong ALVA_TTS_VOICES_DIR)
+        # -> 503, logged with traceback in the worker console.
+        _logger.exception("level=error voice=tts_synthesize failure=%r", str(e))
+        raise HTTPException(status_code=503, detail=str(e))
 
 
 # ---- Alva Voice: full pipeline (ASR -> LLM -> TTS) --------------------------
@@ -446,10 +453,17 @@ async def voice_converse(req: ConverseReq) -> dict:
         return await voice_pipeline.converse(
             req.path, language=req.language, model=req.model, out_dir=req.out_dir,
         )
-    except RuntimeError as e:
-        # A missing Voice backend (ASR/TTS not installed) -> 501 with the
-        # specific actionable message from the pipeline.
+    except voice_pipeline.VoiceBackendMissing as e:
+        # A missing Voice backend (ASR/TTS not installed) -> honest 501.
+        _logger.info("level=warn voice=converse backend_missing=%r", str(e))
         raise HTTPException(status_code=501, detail=str(e))
+    except RuntimeError as e:
+        # Backend IS installed but failed at load/run time (voice model file
+        # not found, wrong voices dir, CUDA DLLs, ...) -> 503, and the full
+        # cause goes to the worker console -- the phone app swallows the
+        # detail string, so this log line is the only place the answer shows.
+        _logger.exception("level=error voice=converse pipeline_failure=%r", str(e))
+        raise HTTPException(status_code=503, detail=str(e))
     except oc.OllamaError as e:
         # LLM unreachable / model not pulled -> 502 (upstream dependency).
         raise HTTPException(status_code=502, detail=f"LLM error: {e}")
@@ -494,8 +508,15 @@ async def voice_converse_upload(req: ConverseUploadReq) -> dict:
             in_path, language=req.language, model=req.model, out_dir=tmp_dir,
             llm_base_url=req.llm_base_url, llm_api_key=req.llm_api_key,
         )
-    except RuntimeError as e:
+    except voice_pipeline.VoiceBackendMissing as e:
+        _logger.info("level=warn voice=converse_upload backend_missing=%r", str(e))
         raise HTTPException(status_code=501, detail=str(e))
+    except RuntimeError as e:
+        # Installed-but-broken (model load, voices dir, CUDA) -> 503 + the real
+        # cause with traceback in the worker console. See /voice/converse.
+        _logger.exception("level=error voice=converse_upload pipeline_failure=%r",
+                          str(e))
+        raise HTTPException(status_code=503, detail=str(e))
     except oc.OllamaError as e:
         raise HTTPException(status_code=502, detail=f"LLM error: {e}")
 

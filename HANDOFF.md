@@ -10,8 +10,10 @@ Copy/paste dette som første besked i en ny chat.
 
 1. **⚠️ GitHub PAT'en er stadig aktiv** og er brugt til ~15 releases i dag.
    Revokér den: `github.com/settings/tokens`. Dette er højeste prioritet.
-2. **Der er en åben fejl** (se §5): worker'en returnerer 501 på voice, men
-   ASR-modellen loader fint isoleret. Næste skridt er at teste TTS isoleret.
+2. **Der er en åben fejl** (se §5): voice fejlede med 501, men både ASR og
+   TTS loader fint isoleret (verificeret 9/7 aften). Efter v1.12.2 printer
+   worker-konsollen selv den rigtige fejl — start worker, prøv voice én
+   gang, læs vindue 2.
 3. **Anders har flere kopier af repoet** (`modelrig`, `modelrig-new`,
    `modelrig-mono`) med forskellig kode-alder. Det har forårsaget flere falske
    fejlspor. Ryd op: behold én mappe.
@@ -108,27 +110,42 @@ python -m piper.download_voices da_DK-talesyntese-medium
 
 ---
 
-## 5. ÅBEN FEJL — det næste skridt
+## 5. ÅBEN FEJL — status pr. 9/7 aften
 
-**Symptom:** `POST /voice/converse/upload` → `501 Not Implemented` i
-worker-loggen. Appen viser "Stemme-fejl: Software caused connection abort".
+**Symptom:** `POST /voice/converse/upload` → `501` i worker-loggen. Appen
+viser "Stemme-fejl: Software caused connection abort" (skjuler detail).
 
-**Hvad vi ved:**
-- ASR loader fint isoleret: `device: cuda, model: large-v3, MODEL LOADED OK`
-- Så 501'eren handler **ikke** om ASR-device
-- 501 returneres når **enten ASR eller TTS** ikke er tilgængelig
-- Konklusion: mistanken er nu **TTS (piper)** eller pipelinen
+**Udført 9/7 aften (denne + forrige session):**
+- ASR isoleret: BESTÅET (`cuda`, `large-v3`, MODEL LOADED OK)
+- TTS isoleret: BESTÅET (`available: True`, VOICE LOADED OK)
+- Kodegennemgang: 501 var en **catch-all for ALLE RuntimeErrors** fra
+  pipelinen — også model-load-fejl. Isolerede tests i et cmd-vindue
+  beviser derfor INTET om worker-processen (andet miljø, andre
+  env-vars, potentielt anden Python).
 
-**Næste kommando at køre** (fra repo-mappen):
+**Fixet i v1.12.2:**
+- 501 betyder nu KUN "pakke ikke installeret" (`VoiceBackendMissing`)
+- Alle andre pipeline-fejl → **503** med samme detail-besked
+- **Worker-konsollen logger fejlen med fuld traceback** — appen behøver
+  ikke vise noget; svaret står i vindue 2
+
+**Næste skridt (kræver Anders' rig):**
+1. Hent v1.12.2-zip, pak ud, start worker fra kildekoden (§2)
+2. Prøv voice fra telefonen én gang
+3. Læs fejlen i vindue 2 (`pipeline_failure=...` + traceback) — det ER
+   root cause. Alternativt, uden telefon:
 ```cmd
-python -c "import sys; sys.path.insert(0,'worker'); from app import voice_tts; print('TTS available:', voice_tts.is_available()); voice_tts._get_voice(); print('TTS VOICE LOADED OK')"
+curl -s http://127.0.0.1:8099/voice/tts/status
+mkdir C:\Temp 2>nul
+echo {"text":"hej","out_path":"C:/Temp/t.wav"} > %TEMP%\tts.json
+curl -s -X POST http://127.0.0.1:8099/voice/tts/synthesize -H "Content-Type: application/json" -d @%TEMP%\tts.json
 ```
+Sammenlign `voices_dir` fra status med hvor `.onnx`-filen faktisk ligger.
 
-**Sandsynlige årsager:**
-- Den danske stemme ligger i `~\.alva\piper-voices`, men `ALVA_TTS_VOICES_DIR`
-  peger et andet sted
-- `piper-tts` installeret i en anden Python end den worker'en kører i
-- Anders kørte fra en mappe med gammel kode (det har sket to gange i dag)
+**Stadig sandsynlige root causes** (nu synlige i loggen når de rammes):
+- `ALVA_TTS_VOICES_DIR`/`ALVA_TTS_VOICE` sat anderledes i worker-vinduet
+- `piper-tts`/`faster-whisper` i en anden Python end worker'ens
+- Worker startet fra mappe med gammel kode (sket to gange 9/7)
 
 ---
 

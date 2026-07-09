@@ -32,6 +32,19 @@ from . import ollama_client as oc
 from . import voice_asr
 from . import voice_tts
 
+
+class VoiceBackendMissing(RuntimeError):
+    """An optional Voice backend (faster-whisper / piper-tts) is not installed.
+
+    Split out from plain RuntimeError so the endpoints can answer an honest 501
+    (feature not enabled on this rig) for THIS case only. Every other
+    RuntimeError from the pipeline means the backend IS installed but failed to
+    load or run (voice model file missing, wrong voices dir, CUDA DLLs) --
+    that's a 503. Conflating the two behind one status code cost an evening of
+    debugging on 2026-07-09: isolated cmd-window tests passed while the worker
+    kept answering 501, and nothing ever said why.
+    """
+
 # Split point: end-of-sentence punctuation followed by space/end. Keeping it
 # simple for the MVP -- Danish abbreviations (f.eks., bl.a.) can cause an early
 # split, which is acceptable for a first spoken chunk (worst case: a slightly
@@ -121,13 +134,14 @@ async def converse(
         total_s,                 # whole pipeline
         chunks: [{index, text, wav, synth_s}],
       }
-    Raises RuntimeError (surfaced as 501 by the endpoint) if a Voice backend
+    Raises VoiceBackendMissing (-> 501) if a backend isn't installed; any
+    other RuntimeError (-> 503, logged in the worker console) if a Voice backend
     isn't installed.
     """
     if not voice_asr.is_available():
-        raise RuntimeError("ASR not enabled (pip install faster-whisper)")
+        raise VoiceBackendMissing("ASR not enabled (pip install faster-whisper)")
     if not voice_tts.is_available():
-        raise RuntimeError("TTS not enabled (pip install piper-tts)")
+        raise VoiceBackendMissing("TTS not enabled (pip install piper-tts)")
     os.makedirs(out_dir, exist_ok=True)
     t_start = time.time()
 
