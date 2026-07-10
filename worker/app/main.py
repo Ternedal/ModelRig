@@ -20,7 +20,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.26.0"
+VERSION = "1.27.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -304,6 +304,10 @@ class ToolChatReq(BaseModel):
     rag: bool = False
     rag_source: str | None = None
     rag_top_k: int = Field(default=4, ge=1, le=10)
+    # Vision. Without this the app silently dropped an attached image the
+    # moment Tools was on: you asked about a photo and got an answer about
+    # nothing. Ollama carries images on the user message itself.
+    image_base64: str | None = None
     model: str | None = None
     conversation_id: str | None = None
     system: str | None = None
@@ -391,7 +395,10 @@ async def tools_chat(req: ToolChatReq) -> dict:
                 "content": t.wrap_as_data(f"Kontekst fra dine dokumenter:\n{ctx}"),
             })
 
-    messages.append({"role": "user", "content": req.message})
+    user_msg: dict = {"role": "user", "content": req.message}
+    if req.image_base64:
+        user_msg["images"] = [req.image_base64]
+    messages.append(user_msg)
 
     origin = "cloud" if req.cloud_key else "local"
     try:

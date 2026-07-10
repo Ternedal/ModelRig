@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.26.0** — "RAG og tools kunne ikke kombineres: slog man tools til, forsvandt dokumentkonteksten lydløst. Nu henter riggen først, pakker chunks som DATA og lader modellen beslutte. Et forgiftet dokument kan stadig ikke skrive uden Anders' kort — men det kan udløse et læsende tool, og den grænse står nu i kravspec §R1b". Follows 1.25.0 (historik i tools-tilstand), 1.24.0 (kill switchen). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.27.0** — "Systematisk gennemgang af hvad tools-tilstand tabte lydløst: et vedhæftet billede forsvandt, kortets svar blev aldrig gemt i databasen, og forslagsturen efterlod en tom boble i historikken. Alle tre havde samme form som historik- og RAG-fejlene: tools-grenen blev sat foran normal-vejen uden at lære hvad den gjorde". Follows 1.26.0 (RAG + tools), 1.25.0 (historik). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

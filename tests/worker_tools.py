@@ -446,5 +446,29 @@ g = fresh_gate()
 check(g.propose("rig_status", {})["status"] == "executed",
       "T22: a read still runs without a card -- the known, accepted boundary")
 
+# ---------------------------------------------------------------------------
+# T23: the sweep. Tools mode kept dropping things silently -- history (v1.25),
+# RAG context (v1.26), and now an attached image. Same shape every time: the
+# tools branch was bolted in front of the normal path and never taught what the
+# normal path already did. These assert the plumbing exists at all.
+# ---------------------------------------------------------------------------
+src = _i.getsource(_M.tools_chat)
+check("req.image_base64" in src and "images" in src,
+      "T23: an attached image rides on the user message, not dropped")
+check(src.index("req.image_base64") > src.index("_trim_history"),
+      "T23: the image goes on the CURRENT turn, not into history")
+
+req = _M.ToolChatReq(message="hvad ser du?", image_base64="AAAA")
+check(req.image_base64 == "AAAA", "T23: image_base64 survives the request model")
+req2 = _M.ToolChatReq(message="x")
+check(req2.image_base64 is None and req2.rag is False and req2.history == [],
+      "T23: every new field defaults to off -- old clients keep working")
+
+# The confirmation path must return the parked conversation, or the answer to
+# an approved write would be phrased with no memory of what was asked.
+src_confirm = _i.getsource(_M.tools_confirm_chat)
+check("messages" in src_confirm and "_final_answer" in src_confirm,
+      "T23: an approved write is answered with the parked conversation")
+
 print(f"\n===== TOOLS: {passed} passed, {failed} failed =====")
 sys.exit(0 if failed == 0 else 1)

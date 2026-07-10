@@ -284,6 +284,13 @@ MODELRIG_HOST       (sæt til 0.0.0.0!)
    skubbe utestet Kotlin ud og håbe på CI. (`local.properties` må ikke
    committes.)
 
+9. **En ny gren i et `when` arver ingenting.** Tools-grenen blev sat foran
+   normal-vejen og tabte lydløst: samtalehistorik (v1.25.0), RAG-kontekst
+   (v1.26.0), vedhæftet billede + persistens af svaret (v1.27.0). Ingen fejl,
+   ingen advarsel — bare et svar der manglede noget. Når du tilføjer en gren:
+   list hvad de andre grene gør, og forklar for hver ting hvorfor din ikke
+   behøver den.
+
 8. **`os.add_dll_directory` er ikke nok på Windows.** CTranslate2 loader
    cuBLAS ad den klassiske søgesti (kun PATH). Mappen var registreret,
    DLL'en lå på disken — load fejlede alligevel, og først ved `encode()`,
@@ -393,7 +400,7 @@ git push <url> main:main
 - ⚠️ **Betingelsen står ved magt:** vilkårlige filstier eller 3.-parts
   MCP-servere kræver separat Windows-konto + ACL'er FØRST (kravspec §5b).
 
-**Testdækning (10/7):** worker 166 tests (unit 31 · rag 48 · tools 87) +
+**Testdækning (10/7):** worker 171 tests (unit 31 · rag 48 · tools 92) +
 Go `internal/httpapi` 4 tests. CI kører nu `go vet` og `go test ./...` —
 det gjorde den ikke før v1.23.1, så Go-koden var reelt utestet.
 

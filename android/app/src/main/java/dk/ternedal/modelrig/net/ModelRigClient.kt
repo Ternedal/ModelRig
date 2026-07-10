@@ -458,6 +458,7 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         history: List<Pair<String, String>> = emptyList(),
         rag: Boolean = false,
         ragSource: String? = null,
+        imageB64: String? = null,
     ): ToolTurn {
         val payload = JSONObject().put("message", message)
         // Without history, turning Tools on made Kaliv amnesiac: "write down
@@ -475,6 +476,8 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
             payload.put("rag", true)
             ragSource?.let { payload.put("rag_source", it) }
         }
+        // An attached image used to vanish the moment Tools was on.
+        imageB64?.let { payload.put("image_base64", it) }
         if (model != null) payload.put("model", model)
         if (conversationId != null) payload.put("conversation_id", conversationId)
         // Routing a cloud model THROUGH the rig is the only way it can propose

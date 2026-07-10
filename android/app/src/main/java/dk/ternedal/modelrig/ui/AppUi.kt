@@ -967,6 +967,7 @@ private fun ChatScreen(
                                     history = prior,
                                     rag = toolsWithRag,
                                     ragSource = if (toolsWithRag) srcFilter else null,
+                                    imageB64 = imageB64,
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.status == "confirmation_required") {
@@ -1018,9 +1019,13 @@ private fun ChatScreen(
             }
             // persist the assistant reply (full or partial-cancelled), never errors
             val finalText = messages[idx].text
-            if (err == null || cancelled) {
+            // A pending tool proposal produces no answer yet: the card is on
+            // screen and nothing has run. Persisting an empty assistant turn
+            // would leave a blank bubble in the history forever.
+            if ((err == null || cancelled) && finalText.isNotBlank()) {
                 withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText) }
             }
+            if (proposal != null) messages.removeAt(idx)
             busy = false
         }
     }
@@ -1589,6 +1594,15 @@ private fun ChatScreen(
                                             } ?: ""
                                         if (text.isNotBlank()) {
                                             messages.add(Msg("assistant", text))
+                                            // Persist it. What you approved, and
+                                            // what Kaliv did about it, belongs in
+                                            // the conversation -- not only in RAM
+                                            // until the next app restart.
+                                            convId?.let { id ->
+                                                withContext(Dispatchers.IO) {
+                                                    db.addMessage(id, "assistant", text)
+                                                }
+                                            }
                                         }
                                     }
                                 }
