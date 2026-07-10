@@ -481,9 +481,9 @@ uden at kunne se hinandens data; en gæsteprofil kan chatte men intet
                    └───┬─────────┬─────────────┘
                        │         │  kun LLM-trin · eksplicit toggle
                 ┌──────▼───┐  ┌──▼─────────────┐
-                │  Ollama  │  │  Ollama Cloud  │
-                │  :11434  │  │  (valgfrit) ✅ │
-                └──────────┘  └────────────────┘
+                │  Ollama  │  │  Ollama Cloud  │◀─ ─ appens direkte
+                │  :11434  │  │  (valgfrit) ✅ │     vej: uden om
+                └──────────┘  └────────────────┘     riggen, uden tools
    Lager (alt lokalt): SQLite ✅ · RAG-indeks ✅ · Audit ✅ · Memory ⬜
    Drift: services ⬜ · watchdog ⬜ · selvopdatering ⬜ · backup ⬜
 
@@ -511,6 +511,8 @@ kan hægtes på uden at rive arkitekturen op:
   til cloud, kun ved eksplicit toggle; nøgler bruges én gang, gemmes aldrig
 - Alt persistent er lokalt, synligt og sletbart af ejeren
 - Ingen skrivende tool-handling uden eksplicit bekræftelse; alt i audit-log
+- Tools findes KUN i workeren. Appens direkte cloud-vej har ingen tools —
+  der er intet at omgå, fordi der ikke er nogen dør på den vej
 - Én statuskode = én betydning; status-endpoints laver ikke arbejde
 - Faser lukkes med dato i docs; release-tags forbliver `v1.x`
 - CI bygger kun Windows + Android — aldrig Linux/macOS-desktop

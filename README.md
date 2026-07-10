@@ -8,61 +8,69 @@ Version: **1.12.1** (Status-endpoint laver ikke arbejde; barge-in fra 1.12.0)
 
 ## Architecture
 ```
-┌──────────────┐        ┌──────────────────┐
-│  Desktop     │        │  Kaliv (Android) │
-│ (Compose JVM)│        │  chat · voice ·  │
-│  Windows     │        │  tools · RAG     │
-└──────┬───────┘        └────────┬─────────┘
-       │  local-first,           │  pair + bearer token
-       │  cloud fallback         │
-       │                 ┌───────▼──────────────┐
-       │  (direct, or    │  Backend (Go) :8080  │
-       └──via backend)──▶│  pairing · tokens ·  │
-                         │  reverse proxy only  │
-                         └───┬──────────────┬───┘
-                 /api/chat,  │              │  /rag/* · /voice/* · /tools/*
-                 /api/tags   │              │
-                       ┌─────▼─────┐  ┌─────▼──────────────────────────┐
-                       │  Ollama   │  │  Worker (Python) :8099         │
-                       │  :11434   │  │  ┌──────────────────────────┐  │
-                       └───────────┘  │  │ RAG   pdf·docx·pptx·html │  │
-                                      │  │ Voice ASR→LLM→TTS        │  │
-                                      │  ├──────────────────────────┤  │
-                                      │  │ Kaliv Tools              │  │
-                                      │  │  registry (in code)      │  │
-                                      │  │  confirmation gate ◀─────┼──┼── human
-                                      │  │  audit log (append-only) │  │   approves
-                                      │  │  Executor seam           │  │   writes
-                                      │  └───────────┬──────────────┘  │
-                                      └──────┬───────┼─────────────────┘
-                                             │       │ embeddings/gen
-                                       ┌─────▼─────┐ │  ┌──────────────┐
-                                       │ SQLite    │ └─▶│  Ollama      │
-                                       │ RAG·audit │    │  (or Cloud)  │
-                                       └───────────┘    └──────────────┘
+  ┌──────────────┐      ┌──────────────────┐
+  │  Desktop     │      │  Kaliv (Android) │
+  │ (Compose JVM)│      │  chat · voice ·  │
+  │  Windows     │      │  tools · RAG     │
+  └──────┬───────┘      └────────┬─────────┘
+         │ local-first,          │ pair + bearer token
+         │ cloud fallback        │
+         │              ┌────────▼─────────────┐
+         │ (direct, or  │  Backend (Go) :8080  │
+         └─via backend)▶│  pairing · tokens ·  │
+                        │  reverse proxy only  │
+                        └───┬──────────────┬───┘
+                /api/chat,  │              │  /rag/*  /voice/*
+                /api/tags   │              │  /tools/*
+                      ┌─────▼─────┐  ┌─────▼──────────────────────┐
+                      │  Ollama   │  │  Worker (Python) :8099     │
+                      │  :11434   │  │                            │
+                      └───────────┘  │  RAG  pdf·docx·pptx·html   │
+                                     │  Voice  ASR → LLM → TTS    │
+                                     │  ────────────────────────  │
+       human ───────────────────────▶│  Kaliv Tools               │
+       approves                      │    registry (in code)      │
+       every write                   │    confirmation gate       │
+                                     │    audit log (append-only) │
+                                     │    Executor seam           │
+                                     └────┬──────────────┬────────┘
+                                          │              │ embeddings / gen
+                                    ┌─────▼─────┐  ┌─────▼──────────┐
+                                    │  SQLite   │  │  Ollama Cloud  │
+                                    │ RAG·audit │  │  (optional)    │
+                                    └───────────┘  └────────────────┘
+```
 
-Voice: audio never leaves the house. ASR (faster-whisper, CUDA) and TTS
-(Piper, Danish) always run on the rig. Only the transcribed question may go
-to Ollama Cloud, and only with the toggle on.
+**Two cloud roads, and they are not the same thing.**
 
-Tools: the model proposes; the gate decides. Reads run. Writes stop at a
-confirmation card and execute the arguments that were shown -- the worker
-parks them, so no client can alter them after approval. A tool result cannot
-trigger another tool: the follow-up turn is sent with tools=[]. Off by default
-(KALIV_TOOLS_ENABLED=1). See KRAVSPEC_V5_TOOLS.md.
+```
+  road 1   Kaliv ─────────────────────────────▶ Ollama Cloud
+           The rig is never involved. There are NO tools on this road.
+           Nothing to bypass: there is no door, not an open one.
 
-The Go server is a proxy and nothing more. Gate, whitelist and audit live in
+  road 2   Kaliv ──▶ Go ──▶ Worker ──▶ Ollama Cloud
+                            └─ gate ─┘
+           /tools/chat with cloud_key. A cloud model proposes, the gate
+           decides, you approve every write. The card says who asked:
+           "Cloud-modellen foreslår: …"
+```
+
+**Voice** — audio never leaves the house. ASR (faster-whisper, CUDA) and TTS
+(Piper, Danish) always run on the rig. Only the transcribed question may go to
+the cloud, and only with the toggle on.
+
+**Tools** — the model proposes; the gate decides. Reads run. Writes stop at a
+confirmation card and execute the arguments that were shown: the worker parks
+them, so no client can alter them after approval. *Risk* decides whether a
+human is asked, not origin. A tool result cannot trigger another tool — the
+follow-up turn is sent with `tools=[]`. Off by default (`KALIV_TOOLS_ENABLED=1`).
+See `KRAVSPEC_V5_TOOLS.md`.
+
+**The Go server is a proxy and nothing more.** Gate, whitelist and audit live in
 the worker, so an old or tampered client cannot find a friendlier backend.
 
-Two cloud roads, and they are not the same:
-  app → Ollama Cloud direct   (CloudClient) — the rig is not involved, so
-                               there are no tools on this road at all
-  app → rig → Ollama Cloud    (/tools/chat with cloud_key) — a cloud model
-                               proposes, the gate decides, you approve writes
-
 Cloud fallback (desktop): if local is down/insufficient →
-Ollama Cloud (https://ollama.com, model :cloud) with OLLAMA_API_KEY.
-```
+Ollama Cloud (https://ollama.com, model `:cloud`) with `OLLAMA_API_KEY`.
 
 - **backend/** — Go, stdlib only. Device pairing (short `XXXX-XXXX` codes) →
   hashed bearer tokens, device list + **revoke**, brute-force **rate limiting** on
