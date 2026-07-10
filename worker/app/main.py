@@ -20,7 +20,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.27.1"
+VERSION = "1.28.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -361,6 +361,15 @@ async def _final_answer(messages: list[dict], model: str | None,
     """
     msg = await oc.chat_tools(messages, tools=[], model=model,
                               base_url=base_url, api_key=api_key)
+    # tools=[] should make a tool call impossible. It is one line to make sure
+    # rather than to assume: the model is remote, the wire is not ours, and a
+    # tool call honoured here would be exactly the chain the whole design
+    # forbids. Dropped, not executed, and never silently.
+    if msg.get("tool_calls"):
+        _logger.warning(
+            "follow-up turn returned %d tool call(s) despite tools=[]; ignored",
+            len(msg["tool_calls"]),
+        )
     return msg.get("content", "")
 
 
@@ -537,15 +546,10 @@ class ToolEnabledReq(BaseModel):
 @app.post("/tools/enabled")
 def tools_enabled(req: ToolEnabledReq) -> dict:
     from . import tools as t
-    if req.tool is None:
-        t.GATE.enabled = req.enabled
-    else:
-        if req.tool not in t.REGISTRY:
-            raise HTTPException(status_code=404, detail=f"unknown tool: {req.tool}")
-        if req.enabled:
-            t.GATE.disabled_tools.discard(req.tool)
-        else:
-            t.GATE.disabled_tools.add(req.tool)
+    if req.tool is not None and req.tool not in t.REGISTRY:
+        raise HTTPException(status_code=404, detail=f"unknown tool: {req.tool}")
+    # Persisted: a brake hit because something misbehaved must survive a restart.
+    t.GATE.set_enabled(req.enabled, req.tool)
     return {"enabled": t.GATE.enabled, "tools": t.GATE.list_tools()}
 
 

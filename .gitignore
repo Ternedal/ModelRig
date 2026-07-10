@@ -27,3 +27,7 @@ local.properties
 # OS
 .DS_Store
 Thumbs.db
+
+# Kaliv Tools: kill-switch state (per-rig, never committed)
+kaliv-tools-state.json
+kaliv-tools-state.json.tmp

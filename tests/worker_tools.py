@@ -502,5 +502,76 @@ check('m.role == "system" and i > 0' in src,
 check('if req.system:' in src and 'm.role != "system"' in src,
       "T24: an explicit system field wins over one smuggled in history")
 
+# ---------------------------------------------------------------------------
+# T25: the brake survives a restart. Anders keeps KALIV_TOOLS_ENABLED=1 in his
+# environment, so without persistence, hitting the kill switch and then having
+# the worker restart -- crash, watchdog, reboot -- would quietly re-arm exactly
+# what he just stopped. The env var is the first-run default; a decision outlives it.
+# ---------------------------------------------------------------------------
+import json as _json  # noqa: E402
+import os as _os  # noqa: E402
+
+state = _os.path.join(_tmp, "state.json")
+_os.environ["KALIV_TOOLS_ENABLED"] = "1"
+
+def gate_with_state():
+    g = T.ToolGate(audit=T.AuditLog(_os.environ["KALIV_AUDIT_DB"]), state_file=state)
+    return g
+
+g = gate_with_state()
+check(g.enabled is True, "T25: env var arms the layer on first run")
+g.set_enabled(False)
+check(gate_with_state().enabled is False,
+      "T25: the kill switch survives a restart, even with the env var set")
+g = gate_with_state()
+g.set_enabled(True)
+check(gate_with_state().enabled is True, "T25: re-arming survives a restart too")
+
+g.set_enabled(False, "note_append")
+check("note_append" in gate_with_state().disabled_tools,
+      "T25: a single disabled tool survives a restart")
+check(gate_with_state().enabled is True,
+      "T25: disabling one tool does not disarm the layer")
+
+# A corrupt state file must not brick the worker, and must not silently arm it.
+with open(state, "w", encoding="utf-8") as f:
+    f.write("{ not json")
+_os.environ["KALIV_TOOLS_ENABLED"] = "0"
+check(gate_with_state().enabled is False,
+      "T25: a corrupt state file falls back to the env default, which is off")
+_os.environ.pop("KALIV_TOOLS_ENABLED", None)
+
+# Writes are atomic: no half-written brake.
+g = gate_with_state()
+g.set_enabled(False)
+check(_json.load(open(state))["enabled"] is False, "T25: state is written, not promised")
+
+# ---------------------------------------------------------------------------
+# T26: abandoned proposals are purged. The 60s TTL was only enforced when a
+# confirm() arrived, so a write the model proposed and nobody answered lived in
+# the dict for the life of the process.
+# ---------------------------------------------------------------------------
+g = fresh_gate()
+r = g.propose("note_append", {"text": "glemt"})
+with g._lock:
+    g._pending[r["confirmation_id"]].expires_at = time.time() - 1
+check(len(g._pending) == 1, "T26: the abandoned proposal is still there")
+g.propose("rig_status", {})  # any later proposal triggers the sweep
+check(len(g._pending) == 0, "T26: the expired proposal is purged")
+check("expired" in {e["outcome"] for e in g.audit.recent(5)},
+      "T26: an expiry nobody answered is still recorded")
+check("glemt" not in open(T.note_path(), encoding="utf-8").read(),
+      "T26: purging never executes anything")
+
+# ---------------------------------------------------------------------------
+# T27: no chains, enforced at runtime and not only by tools=[].
+# ---------------------------------------------------------------------------
+src = _i.getsource(_M._final_answer)
+check("tools=[]" in src, "T27: the follow-up turn requests no tools")
+check('msg.get("tool_calls")' in src and "_logger.warning" in src,
+      "T27: a tool call returned anyway is dropped, and loudly")
+check("EXECUTOR" not in src and "propose" not in src,
+      "T27: there is no path from the follow-up turn to executing a tool")
+
 print(f"\n===== TOOLS: {passed} passed, {failed} failed =====")
 sys.exit(0 if failed == 0 else 1)

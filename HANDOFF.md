@@ -375,6 +375,10 @@ git push <url> main:main
 - Spec godkendt af Anders 10/7. `rig_status` (read) + `note_append` (write,
   append-only, én mappe). Bekræftelsesport håndhævet i workeren, append-only
   audit-log, kill switch. **Slået FRA som standard** (`KALIV_TOOLS_ENABLED=1`).
+  **Fra v1.28.0 er kill switch-beslutningen persistent** (`kaliv-tools-state.json`,
+  sti via `KALIV_TOOLS_STATE`). Env-varen er kun *første-kørsel*-default: slår du
+  laget fra i appen, forbliver det slået fra efter en genstart, selv med
+  `KALIV_TOOLS_ENABLED=1` i env. Slet statefilen for at nulstille.
 - 27 tests grønne, inkl. T7/T8 (prompt injection). Kører nu i CI.
 - **v1.19.0:** modellen kan foreslå tools (`POST /tools/chat`), og Go-serveren
   proxy'er hele laget.
@@ -400,7 +404,7 @@ git push <url> main:main
 - ⚠️ **Betingelsen står ved magt:** vilkårlige filstier eller 3.-parts
   MCP-servere kræver separat Windows-konto + ACL'er FØRST (kravspec §5b).
 
-**Testdækning (10/7):** worker 178 tests (unit 31 · rag 48 · tools 99) +
+**Testdækning (10/7):** worker 192 tests (unit 31 · rag 48 · tools 113) +
 Go `internal/httpapi` 4 tests. CI kører nu `go vet` og `go test ./...` —
 det gjorde den ikke før v1.23.1, så Go-koden var reelt utestet.
 

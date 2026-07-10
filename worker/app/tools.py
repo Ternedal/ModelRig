@@ -42,6 +42,7 @@ Risk = Literal["read", "write"]
 CONFIRM_TTL_SECONDS = 60
 
 _AUDIT_DB = os.getenv("KALIV_AUDIT_DB", "./kaliv-audit.db")
+_STATE_FILE = os.getenv("KALIV_TOOLS_STATE", "./kaliv-tools-state.json")
 
 
 def tools_dir() -> str:
@@ -280,13 +281,66 @@ class Pending:
 class ToolGate:
     """Everything the model is not allowed to decide."""
 
-    def __init__(self, audit: Optional[AuditLog] = None):
+    def __init__(self, audit: Optional[AuditLog] = None,
+                 state_file: Optional[str] = _STATE_FILE):
         self.audit = audit or AuditLog()
         self._pending: dict[str, Pending] = {}
         self._lock = threading.Lock()
-        # Off by default on first update: power should be opted into.
+        self.state_file = state_file
+        # Off by default on first run: power should be opted into.
         self.enabled = os.getenv("KALIV_TOOLS_ENABLED", "0") == "1"
         self.disabled_tools: set[str] = set()
+        if state_file:
+            self._load_state()
+
+    # -- persistence -------------------------------------------------------
+    # A brake you hit because a tool misbehaved MUST survive a restart. Anders
+    # keeps KALIV_TOOLS_ENABLED=1 in his environment, so without this, killing
+    # the layer and then restarting the worker (crash, watchdog, reboot) would
+    # quietly re-arm the exact thing he just stopped. The env var is the FIRST
+    # RUN default; an explicit decision outlives it.
+    #
+    # The reverse is deliberately not symmetrical in spirit: arming again is a
+    # decision he makes while looking at the app; disarming may have happened
+    # while something was going wrong. Both persist, but this is the one that
+    # matters, and it is why the file is written before the answer is returned.
+    def _load_state(self) -> None:
+        try:
+            with open(self.state_file, encoding="utf-8") as f:
+                st = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return  # first run, or a corrupt file: fall back to the env default
+        if isinstance(st.get("enabled"), bool):
+            self.enabled = st["enabled"]
+        tools = st.get("disabled_tools")
+        if isinstance(tools, list):
+            self.disabled_tools = {t for t in tools if isinstance(t, str)}
+
+    def _save_state(self) -> None:
+        if not self.state_file:
+            return
+        tmp = f"{self.state_file}.tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"enabled": self.enabled,
+                           "disabled_tools": sorted(self.disabled_tools)}, f)
+            os.replace(tmp, self.state_file)  # atomic: never a half-written brake
+        except OSError:
+            # Cannot persist. Do not pretend the toggle stuck: the caller reads
+            # the returned registry, and the in-memory state is still correct
+            # for this process. Record it where it will be seen.
+            self.audit.record(tool="_state", args={}, risk="write",
+                              outcome="error", result_summary="could not persist tool state")
+
+    def set_enabled(self, enabled: bool, tool: Optional[str] = None) -> None:
+        """The kill switch. Omit `tool` for the whole layer."""
+        if tool is None:
+            self.enabled = enabled
+        elif enabled:
+            self.disabled_tools.discard(tool)
+        else:
+            self.disabled_tools.add(tool)
+        self._save_state()
 
     def is_enabled(self, name: str) -> bool:
         return self.enabled and name not in self.disabled_tools
@@ -303,6 +357,11 @@ class ToolGate:
                 origin: str = "local") -> dict:
         """A read tool runs now. A write tool returns a confirmation_id and
         runs NOTHING until a human approves it."""
+        # Sweep first, whatever this proposal turns out to be. Putting this in
+        # the write branch meant a rig only ever asked for reads never cleaned
+        # up at all -- T26 caught that, the code review did not.
+        self._purge_expired()
+
         tool = REGISTRY.get(name)
         if tool is None:
             self.audit.record(tool=name, args=args, risk="unknown",
@@ -342,6 +401,26 @@ class ToolGate:
                         + tool.human_summary(args)),
             "expires_in_seconds": CONFIRM_TTL_SECONDS,
         }
+
+    def _purge_expired(self) -> None:
+        """Drop proposals nobody answered.
+
+        The 60s TTL was only enforced when confirm() arrived. A write the model
+        proposed and Anders simply ignored stayed in the dict for the life of
+        the process. Small objects, but an unbounded dict fed by a model is a
+        dict fed by whoever can talk to the model. Each expiry is recorded:
+        an action that was proposed and never answered is worth seeing.
+        """
+        now = time.time()
+        with self._lock:
+            stale = [p for p in self._pending.values() if now > p.expires_at]
+            for p in stale:
+                self._pending.pop(p.confirmation_id, None)
+        for p in stale:
+            self.audit.record(tool=p.tool, args=p.args, risk=REGISTRY[p.tool].risk,
+                              outcome="expired", conversation_id=p.conversation_id,
+                              confirmation_id=p.confirmation_id, origin=p.origin,
+                              result_summary="expired without an answer")
 
     def confirm(self, confirmation_id: str, decision: str) -> dict:
         with self._lock:
