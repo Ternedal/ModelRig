@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import os
 import threading
+
+from .env_compat import env
 from typing import Optional
 
 # Lazy singleton: the model is heavy (~2.5 GB VRAM), load once, on first use.
@@ -106,11 +108,11 @@ def _model_name() -> str:
     # large-v3 = best multilingual/Danish accuracy. int8 keeps VRAM ~2.5 GB so
     # it coexists with the LLM. Smaller options (medium, small) via env for
     # tighter GPUs or lower latency at some accuracy cost.
-    return os.environ.get("ALVA_ASR_MODEL", "large-v3")
+    return env("ASR_MODEL", "large-v3")
 
 
 def _compute_type() -> str:
-    return os.environ.get("ALVA_ASR_COMPUTE", "int8")
+    return env("ASR_COMPUTE", "int8")
 
 
 def _device() -> str:
@@ -118,7 +120,7 @@ def _device() -> str:
     # pip wheels live where Windows won't look; _add_cuda_dll_dirs() registers
     # them before the model loads (see that function). If CUDA still won't come
     # up, fall back with ALVA_ASR_DEVICE=cpu + ALVA_ASR_MODEL=small.
-    return os.environ.get("ALVA_ASR_DEVICE", "cuda")
+    return env("ASR_DEVICE", "cuda")
 
 
 def is_available() -> bool:

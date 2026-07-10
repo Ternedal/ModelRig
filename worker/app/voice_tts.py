@@ -30,6 +30,8 @@ import threading
 import wave
 from typing import Optional
 
+from .env_compat import env
+
 _voice = None
 _voice_lock = threading.Lock()
 _load_error: Optional[str] = None
@@ -38,13 +40,22 @@ _load_error: Optional[str] = None
 def _voice_name() -> str:
     # Danish medium voice (22.05 kHz). Overridable; x_low/low are 16 kHz and
     # faster/smaller if latency matters more than quality.
-    return os.environ.get("ALVA_TTS_VOICE", "da_DK-talesyntese-medium")
+    return env("TTS_VOICE", "da_DK-talesyntese-medium")
 
 
 def _voices_dir() -> str:
     # Where the .onnx + .onnx.json voice files live on the rig. Piper downloads
     # them here on first use (or the user pre-downloads them).
-    return os.environ.get("ALVA_TTS_VOICES_DIR", os.path.expanduser("~/.alva/piper-voices"))
+    explicit = env("TTS_VOICES_DIR")
+    if explicit:
+        return explicit
+    # Default moved ~/.alva -> ~/.kaliv. Anders' voice files already live in
+    # the old dir; keep using it if it exists so nothing breaks on rename.
+    new = os.path.expanduser("~/.kaliv/piper-voices")
+    old = os.path.expanduser("~/.alva/piper-voices")
+    if not os.path.isdir(new) and os.path.isdir(old):
+        return old
+    return new
 
 
 def is_available() -> bool:

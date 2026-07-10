@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from . import ollama_client as oc
 from . import rag
+from .env_compat import legacy_names_in_use
 from .store import DocStore
 
 VERSION = "1.12.3"
@@ -350,6 +351,9 @@ def voice_asr_status() -> dict:
         # Populated once the model has been loaded on a cuda device. Empty
         # before first use, or if the nvidia-* pip packages aren't installed.
         "cuda_dll_dirs": voice_asr.registered_dll_dirs(),
+        # Old ALVA_* names still honoured after the Kaliv rename. Listed so a
+        # pending migration is visible instead of silent.
+        "legacy_env": legacy_names_in_use(),
     }
 
 
@@ -399,6 +403,7 @@ def voice_tts_status() -> dict:
         "available": voice_tts.is_available(),
         "voice": voice_tts._voice_name(),
         "voices_dir": voice_tts._voices_dir(),
+        "legacy_env": legacy_names_in_use(),
     }
 
 

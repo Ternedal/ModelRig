@@ -84,5 +84,36 @@ check(strip_markdown("min_fil_navn.txt") == "min_fil_navn.txt", "strip_markdown:
 check(strip_markdown("| GPU | RTX 3060 |") == "", "strip_markdown: table row dropped")
 check(strip_markdown("```\nkode\n```") == "", "strip_markdown: code fence dropped")
 
+# ---------------------------------------------------------------------------
+# Kaliv rename: KALIV_* wins, ALVA_* still works, defaults survive.
+# Anders' rig has ALVA_* in shell history and docs -- a hard rename would
+# break a working setup for no gain.
+# ---------------------------------------------------------------------------
+import os as _os
+from app.env_compat import env as _env, legacy_names_in_use as _legacy
+
+for _k in [k for k in _os.environ if k.startswith(("ALVA_", "KALIV_"))]:
+    del _os.environ[_k]
+
+check(_env("ASR_MODEL", "large-v3") == "large-v3", "env: default when nothing set")
+
+_os.environ["ALVA_ASR_MODEL"] = "small"
+check(_env("ASR_MODEL", "large-v3") == "small", "env: legacy ALVA_* still honoured")
+
+_os.environ["KALIV_ASR_MODEL"] = "medium"
+check(_env("ASR_MODEL", "large-v3") == "medium", "env: KALIV_* wins over ALVA_*")
+
+check(_legacy() == [], "env: legacy list empty when KALIV_* shadows ALVA_*")
+
+_os.environ["ALVA_TTS_VOICE"] = "da_DK-talesyntese-medium"
+check(_legacy() == ["ALVA_TTS_VOICE"], "env: unshadowed legacy name is reported")
+
+# An explicitly empty value is a choice, not an absence.
+_os.environ["KALIV_ASR_DEVICE"] = ""
+check(_env("ASR_DEVICE", "cuda") == "", "env: empty string counts as set")
+
+for _k in [k for k in _os.environ if k.startswith(("ALVA_", "KALIV_"))]:
+    del _os.environ[_k]
+
 print(f"\n===== WORKER: {passed} passed, {failed} failed =====")
 raise SystemExit(0 if failed == 0 else 1)
