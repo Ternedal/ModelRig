@@ -1,6 +1,6 @@
-"""Alva Voice — ASR (speech-to-text) module.
+"""Kaliv Voice — ASR (speech-to-text) module.
 
-Phase 1 of the Alva Voice MVP (see ALVA_VOICE_ROADMAP_DELTA.md). Deliberately
+Phase 1 of the Kaliv Voice MVP (see ALVA_VOICE_ROADMAP_DELTA.md). Deliberately
 built on faster-whisper, NOT Parakeet/NeMo, for the MVP:
   - MIT-licensed (Parakeet is under NVIDIA Open Model License).
   - No NeMo/PyTorch-heavy toolchain -- CTranslate2 backend, ~2.5 GB VRAM at
@@ -144,7 +144,7 @@ def _get_model():
             from faster_whisper import WhisperModel
         except Exception as e:  # not installed
             _load_error = (
-                "faster-whisper is not installed. Alva Voice ASR is optional; "
+                "faster-whisper is not installed. Kaliv Voice ASR is optional; "
                 "install it on the rig with: pip install faster-whisper"
             )
             raise RuntimeError(_load_error) from e

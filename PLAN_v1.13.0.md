@@ -1,4 +1,16 @@
-# PLAN — v1.13.0 "Tap-to-stop + Kaliv"
+# PLAN — v1.13.0 "Tap-to-stop + Kaliv" — ✅ LEVERET 10/7 morgen
+
+> **Denne plan er udført.** v1.13.0 er tagget, CI grøn, APK bygget.
+> Én rettelse værd at huske: planens §3a var FORKERT om mekanismen.
+> `/voice/converse` streamer ikke — appen får ét komplet WAV, og
+> sætnings-chunking sker inde i workeren. Der er ingen in-flight stream
+> at annullere. Det der faktisk stopper lyden er et flag som `playWav`s
+> write-loop tjekker mellem chunks; en coroutine-cancel kan ikke afbryde
+> et blokerende `AudioTrack.write`.
+>
+> Tilbage: **Anders' on-device-test.** Se §0 punkt 5–6.
+
+
 
 **Skrevet:** 2026-07-09 sen aften, efter GPU-voice virkede
 **Status:** ✅ LEVERET som v1.13.0 (10/7 tidlig morgen). Worker (§2) og

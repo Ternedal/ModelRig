@@ -328,8 +328,8 @@ def delete_source(source: str) -> dict:
     return {"source": source, "removed": removed, "total": store.count()}
 
 
-# ---- Alva Voice: ASR (optional) --------------------------------------------
-# Phase 1 of Alva Voice. Optional: faster-whisper is NOT a hard worker
+# ---- Kaliv Voice: ASR (optional) --------------------------------------------
+# Phase 1 of Kaliv Voice. Optional: faster-whisper is NOT a hard worker
 # dependency. If it's not installed, this returns 501 with instructions and the
 # rest of the worker is unaffected. See app/voice_asr.py and
 # ALVA_VOICE_ROADMAP_DELTA.md. NOT YET HARDWARE-TESTED.
@@ -373,7 +373,7 @@ def voice_asr_transcribe(req: AsrReq) -> dict:
         # installed here. Clear, actionable message rather than a 500 stack.
         raise HTTPException(
             status_code=501,
-            detail="Alva Voice ASR is not enabled on this rig. Install it with: "
+            detail="Kaliv Voice ASR is not enabled on this rig. Install it with: "
                    "pip install faster-whisper",
         )
     import os as _os
@@ -389,8 +389,8 @@ def voice_asr_transcribe(req: AsrReq) -> dict:
         raise HTTPException(status_code=503, detail=str(e))
 
 
-# ---- Alva Voice: TTS (optional) --------------------------------------------
-# Phase 2 of Alva Voice. Same optional pattern as ASR: piper-tts is NOT a hard
+# ---- Kaliv Voice: TTS (optional) --------------------------------------------
+# Phase 2 of Kaliv Voice. Same optional pattern as ASR: piper-tts is NOT a hard
 # dependency; absent -> 501 with instructions, worker otherwise unaffected. See
 # app/voice_tts.py. NOT YET HARDWARE-TESTED. Piper is GPL-3.0 (fine for private
 # use; flagged for redistribution).
@@ -420,7 +420,7 @@ def voice_tts_synthesize(req: TtsReq) -> dict:
     if not voice_tts.is_available():
         raise HTTPException(
             status_code=501,
-            detail="Alva Voice TTS is not enabled on this rig. Install it with: "
+            detail="Kaliv Voice TTS is not enabled on this rig. Install it with: "
                    "pip install piper-tts",
         )
     if not req.text.strip():
@@ -435,7 +435,7 @@ def voice_tts_synthesize(req: TtsReq) -> dict:
         raise HTTPException(status_code=503, detail=str(e))
 
 
-# ---- Alva Voice: full pipeline (ASR -> LLM -> TTS) --------------------------
+# ---- Kaliv Voice: full pipeline (ASR -> LLM -> TTS) --------------------------
 # Phase 3 (V-MVP.3). Orchestrates one spoken turn and reports time-to-first-
 # audio. Needs BOTH ASR and TTS backends installed; 501 with the specific
 # missing one otherwise. See app/voice_pipeline.py. NOT YET HARDWARE-TESTED.

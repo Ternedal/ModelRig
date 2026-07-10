@@ -1,6 +1,6 @@
-"""Alva Voice — pipeline orchestration (ASR -> LLM -> TTS).
+"""Kaliv Voice — pipeline orchestration (ASR -> LLM -> TTS).
 
-Phase 3 of the Alva Voice MVP (V-MVP.3 in ALVA_VOICE_ROADMAP_DELTA.md). Ties
+Phase 3 of the Kaliv Voice MVP (V-MVP.3 in ALVA_VOICE_ROADMAP_DELTA.md). Ties
 the two building blocks (voice_asr, voice_tts) together with the existing
 streaming Ollama client into one spoken turn:
 
@@ -9,7 +9,7 @@ streaming Ollama client into one spoken turn:
 
 THE KEY METRIC is time-to-first-audio: as the LLM streams, we split on sentence
 boundaries (. ! ?) and synthesize each COMPLETE sentence immediately, instead
-of waiting for the whole reply. So Alva can start speaking the first sentence
+of waiting for the whole reply. So Kaliv can start speaking the first sentence
 while the LLM is still generating the rest. This module measures and returns
 that first-audio latency.
 
@@ -53,7 +53,7 @@ _SENTENCE_END = re.compile(r"([.!?])(\s|$)")
 
 # --- Markdown -> speakable text ---------------------------------------------
 # The LLM writes markdown (**bold**, `code`, - bullets, ### headings). Piper
-# reads it literally, so Alva says "stjerne stjerne" out loud. Anders hit this
+# reads it literally, so Kaliv says "stjerne stjerne" out loud. Anders hit this
 # on 2026-07-09. We strip formatting from what is SPOKEN; the chat still shows
 # the original markdown.
 #

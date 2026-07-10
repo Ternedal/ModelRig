@@ -1,6 +1,6 @@
-"""Alva Voice — TTS (text-to-speech) module.
+"""Kaliv Voice — TTS (text-to-speech) module.
 
-Phase 2 of the Alva Voice MVP (see ALVA_VOICE_ROADMAP_DELTA.md). Built on Piper
+Phase 2 of the Kaliv Voice MVP (see ALVA_VOICE_ROADMAP_DELTA.md). Built on Piper
 for the MVP:
   - CPU-only, real-time (~10x real-time on a modern desktop CPU), tiny voices
     (~tens of MB). Frees the GPU entirely for ASR + the LLM. Verified via web
@@ -79,7 +79,7 @@ def _get_voice():
             from piper import PiperVoice
         except Exception as e:
             _load_error = (
-                "piper-tts is not installed. Alva Voice TTS is optional; install "
+                "piper-tts is not installed. Kaliv Voice TTS is optional; install "
                 "it on the rig with: pip install piper-tts"
             )
             raise RuntimeError(_load_error) from e
