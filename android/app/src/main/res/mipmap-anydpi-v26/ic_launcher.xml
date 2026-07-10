@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Kaliv adaptive icon. Foreground motif is ~38% of the canvas, well inside
+     the 66% safe zone: the first Alva icon shipped a full-bleed foreground
+     and the launcher mask clipped it. Background is a separate layer, never
+     baked into the foreground. Monochrome layer drives Android 13+ themed
+     icons; older platforms ignore the attribute. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@drawable/ic_launcher_background" />
     <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
 </adaptive-icon>

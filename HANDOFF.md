@@ -20,9 +20,11 @@ Copy/paste dette som første besked i en ny chat.
    `modelrig-mono`) med forskellig kode-alder. Det har forårsaget flere falske
    fejlspor. Ryd op: behold én mappe.
 4. **Appen hedder nu KALIV** (Anders' beslutning 9/7 aften; før: Alva).
-   Navne-rebrand (launcher, UI, persona, docs; env-vars `KALIV_*` med
-   `ALVA_*`-fallback) → `v1.13.0` sammen med tap-to-stop. Ikonet afventer
-   Anders' brand-pakke og skibes separat. `applicationId` røres ALDRIG.
+   **Ikonet er shippet i `v1.12.4`** (ankh-mærke, bronze/ember-palet,
+   monokrom-lag til Android 13+ themed icons). Worker-env `KALIV_*` med
+   `ALVA_*`-fallback er også lavet. Resten af navne-rebranden (launcher,
+   UI, persona, docs) → `v1.13.0` sammen med tap-to-stop.
+   `applicationId` røres ALDRIG.
 
 ---
 

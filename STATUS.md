@@ -2,7 +2,7 @@
 
 Version **1.12.3** — "GPU-voice virker på telefonen. Root cause fundet og fixet: CTranslate2 loader cuBLAS via den klassiske søgesti, så workeren prepender nu nvidia-bin-mapperne til PATH (add_dll_directory alene var ikke nok — hardware-bevist 9/7 ~21:50)". Follows 1.12.2 (501/503-split + traceback-logning — fixet der gjorde root cause synlig). Autonomous sessions, **2026-07-02 → 07-09**.
 
-> **Beslutning 9/7 aften:** appen omdøbes **Alva → Kaliv**. Navn + env-fallback i `v1.13.0` (sammen med tap-to-stop); ikon afventer Anders' brand-pakke. Roadmap udvidet med V4-horisonter — se `ROADMAP.md` §9–10.
+> **Beslutning 9/7 aften:** appen omdøbes **Alva → Kaliv**. Ikonet er leveret og shippet i `v1.12.4` (ankh-mærket, monokrom-lag inkl.). Navn i UI + `KALIV_*`-env med `ALVA_*`-fallback lander i `v1.13.0` sammen med tap-to-stop. Roadmap udvidet til V8 + målarkitektur — se `ROADMAP.md` §9–15.
 
 > **🎉 MILEPÆL 8/7 aften:** Hele Alva Voice-kæden er nu bevist på Anders' rig — ASR→LLM→TTS kørte ende-til-ende. Input-WAV → dansk transskription → llama3.2-svar → tale delt i sætnings-WAV'er. Alle tre Voice-lag + LLM koblet sammen og kørende. (Svar-kvaliteten var svag med den lille 1b-model — vrøvl + engelsk-indblanding — men det beviser rørene; hermes3:8b/qwen giver gode svar. TTFA-metrikken fejlede i test-one-lineren men er verificeret korrekt i selve voice_pipeline.py-modulet.)
 

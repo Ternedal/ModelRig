@@ -118,8 +118,9 @@ straks klar til ny tur, worker-loggen viser ingen fortsat syntese.
 
 ### 3b. Kaliv-navnerebrand
 
-Kun navn. **Ikonet venter på Anders' brand-pakke** (ChatGPT laver designet;
-krav: transparent forgrund ≤40 %, separat baggrund, valgfri monokrom).
+Kun navn. **Ikonet er LEVERET og shippet i v1.12.4** (9/7 sen aften) —
+verificeret: forgrund 38,4 % af kanten, transparent, separat baggrund,
+monokrom-lag med i adaptive-icon XML'en.
 
 - `strings.xml`: app-navn, UI-titler
 - Persona/system-prompt: "Alva" → "Kaliv"
