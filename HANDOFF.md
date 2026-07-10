@@ -355,6 +355,10 @@ git push <url> main:main
 - Flere dokumentformater (PPTX, HTML) — samme mønster som PDF/DOCX
 - Forbedringer til markdown-strip, chunking, fejlbeskeder
 
+**Kræver Anders' beslutning:**
+- `KRAVSPEC_V5_TOOLS.md` — agent-laget. Fem åbne spørgsmål i §12. Ingen
+  tool-kode skrives før spec'en er godkendt.
+
 **Kræver Anders' test:**
 - Tap-to-stop + Kaliv-navnerebrand (bygges som v1.13.0)
 - Barge-in-kalibrering (rmsThreshold)

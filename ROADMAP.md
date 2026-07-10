@@ -319,9 +319,10 @@ acceptkriterier ligger i **`ALVA_VOICE_ROADMAP_DELTA.md`**. Kernepunkter:
 Retninger EFTER at V3-kernen (Voice) er hardware-bevist. Uprioriteret indtil
 Anders vælger; hvert punkt er markeret med hvad der kræves.
 
-### Nær (ingen nye beslutninger nødvendige)
-- **v1.13.0 — tap-to-stop + Kaliv-navnerebrand** (næste session; §5 + §10)
-- **Kaliv-ikon** som egen release [venter: Anders' brand-pakke]
+### Nær — ✅ AFSLUTTET 10/7-2026
+- ~~tap-to-stop + Kaliv-navnerebrand~~ ✅ **v1.13.0**
+- ~~Kaliv-ikon~~ ✅ **v1.12.4** (+ hele paletten i **v1.16.0**, splash og
+  velkomstskærm i **v1.17.0**)
 - ~~Barge-in-kalibrering~~ ✅ **værktøjet leveret i v1.15.0** (live RMS +
   top + justerbar tærskel). Selve kalibreringen kræver Anders' telefon.
 - ~~PPTX/HTML-ingest~~ ✅ **leveret i v1.14.0** (10/7). PPTX: shapes, tabeller
@@ -356,10 +357,12 @@ Tema: fra samtale til handling — Kaliv må røre ting på riggen, men kun
 gennem en sikkerhedsmodel der er designet FØR første linje tool-kode.
 Løfter V4's største "kræver beslutning"-punkt til et fuldt spor.
 
-0. **Kravspec før kode** [Anders godkender spec før implementering]:
-   whitelist pr. tool, eksplicit bekræftelse pr. skrivende handling
-   (ingen auto-exec), audit-log på riggen, tool-output behandles som
-   DATA (prompt-injection-værn), rate limits.
+0. ~~Kravspec før kode~~ ✅ **skrevet 10/7: `KRAVSPEC_V5_TOOLS.md`**.
+   Afventer Anders' godkendelse + svar på fem åbne spørgsmål (§12).
+   Indhold: whitelist pr. tool, eksplicit bekræftelse pr. skrivende
+   handling (ingen auto-exec, ingen "husk mit valg"), append-only
+   audit-log på riggen, tool-output som DATA, ingen tool-kæder i MVP.
+   **Ingen kode før godkendelse.**
 1. **MCP-fundament i workeren** [arkitekturvalg — anbefaling: MCP frem
    for eget format; fremtidssikret og genbrugeligt]: ModelRig som
    MCP-klient mod lokale MCP-servere; tool-registry i appen med
