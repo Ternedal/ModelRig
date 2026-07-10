@@ -20,7 +20,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.13.0"
+VERSION = "1.14.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -333,6 +333,115 @@ def delete_source(source: str) -> dict:
 # dependency. If it's not installed, this returns 501 with instructions and the
 # rest of the worker is unaffected. See app/voice_asr.py and
 # ALVA_VOICE_ROADMAP_DELTA.md. NOT YET HARDWARE-TESTED.
+
+@app.get("/rag/ingest/pptx/status")
+def rag_pptx_status() -> dict:
+    """Whether PPTX ingest is available (python-pptx installed)."""
+    from . import rag_pptx
+    return {"available": rag_pptx.is_available()}
+
+
+class IngestPptxReq(BaseModel):
+    # base64-encoded .pptx bytes. Mirrors /rag/ingest/docx.
+    pptx_base64: str
+    source: str | None = None
+    chunk_size: int = Field(default=800, ge=100, le=4000)
+    overlap: int = Field(default=150, ge=0, le=1000)
+
+
+@app.post("/rag/ingest/pptx")
+async def ingest_pptx(req: IngestPptxReq) -> dict:
+    """Extract text from an uploaded .pptx and ingest it into the RAG index.
+
+    Returns {source, slides, chars, chunks_added, total}. 501 if python-pptx
+    isn't installed, 400 for bad base64 / unreadable / legacy .ppt, 422 if
+    there's no extractable text (an image-only deck).
+    """
+    from . import rag_pptx
+    import base64
+    if not rag_pptx.is_available():
+        raise HTTPException(
+            status_code=501,
+            detail="PPTX ingest is not enabled on this rig. Install it with: pip install python-pptx",
+        )
+    try:
+        raw = base64.b64decode(req.pptx_base64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="pptx_base64 is not valid base64")
+    try:
+        extracted = rag_pptx.extract_text(raw)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not extracted["text"]:
+        raise HTTPException(status_code=422, detail="no extractable text in PPTX")
+    try:
+        chunks = await rag.ingest(
+            store,
+            [{"text": extracted["text"], "source": req.source}],
+            chunk_size=req.chunk_size, overlap=req.overlap,
+        )
+    except oc.OllamaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {
+        "source": req.source,
+        "slides": extracted["slides"],
+        "chars": extracted["chars"],
+        "chunks_added": chunks,
+        "total": store.count(),
+    }
+
+
+@app.get("/rag/ingest/html/status")
+def rag_html_status() -> dict:
+    """Always available: html.parser is stdlib, so there is nothing to install."""
+    from . import rag_html
+    return {"available": rag_html.is_available()}
+
+
+class IngestHtmlReq(BaseModel):
+    # base64-encoded HTML bytes (a saved web page). No optional dependency.
+    html_base64: str
+    source: str | None = None
+    chunk_size: int = Field(default=800, ge=100, le=4000)
+    overlap: int = Field(default=150, ge=0, le=1000)
+
+
+@app.post("/rag/ingest/html")
+async def ingest_html(req: IngestHtmlReq) -> dict:
+    """Extract text from uploaded HTML and ingest it into the RAG index.
+
+    Returns {source, title, chars, chunks_added, total}. Never 501 (stdlib):
+    400 for bad base64 / undecodable bytes, 422 if there's no text left after
+    stripping scripts, styles and site chrome.
+    """
+    from . import rag_html
+    import base64
+    try:
+        raw = base64.b64decode(req.html_base64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="html_base64 is not valid base64")
+    try:
+        extracted = rag_html.extract_text(raw)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not extracted["text"]:
+        raise HTTPException(status_code=422, detail="no extractable text in HTML")
+    try:
+        chunks = await rag.ingest(
+            store,
+            [{"text": extracted["text"], "source": req.source}],
+            chunk_size=req.chunk_size, overlap=req.overlap,
+        )
+    except oc.OllamaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {
+        "source": req.source,
+        "title": extracted["title"],
+        "chars": extracted["chars"],
+        "chunks_added": chunks,
+        "total": store.count(),
+    }
+
 
 @app.get("/voice/asr/status")
 def voice_asr_status() -> dict:

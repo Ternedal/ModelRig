@@ -339,6 +339,20 @@ func (s *server) handleRagIngestDocx(w http.ResponseWriter, r *http.Request) {
 	s.WorkerSlow.Forward(w, r, "/rag/ingest/docx")
 }
 
+// handleRagIngestPptx proxies a .pptx upload to the worker, which extracts text
+// (python-pptx: shapes, tables, speaker notes) and ingests it. 501 if
+// python-pptx isn't installed.
+func (s *server) handleRagIngestPptx(w http.ResponseWriter, r *http.Request) {
+	// WorkerSlow: a large deck means many embedding calls.
+	s.WorkerSlow.Forward(w, r, "/rag/ingest/pptx")
+}
+
+// handleRagIngestHtml proxies a saved web page to the worker, which extracts
+// text with the standard library. Never 501: html.parser needs no install.
+func (s *server) handleRagIngestHtml(w http.ResponseWriter, r *http.Request) {
+	s.WorkerSlow.Forward(w, r, "/rag/ingest/html")
+}
+
 // clientIP extracts the remote host for rate-limiting. Behind a trusted reverse
 // proxy you'd honor X-Forwarded-For; for a direct LAN server RemoteAddr is right.
 func clientIP(r *http.Request) string {

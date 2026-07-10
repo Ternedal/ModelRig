@@ -481,4 +481,55 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
             return IngestResult(1, o.optInt("chunks_added"), o.optInt("total"))
         }
     }
+
+    /**
+     * Ingests a .pptx into the RAG index. The rig extracts shape text, table
+     * cells and speaker notes with python-pptx. Mirrors ingestDocx. 501 if
+     * python-pptx isn't installed, 400 for a legacy .ppt, 422 for an
+     * image-only deck.
+     */
+    fun ingestPptx(source: String, pptxBytes: ByteArray, chunkSize: Int = 800, overlap: Int = 150): IngestResult {
+        val b64 = android.util.Base64.encodeToString(pptxBytes, android.util.Base64.NO_WRAP)
+        val payload = JSONObject()
+            .put("pptx_base64", b64)
+            .put("source", source)
+            .put("chunk_size", chunkSize)
+            .put("overlap", overlap)
+            .toString()
+            .toRequestBody(jsonType)
+        val builder = Request.Builder().url("$base/api/v1/rag/ingest/pptx").post(payload)
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        // Long timeout: a large deck means many embedding calls to Ollama.
+        voiceHttp.newCall(builder.build()).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("PPTX ingest failed (${resp.code}): $body")
+            val o = JSONObject(body)
+            return IngestResult(1, o.optInt("chunks_added"), o.optInt("total"))
+        }
+    }
+
+    /**
+     * Ingests a saved web page (.html) into the RAG index. Extraction uses the
+     * Python standard library on the rig, so this never returns 501 -- unlike
+     * PDF/DOCX/PPTX there is nothing to install. Sends raw bytes rather than a
+     * decoded string: the page may be cp1252, and the rig sniffs the encoding.
+     */
+    fun ingestHtml(source: String, htmlBytes: ByteArray, chunkSize: Int = 800, overlap: Int = 150): IngestResult {
+        val b64 = android.util.Base64.encodeToString(htmlBytes, android.util.Base64.NO_WRAP)
+        val payload = JSONObject()
+            .put("html_base64", b64)
+            .put("source", source)
+            .put("chunk_size", chunkSize)
+            .put("overlap", overlap)
+            .toString()
+            .toRequestBody(jsonType)
+        val builder = Request.Builder().url("$base/api/v1/rag/ingest/html").post(payload)
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        voiceHttp.newCall(builder.build()).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("HTML ingest failed (${resp.code}): $body")
+            val o = JSONObject(body)
+            return IngestResult(1, o.optInt("chunks_added"), o.optInt("total"))
+        }
+    }
 }

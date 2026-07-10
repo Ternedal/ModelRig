@@ -735,6 +735,12 @@ private fun ChatScreen(
                     val isPdf = mime == "application/pdf" || lower.endsWith(".pdf")
                     val isDocx = mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
                         lower.endsWith(".docx")
+                    val isPptx = mime == "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
+                        lower.endsWith(".pptx")
+                    // Extension first for HTML: providers report saved pages as
+                    // text/html, but also sometimes as text/plain, and a page
+                    // sent through ingestText would keep all its markup.
+                    val isHtml = lower.endsWith(".html") || lower.endsWith(".htm") || mime == "text/html"
                     val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
                         ?: throw RuntimeException("kunne ikke læse filen")
                     if (bytes.isEmpty()) throw RuntimeException("filen er tom")
@@ -742,6 +748,8 @@ private fun ChatScreen(
                     when {
                         isPdf -> name to client.ingestPdf(name, bytes)
                         isDocx -> name to client.ingestDocx(name, bytes)
+                        isPptx -> name to client.ingestPptx(name, bytes)
+                        isHtml -> name to client.ingestHtml(name, bytes)
                         else -> {
                             // Plain text/markdown: send decoded text as before.
                             val text = bytes.toString(Charsets.UTF_8)
@@ -1090,7 +1098,7 @@ private fun ChatScreen(
                                 DropdownMenuItem(
                                     text = { Text(if (ingesting) "Ingesterer…" else "+ Tilføj dokument (txt/md)…", color = if (ingesting) TextMuted else Signal) },
                                     enabled = !ingesting,
-                                    onClick = { ragSourceMenu = false; pickDocument.launch(arrayOf("text/plain", "text/markdown", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/octet-stream")) },
+                                    onClick = { ragSourceMenu = false; pickDocument.launch(arrayOf("text/plain", "text/markdown", "text/html", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/octet-stream")) },
                                 )
                             }
                         }

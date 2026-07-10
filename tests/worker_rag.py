@@ -169,5 +169,74 @@ has_error = any("error" in x for x in lines_c)
 check(rc.status_code == 200 and head_c.get("sources") == [] and body_c.strip() != "" and not has_error,
       f"rag-chat with no matches streams a don't-know message without hitting Ollama (got {rc.text!r})")
 
+# ---------------------------------------------------------------------------
+# HTML ingest (stdlib -- always available, never 501)
+# ---------------------------------------------------------------------------
+from app import rag_html
+
+check(rag_html.is_available(), "html: always available (stdlib)")
+
+_h = (b"<html><head><title>Vadehavet &amp; tidevand</title>"
+      b"<style>p{color:red}</style></head><body>"
+      b"<nav>Forside Kontakt</nav><h1>Overskrift</h1><p>F&oslash;rste afsnit.</p>"
+      b"<script>alert('x')</script>"
+      b"<table><tr><td>VRAM</td><td>12 GB</td></tr></table>"
+      b"<footer>Cookies</footer></body></html>")
+_r = rag_html.extract_text(_h)
+check(_r["title"] == "Vadehavet & tidevand", "html: title unescaped")
+check("alert" not in _r["text"], "html: script contents dropped")
+check("color:red" not in _r["text"], "html: style contents dropped")
+check("Forside" not in _r["text"] and "Cookies" not in _r["text"],
+      "html: nav/footer chrome dropped (would pollute every chunk)")
+check("Første afsnit." in _r["text"], "html: danish entities decoded")
+check("VRAM | 12 GB" in _r["text"], "html: table cells separated, not fused")
+check("Overskrift" in _r["text"], "html: headings kept")
+
+# Undecodable-as-utf8 bytes must still work (cp1252 fallback), not explode.
+check("bl\u00e5" in rag_html.extract_text("<p>blå</p>".encode("cp1252"))["text"],
+      "html: cp1252 fallback decodes danish letters")
+try:
+    rag_html.extract_text(b"<p></p>")
+    _empty = rag_html.extract_text(b"<p></p>")["text"] == ""
+except Exception:
+    _empty = False
+check(_empty, "html: empty document yields empty text (endpoint turns this into 422)")
+
+# ---------------------------------------------------------------------------
+# PPTX ingest (optional dependency, like PDF/DOCX)
+# ---------------------------------------------------------------------------
+from app import rag_pptx
+
+if rag_pptx.is_available():
+    import io as _io
+    from pptx import Presentation as _P
+    from pptx.util import Inches as _In
+    _prs = _P()
+    _s1 = _prs.slides.add_slide(_prs.slide_layouts[1])
+    _s1.shapes.title.text = "Kaliv"
+    _s1.placeholders[1].text = "Lokal AI"
+    _s1.notes_slide.notes_text_frame.text = "Husk GPU'en"
+    _s2 = _prs.slides.add_slide(_prs.slide_layouts[5])
+    _t = _s2.shapes.add_table(1, 2, _In(1), _In(1), _In(4), _In(1)).table
+    _t.cell(0, 0).text = "VRAM"; _t.cell(0, 1).text = "12 GB"
+    _buf = _io.BytesIO(); _prs.save(_buf)
+    _pr = rag_pptx.extract_text(_buf.getvalue())
+    check(_pr["slides"] == 2, "pptx: slide count")
+    check("[Slide 1]" in _pr["text"], "pptx: slide markers for traceability")
+    check("Kaliv" in _pr["text"] and "Lokal AI" in _pr["text"], "pptx: title + body text")
+    check("Husk GPU'en" in _pr["text"],
+          "pptx: speaker notes captured (a deck of bullets embeds badly without them)")
+    check("VRAM | 12 GB" in _pr["text"], "pptx: table cells")
+
+    # Legacy binary .ppt must be rejected honestly, not with an opaque zip error.
+    try:
+        rag_pptx.extract_text(b"\xd0\xcf\x11\xe0" + b"0" * 32)
+        _legacy = False
+    except RuntimeError as e:
+        _legacy = "legacy .ppt" in str(e)
+    check(_legacy, "pptx: legacy .ppt rejected with a clear message")
+else:
+    print("  SKIP: python-pptx not installed (optional dependency)")
+
 print(f"\n===== WORKER V1: {passed} passed, {failed} failed =====")
 raise SystemExit(0 if failed == 0 else 1)

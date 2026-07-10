@@ -325,7 +325,8 @@ Anders vælger; hvert punkt er markeret med hvad der kræves.
 - **Barge-in-kalibrering**: live-RMS-udlæsning i appen, så `rmsThreshold`
   sættes på målinger i stedet for gæt [bygges autonomt; tallene skal komme
   fra Anders' telefon]
-- **PPTX/HTML-ingest** — samme mønster som PDF/DOCX [autonomt byggbart]
+- ~~PPTX/HTML-ingest~~ ✅ **leveret i v1.14.0** (10/7). PPTX: shapes, tabeller
+  og talernoter via python-pptx. HTML: stdlib — ingen ny afhængighed, aldrig 501.
 
 ### Mellem (små beslutninger, kendt teknik)
 - **Streaming-ASR**: delvis transskription mens der tales (i dag sendes hele

@@ -342,6 +342,8 @@ git push <url> main:main
 
 **Kræver Anders' beslutning:**
 - **Wake word** ("Hey Kaliv") — openwakeword, valgfri mode
+- *(v1.14.0 tilføjede PPTX- og HTML-ingest. PPTX kræver `pip install python-pptx`
+  på riggen; HTML kræver intet — stdlib.)*
 - **Agent-tools** — modellen kalder værktøjer via rig'en. Kræver en gennemtænkt
   sikkerhedsmodel (hvad må kaldes, bekræftelse, prompt injection). Størst
   usikkerhed i hele roadmappen.
