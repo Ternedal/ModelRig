@@ -461,27 +461,51 @@ uden at kunne se hinandens data; en gæsteprofil kan chatte men intet
 
 ```
         ┌─────────────── Klienter ────────────────┐
-        │ Kaliv Android ×N · desktop · station     │
+        │ Kaliv Android ✅ · desktop ✅ · station ⬜│
         └───────────────────┬──────────────────────┘
-                            │  parring pr. enhed/bruger · TLS
+                            │  parring pr. enhed ✅ · TLS ⬜
                    ┌────────▼─────────┐
-                   │  Go-server :8080 │  adgang · proxy · rate limit
+                   │  Go-server :8080 │  adgang · proxy · rate limit ✅
                    └────────┬─────────┘
-                   ┌────────▼─────────┐        ┌──────────────────┐
-                   │  Worker :8099    │◄──────►│ MCP-servere      │
-                   │  RAG · ASR/TTS   │  tools │ (lokale, whitelist)│
-                   │  Memory · Audit  │        └──────────────────┘
-                   └───┬─────────┬────┘
+                   ┌────────▼──────────────────┐   ┌──────────────────┐
+                   │  Worker :8099             │──▶│ MCP-servere ⬜   │
+                   │  RAG ✅ · ASR/TTS ✅      │   │ (lokale,         │
+                   │  Memory ⬜                │   │  whitelistede)   │
+                   │  ┌──────────────────────┐ │   └──────────────────┘
+                   │  │ Kaliv Tools ✅       │ │
+                   │  │  registry (kode)     │ │
+                   │  │  bekræftelsesport ◀──┼─┼── mennesket godkender
+                   │  │  audit (append-only) │ │    hver skrivning
+                   │  │  Executor-søm        │ │
+                   │  └──────────────────────┘ │
+                   └───┬─────────┬─────────────┘
                        │         │  kun LLM-trin · eksplicit toggle
                 ┌──────▼───┐  ┌──▼─────────────┐
-                │  Ollama   │  │  Ollama Cloud  │
-                │  :11434   │  │  (valgfrit)    │
-                └───────────┘  └────────────────┘
-   Lager (alt lokalt): SQLite · RAG-indeks · Memory · Audit-log
-   Drift: services + watchdog · selvopdatering · backup/restore
+                │  Ollama  │  │  Ollama Cloud  │
+                │  :11434  │  │  (valgfrit) ✅ │
+                └──────────┘  └────────────────┘
+   Lager (alt lokalt): SQLite ✅ · RAG-indeks ✅ · Audit ✅ · Memory ⬜
+   Drift: services ⬜ · watchdog ⬜ · selvopdatering ⬜ · backup ⬜
+
+   ✅ bygget og CI-verificeret   ⬜ planlagt (V6–V8)
+```
+
+**Isolationstrappen** (kravspec §5b) — Executor-sømmen findes, så hvert trin
+kan hægtes på uden at rive arkitekturen op:
+
+```
+   InProcessExecutor  ✅  rig_status, note_append (Anders' risikoaccept 10/7)
+        ↓
+   separat proces     ⬜  KRAV før tools med vilkårlige filstier
+        ↓
+   egen Windows-konto ⬜  KRAV før 3.-parts MCP-servere
+   + NTFS-ACL + Job Object
 ```
 
 **Invarianter — gælder i alle versioner, brydes aldrig:**
+- Modellen vælger *hvilket* tool og *hvilke* argumenter; aldrig *om*
+  bekræftelse kræves. Det afgør registryet, i kode, uden for dens rækkevidde
+- Et tool-resultat kan ikke udløse endnu et tool i samme tur (`tools=[]`)
 - `applicationId` = `dk.ternedal.modelrig` (APK-signaturen fryses for evigt)
 - **Lyd forlader aldrig huset.** Kun det transskriberede spørgsmål kan gå
   til cloud, kun ved eksplicit toggle; nøgler bruges én gang, gemmes aldrig

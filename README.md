@@ -8,29 +8,51 @@ Version: **1.12.1** (Status-endpoint laver ikke arbejde; barge-in fra 1.12.0)
 
 ## Architecture
 ```
-┌──────────────┐        ┌──────────────┐
-│  Desktop     │        │  Android V1  │
-│ (Compose JVM)│        │ (Compose)    │
-└──────┬───────┘        └──────┬───────┘
-       │  local-first,          │  pair + chat
-       │  cloud fallback        │  (bearer token)
-       │                        │
-       │                 ┌──────▼───────────────┐
-       │  (direct, or    │  Backend (Go)        │
+┌──────────────┐        ┌──────────────────┐
+│  Desktop     │        │  Kaliv (Android) │
+│ (Compose JVM)│        │  chat · voice ·  │
+│  Windows     │        │  tools · RAG     │
+└──────┬───────┘        └────────┬─────────┘
+       │  local-first,           │  pair + bearer token
+       │  cloud fallback         │
+       │                 ┌───────▼──────────────┐
+       │  (direct, or    │  Backend (Go) :8080  │
        └──via backend)──▶│  pairing · tokens ·  │
-                         │  reverse proxy       │
+                         │  reverse proxy only  │
                          └───┬──────────────┬───┘
-                             │              │
-                     /api/chat,/api/tags   /rag/*
-                             │              │
-                       ┌─────▼─────┐  ┌─────▼──────────┐
-                       │  Ollama   │  │  Worker (Py)   │
-                       │ (local)   │  │  FastAPI RAG   │
-                       └───────────┘  └──────┬─────────┘
-                                             │ embeddings/gen
-                                       ┌─────▼─────┐
-                                       │  Ollama   │
-                                       └───────────┘
+                 /api/chat,  │              │  /rag/* · /voice/* · /tools/*
+                 /api/tags   │              │
+                       ┌─────▼─────┐  ┌─────▼──────────────────────────┐
+                       │  Ollama   │  │  Worker (Python) :8099         │
+                       │  :11434   │  │  ┌──────────────────────────┐  │
+                       └───────────┘  │  │ RAG   pdf·docx·pptx·html │  │
+                                      │  │ Voice ASR→LLM→TTS        │  │
+                                      │  ├──────────────────────────┤  │
+                                      │  │ Kaliv Tools              │  │
+                                      │  │  registry (in code)      │  │
+                                      │  │  confirmation gate ◀─────┼──┼── human
+                                      │  │  audit log (append-only) │  │   approves
+                                      │  │  Executor seam           │  │   writes
+                                      │  └───────────┬──────────────┘  │
+                                      └──────┬───────┼─────────────────┘
+                                             │       │ embeddings/gen
+                                       ┌─────▼─────┐ │  ┌──────────────┐
+                                       │ SQLite    │ └─▶│  Ollama      │
+                                       │ RAG·audit │    │  (or Cloud)  │
+                                       └───────────┘    └──────────────┘
+
+Voice: audio never leaves the house. ASR (faster-whisper, CUDA) and TTS
+(Piper, Danish) always run on the rig. Only the transcribed question may go
+to Ollama Cloud, and only with the toggle on.
+
+Tools: the model proposes; the gate decides. Reads run. Writes stop at a
+confirmation card and execute the arguments that were shown -- the worker
+parks them, so no client can alter them after approval. A tool result cannot
+trigger another tool: the follow-up turn is sent with tools=[]. Off by default
+(KALIV_TOOLS_ENABLED=1). See KRAVSPEC_V5_TOOLS.md.
+
+The Go server is a proxy and nothing more. Gate, whitelist and audit live in
+the worker, so an old or tampered client cannot find a friendlier backend.
 
 Cloud fallback (desktop): if local is down/insufficient →
 Ollama Cloud (https://ollama.com, model :cloud) with OLLAMA_API_KEY.
