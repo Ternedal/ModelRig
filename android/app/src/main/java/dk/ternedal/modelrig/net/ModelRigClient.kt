@@ -93,7 +93,7 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
     }
 
     /**
-     * Alva Voice: whether ASR/TTS are enabled on the rig. Returns the parsed
+     * Kaliv Voice: whether ASR/TTS are enabled on the rig. Returns the parsed
      * status object, or throws. Lets the UI tell the user to install the Voice
      * backends before recording (rather than failing mid-turn).
      */
@@ -108,7 +108,7 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
     }
 
     /**
-     * Alva Voice: one spoken turn. Uploads recorded audio (base64 WAV, 16 kHz
+     * Kaliv Voice: one spoken turn. Uploads recorded audio (base64 WAV, 16 kHz
      * mono) to the rig, which runs ASR -> LLM -> TTS and returns the transcript,
      * the reply text, and a combined reply WAV (base64) to play back. Voice runs
      * on the rig (that's where ASR/TTS live), so it needs the rig reachable --

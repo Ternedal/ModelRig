@@ -8,7 +8,7 @@ import android.media.MediaRecorder
 import java.io.ByteArrayOutputStream
 
 /**
- * Alva Voice: microphone capture and playback for push-to-talk.
+ * Kaliv Voice: microphone capture and playback for push-to-talk.
  *
  * Records 16 kHz mono PCM16 (what the rig's ASR expects) and wraps it in a WAV
  * container for upload. Plays a WAV reply back through AudioTrack.
@@ -115,15 +115,26 @@ class VoiceCapture {
          * through AudioTrack. Blocks until playback finishes. Piper replies are
          * typically 22.05 kHz mono PCM16.
          *
-         * If [bargeIn] is supplied, playback is interruptible: the detector
-         * listens on the mic while Alva speaks, and playback stops the moment
-         * the user starts talking. Returns true if it was interrupted.
+         * If [bargeIn] is supplied, playback is interruptible by voice: the
+         * detector listens on the mic while Kaliv speaks, and playback stops
+         * the moment the user starts talking.
+         *
+         * [stopFlag] is the manual equivalent: any thread can set it to cut
+         * playback short (the stop button). Barge-in was the ONLY way out
+         * until v1.13.0, and it is off by default and uncalibrated -- so
+         * until now a spoken reply could not be interrupted at all.
+         *
+         * Returns true if playback was cut short by either route.
          *
          * Uses MODE_STREAM (not MODE_STATIC) precisely so the write loop can
-         * check for a barge-in between chunks. MODE_STATIC hands the whole
-         * buffer to the hardware and can't be stopped cleanly mid-utterance.
+         * check between chunks. MODE_STATIC hands the whole buffer to the
+         * hardware and can't be stopped cleanly mid-utterance.
          */
-        fun playWav(wav: ByteArray, bargeIn: BargeInDetector? = null): Boolean {
+        fun playWav(
+            wav: ByteArray,
+            bargeIn: BargeInDetector? = null,
+            stopFlag: java.util.concurrent.atomic.AtomicBoolean? = null,
+        ): Boolean {
             if (wav.size <= 44) return false
             fun intLE(off: Int) = (wav[off].toInt() and 0xff) or
                 ((wav[off + 1].toInt() and 0xff) shl 8) or
@@ -150,6 +161,7 @@ class VoiceCapture {
                 // large enough not to underrun.
                 var off = 0
                 while (off < pcm.size) {
+                    if (stopFlag?.get() == true) { interrupted = true; break }
                     if (bargeIn?.triggered == true) { interrupted = true; break }
                     val n = minOf(minBuf, pcm.size - off)
                     val written = track.write(pcm, off, n)
@@ -161,6 +173,7 @@ class VoiceCapture {
                     val remainingMs = 200L
                     val deadline = System.currentTimeMillis() + remainingMs
                     while (System.currentTimeMillis() < deadline) {
+                        if (stopFlag?.get() == true) { interrupted = true; break }
                         if (bargeIn?.triggered == true) { interrupted = true; break }
                         Thread.sleep(20)
                     }
@@ -176,10 +189,10 @@ class VoiceCapture {
 }
 
 /**
- * Listens on the microphone while Alva is speaking and reports when the user
+ * Listens on the microphone while Kaliv is speaking and reports when the user
  * starts talking, so playback can be cut short (barge-in).
  *
- * Echo cancellation: the mic would otherwise hear Alva's own voice through the
+ * Echo cancellation: the mic would otherwise hear Kaliv's own voice through the
  * speaker and trigger constantly. Two defences, both OS-level:
  *   1. AudioSource.VOICE_COMMUNICATION -- the source phone calls use, which
  *      asks the platform for AEC/NS/AGC.
@@ -190,7 +203,7 @@ class VoiceCapture {
  *
  * Detection is a simple energy gate with a hangover: RMS must exceed a
  * threshold for several consecutive frames, so a door slam or a click doesn't
- * cut Alva off mid-sentence.
+ * cut Kaliv off mid-sentence.
  *
  * NOT TESTED ON A DEVICE. The threshold in particular is a starting point that
  * likely needs calibrating against a real phone and a real speaker.

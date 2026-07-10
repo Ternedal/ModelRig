@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Alva Voice: microphone capture for push-to-talk. Requested at runtime. -->
+    <!-- Kaliv Voice: microphone capture for push-to-talk. Requested at runtime. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!--

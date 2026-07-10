@@ -51,7 +51,7 @@ class TokenStore(context: Context) {
         set(v) { prefs.edit().putBoolean("voice_uses_cloud", v).apply() }
 
     /**
-     * When true, speaking while Alva talks cuts her off (barge-in). Relies on
+     * When true, speaking while Kaliv talks cuts her off (barge-in). Relies on
      * the platform's acoustic echo canceler when on speaker; a headset removes
      * the problem entirely. Off by default -- a false trigger mid-sentence is
      * more annoying than not having the feature.

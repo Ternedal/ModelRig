@@ -1,7 +1,10 @@
 # PLAN — v1.13.0 "Tap-to-stop + Kaliv"
 
 **Skrevet:** 2026-07-09 sen aften, efter GPU-voice virkede
-**Status:** worker-delen ER lavet (se §2). Android-delen udestår (§3).
+**Status:** ✅ LEVERET som v1.13.0 (10/7 tidlig morgen). Worker (§2) og
+Android (§3) er begge bygget og compile-verificeret (`assembleRelease`
+kørt lokalt; label `Kaliv`, monochrome-lag bekræftet i APK'en).
+**Udestår kun Anders' on-device-test** — §0 punkt 1, 2, 5 og 6.
 **Læs først:** `HANDOFF.md` §0 og §7 (lektierne). `ROADMAP.md` §14 (invarianter).
 
 ---
@@ -110,8 +113,11 @@ ingen manuel afbrydelse. Eneste vej ud er barge-in, som er ukalibreret.
    annullere den kørende streaming-request (ellers fortsætter workeren
    med at syntetisere sætninger ind i en lukket kø).
 
-**Punkt 3 er det der let bliver glemt.** Verificér at requesten faktisk
-annulleres — ikke bare at lyden holder op.
+**RETTELSE (10/7):** punkt 3 ovenfor var forkert. `/voice/converse` er
+IKKE streaming — appen får ét samlet WAV. Der er ingen løbende request at
+annullere. Det rigtige stop er `playbackStop` (AtomicBoolean) som
+`playWav`s skriveløkke tjekker mellem chunks, PLUS coroutine-cancel for
+rig-rundturen. Sådan blev det bygget.
 
 **Acceptkriterie:** tryk under tale → stilhed inden for ~200 ms, appen er
 straks klar til ny tur, worker-loggen viser ingen fortsat syntese.

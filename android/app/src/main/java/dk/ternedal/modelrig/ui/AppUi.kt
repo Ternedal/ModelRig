@@ -33,6 +33,8 @@ import dk.ternedal.modelrig.net.CloudClient
 import dk.ternedal.modelrig.net.ModelRigClient
 import dk.ternedal.modelrig.ui.theme.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -98,7 +100,7 @@ private fun SetupScreen(store: TokenStore, db: ChatDb, onDone: () -> Unit) {
             .verticalScroll(rememberScrollState()),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Alva", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = TextHigh)
+            Text("Kaliv", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = TextHigh)
             Spacer(Modifier.weight(1f))
             if (canChat) TextButton(onClick = onDone) { Text("Til chat →", color = Signal) }
         }
@@ -580,13 +582,24 @@ private fun ChatScreen(
     var pendingImageB64 by remember { mutableStateOf<String?>(null) }
     var pendingImageError by remember { mutableStateOf<String?>(null) }
 
-    // Alva Voice: push-to-talk state. Voice runs on the rig (ASR/TTS live
+    // Kaliv Voice: push-to-talk state. Voice runs on the rig (ASR/TTS live
     // there), so the mic button only shows in rig mode. recording = mic is
     // live; voiceBusy = uploaded audio is being transcribed/answered/spoken.
     val voiceCapture = remember { dk.ternedal.modelrig.voice.VoiceCapture() }
     var recording by remember { mutableStateOf(false) }
     var voiceBusy by remember { mutableStateOf(false) }
     var voiceError by remember { mutableStateOf<String?>(null) }
+    // Tap-to-stop (v1.13.0). Until now a voice turn could not be interrupted
+    // at all: barge-in is off by default and uncalibrated. Two mechanisms,
+    // because a turn has two phases with different escape routes:
+    //   voiceJob   -- cancels the coroutine (covers the rig round-trip)
+    //   playbackStop -- a flag playWav's write loop checks between chunks;
+    //                   cancelling a coroutine cannot interrupt the blocking
+    //                   AudioTrack write, so the flag is what actually stops
+    //                   the sound.
+    var voiceJob by remember { mutableStateOf<Job?>(null) }
+    val playbackStop = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    var speaking by remember { mutableStateOf(false) }
     // Model-list load failures used to be swallowed silently: "Genindlæs
     // modeller" looked dead when the rig was unreachable. Surface the reason.
     var modelError by remember { mutableStateOf<String?>(null) }
@@ -597,8 +610,8 @@ private fun ChatScreen(
     // transcript would leave the house, and the local path is the private one.
     var voiceUsesCloud by remember { mutableStateOf(store.voiceUsesCloud) }
 
-    // Barge-in: let the user cut Alva off by speaking while she talks. Needs
-    // echo cancellation on speaker (the mic hears Alva otherwise); trivially
+    // Barge-in: let the user cut Kaliv off by speaking while she talks. Needs
+    // echo cancellation on speaker (the mic hears Kaliv otherwise); trivially
     // safe on a headset. Off by default until it's proven on a device.
     var bargeInEnabled by remember { mutableStateOf(store.bargeInEnabled) }
     var wasInterrupted by remember { mutableStateOf(false) }
@@ -618,7 +631,8 @@ private fun ChatScreen(
     // fallback (voice needs the rig). Runs off the main thread.
     fun runVoiceTurn(wav: ByteArray) {
         voiceBusy = true; voiceError = null; wasInterrupted = false
-        scope.launch {
+        speaking = false; playbackStop.set(false)
+        voiceJob = scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
                     val b64 = android.util.Base64.encodeToString(wav, android.util.Base64.NO_WRAP)
@@ -650,21 +664,38 @@ private fun ChatScreen(
                     if (reply.isNotEmpty()) db.addMessage(cid, "assistant", reply)
                 }
                 if (audioB64.isNotEmpty()) {
+                    speaking = true
                     val cut = withContext(Dispatchers.IO) {
                         val bytes = android.util.Base64.decode(audioB64, android.util.Base64.DEFAULT)
                         val detector = if (bargeInEnabled && hasMicPermission) {
                             dk.ternedal.modelrig.voice.BargeInDetector()
                         } else null
-                        dk.ternedal.modelrig.voice.VoiceCapture.playWav(bytes, detector)
+                        dk.ternedal.modelrig.voice.VoiceCapture.playWav(bytes, detector, playbackStop)
                     }
                     wasInterrupted = cut
                 }
+            } catch (e: CancellationException) {
+                // The user pressed stop. Not an error -- don't paint it red.
+                wasInterrupted = true
+                throw e
             } catch (e: Exception) {
                 voiceError = e.message ?: "stemme-fejl"
             } finally {
+                speaking = false
                 voiceBusy = false
+                voiceJob = null
             }
         }
+    }
+
+    /**
+     * Cut the current voice turn short. Order matters: raise the flag first so
+     * a blocking playWav write returns, then cancel the coroutine. Cancelling
+     * first would leave the audio playing until the WAV ran out.
+     */
+    fun stopVoiceTurn() {
+        playbackStop.set(true)
+        voiceJob?.cancel()
     }
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -981,14 +1012,14 @@ private fun ChatScreen(
                                     },
                                 )
                             }
-                            // Barge-in: speak to cut Alva off mid-reply. Needs the
+                            // Barge-in: speak to cut Kaliv off mid-reply. Needs the
                             // mic while she talks, hence the permission check.
                             if (mode == "rig") {
                                 DropdownMenuItem(
                                     text = {
                                         Text(
                                             (if (bargeInEnabled) "✋ " else "◇ ") +
-                                                "Afbryd Alva ved at tale",
+                                                "Afbryd Kaliv ved at tale",
                                             color = if (bargeInEnabled) Signal else TextMuted,
                                             fontSize = 13.sp,
                                         )
@@ -1151,11 +1182,12 @@ private fun ChatScreen(
                 pendingImageError?.let {
                     Text("Billedfejl: $it", color = Danger, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
                 }
-                // Alva Voice status line (recording / working / error).
+                // Kaliv Voice status line (recording / working / error).
                 if (recording || voiceBusy || voiceError != null) {
                     val vt = when {
                         recording -> "🎙 Optager… tryk igen for at sende"
-                        voiceBusy -> "🔊 Alva lytter og svarer…"
+                        speaking -> "🔊 Kaliv taler… tryk ⏹ for at afbryde"
+                        voiceBusy -> "🔊 Kaliv lytter og svarer… tryk ⏹ for at afbryde"
                         else -> "Stemme-fejl: ${voiceError.orEmpty()}"
                     }
                     Text(
@@ -1169,7 +1201,7 @@ private fun ChatScreen(
                 }
                 if (wasInterrupted && !voiceBusy && !recording) {
                     Text(
-                        "✋ Du afbrød Alva — tryk 🎙 for at sige noget",
+                        "✋ Du afbrød Kaliv — tryk 🎙 for at sige noget",
                         color = TextMuted, fontSize = 12.sp,
                         modifier = Modifier.padding(bottom = 6.dp),
                     )
@@ -1188,14 +1220,19 @@ private fun ChatScreen(
                         ) { Text("📎", fontSize = 20.sp) }
                         Spacer(Modifier.width(2.dp))
                     }
-                    // Alva Voice mic button: rig mode only (voice runs on the
+                    // Kaliv Voice mic button: rig mode only (voice runs on the
                     // rig). Tap to start recording, tap again to send. Disabled
                     // while a voice turn is in flight.
                     if (mode == "rig") {
+                        // One button, three jobs. While a turn is in flight it
+                        // becomes ⏹: the mic is busy anyway, so a separate stop
+                        // button would just be another thing to aim at.
                         Box(
-                            Modifier.size(44.dp).clickable(enabled = !busy && !voiceBusy, onClick = {
+                            Modifier.size(44.dp).clickable(enabled = !busy || voiceBusy, onClick = {
                                 voiceError = null
-                                if (!hasMicPermission) {
+                                if (voiceBusy) {
+                                    stopVoiceTurn()
+                                } else if (!hasMicPermission) {
                                     micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                                 } else if (recording) {
                                     recording = false
@@ -1208,7 +1245,16 @@ private fun ChatScreen(
                                 }
                             }),
                             contentAlignment = Alignment.Center,
-                        ) { Text(if (recording) "⏺" else "🎙", fontSize = 20.sp) }
+                        ) {
+                            Text(
+                                when {
+                                    voiceBusy -> "⏹"
+                                    recording -> "⏺"
+                                    else -> "🎙"
+                                },
+                                fontSize = 20.sp,
+                            )
+                        }
                         Spacer(Modifier.width(2.dp))
                     }
                     OutlinedTextField(
@@ -1338,7 +1384,7 @@ private fun ConversationsScreen(
                                     }) { Text("✎", color = TextMuted, fontSize = 13.sp) }
                                     TextButton(onClick = {
                                         val md = buildString {
-                                            appendLine("# ${c.title.ifBlank { "Alva-samtale" }}")
+                                            appendLine("# ${c.title.ifBlank { "Kaliv-samtale" }}")
                                             appendLine()
                                             db.loadMessages(c.id).forEach { (role, content) ->
                                                 appendLine(if (role == "user") "**Du:**" else "**Assistent:**")
@@ -1348,7 +1394,7 @@ private fun ConversationsScreen(
                                         }
                                         val intent = Intent(Intent.ACTION_SEND).apply {
                                             type = "text/plain"
-                                            putExtra(Intent.EXTRA_SUBJECT, c.title.ifBlank { "Alva-samtale" })
+                                            putExtra(Intent.EXTRA_SUBJECT, c.title.ifBlank { "Kaliv-samtale" })
                                             putExtra(Intent.EXTRA_TEXT, md)
                                         }
                                         context.startActivity(Intent.createChooser(intent, "Del samtale"))

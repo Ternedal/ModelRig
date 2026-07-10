@@ -20,11 +20,10 @@ Copy/paste dette som første besked i en ny chat.
    `modelrig-mono`) med forskellig kode-alder. Det har forårsaget flere falske
    fejlspor. Ryd op: behold én mappe.
 4. **Appen hedder nu KALIV** (Anders' beslutning 9/7 aften; før: Alva).
-   **Ikonet er shippet i `v1.12.4`** (ankh-mærke, bronze/ember-palet,
-   monokrom-lag til Android 13+ themed icons). Worker-env `KALIV_*` med
-   `ALVA_*`-fallback er også lavet. Resten af navne-rebranden (launcher,
-   UI, persona, docs) → `v1.13.0` sammen med tap-to-stop.
-   `applicationId` røres ALDRIG.
+   **Rebranden er FÆRDIG:** ikon i `v1.12.4`, navn + tap-to-stop i
+   `v1.13.0`. Launcher-label er `Kaliv` (verificeret i den byggede APK),
+   worker-env er `KALIV_*` med `ALVA_*`-fallback. `applicationId` er
+   uændret `dk.ternedal.modelrig` — APK'en installerer henover.
 
 ---
 
@@ -111,10 +110,11 @@ python -m piper.download_voices da_DK-talesyntese-medium
 
 - **Barge-in** (v1.12.0) — kompileret, aldrig prøvet. `rmsThreshold = 1500.0`
   er et gæt der skal kalibreres. **Prøv headset først** (intet ekko).
-- **⚠️ Stop af afspilning MANGLER** (fundet on-device 9/7 ~21:50, første
-  fungerende GPU-voice-tur): mens Alva taler er der ingen manuel afbrydelse
-  — eneste vej er barge-in, som er ukalibreret. Tap-to-stop er næste
-  app-opgave (v1.13.0, se §10).
+- **Tap-to-stop** (v1.13.0) — bygget og compile-verificeret, **ikke
+  device-testet**. Mens en stemmetur kører bliver 🎙 til ⏹. Stop hæver
+  først `playbackStop` (så `playWav`s skriveløkke returnerer) og annullerer
+  derefter coroutinen — omvendt rækkefølge ville lade lyden spille færdig.
+  Test: tryk under tale → stilhed hurtigt, appen straks klar igen.
 - **Model-chip på stemme-svar** (v1.11.0) — `◈ 🎙 hermes3:8b` / `☁ 🎙 kimi-k2.6`
 - **PDF/DOCX-upload fra telefonen** (kun testet på rig'en)
 - **Vision** (v1.1.0) — kræver `ollama pull llama3.2-vision`
@@ -241,6 +241,19 @@ MODELRIG_HOST       (sæt til 0.0.0.0!)
 
 7. **On-device-test er den eneste sandhed.** Alle tre store Voice-bugs
    (PyAV, timeouts, CUDA) var usynlige for headless builds.
+
+9. **Læs koden før du skriver planen.** PLAN_v1.13.0 påstod at stop skulle
+   "annullere den kørende streaming-request". Forkert: `/voice/converse`
+   er ikke streaming — appen får ét samlet WAV, og sætnings-chunkingen sker
+   inde i workeren. Det rigtige stop er et flag som `playWav`s skriveløkke
+   tjekker, fordi coroutine-cancel ikke kan afbryde et blokerende
+   `AudioTrack.write()`.
+
+10. **Android KAN compile-verificeres i sandboxen.** JDK 21 er der;
+   `sdkmanager` + platform-35 + build-tools tager ~4 min, og
+   `./gradlew :app:assembleRelease` kører igennem. Ingen grund til at
+   skubbe utestet Kotlin ud og håbe på CI. (`local.properties` må ikke
+   committes.)
 
 8. **`os.add_dll_directory` er ikke nok på Windows.** CTranslate2 loader
    cuBLAS ad den klassiske søgesti (kun PATH). Mappen var registreret,
