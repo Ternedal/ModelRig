@@ -21,7 +21,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.30.0"
+VERSION = "1.31.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -97,6 +97,86 @@ async def health_deep() -> dict:
     except oc.OllamaError as e:
         dur_ms = int((_t.perf_counter() - start) * 1000)
         return {"ok": False, "error": str(e), "latency_ms": dur_ms}
+
+
+@app.get("/health/full")
+async def health_full(deep: bool = False) -> dict:
+    """One call that answers "how is the rig?" across the whole chain.
+
+    Built as the first thing to look at when a device test misbehaves: instead
+    of guessing whether ASR is down, or cuBLAS lost its PATH again, or Tools is
+    switched off, or the disk filled up, this returns a verdict per subsystem
+    plus a single overall status. Each check says not just up/down but WHY,
+    because "TTS: unavailable" without a reason is another round of guessing.
+
+    Always HTTP 200: the body carries the verdict. A monitor keys on `ok`.
+    Read-only and side-effect free, except /health/deep's embedding round trip,
+    which is the point of `deep=true` -- it proves the model answers, not just
+    that a port is open. Left off by default so a frequent poll stays cheap.
+    """
+    import os as _os
+    import shutil as _sh
+    from . import voice_asr, voice_tts, tools as _tools
+
+    checks: dict[str, dict] = {}
+
+    # Worker: trivially up if this runs, but report the document count so a
+    # wiped RAG index is visible here rather than as empty answers later.
+    checks["worker"] = {"ok": True, "version": VERSION, "documents": store.count()}
+
+    # Ollama: reachability only here (cheap). deep=true round-trips an embedding.
+    try:
+        import httpx as _httpx
+        async with _httpx.AsyncClient(timeout=3.0) as c:
+            r = await c.get(f"{oc.OLLAMA_URL}/api/tags")
+        checks["ollama"] = {"ok": r.status_code == 200, "url": oc.OLLAMA_URL,
+                            "detail": f"HTTP {r.status_code}"}
+    except Exception as e:
+        checks["ollama"] = {"ok": False, "url": oc.OLLAMA_URL, "detail": str(e)[:120]}
+
+    # ASR / TTS: available? and crucially, on what device -- the whole GPU-voice
+    # saga (v1.12.3) was ASR silently falling back off CUDA.
+    checks["asr"] = {"ok": voice_asr.is_available(),
+                     "device": voice_asr._device() if voice_asr.is_available() else None,
+                     "model": voice_asr._model_name() if voice_asr.is_available() else None,
+                     "detail": None if voice_asr.is_available()
+                               else "faster-whisper not installed"}
+    checks["tts"] = {"ok": voice_tts.is_available(),
+                     "voice": voice_tts._voice_name() if voice_tts.is_available() else None,
+                     "detail": None if voice_tts.is_available() else "piper not installed"}
+
+    # Tools: the kill-switch state, surfaced. "Why did Kaliv refuse to act" is a
+    # question this answers before it gets asked.
+    checks["tools"] = {"ok": True, "enabled": _tools.GATE.enabled,
+                       "disabled_tools": sorted(_tools.GATE.disabled_tools),
+                       "detail": "layer on" if _tools.GATE.enabled else "layer off (KALIV_TOOLS_ENABLED=1)"}
+
+    # Disk: a full disk breaks ingest, TTS output and backups at once, silently.
+    try:
+        total, used, free = _sh.disk_usage(_os.path.expanduser("~"))
+        gb = 1024 ** 3
+        low = free < 2 * gb
+        checks["disk"] = {"ok": not low, "free_gb": round(free / gb, 1),
+                          "total_gb": round(total / gb, 1),
+                          "detail": "low space (<2 GB)" if low else None}
+    except Exception as e:
+        checks["disk"] = {"ok": False, "detail": str(e)[:120]}
+
+    if deep:
+        import time as _t
+        t0 = _t.perf_counter()
+        try:
+            vec = await oc.embed("ping")
+            checks["ollama"]["embed_dims"] = len(vec)
+            checks["ollama"]["embed_ms"] = int((_t.perf_counter() - t0) * 1000)
+        except oc.OllamaError as e:
+            checks["ollama"]["ok"] = False
+            checks["ollama"]["detail"] = f"embedding failed: {e}"
+
+    # A subsystem that is off by choice (tools) must not drag the whole rig to
+    # "unhealthy". Only the checks that represent a fault count against overall.
+    faults = [k for k in ("worker", "ollama", "asr", "tts", "disk") if not checks[k]["ok"]]
+    return {"ok": not faults, "faults": faults, "checks": checks}
 
 
 @app.post("/rag/ingest")

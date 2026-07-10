@@ -115,5 +115,40 @@ check(_env("ASR_DEVICE", "cuda") == "", "env: empty string counts as set")
 for _k in [k for k in _os.environ if k.startswith(("ALVA_", "KALIV_"))]:
     del _os.environ[_k]
 
+# --- /health/full: the one-call rig verdict (v1.31.0) --------------------
+import asyncio as _aio  # noqa: E402
+from app import main as _M  # noqa: E402
+
+h = _aio.run(_M.health_full())
+check("checks" in h and "ok" in h and "faults" in h,
+      "health_full: returns overall verdict + per-subsystem checks")
+for sub in ("worker", "ollama", "asr", "tts", "tools", "disk"):
+    check(sub in h["checks"], f"health_full: reports {sub}")
+    check("ok" in h["checks"][sub], f"health_full: {sub} has an ok verdict")
+
+# The worker itself is always up if this runs, and reports its doc count.
+check(h["checks"]["worker"]["ok"] is True, "health_full: worker check is up")
+check("documents" in h["checks"]["worker"], "health_full: worker reports document count")
+
+# A subsystem down for a real reason names the reason -- no reason is another
+# round of guessing during a device test.
+if not h["checks"]["asr"]["ok"]:
+    check(h["checks"]["asr"]["detail"] is not None, "health_full: a down subsystem says why")
+
+# Tools state is surfaced (off by default), and does NOT count as a fault: a
+# layer off by choice must not drag the rig to unhealthy.
+check("enabled" in h["checks"]["tools"], "health_full: surfaces the tools kill-switch state")
+check("tools" not in h["faults"], "health_full: tools-off is not a fault")
+
+# The disk check must actually compute, not raise -- it referenced a name that
+# was never imported at module scope (os vs _os), caught here before shipping.
+check(h["checks"]["disk"].get("detail") != "name 'os' is not defined",
+      "health_full: disk check runs (os import bug would surface here)")
+check(h["checks"]["disk"]["ok"] in (True, False), "health_full: disk check has a verdict")
+
+# overall ok == no faults among the real subsystems
+faults = [k for k in ("worker","ollama","asr","tts","disk") if not h["checks"][k]["ok"]]
+check(h["ok"] == (not faults), "health_full: overall ok iff no real subsystem faults")
+
 print(f"\n===== WORKER: {passed} passed, {failed} failed =====")
 raise SystemExit(0 if failed == 0 else 1)

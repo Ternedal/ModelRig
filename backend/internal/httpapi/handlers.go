@@ -190,6 +190,18 @@ func (s *server) handleModelsDelete(w http.ResponseWriter, r *http.Request) {
 	s.Ollama.Forward(w, r, "/api/delete")
 }
 
+// handleHealthFull proxies the worker's whole-chain health verdict. The worker
+// does the aggregation (ASR device, TTS, tools state, disk, Ollama); the server
+// just forwards it, authenticated, so a phone can ask "how is the rig?" in one
+// call. Pass ?deep=true to include an embedding round trip.
+func (s *server) handleHealthFull(w http.ResponseWriter, r *http.Request) {
+	target := "/health/full"
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	s.Worker.Forward(w, r, target)
+}
+
 // handleHealthDeep actively round-trips both upstreams: it lists Ollama models
 // and asks the worker to embed a token (which itself calls Ollama). This proves
 // the models actually respond, not just that the ports are open. Always HTTP 200;

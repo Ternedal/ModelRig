@@ -411,9 +411,14 @@ git push <url> main:main
 - ⚠️ **Betingelsen står ved magt:** vilkårlige filstier eller 3.-parts
   MCP-servere kræver separat Windows-konto + ACL'er FØRST (kravspec §5b).
 
-**Testdækning (10/7):** worker 198 tests (unit 31 · rag 48 · tools 119) +
+**Testdækning (10/7):** worker 236 tests (unit 52 · rag 48 · tools 119 · backup 17) +
 Go `internal/httpapi` 4 tests. CI kører nu `go vet` og `go test ./...` —
 det gjorde den ikke før v1.23.1, så Go-koden var reelt utestet.
+
+**Diagnose først (v1.31.0):** `GET /api/v1/health/full` (eller `/health/full`
+på workeren direkte) giver én samlet status — worker, Ollama, ASR+device, TTS,
+tools-kill-switch, disk — hver med grund. `?deep=true` tester også en embedding.
+Kig her FØRST når en device-test driller, før du gætter på hvilken del der fejler.
 
 **Kræver Anders' test:**
 - Tap-to-stop + Kaliv-navnerebrand (bygges som v1.13.0)

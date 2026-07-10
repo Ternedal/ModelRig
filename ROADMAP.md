@@ -420,9 +420,10 @@ genstart, opdatere sig selv og kunne reddes.
    pakker RAG + data + audit + tools-state + notes som ét verificeret arkiv;
    round-trip bevist i CI (`tests/worker_backup.py`). Windows-scripts +
    scheduled task i `scripts/`. **Mangler:** verifikation på selve riggen.
-4. **Sundhed & observabilitet**: samlet health for hele kæden,
-   GPU/VRAM/disk-metrikker, logrotation — og Kaliv kan selv svare på
-   "hvordan har riggen det?" via V5's rig-status-tool.
+4. **Sundhed & observabilitet** 🟡 **PÅBEGYNDT (v1.31.0)**: `/health/full`
+   giver samlet verdict for worker, Ollama, ASR+device, TTS, tools, disk —
+   hver med grund; `?deep=true` round-trip'er en embedding. **Mangler:**
+   GPU/VRAM-metrikker, logrotation.
 5. **Hærdning**: TLS på LAN [beslutning: selvsigneret + pinning i
    appen], token-rotation, rate limits.
 6. **Strøm/termik** [valgfrit]: GPU-idle-politik, planlagt dvale/vågn.
