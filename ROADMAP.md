@@ -322,9 +322,8 @@ Anders vælger; hvert punkt er markeret med hvad der kræves.
 ### Nær (ingen nye beslutninger nødvendige)
 - **v1.13.0 — tap-to-stop + Kaliv-navnerebrand** (næste session; §5 + §10)
 - **Kaliv-ikon** som egen release [venter: Anders' brand-pakke]
-- **Barge-in-kalibrering**: live-RMS-udlæsning i appen, så `rmsThreshold`
-  sættes på målinger i stedet for gæt [bygges autonomt; tallene skal komme
-  fra Anders' telefon]
+- ~~Barge-in-kalibrering~~ ✅ **værktøjet leveret i v1.15.0** (live RMS +
+  top + justerbar tærskel). Selve kalibreringen kræver Anders' telefon.
 - ~~PPTX/HTML-ingest~~ ✅ **leveret i v1.14.0** (10/7). PPTX: shapes, tabeller
   og talernoter via python-pptx. HTML: stdlib — ingen ny afhængighed, aldrig 501.
 

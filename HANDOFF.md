@@ -108,8 +108,12 @@ python -m piper.download_voices da_DK-talesyntese-medium
 
 ## 4. Hvad der IKKE er testet
 
-- **Barge-in** (v1.12.0) — kompileret, aldrig prøvet. `rmsThreshold = 1500.0`
-  er et gæt der skal kalibreres. **Prøv headset først** (intet ekko).
+- **Barge-in** (v1.12.0) — kompileret, aldrig prøvet på enhed. Tærsklen er
+  ikke længere hardkodet: v1.15.0 viser live RMS + top i statuslinjen mens
+  Kaliv taler, og følsomheden justeres i ⋮-menuen (persisteret).
+  **Fremgangsmåde:** headset på (intet ekko) → tal over Kaliv → aflæs top →
+  sæt tærsklen mellem tomgangsniveauet og toppen. Derefter samme øvelse på
+  højttaler, hvor telefonens AEC afgør om det overhovedet kan lade sig gøre.
 - **Tap-to-stop** (v1.13.0) — bygget og compile-verificeret, **ikke
   device-testet**. Mens en stemmetur kører bliver 🎙 til ⏹. Stop hæver
   først `playbackStop` (så `playWav`s skriveløkke returnerer) og annullerer

@@ -60,6 +60,15 @@ class TokenStore(context: Context) {
         get() = prefs.getBoolean("barge_in", false)
         set(v) { prefs.edit().putBoolean("barge_in", v).apply() }
 
+    /**
+     * Barge-in RMS threshold (0..32767 scale). 1500 was a guess made without a
+     * device. Persisted so it can be tuned from the live readout instead of
+     * requiring a rebuild.
+     */
+    var bargeInThreshold: Int
+        get() = prefs.getInt("barge_in_rms", 1500)
+        set(v) { prefs.edit().putInt("barge_in_rms", v.coerceIn(200, 8000)).apply() }
+
     /** "rig" or "cloud" — which source the chat screen uses. */
     var chatMode: String
         get() = prefs.getString("chat_mode", "rig") ?: "rig"

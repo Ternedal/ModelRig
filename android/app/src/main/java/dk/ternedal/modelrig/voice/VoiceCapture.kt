@@ -205,17 +205,27 @@ class VoiceCapture {
  * threshold for several consecutive frames, so a door slam or a click doesn't
  * cut Kaliv off mid-sentence.
  *
- * NOT TESTED ON A DEVICE. The threshold in particular is a starting point that
- * likely needs calibrating against a real phone and a real speaker.
+ * The threshold was a pure guess (1500.0) with no way to check it. Since
+ * v1.15.0 it is settable, and the detector reports what it hears
+ * ([lastRms], [peakRms]) so the number can be chosen from measurements:
+ * speak, read the peak, set the threshold below it but above the idle floor.
  */
 class BargeInDetector(
     private val sampleRate: Int = 16000,
-    /** RMS above this (0..32767 scale) counts as speech. Needs on-device tuning. */
+    /** RMS above this (0..32767 scale) counts as speech. Tune from [peakRms]. */
     private val rmsThreshold: Double = 1500.0,
     /** Consecutive loud frames required before we call it speech. */
     private val framesToTrigger: Int = 3,
 ) {
     @Volatile var triggered = false
+        private set
+
+    /** RMS of the most recent frame. Live calibration readout; 0 when stopped. */
+    @Volatile var lastRms: Double = 0.0
+        private set
+
+    /** Loudest frame seen since start(). Survives stop() so it can be read after. */
+    @Volatile var peakRms: Double = 0.0
         private set
 
     /** True if the platform gave us an echo canceler. On speaker, this matters. */
@@ -268,6 +278,8 @@ class BargeInDetector(
                 var sum = 0.0
                 for (i in 0 until n) { val v = buf[i].toDouble(); sum += v * v }
                 val rms = kotlin.math.sqrt(sum / n)
+                lastRms = rms
+                if (rms > peakRms) peakRms = rms
                 if (rms > rmsThreshold) {
                     loudFrames++
                     if (loudFrames >= framesToTrigger) triggered = true
@@ -280,6 +292,7 @@ class BargeInDetector(
 
     fun stop() {
         running = false
+        lastRms = 0.0   // peakRms deliberately survives: it IS the measurement
         thread?.join(300)
         thread = null
         aec?.let { runCatching { it.enabled = false; it.release() } }

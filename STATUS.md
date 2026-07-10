@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.14.0** — "GPU-voice virker på telefonen. Root cause fundet og fixet: CTranslate2 loader cuBLAS via den klassiske søgesti, så workeren prepender nu nvidia-bin-mapperne til PATH (add_dll_directory alene var ikke nok — hardware-bevist 9/7 ~21:50)". Follows 1.12.2 (501/503-split + traceback-logning — fixet der gjorde root cause synlig). Autonomous sessions, **2026-07-02 → 07-09**.
+Version **1.15.0** — "Barge-in kan nu kalibreres: detektoren rapporterer hvad den hører (live RMS + top), og tærsklen er persisteret og justerbar i appen. 1500.0 var et gæt taget uden en telefon". Follows 1.14.0 (PPTX- og HTML-ingest), 1.13.0 (tap-to-stop + Kaliv-rebrand), 1.12.4 (Kaliv-ikon), 1.12.3 (GPU-voice: PATH-fixet). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

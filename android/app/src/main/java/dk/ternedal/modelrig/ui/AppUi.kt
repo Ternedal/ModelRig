@@ -35,6 +35,8 @@ import dk.ternedal.modelrig.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -615,6 +617,13 @@ private fun ChatScreen(
     // safe on a headset. Off by default until it's proven on a device.
     var bargeInEnabled by remember { mutableStateOf(store.bargeInEnabled) }
     var wasInterrupted by remember { mutableStateOf(false) }
+    // Barge-in calibration (v1.15.0). The threshold used to be a hardcoded
+    // guess with no way to check it. Now: the detector reports what it hears,
+    // and the number is settable. Read the peak while speaking over Kaliv,
+    // then set the threshold between the idle floor and that peak.
+    var bargeInThreshold by remember { mutableStateOf(store.bargeInThreshold) }
+    var liveRms by remember { mutableStateOf(0.0) }
+    var peakRms by remember { mutableStateOf(0.0) }
     var hasMicPermission by remember {
         mutableStateOf(
             androidx.core.content.ContextCompat.checkSelfPermission(
@@ -665,12 +674,30 @@ private fun ChatScreen(
                 }
                 if (audioB64.isNotEmpty()) {
                     speaking = true
-                    val cut = withContext(Dispatchers.IO) {
-                        val bytes = android.util.Base64.decode(audioB64, android.util.Base64.DEFAULT)
-                        val detector = if (bargeInEnabled && hasMicPermission) {
-                            dk.ternedal.modelrig.voice.BargeInDetector()
-                        } else null
-                        dk.ternedal.modelrig.voice.VoiceCapture.playWav(bytes, detector, playbackStop)
+                    val detector = if (bargeInEnabled && hasMicPermission) {
+                        dk.ternedal.modelrig.voice.BargeInDetector(
+                            rmsThreshold = bargeInThreshold.toDouble(),
+                        )
+                    } else null
+                    // Poll the detector on the main scope while playback blocks
+                    // on IO. Cheap (5 Hz) and it stops with the turn.
+                    val meter = detector?.let {
+                        launch {
+                            while (isActive) {
+                                liveRms = it.lastRms; peakRms = it.peakRms
+                                delay(200)
+                            }
+                        }
+                    }
+                    val cut = try {
+                        withContext(Dispatchers.IO) {
+                            val bytes = android.util.Base64.decode(audioB64, android.util.Base64.DEFAULT)
+                            dk.ternedal.modelrig.voice.VoiceCapture.playWav(bytes, detector, playbackStop)
+                        }
+                    } finally {
+                        meter?.cancel()
+                        // peakRms survives stop(): it is the measurement.
+                        detector?.let { liveRms = 0.0; peakRms = it.peakRms }
                     }
                     wasInterrupted = cut
                 }
@@ -1038,6 +1065,27 @@ private fun ChatScreen(
                                         modelMenu = false
                                     },
                                 )
+                                if (bargeInEnabled) {
+                                    // Step through sensible thresholds rather than
+                                    // a slider: this is a calibration dial used a
+                                    // handful of times, not a daily control.
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                "Barge-in følsomhed: $bargeInThreshold" +
+                                                    if (peakRms > 0) "  (sidste top ${peakRms.toInt()})" else "",
+                                                color = TextMuted,
+                                                fontSize = 13.sp,
+                                            )
+                                        },
+                                        onClick = {
+                                            val steps = listOf(500, 800, 1200, 1500, 2000, 3000, 4500)
+                                            val next = steps.firstOrNull { it > bargeInThreshold } ?: steps.first()
+                                            bargeInThreshold = next
+                                            store.bargeInThreshold = next
+                                        },
+                                    )
+                                }
                             }
                             if (mode == "rig") HorizontalDivider()
                             DropdownMenuItem(
@@ -1194,6 +1242,9 @@ private fun ChatScreen(
                 if (recording || voiceBusy || voiceError != null) {
                     val vt = when {
                         recording -> "🎙 Optager… tryk igen for at sende"
+                        speaking && bargeInEnabled && hasMicPermission ->
+                            "🔊 Kaliv taler… ⏹ afbryder · mik %.0f (top %.0f, grænse %d)"
+                                .format(liveRms, peakRms, bargeInThreshold)
                         speaking -> "🔊 Kaliv taler… tryk ⏹ for at afbryde"
                         voiceBusy -> "🔊 Kaliv lytter og svarer… tryk ⏹ for at afbryde"
                         else -> "Stemme-fejl: ${voiceError.orEmpty()}"
