@@ -415,6 +415,12 @@ git push <url> main:main
 Go `internal/httpapi` 4 tests. CI kører nu `go vet` og `go test ./...` —
 det gjorde den ikke før v1.23.1, så Go-koden var reelt utestet.
 
+**Light/dark (v1.32.0):** Manuel toggle i ⋮-menuen, gemt i TokenStore (`dark_mode`,
+default true). Paletten er nu `KalivTheme.colors.X` (CompositionLocal), ikke
+globale `val`'er. **Platform-grænse:** launcher-ikonet og OS-splashens første
+frame følger *systemets* tema (via `-night`-ressourcer), IKKE in-app-toggle'en —
+OS'et vælger dem før app-processen kører. Toggle'en styrer alt Compose tegner.
+
 **Diagnose først (v1.31.0):** `GET /api/v1/health/full` (eller `/health/full`
 på workeren direkte) giver én samlet status — worker, Ollama, ASR+device, TTS,
 tools-kill-switch, disk — hver med grund. `?deep=true` tester også en embedding.

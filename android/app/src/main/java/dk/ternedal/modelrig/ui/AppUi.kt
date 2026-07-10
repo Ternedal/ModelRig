@@ -1,5 +1,6 @@
 package dk.ternedal.modelrig.ui
 
+
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -51,10 +52,13 @@ private enum class Screen { Setup, Chat, Convos, Models, CloudPicker }
 
 @Composable
 fun AppUi() {
-    ModelRigTheme {
-        val context = LocalContext.current
-        val store = remember { TokenStore(context) }
-        val db = remember { ChatDb(context) }
+    val context = LocalContext.current
+    val store = remember { TokenStore(context) }
+    val db = remember { ChatDb(context) }
+    // The chosen mode lives here, above the theme, so the in-app toggle can flip
+    // it and the whole tree recomposes into the other palette live -- no restart.
+    var darkMode by remember { mutableStateOf(store.darkMode) }
+    ModelRigTheme(dark = darkMode) {
         var screen by remember {
             mutableStateOf(if (store.hasRig || store.hasCloud) Screen.Chat else Screen.Setup)
         }
@@ -64,11 +68,13 @@ fun AppUi() {
         // ChatScreen re-reads store.cloudModel when it comes back into view.
         var cloudModelTick by remember { mutableStateOf(0) }
 
-        Surface(color = Graphite, modifier = Modifier.fillMaxSize()) {
+        Surface(color = KalivTheme.colors.background, modifier = Modifier.fillMaxSize()) {
             when (screen) {
                 Screen.Setup -> SetupScreen(store, db, onDone = { screen = Screen.Chat })
                 Screen.Chat -> ChatScreen(
                     store, db, openConvId, cloudModelTick,
+                    darkMode = darkMode,
+                    onToggleDark = { store.darkMode = it; darkMode = it },
                     onOpenSettings = { screen = Screen.Setup },
                     onOpenConversations = { screen = Screen.Convos },
                     onOpenModels = { screen = Screen.Models },
@@ -109,13 +115,13 @@ private fun SetupScreen(store: TokenStore, db: ChatDb, onDone: () -> Unit) {
             Text(
                 "Kaliv",
                 fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
-                fontSize = 28.sp, fontWeight = FontWeight.Bold, color = TextHigh,
+                fontSize = 28.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh,
                 letterSpacing = 2.sp,
             )
             Spacer(Modifier.weight(1f))
-            if (canChat) TextButton(onClick = onDone) { Text("Til chat →", color = Signal) }
+            if (canChat) TextButton(onClick = onDone) { Text("Til chat →", color = KalivTheme.colors.signal) }
         }
-        Text("Vælg mindst én kilde", fontSize = 14.sp, color = TextMuted)
+        Text("Vælg mindst én kilde", fontSize = 14.sp, color = KalivTheme.colors.textMuted)
         Spacer(Modifier.height(16.dp))
         CloudCard(store, db) { refresh++; onDone() }
         Spacer(Modifier.height(16.dp))
@@ -132,11 +138,11 @@ private fun CloudCard(store: TokenStore, db: ChatDb, onSaved: () -> Unit) {
     var configured by remember { mutableStateOf(store.hasCloud) }
     var msg by remember { mutableStateOf<String?>(null) }
 
-    Surface(color = GraphiteSurface, shape = RoundedCornerShape(14.dp)) {
+    Surface(color = KalivTheme.colors.surface, shape = RoundedCornerShape(14.dp)) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
-            Text("Ollama Cloud", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextHigh)
-            Text("Chat uden at rig'en kører. Modeller i skyen.", fontSize = 12.sp, color = TextMuted)
-            if (configured) { Spacer(Modifier.height(4.dp)); Text("✓ konfigureret", color = Signal, fontSize = 13.sp) }
+            Text("Ollama Cloud", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
+            Text("Chat uden at rig'en kører. Modeller i skyen.", fontSize = 12.sp, color = KalivTheme.colors.textMuted)
+            if (configured) { Spacer(Modifier.height(4.dp)); Text("✓ konfigureret", color = KalivTheme.colors.signal, fontSize = 13.sp) }
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = key, onValueChange = { key = it },
@@ -144,7 +150,7 @@ private fun CloudCard(store: TokenStore, db: ChatDb, onSaved: () -> Unit) {
                 singleLine = true, visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
             )
-            Text("Hentes på ollama.com/settings/keys", fontSize = 11.sp, color = TextMuted)
+            Text("Hentes på ollama.com/settings/keys", fontSize = 11.sp, color = KalivTheme.colors.textMuted)
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = model, onValueChange = { model = it },
@@ -152,7 +158,7 @@ private fun CloudCard(store: TokenStore, db: ChatDb, onSaved: () -> Unit) {
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
             )
             Text("Modellen der bruges som standard. Du kan også vælge fra din cloud-kontos liste via ☁-menuen øverst i chatten.",
-                fontSize = 11.sp, color = TextMuted, lineHeight = 15.sp)
+                fontSize = 11.sp, color = KalivTheme.colors.textMuted, lineHeight = 15.sp)
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = system, onValueChange = { system = it; store.cloudSystem = it },
@@ -160,7 +166,7 @@ private fun CloudCard(store: TokenStore, db: ChatDb, onSaved: () -> Unit) {
                 minLines = 2, maxLines = 5, modifier = Modifier.fillMaxWidth(),
             )
             Text("Rolle/baggrund modellen altid får. Fx: Du er en skarp dansk backend-udvikler. Svar kort.",
-                fontSize = 11.sp, color = TextMuted, lineHeight = 15.sp)
+                fontSize = 11.sp, color = KalivTheme.colors.textMuted, lineHeight = 15.sp)
             PresetRow(db, "cloud", system) { system = it; store.cloudSystem = it }
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -177,10 +183,10 @@ private fun CloudCard(store: TokenStore, db: ChatDb, onSaved: () -> Unit) {
                 ) { Text("Gem & brug cloud") }
                 if (configured) {
                     Spacer(Modifier.width(8.dp))
-                    TextButton(onClick = { store.clearCloud(); configured = false; key = "" }) { Text("Ryd", color = Danger) }
+                    TextButton(onClick = { store.clearCloud(); configured = false; key = "" }) { Text("Ryd", color = KalivTheme.colors.danger) }
                 }
             }
-            msg?.let { Spacer(Modifier.height(6.dp)); Text(it, color = Danger, fontSize = 12.sp) }
+            msg?.let { Spacer(Modifier.height(6.dp)); Text(it, color = KalivTheme.colors.danger, fontSize = 12.sp) }
         }
     }
 }
@@ -211,19 +217,19 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
         }
     }
 
-    Surface(color = GraphiteSurface, shape = RoundedCornerShape(14.dp)) {
+    Surface(color = KalivTheme.colors.surface, shape = RoundedCornerShape(14.dp)) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
-            Text("Din rig (backend)", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextHigh)
-            Text("Lokale modeller + RAG. Kræver at rig'en kører.", fontSize = 12.sp, color = TextMuted)
+            Text("Din rig (backend)", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
+            Text("Lokale modeller + RAG. Kræver at rig'en kører.", fontSize = 12.sp, color = KalivTheme.colors.textMuted)
             if (connected) {
                 Spacer(Modifier.height(4.dp))
                 when (reachable) {
-                    true -> Text("✓ forbundet", color = Signal, fontSize = 13.sp)
+                    true -> Text("✓ forbundet", color = KalivTheme.colors.signal, fontSize = 13.sp)
                     false -> Text(
                         "⚠ parret, men rig'en svarer ikke — tjek IP og at serveren kører",
-                        color = Danger, fontSize = 13.sp,
+                        color = KalivTheme.colors.danger, fontSize = 13.sp,
                     )
-                    null -> Text("… tjekker forbindelsen", color = TextMuted, fontSize = 13.sp)
+                    null -> Text("… tjekker forbindelsen", color = KalivTheme.colors.textMuted, fontSize = 13.sp)
                 }
             }
             RigProfileRow(
@@ -245,7 +251,7 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
             Field("Parringskode (XXXX-XXXX)", code) { code = it }
             Field("Enhedsnavn", deviceName) { deviceName = it }
             Text("Serveren skal binde 0.0.0.0 / Tailscale-IP — ikke 127.0.0.1. Brug LAN-IP.",
-                color = TextMuted, fontSize = 11.sp, lineHeight = 15.sp)
+                color = KalivTheme.colors.textMuted, fontSize = 11.sp, lineHeight = 15.sp)
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = system, onValueChange = { system = it; store.rigSystem = it },
@@ -294,10 +300,10 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
                 ) { Text(if (busy) "Forbinder…" else "Forbind") }
                 if (connected) {
                     Spacer(Modifier.width(8.dp))
-                    TextButton(onClick = { store.clearRig(); connected = false; reachable = null }) { Text("Afbryd", color = Danger) }
+                    TextButton(onClick = { store.clearRig(); connected = false; reachable = null }) { Text("Afbryd", color = KalivTheme.colors.danger) }
                 }
             }
-            msg?.let { Spacer(Modifier.height(6.dp)); Text(it, color = Danger, fontSize = 12.sp) }
+            msg?.let { Spacer(Modifier.height(6.dp)); Text(it, color = KalivTheme.colors.danger, fontSize = 12.sp) }
         }
     }
 }
@@ -331,14 +337,14 @@ private fun RigProfileRow(
         profiles.forEach { p ->
             Surface(
                 shape = RoundedCornerShape(999.dp),
-                color = GraphiteSurfaceHigh,
+                color = KalivTheme.colors.surfaceHigh,
                 modifier = Modifier.padding(end = 6.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(
                         onClick = { onApply(p) },
                         contentPadding = PaddingValues(start = 12.dp, end = 4.dp),
-                    ) { Text(p.name, color = TextHigh, fontSize = 12.sp) }
+                    ) { Text(p.name, color = KalivTheme.colors.textHigh, fontSize = 12.sp) }
                     TextButton(
                         onClick = {
                             runCatching {
@@ -347,7 +353,7 @@ private fun RigProfileRow(
                             }.onFailure { profileError = "Kunne ikke slette: ${it.message}" }
                         },
                         contentPadding = PaddingValues(start = 4.dp, end = 12.dp),
-                    ) { Text("✕", color = TextMuted, fontSize = 11.sp) }
+                    ) { Text("✕", color = KalivTheme.colors.textMuted, fontSize = 11.sp) }
                 }
             }
         }
@@ -358,7 +364,7 @@ private fun RigProfileRow(
         ) {
             Text(
                 if (saving) "− Annullér" else "+ Gem denne rig",
-                color = if (canSaveCurrent) Signal else TextMuted,
+                color = if (canSaveCurrent) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
                 fontSize = 12.sp,
             )
         }
@@ -385,10 +391,10 @@ private fun RigProfileRow(
                         }.onFailure { profileError = "Kunne ikke gemme: ${it.message}" }
                     }
                 },
-            ) { Text("Gem", color = if (newName.isNotBlank() && currentToken != null) Signal else TextMuted, fontWeight = FontWeight.Bold) }
+            ) { Text("Gem", color = if (newName.isNotBlank() && currentToken != null) KalivTheme.colors.signal else KalivTheme.colors.textMuted, fontWeight = FontWeight.Bold) }
         }
     }
-    profileError?.let { Text(it, color = Danger, fontSize = 11.sp) }
+    profileError?.let { Text(it, color = KalivTheme.colors.danger, fontSize = 11.sp) }
 }
 
 @Composable
@@ -406,14 +412,14 @@ private fun PresetRow(db: ChatDb, source: String, currentPrompt: String, onApply
         presets.forEach { p ->
             Surface(
                 shape = RoundedCornerShape(999.dp),
-                color = GraphiteSurfaceHigh,
+                color = KalivTheme.colors.surfaceHigh,
                 modifier = Modifier.padding(end = 6.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(
                         onClick = { onApply(p.prompt) },
                         contentPadding = PaddingValues(start = 12.dp, end = 4.dp),
-                    ) { Text(p.name, color = TextHigh, fontSize = 12.sp) }
+                    ) { Text(p.name, color = KalivTheme.colors.textHigh, fontSize = 12.sp) }
                     TextButton(
                         onClick = {
                             runCatching {
@@ -422,7 +428,7 @@ private fun PresetRow(db: ChatDb, source: String, currentPrompt: String, onApply
                             }.onFailure { presetError = "Kunne ikke slette: ${it.message}" }
                         },
                         contentPadding = PaddingValues(start = 4.dp, end = 12.dp),
-                    ) { Text("✕", color = TextMuted, fontSize = 11.sp) }
+                    ) { Text("✕", color = KalivTheme.colors.textMuted, fontSize = 11.sp) }
                 }
             }
         }
@@ -433,7 +439,7 @@ private fun PresetRow(db: ChatDb, source: String, currentPrompt: String, onApply
         ) {
             Text(
                 if (saving) "− Annullér" else "+ Gem som preset",
-                color = if (currentPrompt.isNotBlank()) Signal else TextMuted,
+                color = if (currentPrompt.isNotBlank()) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
                 fontSize = 12.sp,
             )
         }
@@ -457,10 +463,10 @@ private fun PresetRow(db: ChatDb, source: String, currentPrompt: String, onApply
                         newName = ""; saving = false
                     }.onFailure { presetError = "Kunne ikke gemme: ${it.message}" }
                 },
-            ) { Text("Gem", color = if (newName.isNotBlank()) Signal else TextMuted, fontWeight = FontWeight.Bold) }
+            ) { Text("Gem", color = if (newName.isNotBlank()) KalivTheme.colors.signal else KalivTheme.colors.textMuted, fontWeight = FontWeight.Bold) }
         }
     }
-    presetError?.let { Text(it, color = Danger, fontSize = 11.sp) }
+    presetError?.let { Text(it, color = KalivTheme.colors.danger, fontSize = 11.sp) }
 }
 private data class Msg(
     val role: String,
@@ -546,6 +552,8 @@ private fun ChatScreen(
     db: ChatDb,
     openConvId: Long?,
     cloudModelTick: Int,
+    darkMode: Boolean,
+    onToggleDark: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenConversations: () -> Unit,
     onOpenModels: () -> Unit,
@@ -1117,7 +1125,7 @@ private fun ChatScreen(
 
     Column(Modifier.fillMaxSize()) {
         // top bar
-        Surface(color = GraphiteSurface, tonalElevation = 2.dp) {
+        Surface(color = KalivTheme.colors.surface, tonalElevation = 2.dp) {
             Column {
             Row(
                 Modifier.fillMaxWidth()
@@ -1140,7 +1148,7 @@ private fun ChatScreen(
                                         Text(
                                             (if (voiceUsesCloud) "☁ " else "◇ ") +
                                                 "Stemme svarer via cloud (${store.cloudModel})",
-                                            color = if (voiceUsesCloud) Signal else TextMuted,
+                                            color = if (voiceUsesCloud) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
                                             fontSize = 13.sp,
                                         )
                                     },
@@ -1159,7 +1167,7 @@ private fun ChatScreen(
                                         Text(
                                             (if (bargeInEnabled) "✋ " else "◇ ") +
                                                 "Afbryd Kaliv ved at tale",
-                                            color = if (bargeInEnabled) Signal else TextMuted,
+                                            color = if (bargeInEnabled) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
                                             fontSize = 13.sp,
                                         )
                                     },
@@ -1169,13 +1177,28 @@ private fun ChatScreen(
                                         modelMenu = false
                                     },
                                 )
+                                // Light / dark. A manual choice (see TokenStore):
+                                // stays put when Android auto-switches at sunset.
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (darkMode) "☀ Skift til lyst tema" else "☾ Skift til mørkt tema",
+                                            color = KalivTheme.colors.textMuted,
+                                            fontSize = 13.sp,
+                                        )
+                                    },
+                                    onClick = {
+                                        onToggleDark(!darkMode)
+                                        modelMenu = false
+                                    },
+                                )
                                 // Kaliv Tools. Off by default, and the rig has its
                                 // own kill switch on top: two locks, both opt-in.
                                 DropdownMenuItem(
                                     text = {
                                         Text(
                                             if (toolsMode) "🛠 Tools: til" else "🛠 Tools: fra",
-                                            color = if (toolsMode) Signal else TextMuted,
+                                            color = if (toolsMode) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
                                             fontSize = 13.sp,
                                         )
                                     },
@@ -1189,7 +1212,7 @@ private fun ChatScreen(
                                 // Audit log: readable whether or not tools mode is
                                 // currently on -- past actions matter regardless.
                                 DropdownMenuItem(
-                                    text = { Text("⚙ Tool-styring", color = TextMuted, fontSize = 13.sp) },
+                                    text = { Text("⚙ Tool-styring", color = KalivTheme.colors.textMuted, fontSize = 13.sp) },
                                     onClick = {
                                         modelMenu = false
                                         registryError = null
@@ -1198,7 +1221,7 @@ private fun ChatScreen(
                                     },
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("📜 Handlingslog", color = TextMuted, fontSize = 13.sp) },
+                                    text = { Text("📜 Handlingslog", color = KalivTheme.colors.textMuted, fontSize = 13.sp) },
                                     onClick = {
                                         modelMenu = false
                                         auditError = null
@@ -1223,7 +1246,7 @@ private fun ChatScreen(
                                             Text(
                                                 "Barge-in følsomhed: $bargeInThreshold" +
                                                     if (peakRms > 0) "  (sidste top ${peakRms.toInt()})" else "",
-                                                color = TextMuted,
+                                                color = KalivTheme.colors.textMuted,
                                                 fontSize = 13.sp,
                                             )
                                         },
@@ -1238,7 +1261,7 @@ private fun ChatScreen(
                             }
                             if (mode == "rig") HorizontalDivider()
                             DropdownMenuItem(
-                                text = { Text("↻  Genindlæs modeller", color = Signal) },
+                                text = { Text("↻  Genindlæs modeller", color = KalivTheme.colors.signal) },
                                 onClick = {
                                     modelMenu = false
                                     scope.launch {
@@ -1289,11 +1312,11 @@ private fun ChatScreen(
                                 }
                                 if (ragSources.isEmpty()) {
                                     HorizontalDivider()
-                                    DropdownMenuItem(text = { Text("Ingen kilder ingesteret endnu", color = TextMuted) }, onClick = { ragSourceMenu = false })
+                                    DropdownMenuItem(text = { Text("Ingen kilder ingesteret endnu", color = KalivTheme.colors.textMuted) }, onClick = { ragSourceMenu = false })
                                 }
                                 HorizontalDivider()
                                 DropdownMenuItem(
-                                    text = { Text(if (ingesting) "Ingesterer…" else "+ Tilføj dokument (txt/md)…", color = if (ingesting) TextMuted else Signal) },
+                                    text = { Text(if (ingesting) "Ingesterer…" else "+ Tilføj dokument (txt/md)…", color = if (ingesting) KalivTheme.colors.textMuted else KalivTheme.colors.signal) },
                                     enabled = !ingesting,
                                     onClick = { ragSourceMenu = false; pickDocument.launch(arrayOf("text/plain", "text/markdown", "text/html", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/octet-stream")) },
                                 )
@@ -1307,11 +1330,11 @@ private fun ChatScreen(
                     TextButton(
                         onClick = { val m = if (mode == "cloud") "rig" else "cloud"; mode = m; store.chatMode = m; if (m == "cloud") ragMode = false },
                         contentPadding = PaddingValues(horizontal = 8.dp),
-                    ) { Text("Skift", color = Signal, fontSize = 13.sp) }
+                    ) { Text("Skift", color = KalivTheme.colors.signal, fontSize = 13.sp) }
                 }
                 Box {
                     TextButton(onClick = { overflow = true }, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                        Text("⋮", color = TextHigh, fontSize = 20.sp)
+                        Text("⋮", color = KalivTheme.colors.textHigh, fontSize = 20.sp)
                     }
                     DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
                         DropdownMenuItem(text = { Text("Ny samtale") }, onClick = {
@@ -1326,9 +1349,9 @@ private fun ChatScreen(
             if (ingesting || ingestStatus != null || ingestError != null) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
                     when {
-                        ingesting -> Text("Ingesterer…", color = TextMuted, fontSize = 11.sp)
-                        ingestError != null -> Text("Fejl: ${friendlyError(ingestError!!)}", color = Danger, fontSize = 11.sp)
-                        ingestStatus != null -> Text(ingestStatus!!, color = Signal, fontSize = 11.sp)
+                        ingesting -> Text("Ingesterer…", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
+                        ingestError != null -> Text("Fejl: ${friendlyError(ingestError!!)}", color = KalivTheme.colors.danger, fontSize = 11.sp)
+                        ingestStatus != null -> Text(ingestStatus!!, color = KalivTheme.colors.signal, fontSize = 11.sp)
                     }
                 }
             }
@@ -1354,30 +1377,30 @@ private fun ChatScreen(
                     "KALIV",
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
                     fontSize = 30.sp, fontWeight = FontWeight.Bold,
-                    color = TextHigh, letterSpacing = 8.sp,
+                    color = KalivTheme.colors.textHigh, letterSpacing = 8.sp,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
                     "Lokal intelligens. Privat.",
-                    color = TextMuted, fontSize = 13.sp, letterSpacing = 1.sp,
+                    color = KalivTheme.colors.textMuted, fontSize = 13.sp, letterSpacing = 1.sp,
                 )
                 Spacer(Modifier.height(28.dp))
-                // Hairline divider: the branded-seal feel is quiet structure,
+                // KalivTheme.colors.hairline divider: the branded-seal feel is quiet structure,
                 // not more colour.
                 androidx.compose.foundation.layout.Box(
                     Modifier.width(48.dp).height(1.dp)
-                        .background(Hairline),
+                        .background(KalivTheme.colors.hairline),
                 )
                 Spacer(Modifier.height(20.dp))
                 Text(
                     when { mode == "cloud" -> "Cloud-tilstand"; ragMode -> "RAG-tilstand"; else -> "Rig-tilstand" },
-                    color = if (mode == "cloud") Amber else Signal,
+                    color = if (mode == "cloud") KalivTheme.colors.amber else KalivTheme.colors.signal,
                     fontSize = 14.sp, fontWeight = FontWeight.Medium, letterSpacing = 1.sp,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
                     if (ragMode) "Spørg om dine ingesterede dokumenter" else "Skriv en besked for at starte",
-                    color = TextMuted, fontSize = 13.sp,
+                    color = KalivTheme.colors.textMuted, fontSize = 13.sp,
                 )
             }
         } else {
@@ -1391,7 +1414,7 @@ private fun ChatScreen(
         // input bar — adjustResize + edge-to-edge: the keyboard arrives as the ime
         // inset, so ime.union(navigationBars) lifts the field above it (max per
         // side, no double-count).
-        Surface(color = GraphiteSurface, tonalElevation = 3.dp) {
+        Surface(color = KalivTheme.colors.surface, tonalElevation = 3.dp) {
             Column(
                 Modifier.fillMaxWidth()
                     .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
@@ -1404,15 +1427,15 @@ private fun ChatScreen(
                         Modifier.fillMaxWidth().padding(bottom = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("🖼 Billede vedhæftet", color = Signal, fontSize = 12.sp)
+                        Text("🖼 Billede vedhæftet", color = KalivTheme.colors.signal, fontSize = 12.sp)
                         Spacer(Modifier.weight(1f))
                         TextButton(onClick = { pendingImageB64 = null }) {
-                            Text("✕ Fjern", color = TextMuted, fontSize = 12.sp)
+                            Text("✕ Fjern", color = KalivTheme.colors.textMuted, fontSize = 12.sp)
                         }
                     }
                 }
                 pendingImageError?.let {
-                    Text("Billedfejl: $it", color = Danger, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                    Text("Billedfejl: $it", color = KalivTheme.colors.danger, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
                 }
                 // Kaliv Tools: the confirmation card. Nothing has executed while
                 // this is on screen. Deny is exactly as easy to hit as approve --
@@ -1422,18 +1445,18 @@ private fun ChatScreen(
                     AlertDialog(
                         onDismissRequest = { showToolCtl = false },
                         confirmButton = {
-                            TextButton(onClick = { showToolCtl = false }) { Text("Luk", color = Signal) }
+                            TextButton(onClick = { showToolCtl = false }) { Text("Luk", color = KalivTheme.colors.signal) }
                         },
                         title = {
-                            Text("Tool-styring", color = TextHigh,
+                            Text("Tool-styring", color = KalivTheme.colors.textHigh,
                                 fontFamily = androidx.compose.ui.text.font.FontFamily.Serif)
                         },
                         text = {
                             Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
-                                registryError?.let { Text(it, color = Danger, fontSize = 13.sp) }
+                                registryError?.let { Text(it, color = KalivTheme.colors.danger, fontSize = 13.sp) }
                                 val reg = registry
                                 if (reg == null && registryError == null) {
-                                    Text("Henter…", color = TextMuted, fontSize = 13.sp)
+                                    Text("Henter…", color = KalivTheme.colors.textMuted, fontSize = 13.sp)
                                 }
                                 reg?.let { r ->
                                     // The kill switch. Turning tools OFF is never
@@ -1441,10 +1464,10 @@ private fun ChatScreen(
                                     // brake that asks "are you sure" is not a brake.
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Column(Modifier.weight(1f)) {
-                                            Text("Tool-laget på riggen", color = TextHigh, fontSize = 14.sp)
+                                            Text("Tool-laget på riggen", color = KalivTheme.colors.textHigh, fontSize = 14.sp)
                                             Text(
                                                 if (r.enabled) "Aktivt" else "Slået fra — intet tool kan køre",
-                                                color = if (r.enabled) Success else TextMuted, fontSize = 11.sp,
+                                                color = if (r.enabled) KalivTheme.colors.success else KalivTheme.colors.textMuted, fontSize = 11.sp,
                                             )
                                         }
                                         Switch(
@@ -1454,11 +1477,11 @@ private fun ChatScreen(
                                         )
                                     }
                                     r.toolsDir?.let {
-                                        Text("Skrivninger lander i: $it", color = TextMuted,
+                                        Text("Skrivninger lander i: $it", color = KalivTheme.colors.textMuted,
                                             fontSize = 11.sp, lineHeight = 15.sp)
                                     }
                                     Spacer(Modifier.height(8.dp))
-                                    HorizontalDivider(color = Hairline)
+                                    HorizontalDivider(color = KalivTheme.colors.hairline)
                                     Spacer(Modifier.height(8.dp))
                                     r.tools.forEach { tool ->
                                         Row(
@@ -1467,17 +1490,17 @@ private fun ChatScreen(
                                         ) {
                                             Column(Modifier.weight(1f)) {
                                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    Text(tool.name, color = TextHigh, fontSize = 13.sp)
+                                                    Text(tool.name, color = KalivTheme.colors.textHigh, fontSize = 13.sp)
                                                     Spacer(Modifier.width(6.dp))
                                                     // Writes are the ones that need a card.
                                                     // Say so before anything is enabled.
                                                     Text(
                                                         if (tool.risk == "write") "SKRIVER" else "læser",
-                                                        color = if (tool.risk == "write") Amber else TextMuted,
+                                                        color = if (tool.risk == "write") KalivTheme.colors.amber else KalivTheme.colors.textMuted,
                                                         fontSize = 10.sp, fontWeight = FontWeight.Bold,
                                                     )
                                                 }
-                                                Text(tool.description, color = TextMuted,
+                                                Text(tool.description, color = KalivTheme.colors.textMuted,
                                                     fontSize = 11.sp, lineHeight = 15.sp)
                                             }
                                             Switch(
@@ -1490,7 +1513,7 @@ private fun ChatScreen(
                                 }
                             }
                         },
-                        containerColor = GraphiteSurfaceHigh,
+                        containerColor = KalivTheme.colors.surfaceHigh,
                     )
                 }
 
@@ -1499,32 +1522,32 @@ private fun ChatScreen(
                         onDismissRequest = { showAudit = false },
                         confirmButton = {
                             TextButton(onClick = { showAudit = false }) {
-                                Text("Luk", color = Signal)
+                                Text("Luk", color = KalivTheme.colors.signal)
                             }
                         },
-                        title = { Text("Handlingslog", color = TextHigh, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif) },
+                        title = { Text("Handlingslog", color = KalivTheme.colors.textHigh, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif) },
                         text = {
                             Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
                                 auditError?.let {
-                                    Text(it, color = Danger, fontSize = 13.sp)
+                                    Text(it, color = KalivTheme.colors.danger, fontSize = 13.sp)
                                 }
                                 if (auditError == null && auditRows.isEmpty()) {
-                                    Text("Ingen handlinger registreret endnu.", color = TextMuted, fontSize = 13.sp)
+                                    Text("Ingen handlinger registreret endnu.", color = KalivTheme.colors.textMuted, fontSize = 13.sp)
                                 }
                                 auditRows.forEach { e ->
                                     // Colour by outcome: a refusal or a failure should
                                     // catch the eye, an ordinary success should not.
                                     val c = when (e.outcome) {
-                                        "executed" -> Success
-                                        "denied", "expired", "blocked" -> Amber
-                                        "error" -> Danger
-                                        else -> TextMuted
+                                        "executed" -> KalivTheme.colors.success
+                                        "denied", "expired", "blocked" -> KalivTheme.colors.amber
+                                        "error" -> KalivTheme.colors.danger
+                                        else -> KalivTheme.colors.textMuted
                                     }
                                     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                                         Row {
                                             Text(e.outcome.uppercase(), color = c, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                             Spacer(Modifier.width(6.dp))
-                                            Text(e.tool, color = TextHigh, fontSize = 12.sp)
+                                            Text(e.tool, color = KalivTheme.colors.textHigh, fontSize = 12.sp)
                                             if (e.origin == "cloud") {
                                                 Spacer(Modifier.width(6.dp))
                                                 Text("☁", fontSize = 12.sp)
@@ -1532,30 +1555,30 @@ private fun ChatScreen(
                                         }
                                         Text(
                                             "${e.ts} · ${e.risk}" + if (e.summary.isNotBlank()) " · ${e.summary.take(80)}" else "",
-                                            color = TextMuted, fontSize = 11.sp, lineHeight = 15.sp,
+                                            color = KalivTheme.colors.textMuted, fontSize = 11.sp, lineHeight = 15.sp,
                                         )
                                     }
-                                    HorizontalDivider(color = Hairline)
+                                    HorizontalDivider(color = KalivTheme.colors.hairline)
                                 }
                             }
                         },
-                        containerColor = GraphiteSurfaceHigh,
+                        containerColor = KalivTheme.colors.surfaceHigh,
                     )
                 }
 
                 pendingTool?.let { prop ->
                     Surface(
-                        color = GraphiteSurfaceHigh,
+                        color = KalivTheme.colors.surfaceHigh,
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                     ) {
                         Column(Modifier.padding(14.dp)) {
                             Text(
                                 "⚠ Kaliv vil udføre en handling",
-                                color = Signal, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                color = KalivTheme.colors.signal, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                             )
                             Spacer(Modifier.height(6.dp))
-                            Text(prop.summary.orEmpty(), color = TextHigh, fontSize = 14.sp, lineHeight = 20.sp)
+                            Text(prop.summary.orEmpty(), color = KalivTheme.colors.textHigh, fontSize = 14.sp, lineHeight = 20.sp)
                             // The clock is visible because a timeout is a DENIAL,
                             // not an acceptance. Nothing happens if you walk away;
                             // the card should say so rather than let you assume.
@@ -1576,7 +1599,7 @@ private fun ChatScreen(
                                 Spacer(Modifier.height(6.dp))
                                 Text(
                                     "Udløber om $remaining s — sker der intet, bliver handlingen afvist.",
-                                    color = TextMuted, fontSize = 12.sp,
+                                    color = KalivTheme.colors.textMuted, fontSize = 12.sp,
                                 )
                             }
                             Spacer(Modifier.height(12.dp))
@@ -1628,7 +1651,7 @@ private fun ChatScreen(
                                     enabled = !toolBusy && cid != null,
                                     modifier = Modifier.weight(1f),
                                 ) {
-                                    Text("Afvis", color = TextHigh, fontSize = 14.sp,
+                                    Text("Afvis", color = KalivTheme.colors.textHigh, fontSize = 14.sp,
                                          fontWeight = FontWeight.SemiBold)
                                 }
                                 TextButton(
@@ -1636,7 +1659,7 @@ private fun ChatScreen(
                                     enabled = !toolBusy && cid != null,
                                     modifier = Modifier.weight(1f),
                                 ) {
-                                    Text("Godkend", color = Signal, fontSize = 14.sp,
+                                    Text("Godkend", color = KalivTheme.colors.signal, fontSize = 14.sp,
                                          fontWeight = FontWeight.SemiBold)
                                 }
                             }
@@ -1657,17 +1680,17 @@ private fun ChatScreen(
                     }
                     Text(
                         vt,
-                        color = if (voiceError != null && !recording && !voiceBusy) Danger else Signal,
+                        color = if (voiceError != null && !recording && !voiceBusy) KalivTheme.colors.danger else KalivTheme.colors.signal,
                         fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp),
                     )
                 }
                 modelError?.let {
-                    Text(it, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
+                    Text(it, color = KalivTheme.colors.danger, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
                 }
                 if (wasInterrupted && !voiceBusy && !recording) {
                     Text(
                         "✋ Du afbrød Kaliv — tryk 🎙 for at sige noget",
-                        color = TextMuted, fontSize = 12.sp,
+                        color = KalivTheme.colors.textMuted, fontSize = 12.sp,
                         modifier = Modifier.padding(bottom = 6.dp),
                     )
                 }
@@ -1733,7 +1756,7 @@ private fun ChatScreen(
                         Box(
                             Modifier.size(44.dp).clickable(onClick = { activeCall?.cancel() }),
                             contentAlignment = Alignment.Center,
-                        ) { StopGlyph(color = Danger, modifier = Modifier.size(20.dp)) }
+                        ) { StopGlyph(color = KalivTheme.colors.danger, modifier = Modifier.size(20.dp)) }
                     } else {
                         // Can send with text OR just an image (vision prompts
                         // are often "what's in this?" with an image and no text).
@@ -1741,7 +1764,7 @@ private fun ChatScreen(
                         Box(
                             Modifier.size(44.dp).clickable(enabled = canSend, onClick = onSend),
                             contentAlignment = Alignment.Center,
-                        ) { SendGlyph(color = if (canSend) Signal else TextMuted, modifier = Modifier.size(26.dp)) }
+                        ) { SendGlyph(color = if (canSend) KalivTheme.colors.signal else KalivTheme.colors.textMuted, modifier = Modifier.size(26.dp)) }
                     }
                 }
             }
@@ -1768,17 +1791,17 @@ private fun ConversationsScreen(
     }
 
     Column(Modifier.fillMaxSize()) {
-        Surface(color = GraphiteSurface, tonalElevation = 2.dp) {
+        Surface(color = KalivTheme.colors.surface, tonalElevation = 2.dp) {
             Column(
                 Modifier.fillMaxWidth()
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 8.dp, vertical = 8.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onBack) { Text("←", color = TextHigh, fontSize = 18.sp) }
-                    Text("Samtaler", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextHigh)
+                    TextButton(onClick = onBack) { Text("←", color = KalivTheme.colors.textHigh, fontSize = 18.sp) }
+                    Text("Samtaler", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = onNew) { Text("+ Ny", color = Signal) }
+                    TextButton(onClick = onNew) { Text("+ Ny", color = KalivTheme.colors.signal) }
                 }
                 OutlinedTextField(
                     value = query, onValueChange = { query = it },
@@ -1792,7 +1815,7 @@ private fun ConversationsScreen(
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text(
                     if (convos.isEmpty()) "Ingen samtaler endnu" else "Ingen match på \"$query\"",
-                    color = TextMuted, fontSize = 14.sp,
+                    color = KalivTheme.colors.textMuted, fontSize = 14.sp,
                 )
             }
         } else {
@@ -1802,7 +1825,7 @@ private fun ConversationsScreen(
             ) {
                 items(visible, key = { it.id }) { c ->
                     Surface(
-                        color = GraphiteSurface,
+                        color = KalivTheme.colors.surface,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     ) {
@@ -1820,8 +1843,8 @@ private fun ConversationsScreen(
                                             convos = db.listConversations()
                                             renamingId = null
                                         },
-                                    ) { Text("Gem", color = if (renameText.isNotBlank()) Signal else TextMuted) }
-                                    TextButton(onClick = { renamingId = null }) { Text("✕", color = TextMuted) }
+                                    ) { Text("Gem", color = if (renameText.isNotBlank()) KalivTheme.colors.signal else KalivTheme.colors.textMuted) }
+                                    TextButton(onClick = { renamingId = null }) { Text("✕", color = KalivTheme.colors.textMuted) }
                                 }
                             } else {
                                 Row(
@@ -1831,14 +1854,14 @@ private fun ConversationsScreen(
                                     Column(Modifier.weight(1f)) {
                                         Text(
                                             c.title.ifBlank { "(uden titel)" },
-                                            color = TextHigh, fontSize = 14.sp,
+                                            color = KalivTheme.colors.textHigh, fontSize = 14.sp,
                                             maxLines = 1,
                                         )
                                         Spacer(Modifier.height(2.dp))
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             SourceBadge(c.source)
                                             Spacer(Modifier.width(8.dp))
-                                            Text(fmt.format(Date(c.updatedAt)), color = TextMuted, fontSize = 11.sp)
+                                            Text(fmt.format(Date(c.updatedAt)), color = KalivTheme.colors.textMuted, fontSize = 11.sp)
                                         }
                                     }
                                 }
@@ -1846,7 +1869,7 @@ private fun ConversationsScreen(
                                     TextButton(onClick = {
                                         renamingId = c.id
                                         renameText = c.title
-                                    }) { Text("✎", color = TextMuted, fontSize = 13.sp) }
+                                    }) { Text("✎", color = KalivTheme.colors.textMuted, fontSize = 13.sp) }
                                     TextButton(onClick = {
                                         val md = buildString {
                                             appendLine("# ${c.title.ifBlank { "Kaliv-samtale" }}")
@@ -1863,11 +1886,11 @@ private fun ConversationsScreen(
                                             putExtra(Intent.EXTRA_TEXT, md)
                                         }
                                         context.startActivity(Intent.createChooser(intent, "Del samtale"))
-                                    }) { Text("Del", color = Signal, fontSize = 12.sp) }
+                                    }) { Text("Del", color = KalivTheme.colors.signal, fontSize = 12.sp) }
                                     TextButton(onClick = {
                                         db.deleteConversation(c.id)
                                         convos = db.listConversations()
-                                    }) { Text("Slet", color = Danger, fontSize = 12.sp) }
+                                    }) { Text("Slet", color = KalivTheme.colors.danger, fontSize = 12.sp) }
                                 }
                             }
                         }
@@ -1916,30 +1939,30 @@ private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
     LaunchedEffect(Unit) { refresh() }
 
     Column(Modifier.fillMaxSize()) {
-        Surface(color = GraphiteSurface, tonalElevation = 2.dp) {
+        Surface(color = KalivTheme.colors.surface, tonalElevation = 2.dp) {
             Row(
                 Modifier.fillMaxWidth()
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 8.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = onBack) { Text("←", color = TextHigh, fontSize = 18.sp) }
-                Text("Modeller", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextHigh)
+                TextButton(onClick = onBack) { Text("←", color = KalivTheme.colors.textHigh, fontSize = 18.sp) }
+                Text("Modeller", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = { refresh() }) { Text(if (loading) "…" else "Genindlæs", color = Signal) }
+                TextButton(onClick = { refresh() }) { Text(if (loading) "…" else "Genindlæs", color = KalivTheme.colors.signal) }
             }
         }
 
         if (!store.hasRig) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("Kræver rig-forbindelse", color = TextMuted, fontSize = 14.sp)
+                Text("Kræver rig-forbindelse", color = KalivTheme.colors.textMuted, fontSize = 14.sp)
             }
             return@Column
         }
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
             // ---- pull new model ----
-            Text("Hent ny model", color = TextHigh, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Text("Hent ny model", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
@@ -1978,20 +2001,20 @@ private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
                     },
                 ) { Text(if (pulling) "Henter…" else "Hent") }
             }
-            pullStatus?.let { Spacer(Modifier.height(6.dp)); Text(it, color = Signal, fontSize = 12.sp) }
-            pullError?.let { Spacer(Modifier.height(6.dp)); Text("Fejl: ${friendlyError(it)}", color = Danger, fontSize = 12.sp) }
+            pullStatus?.let { Spacer(Modifier.height(6.dp)); Text(it, color = KalivTheme.colors.signal, fontSize = 12.sp) }
+            pullError?.let { Spacer(Modifier.height(6.dp)); Text("Fejl: ${friendlyError(it)}", color = KalivTheme.colors.danger, fontSize = 12.sp) }
 
             Spacer(Modifier.height(20.dp))
 
             // ---- running now ----
-            Text("Kører nu", color = TextHigh, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Text("Kører nu", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             Spacer(Modifier.height(8.dp))
             if (running.isEmpty()) {
-                Text("Ingen modeller indlæst i hukommelsen lige nu", color = TextMuted, fontSize = 13.sp)
+                Text("Ingen modeller indlæst i hukommelsen lige nu", color = KalivTheme.colors.textMuted, fontSize = 13.sp)
             } else {
                 running.forEach { m ->
                     Surface(
-                        color = GraphiteSurface, shape = RoundedCornerShape(10.dp),
+                        color = KalivTheme.colors.surface, shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
                     ) {
                         Row(
@@ -1999,10 +2022,10 @@ private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text(m.name, color = TextHigh, fontSize = 13.sp)
+                                Text(m.name, color = KalivTheme.colors.textHigh, fontSize = 13.sp)
                                 Text(
                                     "${m.sizeVramBytes / 1_000_000_000.0} GB VRAM",
-                                    color = TextMuted, fontSize = 11.sp,
+                                    color = KalivTheme.colors.textMuted, fontSize = 11.sp,
                                 )
                             }
                         }
@@ -2013,12 +2036,12 @@ private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
             Spacer(Modifier.height(20.dp))
 
             // ---- installed ----
-            Text("Installeret", color = TextHigh, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Text("Installeret", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             Spacer(Modifier.height(8.dp))
-            loadError?.let { Text("Fejl: ${friendlyError(it)}", color = Danger, fontSize = 12.sp); Spacer(Modifier.height(6.dp)) }
+            loadError?.let { Text("Fejl: ${friendlyError(it)}", color = KalivTheme.colors.danger, fontSize = 12.sp); Spacer(Modifier.height(6.dp)) }
             installed.forEach { m ->
                 Surface(
-                    color = GraphiteSurface, shape = RoundedCornerShape(10.dp),
+                    color = KalivTheme.colors.surface, shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
                 ) {
                     Row(
@@ -2026,10 +2049,10 @@ private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text(m.name, color = TextHigh, fontSize = 13.sp)
-                            Text("${m.sizeBytes / 1_000_000_000.0} GB", color = TextMuted, fontSize = 11.sp)
+                            Text(m.name, color = KalivTheme.colors.textHigh, fontSize = 13.sp)
+                            Text("${m.sizeBytes / 1_000_000_000.0} GB", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
                         }
-                        TextButton(onClick = { confirmDelete = m.name }) { Text("Slet", color = Danger, fontSize = 12.sp) }
+                        TextButton(onClick = { confirmDelete = m.name }) { Text("Slet", color = KalivTheme.colors.danger, fontSize = 12.sp) }
                     }
                 }
             }
@@ -2049,9 +2072,9 @@ private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
                         val err = withContext(Dispatchers.IO) { runCatching { client.deleteModel(name) }.exceptionOrNull() }
                         if (err == null) refresh() else loadError = err.message
                     }
-                }) { Text("Slet", color = Danger) }
+                }) { Text("Slet", color = KalivTheme.colors.danger) }
             },
-            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Annullér", color = TextMuted) } },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Annullér", color = KalivTheme.colors.textMuted) } },
         )
     }
 }
@@ -2090,16 +2113,16 @@ private fun CloudModelPickerScreen(store: TokenStore, onPicked: () -> Unit, onBa
     }
 
     Column(Modifier.fillMaxSize()) {
-        Surface(color = GraphiteSurface, tonalElevation = 2.dp) {
+        Surface(color = KalivTheme.colors.surface, tonalElevation = 2.dp) {
             Column(
                 Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 8.dp, vertical = 8.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onBack) { Text("←", color = TextHigh, fontSize = 18.sp) }
-                    Text("Vælg cloud-model", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextHigh)
+                    TextButton(onClick = onBack) { Text("←", color = KalivTheme.colors.textHigh, fontSize = 18.sp) }
+                    Text("Vælg cloud-model", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = { reload() }) { Text("↻", color = Signal, fontSize = 16.sp) }
+                    TextButton(onClick = { reload() }) { Text("↻", color = KalivTheme.colors.signal, fontSize = 16.sp) }
                 }
                 OutlinedTextField(
                     value = query, onValueChange = { query = it },
@@ -2108,28 +2131,28 @@ private fun CloudModelPickerScreen(store: TokenStore, onPicked: () -> Unit, onBa
                 )
             }
         }
-        error?.let { Text(it, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(12.dp)) }
+        error?.let { Text(it, color = KalivTheme.colors.danger, fontSize = 12.sp, modifier = Modifier.padding(12.dp)) }
         if (loading && models.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("Henter modeller…", color = TextMuted, fontSize = 14.sp)
+                Text("Henter modeller…", color = KalivTheme.colors.textMuted, fontSize = 14.sp)
             }
         } else {
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(vertical = 8.dp)) {
                 // pinned selected/default
                 item {
-                    Text("Nuværende standard", color = TextMuted, fontSize = 11.sp,
+                    Text("Nuværende standard", color = KalivTheme.colors.textMuted, fontSize = 11.sp,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                     Row(
                         Modifier.fillMaxWidth().clickable { onBack() }
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("✓", color = Signal, fontSize = 15.sp, modifier = Modifier.width(24.dp))
-                        Text(selected, color = Signal, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text("✓", color = KalivTheme.colors.signal, fontSize = 15.sp, modifier = Modifier.width(24.dp))
+                        Text(selected, color = KalivTheme.colors.signal, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     }
                     if (shown.isNotEmpty()) {
                         HorizontalDivider()
-                        Text("Alle modeller", color = TextMuted, fontSize = 11.sp,
+                        Text("Alle modeller", color = KalivTheme.colors.textMuted, fontSize = 11.sp,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                     }
                 }
@@ -2141,12 +2164,12 @@ private fun CloudModelPickerScreen(store: TokenStore, onPicked: () -> Unit, onBa
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Spacer(Modifier.width(24.dp))
-                        Text(m, color = TextHigh, fontSize = 15.sp)
+                        Text(m, color = KalivTheme.colors.textHigh, fontSize = 15.sp)
                     }
                 }
                 if (shown.isEmpty() && query.isNotBlank()) {
                     item {
-                        Text("Ingen match på \"$query\"", color = TextMuted, fontSize = 14.sp,
+                        Text("Ingen match på \"$query\"", color = KalivTheme.colors.textMuted, fontSize = 14.sp,
                             modifier = Modifier.padding(16.dp))
                     }
                 }
@@ -2160,19 +2183,19 @@ private fun CloudModelPickerScreen(store: TokenStore, onPicked: () -> Unit, onBa
 private fun ModelChip(label: String, onClick: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(20.dp),
-        color = GraphiteSurfaceHigh,
+        color = KalivTheme.colors.surfaceHigh,
         modifier = Modifier.clickable(onClick = onClick),
     ) {
-        Text(label, color = TextHigh, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+        Text(label, color = KalivTheme.colors.textHigh, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
     }
 }
 
 @Composable
 private fun SourceBadge(mode: String) {
     val (label, color, onColor) = when (mode) {
-        "cloud" -> Triple("☁ Cloud", Amber, OnEmber)
-        "rag" -> Triple("⌕ RAG", Signal, OnEmber)
-        else -> Triple("◈ Rig", Signal, OnEmber)
+        "cloud" -> Triple("☁ Cloud", KalivTheme.colors.amber, KalivTheme.colors.onSignal)
+        "rag" -> Triple("⌕ RAG", KalivTheme.colors.signal, KalivTheme.colors.onSignal)
+        else -> Triple("◈ Rig", KalivTheme.colors.signal, KalivTheme.colors.onSignal)
     }
     Surface(shape = RoundedCornerShape(999.dp), color = color) {
         Text(
@@ -2187,12 +2210,12 @@ private fun SourceBadge(mode: String) {
 private fun RagToggle(active: Boolean, onToggle: (Boolean) -> Unit) {
     Surface(
         shape = RoundedCornerShape(20.dp),
-        color = if (active) Signal else GraphiteSurfaceHigh,
+        color = if (active) KalivTheme.colors.signal else KalivTheme.colors.surfaceHigh,
         modifier = Modifier.clickable { onToggle(!active) },
     ) {
         Text(
             "⌕ RAG",
-            color = if (active) OnEmber else TextMuted,
+            color = if (active) KalivTheme.colors.onSignal else KalivTheme.colors.textMuted,
             fontSize = 12.sp, fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
         )
@@ -2230,7 +2253,7 @@ private fun Bubble(m: Msg, onRetry: (() -> Unit)? = null) {
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
     ) {
         Surface(
-            color = if (isUser) Signal else GraphiteSurfaceHigh,
+            color = if (isUser) KalivTheme.colors.signal else KalivTheme.colors.surfaceHigh,
             shape = RoundedCornerShape(
                 topStart = 16.dp, topEnd = 16.dp,
                 bottomStart = if (isUser) 16.dp else 4.dp,
@@ -2244,11 +2267,11 @@ private fun Bubble(m: Msg, onRetry: (() -> Unit)? = null) {
                     // invisible whether the rig or a cloud model did the thinking.
                     if (!isUser && m.voiceModel != null) {
                         Row(Modifier.padding(bottom = 6.dp)) {
-                            Surface(shape = RoundedCornerShape(999.dp), color = GraphiteSurfaceHigh) {
+                            Surface(shape = RoundedCornerShape(999.dp), color = KalivTheme.colors.surfaceHigh) {
                                 Text(
                                     (if (m.voiceViaCloud) "☁ " else "◈ ") + "🎙 ${m.voiceModel}",
                                     fontSize = 10.sp,
-                                    color = if (m.voiceViaCloud) Signal else TextMuted,
+                                    color = if (m.voiceViaCloud) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                                 )
                             }
@@ -2258,11 +2281,11 @@ private fun Bubble(m: Msg, onRetry: (() -> Unit)? = null) {
                         Row(Modifier.padding(bottom = 6.dp)) {
                             Surface(
                                 shape = RoundedCornerShape(999.dp),
-                                color = GraphiteSurfaceHigh,
+                                color = KalivTheme.colors.surfaceHigh,
                             ) {
                                 Text(
                                     "☁ via cloud (rig utilgængelig)",
-                                    fontSize = 10.sp, color = TextMuted,
+                                    fontSize = 10.sp, color = KalivTheme.colors.textMuted,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                                 )
                             }
@@ -2278,11 +2301,11 @@ private fun Bubble(m: Msg, onRetry: (() -> Unit)? = null) {
                             m.sources.distinct().take(4).forEach { s ->
                                 Surface(
                                     shape = RoundedCornerShape(999.dp),
-                                    color = GraphiteSurfaceHigh,
+                                    color = KalivTheme.colors.surfaceHigh,
                                     modifier = Modifier.padding(end = 4.dp),
                                 ) {
                                     Text(
-                                        s, fontSize = 10.sp, color = TextMuted,
+                                        s, fontSize = 10.sp, color = KalivTheme.colors.textMuted,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                                     )
                                 }
@@ -2290,16 +2313,16 @@ private fun Bubble(m: Msg, onRetry: (() -> Unit)? = null) {
                         }
                     }
                     when {
-                        isUser -> Text(m.text, color = OnEmber, fontSize = 15.sp, lineHeight = 21.sp)
-                        m.error -> Text(m.text, color = Danger, fontSize = 14.sp, lineHeight = 20.sp)
-                        m.streaming && m.text.isEmpty() -> Text("…", color = TextMuted, fontSize = 15.sp, lineHeight = 21.sp)
-                        m.streaming -> Text(m.text + "▍", color = TextHigh, fontSize = 15.sp, lineHeight = 21.sp)
-                        else -> MarkdownText(m.text, color = TextHigh)
+                        isUser -> Text(m.text, color = KalivTheme.colors.onSignal, fontSize = 15.sp, lineHeight = 21.sp)
+                        m.error -> Text(m.text, color = KalivTheme.colors.danger, fontSize = 14.sp, lineHeight = 20.sp)
+                        m.streaming && m.text.isEmpty() -> Text("…", color = KalivTheme.colors.textMuted, fontSize = 15.sp, lineHeight = 21.sp)
+                        m.streaming -> Text(m.text + "▍", color = KalivTheme.colors.textHigh, fontSize = 15.sp, lineHeight = 21.sp)
+                        else -> MarkdownText(m.text, color = KalivTheme.colors.textHigh)
                     }
                     if (m.error && onRetry != null) {
                         Spacer(Modifier.height(6.dp))
                         TextButton(onClick = onRetry, contentPadding = PaddingValues(0.dp)) {
-                            Text("↻ Prøv igen", color = Signal, fontSize = 12.sp)
+                            Text("↻ Prøv igen", color = KalivTheme.colors.signal, fontSize = 12.sp)
                         }
                     }
                 }

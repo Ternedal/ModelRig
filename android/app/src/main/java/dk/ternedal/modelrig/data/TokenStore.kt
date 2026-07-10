@@ -78,6 +78,15 @@ class TokenStore(context: Context) {
         get() = prefs.getBoolean("tools_mode", false)
         set(v) { prefs.edit().putBoolean("tools_mode", v).apply() }
 
+    /**
+     * Dark (true) or light (false) UI. A manual choice, not the system theme,
+     * so it stays put when Android auto-switches at sunset. Defaults to dark:
+     * that is what every build before light mode looked like.
+     */
+    var darkMode: Boolean
+        get() = prefs.getBoolean("dark_mode", true)
+        set(v) { prefs.edit().putBoolean("dark_mode", v).apply() }
+
     /** "rig" or "cloud" — which source the chat screen uses. */
     var chatMode: String
         get() = prefs.getString("chat_mode", "rig") ?: "rig"

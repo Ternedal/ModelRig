@@ -1,10 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Kaliv brand tokens, mirrored from kaliv_palette.json so that the window
-     background can use them before Compose is alive. Keep in sync with
-     ui/theme/Theme.kt: these two must never disagree. -->
+<!-- Window-background colours, resolved by the OS from the system theme BEFORE
+     Compose is alive. Light is the default set here; dark lives in
+     values-night/. Mirrored from 06_COLOR_SYSTEM/kaliv_design_tokens.json; keep
+     in sync with ui/theme/Theme.kt.
+
+     NOTE: the cold-start splash and the launcher icon follow the SYSTEM theme,
+     not the in-app manual toggle; the OS picks these resources before the app
+     process runs, so nothing in-app can influence that first frame. The manual
+     toggle governs everything drawn by Compose, including the welcome screen. -->
 <resources>
-    <color name="kaliv_charred_black">#0B0B0D</color>
-    <color name="kaliv_dark_walnut">#1A120D</color>
-    <color name="kaliv_ember_bronze">#B6803A</color>
-    <color name="kaliv_muted_ivory">#E7DCC9</color>
+    <!-- light (tokens "light") -->
+    <color name="kaliv_splash_bg">#F7F4EF</color>
+    <color name="kaliv_charred_black">#F7F4EF</color>   <!-- name kept for themes.xml; light window bg -->
+    <color name="kaliv_dark_walnut">#E6DFD2</color>
+    <color name="kaliv_ember_bronze">#8B6B3D</color>
+    <color name="kaliv_muted_ivory">#2A2118</color>
 </resources>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dark window-background colours (tokens "dark"). Used when the SYSTEM is in
+     dark mode. See values/colors.xml for why the splash follows system, not the
+     in-app toggle. -->
+<resources>
+    <color name="kaliv_splash_bg">#0B0A09</color>
+    <color name="kaliv_charred_black">#0B0A09</color>
+    <color name="kaliv_dark_walnut">#1B1612</color>
+    <color name="kaliv_ember_bronze">#8B6B3D</color>
+    <color name="kaliv_muted_ivory">#F3EFE6</color>
+</resources>

@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.31.0** — "Ét kald der svarer på 'hvordan har riggen det?' på tværs af hele kæden: worker, Ollama, ASR (med device), TTS, tools-kill-switch og disk — hver med en verdict OG en grund, plus ét samlet ok. Bygget som det første Anders kigger på når en device-test driller, i stedet for at gætte hvilken del der fejler. `?deep=true` tilføjer en embedding-round-trip". Follows 1.30.0 (backup/restore). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.32.0** — "Light mode. Appen havde kun et hårdkodet mørkt tema; nu er paletten et tema-opslag med to fulde sæt fra den QA-godkendte brand-pakke, skiftbart med en manuel toggle (⋮ → skift tema), gemt så den bliver stående når Android skifter ved solnedgang. Kontrast målt: bronze deles af begge modes, tekst PÅ bronze er mørkt blæk, aldrig hvidt. Splash + launcher-ikon får -night-varianter (systemstyret — OS'et vælger dem før appen kører)". Follows 1.31.0 (/health/full). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

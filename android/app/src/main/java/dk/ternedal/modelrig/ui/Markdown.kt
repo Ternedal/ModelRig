@@ -1,5 +1,7 @@
 package dk.ternedal.modelrig.ui
 
+import dk.ternedal.modelrig.ui.theme.KalivTheme
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -26,9 +28,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dk.ternedal.modelrig.ui.theme.CodeSurface
-import dk.ternedal.modelrig.ui.theme.Signal
-import dk.ternedal.modelrig.ui.theme.TextMuted
 
 /**
  * Minimal, dependency-free Markdown renderer for chat output.
@@ -48,13 +47,17 @@ fun MarkdownText(
     color: Color = MaterialTheme.colorScheme.onSurface,
 ) {
     val blocks = remember(markdown) { parseBlocks(markdown) }
+    // Resolved here, in composition, and passed into the (non-composable)
+    // inline builder -- links are bronze in both palettes but read from the
+    // active theme so a future palette change carries through.
+    val linkColor = KalivTheme.colors.signal
     Column(modifier) {
         blocks.forEachIndexed { i, block ->
             if (i > 0) Spacer(Modifier.height(6.dp))
             when (block) {
-                is Paragraph -> Text(inline(block.text), color = color, fontSize = 15.sp, lineHeight = 22.sp)
+                is Paragraph -> Text(inline(block.text, linkColor), color = color, fontSize = 15.sp, lineHeight = 22.sp)
                 is Heading -> Text(
-                    inline(block.text),
+                    inline(block.text, linkColor),
                     color = color,
                     fontWeight = FontWeight.Bold,
                     lineHeight = 26.sp,
@@ -67,16 +70,16 @@ fun MarkdownText(
                 )
                 is Bullet -> Row {
                     Text("•  ", color = color, fontSize = 15.sp, lineHeight = 22.sp)
-                    Text(inline(block.text), color = color, fontSize = 15.sp, lineHeight = 22.sp)
+                    Text(inline(block.text, linkColor), color = color, fontSize = 15.sp, lineHeight = 22.sp)
                 }
                 is Numbered -> Row {
                     Text("${block.number}. ", color = color, fontSize = 15.sp, lineHeight = 22.sp)
-                    Text(inline(block.text), color = color, fontSize = 15.sp, lineHeight = 22.sp)
+                    Text(inline(block.text, linkColor), color = color, fontSize = 15.sp, lineHeight = 22.sp)
                 }
                 is Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
-                    Box(Modifier.width(3.dp).fillMaxHeight().background(Signal))
+                    Box(Modifier.width(3.dp).fillMaxHeight().background(KalivTheme.colors.signal))
                     Spacer(Modifier.width(8.dp))
-                    Text(inline(block.text), color = TextMuted, fontSize = 15.sp, lineHeight = 22.sp)
+                    Text(inline(block.text, linkColor), color = KalivTheme.colors.textMuted, fontSize = 15.sp, lineHeight = 22.sp)
                 }
                 is Code -> CodeBlock(block.language, block.code)
                 Rule -> HorizontalDivider(color = MaterialTheme.colorScheme.outline)
@@ -92,7 +95,7 @@ private fun CodeBlock(language: String, code: String) {
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(CodeSurface),
+            .background(KalivTheme.colors.codeSurface),
     ) {
         Row(
             Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
@@ -100,13 +103,13 @@ private fun CodeBlock(language: String, code: String) {
         ) {
             Text(
                 language.ifBlank { "code" },
-                color = TextMuted,
+                color = KalivTheme.colors.textMuted,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
             )
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { clipboard.setText(AnnotatedString(code)) }) {
-                Text("Kopiér", color = Signal, fontSize = 12.sp)
+                Text("Kopiér", color = KalivTheme.colors.signal, fontSize = 12.sp)
             }
         }
         Text(
@@ -201,9 +204,13 @@ private fun parseBlocks(md: String): List<Block> {
 // ---- inline formatting ----
 private val CODE_BG = Color(0x333A2A1F)  // smoke brown wash (was a cool grey tuned to sapphire)
 
-private fun inline(text: String): AnnotatedString = buildAnnotatedString { appendInline(text) }
+private fun inline(text: String, linkColor: Color): AnnotatedString =
+    buildAnnotatedString { appendInline(text, linkColor) }
 
-private fun androidx.compose.ui.text.AnnotatedString.Builder.appendInline(text: String) {
+private fun androidx.compose.ui.text.AnnotatedString.Builder.appendInline(
+    text: String,
+    linkColor: Color,
+) {
     var i = 0
     val n = text.length
     while (i < n) {
@@ -225,7 +232,7 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendInline(text: 
                 if (end == -1) {
                     append(c); i++
                 } else {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { appendInline(text.substring(i + 2, end)) }
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { appendInline(text.substring(i + 2, end), linkColor) }
                     i = end + 2
                 }
             }
@@ -234,7 +241,7 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendInline(text: 
                 if (end == -1) {
                     append(c); i++
                 } else {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { appendInline(text.substring(i + 2, end)) }
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { appendInline(text.substring(i + 2, end), linkColor) }
                     i = end + 2
                 }
             }
@@ -243,7 +250,7 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendInline(text: 
                 if (end == -1) {
                     append(c); i++
                 } else {
-                    withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { appendInline(text.substring(i + 1, end)) }
+                    withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { appendInline(text.substring(i + 1, end), linkColor) }
                     i = end + 1
                 }
             }
@@ -252,7 +259,7 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendInline(text: 
                 if (end == -1) {
                     append(c); i++
                 } else {
-                    withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { appendInline(text.substring(i + 1, end)) }
+                    withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { appendInline(text.substring(i + 1, end), linkColor) }
                     i = end + 1
                 }
             }
@@ -263,8 +270,8 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendInline(text: 
                     if (paren != -1) {
                         // Link text is styled (color + underline). Not clickable in v1;
                         // wrap with withLink(LinkAnnotation.Url(...)) on Compose 1.7+ to enable taps.
-                        withStyle(SpanStyle(color = Signal, textDecoration = TextDecoration.Underline)) {
-                            appendInline(text.substring(i + 1, close))
+                        withStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)) {
+                            appendInline(text.substring(i + 1, close), linkColor)
                         }
                         i = paren + 1
                     } else {
