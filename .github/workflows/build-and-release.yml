@@ -12,6 +12,11 @@ on:
   push:
     tags:
       - "v*"
+
+# 2026-07-10: GitHub deprecated Node 20 on the runners. actions/*@v4 target
+# Node 20, were force-migrated to Node 24, and every upload-artifact step died
+# -- v1.20.0 shipped with zero assets while the code was fine. Pinned to the
+# Node 24 majors. Nothing about this was our code; the environment moved.
   workflow_dispatch:
     inputs:
       force_full_matrix:
@@ -38,7 +43,7 @@ jobs:
       build_desktop: ${{ steps.calc.outputs.build_desktop }}
       server_bins: ${{ steps.calc.outputs.server_bins }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # depth 2 so git diff-tree can compare HEAD against its parent (the
           # desktop-touch check below). Assumes the linear one-commit-per-
@@ -84,7 +89,7 @@ jobs:
   server-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/setup-go@v5
         with:
@@ -124,9 +129,9 @@ jobs:
     needs: server-tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
@@ -147,7 +152,7 @@ jobs:
         working-directory: android
         run: cp app/build/outputs/apk/debug/app-debug.apk "../modelrig-${{ github.ref_name }}.apk"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: android-apk
           path: modelrig-${{ github.ref_name }}.apk
@@ -161,9 +166,9 @@ jobs:
     if: needs.determine-matrix.outputs.build_desktop == 'true'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
@@ -186,7 +191,7 @@ jobs:
           # find the file (this bit v0.19.6: "No files were found").
           echo "path=desktop/$jar" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: desktop-jar-windows
           path: ${{ steps.findjar.outputs.path }}
@@ -201,7 +206,7 @@ jobs:
     if: needs.determine-matrix.outputs.server_bins == 'true'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-go@v5
         with:
           go-version: 'stable'
@@ -249,7 +254,7 @@ jobs:
             if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
             if ($worker -and -not $worker.HasExited) { Stop-Process -Id $worker.Id -Force -ErrorAction SilentlyContinue }
           }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: server-binaries-windows
           path: |
@@ -264,7 +269,7 @@ jobs:
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build source zip (same exclude pattern used throughout this project)
         run: |
@@ -279,7 +284,7 @@ jobs:
             -x '*/build/*' -x '*/.gradle/*' -x '*/local.properties' -x '*.apk'
           mv "modelrig-${{ github.ref_name }}.zip" "$GITHUB_WORKSPACE/"
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           path: artifacts
 
