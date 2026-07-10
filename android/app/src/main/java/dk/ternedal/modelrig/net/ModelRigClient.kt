@@ -427,7 +427,7 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         }
     }
 
-    data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int)
+data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int)
 
     /**
      * Ingests a PDF into the RAG index by uploading its bytes (base64) to the
@@ -435,6 +435,71 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
      * pipeline as ingestText. Returns chunks added. The worker returns 501 if
      * PyMuPDF isn't installed, 422 if the PDF has no extractable text (a scan).
      */
+    /**
+     * One chat turn in which the rig's model may propose a tool (Kaliv Tools).
+     *
+     * Returns either an answer, or a proposal that has executed NOTHING and is
+     * waiting for a human. The confirmation_id is opaque: the app cannot change
+     * the arguments between the card and the execution, because it never sends
+     * them again. The worker parked them.
+     *
+     * 403 when the tool layer is off on the rig.
+     */
+    fun toolsChat(message: String, model: String? = null, conversationId: String? = null): ToolTurn {
+        val payload = JSONObject().put("message", message)
+        if (model != null) payload.put("model", model)
+        if (conversationId != null) payload.put("conversation_id", conversationId)
+        val builder = Request.Builder().url("$base/api/v1/tools/chat")
+            .post(payload.toString().toRequestBody(jsonType))
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        // Long timeout: this is an LLM turn, possibly two.
+        voiceHttp.newCall(builder.build()).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("tools chat failed (${resp.code}): $body")
+            return parseToolTurn(JSONObject(body))
+        }
+    }
+
+    /**
+     * Approve or deny a pending write. The rig executes exactly the arguments
+     * it showed on the card, then phrases the answer.
+     *
+     * 409 if the confirmation was already used, 410 if it expired. Both are
+     * refusals -- a timeout is never an acceptance.
+     */
+    fun toolsConfirm(confirmationId: String, approve: Boolean): ToolTurn {
+        val payload = JSONObject()
+            .put("confirmation_id", confirmationId)
+            .put("decision", if (approve) "approve" else "deny")
+        val builder = Request.Builder().url("$base/api/v1/tools/confirm")
+            .post(payload.toString().toRequestBody(jsonType))
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        voiceHttp.newCall(builder.build()).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("confirm failed (${resp.code}): $body")
+            return parseToolTurn(JSONObject(body))
+        }
+    }
+
+    /** Whether the rig has the tool layer switched on, and which tools exist. */
+    fun toolsEnabled(): Boolean {
+        val builder = Request.Builder().url("$base/api/v1/tools").get()
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        http.newCall(builder.build()).execute().use { resp ->
+            if (!resp.isSuccessful) return false
+            return JSONObject(resp.body?.string().orEmpty()).optBoolean("enabled", false)
+        }
+    }
+
+    private fun parseToolTurn(o: JSONObject): ToolTurn = ToolTurn(
+        status = o.optString("status"),
+        answer = o.optString("answer", ""),
+        tool = o.optString("tool").takeIf { it.isNotEmpty() && it != "null" },
+        confirmationId = o.optString("confirmation_id").takeIf { it.isNotEmpty() },
+        summary = o.optString("summary").takeIf { it.isNotEmpty() },
+        expiresInSeconds = o.optInt("expires_in_seconds", 0),
+    )
+
     fun ingestPdf(source: String, pdfBytes: ByteArray, chunkSize: Int = 800, overlap: Int = 150): IngestResult {
         val b64 = android.util.Base64.encodeToString(pdfBytes, android.util.Base64.NO_WRAP)
         val payload = JSONObject()
@@ -533,3 +598,23 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         }
     }
 }
+
+/**
+ * One turn of a tool conversation. Top-level: it crosses the net/ui boundary.
+ *
+ * status is "answered" (a read tool ran, or no tool was used),
+ * "confirmation_required" (a write is waiting for a human, nothing executed),
+ * "executed" (approved and done) or "denied".
+ *
+ * Deliberately carries no arguments field. The app must not be able to send
+ * back a modified version of what the user approved -- the worker parked the
+ * arguments alongside the confirmation_id, and executes those.
+ */
+data class ToolTurn(
+    val status: String,
+    val answer: String,
+    val tool: String?,
+    val confirmationId: String?,
+    val summary: String?,
+    val expiresInSeconds: Int,
+)

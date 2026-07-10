@@ -69,6 +69,15 @@ class TokenStore(context: Context) {
         get() = prefs.getInt("barge_in_rms", 1500)
         set(v) { prefs.edit().putInt("barge_in_rms", v.coerceIn(200, 8000)).apply() }
 
+    /**
+     * Kaliv Tools mode: route chat through the rig's tool layer, so the model
+     * may propose an action. Off by default -- power is opted into, and the
+     * rig has its own kill switch on top of this one.
+     */
+    var toolsMode: Boolean
+        get() = prefs.getBoolean("tools_mode", false)
+        set(v) { prefs.edit().putBoolean("tools_mode", v).apply() }
+
     /** "rig" or "cloud" — which source the chat screen uses. */
     var chatMode: String
         get() = prefs.getString("chat_mode", "rig") ?: "rig"

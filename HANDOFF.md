@@ -376,8 +376,12 @@ git push <url> main:main
   kræver kortet uanset hvem der foreslog; læsning kører frit. Cloud-nøglen
   parkeres aldrig med en ventende handling; appen gensender den med
   beslutningen.
-- ⚠️ **Bekræftelseskortet mangler stadig i appen.** Skrivende tools godkendes
-  indtil videre via `POST /api/v1/tools/confirm`. Det er næste release.
+- **v1.21.0: bekræftelseskortet er i appen.** ⋮-menu → "🛠 Tools" slår
+  tools-tilstand til (fra som standard; riggens `KALIV_TOOLS_ENABLED` er den
+  anden lås). Et skrivende forslag parkerer som et kort over inputfeltet —
+  intet er udført mens det står der. Afvis og Godkend er lige store.
+- ⚠️ **Ikke on-device-testet.** Kortet er compile-verificeret, ikke prøvet på
+  Pixel'en. Kræver `KALIV_TOOLS_ENABLED=1` på riggen.
 - ⚠️ **Betingelsen står ved magt:** vilkårlige filstier eller 3.-parts
   MCP-servere kræver separat Windows-konto + ACL'er FØRST (kravspec §5b).
 

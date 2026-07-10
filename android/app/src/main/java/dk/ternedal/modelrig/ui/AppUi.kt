@@ -631,6 +631,12 @@ private fun ChatScreen(
     // and the number is settable. Read the peak while speaking over Kaliv,
     // then set the threshold between the idle floor and that peak.
     var bargeInThreshold by remember { mutableStateOf(store.bargeInThreshold) }
+    // Kaliv Tools: when on, a chat turn goes through the rig's tool layer and
+    // the model may propose an action. A write proposal parks here until the
+    // human decides -- nothing has run when this is non-null.
+    var toolsMode by remember { mutableStateOf(store.toolsMode) }
+    var pendingTool by remember { mutableStateOf<dk.ternedal.modelrig.net.ToolTurn?>(null) }
+    var toolBusy by remember { mutableStateOf(false) }
     var liveRms by remember { mutableStateOf(0.0) }
     var peakRms by remember { mutableStateOf(0.0) }
     var hasMicPermission by remember {
@@ -893,9 +899,23 @@ private fun ChatScreen(
             // ChatRouter.chatStream contract.
             var rigEmitted = 0
             var didFallback = false
+            val useTools = toolsMode && mode == "rig"
+            var proposal: dk.ternedal.modelrig.net.ToolTurn? = null
             val err = withContext(Dispatchers.IO) {
                 runCatching {
                     when {
+                        // Tools: not a stream. One turn in, either an answer or a
+                        // proposal that has executed nothing. Checked before RAG and
+                        // cloud because it is the most restrictive mode.
+                        useTools -> {
+                            val turn = ModelRigClient(store.baseUrl ?: "", store.token)
+                                .toolsChat(t, rigModel)
+                            if (turn.status == "confirmation_required") {
+                                proposal = turn
+                            } else {
+                                onDelta(turn.answer)
+                            }
+                        }
                         // RAG: single-shot retrieval over the current question, not the
                         // full conversation — that's how the worker's /rag/chat is built
                         // (one query in, sources + answer out). History still shows and
@@ -928,6 +948,8 @@ private fun ChatScreen(
                 }.exceptionOrNull()
             }
             activeCall = null
+            // A parked write proposal: surface the card. Nothing has executed.
+            proposal?.let { pendingTool = it }
             val cur = messages[idx]
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[idx] = when {
@@ -1071,6 +1093,23 @@ private fun ChatScreen(
                                     onClick = {
                                         bargeInEnabled = !bargeInEnabled
                                         store.bargeInEnabled = bargeInEnabled
+                                        modelMenu = false
+                                    },
+                                )
+                                // Kaliv Tools. Off by default, and the rig has its
+                                // own kill switch on top: two locks, both opt-in.
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (toolsMode) "🛠 Tools: til" else "🛠 Tools: fra",
+                                            color = if (toolsMode) Signal else TextMuted,
+                                            fontSize = 13.sp,
+                                        )
+                                    },
+                                    onClick = {
+                                        toolsMode = !toolsMode
+                                        store.toolsMode = toolsMode
+                                        if (!toolsMode) pendingTool = null
                                         modelMenu = false
                                     },
                                 )
@@ -1274,6 +1313,61 @@ private fun ChatScreen(
                 pendingImageError?.let {
                     Text("Billedfejl: $it", color = Danger, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
                 }
+                // Kaliv Tools: the confirmation card. Nothing has executed while
+                // this is on screen. Deny is exactly as easy to hit as approve --
+                // a big green yes next to a grey line is a dark pattern, and it is
+                // how people approve things they did not read.
+                pendingTool?.let { prop ->
+                    Surface(
+                        color = GraphiteSurfaceHigh,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Text(
+                                "⚠ Kaliv vil udføre en handling",
+                                color = Signal, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(prop.summary.orEmpty(), color = TextHigh, fontSize = 14.sp, lineHeight = 20.sp)
+                            Spacer(Modifier.height(12.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                val cid = prop.confirmationId
+                                val decide: (Boolean) -> Unit = { approve ->
+                                    toolBusy = true
+                                    scope.launch {
+                                        val r = withContext(Dispatchers.IO) {
+                                            runCatching {
+                                                ModelRigClient(store.baseUrl ?: "", store.token)
+                                                    .toolsConfirm(cid!!, approve)
+                                            }
+                                        }
+                                        toolBusy = false
+                                        pendingTool = null
+                                        val text = r.getOrNull()?.answer
+                                            // 410 means the confirmation expired. A timeout is a
+                                            // denial, never an acceptance -- say so plainly.
+                                            ?: r.exceptionOrNull()?.let { e ->
+                                                if (e.message?.contains("410") == true)
+                                                    "Bekræftelsen udløb. Handlingen blev ikke udført."
+                                                else friendlyError(e)
+                                            } ?: ""
+                                        if (text.isNotBlank()) {
+                                            messages.add(Msg("assistant", text))
+                                        }
+                                    }
+                                }
+                                TextButton(onClick = { decide(false) }, enabled = !toolBusy && cid != null) {
+                                    Text("Afvis", color = TextHigh, fontSize = 14.sp)
+                                }
+                                TextButton(onClick = { decide(true) }, enabled = !toolBusy && cid != null) {
+                                    Text("Godkend", color = Signal, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Kaliv Voice status line (recording / working / error).
                 if (recording || voiceBusy || voiceError != null) {
                     val vt = when {
