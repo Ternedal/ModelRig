@@ -117,6 +117,15 @@ jobs:
       - name: Build backend
         run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
 
+      # The Go server had zero tests while being the thing that puts auth in
+      # front of the tool layer. go vet catches the shape errors; go test now
+      # catches the ones that matter -- see internal/httpapi/tools_test.go.
+      - name: Backend vet
+        run: cd backend && go vet ./...
+
+      - name: Backend tests
+        run: cd backend && go test ./...
+
       - name: Backend smoke
         run: MODELRIG_BIN=/tmp/modelrig-server python3 tests/backend_smoke.py
 

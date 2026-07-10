@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.23.0** — "Handlingsloggen kan læses fra appen. En append-only sikkerhedslog, ingen kunne se, var kun halv sikkerhed: nu viser ⋮ → Handlingslog hver foreslået, godkendt og AFVIST handling, farvet efter udfald, med ☁ når en cloud-model foreslog". Follows 1.22.0 (cloud gennem gaten), 1.21.0 (bekræftelseskortet). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.23.1** — "Go-backenden havde nul tests, mens den er dét der sætter auth foran tool-laget. Nu låser fire tests de to egenskaber den faktisk lover: hver tools-rute kræver bearer-token, og hver eneste lander på workeren — aldrig på Ollama, aldrig i skyen. Mutationstestet: begge fejl fanges. CI kørte heller aldrig `go test`; det gør den nu". Follows 1.23.0 (handlingsloggen i appen). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

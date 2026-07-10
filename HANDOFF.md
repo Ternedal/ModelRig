@@ -393,6 +393,10 @@ git push <url> main:main
 - ⚠️ **Betingelsen står ved magt:** vilkårlige filstier eller 3.-parts
   MCP-servere kræver separat Windows-konto + ACL'er FØRST (kravspec §5b).
 
+**Testdækning (10/7):** worker 140 tests (unit 31 · rag 48 · tools 61) +
+Go `internal/httpapi` 4 tests. CI kører nu `go vet` og `go test ./...` —
+det gjorde den ikke før v1.23.1, så Go-koden var reelt utestet.
+
 **Kræver Anders' test:**
 - Tap-to-stop + Kaliv-navnerebrand (bygges som v1.13.0)
 - Barge-in-kalibrering (rmsThreshold)
