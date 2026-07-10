@@ -7,62 +7,54 @@ Ollama Cloud fallback for when local isn't enough.
 Version: **1.12.1** (Status-endpoint laver ikke arbejde; barge-in fra 1.12.0)
 
 ## Architecture
+
+```mermaid
+flowchart TB
+    Desktop["Desktop<br/>Compose JVM · Windows"]
+    Kaliv["Kaliv (Android)<br/>chat · voice · tools · RAG"]
+    Go["Backend (Go) :8080<br/>pairing · tokens · reverse proxy ONLY"]
+
+    subgraph Worker["Worker (Python) :8099"]
+        Pipe["RAG&nbsp;&nbsp;pdf · docx · pptx · html<br/>Voice&nbsp;&nbsp;ASR → LLM → TTS"]
+        Tools["Kaliv Tools<br/>registry (in code)<br/>confirmation gate<br/>audit log (append-only)<br/>Executor seam"]
+    end
+
+    Human(["human"])
+    Ollama["Ollama :11434<br/>local — ALWAYS"]
+    DB[("SQLite<br/>RAG · audit")]
+    Cloud["Ollama Cloud<br/>(optional)"]
+
+    Desktop -- "local-first, cloud fallback" --> Go
+    Kaliv -- "pair + bearer token" --> Go
+    Kaliv -. "direct cloud chat: rig not involved,<br/>NO tools exist on this road" .-> Cloud
+    Go -- "/api/chat · /api/tags" --> Ollama
+    Go -- "/rag/* · /voice/* · /tools/*" --> Worker
+    Human == "approves every write" ==> Tools
+    Worker -- "embeddings + generation<br/>ALWAYS local" --> Ollama
+    Worker --> DB
+    Worker -. "LLM step only ·<br/>explicit toggle" .-> Cloud
+
+    classDef ext stroke-dasharray: 6 4;
+    class Cloud ext;
 ```
-  ┌──────────────┐      ┌──────────────────┐
-  │  Desktop     │      │  Kaliv (Android) │
-  │ (Compose JVM)│      │  chat · voice ·  │
-  │  Windows     │      │  tools · RAG     │
-  └──────┬───────┘      └────────┬─────────┘
-         │ local-first,          │ pair + bearer token
-         │ cloud fallback        │
-         │              ┌────────▼─────────────┐
-         │ (direct, or  │  Backend (Go) :8080  │
-         └─via backend)▶│  pairing · tokens ·  │
-                        │  reverse proxy only  │
-                        └───┬──────────────┬───┘
-            /api/chat,      │              │  /rag/*  /voice/*
-            /api/tags       │              │  /tools/*
-                            │              │
-                            │     ┌────────▼───────────────────┐
-                            │     │  Worker (Python) :8099     │
-                            │     │                            │
-                            │     │  RAG  pdf·docx·pptx·html   │
-                            │     │  Voice  ASR → LLM → TTS    │
-                            │     │  ────────────────────────  │
-     human ─────────────────────▶ │  Kaliv Tools               │
-     approves                     │    registry (in code)      │
-     every write                  │    confirmation gate       │
-                                  │    audit log (append-only) │
-                                  │    Executor seam           │
-                                  └──┬──────────┬──────────┬───┘
-                    embeddings + gen │  SQLite  │          │ LLM step only,
-                    (always local)   │          │          │ explicit toggle
-  ┌─────────────────┐                │    ┌─────▼────┐  ┌──▼─────────────┐
-  │  Ollama :11434  │◀───────────────┘    │  RAG ·   │  │  Ollama Cloud  │
-  │ (local, always) │                     │  audit   │  │  (optional)    │
-  └────────▲────────┘                     └──────────┘  └────────────────┘
-           │ /api/chat, /api/tags (proxied straight through by the Go server)
-           └──────────────────────────────────────────────────────────────
+
+**Two cloud roads, and they are not the same thing.**
+
+```mermaid
+flowchart LR
+    subgraph R1["Road 1 — no tools exist on this road. Nothing to bypass: there is no door."]
+        K1["Kaliv"] --> C1["Ollama Cloud"]
+    end
+    subgraph R2["Road 2 — /tools/chat with cloud_key: cloud proposes, the gate decides, you approve writes"]
+        K2["Kaliv"] --> G2["Go"] --> W2["Worker<br/>(the gate lives here)"] --> C2["Ollama Cloud"]
+    end
 ```
 
 Embeddings NEVER go to the cloud. `oc.embed()` has no `base_url` and no
 `api_key` parameter, so the RAG index cannot be built over the network —
 enforced by the signature, not by a runtime check. Only the LLM step can leave
-the rig, and only with the toggle on.
-
-**Two cloud roads, and they are not the same thing.**
-
-```
-  road 1   Kaliv ─────────────────────────────▶ Ollama Cloud
-           The rig is never involved. There are NO tools on this road.
-           Nothing to bypass: there is no door, not an open one.
-
-  road 2   Kaliv ──▶ Go ──▶ Worker ──▶ Ollama Cloud
-                            └─ gate ─┘
-           /tools/chat with cloud_key. A cloud model proposes, the gate
-           decides, you approve every write. The card says who asked:
-           "Cloud-modellen foreslår: …"
-```
+the rig, and only with the toggle on. When a cloud model proposes a write, the
+card says who asked: *"Cloud-modellen foreslår: …"*
 
 **Voice** — audio never leaves the house. ASR (faster-whisper, CUDA) and TTS
 (Piper, Danish) always run on the rig. Only the transcribed question may go to

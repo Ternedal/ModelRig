@@ -459,37 +459,37 @@ uden at kunne se hinandens data; en gæsteprofil kan chatte men intet
 
 ## 14. Målarkitektur — slutbilledet V1→V8 konvergerer mod
 
-```
-        ┌─────────────── Klienter ────────────────┐
-        │ Kaliv Android ✅ · desktop ✅ · station ⬜│
-        └───────────────────┬──────────────────────┘
-                            │  parring pr. enhed ✅ · TLS ⬜
-                   ┌────────▼─────────┐
-                   │  Go-server :8080 │  adgang · proxy · rate limit ✅
-                   └────────┬─────────┘
-                   ┌────────▼──────────────────┐   ┌──────────────────┐
-                   │  Worker :8099             │──▶│ MCP-servere ⬜   │
-                   │  RAG ✅ · ASR/TTS ✅      │   │ (lokale,         │
-                   │  Memory ⬜                │   │  whitelistede)   │
-                   │  ┌──────────────────────┐ │   └──────────────────┘
-                   │  │ Kaliv Tools ✅       │ │
-                   │  │  registry (kode)     │ │
-                   │  │  bekræftelsesport ◀──┼─┼── mennesket godkender
-                   │  │  audit (append-only) │ │    hver skrivning
-                   │  │  Executor-søm        │ │
-                   │  └──────────────────────┘ │
-                   └───┬─────────┬─────────────┘
-      embeddings + gen │         │  kun LLM-trin · eksplicit toggle
-      (altid lokalt)   │         │
-                ┌──────▼───┐  ┌──▼─────────────┐
-                │  Ollama  │  │  Ollama Cloud  │◀─ ─ appens direkte
-                │  :11434  │  │  (valgfrit) ✅ │     vej: uden om
-                └──────────┘  └────────────────┘     riggen, uden tools
-   Lager (alt lokalt): SQLite ✅ · RAG-indeks ✅ · Audit ✅ · Memory ⬜
-   Drift: services ⬜ · watchdog ⬜ · selvopdatering ⬜ · backup ⬜
+```mermaid
+flowchart TB
+    Clients["Klienter<br/>Kaliv Android ✅ · desktop ✅ · station ⬜"]
+    Go["Go-server :8080 ✅<br/>adgang · proxy · rate limit<br/>TLS ⬜"]
 
-   ✅ bygget og CI-verificeret   ⬜ planlagt (V6–V8)
+    subgraph W["Worker :8099"]
+        Core["RAG ✅ · ASR/TTS ✅ · Memory ⬜"]
+        T["Kaliv Tools ✅<br/>registry (kode) · bekræftelsesport<br/>audit (append-only) · Executor-søm"]
+    end
+
+    Human(["mennesket godkender<br/>hver skrivning"])
+    MCP["MCP-servere ⬜<br/>lokale · whitelistede"]
+    OL["Ollama :11434 ✅"]
+    OC["Ollama Cloud ✅<br/>(valgfrit)"]
+    Lager[("Lager — alt lokalt<br/>SQLite ✅ · RAG ✅ · Audit ✅ · Memory ⬜")]
+    Drift["Drift ⬜<br/>services · watchdog · selvopdatering · backup"]
+
+    Clients -- "parring pr. enhed ✅ · TLS ⬜" --> Go --> W
+    Clients -. "appens direkte vej:<br/>uden om riggen — uden tools" .-> OC
+    Human == "hver skrivning" ==> T
+    T -.-> MCP
+    W -- "embeddings + gen<br/>ALTID lokalt" --> OL
+    W -. "kun LLM-trin ·<br/>eksplicit toggle" .-> OC
+    W --> Lager
+    W -.- Drift
+
+    classDef plan stroke-dasharray: 6 4;
+    class MCP,Drift plan;
 ```
+
+✅ = bygget og CI-verificeret · ⬜ = planlagt (V6–V8)
 
 **Isolationstrappen** (kravspec §5b) — Executor-sømmen findes, så hvert trin
 kan hægtes på uden at rive arkitekturen op:
