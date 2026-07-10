@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.15.0** — "Barge-in kan nu kalibreres: detektoren rapporterer hvad den hører (live RMS + top), og tærsklen er persisteret og justerbar i appen. 1500.0 var et gæt taget uden en telefon". Follows 1.14.0 (PPTX- og HTML-ingest), 1.13.0 (tap-to-stop + Kaliv-rebrand), 1.12.4 (Kaliv-ikon), 1.12.3 (GPU-voice: PATH-fixet). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.16.0** — "Kaliv-brandet er nu i hele appen, ikke kun på ikonet: charred black, dark walnut, ember bronze, muted ivory. Kontrasten er målt, ikke antaget — hvid på bronze er 3,42:1 og dumpede, så onPrimary er charred black (5,75:1)". Follows 1.15.0 (barge-in-kalibrering), 1.14.0 (PPTX/HTML-ingest), 1.13.0 (tap-to-stop + Kaliv-navn), 1.12.4 (Kaliv-ikon). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

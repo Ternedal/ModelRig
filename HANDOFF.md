@@ -20,10 +20,22 @@ Copy/paste dette som første besked i en ny chat.
    `modelrig-mono`) med forskellig kode-alder. Det har forårsaget flere falske
    fejlspor. Ryd op: behold én mappe.
 4. **Appen hedder nu KALIV** (Anders' beslutning 9/7 aften; før: Alva).
-   **Rebranden er FÆRDIG:** ikon i `v1.12.4`, navn + tap-to-stop i
-   `v1.13.0`. Launcher-label er `Kaliv` (verificeret i den byggede APK),
-   worker-env er `KALIV_*` med `ALVA_*`-fallback. `applicationId` er
-   uændret `dk.ternedal.modelrig` — APK'en installerer henover.
+   **Rebranden:** ikon i `v1.12.4`, navn + tap-to-stop i `v1.13.0`,
+   **hele UI-paletten i `v1.16.0`** (charred black / dark walnut / ember
+   bronze / muted ivory, fra `kaliv_palette.json`). Launcher-label er
+   `Kaliv` (verificeret i den byggede APK), worker-env er `KALIV_*` med
+   `ALVA_*`-fallback. `applicationId` er uændret `dk.ternedal.modelrig`.
+
+   ⚠️ **Lektie:** §0 påstod "rebranden er FÆRDIG" efter ikon + navn, mens
+   appen indeni stadig var safir-blå. Anders opdagede det. Et ikon er ikke
+   et brand. Skriv aldrig "færdig" om noget der ikke er efterprøvet mod
+   selve leverancen — her: paletten, tokens og UI-mockups i brand-pakken.
+
+   **Åben rest:** brand-fontene (Cinzel/Cormorant + Montserrat) findes ikke
+   som filer i pakken — display bruger platform-serif indtil de lægges i
+   `res/font`. Desktop-klienten er stadig safir-blå; den hedder ModelRig,
+   ikke Kaliv. UI-mockuppernes layout (splash, velkomstskærm) er ikke
+   implementeret — kun farve/typografi-systemet.
 
 ---
 
