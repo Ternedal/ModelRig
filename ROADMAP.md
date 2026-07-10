@@ -416,8 +416,10 @@ genstart, opdatere sig selv og kunne reddes.
 2. **Selvopdatering**: rig-agent der ser nye GitHub-releases, henter,
    verificerer (checksum) og ruller tilbage ved fejl [beslutning:
    fuldautomatisk vs. ét-kliks-godkendelse].
-3. **Backup/restore**: SQLite + RAG-indeks + memory + audit-log som én
-   pakke; planlagt + manuel; test-restore indgår i release-tjek.
+3. ~~Backup/restore~~ 🟡 **PÅBEGYNDT (v1.30.0)**: `worker/app/backup.py`
+   pakker RAG + data + audit + tools-state + notes som ét verificeret arkiv;
+   round-trip bevist i CI (`tests/worker_backup.py`). Windows-scripts +
+   scheduled task i `scripts/`. **Mangler:** verifikation på selve riggen.
 4. **Sundhed & observabilitet**: samlet health for hele kæden,
    GPU/VRAM/disk-metrikker, logrotation — og Kaliv kan selv svare på
    "hvordan har riggen det?" via V5's rig-status-tool.

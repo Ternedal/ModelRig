@@ -146,6 +146,11 @@ jobs:
       - name: Worker tools (agent layer)
         run: PYTHONPATH=worker python3 tests/worker_tools.py
 
+      # Proves the backup round trip (create -> wipe -> restore -> byte-identical)
+      # on every release, so V7.3's "restore is proven once" stays proven.
+      - name: Worker backup/restore
+        run: PYTHONPATH=worker python3 tests/worker_backup.py
+
   android-build:
     needs: server-tests
     runs-on: ubuntu-latest

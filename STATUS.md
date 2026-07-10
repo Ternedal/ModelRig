@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.29.0** — "Blokerende arbejde kørte i event-loopet. Et tool på ét sekund frøs hele workeren i 1005 ms — og `converse()` kaldte Whisper direkte, altså sekunder. Nu i tråde, men stadig serialiseret med en lås: loopet serialiserede dem utilsigtet, og modelobjekterne er delte. Målt efter: 11 ms". Follows 1.28.0 (bremsen overlever genstart). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.30.0** — "Første stykke V7-drift: backup/restore af alt der ikke kan genskabes fra repoet — RAG-indeks, device-tokens, audit-log, kill-switch-tilstand, noter. Verificeret med sha256, nægter at restore et korrupt arkiv, og round-trippen (backup→slet→restore→byte-identisk) bevises i CI. Windows-scripts medfølger". Follows 1.29.0 (event-loop-fix). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
