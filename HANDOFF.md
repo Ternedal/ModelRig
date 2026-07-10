@@ -360,9 +360,11 @@ git push <url> main:main
   append-only, én mappe). Bekræftelsesport håndhævet i workeren, append-only
   audit-log, kill switch. **Slået FRA som standard** (`KALIV_TOOLS_ENABLED=1`).
 - 27 tests grønne, inkl. T7/T8 (prompt injection). Kører nu i CI.
-- ⚠️ **Ikke i appen endnu.** Bekræftelseskortet mangler i UI'et, så
-  skrivende tools kan i praksis kun godkendes via `POST /tools/confirm`.
-  Det er næste release.
+- **v1.19.0:** modellen kan foreslå tools (`POST /tools/chat`), og Go-serveren
+  proxy'er hele laget. Cloud kan strukturelt ikke foreslå tools —
+  `chat_tools()` har ingen `api_key`-parameter.
+- ⚠️ **Bekræftelseskortet mangler stadig i appen.** Skrivende tools godkendes
+  indtil videre via `POST /api/v1/tools/confirm`. Det er næste release.
 - ⚠️ **Betingelsen står ved magt:** vilkårlige filstier eller 3.-parts
   MCP-servere kræver separat Windows-konto + ACL'er FØRST (kravspec §5b).
 

@@ -57,6 +57,34 @@ async def chat(messages: list[dict], model: str | None = None) -> str:
     return r.json().get("message", {}).get("content", "")
 
 
+async def chat_tools(messages: list[dict], tools: list[dict],
+                     model: str | None = None) -> dict:
+    """One non-streaming chat turn that MAY return tool calls.
+
+    Returns Ollama's message dict: {"content": str, "tool_calls": [...]} .
+
+    Deliberately has no base_url/api_key parameters, unlike chat_stream. Tools
+    are local power; a model running outside the house does not get a hand on
+    them (KRAVSPEC_V5_TOOLS.md, Anders' decision 2026-07-10). Making that a
+    missing parameter rather than a runtime check means it cannot be forgotten.
+
+    Pass tools=[] to guarantee the model cannot request a tool -- that is how
+    the follow-up turn after a tool result is made chain-free.
+    """
+    model = model or GEN_MODEL
+    payload: dict = {"model": model, "messages": messages, "stream": False}
+    if tools:
+        payload["tools"] = tools
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+            r = await c.post(f"{OLLAMA_URL}/api/chat", json=payload)
+    except httpx.HTTPError as e:
+        raise OllamaError(f"cannot reach Ollama at {OLLAMA_URL}: {e}") from e
+    if r.status_code != 200:
+        raise OllamaError(f"chat failed ({r.status_code}): {r.text[:200]}")
+    return r.json().get("message", {}) or {}
+
+
 async def chat_stream(messages: list[dict], model: str | None = None,
                       base_url: str | None = None, api_key: str | None = None):
     """Async generator yielding raw NDJSON lines (bytes) from Ollama's streaming

@@ -169,5 +169,49 @@ os.environ.pop("KALIV_TOOLS_ENABLED", None)
 check(T.ToolGate(audit=T.AuditLog(os.environ["KALIV_AUDIT_DB"])).enabled is False,
       "default: the tool layer is off until opted into")
 
+# ---------------------------------------------------------------------------
+# Tool-calling in chat (v1.19.0). The model proposes; the gate decides.
+# ---------------------------------------------------------------------------
+import asyncio  # noqa: E402
+from app import main as M  # noqa: E402
+from app import ollama_client as oc  # noqa: E402
+
+# T11: the follow-up turn after a tool result is structurally chain-free.
+sig = inspect.signature(oc.chat_tools)
+check("api_key" not in sig.parameters and "base_url" not in sig.parameters,
+      "T11: chat_tools has no cloud parameters -- cloud cannot propose tools")
+check("tools=[]" in inspect.getsource(M._final_answer),
+      "T11: the answer turn passes tools=[] -- a tool result cannot chain")
+
+# T12: a disabled tool is never advertised to the model.
+g = fresh_gate()
+names = [t["function"]["name"] for t in T.ollama_tool_schema(g)]
+check(set(names) == {"rig_status", "note_append"}, "T12: enabled tools advertised")
+g.disabled_tools.add("note_append")
+names = [t["function"]["name"] for t in T.ollama_tool_schema(g)]
+check(names == ["rig_status"],
+      "T12: disabled tool is not advertised, not merely refused")
+
+# T13: a proposed write parks the conversation; approval runs those exact args.
+g = fresh_gate()
+msgs = [{"role": "user", "content": "skriv en note"}]
+r = g.propose("note_append", {"text": "parkeret"}, "c1", messages=msgs, model="m")
+with g._lock:
+    parked = g._pending[r["confirmation_id"]]
+check(parked.args == {"text": "parkeret"}, "T13: args parked verbatim")
+check(parked.messages == msgs and parked.model == "m", "T13: conversation parked")
+done = g.confirm(r["confirmation_id"], "approve")
+check(done["messages"] == msgs, "T13: approval returns the parked conversation")
+check("parkeret" in open(T.note_path(), encoding="utf-8").read(),
+      "T13: approval wrote exactly the confirmed text")
+
+# T14: only one tool call per turn is honoured.
+src = inspect.getsource(M.tools_chat)
+check("calls[:1]" in src and "extra_tool_calls_ignored" in src,
+      "T14: at most one tool per turn, and the caller is told")
+
+# T15: /tools/chat refuses entirely when the layer is off.
+check("the tool layer is disabled" in src, "T15: kill switch checked before the LLM")
+
 print(f"\n===== TOOLS: {passed} passed, {failed} failed =====")
 sys.exit(0 if failed == 0 else 1)

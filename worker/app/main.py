@@ -20,7 +20,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.18.0"
+VERSION = "1.19.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -286,6 +286,131 @@ def tools_confirm(req: ConfirmReq) -> dict:
         raise HTTPException(status_code=400, detail=msg)
     except t.ToolError as e:
         raise HTTPException(status_code=503, detail=str(e))
+
+
+class ToolChatReq(BaseModel):
+    message: str
+    model: str | None = None
+    conversation_id: str | None = None
+    system: str | None = None
+
+
+async def _final_answer(messages: list[dict], model: str | None) -> str:
+    """Ask the model to phrase an answer AFTER a tool ran.
+
+    tools=[] is the whole point: the follow-up turn cannot request another
+    tool, so a tool result can never chain into a second call. Structural, not
+    a promise -- an ingested document that says "now call note_append" gets
+    read as text, because there is no tool to call.
+    """
+    msg = await oc.chat_tools(messages, tools=[], model=model)
+    return msg.get("content", "")
+
+
+@app.post("/tools/chat")
+async def tools_chat(req: ToolChatReq) -> dict:
+    """One chat turn in which the model MAY propose a tool.
+
+    Read tools run and the model answers, in one call. Write tools stop here
+    and return a confirmation_id: nothing has been executed, and the arguments
+    Anders reads on the card are the arguments that will run -- the model gets
+    no second chance to change them after approval.
+    """
+    from . import tools as t
+    if not t.GATE.enabled:
+        raise HTTPException(status_code=403, detail="the tool layer is disabled")
+
+    messages: list[dict] = []
+    if req.system:
+        messages.append({"role": "system", "content": req.system})
+    messages.append({"role": "user", "content": req.message})
+
+    try:
+        msg = await oc.chat_tools(messages, tools=t.ollama_tool_schema(t.GATE),
+                                  model=req.model)
+    except oc.OllamaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    calls = msg.get("tool_calls") or []
+    if not calls:
+        return {"status": "answered", "answer": msg.get("content", ""),
+                "tool": None}
+
+    # One tool per turn. If the model asks for several, take the first and say
+    # so: batching write actions behind one confirmation is how a user ends up
+    # approving something they did not read.
+    fn = (calls[0] or {}).get("function", {}) or {}
+    name = fn.get("name", "")
+    args = fn.get("arguments") or {}
+    if isinstance(args, str):
+        import json as _json
+        try:
+            args = _json.loads(args)
+        except Exception:
+            raise HTTPException(status_code=400, detail="tool arguments are not valid JSON")
+
+    messages.append({"role": "assistant", "content": msg.get("content", ""),
+                     "tool_calls": calls[:1]})
+    try:
+        result = t.GATE.propose(name, args, req.conversation_id,
+                                messages=messages, model=req.model)
+    except t.ToolDenied as e:
+        m = str(e)
+        if m.startswith("unknown tool"):
+            raise HTTPException(status_code=404, detail=m)
+        if "disabled" in m:
+            raise HTTPException(status_code=403, detail=m)
+        raise HTTPException(status_code=400, detail=m)
+    except t.ToolError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    if result["status"] == "confirmation_required":
+        return {**result, "extra_tool_calls_ignored": len(calls) - 1}
+
+    # Read tool: feed the result back as DATA and let the model phrase it.
+    messages.append({"role": "tool", "content": result["result"]})
+    try:
+        answer = await _final_answer(messages, req.model)
+    except oc.OllamaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"status": "answered", "tool": name, "answer": answer,
+            "tool_result": result["result"]}
+
+
+class ConfirmChatReq(BaseModel):
+    confirmation_id: str
+    decision: str = Field(pattern="^(approve|deny)$")
+
+
+@app.post("/tools/confirm/chat")
+async def tools_confirm_chat(req: ConfirmChatReq) -> dict:
+    """Approve or deny a pending write, and get the model's answer back.
+
+    The conversation was parked with the confirmation, so approval executes
+    exactly the arguments that were shown on the card.
+    """
+    from . import tools as t
+    try:
+        res = t.GATE.confirm(req.confirmation_id, req.decision)
+    except t.ToolDenied as e:
+        m = str(e)
+        if "expired" in m:
+            raise HTTPException(status_code=410, detail=m)
+        raise HTTPException(status_code=409, detail=m)
+    except t.ToolError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    if res["status"] == "denied":
+        return {"status": "denied", "answer": "Handlingen blev afvist.",
+                "tool": res["tool"]}
+
+    messages = list(res.get("messages") or [])
+    messages.append({"role": "tool", "content": res["result"]})
+    try:
+        answer = await _final_answer(messages, res.get("model"))
+    except oc.OllamaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"status": "executed", "tool": res["tool"], "answer": answer}
 
 
 @app.get("/tools/audit")

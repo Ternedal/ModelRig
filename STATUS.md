@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.18.0** — "Agent-laget (V5 MVP): Kaliv kan læse riggens tilstand og appende til sin notesfil. Skrivende handlinger kræver menneskelig bekræftelse hver gang, håndhævet i workeren — ikke i appen, ikke i prompten. Slået fra som standard". Follows 1.17.0 (splash + velkomstskærm), 1.16.0 (Kaliv-paletten), 1.15.0 (barge-in-kalibrering). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.19.0** — "Modellen kan nu foreslå tools, og gaten afgør. Læsende tools kører og besvares i ét kald; skrivende parkerer samtalen bag et bekræftelseskort, så de argumenter Anders læser er præcis dem der udføres. Opfølgningsturen sender `tools=[]` — et tool-resultat kan strukturelt ikke udløse endnu et tool". Follows 1.18.0 (agent-lagets MVP), 1.17.0 (splash), 1.16.0 (Kaliv-paletten). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

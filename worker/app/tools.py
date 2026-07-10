@@ -241,6 +241,12 @@ class Pending:
     args: dict
     conversation_id: Optional[str]
     expires_at: float
+    # The chat turn that proposed this write, so an approval can be answered
+    # in one round trip. The app never has to replay the conversation, and the
+    # model never gets a second chance to change the arguments after Anders
+    # has read them on the confirmation card.
+    messages: list = field(default_factory=list)
+    model: Optional[str] = None
 
 
 class ToolGate:
@@ -264,7 +270,8 @@ class ToolGate:
             for t in REGISTRY.values()
         ]
 
-    def propose(self, name: str, args: dict, conversation_id: Optional[str] = None) -> dict:
+    def propose(self, name: str, args: dict, conversation_id: Optional[str] = None,
+                messages: Optional[list] = None, model: Optional[str] = None) -> dict:
         """A read tool runs now. A write tool returns a confirmation_id and
         runs NOTHING until a human approves it."""
         tool = REGISTRY.get(name)
@@ -290,7 +297,8 @@ class ToolGate:
         cid = str(uuid.uuid4())
         with self._lock:
             self._pending[cid] = Pending(cid, name, args, conversation_id,
-                                         time.time() + CONFIRM_TTL_SECONDS)
+                                         time.time() + CONFIRM_TTL_SECONDS,
+                                         messages=list(messages or []), model=model)
         return {
             "status": "confirmation_required",
             "confirmation_id": cid,
@@ -318,8 +326,11 @@ class ToolGate:
                               outcome="denied", conversation_id=p.conversation_id,
                               confirmation_id=confirmation_id)
             return {"status": "denied", "tool": p.tool}
-        return {"status": "executed",
-                **self._execute(tool, p.args, p.conversation_id, confirmation_id)}
+        out = self._execute(tool, p.args, p.conversation_id, confirmation_id)
+        # The pending conversation travels back with the result. The caller may
+        # ask the model to phrase an answer -- with tools=[] (see ollama_client
+        # .chat_tools), so a tool result can never request another tool.
+        return {"status": "executed", "messages": p.messages, "model": p.model, **out}
 
     def _execute(self, tool: Tool, args: dict, conv: Optional[str],
                  cid: Optional[str]) -> dict:
@@ -359,6 +370,21 @@ def wrap_as_data(result: str) -> str:
         + result
         + "\n<<<END_TOOL_OUTPUT>>>"
     )
+
+
+def ollama_tool_schema(gate: "ToolGate") -> list[dict]:
+    """The registry, in the shape Ollama's /api/chat expects.
+
+    Only ENABLED tools are advertised. A disabled tool is not merely refused at
+    the gate -- the model is never told it exists, so it cannot suggest it to
+    Anders and create pressure to enable it.
+    """
+    return [
+        {"type": "function",
+         "function": {"name": t.name, "description": t.description,
+                      "parameters": t.params}}
+        for t in REGISTRY.values() if gate.is_enabled(t.name)
+    ]
 
 
 GATE = ToolGate()

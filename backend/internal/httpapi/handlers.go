@@ -353,6 +353,44 @@ func (s *server) handleRagIngestHtml(w http.ResponseWriter, r *http.Request) {
 	s.WorkerSlow.Forward(w, r, "/rag/ingest/html")
 }
 
+// Kaliv Tools (V5). The server is a proxy here and nothing more: the
+// confirmation gate, the whitelist and the audit log all live in the worker.
+// That is deliberate -- an old or tampered client must not be able to skip
+// them by talking to a friendlier backend.
+//
+// Note what is NOT here: no cloud fallback for any tools route. Tools are
+// local power, and a model running outside the house does not get a hand on
+// them (KRAVSPEC_V5_TOOLS.md, Anders' decision 2026-07-10).
+
+// handleToolsList proxies the tool registry and its enabled state.
+func (s *server) handleToolsList(w http.ResponseWriter, r *http.Request) {
+	s.Worker.Forward(w, r, "/tools")
+}
+
+// handleToolsChat proxies one chat turn in which the model may propose a tool.
+// A read tool runs and the model answers; a write tool returns a
+// confirmation_id and executes nothing.
+func (s *server) handleToolsChat(w http.ResponseWriter, r *http.Request) {
+	// WorkerSlow: this is an LLM turn, possibly two.
+	s.WorkerSlow.Forward(w, r, "/tools/chat")
+}
+
+// handleToolsConfirm proxies the human decision on a pending write action.
+func (s *server) handleToolsConfirm(w http.ResponseWriter, r *http.Request) {
+	// WorkerSlow: an approval is followed by an LLM turn to phrase the answer.
+	s.WorkerSlow.Forward(w, r, "/tools/confirm/chat")
+}
+
+// handleToolsAudit proxies the append-only audit log.
+func (s *server) handleToolsAudit(w http.ResponseWriter, r *http.Request) {
+	s.Worker.Forward(w, r, "/tools/audit")
+}
+
+// handleToolsEnabled proxies the kill switch and per-tool toggles.
+func (s *server) handleToolsEnabled(w http.ResponseWriter, r *http.Request) {
+	s.Worker.Forward(w, r, "/tools/enabled")
+}
+
 // clientIP extracts the remote host for rate-limiting. Behind a trusted reverse
 // proxy you'd honor X-Forwarded-For; for a direct LAN server RemoteAddr is right.
 func clientIP(r *http.Request) string {
