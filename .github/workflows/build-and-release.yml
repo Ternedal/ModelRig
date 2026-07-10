@@ -13,17 +13,22 @@ on:
     tags:
       - "v*"
 
-# 2026-07-10: v1.20.0 built clean but shipped zero assets. Every
-# upload-artifact step failed with "Artifact storage quota has been hit".
-# Artifacts are scratch space between CI jobs -- the binaries that matter live
-# on the release -- but they were kept for 14 days each, and 19 releases in one
-# day filled 4.6 GB. Retention cut to 1 day: the release job downloads them
-# within the same run, so nothing else needs them.
+# 2026-07-10: v1.20.0 built clean and shipped zero assets. Every
+# upload-artifact step failed: "Artifact storage quota has been hit. Usage is
+# recalculated every 6-12 hours." Deleting the 4.6 GB backlog did NOT free the
+# quota immediately -- the message said so, and a re-tag failed identically.
 #
-# Actions were also bumped off the deprecated Node 20 (checkout/setup-java/
-# upload-artifact v4 -> v5, download-artifact -> v6). That was a guess made
-# BEFORE reading the actual error, and it was not the cause. Kept because the
-# deprecation is real, recorded because the guessing was the mistake.
+# So the artifact hop is gone. Artifacts were only ever scratch space between
+# the build jobs and the release job; each build job now uploads its own
+# binaries straight to the release with `gh release upload --clobber`. No
+# quota, no retention, one fewer moving part. The release job still gates on
+# `needs`, adds the source zip, and now VERIFIES the assets exist -- because
+# compiling is not shipping, which is exactly how v1.20.0 got out empty.
+#
+# The actions were also bumped off deprecated Node 20 (checkout/setup-java/
+# upload-artifact v4 -> v5). That change was a guess made BEFORE reading the
+# error and was not the cause. Kept: the deprecation is real. Recorded: the
+# guessing was the mistake.
   workflow_dispatch:
     inputs:
       force_full_matrix:
@@ -159,11 +164,16 @@ jobs:
         working-directory: android
         run: cp app/build/outputs/apk/debug/app-debug.apk "../modelrig-${{ github.ref_name }}.apk"
 
-      - uses: actions/upload-artifact@v5
-        with:
-          name: android-apk
-          path: modelrig-${{ github.ref_name }}.apk
-          retention-days: 1
+      - name: Upload straight to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          # The release usually exists already (it is created via the API,
+          # which creates the tag, which fires this workflow). Create it if a
+          # bare tag was pushed instead. Harmless if another job won the race.
+          gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes "" || true
+          gh release upload "${{ github.ref_name }}" "modelrig-${{ github.ref_name }}.apk" --clobber
 
   desktop-build:
     # Windows only -- the one desktop platform actually in use. The Windows
@@ -192,17 +202,23 @@ jobs:
         run: |
           jar=$(find composeApp/build/compose/jars -name "*.jar" | head -1)
           echo "Found: $jar"
-          # upload-artifact runs from the job's default working directory
-          # (repo root), not this step's `working-directory: desktop` -- so
-          # the recorded path must include that prefix or the next step can't
-          # find the file (this bit v0.19.6: "No files were found").
+          # The upload step runs from the job's default working directory
+          # (repo root), not this step's `working-directory: desktop` -- so the
+          # recorded path must include that prefix or the upload can't find the
+          # file (this bit v0.19.6: "No files were found"). Still true now that
+          # the upload is `gh release upload` rather than upload-artifact.
           echo "path=desktop/$jar" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v5
-        with:
-          name: desktop-jar-windows
-          path: ${{ steps.findjar.outputs.path }}
-          retention-days: 1
+      - name: Upload straight to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          # The release usually exists already (it is created via the API,
+          # which creates the tag, which fires this workflow). Create it if a
+          # bare tag was pushed instead. Harmless if another job won the race.
+          gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes "" || true
+          gh release upload "${{ github.ref_name }}" "${{ steps.findjar.outputs.path }}" --clobber
 
   server-binaries:
     # Prebuilt single-file Windows exes for the rig: no Go, no Python, no pip
@@ -261,12 +277,16 @@ jobs:
             if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
             if ($worker -and -not $worker.HasExited) { Stop-Process -Id $worker.Id -Force -ErrorAction SilentlyContinue }
           }
-      - uses: actions/upload-artifact@v5
-        with:
-          name: server-binaries-windows
-          path: |
-            modelrig-server-windows-x64.exe
-            dist/modelrig-worker-windows-x64.exe
+      - name: Upload straight to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          # The release usually exists already (it is created via the API,
+          # which creates the tag, which fires this workflow). Create it if a
+          # bare tag was pushed instead. Harmless if another job won the race.
+          gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes "" || true
+          gh release upload "${{ github.ref_name }}" "modelrig-server-windows-x64.exe" "dist/modelrig-worker-windows-x64.exe" --clobber
 
   release:
     needs: [android-build, desktop-build, server-binaries]
@@ -291,23 +311,26 @@ jobs:
             -x '*/build/*' -x '*/.gradle/*' -x '*/local.properties' -x '*.apk'
           mv "modelrig-${{ github.ref_name }}.zip" "$GITHUB_WORKSPACE/"
 
-      - uses: actions/download-artifact@v6
-        with:
-          path: artifacts
-
-      - name: Collect all release assets into one flat folder
+      # The binaries are already on the release: each build job uploads its
+      # own. This job only adds the source zip, and its `needs` still makes it
+      # the gate that proves every build succeeded.
+      - name: Upload the source zip to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p release-assets
-          find artifacts -type f \( -name "*.apk" -o -name "*.jar" -o -name "*.exe" \) -exec cp {} release-assets/ \;
-          cp "modelrig-${{ github.ref_name }}.zip" release-assets/
-          ls -la release-assets
+          gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes "" || true
+          gh release upload "${{ github.ref_name }}" "modelrig-${{ github.ref_name }}.zip" --clobber
 
-      - name: Publish / update the GitHub Release with all assets
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: release-assets/*
-          fail_on_unmatched_files: true
+      - name: Verify the release actually has its assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Compiling is not shipping. v1.20.0 built clean and shipped nothing.
+          names=$(gh release view "${{ github.ref_name }}" --json assets --jq '.assets[].name')
+          echo "$names"
+          for want in .apk .zip .exe; do
+            echo "$names" | grep -q -- "$want" || { echo "MISSING: $want"; exit 1; }
+          done
           # Only sets these if the release doesn't already exist yet (this
           # project usually creates the release via the API first, then the
           # tag push fires this workflow -- action-gh-release updates the

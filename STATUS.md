@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.20.0** — "Cloud må foreslå tools; Anders godkender redigeringerne. Reglen bor i én funktion — `requires_confirmation(tool, origin)` — og siger: risiko afgør, ikke oprindelse. Origin logges altid". Follows 1.19.0 (tool calling), 1.18.0 (agent-lagets MVP), 1.17.0 (splash). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.20.1** — "CI leverer igen. Artifact-mellemlageret er væk: hvert build-job lægger sine binærer direkte på releasen, og release-jobbet verificerer at de er der. v1.20.0 byggede rent og shippede intet". Follows 1.20.0 (cloud må foreslå tools; risiko afgør bekræftelsen), 1.19.0 (tool calling), 1.18.0 (agent-lagets MVP). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

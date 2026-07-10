@@ -262,6 +262,15 @@ MODELRIG_HOST       (sæt til 0.0.0.0!)
 7. **On-device-test er den eneste sandhed.** Alle tre store Voice-bugs
    (PyAV, timeouts, CUDA) var usynlige for headless builds.
 
+7b. **Læs fejlteksten FØR du fikser.** To gange på to dage: 501'eren sagde
+   `cublas64_12.dll is not found` mens vi fejlsøgte TTS, og CI sagde
+   `Artifact storage quota has been hit` mens jeg opgraderede Node-actions.
+   Svaret stod der begge gange.
+
+7c. **At kompilere er ikke at shippe.** v1.20.0 byggede rent og leverede nul
+   assets. `release`-jobbet verificerer nu at .apk/.zip/.exe faktisk ligger på
+   releasen, og fejler hvis ikke.
+
 9. **Læs koden før du skriver planen.** PLAN_v1.13.0 påstod at stop skulle
    "annullere den kørende streaming-request". Forkert: `/voice/converse`
    er ikke streaming — appen får ét samlet WAV, og sætnings-chunkingen sker
