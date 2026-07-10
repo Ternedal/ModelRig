@@ -13,10 +13,17 @@ on:
     tags:
       - "v*"
 
-# 2026-07-10: GitHub deprecated Node 20 on the runners. actions/*@v4 target
-# Node 20, were force-migrated to Node 24, and every upload-artifact step died
-# -- v1.20.0 shipped with zero assets while the code was fine. Pinned to the
-# Node 24 majors. Nothing about this was our code; the environment moved.
+# 2026-07-10: v1.20.0 built clean but shipped zero assets. Every
+# upload-artifact step failed with "Artifact storage quota has been hit".
+# Artifacts are scratch space between CI jobs -- the binaries that matter live
+# on the release -- but they were kept for 14 days each, and 19 releases in one
+# day filled 4.6 GB. Retention cut to 1 day: the release job downloads them
+# within the same run, so nothing else needs them.
+#
+# Actions were also bumped off the deprecated Node 20 (checkout/setup-java/
+# upload-artifact v4 -> v5, download-artifact -> v6). That was a guess made
+# BEFORE reading the actual error, and it was not the cause. Kept because the
+# deprecation is real, recorded because the guessing was the mistake.
   workflow_dispatch:
     inputs:
       force_full_matrix:
@@ -156,7 +163,7 @@ jobs:
         with:
           name: android-apk
           path: modelrig-${{ github.ref_name }}.apk
-          retention-days: 14
+          retention-days: 1
 
   desktop-build:
     # Windows only -- the one desktop platform actually in use. The Windows
@@ -195,7 +202,7 @@ jobs:
         with:
           name: desktop-jar-windows
           path: ${{ steps.findjar.outputs.path }}
-          retention-days: 14
+          retention-days: 1
 
   server-binaries:
     # Prebuilt single-file Windows exes for the rig: no Go, no Python, no pip
