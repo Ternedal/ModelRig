@@ -24,6 +24,7 @@ answer, and speak, and how fast?) can only be proven on Anders' rig.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import time
@@ -74,6 +75,13 @@ _MD_IMAGE = re.compile(r"!\[([^\]]*)\]\([^)]+\)")        # ![alt](url) -> alt
 _MD_HRULE = re.compile(r"^\s*([-*_])\s*(?:\1\s*){2,}$", re.MULTILINE)
 _MD_TABLE_PIPE = re.compile(r"^\s*\|.*\|\s*$", re.MULTILINE)  # table rows: drop
 _WS = re.compile(r"[ \t]{2,}")
+
+
+# One at a time, per backend. Not for safety against Anders -- he is one user --
+# but because the model objects are shared, and because two Whisper decodes on a
+# 12 GB card is how you meet an out-of-memory error at the worst moment.
+_ASR_LOCK = asyncio.Lock()
+_TTS_LOCK = asyncio.Lock()
 
 
 def strip_markdown(text: str) -> str:
@@ -146,7 +154,14 @@ async def converse(
     t_start = time.time()
 
     # 1. ASR: audio -> Danish text.
-    asr = voice_asr.transcribe_wav(audio_path, language=language)
+    #
+    # transcribe_wav is seconds of blocking CUDA work. Called inline from an
+    # async handler it froze the entire worker for its duration -- healthz,
+    # RAG, every other request. Offloaded to a thread, but SERIALIZED: the
+    # event loop used to serialize these by accident, and the faster-whisper
+    # model is shared state. Keep the serialization; drop the freeze.
+    async with _ASR_LOCK:
+        asr = await asyncio.to_thread(voice_asr.transcribe_wav, audio_path, language)
     transcript = asr["text"]
 
     # 2+3+4. Stream the LLM; chunk on sentence boundaries; TTS each sentence as
@@ -170,7 +185,10 @@ async def converse(
             return
         wav = os.path.join(out_dir, f"chunk_{idx:03d}.wav")
         s0 = time.time()
-        voice_tts.synthesize_to_wav(speakable, wav)
+        # Piper is a subprocess and a loaded model: same reasoning as ASR.
+        # Serialized so sentences still reach the phone in order.
+        async with _TTS_LOCK:
+            await asyncio.to_thread(voice_tts.synthesize_to_wav, speakable, wav)
         synth_s = round(time.time() - s0, 2)
         if first_audio_at is None:
             first_audio_at = time.time()

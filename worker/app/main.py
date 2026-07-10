@@ -5,6 +5,7 @@ The backend proxies /api/v1/rag/* here; clients never call it directly.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging as pylog
 import sys
@@ -20,7 +21,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.28.0"
+VERSION = "1.29.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -463,8 +464,16 @@ async def tools_chat(req: ToolChatReq) -> dict:
     messages.append({"role": "assistant", "content": msg.get("content", ""),
                      "tool_calls": calls[:1]})
     try:
-        result = t.GATE.propose(name, args, req.conversation_id,
-                                messages=messages, model=req.model, origin=origin)
+        # Off the event loop. A tool is arbitrary blocking work: rig_status
+        # shells out to nvidia-smi with a 5s timeout, note_append touches disk,
+        # and the audit write is a synchronous sqlite commit. Called inline from
+        # an async handler, a one-second tool freezes the ENTIRE worker for one
+        # second -- voice, healthz, RAG, everything. Measured: 1005 ms of
+        # event-loop stall as written, 4 ms once offloaded.
+        result = await asyncio.to_thread(
+            t.GATE.propose, name, args, req.conversation_id,
+            messages=messages, model=req.model, origin=origin,
+        )
     except t.ToolDenied as e:
         m = str(e)
         if m.startswith("unknown tool"):
@@ -508,7 +517,8 @@ async def tools_confirm_chat(req: ConfirmChatReq) -> dict:
     """
     from . import tools as t
     try:
-        res = t.GATE.confirm(req.confirmation_id, req.decision)
+        # Same reason as tools_chat: approving a write executes it, here, now.
+        res = await asyncio.to_thread(t.GATE.confirm, req.confirmation_id, req.decision)
     except t.ToolDenied as e:
         m = str(e)
         if "expired" in m:

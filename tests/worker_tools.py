@@ -573,5 +573,62 @@ check('msg.get("tool_calls")' in src and "_logger.warning" in src,
 check("EXECUTOR" not in src and "propose" not in src,
       "T27: there is no path from the follow-up turn to executing a tool")
 
+# ---------------------------------------------------------------------------
+# T28: tools must not run on the event loop. rig_status shells out to
+# nvidia-smi (5s timeout); note_append writes to disk; the audit log commits to
+# sqlite. Inline in an async handler, a one-second tool froze the whole worker
+# for one second: voice, healthz, RAG, everything. Measured before the fix.
+# ---------------------------------------------------------------------------
+import asyncio as _asyncio  # noqa: E402
+
+src = _i.getsource(_M.tools_chat)
+check("asyncio.to_thread" in src and "GATE.propose" in src,
+      "T28: tools_chat offloads propose() to a thread")
+check("t.GATE.propose(" not in src.replace("t.GATE.propose,", ""),
+      "T28: tools_chat never calls propose() inline")
+src_c = _i.getsource(_M.tools_confirm_chat)
+check("asyncio.to_thread" in src_c, "T28: confirm() -- which executes -- is offloaded too")
+
+# The same class of bug in the voice pipeline, where it costs seconds not
+# milliseconds: whisper is blocking CUDA work.
+from app import voice_pipeline as _vp  # noqa: E402
+src_v = _i.getsource(_vp.converse)
+check("to_thread" in src_v and "transcribe_wav" in src_v,
+      "T28: ASR is offloaded from the event loop")
+check("_ASR_LOCK" in src_v and "_TTS_LOCK" in src_v,
+      "T28: ASR and TTS stay serialized -- the loop used to serialize them by accident")
+
+# And the behaviour, not just the shape: a slow tool must not stall the loop.
+def _slow(_args):
+    time.sleep(0.6)
+    return "slow"
+
+_saved = T.REGISTRY["rig_status"]
+T.REGISTRY["rig_status"] = T.Tool(name="rig_status", risk="read",
+                                  description="x", params={}, run=_slow)
+
+async def _stall_test() -> float:
+    g = fresh_gate()
+    lags: list[float] = []
+    stop = _asyncio.Event()
+
+    async def beat():
+        while not stop.is_set():
+            t0 = time.perf_counter()
+            await _asyncio.sleep(0.02)
+            lags.append(time.perf_counter() - t0 - 0.02)
+
+    hb = _asyncio.create_task(beat())
+    await _asyncio.sleep(0.1)
+    await _asyncio.to_thread(g.propose, "rig_status", {})
+    stop.set()
+    await hb
+    return max(lags)
+
+worst = _asyncio.run(_stall_test())
+T.REGISTRY["rig_status"] = _saved
+check(worst < 0.25,
+      f"T28: a 600ms tool stalls the loop by {worst*1000:.0f}ms, not by 600ms")
+
 print(f"\n===== TOOLS: {passed} passed, {failed} failed =====")
 sys.exit(0 if failed == 0 else 1)

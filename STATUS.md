@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.28.0** — "Nødbremsen overlever en genstart. Anders har `KALIV_TOOLS_ENABLED=1` i sin env, så uden persistens ville et crash gen-arme præcis det tool han lige stoppede. Env-varen er nu kun første-kørsel-default. Plus: forladte forslag ryddes (TTL blev kun håndhævet ved confirm), og et tool-kald i opfølgningsturen droppes højlydt i stedet for at blive stolet på". Follows 1.27.1 (review-fundene). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.29.0** — "Blokerende arbejde kørte i event-loopet. Et tool på ét sekund frøs hele workeren i 1005 ms — og `converse()` kaldte Whisper direkte, altså sekunder. Nu i tråde, men stadig serialiseret med en lås: loopet serialiserede dem utilsigtet, og modelobjekterne er delte. Målt efter: 11 ms". Follows 1.28.0 (bremsen overlever genstart). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

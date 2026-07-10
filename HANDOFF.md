@@ -284,6 +284,13 @@ MODELRIG_HOST       (sæt til 0.0.0.0!)
    skubbe utestet Kotlin ud og håbe på CI. (`local.properties` må ikke
    committes.)
 
+10. **Blokerende arbejde i `async def` fryser hele workeren.** `tools_chat`
+   kaldte den synkrone `GATE.propose()` direkte (nvidia-smi, disk, sqlite), og
+   `voice_pipeline.converse()` kaldte `transcribe_wav()` — sekunders CUDA-arbejde.
+   Målt: et 1-sekunds tool gav **1005 ms** event-loop-stall; med `to_thread` 4 ms.
+   Alt blokerende skal i en tråd — men **behold serialiseringen** med en lås,
+   for event-loopet serialiserede dem utilsigtet, og modelobjekterne er delte.
+
 9. **En ny gren i et `when` arver ingenting.** Tools-grenen blev sat foran
    normal-vejen og tabte lydløst: samtalehistorik (v1.25.0), RAG-kontekst
    (v1.26.0), vedhæftet billede + persistens af svaret (v1.27.0). Ingen fejl,
@@ -404,7 +411,7 @@ git push <url> main:main
 - ⚠️ **Betingelsen står ved magt:** vilkårlige filstier eller 3.-parts
   MCP-servere kræver separat Windows-konto + ACL'er FØRST (kravspec §5b).
 
-**Testdækning (10/7):** worker 192 tests (unit 31 · rag 48 · tools 113) +
+**Testdækning (10/7):** worker 198 tests (unit 31 · rag 48 · tools 119) +
 Go `internal/httpapi` 4 tests. CI kører nu `go vet` og `go test ./...` —
 det gjorde den ikke før v1.23.1, så Go-koden var reelt utestet.
 
