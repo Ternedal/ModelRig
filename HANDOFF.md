@@ -385,8 +385,11 @@ git push <url> main:main
   gaten bor. Appens direkte `CloudClient`-vej har slet ingen tools: intet at
   omgå, for der er ingen dør på den vej. Kortet siger "Cloud-modellen
   foreslår:", og `origin` står på audit-rækken.
-- ⚠️ **Ikke on-device-testet.** Kortet er compile-verificeret, ikke prøvet på
-  Pixel'en. Kræver `KALIV_TOOLS_ENABLED=1` på riggen.
+- **v1.23.0: handlingsloggen kan læses** (⋮ → Handlingslog). Viser de sidste
+  50 rækker fra `/tools/audit`, farvet efter udfald, ☁ for cloud-oprindelse.
+  Read-only — appen kan ikke ændre eller rydde loggen.
+- ⚠️ **Ikke on-device-testet.** Kort + log er compile-verificeret, ikke prøvet
+  på Pixel'en. Kræver `KALIV_TOOLS_ENABLED=1` på riggen.
 - ⚠️ **Betingelsen står ved magt:** vilkårlige filstier eller 3.-parts
   MCP-servere kræver separat Windows-konto + ACL'er FØRST (kravspec §5b).
 

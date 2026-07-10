@@ -637,6 +637,11 @@ private fun ChatScreen(
     var toolsMode by remember { mutableStateOf(store.toolsMode) }
     var pendingTool by remember { mutableStateOf<dk.ternedal.modelrig.net.ToolTurn?>(null) }
     var toolBusy by remember { mutableStateOf(false) }
+    // Audit log viewer. An append-only log nobody can read is only half a
+    // safeguard: the point is to SEE what was proposed, approved and refused.
+    var showAudit by remember { mutableStateOf(false) }
+    var auditRows by remember { mutableStateOf<List<dk.ternedal.modelrig.net.AuditEntry>>(emptyList()) }
+    var auditError by remember { mutableStateOf<String?>(null) }
     var liveRms by remember { mutableStateOf(0.0) }
     var peakRms by remember { mutableStateOf(0.0) }
     var hasMicPermission by remember {
@@ -1123,6 +1128,25 @@ private fun ChatScreen(
                                         modelMenu = false
                                     },
                                 )
+                                // Audit log: readable whether or not tools mode is
+                                // currently on -- past actions matter regardless.
+                                DropdownMenuItem(
+                                    text = { Text("📜 Handlingslog", color = TextMuted, fontSize = 13.sp) },
+                                    onClick = {
+                                        modelMenu = false
+                                        auditError = null
+                                        showAudit = true
+                                        scope.launch {
+                                            val r = withContext(Dispatchers.IO) {
+                                                runCatching {
+                                                    ModelRigClient(store.baseUrl ?: "", store.token).toolsAudit(50)
+                                                }
+                                            }
+                                            auditRows = r.getOrDefault(emptyList())
+                                            auditError = r.exceptionOrNull()?.let { friendlyError(it) }
+                                        }
+                                    },
+                                )
                                 if (bargeInEnabled) {
                                     // Step through sensible thresholds rather than
                                     // a slider: this is a calibration dial used a
@@ -1327,6 +1351,55 @@ private fun ChatScreen(
                 // this is on screen. Deny is exactly as easy to hit as approve --
                 // a big green yes next to a grey line is a dark pattern, and it is
                 // how people approve things they did not read.
+                if (showAudit) {
+                    AlertDialog(
+                        onDismissRequest = { showAudit = false },
+                        confirmButton = {
+                            TextButton(onClick = { showAudit = false }) {
+                                Text("Luk", color = Signal)
+                            }
+                        },
+                        title = { Text("Handlingslog", color = TextHigh, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif) },
+                        text = {
+                            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                                auditError?.let {
+                                    Text(it, color = Danger, fontSize = 13.sp)
+                                }
+                                if (auditError == null && auditRows.isEmpty()) {
+                                    Text("Ingen handlinger registreret endnu.", color = TextMuted, fontSize = 13.sp)
+                                }
+                                auditRows.forEach { e ->
+                                    // Colour by outcome: a refusal or a failure should
+                                    // catch the eye, an ordinary success should not.
+                                    val c = when (e.outcome) {
+                                        "executed" -> Success
+                                        "denied", "expired", "blocked" -> Amber
+                                        "error" -> Danger
+                                        else -> TextMuted
+                                    }
+                                    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                        Row {
+                                            Text(e.outcome.uppercase(), color = c, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(e.tool, color = TextHigh, fontSize = 12.sp)
+                                            if (e.origin == "cloud") {
+                                                Spacer(Modifier.width(6.dp))
+                                                Text("☁", fontSize = 12.sp)
+                                            }
+                                        }
+                                        Text(
+                                            "${e.ts} · ${e.risk}" + if (e.summary.isNotBlank()) " · ${e.summary.take(80)}" else "",
+                                            color = TextMuted, fontSize = 11.sp, lineHeight = 15.sp,
+                                        )
+                                    }
+                                    HorizontalDivider(color = Hairline)
+                                }
+                            }
+                        },
+                        containerColor = GraphiteSurfaceHigh,
+                    )
+                }
+
                 pendingTool?.let { prop ->
                     Surface(
                         color = GraphiteSurfaceHigh,

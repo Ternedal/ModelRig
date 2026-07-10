@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.22.0** — "Tools virker nu også med en cloud-model — men kun gennem riggen, hvor gaten bor. Appens direkte cloud-vej har ingen tools: intet at omgå, for der er ingen dør. Kortet siger hvem der foreslog". Follows 1.21.0 (bekræftelseskortet i appen), 1.20.0 (risiko afgør bekræftelse, ikke oprindelse). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.23.0** — "Handlingsloggen kan læses fra appen. En append-only sikkerhedslog, ingen kunne se, var kun halv sikkerhed: nu viser ⋮ → Handlingslog hver foreslået, godkendt og AFVIST handling, farvet efter udfald, med ☁ når en cloud-model foreslog". Follows 1.22.0 (cloud gennem gaten), 1.21.0 (bekræftelseskortet). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

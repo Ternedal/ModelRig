@@ -291,5 +291,24 @@ check(T.requires_confirmation(_W(), "local") and T.requires_confirmation(_W(), "
 check(not T.requires_confirmation(_T(), "local") and not T.requires_confirmation(_T(), "cloud"),
       "T18: reads run, whoever proposed them")
 
+# ---------------------------------------------------------------------------
+# T19: the audit log is READABLE, and refusals show up in it. An append-only
+# log nobody can read is only half a safeguard.
+# ---------------------------------------------------------------------------
+g = fresh_gate()
+g.propose("rig_status", {})                                   # executed
+try: g.propose("rm_rf", {})                                   # blocked (unknown)
+except T.ToolDenied: pass
+w = g.propose("note_append", {"text": "afvist"})
+g.confirm(w["confirmation_id"], "deny")                       # denied
+rows = g.audit.recent(10)
+outcomes = {e["outcome"] for e in rows}
+check("executed" in outcomes, "T19: a successful read is in the log")
+check("blocked" in outcomes, "T19: a blocked unknown tool is in the log")
+check("denied" in outcomes, "T19: a REFUSED write is in the log -- refusals are visible")
+check(all("origin" in e for e in rows), "T19: every row carries its origin")
+check("afvist" not in open(T.note_path(), encoding="utf-8").read(),
+      "T19: the denied write left no trace on disk, only in the log")
+
 print(f"\n===== TOOLS: {passed} passed, {failed} failed =====")
 sys.exit(0 if failed == 0 else 1)

@@ -509,6 +509,34 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         }
     }
 
+    /**
+     * The append-only audit log: every tool proposal, approval, denial and
+     * failure the rig has recorded. An audit log nobody can read is only half a
+     * safeguard -- you would only find misuse by opening the SQLite file on the
+     * rig by hand. Read-only; the app cannot alter or clear it (there is no
+     * delete path on the rig either).
+     */
+    fun toolsAudit(limit: Int = 50): List<AuditEntry> {
+        val builder = Request.Builder().url("$base/api/v1/tools/audit?limit=$limit").get()
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        http.newCall(builder.build()).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("audit failed (${resp.code}): $body")
+            val arr = JSONObject(body).optJSONArray("entries") ?: return emptyList()
+            return (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                AuditEntry(
+                    ts = o.optString("ts"),
+                    tool = o.optString("tool"),
+                    risk = o.optString("risk"),
+                    outcome = o.optString("outcome"),
+                    origin = o.optString("origin", "local"),
+                    summary = o.optString("result_summary"),
+                )
+            }
+        }
+    }
+
     private fun parseToolTurn(o: JSONObject): ToolTurn = ToolTurn(
         status = o.optString("status"),
         answer = o.optString("answer", ""),
@@ -628,6 +656,19 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
  * back a modified version of what the user approved -- the worker parked the
  * arguments alongside the confirmation_id, and executes those.
  */
+/**
+ * One row of the tool audit log. outcome is one of: executed, denied, expired,
+ * blocked, error. origin is "local" or "cloud" -- who proposed the action.
+ */
+data class AuditEntry(
+    val ts: String,
+    val tool: String,
+    val risk: String,
+    val outcome: String,
+    val origin: String,
+    val summary: String,
+)
+
 data class ToolTurn(
     val status: String,
     val answer: String,
