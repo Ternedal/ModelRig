@@ -941,6 +941,10 @@ private fun ChatScreen(
             // app's direct CloudClient path has no tools at all: nothing to
             // bypass, since the tool layer simply isn't on that road.
             val useTools = toolsMode && (mode == "rig" || (mode == "cloud" && store.cloudKey != null))
+            // RAG and Tools compose: documents ground the answer, and the model
+            // may still propose an action about them. Retrieval only works
+            // against the rig's index, so cloud+RAG stays off.
+            val toolsWithRag = useTools && ragMode && mode == "rig"
             var proposal: dk.ternedal.modelrig.net.ToolTurn? = null
             val err = withContext(Dispatchers.IO) {
                 runCatching {
@@ -961,7 +965,10 @@ private fun ChatScreen(
                                     cloudBaseUrl = if (viaCloud) "https://ollama.com" else null,
                                     cloudKey = if (viaCloud) store.cloudKey else null,
                                     history = prior,
+                                    rag = toolsWithRag,
+                                    ragSource = if (toolsWithRag) srcFilter else null,
                                 )
+                            if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.status == "confirmation_required") {
                                 proposal = turn
                             } else {

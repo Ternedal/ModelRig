@@ -456,6 +456,8 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         cloudBaseUrl: String? = null,
         cloudKey: String? = null,
         history: List<Pair<String, String>> = emptyList(),
+        rag: Boolean = false,
+        ragSource: String? = null,
     ): ToolTurn {
         val payload = JSONObject().put("message", message)
         // Without history, turning Tools on made Kaliv amnesiac: "write down
@@ -467,6 +469,11 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
                 arr.put(JSONObject().put("role", role).put("content", content))
             }
             payload.put("history", arr)
+        }
+        // Tools used to silently discard document context. Both can be on.
+        if (rag) {
+            payload.put("rag", true)
+            ragSource?.let { payload.put("rag_source", it) }
         }
         if (model != null) payload.put("model", model)
         if (conversationId != null) payload.put("conversation_id", conversationId)
@@ -600,6 +607,9 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         confirmationId = o.optString("confirmation_id").takeIf { it.isNotEmpty() },
         summary = o.optString("summary").takeIf { it.isNotEmpty() },
         expiresInSeconds = o.optInt("expires_in_seconds", 0),
+        sources = o.optJSONArray("sources")?.let { a ->
+            (0 until a.length()).map { a.getString(it) }
+        } ?: emptyList(),
     )
 
     fun ingestPdf(source: String, pdfBytes: ByteArray, chunkSize: Int = 800, overlap: Int = 150): IngestResult {
@@ -747,4 +757,6 @@ data class ToolTurn(
     val confirmationId: String?,
     val summary: String?,
     val expiresInSeconds: Int,
+    /** RAG sources that grounded this turn, if document context was used. */
+    val sources: List<String> = emptyList(),
 )

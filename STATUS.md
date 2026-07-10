@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.25.0** — "Tools-tilstand havde ingen samtalehistorik: Kaliv glemte alt, så snart man slog tools til. 'Skriv det ned, vi lige talte om' havde intet at skrive. Historikken sendes nu med og beskæres på riggen — ikke i appen, for en betroet klient i dag er en gammel APK i morgen". Follows 1.24.0 (kill switchen), 1.23.1 (Go-tests). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.26.0** — "RAG og tools kunne ikke kombineres: slog man tools til, forsvandt dokumentkonteksten lydløst. Nu henter riggen først, pakker chunks som DATA og lader modellen beslutte. Et forgiftet dokument kan stadig ikke skrive uden Anders' kort — men det kan udløse et læsende tool, og den grænse står nu i kravspec §R1b". Follows 1.25.0 (historik i tools-tilstand), 1.24.0 (kill switchen). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

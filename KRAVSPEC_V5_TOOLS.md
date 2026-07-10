@@ -190,6 +190,14 @@ T7 og T8 er de eneste tests der virkelig betyder noget. Resten er hygiejne.
 
 ## 12. Risici og åbne spørgsmål
 
+**R1b — RAG + tools (tilføjet v1.26.0).** Da tools og RAG kunne kombineres,
+kom utroværdig dokumenttekst ind i en kontekst hvor modellen kan kalde tools.
+Værnet er uændret: kontekst pakkes som DATA, og enhver skrivning kræver kort.
+**Åben, accepteret grænse:** et forgiftet dokument kan udløse et LÆSENDE tool
+uden bekræftelse. I dag returnerer `rig_status` disk- og GPU-tal, så det er
+proportionalt. **Første læsende tool der rører filer, kræver procesgrænsen
+(§5b) — nu er det ikke længere kun et princip, men en åben angrebsvej.**
+
 **R1 — Prompt injection (højeste risiko).** Kaliv læser dokumenter, PDF'er,
 web-sider. Enhver af dem kan indeholde tekst der beder modellen kalde et
 tool. Modstandsdygtighed er ikke prompt-engineering; det er arkitektur:
