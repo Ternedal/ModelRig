@@ -289,7 +289,7 @@ jobs:
           gh release upload "${{ github.ref_name }}" "modelrig-server-windows-x64.exe" "dist/modelrig-worker-windows-x64.exe" --clobber
 
   release:
-    needs: [android-build, desktop-build, server-binaries]
+    needs: [determine-matrix, android-build, desktop-build, server-binaries]
     # !failure() && !cancelled(): server-binaries may legitimately be SKIPPED
     # (patch release not touching backend/worker/deploy) -- that must not
     # block the release; an actual failure anywhere still does.
@@ -324,17 +324,24 @@ jobs:
       - name: Verify the release actually has its assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_DESKTOP: ${{ needs.determine-matrix.outputs.build_desktop }}
         run: |
           # Compiling is not shipping. v1.20.0 built clean and shipped nothing.
+          #
+          # This step used to end with three stray YAML keys (draft/prerelease/
+          # make_latest) pasted into the shell body from an old action block.
+          # Under `bash -e` the shell ran `draft:` as a command, it did not
+          # exist, and the step failed AFTER every asset had checked out fine.
+          # A guard that fails when everything is right teaches you to ignore it.
           names=$(gh release view "${{ github.ref_name }}" --json assets --jq '.assets[].name')
           echo "$names"
           for want in .apk .zip .exe; do
             echo "$names" | grep -q -- "$want" || { echo "MISSING: $want"; exit 1; }
           done
-          # Only sets these if the release doesn't already exist yet (this
-          # project usually creates the release via the API first, then the
-          # tag push fires this workflow -- action-gh-release updates the
-          # existing release with assets rather than overwriting its notes).
-          draft: false
-          prerelease: false
-          make_latest: true
+          # The desktop jar is only built on milestones (patch=0) or when
+          # desktop code changed -- so require it only when it was built.
+          if [ "$BUILD_DESKTOP" = "true" ]; then
+            echo "$names" | grep -q -- ".jar" || { echo "MISSING: .jar"; exit 1; }
+          else
+            echo "desktop jar not built for this tag; not required"
+          fi
