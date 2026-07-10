@@ -199,7 +199,7 @@ private fun parseBlocks(md: String): List<Block> {
 }
 
 // ---- inline formatting ----
-private val CODE_BG = Color(0x33808A99)
+private val CODE_BG = Color(0x333A2A1F)  // smoke brown wash (was a cool grey tuned to sapphire)
 
 private fun inline(text: String): AnnotatedString = buildAnnotatedString { appendInline(text) }
 

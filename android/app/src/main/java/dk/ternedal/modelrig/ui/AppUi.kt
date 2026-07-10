@@ -102,7 +102,12 @@ private fun SetupScreen(store: TokenStore, db: ChatDb, onDone: () -> Unit) {
             .verticalScroll(rememberScrollState()),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Kaliv", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = TextHigh)
+            Text(
+                "Kaliv",
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                fontSize = 28.sp, fontWeight = FontWeight.Bold, color = TextHigh,
+                letterSpacing = 2.sp,
+            )
             Spacer(Modifier.weight(1f))
             if (canChat) TextButton(onClick = onDone) { Text("Til chat →", color = Signal) }
         }
@@ -1764,9 +1769,9 @@ private fun ModelChip(label: String, onClick: () -> Unit) {
 @Composable
 private fun SourceBadge(mode: String) {
     val (label, color, onColor) = when (mode) {
-        "cloud" -> Triple("☁ Cloud", Amber, Graphite)
-        "rag" -> Triple("⌕ RAG", Signal, Color.White)
-        else -> Triple("◈ Rig", Signal, Color.White)
+        "cloud" -> Triple("☁ Cloud", Amber, OnEmber)
+        "rag" -> Triple("⌕ RAG", Signal, OnEmber)
+        else -> Triple("◈ Rig", Signal, OnEmber)
     }
     Surface(shape = RoundedCornerShape(999.dp), color = color) {
         Text(
@@ -1786,7 +1791,7 @@ private fun RagToggle(active: Boolean, onToggle: (Boolean) -> Unit) {
     ) {
         Text(
             "⌕ RAG",
-            color = if (active) Color.White else TextMuted,
+            color = if (active) OnEmber else TextMuted,
             fontSize = 12.sp, fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
         )
@@ -1884,7 +1889,7 @@ private fun Bubble(m: Msg, onRetry: (() -> Unit)? = null) {
                         }
                     }
                     when {
-                        isUser -> Text(m.text, color = Color.White, fontSize = 15.sp, lineHeight = 21.sp)
+                        isUser -> Text(m.text, color = OnEmber, fontSize = 15.sp, lineHeight = 21.sp)
                         m.error -> Text(m.text, color = Danger, fontSize = 14.sp, lineHeight = 20.sp)
                         m.streaming && m.text.isEmpty() -> Text("…", color = TextMuted, fontSize = 15.sp, lineHeight = 21.sp)
                         m.streaming -> Text(m.text + "▍", color = TextHigh, fontSize = 15.sp, lineHeight = 21.sp)
