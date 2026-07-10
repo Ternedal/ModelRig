@@ -459,8 +459,13 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         rag: Boolean = false,
         ragSource: String? = null,
         imageB64: String? = null,
+        system: String? = null,
     ): ToolTurn {
         val payload = JSONObject().put("message", message)
+        // Send the system prompt in its own field, not at the head of history.
+        // The rig protects a leading system message when trimming, but an
+        // explicit field cannot be crowded out by a long conversation at all.
+        system?.takeIf { it.isNotBlank() }?.let { payload.put("system", it) }
         // Without history, turning Tools on made Kaliv amnesiac: "write down
         // what we just discussed" had nothing to write. The rig trims it again
         // on arrival; this is the polite bound, not the enforced one.

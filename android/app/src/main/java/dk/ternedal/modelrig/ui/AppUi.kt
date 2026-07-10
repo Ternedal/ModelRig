@@ -856,6 +856,13 @@ private fun ChatScreen(
 
     LaunchedEffect(openConvId) {
         messages.clear()
+        // A pending confirmation belongs to the conversation that proposed it.
+        // Leaving it on screen across a switch means approving an action in the
+        // wrong context -- the confirmation_id still points at the old thread.
+        // The rig would happily execute it: it parked the arguments, not the UI.
+        pendingTool = null
+        showAudit = false
+        showToolCtl = false
         convId = openConvId
         if (openConvId != null) {
             val loaded = withContext(Dispatchers.IO) {
@@ -954,10 +961,11 @@ private fun ChatScreen(
                         // cloud because it is the most restrictive mode.
                         useTools -> {
                             val viaCloud = mode == "cloud"
-                            // history minus the just-added user turn: the rig
-                            // appends that itself, and sending it twice makes
-                            // the model answer its own echo.
-                            val prior = history.dropLast(1)
+                            // history minus the just-added user turn (the rig
+                            // appends that itself; sending it twice makes the
+                            // model answer its own echo) and minus the system
+                            // prompt, which now travels in its own field.
+                            val prior = history.dropLast(1).filter { it.first != "system" }
                             val turn = ModelRigClient(store.baseUrl ?: "", store.token)
                                 .toolsChat(
                                     t,
@@ -968,6 +976,7 @@ private fun ChatScreen(
                                     rag = toolsWithRag,
                                     ragSource = if (toolsWithRag) srcFilter else null,
                                     imageB64 = imageB64,
+                                    system = sys,
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.status == "confirmation_required") {

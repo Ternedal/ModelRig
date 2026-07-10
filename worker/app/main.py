@@ -20,7 +20,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.27.0"
+VERSION = "1.27.1"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -325,14 +325,29 @@ TOOL_HISTORY_MAX_CHARS = 24_000
 
 
 def _trim_history(history: list) -> list:
-    """Keep the tail: recent turns matter most, and the system prompt is added
-    separately so a long conversation can never evict it."""
-    tail = history[-TOOL_HISTORY_MAX_MESSAGES:]
-    total = sum(len(m.content) for m in tail)
+    """Keep the tail, but never evict a leading system message.
+
+    The old docstring claimed the system prompt "is added separately so a long
+    conversation can never evict it". That was true only if the caller used
+    req.system. The Android app puts it at the head of `history` instead, so at
+    20 messages the tail cut silently dropped it and Kaliv lost her persona and
+    instructions -- exactly the failure the comment said was impossible.
+
+    Old APKs still send it that way, so protect it here rather than only fixing
+    the client: the rig cannot assume the shape of a client it does not ship.
+    """
+    system: list = []
+    rest = history
+    if history and history[0].role == "system":
+        system, rest = [history[0]], history[1:]
+
+    budget = max(1, TOOL_HISTORY_MAX_MESSAGES - len(system))
+    tail = rest[-budget:]
+    total = sum(len(m.content) for m in tail) + sum(len(m.content) for m in system)
     while len(tail) > 1 and total > TOOL_HISTORY_MAX_CHARS:
         total -= len(tail[0].content)
         tail = tail[1:]
-    return tail
+    return system + tail
 
 
 async def _final_answer(messages: list[dict], model: str | None,
@@ -365,7 +380,17 @@ async def tools_chat(req: ToolChatReq) -> dict:
     messages: list[dict] = []
     if req.system:
         messages.append({"role": "system", "content": req.system})
-    messages.extend(m.model_dump() for m in _trim_history(req.history))
+    trimmed = _trim_history(req.history)
+    # A system message may only ever be first. One appearing mid-conversation is
+    # a client bug at best, and at worst a replayed turn trying to speak with
+    # system authority. Demote it to user text rather than honour it.
+    for i, m in enumerate(trimmed):
+        if m.role == "system" and i > 0:
+            m.role = "user"
+    if req.system:
+        # The caller passed it explicitly: drop any duplicate from history.
+        trimmed = [m for m in trimmed if m.role != "system"]
+    messages.extend(m.model_dump() for m in trimmed)
 
     sources: list[str] = []
     if req.rag:

@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.27.0** — "Systematisk gennemgang af hvad tools-tilstand tabte lydløst: et vedhæftet billede forsvandt, kortets svar blev aldrig gemt i databasen, og forslagsturen efterlod en tom boble i historikken. Alle tre havde samme form som historik- og RAG-fejlene: tools-grenen blev sat foran normal-vejen uden at lære hvad den gjorde". Follows 1.26.0 (RAG + tools), 1.25.0 (historik). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.27.1** — "Kodereview fandt to fejl. Systemprompten blev ædt af workerens beskæring ved 20 beskeder — appen lagde den forrest i historikken, og halen blev skåret fra hovedet. Og et åbent bekræftelseskort overlevede et samtaleskift, så en godkendelse ville eksekvere i forkert kontekst. Begge rettet, begge mutationstestet". Follows 1.27.0 (gennemgangen), 1.26.0 (RAG + tools). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

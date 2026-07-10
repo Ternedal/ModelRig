@@ -470,5 +470,37 @@ src_confirm = _i.getsource(_M.tools_confirm_chat)
 check("messages" in src_confirm and "_final_answer" in src_confirm,
       "T23: an approved write is answered with the parked conversation")
 
+# ---------------------------------------------------------------------------
+# T24: the system prompt survives trimming. Found in review, proven before it
+# was fixed: the app put the prompt at the head of `history`, and at 20 messages
+# the rig's tail cut dropped it -- Kaliv lost her persona mid-conversation. The
+# worker's own docstring claimed that was impossible.
+# ---------------------------------------------------------------------------
+sys_msg = ToolMsg(role="system", content="Du er Kaliv.")
+
+long_convo = [sys_msg] + [ToolMsg(role="user", content=f"t{i}") for i in range(30)]
+kept = _trim_history(long_convo)
+check(kept[0].role == "system", "T24: a leading system message survives the count cap")
+check(len(kept) == TOOL_HISTORY_MAX_MESSAGES, "T24: the cap still holds")
+check(kept[-1].content == "t29", "T24: the newest turn still survives")
+
+fat = [sys_msg] + [ToolMsg(role="user", content="x" * 30_000) for _ in range(2)]
+check(_trim_history(fat)[0].role == "system",
+      "T24: a leading system message survives the character cap")
+
+# Without a system message nothing changes.
+plain = [ToolMsg(role="user", content=str(i)) for i in range(30)]
+check(len(_trim_history(plain)) == TOOL_HISTORY_MAX_MESSAGES and
+      _trim_history(plain)[0].content == "10",
+      "T24: history without a system prompt trims exactly as before")
+
+# A system message anywhere but first is demoted, not honoured: a replayed turn
+# must not be able to speak with system authority.
+src = _i.getsource(_M.tools_chat)
+check('m.role == "system" and i > 0' in src,
+      "T24: a system role mid-history is demoted to user")
+check('if req.system:' in src and 'm.role != "system"' in src,
+      "T24: an explicit system field wins over one smuggled in history")
+
 print(f"\n===== TOOLS: {passed} passed, {failed} failed =====")
 sys.exit(0 if failed == 0 else 1)
