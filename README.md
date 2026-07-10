@@ -54,6 +54,12 @@ trigger another tool: the follow-up turn is sent with tools=[]. Off by default
 The Go server is a proxy and nothing more. Gate, whitelist and audit live in
 the worker, so an old or tampered client cannot find a friendlier backend.
 
+Two cloud roads, and they are not the same:
+  app → Ollama Cloud direct   (CloudClient) — the rig is not involved, so
+                               there are no tools on this road at all
+  app → rig → Ollama Cloud    (/tools/chat with cloud_key) — a cloud model
+                               proposes, the gate decides, you approve writes
+
 Cloud fallback (desktop): if local is down/insufficient →
 Ollama Cloud (https://ollama.com, model :cloud) with OLLAMA_API_KEY.
 ```

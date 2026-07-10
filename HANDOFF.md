@@ -380,6 +380,11 @@ git push <url> main:main
   tools-tilstand til (fra som standard; riggens `KALIV_TOOLS_ENABLED` er den
   anden lås). Et skrivende forslag parkerer som et kort over inputfeltet —
   intet er udført mens det står der. Afvis og Godkend er lige store.
+- **v1.22.0:** tools virker også i cloud-tilstand — men kun ved at rute
+  cloud-modellen GENNEM riggen (`/tools/chat` med `cloud_key`), for det er dér
+  gaten bor. Appens direkte `CloudClient`-vej har slet ingen tools: intet at
+  omgå, for der er ingen dør på den vej. Kortet siger "Cloud-modellen
+  foreslår:", og `origin` står på audit-rækken.
 - ⚠️ **Ikke on-device-testet.** Kortet er compile-verificeret, ikke prøvet på
   Pixel'en. Kræver `KALIV_TOOLS_ENABLED=1` på riggen.
 - ⚠️ **Betingelsen står ved magt:** vilkårlige filstier eller 3.-parts

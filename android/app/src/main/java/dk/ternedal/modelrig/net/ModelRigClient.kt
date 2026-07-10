@@ -444,11 +444,29 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
      * them again. The worker parked them.
      *
      * 403 when the tool layer is off on the rig.
+     *
+     * Pass cloudBaseUrl/cloudKey to have a CLOUD model do the proposing. Reads
+     * still run without asking; writes still stop at the confirmation card.
+     * Risk decides, not origin (Anders, 2026-07-10).
      */
-    fun toolsChat(message: String, model: String? = null, conversationId: String? = null): ToolTurn {
+    fun toolsChat(
+        message: String,
+        model: String? = null,
+        conversationId: String? = null,
+        cloudBaseUrl: String? = null,
+        cloudKey: String? = null,
+    ): ToolTurn {
         val payload = JSONObject().put("message", message)
         if (model != null) payload.put("model", model)
         if (conversationId != null) payload.put("conversation_id", conversationId)
+        // Routing a cloud model THROUGH the rig is the only way it can propose
+        // a tool: the app's direct CloudClient never touches the worker, so the
+        // gate isn't there to bypass. The key is sent per request and never
+        // persisted on the rig -- same contract as voice.
+        if (cloudBaseUrl != null && cloudKey != null) {
+            payload.put("cloud_base_url", cloudBaseUrl)
+            payload.put("cloud_key", cloudKey)
+        }
         val builder = Request.Builder().url("$base/api/v1/tools/chat")
             .post(payload.toString().toRequestBody(jsonType))
         token?.let { builder.header("Authorization", "Bearer $it") }

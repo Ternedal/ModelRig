@@ -899,7 +899,11 @@ private fun ChatScreen(
             // ChatRouter.chatStream contract.
             var rigEmitted = 0
             var didFallback = false
-            val useTools = toolsMode && mode == "rig"
+            // Tools work in cloud mode too -- but only by routing the cloud
+            // model THROUGH the rig, because that is where the gate lives. The
+            // app's direct CloudClient path has no tools at all: nothing to
+            // bypass, since the tool layer simply isn't on that road.
+            val useTools = toolsMode && (mode == "rig" || (mode == "cloud" && store.cloudKey != null))
             var proposal: dk.ternedal.modelrig.net.ToolTurn? = null
             val err = withContext(Dispatchers.IO) {
                 runCatching {
@@ -908,8 +912,14 @@ private fun ChatScreen(
                         // proposal that has executed nothing. Checked before RAG and
                         // cloud because it is the most restrictive mode.
                         useTools -> {
+                            val viaCloud = mode == "cloud"
                             val turn = ModelRigClient(store.baseUrl ?: "", store.token)
-                                .toolsChat(t, rigModel)
+                                .toolsChat(
+                                    t,
+                                    model = if (viaCloud) cModel else rigModel,
+                                    cloudBaseUrl = if (viaCloud) "https://ollama.com" else null,
+                                    cloudKey = if (viaCloud) store.cloudKey else null,
+                                )
                             if (turn.status == "confirmation_required") {
                                 proposal = turn
                             } else {

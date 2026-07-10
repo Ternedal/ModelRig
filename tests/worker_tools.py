@@ -256,5 +256,40 @@ check("key" not in src_pending.lower(), "T19: no cloud key parked on the rig")
 # T15: /tools/chat refuses entirely when the layer is off.
 check("the tool layer is disabled" in src, "T15: kill switch checked before the LLM")
 
+# ---------------------------------------------------------------------------
+# T16-T18: cloud may propose. Risk decides confirmation, not origin.
+# The app's DIRECT CloudClient path never reaches the worker at all -- there is
+# no gate to bypass there, because there are no tools on that road. Tools with
+# a cloud model only exist when the request is routed THROUGH the rig.
+# ---------------------------------------------------------------------------
+g = fresh_gate()
+r = g.propose("rig_status", {}, origin="cloud")
+check(r["status"] == "executed", "T16: a cloud-proposed READ runs without a card")
+
+g = fresh_gate()
+r = g.propose("note_append", {"text": "fra skyen"}, origin="cloud")
+check(r["status"] == "confirmation_required",
+      "T16: a cloud-proposed WRITE still stops at the card")
+check(r["origin"] == "cloud", "T16: the proposal carries its origin")
+check("Cloud-modellen" in r["summary"],
+      "T17: the card says who proposed it, so approval is informed")
+check("fra skyen" not in open(T.note_path(), encoding="utf-8").read(),
+      "T16: nothing written before approval, cloud or not")
+
+# The origin survives into the audit log, so "who asked" stays answerable.
+g.confirm(r["confirmation_id"], "approve")
+row = [e for e in g.audit.recent(5) if e["outcome"] == "executed"][0]
+check(row["origin"] == "cloud", "T17: origin recorded on the audit row")
+
+# T18: the rule itself, asserted directly rather than through a scenario.
+class _T:
+    risk = "read"
+class _W:
+    risk = "write"
+check(T.requires_confirmation(_W(), "local") and T.requires_confirmation(_W(), "cloud"),
+      "T18: every write needs a human, whoever proposed it")
+check(not T.requires_confirmation(_T(), "local") and not T.requires_confirmation(_T(), "cloud"),
+      "T18: reads run, whoever proposed them")
+
 print(f"\n===== TOOLS: {passed} passed, {failed} failed =====")
 sys.exit(0 if failed == 0 else 1)
