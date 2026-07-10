@@ -138,6 +138,11 @@ Statuskoder, efter husets regel *én kode = én betydning*:
   ændres. Ingen blind overskrivning.
 - **Afvisning er lige så let som godkendelse.** Ingen mørkt mønster hvor
   "Godkend" er stor og grøn og "Afvis" er en grå streg.
+  > ⚠️ v1.21.0 brød denne regel: `Godkend` var bronze + SemiBold, `Afvis` var
+  > almindelig grå tekst — mens kommentaren over koden påstod det modsatte.
+  > Rettet i v1.21.1 (symmetriske knapper, samme vægt, `weight(1f)` hver).
+  > **Lektie:** et løfte i en kommentar er ikke en garanti. Regler i spec'en
+  > skal kunne ses i koden, ikke i prosaen om koden.
 - **Timeout er en afvisning**, ikke en accept. 60 sekunder.
 - **I stemme**: Kaliv læser handlingen op og venter. Uklart svar = afvisning.
   ("Måske", "øh", stilhed → nej.)

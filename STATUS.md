@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.21.0** — "Bekræftelseskortet er i appen. En skrivende handling stopper på skærmen med hvad, hvor og hvilken konsekvens; 'Afvis' er lige så let at ramme som 'Godkend', og en udløbet bekræftelse siger det højt. Tools-tilstand er fra som standard, og riggen har sin egen kill switch ovenpå". Follows 1.20.2 (release-vagt + artifact-kvote), 1.20.0 (cloud må foreslå; risiko afgør bekræftelse), 1.19.0 (tool-calling). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.21.1** — "Bekræftelseskortet er nu symmetrisk: Afvis og Godkend har samme vægt og samme bredde, og nedtællingen står på kortet, fordi timeout er en afvisning. v1.21.0 shippede det mørke mønster, spec'ens §8 forbyder — mens kommentaren over koden påstod det modsatte". Follows 1.21.0 (kortet), 1.20.2 (release-vagt + artifact-kvote), 1.20.0 (cloud må foreslå tools; risiko afgør bekræftelse). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

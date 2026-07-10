@@ -1330,6 +1330,29 @@ private fun ChatScreen(
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(prop.summary.orEmpty(), color = TextHigh, fontSize = 14.sp, lineHeight = 20.sp)
+                            // The clock is visible because a timeout is a DENIAL,
+                            // not an acceptance. Nothing happens if you walk away;
+                            // the card should say so rather than let you assume.
+                            var remaining by remember(prop.confirmationId) {
+                                mutableStateOf(prop.expiresInSeconds)
+                            }
+                            LaunchedEffect(prop.confirmationId) {
+                                while (remaining > 0) { delay(1000); remaining -= 1 }
+                                // Client-side only. The worker enforces the real
+                                // expiry; this just stops offering a dead button.
+                                if (pendingTool?.confirmationId == prop.confirmationId) {
+                                    pendingTool = null
+                                    messages.add(Msg("assistant",
+                                        "Bekræftelsen udløb. Handlingen blev ikke udført."))
+                                }
+                            }
+                            if (remaining > 0) {
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "Udløber om $remaining s — sker der intet, bliver handlingen afvist.",
+                                    color = TextMuted, fontSize = 12.sp,
+                                )
+                            }
                             Spacer(Modifier.height(12.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 val cid = prop.confirmationId
@@ -1357,11 +1380,29 @@ private fun ChatScreen(
                                         }
                                     }
                                 }
-                                TextButton(onClick = { decide(false) }, enabled = !toolBusy && cid != null) {
-                                    Text("Afvis", color = TextHigh, fontSize = 14.sp)
+                                // Symmetric on purpose. Same size, same weight, same
+                                // affordance -- the ONLY difference is the word and
+                                // the hue. v1.21.0 shipped Godkend in bronze
+                                // SemiBold next to a plain grey Afvis, which is the
+                                // exact dark pattern KRAVSPEC_V5_TOOLS.md section 8
+                                // forbids: nudging toward yes on the actions that
+                                // change something. A comment claiming symmetry is
+                                // not symmetry.
+                                TextButton(
+                                    onClick = { decide(false) },
+                                    enabled = !toolBusy && cid != null,
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text("Afvis", color = TextHigh, fontSize = 14.sp,
+                                         fontWeight = FontWeight.SemiBold)
                                 }
-                                TextButton(onClick = { decide(true) }, enabled = !toolBusy && cid != null) {
-                                    Text("Godkend", color = Signal, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                TextButton(
+                                    onClick = { decide(true) },
+                                    enabled = !toolBusy && cid != null,
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text("Godkend", color = Signal, fontSize = 14.sp,
+                                         fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         }
