@@ -302,13 +302,69 @@ except T.ToolDenied: pass
 w = g.propose("note_append", {"text": "afvist"})
 g.confirm(w["confirmation_id"], "deny")                       # denied
 rows = g.audit.recent(10)
-outcomes = {e["outcome"] for e in rows}
-check("executed" in outcomes, "T19: a successful read is in the log")
-check("blocked" in outcomes, "T19: a blocked unknown tool is in the log")
-check("denied" in outcomes, "T19: a REFUSED write is in the log -- refusals are visible")
+seen = {e["outcome"] for e in rows}
+check("executed" in seen, "T19: a successful read is in the log")
+check("blocked" in seen, "T19: a blocked unknown tool is in the log")
+check("denied" in seen, "T19: a REFUSED write is in the log -- refusals are visible")
 check(all("origin" in e for e in rows), "T19: every row carries its origin")
 check("afvist" not in open(T.note_path(), encoding="utf-8").read(),
       "T19: the denied write left no trace on disk, only in the log")
+
+# ---------------------------------------------------------------------------
+# T20: the kill switch. It must stop things NOW, and it must not need a
+# confirmation -- an emergency brake that asks "are you sure" is not a brake.
+# ---------------------------------------------------------------------------
+g = fresh_gate()
+g.propose("rig_status", {})                       # works while enabled
+g.enabled = False
+for tool in ("rig_status", "note_append"):
+    try:
+        g.propose(tool, {"text": "x"})
+        check(False, f"T20: kill switch stops {tool}")
+    except T.ToolDenied as e:
+        check("disabled" in str(e), f"T20: kill switch stops {tool} immediately")
+
+# The brake beats a card already on screen. If the layer is switched off while
+# a write is pending, approving it must NOT run -- the brake was the later
+# decision by the same human. Found while writing this test: confirm() did not
+# check, so an in-flight approval survived the kill switch. Fixed.
+g = fresh_gate()
+r = g.propose("note_append", {"text": "i flugten"})
+g.enabled = False
+try:
+    g.confirm(r["confirmation_id"], "approve")
+    check(False, "T20: kill switch beats a pending approval")
+except T.ToolDenied as e:
+    check("disabled" in str(e), "T20: kill switch beats a pending approval")
+check("i flugten" not in open(T.note_path(), encoding="utf-8").read(),
+      "T20: the braked write left nothing on disk")
+check("blocked" in outcomes(g), "T20: the braked approval is in the audit log")
+
+try:
+    g.propose("note_append", {"text": "ny"})
+    check(False, "T20: no new proposal after the switch")
+except T.ToolDenied:
+    check(True, "T20: no new proposal after the switch")
+
+# Same for a single tool switched off mid-flight.
+g = fresh_gate()
+r = g.propose("note_append", {"text": "enkelt"})
+g.disabled_tools.add("note_append")
+try:
+    g.confirm(r["confirmation_id"], "approve")
+    check(False, "T20: disabling one tool beats its pending approval")
+except T.ToolDenied:
+    check(True, "T20: disabling one tool beats its pending approval")
+
+# Disabling ONE tool leaves the others working, and un-advertises it so the
+# model cannot suggest turning it back on.
+g = fresh_gate()
+g.disabled_tools.add("note_append")
+check(g.propose("rig_status", {})["status"] == "executed",
+      "T20: disabling one tool leaves the others working")
+names = [t["function"]["name"] for t in T.ollama_tool_schema(g)]
+check("note_append" not in names,
+      "T20: a disabled tool is not advertised -- it cannot ask to be re-enabled")
 
 print(f"\n===== TOOLS: {passed} passed, {failed} failed =====")
 sys.exit(0 if failed == 0 else 1)

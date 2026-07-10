@@ -500,13 +500,58 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
     }
 
     /** Whether the rig has the tool layer switched on, and which tools exist. */
-    fun toolsEnabled(): Boolean {
+    fun toolsEnabled(): Boolean = toolsList().enabled
+
+    /** The registry as the rig reports it: the kill switch, and each tool. */
+    fun toolsList(): ToolRegistry {
         val builder = Request.Builder().url("$base/api/v1/tools").get()
         token?.let { builder.header("Authorization", "Bearer $it") }
         http.newCall(builder.build()).execute().use { resp ->
-            if (!resp.isSuccessful) return false
-            return JSONObject(resp.body?.string().orEmpty()).optBoolean("enabled", false)
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("tools list failed (${resp.code}): $body")
+            return parseRegistry(JSONObject(body))
         }
+    }
+
+    /**
+     * The kill switch, reachable from the phone.
+     *
+     * Omit [tool] to switch the whole layer off. Until now this only existed as
+     * an env var on the rig, so stopping a misbehaving tool meant killing the
+     * worker and restarting it -- the wrong way round for an emergency brake.
+     *
+     * Turning a tool OFF also un-advertises it: the model is no longer told it
+     * exists, so it cannot suggest re-enabling it.
+     */
+    fun setToolsEnabled(enabled: Boolean, tool: String? = null): ToolRegistry {
+        val payload = JSONObject().put("enabled", enabled)
+        if (tool != null) payload.put("tool", tool)
+        val builder = Request.Builder().url("$base/api/v1/tools/enabled")
+            .post(payload.toString().toRequestBody(jsonType))
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        http.newCall(builder.build()).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("tools toggle failed (${resp.code}): $body")
+            return parseRegistry(JSONObject(body))
+        }
+    }
+
+    private fun parseRegistry(o: JSONObject): ToolRegistry {
+        val arr = o.optJSONArray("tools")
+        val tools = (0 until (arr?.length() ?: 0)).map { i ->
+            val t = arr!!.getJSONObject(i)
+            ToolInfo(
+                name = t.optString("name"),
+                risk = t.optString("risk"),
+                description = t.optString("description"),
+                enabled = t.optBoolean("enabled"),
+            )
+        }
+        return ToolRegistry(
+            enabled = o.optBoolean("enabled", false),
+            toolsDir = o.optString("tools_dir").takeIf { it.isNotEmpty() },
+            tools = tools,
+        )
     }
 
     /**
@@ -660,6 +705,21 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
  * One row of the tool audit log. outcome is one of: executed, denied, expired,
  * blocked, error. origin is "local" or "cloud" -- who proposed the action.
  */
+/** One tool as the rig's registry describes it. risk is "read" or "write". */
+data class ToolInfo(
+    val name: String,
+    val risk: String,
+    val description: String,
+    val enabled: Boolean,
+)
+
+/** The rig's tool registry: the kill switch, where writes may land, the tools. */
+data class ToolRegistry(
+    val enabled: Boolean,
+    val toolsDir: String?,
+    val tools: List<ToolInfo>,
+)
+
 data class AuditEntry(
     val ts: String,
     val tool: String,

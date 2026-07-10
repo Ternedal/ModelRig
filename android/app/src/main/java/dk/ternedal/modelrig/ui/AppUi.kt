@@ -642,6 +642,38 @@ private fun ChatScreen(
     var showAudit by remember { mutableStateOf(false) }
     var auditRows by remember { mutableStateOf<List<dk.ternedal.modelrig.net.AuditEntry>>(emptyList()) }
     var auditError by remember { mutableStateOf<String?>(null) }
+    // Rig-side tool control. The kill switch used to be an env var only, so
+    // stopping a misbehaving tool meant restarting the worker. Now it is a tap.
+    var showToolCtl by remember { mutableStateOf(false) }
+    var registry by remember { mutableStateOf<dk.ternedal.modelrig.net.ToolRegistry?>(null) }
+    var registryError by remember { mutableStateOf<String?>(null) }
+    var registryBusy by remember { mutableStateOf(false) }
+
+    fun loadRegistry() {
+        registryBusy = true
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).toolsList() }
+            }
+            registryBusy = false
+            registry = r.getOrNull()
+            registryError = r.exceptionOrNull()?.let { friendlyError(it) }
+        }
+    }
+
+    fun toggleTool(enabled: Boolean, tool: String?) {
+        registryBusy = true
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    ModelRigClient(store.baseUrl ?: "", store.token).setToolsEnabled(enabled, tool)
+                }
+            }
+            registryBusy = false
+            r.getOrNull()?.let { registry = it }
+            registryError = r.exceptionOrNull()?.let { friendlyError(it) }
+        }
+    }
     var liveRms by remember { mutableStateOf(0.0) }
     var peakRms by remember { mutableStateOf(0.0) }
     var hasMicPermission by remember {
@@ -1131,6 +1163,15 @@ private fun ChatScreen(
                                 // Audit log: readable whether or not tools mode is
                                 // currently on -- past actions matter regardless.
                                 DropdownMenuItem(
+                                    text = { Text("⚙ Tool-styring", color = TextMuted, fontSize = 13.sp) },
+                                    onClick = {
+                                        modelMenu = false
+                                        registryError = null
+                                        showToolCtl = true
+                                        loadRegistry()
+                                    },
+                                )
+                                DropdownMenuItem(
                                     text = { Text("📜 Handlingslog", color = TextMuted, fontSize = 13.sp) },
                                     onClick = {
                                         modelMenu = false
@@ -1351,6 +1392,82 @@ private fun ChatScreen(
                 // this is on screen. Deny is exactly as easy to hit as approve --
                 // a big green yes next to a grey line is a dark pattern, and it is
                 // how people approve things they did not read.
+                if (showToolCtl) {
+                    AlertDialog(
+                        onDismissRequest = { showToolCtl = false },
+                        confirmButton = {
+                            TextButton(onClick = { showToolCtl = false }) { Text("Luk", color = Signal) }
+                        },
+                        title = {
+                            Text("Tool-styring", color = TextHigh,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Serif)
+                        },
+                        text = {
+                            Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
+                                registryError?.let { Text(it, color = Danger, fontSize = 13.sp) }
+                                val reg = registry
+                                if (reg == null && registryError == null) {
+                                    Text("Henter…", color = TextMuted, fontSize = 13.sp)
+                                }
+                                reg?.let { r ->
+                                    // The kill switch. Turning tools OFF is never
+                                    // confirmed and never delayed: an emergency
+                                    // brake that asks "are you sure" is not a brake.
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text("Tool-laget på riggen", color = TextHigh, fontSize = 14.sp)
+                                            Text(
+                                                if (r.enabled) "Aktivt" else "Slået fra — intet tool kan køre",
+                                                color = if (r.enabled) Success else TextMuted, fontSize = 11.sp,
+                                            )
+                                        }
+                                        Switch(
+                                            checked = r.enabled,
+                                            enabled = !registryBusy,
+                                            onCheckedChange = { toggleTool(it, null) },
+                                        )
+                                    }
+                                    r.toolsDir?.let {
+                                        Text("Skrivninger lander i: $it", color = TextMuted,
+                                            fontSize = 11.sp, lineHeight = 15.sp)
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    HorizontalDivider(color = Hairline)
+                                    Spacer(Modifier.height(8.dp))
+                                    r.tools.forEach { tool ->
+                                        Row(
+                                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Column(Modifier.weight(1f)) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Text(tool.name, color = TextHigh, fontSize = 13.sp)
+                                                    Spacer(Modifier.width(6.dp))
+                                                    // Writes are the ones that need a card.
+                                                    // Say so before anything is enabled.
+                                                    Text(
+                                                        if (tool.risk == "write") "SKRIVER" else "læser",
+                                                        color = if (tool.risk == "write") Amber else TextMuted,
+                                                        fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                                                    )
+                                                }
+                                                Text(tool.description, color = TextMuted,
+                                                    fontSize = 11.sp, lineHeight = 15.sp)
+                                            }
+                                            Switch(
+                                                checked = tool.enabled,
+                                                enabled = !registryBusy && r.enabled,
+                                                onCheckedChange = { toggleTool(it, tool.name) },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        containerColor = GraphiteSurfaceHigh,
+                    )
+                }
+
                 if (showAudit) {
                     AlertDialog(
                         onDismissRequest = { showAudit = false },

@@ -351,6 +351,16 @@ class ToolGate:
             # distinguishes 409 from 404 by asking us nothing more.
             raise ToolDenied("unknown or already-used confirmation")
         tool = REGISTRY[p.tool]
+        # The kill switch beats a pending approval. If the layer (or the tool)
+        # was switched off while the card sat on screen, approving it must NOT
+        # run: the human who hit the brake is the same human holding the card,
+        # and the brake was the later decision. Fail closed.
+        if not self.is_enabled(p.tool):
+            self.audit.record(tool=p.tool, args=p.args, risk=tool.risk,
+                              outcome="blocked", conversation_id=p.conversation_id,
+                              confirmation_id=confirmation_id, origin=p.origin,
+                              result_summary="tool disabled after proposal")
+            raise ToolDenied(f"tool disabled: {p.tool}")
         if time.time() > p.expires_at:
             self.audit.record(tool=p.tool, args=p.args, risk=tool.risk,
                               outcome="expired", conversation_id=p.conversation_id,
