@@ -31,11 +31,15 @@ Copy/paste dette som første besked i en ny chat.
    et brand. Skriv aldrig "færdig" om noget der ikke er efterprøvet mod
    selve leverancen — her: paletten, tokens og UI-mockups i brand-pakken.
 
+   **Splash + velkomstskærm bygget i `v1.17.0`:** `Theme.Kaliv` sætter
+   `windowBackground` til charred black med ankh'en, så koldstart aldrig
+   blitzer platformens tema; tom-tilstanden er nu mærket + `KALIV`-wordmark
+   + "Lokal intelligens. Privat."
+
    **Åben rest:** brand-fontene (Cinzel/Cormorant + Montserrat) findes ikke
    som filer i pakken — display bruger platform-serif indtil de lægges i
    `res/font`. Desktop-klienten er stadig safir-blå; den hedder ModelRig,
-   ikke Kaliv. UI-mockuppernes layout (splash, velkomstskærm) er ikke
-   implementeret — kun farve/typografi-systemet.
+   ikke Kaliv.
 
 ---
 

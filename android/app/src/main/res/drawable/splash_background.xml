@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Cold-start window background. Drawn by the system before a single line of
+     Kotlin runs, so the launch reads as Kaliv rather than a flash of whatever
+     Theme.Material happens to default to: charred black, ankh centred, the
+     same mark the launcher icon carries. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/kaliv_charred_black" />
+    <item
+        android:drawable="@drawable/ic_launcher_foreground"
+        android:gravity="center"
+        android:width="180dp"
+        android:height="180dp" />
+</layer-list>

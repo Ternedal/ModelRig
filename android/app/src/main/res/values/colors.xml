@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Kaliv brand tokens, mirrored from kaliv_palette.json so that the window
+     background can use them before Compose is alive. Keep in sync with
+     ui/theme/Theme.kt: these two must never disagree. -->
+<resources>
+    <color name="kaliv_charred_black">#0B0B0D</color>
+    <color name="kaliv_dark_walnut">#1A120D</color>
+    <color name="kaliv_ember_bronze">#B6803A</color>
+    <color name="kaliv_muted_ivory">#E7DCC9</color>
+</resources>

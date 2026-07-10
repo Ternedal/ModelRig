@@ -4,6 +4,8 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,12 +23,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.painterResource
 import android.content.Intent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dk.ternedal.modelrig.R
 import dk.ternedal.modelrig.data.ChatDb
 import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.net.CloudClient
@@ -1198,12 +1202,39 @@ private fun ChatScreen(
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(if (mode == "cloud") "☁" else if (ragMode) "⌕" else "◉", fontSize = 40.sp, color = if (mode == "cloud") Amber else Signal)
-                Spacer(Modifier.height(12.dp))
+                // The empty state is the welcome screen: the mark, the wordmark,
+                // then the mode. The ankh is the launcher foreground -- one
+                // asset, one identity, no second copy to drift out of sync.
+                Image(
+                    painter = painterResource(R.drawable.ic_launcher_foreground),
+                    contentDescription = null,
+                    modifier = Modifier.size(140.dp),
+                )
+                Text(
+                    "KALIV",
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                    fontSize = 30.sp, fontWeight = FontWeight.Bold,
+                    color = TextHigh, letterSpacing = 8.sp,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Lokal intelligens. Privat.",
+                    color = TextMuted, fontSize = 13.sp, letterSpacing = 1.sp,
+                )
+                Spacer(Modifier.height(28.dp))
+                // Hairline divider: the branded-seal feel is quiet structure,
+                // not more colour.
+                androidx.compose.foundation.layout.Box(
+                    Modifier.width(48.dp).height(1.dp)
+                        .background(Hairline),
+                )
+                Spacer(Modifier.height(20.dp))
                 Text(
                     when { mode == "cloud" -> "Cloud-tilstand"; ragMode -> "RAG-tilstand"; else -> "Rig-tilstand" },
-                    color = TextHigh, fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                    color = if (mode == "cloud") Amber else Signal,
+                    fontSize = 14.sp, fontWeight = FontWeight.Medium, letterSpacing = 1.sp,
                 )
+                Spacer(Modifier.height(4.dp))
                 Text(
                     if (ragMode) "Spørg om dine ingesterede dokumenter" else "Skriv en besked for at starte",
                     color = TextMuted, fontSize = 13.sp,

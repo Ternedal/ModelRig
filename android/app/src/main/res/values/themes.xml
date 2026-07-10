@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The app used @android:style/Theme.Material.NoActionBar, which meant the
+         window background was the platform's, not Kaliv's: a visible flash on
+         cold start before Compose drew anything. windowBackground carries the
+         ankh on charred black instead. Bars are transparent because
+         enableEdgeToEdge() draws under them. -->
+    <style name="Theme.Kaliv" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@drawable/splash_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:colorBackground">@color/kaliv_charred_black</item>
+    </style>
+</resources>
