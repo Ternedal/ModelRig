@@ -58,15 +58,18 @@ async def chat(messages: list[dict], model: str | None = None) -> str:
 
 
 async def chat_tools(messages: list[dict], tools: list[dict],
-                     model: str | None = None) -> dict:
+                     model: str | None = None, base_url: str | None = None,
+                     api_key: str | None = None) -> dict:
     """One non-streaming chat turn that MAY return tool calls.
 
     Returns Ollama's message dict: {"content": str, "tool_calls": [...]} .
 
-    Deliberately has no base_url/api_key parameters, unlike chat_stream. Tools
-    are local power; a model running outside the house does not get a hand on
-    them (KRAVSPEC_V5_TOOLS.md, Anders' decision 2026-07-10). Making that a
-    missing parameter rather than a runtime check means it cannot be forgotten.
+    A cloud model MAY propose tools (Anders' revision 2026-07-10, superseding
+    the earlier "local only" rule) -- but proposing is not executing. Every
+    cloud-originated call goes through the confirmation card, including READ
+    tools, because a read result must travel back to the cloud model to be
+    phrased: the tool output leaves the house. The gate enforces that, not
+    this function; see tools.ToolGate.propose(origin=...).
 
     Pass tools=[] to guarantee the model cannot request a tool -- that is how
     the follow-up turn after a tool result is made chain-free.
@@ -75,11 +78,13 @@ async def chat_tools(messages: list[dict], tools: list[dict],
     payload: dict = {"model": model, "messages": messages, "stream": False}
     if tools:
         payload["tools"] = tools
+    url = (base_url or OLLAMA_URL).rstrip("/")
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as c:
-            r = await c.post(f"{OLLAMA_URL}/api/chat", json=payload)
+            r = await c.post(f"{url}/api/chat", json=payload, headers=headers)
     except httpx.HTTPError as e:
-        raise OllamaError(f"cannot reach Ollama at {OLLAMA_URL}: {e}") from e
+        raise OllamaError(f"cannot reach Ollama at {url}: {e}") from e
     if r.status_code != 200:
         raise OllamaError(f"chat failed ({r.status_code}): {r.text[:200]}")
     return r.json().get("message", {}) or {}

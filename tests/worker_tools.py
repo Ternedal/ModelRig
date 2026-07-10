@@ -177,11 +177,20 @@ from app import main as M  # noqa: E402
 from app import ollama_client as oc  # noqa: E402
 
 # T11: the follow-up turn after a tool result is structurally chain-free.
+#
+# NOTE: an earlier version of this test asserted that chat_tools had no cloud
+# parameters, on the theory that "tools are local power". Anders overruled that
+# on 2026-07-10: cloud may propose, he approves the edits. The assertion was
+# rewritten rather than deleted, because the chain-free guarantee it shared a
+# line with still holds -- and now holds for cloud turns too.
 sig = inspect.signature(oc.chat_tools)
-check("api_key" not in sig.parameters and "base_url" not in sig.parameters,
-      "T11: chat_tools has no cloud parameters -- cloud cannot propose tools")
+check("api_key" in sig.parameters and "base_url" in sig.parameters,
+      "T11: chat_tools accepts a cloud upstream -- cloud may propose tools")
 check("tools=[]" in inspect.getsource(M._final_answer),
       "T11: the answer turn passes tools=[] -- a tool result cannot chain")
+check("tools=[]" in inspect.getsource(M._final_answer)
+      and "base_url" in inspect.signature(M._final_answer).parameters,
+      "T11: chain-free holds on the cloud answer turn too")
 
 # T12: a disabled tool is never advertised to the model.
 g = fresh_gate()
@@ -209,6 +218,40 @@ check("parkeret" in open(T.note_path(), encoding="utf-8").read(),
 src = inspect.getsource(M.tools_chat)
 check("calls[:1]" in src and "extra_tool_calls_ignored" in src,
       "T14: at most one tool per turn, and the caller is told")
+
+# T16: cloud may PROPOSE; risk decides whether it needs the card.
+# Anders 2026-07-10: "Det er fint at cloud kan foreslå tools, men det er mig
+# der skal acceptere brugen af det... udelukkende om tools til redigering."
+g = fresh_gate()
+r = g.propose("rig_status", {}, origin="cloud")
+check(r["status"] == "executed", "T16: cloud-proposed READ runs without a card")
+r = g.propose("note_append", {"text": "fra cloud"}, origin="cloud")
+check(r["status"] == "confirmation_required", "T16: cloud-proposed WRITE needs the card")
+check("Cloud-modellen foreslår" in r["summary"],
+      "T16: the card says the cloud asked -- not the same event as your own rig")
+check("fra cloud" not in open(T.note_path(), encoding="utf-8").read(),
+      "T16: cloud write executed nothing before approval")
+
+# T17: the rule lives in one function, so it can be found and changed on purpose.
+check(T.requires_confirmation(T.REGISTRY["note_append"], "local") is True,
+      "T17: local write needs confirmation")
+check(T.requires_confirmation(T.REGISTRY["note_append"], "cloud") is True,
+      "T17: cloud write needs confirmation")
+check(T.requires_confirmation(T.REGISTRY["rig_status"], "local") is False,
+      "T17: local read does not")
+check(T.requires_confirmation(T.REGISTRY["rig_status"], "cloud") is False,
+      "T17: cloud read does not -- risk decides, not origin")
+
+# T18: origin is recorded even when nothing needed approving.
+g = fresh_gate()
+g.propose("rig_status", {}, origin="cloud")
+g.propose("rig_status", {}, origin="local")
+origins = [e["origin"] for e in g.audit.recent(2)]
+check(sorted(origins) == ["cloud", "local"], "T18: audit records who proposed")
+
+# T19: a cloud key is never parked with a pending action.
+src_pending = inspect.getsource(T.Pending)
+check("key" not in src_pending.lower(), "T19: no cloud key parked on the rig")
 
 # T15: /tools/chat refuses entirely when the layer is off.
 check("the tool layer is disabled" in src, "T15: kill switch checked before the LLM")

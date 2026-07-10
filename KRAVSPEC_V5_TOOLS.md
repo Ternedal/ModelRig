@@ -241,7 +241,15 @@ at rive arkitekturen op — en dags arbejde nu, en uges arbejde senere.
 de er forkerte):
 - `note_append` skriver i `%USERPROFILE%\Documents\Kaliv\notes.md`
   (overrides: `KALIV_TOOLS_DIR`).
-- Cloud-LLM'en må **ikke** foreslå tools. Tools er lokal magt.
+- ~~Cloud-LLM'en må ikke foreslå tools~~ → **omgjort af Anders 10/7:** cloud
+  må gerne foreslå. *"Det er mig der skal acceptere brugen af det … udelukkende
+  om tools til redigering, ikke læse."* Reglen står i én funktion,
+  `tools.requires_confirmation(tool, origin)`: **risiko afgør, ikke oprindelse.**
+  Skrivning kræver kortet, uanset hvem der foreslog. Læsning kører frit,
+  lokalt som fra cloud. Origin logges altid i auditen.
+  Bemærk til fremtiden: hvis et læsende tool en dag returnerer *dokumentindhold*
+  frem for tal, skal den funktion genbesøges — så forlader indholdet huset,
+  når cloud skal formulere svaret.
 - Bekræftelse udløber efter 60 s. Timeout = afvisning.
 
 **Resterende åbne spørgsmål:**

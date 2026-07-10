@@ -20,7 +20,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.19.0"
+VERSION = "1.20.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -293,9 +293,14 @@ class ToolChatReq(BaseModel):
     model: str | None = None
     conversation_id: str | None = None
     system: str | None = None
+    # Cloud may propose tools (Anders 2026-07-10). Writes still need the card;
+    # reads run either way. The key is never persisted -- per request only.
+    cloud_base_url: str | None = None
+    cloud_key: str | None = None
 
 
-async def _final_answer(messages: list[dict], model: str | None) -> str:
+async def _final_answer(messages: list[dict], model: str | None,
+                        base_url: str | None = None, api_key: str | None = None) -> str:
     """Ask the model to phrase an answer AFTER a tool ran.
 
     tools=[] is the whole point: the follow-up turn cannot request another
@@ -303,7 +308,8 @@ async def _final_answer(messages: list[dict], model: str | None) -> str:
     a promise -- an ingested document that says "now call note_append" gets
     read as text, because there is no tool to call.
     """
-    msg = await oc.chat_tools(messages, tools=[], model=model)
+    msg = await oc.chat_tools(messages, tools=[], model=model,
+                              base_url=base_url, api_key=api_key)
     return msg.get("content", "")
 
 
@@ -325,9 +331,11 @@ async def tools_chat(req: ToolChatReq) -> dict:
         messages.append({"role": "system", "content": req.system})
     messages.append({"role": "user", "content": req.message})
 
+    origin = "cloud" if req.cloud_key else "local"
     try:
         msg = await oc.chat_tools(messages, tools=t.ollama_tool_schema(t.GATE),
-                                  model=req.model)
+                                  model=req.model, base_url=req.cloud_base_url,
+                                  api_key=req.cloud_key)
     except oc.OllamaError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -353,7 +361,7 @@ async def tools_chat(req: ToolChatReq) -> dict:
                      "tool_calls": calls[:1]})
     try:
         result = t.GATE.propose(name, args, req.conversation_id,
-                                messages=messages, model=req.model)
+                                messages=messages, model=req.model, origin=origin)
     except t.ToolDenied as e:
         m = str(e)
         if m.startswith("unknown tool"):
@@ -370,16 +378,21 @@ async def tools_chat(req: ToolChatReq) -> dict:
     # Read tool: feed the result back as DATA and let the model phrase it.
     messages.append({"role": "tool", "content": result["result"]})
     try:
-        answer = await _final_answer(messages, req.model)
+        answer = await _final_answer(messages, req.model,
+                                     req.cloud_base_url, req.cloud_key)
     except oc.OllamaError as e:
         raise HTTPException(status_code=502, detail=str(e))
     return {"status": "answered", "tool": name, "answer": answer,
-            "tool_result": result["result"]}
+            "origin": origin, "tool_result": result["result"]}
 
 
 class ConfirmChatReq(BaseModel):
     confirmation_id: str
     decision: str = Field(pattern="^(approve|deny)$")
+    # Re-sent by the app rather than parked with the pending action: a cloud
+    # key is never persisted on the rig, not even for 60 seconds.
+    cloud_base_url: str | None = None
+    cloud_key: str | None = None
 
 
 @app.post("/tools/confirm/chat")
@@ -407,7 +420,8 @@ async def tools_confirm_chat(req: ConfirmChatReq) -> dict:
     messages = list(res.get("messages") or [])
     messages.append({"role": "tool", "content": res["result"]})
     try:
-        answer = await _final_answer(messages, res.get("model"))
+        answer = await _final_answer(messages, res.get("model"),
+                                     req.cloud_base_url, req.cloud_key)
     except oc.OllamaError as e:
         raise HTTPException(status_code=502, detail=str(e))
     return {"status": "executed", "tool": res["tool"], "answer": answer}

@@ -361,8 +361,12 @@ git push <url> main:main
   audit-log, kill switch. **Slået FRA som standard** (`KALIV_TOOLS_ENABLED=1`).
 - 27 tests grønne, inkl. T7/T8 (prompt injection). Kører nu i CI.
 - **v1.19.0:** modellen kan foreslå tools (`POST /tools/chat`), og Go-serveren
-  proxy'er hele laget. Cloud kan strukturelt ikke foreslå tools —
-  `chat_tools()` har ingen `api_key`-parameter.
+  proxy'er hele laget.
+- **v1.20.0:** cloud må foreslå tools (Anders' beslutning). Reglen: **risiko
+  afgør, ikke oprindelse** — se `tools.requires_confirmation()`. Skrivning
+  kræver kortet uanset hvem der foreslog; læsning kører frit. Cloud-nøglen
+  parkeres aldrig med en ventende handling; appen gensender den med
+  beslutningen.
 - ⚠️ **Bekræftelseskortet mangler stadig i appen.** Skrivende tools godkendes
   indtil videre via `POST /api/v1/tools/confirm`. Det er næste release.
 - ⚠️ **Betingelsen står ved magt:** vilkårlige filstier eller 3.-parts

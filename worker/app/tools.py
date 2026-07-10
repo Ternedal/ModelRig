@@ -52,6 +52,26 @@ def tools_dir() -> str:
     return os.path.join(os.path.expanduser("~"), "Documents", "Kaliv")
 
 
+def requires_confirmation(tool: "Tool", origin: str) -> bool:
+    """Risk decides, not origin. Anders, 2026-07-10:
+
+        "Det er fint at cloud kan foreslå tools, men det er mig der skal
+         acceptere brugen af det." ... "udelukkende om tools til redigering,
+         ikke læse."
+
+    So: every WRITE needs the card, whoever proposed it. A READ runs freely,
+    local or cloud. Origin is still recorded in the audit log, because knowing
+    who asked matters even when nothing needed approving.
+
+    One consequence, stated once and then left alone: a cloud-proposed read
+    sends its result to the cloud model so it can phrase the answer. For the
+    MVP's rig_status that is disk space, GPU name and model names -- and the
+    question itself already went out the same way. Proportionate. If a future
+    read tool returns document contents, revisit THIS function.
+    """
+    return tool.risk == "write"
+
+
 class ToolError(RuntimeError):
     """Tool exists but failed. Surfaced as 503, never as 'not installed'."""
 
@@ -85,6 +105,12 @@ class AuditLog:
             )
             """
         )
+        # Migration: origin was added when cloud models were allowed to propose
+        # tools. Old rows predate the distinction and are truthfully 'local'.
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(audit)")}
+        if "origin" not in cols:
+            self._conn.execute(
+                "ALTER TABLE audit ADD COLUMN origin TEXT NOT NULL DEFAULT 'local'")
         self._conn.commit()
 
     def record(
@@ -92,18 +118,19 @@ class AuditLog:
         conversation_id: Optional[str] = None,
         confirmation_id: Optional[str] = None,
         result_summary: str = "", duration_ms: int = 0,
+        origin: str = "local",
     ) -> None:
         # Never log the full result: it could be a whole file. Summaries only.
         summary = (result_summary or "")[:500]
         with self._lock:
             self._conn.execute(
                 "INSERT INTO audit (ts, conversation_id, tool, args_json, risk,"
-                " outcome, confirmation_id, result_summary, duration_ms)"
-                " VALUES (?,?,?,?,?,?,?,?,?)",
+                " outcome, confirmation_id, result_summary, duration_ms, origin)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (
                     time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
                     conversation_id, tool, json.dumps(args, ensure_ascii=False),
-                    risk, outcome, confirmation_id, summary, duration_ms,
+                    risk, outcome, confirmation_id, summary, duration_ms, origin,
                 ),
             )
             self._conn.commit()
@@ -112,7 +139,7 @@ class AuditLog:
         with self._lock:
             cur = self._conn.execute(
                 "SELECT ts, conversation_id, tool, args_json, risk, outcome,"
-                " result_summary, duration_ms FROM audit ORDER BY id DESC LIMIT ?",
+                " origin, result_summary, duration_ms FROM audit ORDER BY id DESC LIMIT ?",
                 (max(1, min(limit, 500)),),
             )
             cols = [c[0] for c in cur.description]
@@ -247,6 +274,7 @@ class Pending:
     # has read them on the confirmation card.
     messages: list = field(default_factory=list)
     model: Optional[str] = None
+    origin: str = "local"
 
 
 class ToolGate:
@@ -271,40 +299,47 @@ class ToolGate:
         ]
 
     def propose(self, name: str, args: dict, conversation_id: Optional[str] = None,
-                messages: Optional[list] = None, model: Optional[str] = None) -> dict:
+                messages: Optional[list] = None, model: Optional[str] = None,
+                origin: str = "local") -> dict:
         """A read tool runs now. A write tool returns a confirmation_id and
         runs NOTHING until a human approves it."""
         tool = REGISTRY.get(name)
         if tool is None:
             self.audit.record(tool=name, args=args, risk="unknown",
                               outcome="blocked", conversation_id=conversation_id,
-                              result_summary="unknown tool")
+                              result_summary="unknown tool", origin=origin)
             raise ToolDenied(f"unknown tool: {name}")
         if not self.enabled:
             self.audit.record(tool=name, args=args, risk=tool.risk,
                               outcome="blocked", conversation_id=conversation_id,
-                              result_summary="tool layer disabled")
+                              result_summary="tool layer disabled", origin=origin)
             raise ToolDenied("the tool layer is disabled")
         if name in self.disabled_tools:
             self.audit.record(tool=name, args=args, risk=tool.risk,
                               outcome="blocked", conversation_id=conversation_id,
-                              result_summary="tool disabled")
+                              result_summary="tool disabled", origin=origin)
             raise ToolDenied(f"tool disabled: {name}")
 
-        if tool.risk == "read":
-            return {"status": "executed", **self._execute(tool, args, conversation_id, None)}
+        if not requires_confirmation(tool, origin):
+            return {"status": "executed",
+                    **self._execute(tool, args, conversation_id, None, origin)}
 
         cid = str(uuid.uuid4())
         with self._lock:
             self._pending[cid] = Pending(cid, name, args, conversation_id,
                                          time.time() + CONFIRM_TTL_SECONDS,
-                                         messages=list(messages or []), model=model)
+                                         messages=list(messages or []), model=model,
+                                         origin=origin)
         return {
             "status": "confirmation_required",
             "confirmation_id": cid,
             "tool": name,
             "risk": "write",
-            "summary": tool.human_summary(args),
+            "origin": origin,
+            # The card says who asked. A cloud model suggesting a write to your
+            # notes is not the same event as your own rig suggesting it.
+            "summary": (("Cloud-modellen foreslår: " if origin == "cloud" else "")
+                        + tool.human_summary(args)),
             "expires_in_seconds": CONFIRM_TTL_SECONDS,
         }
 
@@ -319,40 +354,40 @@ class ToolGate:
         if time.time() > p.expires_at:
             self.audit.record(tool=p.tool, args=p.args, risk=tool.risk,
                               outcome="expired", conversation_id=p.conversation_id,
-                              confirmation_id=confirmation_id)
+                              confirmation_id=confirmation_id, origin=p.origin)
             raise ToolDenied("confirmation expired")
         if decision != "approve":
             self.audit.record(tool=p.tool, args=p.args, risk=tool.risk,
                               outcome="denied", conversation_id=p.conversation_id,
-                              confirmation_id=confirmation_id)
+                              confirmation_id=confirmation_id, origin=p.origin)
             return {"status": "denied", "tool": p.tool}
-        out = self._execute(tool, p.args, p.conversation_id, confirmation_id)
+        out = self._execute(tool, p.args, p.conversation_id, confirmation_id, p.origin)
         # The pending conversation travels back with the result. The caller may
         # ask the model to phrase an answer -- with tools=[] (see ollama_client
         # .chat_tools), so a tool result can never request another tool.
         return {"status": "executed", "messages": p.messages, "model": p.model, **out}
 
     def _execute(self, tool: Tool, args: dict, conv: Optional[str],
-                 cid: Optional[str]) -> dict:
+                 cid: Optional[str], origin: str = "local") -> dict:
         t0 = time.time()
         try:
             result = EXECUTOR.execute(tool, args)
         except ToolDenied as e:
             self.audit.record(tool=tool.name, args=args, risk=tool.risk,
                               outcome="blocked", conversation_id=conv,
-                              confirmation_id=cid, result_summary=str(e))
+                              confirmation_id=cid, origin=origin, result_summary=str(e))
             raise
         except Exception as e:
             self.audit.record(tool=tool.name, args=args, risk=tool.risk,
                               outcome="error", conversation_id=conv,
-                              confirmation_id=cid, result_summary=str(e),
+                              confirmation_id=cid, origin=origin, result_summary=str(e),
                               duration_ms=int((time.time() - t0) * 1000))
             raise ToolError(str(e)) from e
         ms = int((time.time() - t0) * 1000)
         self.audit.record(tool=tool.name, args=args, risk=tool.risk,
                           outcome="executed", conversation_id=conv,
                           confirmation_id=cid, result_summary=result,
-                          duration_ms=ms)
+                          duration_ms=ms, origin=origin)
         return {"tool": tool.name, "result": wrap_as_data(result), "duration_ms": ms}
 
 
