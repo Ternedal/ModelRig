@@ -20,7 +20,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.17.0"
+VERSION = "1.18.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -226,6 +226,93 @@ async def ingest_docx(req: IngestDocxReq) -> dict:
         "chunks_added": chunks,
         "total": store.count(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Kaliv Tools (V5 MVP). See KRAVSPEC_V5_TOOLS.md.
+#
+# Status codes follow the house rule -- one code, one meaning:
+#   400 bad args · 403 disabled · 404 unknown tool · 409/410 confirmation
+#   reused/expired · 501 layer not installed · 503 tool exists but failed
+# ---------------------------------------------------------------------------
+@app.get("/tools")
+def tools_list() -> dict:
+    """Registry + enabled state. Does no work: a status endpoint answers now."""
+    from . import tools as t
+    return {"enabled": t.GATE.enabled, "tools": t.GATE.list_tools(),
+            "tools_dir": t.tools_dir()}
+
+
+class ProposeReq(BaseModel):
+    tool: str
+    args: dict = Field(default_factory=dict)
+    conversation_id: str | None = None
+
+
+@app.post("/tools/propose")
+def tools_propose(req: ProposeReq) -> dict:
+    """Read tools run immediately. Write tools return a confirmation_id and
+    execute NOTHING until a human approves. The model never decides which."""
+    from . import tools as t
+    try:
+        return t.GATE.propose(req.tool, req.args, req.conversation_id)
+    except t.ToolDenied as e:
+        msg = str(e)
+        if msg.startswith("unknown tool"):
+            raise HTTPException(status_code=404, detail=msg)
+        if "disabled" in msg:
+            raise HTTPException(status_code=403, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+    except t.ToolError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+class ConfirmReq(BaseModel):
+    confirmation_id: str
+    decision: str = Field(pattern="^(approve|deny)$")
+
+
+@app.post("/tools/confirm")
+def tools_confirm(req: ConfirmReq) -> dict:
+    from . import tools as t
+    try:
+        return t.GATE.confirm(req.confirmation_id, req.decision)
+    except t.ToolDenied as e:
+        msg = str(e)
+        if "expired" in msg:
+            raise HTTPException(status_code=410, detail=msg)
+        if "already-used" in msg or "unknown" in msg:
+            raise HTTPException(status_code=409, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+    except t.ToolError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.get("/tools/audit")
+def tools_audit(limit: int = 50) -> dict:
+    """Append-only log of every proposal, approval, denial and failure."""
+    from . import tools as t
+    return {"entries": t.GATE.audit.recent(limit)}
+
+
+class ToolEnabledReq(BaseModel):
+    enabled: bool
+    tool: str | None = None  # omit to toggle the whole layer (kill switch)
+
+
+@app.post("/tools/enabled")
+def tools_enabled(req: ToolEnabledReq) -> dict:
+    from . import tools as t
+    if req.tool is None:
+        t.GATE.enabled = req.enabled
+    else:
+        if req.tool not in t.REGISTRY:
+            raise HTTPException(status_code=404, detail=f"unknown tool: {req.tool}")
+        if req.enabled:
+            t.GATE.disabled_tools.discard(req.tool)
+        else:
+            t.GATE.disabled_tools.add(req.tool)
+    return {"enabled": t.GATE.enabled, "tools": t.GATE.list_tools()}
 
 
 @app.post("/rag/query")

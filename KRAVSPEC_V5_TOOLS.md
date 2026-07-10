@@ -1,6 +1,6 @@
 # KRAVSPEC — V5 "Kaliv handler" (agent-laget)
 
-**Status:** UDKAST. Skal godkendes af Anders før første linje tool-kode.
+**Status:** ✅ GODKENDT af Anders 2026-07-10. MVP under implementering.
 **Skrevet:** 2026-07-10 · **Forudsætter:** v1.17.0
 **Roadmap:** `ROADMAP.md` §10 (V5), invarianter i §14
 
@@ -205,7 +205,46 @@ pr. tool*navn*, ikke pr. server, og beskrivelser vises til Anders første gang.
 **R4 — Audit-loggen som datalæk.** Den indeholder argumenter og resultater.
 Den skal aldrig forlade riggen, og `result_summary` afkortes.
 
-**Åbne spørgsmål — Anders skal svare:**
+### Anders' beslutninger (2026-07-10)
+
+> **Indkapsling:** "Den skal have adgang til det der er nødvendigt, om det så
+> er med en minimal risiko. Den risiko tager jeg gerne." Rigg'en er ikke
+> produktion og kører kun små backend-apps.
+>
+> **Konsekvens, skrevet ned mens vi er enige:** MVP'ens to tools kører i
+> worker-processen bag en eksplicit `Executor`-søm (§5b), uden OS-isolation.
+> Det er proportionalt: `rig_status` læser tal, `note_append` kan kun appende
+> til én fil i én mappe.
+>
+> ⚠️ **Betingelsen gælder stadig, fordi risikoen ændrer sig uden at nogen
+> beslutter det:** første tool der læser vilkårlige stier, og enhver
+> MCP-server Anders ikke selv har skrevet, kræver separat Windows-konto med
+> NTFS-ACL'er FØRST. Den dag har man travlt og husker ikke denne samtale.
+>
+> **Bekræftelsesporten er ikke omfattet af risikoaccepten.** Den værner mod
+> prompt injection — en anden trussel end adgang til maskinen. Den bliver.
+
+## 5b. Indkapsling og procesgrænser
+
+Tool-eksekvering går gennem et `Executor`-interface, ikke direkte kald.
+I dag: `InProcessExecutor`. Sømmen findes, så OS-hærdning kan hægtes på uden
+at rive arkitekturen op — en dags arbejde nu, en uges arbejde senere.
+
+| Niveau | Hvornår | Status |
+|---|---|---|
+| `InProcessExecutor` | MVP: `rig_status`, `note_append` | bygget |
+| Separat proces (pipe) | Før vilkårlige filstier | søm klar |
+| Egen Windows-konto + ACL | Før 3.-parts MCP-servere | ikke bygget |
+| Job Object (CPU/RAM-loft) | Sammen med ovenstående | ikke bygget |
+
+**Antagelser truffet uden svar** (Anders sagde "kom i gang"; ret dem hvis
+de er forkerte):
+- `note_append` skriver i `%USERPROFILE%\Documents\Kaliv\notes.md`
+  (overrides: `KALIV_TOOLS_DIR`).
+- Cloud-LLM'en må **ikke** foreslå tools. Tools er lokal magt.
+- Bekræftelse udløber efter 60 s. Timeout = afvisning.
+
+**Resterende åbne spørgsmål:**
 1. Hvilken mappe må `note_append` skrive i? (Foreslået: én dedikeret mappe,
    fx `%USERPROFILE%\\Documents\\Kaliv\\`.)
 2. Skal cloud-LLM'en overhovedet kunne foreslå tools? **Min anbefaling: nej

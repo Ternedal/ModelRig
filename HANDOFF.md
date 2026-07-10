@@ -355,9 +355,16 @@ git push <url> main:main
 - Flere dokumentformater (PPTX, HTML) — samme mønster som PDF/DOCX
 - Forbedringer til markdown-strip, chunking, fejlbeskeder
 
-**Kræver Anders' beslutning:**
-- `KRAVSPEC_V5_TOOLS.md` — agent-laget. Fem åbne spørgsmål i §12. Ingen
-  tool-kode skrives før spec'en er godkendt.
+**Agent-laget (V5) — MVP bygget i `v1.18.0`:**
+- Spec godkendt af Anders 10/7. `rig_status` (read) + `note_append` (write,
+  append-only, én mappe). Bekræftelsesport håndhævet i workeren, append-only
+  audit-log, kill switch. **Slået FRA som standard** (`KALIV_TOOLS_ENABLED=1`).
+- 27 tests grønne, inkl. T7/T8 (prompt injection). Kører nu i CI.
+- ⚠️ **Ikke i appen endnu.** Bekræftelseskortet mangler i UI'et, så
+  skrivende tools kan i praksis kun godkendes via `POST /tools/confirm`.
+  Det er næste release.
+- ⚠️ **Betingelsen står ved magt:** vilkårlige filstier eller 3.-parts
+  MCP-servere kræver separat Windows-konto + ACL'er FØRST (kravspec §5b).
 
 **Kræver Anders' test:**
 - Tap-to-stop + Kaliv-navnerebrand (bygges som v1.13.0)

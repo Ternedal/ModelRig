@@ -115,6 +115,11 @@ jobs:
       - name: Worker RAG
         run: PYTHONPATH=worker python3 tests/worker_rag.py
 
+      # T7/T8 are the prompt-injection tests. If these ever go red the tool
+      # layer is unsafe and the release must not ship.
+      - name: Worker tools (agent layer)
+        run: PYTHONPATH=worker python3 tests/worker_tools.py
+
   android-build:
     needs: server-tests
     runs-on: ubuntu-latest

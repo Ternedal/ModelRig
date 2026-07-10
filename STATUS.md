@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.17.0** — "Brandet møder dig fra første frame: `windowBackground` er charred black med ankh'en, så koldstart ikke blitzer platformens tema, og tom-tilstanden er mærke + KALIV-wordmark + 'Lokal intelligens. Privat.'". Follows 1.16.0 (Kaliv-paletten i hele UI'et), 1.15.0 (barge-in-kalibrering), 1.14.0 (PPTX/HTML-ingest), 1.13.0 (tap-to-stop + Kaliv-navn). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.18.0** — "Agent-laget (V5 MVP): Kaliv kan læse riggens tilstand og appende til sin notesfil. Skrivende handlinger kræver menneskelig bekræftelse hver gang, håndhævet i workeren — ikke i appen, ikke i prompten. Slået fra som standard". Follows 1.17.0 (splash + velkomstskærm), 1.16.0 (Kaliv-paletten), 1.15.0 (barge-in-kalibrering). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
