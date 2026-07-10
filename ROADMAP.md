@@ -479,7 +479,8 @@ uden at kunne se hinandens data; en gæsteprofil kan chatte men intet
                    │  │  Executor-søm        │ │
                    │  └──────────────────────┘ │
                    └───┬─────────┬─────────────┘
-                       │         │  kun LLM-trin · eksplicit toggle
+      embeddings + gen │         │  kun LLM-trin · eksplicit toggle
+      (altid lokalt)   │         │
                 ┌──────▼───┐  ┌──▼─────────────┐
                 │  Ollama  │  │  Ollama Cloud  │◀─ ─ appens direkte
                 │  :11434  │  │  (valgfrit) ✅ │     vej: uden om
@@ -513,6 +514,8 @@ kan hægtes på uden at rive arkitekturen op:
 - Ingen skrivende tool-handling uden eksplicit bekræftelse; alt i audit-log
 - Tools findes KUN i workeren. Appens direkte cloud-vej har ingen tools —
   der er intet at omgå, fordi der ikke er nogen dør på den vej
+- Embeddings bygges ALTID på den lokale Ollama. `oc.embed()` har hverken
+  `base_url` eller `api_key` — RAG-indekset kan ikke bygges over nettet
 - Én statuskode = én betydning; status-endpoints laver ikke arbejde
 - Faser lukkes med dato i docs; release-tags forbliver `v1.x`
 - CI bygger kun Windows + Android — aldrig Linux/macOS-desktop
