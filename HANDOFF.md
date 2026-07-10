@@ -393,7 +393,7 @@ git push <url> main:main
 - ⚠️ **Betingelsen står ved magt:** vilkårlige filstier eller 3.-parts
   MCP-servere kræver separat Windows-konto + ACL'er FØRST (kravspec §5b).
 
-**Testdækning (10/7):** worker 149 tests (unit 31 · rag 48 · tools 70) +
+**Testdækning (10/7):** worker 156 tests (unit 31 · rag 48 · tools 77) +
 Go `internal/httpapi` 4 tests. CI kører nu `go vet` og `go test ./...` —
 det gjorde den ikke før v1.23.1, så Go-koden var reelt utestet.
 

@@ -455,8 +455,19 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         conversationId: String? = null,
         cloudBaseUrl: String? = null,
         cloudKey: String? = null,
+        history: List<Pair<String, String>> = emptyList(),
     ): ToolTurn {
         val payload = JSONObject().put("message", message)
+        // Without history, turning Tools on made Kaliv amnesiac: "write down
+        // what we just discussed" had nothing to write. The rig trims it again
+        // on arrival; this is the polite bound, not the enforced one.
+        if (history.isNotEmpty()) {
+            val arr = JSONArray()
+            for ((role, content) in history) {
+                arr.put(JSONObject().put("role", role).put("content", content))
+            }
+            payload.put("history", arr)
+        }
         if (model != null) payload.put("model", model)
         if (conversationId != null) payload.put("conversation_id", conversationId)
         // Routing a cloud model THROUGH the rig is the only way it can propose

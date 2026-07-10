@@ -366,5 +366,41 @@ names = [t["function"]["name"] for t in T.ollama_tool_schema(g)]
 check("note_append" not in names,
       "T20: a disabled tool is not advertised -- it cannot ask to be re-enabled")
 
+# ---------------------------------------------------------------------------
+# T21: conversation history in tools mode. Without it, turning Tools on made
+# Kaliv amnesiac -- "write down what we just discussed" had nothing to write.
+# The bounds are enforced on the RIG, not by the client: a trusted client today
+# is an old APK tomorrow.
+# ---------------------------------------------------------------------------
+from app.main import _trim_history, ToolMsg, TOOL_HISTORY_MAX_MESSAGES, TOOL_HISTORY_MAX_CHARS  # noqa: E402
+
+check(_trim_history([]) == [], "T21: empty history is fine")
+
+many = [ToolMsg(role="user", content="x") for _ in range(50)]
+check(len(_trim_history(many)) == TOOL_HISTORY_MAX_MESSAGES,
+      "T21: history is capped by message count, server-side")
+
+# The tail is kept, not the head: recent turns are the ones that matter.
+tagged = [ToolMsg(role="user", content=str(i)) for i in range(30)]
+kept = _trim_history(tagged)
+check(kept[-1].content == "29", "T21: the newest turn survives trimming")
+check(kept[0].content == "10", "T21: the oldest turns are dropped, not the newest")
+
+huge = [ToolMsg(role="user", content="y" * 30_000) for _ in range(3)]
+check(len(_trim_history(huge)) == 1,
+      "T21: history is capped by character count too")
+check(sum(len(m.content) for m in _trim_history(huge)) > TOOL_HISTORY_MAX_CHARS,
+      "T21: a single oversized message is kept rather than silently emptied")
+
+# The system prompt is prepended AFTER trimming, so a long conversation can
+# never push it out of the context window.
+import inspect as _i  # noqa: E402
+from app import main as _M  # noqa: E402
+src = _i.getsource(_M.tools_chat)
+sys_pos = src.index('"role": "system"')
+hist_pos = src.index("_trim_history")
+check(sys_pos < hist_pos,
+      "T21: the system prompt is added before history, never evicted by it")
+
 print(f"\n===== TOOLS: {passed} passed, {failed} failed =====")
 sys.exit(0 if failed == 0 else 1)

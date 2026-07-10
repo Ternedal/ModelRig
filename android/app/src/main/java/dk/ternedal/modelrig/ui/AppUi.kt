@@ -950,12 +950,17 @@ private fun ChatScreen(
                         // cloud because it is the most restrictive mode.
                         useTools -> {
                             val viaCloud = mode == "cloud"
+                            // history minus the just-added user turn: the rig
+                            // appends that itself, and sending it twice makes
+                            // the model answer its own echo.
+                            val prior = history.dropLast(1)
                             val turn = ModelRigClient(store.baseUrl ?: "", store.token)
                                 .toolsChat(
                                     t,
                                     model = if (viaCloud) cModel else rigModel,
                                     cloudBaseUrl = if (viaCloud) "https://ollama.com" else null,
                                     cloudKey = if (viaCloud) store.cloudKey else null,
+                                    history = prior,
                                 )
                             if (turn.status == "confirmation_required") {
                                 proposal = turn

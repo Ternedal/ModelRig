@@ -20,7 +20,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.24.0"
+VERSION = "1.25.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -288,8 +288,17 @@ def tools_confirm(req: ConfirmReq) -> dict:
         raise HTTPException(status_code=503, detail=str(e))
 
 
+class ToolMsg(BaseModel):
+    role: str = Field(pattern="^(system|user|assistant)$")
+    content: str
+
+
 class ToolChatReq(BaseModel):
     message: str
+    # Conversation so far. Without it, switching Tools on silently made Kaliv
+    # amnesiac: "write down what we just discussed" had nothing to write.
+    # Capped server-side -- a client is not trusted to bound its own payload.
+    history: list[ToolMsg] = Field(default_factory=list)
     model: str | None = None
     conversation_id: str | None = None
     system: str | None = None
@@ -297,6 +306,24 @@ class ToolChatReq(BaseModel):
     # reads run either way. The key is never persisted -- per request only.
     cloud_base_url: str | None = None
     cloud_key: str | None = None
+
+
+# Bounds enforced here, not in the app. A trusted client today is an old APK
+# tomorrow, and an unbounded history is a way to push the system prompt out of
+# the context window entirely.
+TOOL_HISTORY_MAX_MESSAGES = 20
+TOOL_HISTORY_MAX_CHARS = 24_000
+
+
+def _trim_history(history: list) -> list:
+    """Keep the tail: recent turns matter most, and the system prompt is added
+    separately so a long conversation can never evict it."""
+    tail = history[-TOOL_HISTORY_MAX_MESSAGES:]
+    total = sum(len(m.content) for m in tail)
+    while len(tail) > 1 and total > TOOL_HISTORY_MAX_CHARS:
+        total -= len(tail[0].content)
+        tail = tail[1:]
+    return tail
 
 
 async def _final_answer(messages: list[dict], model: str | None,
@@ -329,6 +356,7 @@ async def tools_chat(req: ToolChatReq) -> dict:
     messages: list[dict] = []
     if req.system:
         messages.append({"role": "system", "content": req.system})
+    messages.extend(m.model_dump() for m in _trim_history(req.history))
     messages.append({"role": "user", "content": req.message})
 
     origin = "cloud" if req.cloud_key else "local"
