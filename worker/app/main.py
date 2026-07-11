@@ -21,7 +21,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.34.7"
+VERSION = "1.34.8"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -464,6 +464,8 @@ async def tools_chat(req: ToolChatReq) -> dict:
     no second chance to change them after approval.
     """
     from . import tools as t
+    _logger.info("level=info tools_chat=start model=%r rag=%s has_image=%s hist=%d",
+                 req.model, req.rag, bool(req.image_base64), len(req.history))
     if not t.GATE.enabled:
         raise HTTPException(status_code=403, detail="the tool layer is disabled")
 
@@ -516,12 +518,18 @@ async def tools_chat(req: ToolChatReq) -> dict:
     messages.append(user_msg)
 
     origin = "cloud" if req.cloud_key else "local"
+    _schema = t.ollama_tool_schema(t.GATE)
+    _logger.info("level=info tools_chat=calling_ollama model=%r n_tools=%d n_msgs=%d url=%r",
+                 req.model, len(_schema), len(messages), req.cloud_base_url or oc.OLLAMA_URL)
     try:
-        msg = await oc.chat_tools(messages, tools=t.ollama_tool_schema(t.GATE),
+        msg = await oc.chat_tools(messages, tools=_schema,
                                   model=req.model, base_url=req.cloud_base_url,
                                   api_key=req.cloud_key)
     except oc.OllamaError as e:
+        _logger.exception("level=error tools_chat=ollama_failed")
         raise HTTPException(status_code=502, detail=str(e))
+    _logger.info("level=info tools_chat=ollama_returned has_calls=%s content_len=%d",
+                 bool(msg.get("tool_calls")), len(msg.get("content", "")))
 
     calls = msg.get("tool_calls") or []
     if not calls:

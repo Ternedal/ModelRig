@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.34.7** — "Foerste agent-test paa riggen: alt timede ud ("modellen svarede ikke i tide"), ogsaa bart hej. Aarsag laest i koden: tools-mode gaar gennem den NON-streaming toolsChat-sti (maa have hele svaret for at beslutte tool-kald), og workeren satte ikke keep_alive — saa Ollama unloadede modellen mellem ture og hver tur betalte fuld kold reload (~5 GB i en 3060). keep_alive=30m tilfoejet paa alle Ollama-kald saa modellen bliver resident. Foerste kolde load er stadig langsomt; kun riggen viser dette". Follows 1.34.6 (launcher). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.34.8** — "DIAGNOSTIK: agent-ture timer ud i appen, men curl mod Ollama med tools svarer paa 0,5s — saa riggen er fin, fejlen er i worker-tools-stien. Hele koden laest og ser korrekt ud; hanget er runtime, ikke synligt i koden. Tilfoejet breadcrumb-logging i tools_chat (start -> calling_ollama -> ollama_returned) saa worker-vinduet viser praecis hvilket trin der fryser". Follows 1.34.7 (keep_alive). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
