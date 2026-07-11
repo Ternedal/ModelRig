@@ -464,8 +464,8 @@ async def tools_chat(req: ToolChatReq) -> dict:
     no second chance to change them after approval.
     """
     from . import tools as t
-    _logger.info("level=info tools_chat=start model=%r rag=%s has_image=%s hist=%d",
-                 req.model, req.rag, bool(req.image_base64), len(req.history))
+    _logger.info("level=info tools_chat=start model=%r rag=%s hist=%d",
+                 req.model, req.rag, len(req.history))
     if not t.GATE.enabled:
         raise HTTPException(status_code=403, detail="the tool layer is disabled")
 
