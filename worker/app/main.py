@@ -21,7 +21,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.34.11"
+VERSION = "1.34.12"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 store = DocStore()
@@ -470,6 +470,20 @@ async def tools_chat(req: ToolChatReq) -> dict:
         raise HTTPException(status_code=403, detail="the tool layer is disabled")
 
     messages: list[dict] = []
+    # A default tool-use nudge, always first. Smaller local models (hermes3:8b)
+    # will otherwise NARRATE a tool -- "Sure, I've created the note" -- as prose
+    # without emitting a structured tool_call, so nothing actually runs. The
+    # worker correctly ignores that prose (it only acts on tool_calls), but the
+    # user is told a lie. This tells the model to call the tool instead of
+    # describing it. Anders' own system prompt, if any, is appended after.
+    _tool_nudge = (
+        "You can perform actions by CALLING the provided tools. When the user "
+        "asks for something a tool can do (for example saving or appending a "
+        "note), you MUST call that tool with the right arguments. Do NOT claim "
+        "you have done it in prose -- only an actual tool call performs the "
+        "action. If no tool fits, answer normally."
+    )
+    messages.append({"role": "system", "content": _tool_nudge})
     if req.system:
         messages.append({"role": "system", "content": req.system})
     trimmed = _trim_history(req.history)

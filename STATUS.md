@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.34.10** — "Telefonen kunne ikke naa riggen: server-vinduet viste "listen tcp: lookup 0.0.0.0 : no such host" — et MELLEMRUM i bind-adressen (0.0.0.0 :8080). Aarsag: batch set MODELRIG_HOST=0.0.0.0 && cmd fanger det efterfoelgende mellemrum, saa host blev "0.0.0.0 ". Serveren lyttede aldrig. Fix: Go trimmer host defensivt + launcheren bruger citeret set. Plus launcheren slaar tools til og advarer om port-kollision (Errno 10048)". Follows 1.34.9 (tools-disabled besked). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.34.12** — "AGENT-LAGET VIRKER paa riggen: note skrevet til notes.md med tidsstempler, hele kaeden foreslaa->udfoer->skriv bevist. Men hermes3:8b hallucinerer nogle gange at have brugt et vaerktoej i prosa uden at kalde det (workeren ignorerer korrekt prosaen — kun tool_calls udfoerer). Tilfoejet default system-besked der beder modellen KALDE vaerktoejet i stedet for at beskrive det. Bind-fix bekraeftet: manuel 0.0.0.0-opstart uden mellemrum = telefonen naar riggen". Follows 1.34.11 (bind-fix). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
