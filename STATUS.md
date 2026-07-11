@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.34.12** — "AGENT-LAGET VIRKER paa riggen: note skrevet til notes.md med tidsstempler, hele kaeden foreslaa->udfoer->skriv bevist. Men hermes3:8b hallucinerer nogle gange at have brugt et vaerktoej i prosa uden at kalde det (workeren ignorerer korrekt prosaen — kun tool_calls udfoerer). Tilfoejet default system-besked der beder modellen KALDE vaerktoejet i stedet for at beskrive det. Bind-fix bekraeftet: manuel 0.0.0.0-opstart uden mellemrum = telefonen naar riggen". Follows 1.34.11 (bind-fix). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.34.13** — "Launcheren crashede med "was unexpected at this time" lige efter Ollama-tjekket: cmd mis-parser parentes-blokke med indlejrede citationstegn og bare &. Omskrevet med goto-labels og smaa genererede .cmd-filer, saa der ikke er indlejrede citationstegn eller bare & paa start-linjerne. Saetter MODELRIG_HOST rent (0.0.0.0 uden mellemrum) + KALIV_TOOLS_ENABLED=1". Follows 1.34.12 (public, CI virker). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
