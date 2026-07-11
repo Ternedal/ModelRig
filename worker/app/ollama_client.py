@@ -22,6 +22,14 @@ GEN_MODEL = os.getenv("MODELRIG_GEN_MODEL", "qwen2.5-coder:7b")
 # layers had to be raised.
 TIMEOUT = float(os.getenv("MODELRIG_OLLAMA_TIMEOUT", "600"))
 
+# Keep the model resident in VRAM between turns. Without this, Ollama unloads
+# it after each idle window, so every turn -- especially the non-streaming
+# tools path, which cannot show a token until generation finishes -- pays the
+# full cold reload (~5 GB into a 3060). On Anders' rig this surfaced as a 25s
+# /health and back-to-back tool turns timing out even at a 5 min client
+# timeout. "30m" holds it for half an hour idle; "-1" pins it, "0" unloads.
+KEEP_ALIVE = os.getenv("MODELRIG_OLLAMA_KEEP_ALIVE", "30m")
+
 
 class OllamaError(RuntimeError):
     """Any failure talking to Ollama (unreachable, non-200, malformed body)."""
@@ -32,7 +40,7 @@ async def embed(text: str, model: str | None = None) -> list[float]:
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as c:
             r = await c.post(f"{OLLAMA_URL}/api/embeddings",
-                             json={"model": model, "prompt": text})
+                             json={"model": model, "prompt": text, "keep_alive": KEEP_ALIVE})
     except httpx.HTTPError as e:
         raise OllamaError(f"cannot reach Ollama at {OLLAMA_URL}: {e}") from e
     if r.status_code != 200:
@@ -49,7 +57,7 @@ async def chat(messages: list[dict], model: str | None = None) -> str:
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as c:
             r = await c.post(f"{OLLAMA_URL}/api/chat",
-                             json={"model": model, "messages": messages, "stream": False})
+                             json={"model": model, "messages": messages, "stream": False, "keep_alive": KEEP_ALIVE})
     except httpx.HTTPError as e:
         raise OllamaError(f"cannot reach Ollama at {OLLAMA_URL}: {e}") from e
     if r.status_code != 200:
@@ -75,7 +83,7 @@ async def chat_tools(messages: list[dict], tools: list[dict],
     the follow-up turn after a tool result is made chain-free.
     """
     model = model or GEN_MODEL
-    payload: dict = {"model": model, "messages": messages, "stream": False}
+    payload: dict = {"model": model, "messages": messages, "stream": False, "keep_alive": KEEP_ALIVE}
     if tools:
         payload["tools"] = tools
     url = (base_url or OLLAMA_URL).rstrip("/")
@@ -110,7 +118,7 @@ async def chat_stream(messages: list[dict], model: str | None = None,
     client = httpx.AsyncClient(timeout=TIMEOUT)
     try:
         async with client.stream("POST", f"{url}/api/chat", headers=headers,
-                                 json={"model": model, "messages": messages, "stream": True}) as r:
+                                 json={"model": model, "messages": messages, "stream": True, "keep_alive": KEEP_ALIVE}) as r:
             if r.status_code != 200:
                 body = await r.aread()
                 raise OllamaError(f"chat failed ({r.status_code}): {body[:200]!r}")

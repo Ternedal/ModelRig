@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.34.5** — "Ikonet saa blodt ud paa launcheren: maalt var det ikke oplosning eller stoerrelse (ankh fylder ~86% af den synlige cirkel, kilde er 1024px) men KONTRAST — mork bronze-ankh paa naesten-sort tekstur gav 1.47:1. Omfarvet: mork=brand-guld (6.8:1), lys=dyb bronze (5.05:1); form og alpha uroert, farver holder sig i paletten. Mipmaps regenereret. JUDGEMENT CALL — omfarver et QA-godkendt asset; Anders kan vetoe". Follows 1.34.4 (RAG i menu). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.34.7** — "Foerste agent-test paa riggen: alt timede ud ("modellen svarede ikke i tide"), ogsaa bart hej. Aarsag laest i koden: tools-mode gaar gennem den NON-streaming toolsChat-sti (maa have hele svaret for at beslutte tool-kald), og workeren satte ikke keep_alive — saa Ollama unloadede modellen mellem ture og hver tur betalte fuld kold reload (~5 GB i en 3060). keep_alive=30m tilfoejet paa alle Ollama-kald saa modellen bliver resident. Foerste kolde load er stadig langsomt; kun riggen viser dette". Follows 1.34.6 (launcher). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
