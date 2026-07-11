@@ -36,8 +36,9 @@ data class KalivColors(
     val surface: Color,
     val surfaceHigh: Color,
     val codeSurface: Color,
-    val signal: Color,
+    val signal: Color,         // filled button / user-bubble fill (deep bronze)
     val signalPressed: Color,
+    val accent: Color,         // bronze text, links, focus (on the background)
     val amber: Color,
     val textHigh: Color,
     val textMuted: Color,
@@ -54,12 +55,13 @@ val KalivDarkColors = KalivColors(
     surface = Color(0xFF1B1612),
     surfaceHigh = Color(0xFF2A1E14),
     codeSurface = Color(0xFF080706),
-    signal = Color(0xFF8B6B3D),
-    signalPressed = Color(0xFF6E5330),
+    signal = Color(0xFF6E5330),       // deep bronze button fill; ivory text = 6.2:1 AA
+    signalPressed = Color(0xFF5A4526),
+    accent = Color(0xFF8B6B3D),       // brand bronze for text/links (4.0:1 on deep black)
     amber = Color(0xFFC8A864),
     textHigh = Color(0xFFF3EFE6),
     textMuted = Color(0xFFA89A82),
-    onSignal = Color(0xFF0B0A09),
+    onSignal = Color(0xFFF3EFE6),     // ivory on deep bronze = 6.2:1 (black failed AA at 4.0)
     success = Color(0xFF6E9E5E),
     danger = Color(0xFFCF6A5C),
     hairline = Color(0xFF3A2A1F),
@@ -72,12 +74,13 @@ val KalivLightColors = KalivColors(
     surface = Color(0xFFEFEAE0),
     surfaceHigh = Color(0xFFE6DFD2),
     codeSurface = Color(0xFFEAE3D5),
-    signal = Color(0xFF8B6B3D),
-    signalPressed = Color(0xFF6E5330),
+    signal = Color(0xFF6E5330),       // deep bronze button fill; ivory text = 6.2:1 AA
+    signalPressed = Color(0xFF5A4526),
+    accent = Color(0xFF5E4728),       // bronze link/accent text: 8.0:1 on ivory
     amber = Color(0xFFB69B73),
     textHigh = Color(0xFF2A2118),
     textMuted = Color(0xFF5A4831),
-    onSignal = Color(0xFF2A2118),
+    onSignal = Color(0xFFF3EFE6),     // ivory on deep bronze = 6.2:1 (charcoal failed AA at 3.2)
     success = Color(0xFF4F7A41),
     danger = Color(0xFFA33529),
     hairline = Color(0xFFCDBFA6),
@@ -120,8 +123,8 @@ private val KalivTypography = Typography(
         fontFamily = Display,
         fontSize = 20.sp, fontWeight = FontWeight.Bold, lineHeight = 26.sp,
     ),
-    bodyLarge = TextStyle(fontSize = 15.sp, lineHeight = 22.sp),
-    bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
+    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 24.sp),
+    bodyMedium = TextStyle(fontSize = 16.sp, lineHeight = 22.sp),
     labelSmall = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),
 )
 

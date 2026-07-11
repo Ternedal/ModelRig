@@ -50,12 +50,12 @@ fun MarkdownText(
     // Resolved here, in composition, and passed into the (non-composable)
     // inline builder -- links are bronze in both palettes but read from the
     // active theme so a future palette change carries through.
-    val linkColor = KalivTheme.colors.signal
+    val linkColor = KalivTheme.colors.accent
     Column(modifier) {
         blocks.forEachIndexed { i, block ->
             if (i > 0) Spacer(Modifier.height(6.dp))
             when (block) {
-                is Paragraph -> Text(inline(block.text, linkColor), color = color, fontSize = 15.sp, lineHeight = 22.sp)
+                is Paragraph -> Text(inline(block.text, linkColor), color = color, fontSize = 16.sp, lineHeight = 24.sp)
                 is Heading -> Text(
                     inline(block.text, linkColor),
                     color = color,
@@ -69,17 +69,17 @@ fun MarkdownText(
                     },
                 )
                 is Bullet -> Row {
-                    Text("•  ", color = color, fontSize = 15.sp, lineHeight = 22.sp)
-                    Text(inline(block.text, linkColor), color = color, fontSize = 15.sp, lineHeight = 22.sp)
+                    Text("•  ", color = color, fontSize = 16.sp, lineHeight = 24.sp)
+                    Text(inline(block.text, linkColor), color = color, fontSize = 16.sp, lineHeight = 24.sp)
                 }
                 is Numbered -> Row {
-                    Text("${block.number}. ", color = color, fontSize = 15.sp, lineHeight = 22.sp)
-                    Text(inline(block.text, linkColor), color = color, fontSize = 15.sp, lineHeight = 22.sp)
+                    Text("${block.number}. ", color = color, fontSize = 16.sp, lineHeight = 24.sp)
+                    Text(inline(block.text, linkColor), color = color, fontSize = 16.sp, lineHeight = 24.sp)
                 }
                 is Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
                     Box(Modifier.width(3.dp).fillMaxHeight().background(KalivTheme.colors.signal))
                     Spacer(Modifier.width(8.dp))
-                    Text(inline(block.text, linkColor), color = KalivTheme.colors.textMuted, fontSize = 15.sp, lineHeight = 22.sp)
+                    Text(inline(block.text, linkColor), color = KalivTheme.colors.textMuted, fontSize = 16.sp, lineHeight = 24.sp)
                 }
                 is Code -> CodeBlock(block.language, block.code)
                 Rule -> HorizontalDivider(color = MaterialTheme.colorScheme.outline)

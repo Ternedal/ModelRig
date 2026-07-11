@@ -17,7 +17,7 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
-        android:theme="@style/Theme.Kaliv">
+        android:theme="@style/Theme.Kaliv.Splash">
         <activity
             android:name=".MainActivity"
             android:windowSoftInputMode="adjustResize"

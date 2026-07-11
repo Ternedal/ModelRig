@@ -9,6 +9,19 @@
         <item name="android:windowBackground">@drawable/splash_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:colorBackground">@color/kaliv_charred_black</item>
+        <item name="android:colorBackground">@color/kaliv_splash_bg</item>
+    </style>
+
+    <!-- The launch theme the manifest points at. Android 12+ SplashScreen API:
+         a real branded splash (ankh on the mode's background), not just a window
+         background the system splash paints over. Colours resolve light/dark
+         from the system theme via values/ vs values-night/. postSplashScreenTheme
+         hands off to the app theme once Compose is up. -->
+    <style name="Theme.Kaliv.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/kaliv_splash_bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.Kaliv</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 </resources>

@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.32.0** — "Light mode. Appen havde kun et hårdkodet mørkt tema; nu er paletten et tema-opslag med to fulde sæt fra den QA-godkendte brand-pakke, skiftbart med en manuel toggle (⋮ → skift tema), gemt så den bliver stående når Android skifter ved solnedgang. Kontrast målt: bronze deles af begge modes, tekst PÅ bronze er mørkt blæk, aldrig hvidt. Splash + launcher-ikon får -night-varianter (systemstyret — OS'et vælger dem før appen kører)". Follows 1.31.0 (/health/full). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.33.0** — "UI-laget gjort færdigt MOD design-guiden (som jeg først havde sprunget over). Fejlene Anders fangede var reelle: tema-toggle lå i model-vælgeren i stedet for ⋮-menuen (usynlig i nogle tilstande), splash var wiret forældet, mipmap-ikonerne var ikke regenereret fra 1024px-assets. Alt rettet OG bygget denne gang: toggle i overflow-menuen, Android 12+ SplashScreen-API med Theme.Kaliv.Splash, fuld-opløsnings-mipmaps, wordmark i header, voice-status som card, 16sp brødtekst". Follows 1.32.0 (light mode). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

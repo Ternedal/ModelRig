@@ -1133,6 +1133,16 @@ private fun ChatScreen(
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // Kaliv wordmark in the header (design guide). Art swaps with the
+                // palette so it reads on both backgrounds.
+                Image(
+                    painter = painterResource(
+                        if (KalivTheme.colors.isDark) R.drawable.kaliv_wordmark_dark
+                        else R.drawable.kaliv_wordmark_light,
+                    ),
+                    contentDescription = "Kaliv",
+                    modifier = Modifier.height(26.dp).padding(end = 10.dp),
+                )
                 if (mode == "cloud") {
                     ModelChip("☁  $cloudModel  ▾", onClick = { onOpenCloudPicker() })
                 } else {
@@ -1174,21 +1184,6 @@ private fun ChatScreen(
                                     onClick = {
                                         bargeInEnabled = !bargeInEnabled
                                         store.bargeInEnabled = bargeInEnabled
-                                        modelMenu = false
-                                    },
-                                )
-                                // Light / dark. A manual choice (see TokenStore):
-                                // stays put when Android auto-switches at sunset.
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            if (darkMode) "☀ Skift til lyst tema" else "☾ Skift til mørkt tema",
-                                            color = KalivTheme.colors.textMuted,
-                                            fontSize = 13.sp,
-                                        )
-                                    },
-                                    onClick = {
-                                        onToggleDark(!darkMode)
                                         modelMenu = false
                                     },
                                 )
@@ -1343,6 +1338,17 @@ private fun ChatScreen(
                         DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
                         DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
                         DropdownMenuItem(text = { Text("Indstillinger") }, onClick = { overflow = false; onOpenSettings() })
+                        HorizontalDivider(color = KalivTheme.colors.hairline)
+                        // Light / dark. A manual choice (TokenStore.darkMode), so it
+                        // stays put when Android auto-switches at sunset. Lives in the
+                        // overflow menu next to Settings -- reachable in every mode,
+                        // unlike the model-picker dropdown it was wrongly placed in.
+                        DropdownMenuItem(
+                            text = {
+                                Text(if (darkMode) "☀  Lyst tema" else "☾  Mørkt tema")
+                            },
+                            onClick = { overflow = false; onToggleDark(!darkMode) },
+                        )
                     }
                 }
             }
@@ -1667,22 +1673,43 @@ private fun ChatScreen(
                     }
                 }
 
-                // Kaliv Voice status line (recording / working / error).
+                // Kaliv Voice status as a distinct card (design guide: "Voice-
+                // status skal kunne vises som separat card/state"), not a bare
+                // line of text. The card colour signals the state: an error is
+                // danger-tinted, an active turn is bronze.
                 if (recording || voiceBusy || voiceError != null) {
+                    val isError = voiceError != null && !recording && !voiceBusy
                     val vt = when {
-                        recording -> "🎙 Optager… tryk igen for at sende"
+                        recording -> "🎙  Optager… tryk igen for at sende"
                         speaking && bargeInEnabled && hasMicPermission ->
-                            "🔊 Kaliv taler… ⏹ afbryder · mik %.0f (top %.0f, grænse %d)"
+                            "🔊  Kaliv taler… ⏹ afbryder · mik %.0f (top %.0f, grænse %d)"
                                 .format(liveRms, peakRms, bargeInThreshold)
-                        speaking -> "🔊 Kaliv taler… tryk ⏹ for at afbryde"
-                        voiceBusy -> "🔊 Kaliv lytter og svarer… tryk ⏹ for at afbryde"
+                        speaking -> "🔊  Kaliv taler… tryk ⏹ for at afbryde"
+                        voiceBusy -> "🔊  Kaliv lytter og svarer… tryk ⏹ for at afbryde"
                         else -> "Stemme-fejl: ${voiceError.orEmpty()}"
                     }
-                    Text(
-                        vt,
-                        color = if (voiceError != null && !recording && !voiceBusy) KalivTheme.colors.danger else KalivTheme.colors.signal,
-                        fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp),
-                    )
+                    val accent = if (isError) KalivTheme.colors.danger else KalivTheme.colors.signal
+                    Surface(
+                        color = KalivTheme.colors.surfaceHigh,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp)
+                            .padding(bottom = 8.dp),
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            // a small state dot in the accent colour
+                            Box(
+                                Modifier.size(8.dp)
+                                    .background(accent, RoundedCornerShape(4.dp)),
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text(vt, color = accent, fontSize = 16.sp, lineHeight = 22.sp)
+                        }
+                    }
                 }
                 modelError?.let {
                     Text(it, color = KalivTheme.colors.danger, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
@@ -1700,7 +1727,7 @@ private fun ChatScreen(
                     // model choice is the user's.
                     if (mode != "rig" || !ragMode) {
                         Box(
-                            Modifier.size(44.dp).clickable(enabled = !busy, onClick = {
+                            Modifier.size(48.dp).clickable(enabled = !busy, onClick = {
                                 pendingImageError = null
                                 pickImage.launch(arrayOf("image/*"))
                             }),
@@ -1716,7 +1743,7 @@ private fun ChatScreen(
                         // becomes ⏹: the mic is busy anyway, so a separate stop
                         // button would just be another thing to aim at.
                         Box(
-                            Modifier.size(44.dp).clickable(enabled = !busy || voiceBusy, onClick = {
+                            Modifier.size(48.dp).clickable(enabled = !busy || voiceBusy, onClick = {
                                 voiceError = null
                                 if (voiceBusy) {
                                     stopVoiceTurn()
@@ -1754,7 +1781,7 @@ private fun ChatScreen(
                     Spacer(Modifier.width(6.dp))
                     if (busy) {
                         Box(
-                            Modifier.size(44.dp).clickable(onClick = { activeCall?.cancel() }),
+                            Modifier.size(48.dp).clickable(onClick = { activeCall?.cancel() }),
                             contentAlignment = Alignment.Center,
                         ) { StopGlyph(color = KalivTheme.colors.danger, modifier = Modifier.size(20.dp)) }
                     } else {
@@ -1762,7 +1789,7 @@ private fun ChatScreen(
                         // are often "what's in this?" with an image and no text).
                         val canSend = input.isNotBlank() || pendingImageB64 != null
                         Box(
-                            Modifier.size(44.dp).clickable(enabled = canSend, onClick = onSend),
+                            Modifier.size(48.dp).clickable(enabled = canSend, onClick = onSend),
                             contentAlignment = Alignment.Center,
                         ) { SendGlyph(color = if (canSend) KalivTheme.colors.signal else KalivTheme.colors.textMuted, modifier = Modifier.size(26.dp)) }
                     }

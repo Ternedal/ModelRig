@@ -23,8 +23,8 @@ android {
         applicationId = "dk.ternedal.modelrig"
         minSdk = 26
         targetSdk = 35
-        versionCode = 88          // monotonic, bumped every release (not tied to semver)
-        versionName = "1.32.0"
+        versionCode = 89          // monotonic, bumped every release (not tied to semver)
+        versionName = "1.33.0"
     }
 
     signingConfigs {
@@ -68,4 +68,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // Android 12+ splash. Without this the app only set windowBackground, which
+    // the system splash overrides on 12+ -- so on a Pixel there was effectively
+    // no branded splash. This API is the supported way to theme it.
+    implementation("androidx.core:core-splashscreen:1.0.1")
 }
