@@ -188,6 +188,12 @@ jobs:
           # bare tag was pushed instead. Harmless if another job won the race.
           gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes "" || true
           gh release upload "${{ github.ref_name }}" "modelrig-${{ github.ref_name }}.apk" --clobber
+          # Also upload under a STABLE, version-less name so the phone has one
+          # permanent link: github.com/Ternedal/ModelRig/releases/latest/download/kaliv-latest.apk
+          # always resolves to this newest build. Bookmark once, one-tap installs
+          # thereafter -- no navigating releases each time.
+          cp "modelrig-${{ github.ref_name }}.apk" "kaliv-latest.apk"
+          gh release upload "${{ github.ref_name }}" "kaliv-latest.apk" --clobber
 
   desktop-build:
     # Windows only -- the one desktop platform actually in use. The Windows

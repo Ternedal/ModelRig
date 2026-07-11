@@ -15,6 +15,10 @@ Hold `/health/full` åben i en fane. Det er din første diagnose ved *alt* neden
 
 ## 0. Start rig'en (tre vinduer)
 
+**Genvej:** kør `scripts\start-kaliv.bat` i stedet — den starter alle tre
+processer korrekt (inkl. `MODELRIG_HOST=0.0.0.0`) og kører `/health/full` til
+sidst. Se `scripts/START_HERE.md`. Trinene herunder er den manuelle vej.
+
 Som HANDOFF §2. Til kold-start-testen i trin 2 er det vigtigt at du **ikke**
 tilføjer manuelle PATH-linjer i worker-vinduet — vi tester netop at den ikke
 længere er nødvendig.
