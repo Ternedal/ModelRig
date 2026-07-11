@@ -2382,11 +2382,15 @@ private fun ModelChip(label: String, onClick: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(20.dp),
         color = KalivTheme.colors.surfaceHigh,
-        // 48dp touch target (design guide), even though the pill looks smaller.
+        // 48dp touch target (design guide). heightIn on the Surface gives the
+        // height; the inner Box centres the label WITHOUT fillMaxHeight -- that
+        // was filling the parent Row's unbounded height and stretching the whole
+        // header down the screen (v1.34.0 regression).
         modifier = Modifier.heightIn(min = 48.dp).clickable(onClick = onClick),
     ) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxHeight()) {
+        Box(contentAlignment = Alignment.Center) {
             Text(label, color = KalivTheme.colors.textHigh, fontSize = 15.sp,
+                maxLines = 1,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
         }
     }

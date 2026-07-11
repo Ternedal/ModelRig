@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.34.0** — "De tre målbare guide-afvigelser Anders krævede lukket: (1) tekstureret splash — OS-splash-API'et tillader kun flad farve + ikon, så teksturen er nu en in-app Compose-splash med brand-teksturen bag mærket; (2) Viden/Knowledge som selvstændig sektion i menuen, koblet til rigtig RAG-kilde-liste + ingest; (3) touch-target-gennemgang — ModelChip fik 48dp. Verificeret i APK". Follows 1.33.0 (UI mod guiden). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.34.1** — "Kritisk layout-fix: min touch-target-ændring i v1.34.0 satte fillMaxHeight() paa en Box inde i header-raekken, som ikke har fast hoejde — chippen kraevede uendelig hoejde og straekte HELE top-baren ned midt paa skaermen. Anders fangede det med ét skaermbillede. Praecis den klasse fejl kun en rigtig skaerm viser". Follows 1.34.0 (guide-huller). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
