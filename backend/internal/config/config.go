@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"encoding/json"
 	"os"
 	"strconv"
@@ -8,7 +9,7 @@ import (
 )
 
 // Version is the ModelRig backend version.
-const Version = "1.34.9"
+const Version = "1.34.10"
 
 // Config holds the effective runtime configuration.
 type Config struct {
@@ -109,7 +110,7 @@ func applyFile(c *Config, path string) error {
 }
 
 func applyEnv(c *Config) {
-	if v := os.Getenv("MODELRIG_HOST"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("MODELRIG_HOST")); v != "" {
 		c.ServerHost = v
 	}
 	if v := os.Getenv("MODELRIG_PORT"); v != "" {
@@ -143,7 +144,7 @@ func applyEnv(c *Config) {
 
 // Addr returns host:port for ListenAndServe.
 func (c Config) Addr() string {
-	return c.ServerHost + ":" + strconv.Itoa(c.ServerPort)
+	return strings.TrimSpace(c.ServerHost) + ":" + strconv.Itoa(c.ServerPort)
 }
 
 // IsLoopback reports whether the bind host is loopback (a LAN footgun).

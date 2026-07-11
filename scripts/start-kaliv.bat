@@ -43,8 +43,16 @@ if not exist "%REPO%\worker\app\main.py" (
     echo          Ligger start-kaliv.bat i den rigtige repo-kopi?
     pause & exit /b 1
 )
-echo   [2/3] starter worker (port 8099)...
-start "Kaliv worker" cmd /k "cd /d "%REPO%" && set PYTHONPATH=%REPO%\worker && python -m uvicorn app.main:app --host 127.0.0.1 --port 8099"
+curl -s -o nul http://127.0.0.1:8099/health
+if not errorlevel 1 (
+    echo   [2/3] [ADVARSEL] noget lytter allerede paa 8099 -- en gammel worker koerer maaske.
+    echo         Luk det gamle worker-vindue foerst, ellers bruger appen den GAMLE worker.
+    echo         Trykker du en tast, springer jeg denne worker over.
+    pause >nul
+) else (
+    echo   [2/3] starter worker med tools slaaet til (port 8099)...
+    start "Kaliv worker" cmd /k "cd /d "%REPO%" && set "KALIV_TOOLS_ENABLED=1"& set "PYTHONPATH=%REPO%\worker"& python -m uvicorn app.main:app --host 127.0.0.1 --port 8099"
+)
 
 :: --- 3. Server (Go exe) ----------------------------------------------------
 :: The exe is a CI artifact. Look next to this script, then in the repo root,
@@ -60,7 +68,7 @@ if "%SRV%"=="" (
     echo             set MODELRIG_HOST=0.0.0.0 ^&^& modelrig-server-windows-x64.exe
 ) else (
     echo   [3/3] starter server: %SRV%
-    start "Kaliv server" cmd /k "set MODELRIG_HOST=0.0.0.0 && "%SRV%""
+    start "Kaliv server" cmd /k "set "MODELRIG_HOST=0.0.0.0"& "%SRV%""
 )
 
 :: --- 4. Health check -------------------------------------------------------
