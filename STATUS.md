@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.33.0** — "UI-laget gjort færdigt MOD design-guiden (som jeg først havde sprunget over). Fejlene Anders fangede var reelle: tema-toggle lå i model-vælgeren i stedet for ⋮-menuen (usynlig i nogle tilstande), splash var wiret forældet, mipmap-ikonerne var ikke regenereret fra 1024px-assets. Alt rettet OG bygget denne gang: toggle i overflow-menuen, Android 12+ SplashScreen-API med Theme.Kaliv.Splash, fuld-opløsnings-mipmaps, wordmark i header, voice-status som card, 16sp brødtekst". Follows 1.32.0 (light mode). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.34.0** — "De tre målbare guide-afvigelser Anders krævede lukket: (1) tekstureret splash — OS-splash-API'et tillader kun flad farve + ikon, så teksturen er nu en in-app Compose-splash med brand-teksturen bag mærket; (2) Viden/Knowledge som selvstændig sektion i menuen, koblet til rigtig RAG-kilde-liste + ingest; (3) touch-target-gennemgang — ModelChip fik 48dp. Verificeret i APK". Follows 1.33.0 (UI mod guiden). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

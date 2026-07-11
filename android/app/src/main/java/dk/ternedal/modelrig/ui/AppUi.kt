@@ -22,6 +22,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
@@ -48,7 +49,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class Screen { Setup, Chat, Convos, Models, CloudPicker }
+private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, CloudPicker }
 
 @Composable
 fun AppUi() {
@@ -59,9 +60,10 @@ fun AppUi() {
     // it and the whole tree recomposes into the other palette live -- no restart.
     var darkMode by remember { mutableStateOf(store.darkMode) }
     ModelRigTheme(dark = darkMode) {
-        var screen by remember {
-            mutableStateOf(if (store.hasRig || store.hasCloud) Screen.Chat else Screen.Setup)
-        }
+        // Launch on the textured splash (design guide: texture in hero/splash/
+        // icon). The OS SplashScreen API only allows a solid colour + centred
+        // icon, so the TEXTURE has to be an in-app splash drawn by Compose.
+        var screen by remember { mutableStateOf(Screen.Splash) }
         // conversation to open in ChatScreen; null = start fresh / latest
         var openConvId by remember { mutableStateOf(db.latestConversationId()) }
         // bumped when the cloud model is changed elsewhere (picker), so
@@ -70,6 +72,9 @@ fun AppUi() {
 
         Surface(color = KalivTheme.colors.background, modifier = Modifier.fillMaxSize()) {
             when (screen) {
+                Screen.Splash -> SplashScreen(onDone = {
+                    screen = if (store.hasRig || store.hasCloud) Screen.Chat else Screen.Setup
+                })
                 Screen.Setup -> SetupScreen(store, db, onDone = { screen = Screen.Chat })
                 Screen.Chat -> ChatScreen(
                     store, db, openConvId, cloudModelTick,
@@ -78,6 +83,7 @@ fun AppUi() {
                     onOpenSettings = { screen = Screen.Setup },
                     onOpenConversations = { screen = Screen.Convos },
                     onOpenModels = { screen = Screen.Models },
+                    onOpenKnowledge = { screen = Screen.Knowledge },
                     onOpenCloudPicker = { screen = Screen.CloudPicker },
                     onConvChanged = { openConvId = it },
                 )
@@ -88,6 +94,7 @@ fun AppUi() {
                     onBack = { screen = Screen.Chat },
                 )
                 Screen.Models -> ModelsScreen(store, onBack = { screen = Screen.Chat })
+                Screen.Knowledge -> KnowledgeScreen(store, onBack = { screen = Screen.Chat })
                 Screen.CloudPicker -> CloudModelPickerScreen(
                     store,
                     onPicked = { cloudModelTick++; screen = Screen.Chat },
@@ -557,6 +564,7 @@ private fun ChatScreen(
     onOpenSettings: () -> Unit,
     onOpenConversations: () -> Unit,
     onOpenModels: () -> Unit,
+    onOpenKnowledge: () -> Unit,
     onOpenCloudPicker: () -> Unit,
     onConvChanged: (Long?) -> Unit,
 ) {
@@ -1337,6 +1345,7 @@ private fun ChatScreen(
                         })
                         DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
                         DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
+                        DropdownMenuItem(text = { Text("Viden") }, onClick = { overflow = false; onOpenKnowledge() })
                         DropdownMenuItem(text = { Text("Indstillinger") }, onClick = { overflow = false; onOpenSettings() })
                         HorizontalDivider(color = KalivTheme.colors.hairline)
                         // Light / dark. A manual choice (TokenStore.darkMode), so it
@@ -1936,6 +1945,168 @@ private fun ConversationsScreen(
  * management endpoints, and this screen isn't shown as a cloud-mode option.
  */
 @Composable
+private fun SplashScreen(onDone: () -> Unit) {
+    // The textured launch screen. The design guide calls for texture in the
+    // splash; the OS SplashScreen API only permits a flat colour plus a centred
+    // icon, so the texture is drawn here, in Compose, over the brand ground the
+    // OS splash already faded in. Shown briefly, then hands off to the app.
+    val dark = KalivTheme.colors.isDark
+    LaunchedEffect(Unit) {
+        delay(900)
+        onDone()
+    }
+    Box(Modifier.fillMaxSize().background(KalivTheme.colors.background)) {
+        // full-bleed brand texture, dimmed so the mark stays legible
+        Image(
+            painter = painterResource(
+                if (dark) R.drawable.kaliv_splash_texture_dark
+                else R.drawable.kaliv_splash_texture_light,
+            ),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            alpha = if (dark) 0.55f else 0.40f,
+            modifier = Modifier.fillMaxSize(),
+        )
+        Column(
+            Modifier.fillMaxSize().padding(32.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Image(
+                painter = painterResource(R.drawable.ic_launcher_foreground),
+                contentDescription = null,
+                modifier = Modifier.size(160.dp),
+            )
+            Text(
+                "KALIV",
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                fontSize = 34.sp, fontWeight = FontWeight.Bold,
+                color = KalivTheme.colors.textHigh, letterSpacing = 10.sp,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Lokal intelligens. Privat.",
+                color = KalivTheme.colors.textMuted, fontSize = 16.sp, letterSpacing = 1.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun KnowledgeScreen(store: TokenStore, onBack: () -> Unit) {
+    // "Knowledge" as its own section (design guide navigation list). Shows the
+    // rig's RAG sources -- the documents Kaliv can draw on -- and adds to them
+    // with the same ingest contract the chat composer uses.
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var sources by remember { mutableStateOf<List<String>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var status by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    fun refresh() {
+        loading = true
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRagSources() }
+            }
+            loading = false
+            sources = r.getOrDefault(emptyList())
+            error = r.exceptionOrNull()?.let { friendlyError(it) }
+        }
+    }
+    LaunchedEffect(Unit) { refresh() }
+
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        status = "Læser fil…"; error = null
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val resolver = context.contentResolver
+                    var name = uri.lastPathSegment ?: "dokument"
+                    resolver.query(uri, null, null, null, null)?.use { c ->
+                        val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (idx >= 0 && c.moveToFirst()) name = c.getString(idx)
+                    }
+                    val mime = resolver.getType(uri) ?: ""
+                    val lower = name.lowercase()
+                    val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw RuntimeException("kunne ikke læse filen")
+                    if (bytes.isEmpty()) throw RuntimeException("filen er tom")
+                    val client = ModelRigClient(store.baseUrl ?: "", store.token)
+                    when {
+                        mime == "application/pdf" || lower.endsWith(".pdf") -> name to client.ingestPdf(name, bytes)
+                        lower.endsWith(".docx") -> name to client.ingestDocx(name, bytes)
+                        lower.endsWith(".pptx") -> name to client.ingestPptx(name, bytes)
+                        lower.endsWith(".html") || lower.endsWith(".htm") -> name to client.ingestHtml(name, bytes)
+                        else -> name to client.ingestText(name, bytes.toString(Charsets.UTF_8))
+                    }
+                }
+            }
+            r.onSuccess { (name, res) -> status = "Ingesteret: $name (${res.chunksAdded} chunks)"; refresh() }
+            r.onFailure { status = null; error = friendlyError(it) }
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(KalivTheme.colors.background)) {
+        Surface(color = KalivTheme.colors.surface, tonalElevation = 2.dp) {
+            Row(
+                Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // 48dp touch target (design guide minimum)
+                TextButton(onClick = onBack, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text("‹ Tilbage", color = KalivTheme.colors.signal, fontSize = 16.sp)
+                }
+                Spacer(Modifier.weight(1f))
+                Text("Viden", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
+                Spacer(Modifier.weight(1f))
+                TextButton(
+                    onClick = { pick.launch(arrayOf("*/*")) },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) { Text("+ Tilføj", color = KalivTheme.colors.signal, fontSize = 16.sp) }
+            }
+        }
+        status?.let {
+            Text(it, color = KalivTheme.colors.signal, fontSize = 14.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        }
+        error?.let {
+            Text(it, color = KalivTheme.colors.danger, fontSize = 14.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        }
+        when {
+            loading -> Text("Henter…", color = KalivTheme.colors.textMuted, fontSize = 16.sp,
+                modifier = Modifier.padding(16.dp))
+            sources.isEmpty() -> Column(Modifier.fillMaxWidth().padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Ingen dokumenter endnu.", color = KalivTheme.colors.textHigh, fontSize = 16.sp)
+                Spacer(Modifier.height(6.dp))
+                Text("Tilføj PDF, DOCX, PPTX, HTML eller tekst, så kan Kaliv trække på dem.",
+                    color = KalivTheme.colors.textMuted, fontSize = 16.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+            else -> androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize()) {
+                items(sources.size) { i ->
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("📄", fontSize = 18.sp)
+                        Spacer(Modifier.width(12.dp))
+                        Text(sources[i], color = KalivTheme.colors.textHigh, fontSize = 16.sp)
+                    }
+                    HorizontalDivider(color = KalivTheme.colors.hairline)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val client = remember { ModelRigClient(store.baseUrl ?: "", store.token) }
@@ -2211,9 +2382,13 @@ private fun ModelChip(label: String, onClick: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(20.dp),
         color = KalivTheme.colors.surfaceHigh,
-        modifier = Modifier.clickable(onClick = onClick),
+        // 48dp touch target (design guide), even though the pill looks smaller.
+        modifier = Modifier.heightIn(min = 48.dp).clickable(onClick = onClick),
     ) {
-        Text(label, color = KalivTheme.colors.textHigh, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxHeight()) {
+            Text(label, color = KalivTheme.colors.textHigh, fontSize = 15.sp,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
+        }
     }
 }
 
