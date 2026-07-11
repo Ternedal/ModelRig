@@ -1151,6 +1151,16 @@ private fun ChatScreen(
                     contentDescription = "Kaliv",
                     modifier = Modifier.height(26.dp).padding(end = 10.dp),
                 )
+                // The model + mode controls live in a weighted, horizontally
+                // scrollable strip. Non-weighted siblings (source badge, Skift,
+                // the overflow menu) are measured first, so this strip only gets
+                // the LEFTOVER width and shrinks/scrolls -- it can never push the
+                // overflow button (which holds Settings) off the right edge, the
+                // way a plain Row of six items did on a phone-width screen.
+                Row(
+                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                 if (mode == "cloud") {
                     ModelChip("☁  $cloudModel  ▾", onClick = { onOpenCloudPicker() })
                 } else {
@@ -1327,7 +1337,8 @@ private fun ChatScreen(
                         }
                     }
                 }
-                Spacer(Modifier.weight(1f))
+                }  // end scrollable model/mode strip
+                Spacer(Modifier.width(8.dp))
                 SourceBadge(mode)
                 if (hasRig && hasCloud) {
                     TextButton(

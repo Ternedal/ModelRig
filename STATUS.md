@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.34.1** — "Kritisk layout-fix: min touch-target-ændring i v1.34.0 satte fillMaxHeight() paa en Box inde i header-raekken, som ikke har fast hoejde — chippen kraevede uendelig hoejde og straekte HELE top-baren ned midt paa skaermen. Anders fangede det med ét skaermbillede. Praecis den klasse fejl kun en rigtig skaerm viser". Follows 1.34.0 (guide-huller). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.34.2** — "Indstillinger var utilgaengelig: header-raekken havde seks faste elementer (wordmark, model-chip, RAG, Rig-badge, Skift, ⋮) som ikke passer paa en telefonbredde, saa ⋮-knappen — hvor Indstillinger bor — blev klippet ud over hoejre kant. Nu: wordmark og ⋮ fast, model/mode-kontroller i en scrollbar midte der krymper i stedet for at skubbe ⋮ ud. Anders fandt det ved at lede efter indstillinger". Follows 1.34.1 (header-hoejde-fix). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
