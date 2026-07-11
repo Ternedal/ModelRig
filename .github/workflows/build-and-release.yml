@@ -151,6 +151,12 @@ jobs:
       - name: Worker backup/restore
         run: PYTHONPATH=worker python3 tests/worker_backup.py
 
+      # Proves data files anchor to a stable root -- guards the working-dir
+      # footgun (relative paths that emptied the RAG index / reset the kill
+      # switch / split the audit log when launched from a different folder).
+      - name: Worker data paths
+        run: PYTHONPATH=worker python3 tests/worker_paths.py
+
   android-build:
     needs: server-tests
     runs-on: ubuntu-latest

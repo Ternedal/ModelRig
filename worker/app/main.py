@@ -21,14 +21,16 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.34.14"
+VERSION = "1.34.15"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
+from . import paths as _paths
 store = DocStore()
 
 # Structured request logging with a request id that the backend propagates via
 # X-Request-ID, so one request can be traced across backend + worker logs.
 _logger = pylog.getLogger("modelrig.worker")
+_logger.info("level=info data_root=%s", _paths.data_root())
 if not _logger.handlers:
     _h = pylog.StreamHandler(sys.stdout)
     _h.setFormatter(pylog.Formatter("%(asctime)s %(message)s"))

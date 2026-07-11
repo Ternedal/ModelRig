@@ -13,7 +13,10 @@ import sqlite3
 import threading
 import time
 
-DB_PATH = os.getenv("MODELRIG_DB", "./modelrig-rag.db")
+from . import paths as _paths
+# Anchored under the data root so a worker started from a different folder
+# does not read an EMPTY index (the 401 footgun, applied to knowledge).
+DB_PATH = _paths.resolve("./modelrig-rag.db", env="MODELRIG_DB")
 
 
 class DocStore:

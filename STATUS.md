@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.34.14** — "Telefonen fik 401 (parring udloebet): bind virker nu (telefonen NAAR riggen), men serveren afviste den. Aarsag: DataPath var ./modelrig-data.json — RELATIV til opstartsmappen, saa naar serveren startes fra forskellige mapper (Desktop vs repo vs launcher) findes en anden/tom token-fil, og den parrede telefon faar 401. Fix: ResolveDataPath ankrer relativ sti paa exe-mappen, saa det er samme fil hver gang. Startup-log viser nu device-store-stien". Follows 1.34.13 (launcher). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.34.15** — "HAERDNING (autonom nat-runde): jagtede 401-fejlens moenster — relative data-stier — andre steder. Fandt DEN SAMME faelde i RAG-index, audit-DB og tools-state (alle default ./...), som ville tomme videns-basen / nulstille kill-switchen / splitte audit-loggen naar workeren startes fra en anden mappe. Nyt paths.py ankrer alt under en stabil data-rod (KALIV_DATA_DIR / %LOCALAPPDATA%\Kaliv); env-override og absolutte stier uroert (bagudkompatibelt). 12 nye tests, mutationstjekket, i CI. data_root logges ved opstart". Follows 1.34.14 (device-token sti). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

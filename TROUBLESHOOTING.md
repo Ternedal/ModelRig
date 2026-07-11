@@ -89,3 +89,15 @@ under test. **Start altid med `/health/full`** (launcheren kører det, eller
 - **Årsag:** cuBLAS/CTranslate2 finder ikke sine DLL'er (Windows PATH). Fixet i
   v1.12.3 (prepender nvidia-bin til PATH før modellen loades).
 - **Hvis cpu:** send worker-loggens traceback — det er en PATH/DLL-sag.
+
+## RAG-dokumenter "forsvinder" / kill-switch nulstiller sig / audit-log har huller
+
+- **Symptom:** ingesteret viden er pludselig væk, eller Tools er tændt igen efter
+  du slog det fra, eller handlingsloggen mangler rækker.
+- **Årsag:** før v1.34.15 defaultede RAG-index, tools-state og audit-DB til
+  RELATIVE stier (som 401-fælden). Startet workeren fra en anden mappe → en
+  anden/tom fil. Fra v1.34.15 ankres alt under en stabil data-rod
+  (`%LOCALAPPDATA%\Kaliv`, eller `KALIV_DATA_DIR`). Se `data_root=<sti>` i
+  worker-loggen ved opstart.
+- **Fix:** kør v1.34.15+ workeren. Gamle filer i tidligere opstartsmapper kan
+  flyttes ind i data-roden hvis du vil beholde dem.

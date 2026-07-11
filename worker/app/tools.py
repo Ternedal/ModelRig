@@ -41,8 +41,12 @@ Risk = Literal["read", "write"]
 # ago should not authorise an action proposed since.
 CONFIRM_TTL_SECONDS = 60
 
-_AUDIT_DB = os.getenv("KALIV_AUDIT_DB", "./kaliv-audit.db")
-_STATE_FILE = os.getenv("KALIV_TOOLS_STATE", "./kaliv-tools-state.json")
+from . import paths as _paths
+# Anchored under the data root (see paths.py): a relative default meant the
+# audit log split across files and the kill-switch state silently reset when
+# the worker was launched from a different directory.
+_AUDIT_DB = _paths.resolve("./kaliv-audit.db", env="KALIV_AUDIT_DB")
+_STATE_FILE = _paths.resolve("./kaliv-tools-state.json", env="KALIV_TOOLS_STATE")
 
 
 def tools_dir() -> str:

@@ -60,7 +60,8 @@ class Item:
 
 
 def _rag_db() -> str:
-    return os.getenv("MODELRIG_DB", "./modelrig-rag.db")
+    from . import paths as _paths
+    return _paths.resolve("./modelrig-rag.db", env="MODELRIG_DB")
 
 
 def _backend_data() -> str:
@@ -73,8 +74,8 @@ def items() -> list[Item]:
     return [
         Item("rag.db", _rag_db(), "file", required=False),
         Item("data.json", _backend_data(), "file", required=False),
-        Item("audit.db", os.getenv("KALIV_AUDIT_DB", "./kaliv-audit.db"), "file", required=False),
-        Item("tools-state.json", os.getenv("KALIV_TOOLS_STATE", "./kaliv-tools-state.json"), "file", required=False),
+        Item("audit.db", __import__("app.paths", fromlist=["resolve"]).resolve("./kaliv-audit.db", env="KALIV_AUDIT_DB"), "file", required=False),
+        Item("tools-state.json", __import__("app.paths", fromlist=["resolve"]).resolve("./kaliv-tools-state.json", env="KALIV_TOOLS_STATE"), "file", required=False),
         Item("notes", _tools.tools_dir(), "dir", required=False),
     ]
 
