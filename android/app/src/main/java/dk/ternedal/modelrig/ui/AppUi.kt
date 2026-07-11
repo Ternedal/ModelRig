@@ -540,6 +540,11 @@ private fun friendlyError(msg: String): String {
     return when {
         msg.contains("ingen cloud-nøgle") ->
             "Ingen cloud-nøgle gemt. Tilføj en under Indstillinger."
+        // Tool layer off on the rig (KALIV_TOOLS_ENABLED not set). This was
+        // surfacing as a misleading "modellen svarede ikke i tide" -- name the
+        // real cause so nobody chases a timeout that never existed.
+        msg.contains("tool layer is disabled") || msg.contains("(403)") ->
+            "Tool-laget er slået fra på rig'en. Start workeren med KALIV_TOOLS_ENABLED=1."
         msg.contains("(401)") ->
             "Ikke godkendt. Parringen er nok udløbet — genpar enheden under Indstillinger."
         msg.contains("(404)") ->

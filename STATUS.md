@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.34.8** — "DIAGNOSTIK: agent-ture timer ud i appen, men curl mod Ollama med tools svarer paa 0,5s — saa riggen er fin, fejlen er i worker-tools-stien. Hele koden laest og ser korrekt ud; hanget er runtime, ikke synligt i koden. Tilfoejet breadcrumb-logging i tools_chat (start -> calling_ollama -> ollama_returned) saa worker-vinduet viser praecis hvilket trin der fryser". Follows 1.34.7 (keep_alive). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.34.9** — "LOEST: agent-turene fejlede fordi KALIV_TOOLS_ENABLED=1 ikke var sat paa riggen — tool-laget er fra som standard (opt-in sikkerhedsdesign). Bevist med curl mod /tools/chat: svarede OEJEBLIKKELIGT med "the tool layer is disabled". Der var aldrig en timeout i koden. Rettet den misvisende fejlbesked: appen sagde "modellen svarede ikke i tide" i stedet for at sige at tools var slaaet fra". Follows 1.34.8 (diagnostik). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
