@@ -1205,6 +1205,45 @@ private fun ChatScreen(
                                         modelMenu = false
                                     },
                                 )
+                                // RAG: a capability toggle, grouped here with
+                                // Tools and Voice (all "what can this model do")
+                                // rather than crammed into the header, where it
+                                // did not fit on a phone and got scrolled out of
+                                // sight. Rig mode only -- cloud has no RAG.
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (ragMode) "⌕ RAG: til" else "⌕ RAG: fra",
+                                            color = if (ragMode) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
+                                            fontSize = 13.sp,
+                                        )
+                                    },
+                                    onClick = {
+                                        val on = !ragMode
+                                        ragMode = on
+                                        if (on) scope.launch {
+                                            val res = withContext(Dispatchers.IO) {
+                                                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRagSources() }
+                                            }
+                                            res.onSuccess { ragSources = it }
+                                        }
+                                        modelMenu = false
+                                    },
+                                )
+                                // Source filter + add-document, shown only when RAG
+                                // is on. Opens the same source menu the header chip
+                                // used to.
+                                if (ragMode) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                ragSourceFilter?.let { "⌕ Kilde: $it" } ?: "⌕ Kilder: alle",
+                                                color = KalivTheme.colors.textMuted, fontSize = 13.sp,
+                                            )
+                                        },
+                                        onClick = { modelMenu = false; ragSourceMenu = true },
+                                    )
+                                }
                                 // Kaliv Tools. Off by default, and the rig has its
                                 // own kill switch on top: two locks, both opt-in.
                                 DropdownMenuItem(
@@ -1302,39 +1341,26 @@ private fun ChatScreen(
                         }
                     }
                 }
-                if (mode == "rig") {
-                    Spacer(Modifier.width(6.dp))
-                    RagToggle(ragMode) { on ->
-                        ragMode = on
-                        if (on) scope.launch {
-                            val res = withContext(Dispatchers.IO) {
-                                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRagSources() }
-                            }
-                            res.onSuccess { ragSources = it }
+                // RAG moved into the model menu (above). The source menu still
+                // needs an anchor in the tree; hang it off a zero-size Box here so
+                // "Kilder" in the model menu can open it.
+                Box {
+                    DropdownMenu(expanded = ragSourceMenu, onDismissRequest = { ragSourceMenu = false }) {
+                        DropdownMenuItem(text = { Text("Alle kilder") }, onClick = { ragSourceFilter = null; ragSourceMenu = false })
+                        if (ragSources.isNotEmpty()) HorizontalDivider()
+                        ragSources.forEach { src ->
+                            DropdownMenuItem(text = { Text(src) }, onClick = { ragSourceFilter = src; ragSourceMenu = false })
                         }
-                    }
-                    if (ragMode) {
-                        Spacer(Modifier.width(6.dp))
-                        Box {
-                            ModelChip(ragSourceFilter?.let { "⌕ $it" } ?: "⌕ Alle kilder", onClick = { ragSourceMenu = true })
-                            DropdownMenu(expanded = ragSourceMenu, onDismissRequest = { ragSourceMenu = false }) {
-                                DropdownMenuItem(text = { Text("Alle kilder") }, onClick = { ragSourceFilter = null; ragSourceMenu = false })
-                                if (ragSources.isNotEmpty()) HorizontalDivider()
-                                ragSources.forEach { s ->
-                                    DropdownMenuItem(text = { Text(s) }, onClick = { ragSourceFilter = s; ragSourceMenu = false })
-                                }
-                                if (ragSources.isEmpty()) {
-                                    HorizontalDivider()
-                                    DropdownMenuItem(text = { Text("Ingen kilder ingesteret endnu", color = KalivTheme.colors.textMuted) }, onClick = { ragSourceMenu = false })
-                                }
-                                HorizontalDivider()
-                                DropdownMenuItem(
-                                    text = { Text(if (ingesting) "Ingesterer…" else "+ Tilføj dokument (txt/md)…", color = if (ingesting) KalivTheme.colors.textMuted else KalivTheme.colors.signal) },
-                                    enabled = !ingesting,
-                                    onClick = { ragSourceMenu = false; pickDocument.launch(arrayOf("text/plain", "text/markdown", "text/html", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/octet-stream")) },
-                                )
-                            }
+                        if (ragSources.isEmpty()) {
+                            HorizontalDivider()
+                            DropdownMenuItem(text = { Text("Ingen kilder ingesteret endnu", color = KalivTheme.colors.textMuted) }, onClick = { ragSourceMenu = false })
                         }
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text(if (ingesting) "Ingesterer…" else "+ Tilføj dokument…", color = if (ingesting) KalivTheme.colors.textMuted else KalivTheme.colors.signal) },
+                            enabled = !ingesting,
+                            onClick = { ragSourceMenu = false; pickDocument.launch(arrayOf("text/plain", "text/markdown", "text/html", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/octet-stream")) },
+                        )
                     }
                 }
                 }  // end scrollable model/mode strip
@@ -2423,21 +2449,6 @@ private fun SourceBadge(mode: String) {
     }
 }
 
-@Composable
-private fun RagToggle(active: Boolean, onToggle: (Boolean) -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = if (active) KalivTheme.colors.signal else KalivTheme.colors.surfaceHigh,
-        modifier = Modifier.clickable { onToggle(!active) },
-    ) {
-        Text(
-            "⌕ RAG",
-            color = if (active) KalivTheme.colors.onSignal else KalivTheme.colors.textMuted,
-            fontSize = 12.sp, fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-        )
-    }
-}
 
 @Composable
 private fun SendGlyph(color: Color, modifier: Modifier) {

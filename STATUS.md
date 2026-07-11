@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.34.3** — "Pop-up-menuen havde et koldt lilla skaer i light mode: Material3-menuer/dialoger tegnes med surfaceContainer-familien, som jeg aldrig satte, saa de faldt tilbage paa Materials lilla-baserede standard. Nu sat til de varme brand-flader i begge paletter. Anders saa det paa sin skaerm". Follows 1.34.2 (⋮ off-screen). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.34.4** — "RAG-knappen var forsvundet: v1.34.2 lagde den i header-stribens vandrette scroll, hvor model-chippen fyldte det synlige, saa RAG blev scrollet ud af syne. Flyttet til model-menuen ved siden af Tools og Stemme (alle "hvad kan modellen"-toggles); header-hoejresiden er nu rent "hvor koerer den" (Rig/Cloud + Skift). surfaceContainer-menufix bekraeftet paa skaerm — varm i baade lys og moerk". Follows 1.34.3 (varme menuer). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
