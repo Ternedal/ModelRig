@@ -9,7 +9,7 @@ Gå ovenfra og ned. Hvert trin har: **hvad du gør**, **hvad du bør se**, og
 **hvis det fejler → hvor du kigger**. Det sidste er det vigtigste — det er
 forskellen på en brugbar fejlmelding og "det virkede ikke".
 
-Hold `/health/full` åben i en fane. Det er din første diagnose ved *alt* nedenfor.
+Går noget galt undervejs: se **TROUBLESHOOTING.md** (symptom → årsag → fix, samlet fra faktiske fejl). Hold `/health/full` åben i en fane. Det er din første diagnose ved *alt* nedenfor.
 
 ---
 
