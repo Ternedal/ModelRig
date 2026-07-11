@@ -103,6 +103,15 @@ private fun materialFrom(c: KalivColors) =
             background = c.background, onBackground = c.textHigh,
             surface = c.surface, onSurface = c.textHigh,
             surfaceVariant = c.surfaceHigh, onSurfaceVariant = c.textMuted,
+            // Menus, dialogs and sheets read from the surfaceContainer family in
+            // M3. Left unset, they fall back to Material's PURPLE-tinted default
+            // -- the cold cast Anders saw on the pop-up menu. Point them at the
+            // warm brand surfaces instead.
+            surfaceContainerLowest = c.background,
+            surfaceContainerLow = c.surface,
+            surfaceContainer = c.surface,
+            surfaceContainerHigh = c.surfaceHigh,
+            surfaceContainerHighest = c.surfaceHigh,
             error = c.danger, outline = c.hairline,
         )
     } else {
@@ -112,6 +121,13 @@ private fun materialFrom(c: KalivColors) =
             background = c.background, onBackground = c.textHigh,
             surface = c.surface, onSurface = c.textHigh,
             surfaceVariant = c.surfaceHigh, onSurfaceVariant = c.textMuted,
+            // Same fix on the light side, where the purple default was most
+            // visible: warm parchment containers, not lavender.
+            surfaceContainerLowest = c.background,
+            surfaceContainerLow = c.background,
+            surfaceContainer = c.surface,
+            surfaceContainerHigh = c.surfaceHigh,
+            surfaceContainerHighest = c.surfaceHigh,
             error = c.danger, outline = c.hairline,
         )
     }
