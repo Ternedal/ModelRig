@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"strings"
 	"encoding/json"
 	"os"
@@ -9,7 +10,7 @@ import (
 )
 
 // Version is the ModelRig backend version.
-const Version = "1.34.13"
+const Version = "1.34.14"
 
 // Config holds the effective runtime configuration.
 type Config struct {
@@ -145,6 +146,24 @@ func applyEnv(c *Config) {
 // Addr returns host:port for ListenAndServe.
 func (c Config) Addr() string {
 	return strings.TrimSpace(c.ServerHost) + ":" + strconv.Itoa(c.ServerPort)
+}
+
+// ResolveDataPath makes the device-token store path stable across launches. The
+// default "./modelrig-data.json" is relative to the working directory, so
+// starting the server from different folders (Desktop vs the repo vs the
+// launcher) means different -- or empty -- token files, and a paired phone then
+// gets 401. If the path is relative, anchor it on the executable's own
+// directory so it is the same file every time. An absolute path (set via
+// MODELRIG_DATA or config) is left untouched.
+func (c *Config) ResolveDataPath() {
+	if filepath.IsAbs(c.DataPath) {
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return // fall back to the relative path rather than fail
+	}
+	c.DataPath = filepath.Join(filepath.Dir(exe), filepath.Base(c.DataPath))
 }
 
 // IsLoopback reports whether the bind host is loopback (a LAN footgun).

@@ -36,6 +36,8 @@ func main() {
 		return
 	}
 
+	cfg.ResolveDataPath()
+	log.Printf("  device store: %s", cfg.DataPath)
 	st, err := store.Open(cfg.DataPath)
 	if err != nil {
 		log.Fatalf("store: %v", err)

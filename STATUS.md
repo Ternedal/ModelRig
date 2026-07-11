@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.34.13** — "Launcheren crashede med "was unexpected at this time" lige efter Ollama-tjekket: cmd mis-parser parentes-blokke med indlejrede citationstegn og bare &. Omskrevet med goto-labels og smaa genererede .cmd-filer, saa der ikke er indlejrede citationstegn eller bare & paa start-linjerne. Saetter MODELRIG_HOST rent (0.0.0.0 uden mellemrum) + KALIV_TOOLS_ENABLED=1". Follows 1.34.12 (public, CI virker). Autonomous sessions, **2026-07-02 → 07-10**.
+Version **1.34.14** — "Telefonen fik 401 (parring udloebet): bind virker nu (telefonen NAAR riggen), men serveren afviste den. Aarsag: DataPath var ./modelrig-data.json — RELATIV til opstartsmappen, saa naar serveren startes fra forskellige mapper (Desktop vs repo vs launcher) findes en anden/tom token-fil, og den parrede telefon faar 401. Fix: ResolveDataPath ankrer relativ sti paa exe-mappen, saa det er samme fil hver gang. Startup-log viser nu device-store-stien". Follows 1.34.13 (launcher). Autonomous sessions, **2026-07-02 → 07-10**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
