@@ -5,7 +5,7 @@
 > Piper, ende-til-ende på telefonen. Dagens root cause (CUDA-DLL-søgesti)
 > fundet og fixet i v1.12.3 (CI grøn, 4 assets). Appen omdøbes **Alva →
 > Kaliv** (navn i v1.13.0; ikon afventer Anders' brand-pakke). Udestående
-> og nye horisonter: se §9–15 (inkl. målarkitektur i §14).
+> og nye horisonter: se §9–18 (inkl. målarkitektur i §19).
 
 **Gældende version:** 0.15.5 · **Dato:** 2026-07-04 · **Ejer:** Anders
 **Estimat-enhed:** "byggesession" = én autonom arbejdsblok med Claude; leverer typisk 1 tagget release.
@@ -26,7 +26,7 @@ og runtime-verificeret, alle leverancer tagget og released på GitHub.
 
 ---
 
-## 2. Status ved 0.15.5 *(historisk — se §15 for status pr. v1.34.17, 12/7-2026)*
+## 2. Status ved 0.15.5 *(historisk — se §20 for status pr. v1.34.17, 12/7-2026)*
 
 ### Verificeret
 - **Server:** 90 test-assertions grønne. Parring → hashede tokens, rotation,
@@ -133,7 +133,7 @@ CI, RAG-ingest fra telefonen. Alt sammen bevidst skubbet — se V2.
 > lukkes fremover med dato + notat her i docs, ikke med tags. **Reel lukning
 > udestår dog on-device** (~10 min, 3 tjek): (1) txt/md-ingest via
 > filvælgeren fra telefonen, (2) model-administration: pull + slet en lille
-> model fra appen, (3) samtale: omdøb → søg → del som markdown. Se §15.
+> model fra appen, (3) samtale: omdøb → søg → del som markdown. Se §20.
 
 Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
 
@@ -499,13 +499,157 @@ se andres data. Forudsætter V5's sikkerhedsmodel og V7's robusthed.
 uden at kunne se hinandens data; en gæsteprofil kan chatte men intet
 ændre. Estimat: 5–8 sessioner.
 
-> **Efter V8 (åben note, ikke et løfte):** "Kaliv lærer" — lokal
-> finjustering (QLoRA på egne data; 12 GB rækker til 7–8B) med
-> eval-harness. Dokumenteres først når/hvis det prioriteres.
+> **Efter V8-noten er promoveret:** "Kaliv lærer" er nu et rigtigt spor
+> med go/no-go — se **V12 (§17)**.
 
 ---
 
-## 14. Målarkitektur — slutbilledet V1→V8 konvergerer mod
+## 14. V9 — "Kaliv i hjemmet" (fysisk verden) ⬜ NYT SPOR 12/7-2026
+
+Tema: fra riggen til huset — Kaliv må røre den fysiske verden (lys, varme,
+sensorer), gennem PRÆCIS samme sikkerhedsmodel som V5: forslag → kort →
+audit. Det er her den udskudte MCP-klient-beslutning fra V5 lander naturligt:
+første EKSTERNE integration, mod ét velafgrænset system.
+
+1. **Home Assistant-bro** [teknikvalg: HA's MCP-integration vs. REST/
+   WebSocket-API — afgøres af hvad HA-versionen på riggen udstiller]:
+   HA er det oplagte mål — lokal-først som ModelRig selv, alt bliver i huset.
+2. **Read-only først** [lav risiko, samme mønster som V5.2]: "er der lys
+   tændt?", "hvad er temperaturen?" — sensor-læsninger kører frit som
+   rig_status gør i dag.
+3. **Styring bag kortet**: "sluk lyset i stuen" → kort → udfør → audit
+   (origin + entitet). [Beslutning senere: whitelist af "ufarlige" domæner
+   (lys/kontakter) til kort-fri styring — IKKE i MVP; låse/varme ALDRIG
+   kort-frit.]
+4. **Voice-styring af hjemmet**: kræver V5's hale (tools i voice-flowet)
+   — "Kaliv, sluk lyset" med mundtligt "ja" som bekræftelse.
+5. **Kaliv-station (valgfrit hardware-spor)**: dedikeret enhed i stuen.
+   Vej A: pensioneret Android-telefon (0 kr, V6.3's model). Vej B:
+   Raspberry Pi 5 + mic-array + højttaler (groft estimat 1.000–1.500 kr).
+   [Beslutning: kun hvis vej A viser sig utilstrækkelig — start gratis.]
+
+**Forudsætninger:** V7.1 (services/altid-oppe — et hjem-API der forsvinder
+når et cmd-vindue lukkes er værre end intet) + V5-hale for voice-delen.
+**Exit-kriterium:** én sensor læses og én lampe styres fra Kaliv med kort +
+audit, on-device-bevist. Estimat: 4–7 sessioner (MCP-valget er det usikre).
+
+---
+
+## 15. V10 — "Kaliv ser" (vision) ⬜ NYT SPOR 12/7-2026
+
+Tema: billeder ind i alle flows. Fundamentet FINDES allerede: appen sender
+`imageB64`, og tools-stien bærer billedet (T23-testet) — men ingen lokal
+model KIGGER på det endnu.
+
+1. **Lokal vision-model** [teknikvalg: llama3.2-vision:11b (~8 GB) vs.
+   qwen-VL-familien — afgøres af dansk-kvalitet og VRAM]:
+   **Ærlig VRAM-kabale:** ASR large-v3 (~3 GB) + gen-model (~5–6 GB) +
+   VLM (~8 GB) kan IKKE alle være resident på 12 GB samtidig. Kræver
+   keep_alive-jonglering eller model-swap ved billedturer → latens-hit.
+   [Beslutning: accepteres swap-latensen, eller er vision cloud-only?]
+2. **"Hvad er det her?"**: foto fra telefonen → beskrivelse i chatten.
+   MVP — rører ingen anden del af systemet.
+3. **Foto → RAG**: tag et billede af et dokument/en tavle → tekst
+   ekstraheres → ingesteres som kilde. Løser samtidig V4's OCR-punkt for
+   fotos (scannede PDF'er er stadig separat beslutning).
+4. **Vision i tools-flowet**: "læs denne kvittering og lav en note med
+   beløbet" — billede + tool-kald i samme tur (stien bærer det allerede).
+
+**Forudsætninger:** ingen hårde — kan bygges nu. Konkurrerer om VRAM med
+V12-eksperimenter.
+**Exit-kriterium:** et foto beskrives korrekt på dansk on-device, og ét
+dokumentfoto er søgbart i RAG. Estimat: 3–5 sessioner.
+
+---
+
+## 16. V11 — "Agent v2" (kæder, planer, skema) ⬜ NYT SPOR 12/7-2026
+
+Tema: fra ét tool pr. tur til opsynede FLERTRINS-handlinger. **OBS:** V5's
+MVP forbød bevidst tool-kæder (sikkerhedsbeslutning). Dette spor OPHÆVER
+det forbud — kontrolleret — og kræver derfor Anders' eksplicitte
+beslutning før første linje kode. [Ingen kode før godkendelse — som V5.]
+
+1. **Plan-forhåndsvisning**: modellen foreslår en plan (max 3 trin), Anders
+   ser HELE planen før noget kører. Reads i planen kører frit; hvert WRITE
+   får stadig sit eget kort. Abort når som helst.
+2. **Skemalagte jobs (scheduler)**: cron-agtige jobs — "hver morgen kl. 7:
+   læs kalenderen og læg et resumé i noterne". Driver V6.4 (proaktiv).
+   [Beslutning: må et skemalagt job indeholde writes? Design-forslag:
+   kun mod forhåndsgodkendt skabelon, aldrig frie writes uden kort.]
+3. **Fil-tools låses op**: V5.2's udskudte filsøgning/-læsning — når
+   NTFS-ACL-forudsætningen (separat Windows-konto) er på plads. Står
+   ved magt som hård forudsætning.
+4. **Generaliseret MCP-klient**: hvis V9's HA-bro blev MCP, generaliseres
+   klienten her til flere whitelistede lokale MCP-servere.
+
+**Forudsætninger:** V5 ✅ + Anders' kæde-beslutning + (pkt. 3) NTFS-ACL.
+**Exit-kriterium:** én 2-trins-plan (read→write) vist, godkendt og udført
+med kort på write-trinnet; ét skemalagt read-job kørt i 7 dage uden babysitting.
+Estimat: 4–6 sessioner efter beslutningen.
+
+---
+
+## 17. V12 — "Kaliv lærer dansk" (model-suverænitet, forskningsspor) ⬜ 12/7-2026
+
+Promoverer "Efter V8"-noten til et rigtigt spor — med en benhård go/no-go
+så vi ikke brænder uger på et eksperiment uden udbytte. Motivation: de to
+tilbageværende svagheder (tool-narration, dansk-drift) er MODEL-grænser.
+V5.5 afprøver købe-vejen (større/cloud-model); dette spor er bygge-vejen.
+
+0. **Eval-harness FØRST** [1–2 sessioner, værdi uanset udfald]: automatiseret
+   dansk-benchmark over egne testcases — (a) kalder den værktøjet eller
+   narrerer den? (b) holder den dansk over 10 ture? (c) svarkvalitet på
+   Anders' faktiske opgavetyper. Køres mod hver ny modelkandidat — gør
+   ALLE fremtidige modelvalg til målinger i stedet for fornemmelser.
+1. **Go/no-go**: kør harness mod qwen3:14b/8b + bedste nye åbne modeller
+   (landskabet flytter sig hurtigt). **Kun hvis** gap består OG cloud er
+   uacceptabel (privacy/pris) → gå til 2. Ellers: sporet LUKKES med data.
+2. **QLoRA-eksperiment** [kun efter go]: finjustér 7–8B på egne data
+   (samtaler/notes — alt lokalt, privacy er gratis her). 12 GB rækker,
+   men langsomt (dage pr. kørsel). Mål: dansk-fasthed + tool-disciplin,
+   IKKE ny viden.
+3. **Eval igen**: kun en model der SLÅR baseline på harnessen udrulles.
+
+**Ærlig forventning:** udbyttet er usikkert; nye åbne modeller kan gøre
+sporet overflødigt før det starter — det er PRÆCIS hvad harnessen afgør
+billigt. Estimat: harness 1–2 sessioner; resten ubundet forskning.
+
+---
+
+## 18. Rækkefølge og afhængigheder (V5.5 → V12)
+
+Sporene er IKKE en kø — de har forskellige forudsætninger og kan delvist
+parallelliseres. Kortet (render-verificeret):
+
+```mermaid
+flowchart LR
+    V55["V5.5 sky-hjerne 🟡<br/>modeltest + cloud-test"]
+    V5t["V5-hale ⬜<br/>tools i voice"]
+    V7["V7 apparat 🟡<br/>services · selvopdatering"]
+    V6["V6 ambient ⬜<br/>wake word · streaming"]
+    V9["V9 hjemmet ⬜"]
+    V10["V10 vision ⬜"]
+    V11["V11 agent v2 ⬜<br/>(kræver kæde-beslutning)"]
+    V12["V12 dansk model ⬜<br/>(harness først)"]
+    V8["V8 flere mennesker ⬜"]
+
+    V55 --> V12
+    V7 --> V9
+    V5t --> V9
+    V6 --> V8
+    V7 --> V8
+    V10 -.->|"deler VRAM"| V12
+    V55 -.->|"afgør behovet"| V11
+```
+
+**Læsning:** V10 (vision) og V12.0 (eval-harness) kan startes NÅR SOM HELST.
+V9 venter på V7.1 + V5-halen. V11 venter på en beslutning. V8 er sidst.
+**Efter V12 (åbne noter, ikke løfter):** føderation mellem flere rigge;
+e-ink-statusskærm; Kaliv-API/webhooks så andre systemer kan tale til Kaliv.
+
+---
+
+## 19. Målarkitektur — slutbilledet V1→V12 konvergerer mod
 
 ```mermaid
 flowchart TB
@@ -513,12 +657,12 @@ flowchart TB
     Go["Go-server :8080 ✅<br/>adgang · proxy · rate limit<br/>TLS ⬜"]
 
     subgraph W["Worker :8099"]
-        Core["RAG ✅ · ASR/TTS ✅ · Memory ⬜"]
+        Core["RAG ✅ · ASR/TTS ✅ · Memory ⬜ · Vision ⬜"]
         T["Kaliv Tools ✅ on-device-bevist 11/7<br/>registry (kode) · bekræftelsesport (i worker)<br/>audit (append-only, origin) · Executor-søm"]
     end
 
     Human(["mennesket godkender<br/>hver skrivning"])
-    MCP["MCP-servere ⬜<br/>lokale · whitelistede"]
+    MCP["MCP-servere ⬜<br/>lokale · whitelistede<br/>(først: Home Assistant, V9)"]
     OL["Ollama :11434 ✅"]
     OC["Ollama Cloud ✅<br/>(valgfrit)"]
     Lager[("Lager — alt lokalt<br/>SQLite ✅ · RAG ✅ · Audit ✅ · Memory ⬜")]
@@ -575,7 +719,7 @@ klienter = tynde og danske; Ollama = eneste lokale LLM-runtime.
 
 ---
 
-## 15. Konkrete næste skridt (pr. 12/7-2026 morgen — efter device-test-dagen)
+## 20. Konkrete næste skridt (pr. 12/7-2026 morgen — efter device-test-dagen)
 
 **Hvor vi står:** V1–V5 opnået; V5 on-device-bevist 11/7 (note skrevet gennem
 kort + audit på riggen). Forbindelseskæden robust (bind, parring, data-rod).
@@ -603,3 +747,7 @@ dansk-drift), ikke kode — deraf V5.5-sporet.
    (services/selvopdatering) — apparatdriften er nu det svageste led.
 6. **Claude — næste byggesession** (efter Anders' valg i 5): enten V5.5 pkt. 3
    (auto-rute, ~1 session) eller V7 pkt. 1 (Windows-services, ~2 sessioner).
+7. **Nye horisonter (12/7):** V9–V12 tilføjet (§14–17) med afhængighedskort
+   (§18). To ting kan startes NÅR SOM HELST uden at vente på noget:
+   V10 (vision — fundamentet findes) og V12.0 (eval-harnessen — gør alle
+   fremtidige modelvalg til målinger). Resten venter på V7/beslutninger.
