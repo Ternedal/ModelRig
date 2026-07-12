@@ -26,7 +26,7 @@ og runtime-verificeret, alle leverancer tagget og released på GitHub.
 
 ---
 
-## 2. Status ved 0.15.5
+## 2. Status ved 0.15.5 *(historisk — se §15 for status pr. v1.34.17, 12/7-2026)*
 
 ### Verificeret
 - **Server:** 90 test-assertions grønne. Parring → hashede tokens, rotation,
@@ -351,31 +351,68 @@ Anders vælger; hvert punkt er markeret med hvad der kræves.
 
 ---
 
-## 10. V5 — "Kaliv handler" (agent-laget, MCP-først)
+## 10. V5 — "Kaliv handler" (agent-laget) ✅ **OPNÅET — on-device-bevist 11/7-2026** (notes.md skrevet via note_append gennem kort + audit på Anders' rig)
 
 Tema: fra samtale til handling — Kaliv må røre ting på riggen, men kun
 gennem en sikkerhedsmodel der er designet FØR første linje tool-kode.
 Løfter V4's største "kræver beslutning"-punkt til et fuldt spor.
 
-0. ~~Kravspec før kode~~ ✅ **skrevet 10/7: `KRAVSPEC_V5_TOOLS.md`**.
-   Afventer Anders' godkendelse + svar på fem åbne spørgsmål (§12).
-   Indhold: whitelist pr. tool, eksplicit bekræftelse pr. skrivende
-   handling (ingen auto-exec, ingen "husk mit valg"), append-only
-   audit-log på riggen, tool-output som DATA, ingen tool-kæder i MVP.
-   **Ingen kode før godkendelse.**
-1. **MCP-fundament i workeren** [arkitekturvalg — anbefaling: MCP frem
-   for eget format; fremtidssikret og genbrugeligt]: ModelRig som
-   MCP-klient mod lokale MCP-servere; tool-registry i appen med
-   enable/disable pr. tool.
-2. **Første tools — read-only** [lav risiko]: filsøgning/-læsning i
-   udpegede mapper på riggen; rig-status (GPU/VRAM/disk/modeller).
-3. **Skrivende tools bag bekræftelse**: notater til fil, påmindelser.
-4. **Tools i voice-flowet**: Kaliv siger højt hvad den vil gøre og
-   venter på "ja" før eksekvering.
+0. ~~Kravspec før kode~~ ✅ skrevet 10/7 (`KRAVSPEC_V5_TOOLS.md`),
+   godkendt af Anders samme dag; de fem åbne spørgsmål besvaret
+   (bl.a.: cloud MÅ foreslå tools, risiko afgør kortet — 10/7).
+1. ~~Fundament i workeren~~ ✅ **leveret som KODE-registry, ikke MCP**
+   (bevidst afvigelse: mindre overflade, ingen tredjeparts-servere før
+   NTFS-ACL-forudsætningen er på plads). Registry + enable/disable pr.
+   tool + `ollama_tool_schema` (disabled tools annonceres ikke engang).
+   MCP-klient er flyttet til V5.5/V6-overvejelse.
+2. ~~Første tools — read-only~~ ✅ `rig_status` (disk m.m.) kører frit;
+   filsøgning/-læsning venter bevidst på **NTFS-ACL-forudsætningen**
+   (separat Windows-konto før vilkårlige fil-stier — står ved magt).
+3. ~~Skrivende tools bag bekræftelse~~ ✅ `note_append` bag kortet;
+   gate håndhævet i WORKER (ingen klient kan omgå); append-only audit
+   med origin (local/cloud); tool-output er DATA og kan ikke kæde
+   (`tools=[]` på svar-turen). On-device-bevist 11/7.
+4. **Tools i voice-flowet** ⬜ (uændret): Kaliv siger højt hvad den vil
+   gøre og venter på "ja" før eksekvering. Næste naturlige V5-hale.
 
-**Exit-kriterium:** ét læsende og ét skrivende tool virker fra både
-tekst og stemme, med bekræftelse + audit-log, on-device-bekræftet.
-Estimat: 5–8 byggesessioner — spec-arbejdet er det usikre led.
+**Exit-kriterium:** ~~ét læsende og ét skrivende tool virker fra tekst,
+med bekræftelse + audit-log, on-device-bekræftet~~ ✅ **11/7-2026**
+(stemme-delen udestår → punkt 4). Faktisk forbrug: ~12 releases
+(v1.18→v1.27) + en hel device-test-dag (v1.34.5→.17) for at bevise det
+— spec-arbejdet var IKKE det usikre led; det var "virker-på-rigtig-
+hardware"-klassen af fejl (se TROUBLESHOOTING.md).
+
+---
+
+## 10.5. V5.5 — "Kaliv med sky-hjerne" (cloud-assisteret agent) 🟡 NYT SPOR 12/7-2026
+
+Tema: de lokale 8B-modeller narrer tool-kald i prosa og glemmer dansk —
+en størrelsesgrænse, ikke en kodefejl. En cloud-model på agent-stien løser
+begge, MED gaten intakt (kortet kører lokalt, uanset hvem der foreslår).
+
+0. ~~Verifikation af eksisterende flow~~ ✅ **v1.34.17**: cloud-tools-stien
+   er trådet korrekt ende-til-ende (app sender cloud-config på TOOLS-stien;
+   worker router på cloud_key; write kræver kort med origin=cloud; T30
+   beviser hele stien med stubbet upstream, mutationstjekket).
+   **Ollama Cloud kræver NUL ny integration** — flowet fandtes.
+1. **On-device cloud-agent-test** ⬜ [Anders, protokol i CLOUD_TOOLS.md §A]:
+   cloud-model + Tools til → kort med "cloud-modellen foreslår" → godkend →
+   notes.md + audit med origin=cloud.
+2. **Lokal model-opgradering parallelt** ⬜ [Anders, protokol i MODELS.md]:
+   qwen3:14b (tæt på 12GB) / qwen3:8b som fallback — afgør hvor langt
+   lokal kan nå på tool-pålidelighed + dansk før cloud er nødvendig.
+3. **Auto-rute til cloud når Tools er på** ⬜ [design klar, CLOUD_TOOLS.md §B]:
+   opt-in switch (default fra), manuel "Skift" vinder altid, kun hvis
+   cloud-nøgle findes, chip viser "via cloud (tools)". Gate uændret.
+   Bygges EFTER pkt. 1+2 har vist behovet.
+4. **Evt. Claude/OpenAI-adapter** ⬜ [kun hvis Ollama Clouds modeludvalg
+   ikke rækker]: reelt arbejde — andet request/tool-schema-format.
+
+**Åbne beslutninger (Anders):** provider; skal auto-cloud undgå RAG-kontekst
+(privacy: personlige dokumenter auto-sendes ellers); omkostningsloft.
+
+**Exit-kriterium:** et cloud-foreslået write godkendt og udført on-device
+med origin=cloud i audit; beslutning truffet om auto-rute.
 
 ---
 
@@ -416,16 +453,24 @@ genstart, opdatere sig selv og kunne reddes.
 2. **Selvopdatering**: rig-agent der ser nye GitHub-releases, henter,
    verificerer (checksum) og ruller tilbage ved fejl [beslutning:
    fuldautomatisk vs. ét-kliks-godkendelse].
-3. ~~Backup/restore~~ 🟡 **PÅBEGYNDT (v1.30.0)**: `worker/app/backup.py`
-   pakker RAG + data + audit + tools-state + notes som ét verificeret arkiv;
-   round-trip bevist i CI (`tests/worker_backup.py`). Windows-scripts +
-   scheduled task i `scripts/`. **Mangler:** verifikation på selve riggen.
-4. **Sundhed & observabilitet** 🟡 **PÅBEGYNDT (v1.31.0)**: `/health/full`
-   giver samlet verdict for worker, Ollama, ASR+device, TTS, tools, disk —
-   hver med grund; `?deep=true` round-trip'er en embedding. **Mangler:**
-   GPU/VRAM-metrikker, logrotation.
-5. **Hærdning**: TLS på LAN [beslutning: selvsigneret + pinning i
-   appen], token-rotation, rate limits.
+3. ~~Backup/restore~~ 🟡 **PÅBEGYNDT (v1.30.0, hærdet v1.34.16)**:
+   `worker/app/backup.py` pakker RAG + data + audit + tools-state + notes
+   som ét verificeret arkiv; round-trip bevist i CI. v1.34.16 rettede at
+   backup læste device-tokens fra FORKERT env-var (restore ville ikke have
+   gendannet parringen). **Mangler stadig:** verifikation på selve riggen.
+4. **Sundhed & observabilitet** 🟡 **PÅBEGYNDT (v1.31.0 + launcher)**:
+   `/health/full` giver samlet verdict (worker, Ollama, ASR+device, TTS,
+   tools, disk); `?deep=true` round-trip'er en embedding; `start-kaliv.bat`
+   (v1.34.13) starter hele stakken korrekt og viser health FØR telefonen
+   tages op; worker/server logger nu data_root/device-store ved opstart.
+   **Mangler:** GPU/VRAM-metrikker, logrotation.
+5. **Hærdning** 🟡 **PÅBEGYNDT (v1.34.10–.16, "apparat-robusthed")**:
+   data-filer working-dir-uafhængige (data-rod + `ResolveDataPath` — RAG/
+   audit/kill-switch/tokens overlever opstart fra vilkårlig mappe;
+   `migrate_data.py` samler gamle filer); alle env-reads trimmes (mellemrums-
+   fælden); misvisende fejlbeskeder navngiver nu den ægte årsag.
+   **Mangler:** TLS på LAN [beslutning: selvsigneret + pinning], token-
+   rotation, rate limits.
 6. **Strøm/termik** [valgfrit]: GPU-idle-politik, planlagt dvale/vågn.
 
 **Exit-kriterium:** koldt strømsvigt → riggen kommer op af sig selv; en
@@ -469,7 +514,7 @@ flowchart TB
 
     subgraph W["Worker :8099"]
         Core["RAG ✅ · ASR/TTS ✅ · Memory ⬜"]
-        T["Kaliv Tools ✅<br/>registry (kode) · bekræftelsesport<br/>audit (append-only) · Executor-søm"]
+        T["Kaliv Tools ✅ on-device-bevist 11/7<br/>registry (kode) · bekræftelsesport (i worker)<br/>audit (append-only, origin) · Executor-søm"]
     end
 
     Human(["mennesket godkender<br/>hver skrivning"])
@@ -477,10 +522,11 @@ flowchart TB
     OL["Ollama :11434 ✅"]
     OC["Ollama Cloud ✅<br/>(valgfrit)"]
     Lager[("Lager — alt lokalt<br/>SQLite ✅ · RAG ✅ · Audit ✅ · Memory ⬜")]
-    Drift["Drift ⬜<br/>services · watchdog · selvopdatering · backup"]
+    Drift["Drift 🟡<br/>launcher+health ✅ · backup (CI-bevist) 🟡<br/>data-rod ✅ · services/watchdog/selvopdatering ⬜"]
 
     Clients -- "parring pr. enhed ✅ · TLS ⬜" --> Go --> W
     Clients -. "appens direkte vej:<br/>uden om riggen — uden tools" .-> OC
+    T -. "cloud må FORESLÅ tools<br/>(gennem riggen, kort lokalt) ✅ v1.34.17" .-> OC
     Human == "hver skrivning" ==> T
     T -.-> MCP
     W -- "embeddings + gen<br/>ALTID lokalt" --> OL
@@ -529,18 +575,31 @@ klienter = tynde og danske; Ollama = eneste lokale LLM-runtime.
 
 ---
 
-## 15. Konkrete næste skridt (pr. 9/7-2026 ~23:45)
+## 15. Konkrete næste skridt (pr. 12/7-2026 morgen — efter device-test-dagen)
 
-1. **Anders:** brand-pakke til Kaliv-ikonet (kravene er sendt).
-2. **Anders, 2 min ved næste rig-opstart:** hent `v1.12.3`-zip → normal
-   start UDEN manuelle PATH-linjer → én stemmetur. [Ikke verificeret:
-   kun den MANUELLE PATH-test er hardware-bevist; kold start med det
-   indbyggede fix mangler.]
-3. **Næste session:** `v1.13.0` — tap-to-stop + Kaliv-navnerebrand,
-   compile-verificeret Android før tag.
-4. **Anders, valgfrit:** barge-in med headset (✋-chip til) — rå
-   kalibreringsdata til v1.13.0.
-5. **Anders, valgfrit (~10 min):** V2-lukketjek på telefonen —
-   txt/md-filvælger-ingest, model-pull/-slet, samtale omdøb/søg/del.
-6. **Token-hygiejne:** revokér dagens PAT ved "i mål"; fine-grained
-   7-dages token fremover.
+**Hvor vi står:** V1–V5 opnået; V5 on-device-bevist 11/7 (note skrevet gennem
+kort + audit på riggen). Forbindelseskæden robust (bind, parring, data-rod).
+CI virker (repo public). Seneste release: **v1.34.17**, alle fire versionssteder
+synkrone. De to reelle svagheder tilbage er MODEL-adfærd (tool-narration,
+dansk-drift), ikke kode — deraf V5.5-sporet.
+
+1. **Anders — SIKKERHED, haster (2 min):** revokér det gamle PAT
+   (`github.com/settings/tokens`) — repo'et er PUBLIC og tokenet ligger i
+   git-remote + Notion. Nyt token → opdater remote + Notion.
+   *Det eneste udestående sikkerhedspunkt i hele projektet.*
+2. **Anders — data-migration ved næste rig-opstart (5 min):** hent v1.34.15+,
+   se `data_root=<sti>` i worker-loggen, kør `python -m app.migrate_data`
+   (dry-run) → `--apply`, så gammel ingesteret viden følger med til data-roden.
+3. **Anders — modeltest (10 min, MODELS.md):** `ollama pull qwen3:14b` (+ 8B
+   fallback) → kør 3-punkts-protokollen (kalder den værktøjet? holder den
+   dansk? passer den i VRAM med ASR/TTS på samme kort?). Afgør hvor langt
+   lokal rækker.
+4. **Anders — cloud-agent-test (5 min, CLOUD_TOOLS.md §A):** cloud-model +
+   Tools til → kort med "cloud-modellen foreslår" → godkend → audit viser
+   origin=cloud. Beviser V5.5 pkt. 1.
+5. **Efter 3+4 — beslutninger:** (a) lokal model vs. auto-cloud-rute (V5.5
+   pkt. 3 — design klar, lille at bygge); (b) skal auto-cloud undgå
+   RAG-kontekst (privacy); (c) V5-hale: tools i voice-flowet, eller V7-spor
+   (services/selvopdatering) — apparatdriften er nu det svageste led.
+6. **Claude — næste byggesession** (efter Anders' valg i 5): enten V5.5 pkt. 3
+   (auto-rute, ~1 session) eller V7 pkt. 1 (Windows-services, ~2 sessioner).
