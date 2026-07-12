@@ -21,7 +21,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.36.0"
+VERSION = "1.37.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 from . import paths as _paths
@@ -269,6 +269,73 @@ class IngestDocxReq(BaseModel):
     source: str | None = None
     chunk_size: int = Field(default=800, ge=100, le=4000)
     overlap: int = Field(default=150, ge=0, le=1000)
+
+
+class IngestImageReq(BaseModel):
+    # A photo (base64) from a client: a document page, a whiteboard, a receipt.
+    # A VISION model transcribes/describes it here on the worker, then the text
+    # goes through the same chunk/embed/store pipeline as every other ingest.
+    image_base64: str
+    source: str | None = None
+    chunk_size: int = Field(default=800, ge=100, le=4000)
+    overlap: int = Field(default=150, ge=0, le=1000)
+
+
+# Faithful extraction, in Danish, content only -- no chat preamble in the index.
+_VISION_PROMPT = (
+    "Transskribér al læsbar tekst i billedet ordret og fuldstændigt. "
+    "Er der ingen tekst, så beskriv indholdet kort og faktuelt på dansk. "
+    "Svar KUN med indholdet — ingen indledning, ingen kommentarer.")
+
+
+def _vision_model() -> str:
+    # Read at call time (tests set it per-case) and TRIMMED -- our own
+    # trailing-space footgun rule applies to every env read. Local import:
+    # main.py deliberately has no module-level `os` (the v1.31.0 lesson).
+    import os as _os
+    return (_os.getenv("KALIV_VISION_MODEL") or "").strip()
+
+
+@app.get("/rag/ingest/image/status")
+def rag_image_status() -> dict:
+    """Whether photo ingest is available (a vision model is configured)."""
+    m = _vision_model()
+    return {"available": bool(m), "model": m or None}
+
+
+@app.post("/rag/ingest/image")
+async def ingest_image(req: IngestImageReq) -> dict:
+    """Extract text from an uploaded photo via a VISION model and ingest it.
+
+    Deliberately gated on KALIV_VISION_MODEL with an honest 501 when unset:
+    sending images to a non-vision model fails in model-dependent ways, so we
+    never guess with the default gen model. Same honesty pattern as the 501
+    for missing PDF/OCR capability.
+    """
+    model = _vision_model()
+    if not model:
+        raise HTTPException(status_code=501, detail=(
+            "photo ingest requires a vision model: set KALIV_VISION_MODEL "
+            "(e.g. llama3.2-vision:11b — pull it with `ollama pull` first)"))
+    try:
+        text = await oc.chat(
+            [{"role": "user", "content": _VISION_PROMPT,
+              "images": [req.image_base64]}], model=model)
+    except oc.OllamaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    text = (text or "").strip()
+    if not text:
+        # Mirrors the honest 422 for unextractable PDFs: say so, index nothing.
+        raise HTTPException(status_code=422, detail=(
+            "the vision model found no readable content in the image"))
+    src = req.source or "foto"
+    try:
+        chunks = await rag.ingest(store, [{"text": text, "source": src}],
+                                  chunk_size=req.chunk_size, overlap=req.overlap)
+    except oc.OllamaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"source": src, "model": model, "extracted_chars": len(text),
+            "chunks_added": chunks, "total": store.count()}
 
 
 @app.post("/rag/ingest/docx")

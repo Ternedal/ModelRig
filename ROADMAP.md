@@ -580,13 +580,17 @@ model KIGGER på det endnu.
    VLM (~8 GB) kan IKKE alle være resident på 12 GB samtidig. Kræver
    keep_alive-jonglering eller model-swap ved billedturer → latens-hit.
    [Beslutning: accepteres swap-latensen, eller er vision cloud-only?]
-2. **"Hvad er det her?"**: foto fra telefonen → beskrivelse i chatten.
-   MVP — rører ingen anden del af systemet.
-3. **Foto → RAG**: tag et billede af et dokument/en tavle → tekst
-   ekstraheres → ingesteres som kilde. Løser samtidig V4's OCR-punkt for
-   fotos (scannede PDF'er er stadig separat beslutning).
-4. **Vision i tools-flowet**: "læs denne kvittering og lav en note med
-   beløbet" — billede + tool-kald i samme tur (stien bærer det allerede).
+2. **"Hvad er det her?"** 🟡 **plumbing BEVIST 12/7 (audit):** Android-
+   chat bærer allerede billeder hele vejen (klient → Go → Ollama urørt),
+   tools-stien ligeså (T23). Pull en vision-model, vælg den i dropdownen
+   → test. **Desktop mangler billed-UI helt** (→ V6.6-rest).
+3. ~~Foto → RAG (worker-siden)~~ ✅ **v1.37.0**: `/rag/ingest/image` —
+   vision-model transskriberer ordret → samme chunk/embed/store-pipeline
+   som PDF. **501-gated på `KALIV_VISION_MODEL`** (aldrig gætte med
+   gen-modellen), ærlig 422 ved tomt indhold. 12 tests, gate mutations-
+   tjekket. ⬜ Klient-UI-hook ("gem dette foto i Viden") udestår.
+4. **Vision i tools-flowet** 🟡: stien bærer allerede billedet (T23) —
+   adfærden med en RIGTIG vision-model er uverificeret (Anders + model).
 
 **Forudsætninger:** ingen hårde — kan bygges nu. Konkurrerer om VRAM med
 V12-eksperimenter.

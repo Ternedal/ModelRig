@@ -166,6 +166,11 @@ jobs:
       - name: Worker model-eval harness
         run: PYTHONPATH=worker python3 tests/worker_eval.py
 
+      # Photo->RAG (V10.3): the 501 gate (no vision model -> honest refusal,
+      # never guess with the gen model) and the extract->chunk->store path.
+      - name: Worker vision ingest
+        run: PYTHONPATH=worker python3 tests/worker_vision.py
+
   android-build:
     needs: server-tests
     runs-on: ubuntu-latest

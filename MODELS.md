@@ -114,3 +114,27 @@ presset — så er `qwen3:8b` det pragmatiske valg.
 ## Kilder
 - willitrunai.com, localaimaster.com, localllm.in, markaicode.com, gigagpu.com,
   ai-ollama.github.io (VRAM-tal + tool-calling + multilingual, apr.–jun. 2026).
+
+## Vision (V10) — foto → RAG (v1.37.0)
+
+Sæt en vision-model og genstart workeren, så er foto-ingest tændt:
+
+```
+set KALIV_VISION_MODEL=llama3.2-vision:11b
+```
+
+Kandidater til 3060'eren: `llama3.2-vision:11b` (~8 GB) eller qwen-VL-
+familien — **VRAM-kabalen fra §ovenfor gælder dobbelt** (ASR + gen + VLM kan
+ikke alle være resident på 12 GB). Uden env-variablen svarer endpointet
+ærligt 501 — vi gætter aldrig med gen-modellen, for billeder mod en
+ikke-vision-model fejler på model-afhængige måder.
+
+Test fra riggen (billede som base64):
+
+```
+curl http://127.0.0.1:8099/rag/ingest/image -H "Content-Type: application/json" -d "{\"image_base64\":\"<BASE64>\",\"source\":\"kvittering\"}"
+```
+
+Og "hvad er det her?"-flowet kræver ingen ny kode på Android: chat-stien
+bærer allerede billeder — pull modellen, vælg den i dropdownen, vedhæft et
+foto (📎).

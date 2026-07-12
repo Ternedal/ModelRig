@@ -72,6 +72,7 @@ func (s *server) routes() {
 	s.mux.Handle("POST /api/v1/rag/query", s.authMW(http.HandlerFunc(s.handleRagQuery)))
 	s.mux.Handle("POST /api/v1/rag/ingest", s.authMW(http.HandlerFunc(s.handleRagIngest)))
 	s.mux.Handle("POST /api/v1/rag/ingest/pdf", s.authMW(http.HandlerFunc(s.handleRagIngestPdf)))
+	s.mux.Handle("POST /api/v1/rag/ingest/image", s.authMW(http.HandlerFunc(s.handleRagIngestImage)))
 	s.mux.Handle("POST /api/v1/rag/ingest/docx", s.authMW(http.HandlerFunc(s.handleRagIngestDocx)))
 	s.mux.Handle("GET /api/v1/tools", s.authMW(http.HandlerFunc(s.handleToolsList)))
 	s.mux.Handle("POST /api/v1/tools/chat", s.authMW(http.HandlerFunc(s.handleToolsChat)))

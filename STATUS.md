@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.36.0** — "V12.0 leveret: eval-harnessen (`python -m app.eval_models`) goer modelvalg til maalinger — tool-disciplin (kaldt/narreret/over-trigget), dansk-fasthed, smoke, latens; `--baseline --gate` er V15.2-porten fra dag ét. 18 tests, fake-personas rangeres korrekt, begge klassifikatorer mutationstjekket, i CI. Koersel mod rigtige modeller = Anders paa riggen". Follows 1.35.0 (desktop-kaerlighed a–d, parallel session). Autonomous sessions, **2026-07-02 → 07-12**.
+Version **1.37.0** — "V10-grundarbejde: audit beviste at Android-chat + tools-stien ALLEREDE baerer billeder (V10.2/10.4 = pull en vision-model); desktop mangler billed-UI. V10.3 leveret: /rag/ingest/image — vision-model transskriberer → samme chunk/embed/store-pipeline, 501-gated paa KALIV_VISION_MODEL (aldrig gaette med gen-modellen), 12 tests, gate mutationstjekket. Testen fangede endnu en os-ikke-importeret (v1.31.0-klassen)". Follows 1.36.0 (eval-harness). Autonomous sessions, **2026-07-02 → 07-12**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

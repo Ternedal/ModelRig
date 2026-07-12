@@ -344,6 +344,11 @@ func (s *server) handleRagIngestPdf(w http.ResponseWriter, r *http.Request) {
 	s.WorkerSlow.Forward(w, r, "/rag/ingest/pdf")
 }
 
+func (s *server) handleRagIngestImage(w http.ResponseWriter, r *http.Request) {
+	// WorkerSlow: a vision-model extraction plus embeddings is a slow turn.
+	s.WorkerSlow.Forward(w, r, "/rag/ingest/image")
+}
+
 // handleRagIngestDocx proxies a .docx upload to the worker, which extracts text
 // (python-docx) and ingests it. 501 if python-docx isn't installed.
 func (s *server) handleRagIngestDocx(w http.ResponseWriter, r *http.Request) {
