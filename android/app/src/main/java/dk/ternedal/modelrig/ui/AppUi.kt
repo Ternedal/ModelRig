@@ -106,8 +106,13 @@ fun AppUi() {
                 Screen.VoiceCloudPicker -> CloudModelPickerScreen(
                     store,
                     forVoice = true,
-                    onPicked = { cloudModelTick++; screen = Screen.Chat },
-                    onBack = { cloudModelTick++; screen = Screen.Chat },
+                    // The voice cloud picker is only reachable from rig mode (voice
+                    // keeps ASR/TTS local). Force chatMode back to rig on return so
+                    // ChatScreen -- which re-reads store.chatMode when it recomposes
+                    // -- lands back on rig, not cloud. Without this it sprang to the
+                    // cloud chat, which is not where the user came from.
+                    onPicked = { store.chatMode = "rig"; cloudModelTick++; screen = Screen.Chat },
+                    onBack = { store.chatMode = "rig"; cloudModelTick++; screen = Screen.Chat },
                 )
                 Screen.CloudPicker -> CloudModelPickerScreen(
                     store,

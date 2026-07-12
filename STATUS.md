@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.52.0** — "Voice-cloud-model kan nu VAELGES. voice brugte store.cloudModel (samme som tekst) og cloud-vaelgeren var kun i cloud-mode — saa i rig-mode (hvor voice bor) kunne man ikke skifte den. Nu: separat voiceCloudModel-setting (falder tilbage til cloudModel), dedikeret vaelger reachable fra rig-dropdownen (Cloud-model til tale: X), CloudModelPickerScreen parameteriseret med forVoice. Saa voice kan bruge en HURTIG model (gpt-oss:120b) mens tekst bruger deepseek 671b. Routing-stribe + toggle viser voiceCloudModel. NB: parallel session havde tilfoejet selve settingen — jeg wired UI+vaelger". Follows 1.51.0. Autonomous sessions, **2026-07-02 → 07-12**.
+Version **1.53.0** — "Nav-fix: efter valg af voice-cloud-model sprang appen til CLOUD-chat i stedet for rig hvor man kom fra. Aarsag: ChatScreen re-remember-er mode fra store.chatMode ved recompose (skaerm disposes via when(screen)), og pickeren rørte ikke chatMode. Fix: VoiceCloudPicker saetter store.chatMode=rig ved retur (onPicked+onBack) — voice-cloud giver kun mening i rig-mode (ASR/TTS lokalt). Nu lander man tilbage i rig". Follows 1.52.0. Autonomous sessions, **2026-07-02 → 07-12**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
