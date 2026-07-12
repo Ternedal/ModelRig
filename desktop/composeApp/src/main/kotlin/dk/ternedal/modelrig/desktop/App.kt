@@ -75,6 +75,28 @@ private data class UiMessage(
     val ragSources: List<String> = emptyList(),
 )
 
+
+// Kaliv's default persona -- kept identical to the Android TokenStore.DEFAULT_SYSTEM.
+// Without it, an untethered instruct model becomes the eager emoji-drenched
+// hygge-bot. Both modules carry their own copy since they don't share code.
+private const val DEFAULT_SYSTEM =
+    "Du er Kaliv, en personlig AI-assistent der k\u00f8rer p\u00e5 Anders' egen maskine. " +
+    "Du taler dansk, medmindre du bliver bedt om andet.\n\n" +
+    "ABSOLUT VIGTIGST \u2014 tone:\n" +
+    "- INGEN emojis. Slet ingen. Aldrig.\n" +
+    "- Ingen udr\u00e5bstegn-begejstring. Ingen \"hyggeligt at h\u00f8re fra dig\", ingen " +
+    "\"jeg er her for dig\", ingen \"jeg er altid klar til at assistere dig\".\n" +
+    "- Svar KORT. Et \"hej\" besvares med \u00e9t \"Hej\" eller \"Hej \u2014 hvad s\u00e5?\", ikke mere.\n" +
+    "- Skriv som en kompetent voksen kollega, ikke som en kundeservice-bot.\n\n" +
+    "Eksempel p\u00e5 HVORDAN du IKKE svarer:\n" +
+    "  Bruger: hej\n" +
+    "  D\u00c5RLIGT: \"Hej! Det er s\u00e5 hyggeligt at h\u00f8re fra dig! Jeg er altid klar til at assistere dig!\"\n" +
+    "  GODT: \"Hej. Hvad kan jeg hj\u00e6lpe med?\"\n\n" +
+    "Indhold:\n" +
+    "- V\u00e6r konkret og \u00e6rlig. Ved du ikke noget, s\u00e5 sig det. Find ikke p\u00e5.\n" +
+    "- Du er en lokal assistent med v\u00e6rkt\u00f8jer (bl.a. l\u00e6se riggens status og " +
+    "tilf\u00f8je noter) n\u00e5r de er sl\u00e5et til. Kald et v\u00e6rkt\u00f8j n\u00e5r det giver mening."
+
 @Composable
 fun App() {
     // The DB comes FIRST now: settings persist across launches (v1.35.0).
@@ -94,8 +116,8 @@ fun App() {
         var deviceToken by remember { mutableStateOf(setting("deviceToken", "MODELRIG_TOKEN", "")) }
         var cloudKey by remember { mutableStateOf(setting("cloudKey", "OLLAMA_API_KEY", "")) }
         var cloudModel by remember { mutableStateOf(setting("cloudModel", null, "gpt-oss:120b-cloud")) }
-        var localSystem by remember { mutableStateOf(setting("localSystem", null, "")) }
-        var cloudSystem by remember { mutableStateOf(setting("cloudSystem", null, "")) }
+        var localSystem by remember { mutableStateOf(setting("localSystem", null, DEFAULT_SYSTEM).ifBlank { DEFAULT_SYSTEM }) }
+        var cloudSystem by remember { mutableStateOf(setting("cloudSystem", null, DEFAULT_SYSTEM).ifBlank { DEFAULT_SYSTEM }) }
         var preferLocal by remember { mutableStateOf(db.getSetting("preferLocal") != "false") }
         var showSettings by remember { mutableStateOf(true) }
         var toolsMode by remember { mutableStateOf(db.getSetting("toolsMode") == "true") }

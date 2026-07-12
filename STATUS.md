@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.43.0** — "Kaliv fik en RIGTIG persona: app-standardprompten var TOM, saa en utethered instruct-model improviserede en tom emoji-druknet hygge-bot (svarede hej med tre linjer regnbuer). Ny DEFAULT_SYSTEM: kortfattet, dansk, aerlig, hoejst 1 emoji, kender sine tools. Gaelder ogsaa eksisterende installs (gemt-tom = brug default). qwen3:14b BEKRAEFTET bedre end hermes3 on-device (ved den er Kaliv, kender sine tools). Taenke-ikon 44→52dp. Verificeret ved build". Follows 1.42.0 (foto→RAG-UI). Autonomous sessions, **2026-07-02 → 07-12**.
+Version **1.44.0** — "Persona haerdet + desktop fik den ogsaa. v1.43.0-personaen virkede kun HALVT (qwen3:14b ignorerede -hoejst 1 emoji- og fortsatte med 🌟✨ og -jeg er her for dig-). Ny prompt er kompromisloes: INGEN emojis nogensinde + et konkret DAARLIGT-vs-GODT-eksempel paa hej-svar. Desktop havde SAMME tomme-prompt-problem — fik nu samme persona. VIGTIGT: skaermbilleder var fra FOER v1.43.0 (gammel build) — personaen anvendes fresh fra store ogsaa i gamle samtaler". Follows 1.43.0. Autonomous sessions, **2026-07-02 → 07-12**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
