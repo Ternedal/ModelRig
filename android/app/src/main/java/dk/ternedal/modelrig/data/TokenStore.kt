@@ -41,6 +41,15 @@ class TokenStore(context: Context) {
         get() = prefs.getString("cloud_model", "gpt-oss:120b") ?: "gpt-oss:120b"
         set(v) { prefs.edit().putString("cloud_model", v).apply() }
 
+    /** The cloud model used specifically for the voice (ASR->LLM->TTS) chain when
+     *  "Stemme svarer via cloud" is on. Separate from cloudModel so voice can use
+     *  a FASTER model (e.g. gpt-oss:120b) than a heavy text model (deepseek 671b),
+     *  or vice versa. Falls back to cloudModel if never set, so existing behaviour
+     *  is unchanged until the user picks a dedicated voice model. */
+    var voiceCloudModel: String
+        get() = prefs.getString("voice_cloud_model", null)?.ifBlank { null } ?: cloudModel
+        set(v) { prefs.edit().putString("voice_cloud_model", v).apply() }
+
     /**
      * When true, a voice turn's LLM step is answered by the cloud model instead
      * of a local one. ASR and TTS still run on the rig -- only the thinking

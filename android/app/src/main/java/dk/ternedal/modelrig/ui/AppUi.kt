@@ -54,7 +54,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, CloudPicker }
+private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, CloudPicker, VoiceCloudPicker }
 
 @Composable
 fun AppUi() {
@@ -90,6 +90,7 @@ fun AppUi() {
                     onOpenModels = { screen = Screen.Models },
                     onOpenKnowledge = { screen = Screen.Knowledge },
                     onOpenCloudPicker = { screen = Screen.CloudPicker },
+                    onOpenVoiceCloudPicker = { screen = Screen.VoiceCloudPicker },
                     onConvChanged = { openConvId = it },
                 )
                 Screen.Convos -> ConversationsScreen(
@@ -102,6 +103,12 @@ fun AppUi() {
                 )
                 Screen.Models -> ModelsScreen(store, onBack = { screen = Screen.Chat })
                 Screen.Knowledge -> KnowledgeScreen(store, onBack = { screen = Screen.Chat })
+                Screen.VoiceCloudPicker -> CloudModelPickerScreen(
+                    store,
+                    forVoice = true,
+                    onPicked = { cloudModelTick++; screen = Screen.Chat },
+                    onBack = { cloudModelTick++; screen = Screen.Chat },
+                )
                 Screen.CloudPicker -> CloudModelPickerScreen(
                     store,
                     onPicked = { cloudModelTick++; screen = Screen.Chat },
@@ -605,6 +612,7 @@ private fun ChatScreen(
     onOpenModels: () -> Unit,
     onOpenKnowledge: () -> Unit,
     onOpenCloudPicker: () -> Unit,
+    onOpenVoiceCloudPicker: () -> Unit,
     onConvChanged: (Long?) -> Unit,
 ) {
     val hasRig = store.hasRig
@@ -763,7 +771,7 @@ private fun ChatScreen(
                         // Sending null made voice fall back to the worker's default
                         // (qwen2.5-coder:7b -- a code model that rambled in half-
                         // Norwegian), ignoring the chosen qwen3:14b entirely.
-                        model = if (key != null) store.cloudModel else currentModel,
+                        model = if (key != null) store.voiceCloudModel else currentModel,
                         cloudBaseUrl = if (key != null) "https://ollama.com" else null,
                         cloudKey = key,
                     )
@@ -1261,7 +1269,7 @@ private fun ChatScreen(
                                     text = {
                                         Text(
                                             (if (voiceUsesCloud) "☁ " else "◇ ") +
-                                                "Stemme svarer via cloud (${store.cloudModel})",
+                                                "Stemme svarer via cloud",
                                             color = if (voiceUsesCloud) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
                                             fontSize = 13.sp,
                                         )
@@ -1272,6 +1280,22 @@ private fun ChatScreen(
                                         modelMenu = false
                                     },
                                 )
+                                // Pick WHICH cloud model the voice chain uses --
+                                // separate from the text cloud model, reachable from
+                                // rig mode (where voice lives). Only useful when the
+                                // toggle above is on.
+                                if (voiceUsesCloud) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                "     ☁ Cloud-model til tale: ${store.voiceCloudModel}",
+                                                color = KalivTheme.colors.amber,
+                                                fontSize = 12.sp,
+                                            )
+                                        },
+                                        onClick = { modelMenu = false; onOpenVoiceCloudPicker() },
+                                    )
+                                }
                             }
                             // Barge-in: speak to cut Kaliv off mid-reply. Needs the
                             // mic while she talks, hence the permission check.
@@ -1494,7 +1518,7 @@ private fun ChatScreen(
                 Spacer(Modifier.width(10.dp))
                 // Voice routing: cloud only when the toggle is on AND a key exists.
                 val voiceCloud = voiceUsesCloud && store.cloudKey != null
-                val voiceLabel = if (voiceCloud) "☁ tale: ${store.cloudModel}" else "🎙 tale: $currentModel"
+                val voiceLabel = if (voiceCloud) "☁ tale: ${store.voiceCloudModel}" else "🎙 tale: $currentModel"
                 Text(
                     voiceLabel,
                     color = if (voiceCloud) KalivTheme.colors.amber else KalivTheme.colors.textMuted,
@@ -2470,13 +2494,13 @@ private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
  * open) and returns to chat. Auto-loads the list on entry if empty.
  */
 @Composable
-private fun CloudModelPickerScreen(store: TokenStore, onPicked: () -> Unit, onBack: () -> Unit) {
+private fun CloudModelPickerScreen(store: TokenStore, forVoice: Boolean = false, onPicked: () -> Unit, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var models by remember { mutableStateOf(listOf<String>()) }
     var query by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    val selected = store.cloudModel
+    val selected = if (forVoice) store.voiceCloudModel else store.cloudModel
 
     fun reload() {
         val key = store.cloudKey
@@ -2508,7 +2532,7 @@ private fun CloudModelPickerScreen(store: TokenStore, onPicked: () -> Unit, onBa
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = onBack) { Text("←", color = KalivTheme.colors.textHigh, fontSize = 18.sp) }
-                    Text("Vælg cloud-model", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
+                    Text(if (forVoice) "Cloud-model til tale" else "Vælg cloud-model", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = { reload() }) { Text("↻", color = KalivTheme.colors.signal, fontSize = 16.sp) }
                 }
@@ -2547,7 +2571,7 @@ private fun CloudModelPickerScreen(store: TokenStore, onPicked: () -> Unit, onBa
                 items(shown, key = { it }) { m ->
                     Row(
                         Modifier.fillMaxWidth()
-                            .clickable { store.cloudModel = m; onPicked() }
+                            .clickable { if (forVoice) store.voiceCloudModel = m else store.cloudModel = m; onPicked() }
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {

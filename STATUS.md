@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.51.0** — "Transparens: altid-synlig routing-stribe under headeren viser nu WHICH model svarer tekst (◈/☁) OG hvilken svarer tale (🎙/☁ med cloud-indikator) — foer var voice-cloud-tilstanden begravet i model-menuen og kun synlig EFTER svar via chippen. Voice-via-cloud bekraeftet virker (keep_alive-fix v1.50.0). Aerlig note: 671B cloud-model paa hele ASR→LLM→TTS-kaeden ER langsom — det er modellen, ikke koden". Follows 1.50.0. Autonomous sessions, **2026-07-02 → 07-12**.
+Version **1.52.0** — "Voice-cloud-model kan nu VAELGES. voice brugte store.cloudModel (samme som tekst) og cloud-vaelgeren var kun i cloud-mode — saa i rig-mode (hvor voice bor) kunne man ikke skifte den. Nu: separat voiceCloudModel-setting (falder tilbage til cloudModel), dedikeret vaelger reachable fra rig-dropdownen (Cloud-model til tale: X), CloudModelPickerScreen parameteriseret med forVoice. Saa voice kan bruge en HURTIG model (gpt-oss:120b) mens tekst bruger deepseek 671b. Routing-stribe + toggle viser voiceCloudModel. NB: parallel session havde tilfoejet selve settingen — jeg wired UI+vaelger". Follows 1.51.0. Autonomous sessions, **2026-07-02 → 07-12**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
