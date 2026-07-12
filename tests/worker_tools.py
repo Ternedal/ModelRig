@@ -630,5 +630,45 @@ T.REGISTRY["rig_status"] = _saved
 check(worst < 0.25,
       f"T28: a 600ms tool stalls the loop by {worst*1000:.0f}ms, not by 600ms")
 
+
+
+# T30: the CLOUD tools path, end to end through tools_chat with a stubbed
+# upstream. Proves that when a cloud key is present, a cloud-proposed WRITE
+# reaches the gate with origin="cloud" and parks behind a card -- i.e. the full
+# request path (not just the gate in isolation, which T16 covers) carries origin
+# correctly. This is the wiring the app depends on in cloud mode.
+import asyncio as _asyncio
+
+def _t30():
+    g = fresh_gate()
+    T.GATE = g  # tools_chat does `from . import tools as t` and reads t.GATE
+    # stub the upstream so no network is needed: it "proposes" a write
+    async def _fake_chat_tools(messages, tools=None, model=None, base_url=None, api_key=None):
+        # the stub asserts the cloud upstream was actually threaded through
+        assert base_url == "https://ollama.com", f"cloud base_url not forwarded: {base_url}"
+        assert api_key == "SECRET", f"cloud key not forwarded: {api_key}"
+        return {"content": "", "tool_calls": [
+            {"function": {"name": "note_append", "arguments": {"text": "fra sky"}}}]}
+    def _read_note():
+        try:
+            return open(T.note_path(), encoding="utf-8").read()
+        except FileNotFoundError:
+            return ""
+    before = _read_note()
+    orig = oc.chat_tools
+    oc.chat_tools = _fake_chat_tools
+    try:
+        req = M.ToolChatReq(message="skriv en note", model="gpt-oss:120b",
+                            cloud_base_url="https://ollama.com", cloud_key="SECRET")
+        out = _asyncio.run(M.tools_chat(req))
+    finally:
+        oc.chat_tools = orig
+    check(out["status"] == "confirmation_required",
+          "T30: cloud-proposed write parks behind the card through the full path")
+    check(_read_note() == before,
+          "T30: the notes file is UNCHANGED before approval on the cloud path")
+
+_t30()
+
 print(f"\n===== TOOLS: {passed} passed, {failed} failed =====")
 sys.exit(0 if failed == 0 else 1)
