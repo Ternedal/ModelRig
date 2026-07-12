@@ -557,7 +557,7 @@ private fun friendlyError(err: Throwable): String {
         err is java.net.UnknownHostException || err is java.net.ConnectException ->
             "Kan ikke oprette forbindelse. Tjek at rig'en kører, og at telefonen er på samme netværk (eller Tailscale)."
         err is java.net.SocketTimeoutException ->
-            "Tidsudløb — modellen svarede ikke i tide. Prøv igen, eller vælg en mindre model."
+            "Tidsudløb — modellen svarede ikke i tide. I cloud-mode: tjek at modelnavnet findes på din konto (fx gpt-oss:120b) og at nøglen er gyldig. Ellers prøv igen eller vælg en mindre model."
         else -> friendlyError(msg)
     }
 }
@@ -2456,12 +2456,18 @@ private fun CloudModelPickerScreen(store: TokenStore, onPicked: () -> Unit, onBa
     val selected = store.cloudModel
 
     fun reload() {
-        val key = store.cloudKey ?: return
+        val key = store.cloudKey
+        if (key == null) {
+            error = "Ingen API-nøgle sat. Gem en nøgle i ☁-menuen (ollama.com/settings/keys) først."
+            return
+        }
         loading = true; error = null
         scope.launch {
             val res = withContext(Dispatchers.IO) { runCatching { CloudClient(key).listModels() } }
-            res.onSuccess { models = it.sorted(); loading = false }
-                .onFailure { error = friendlyError(it); loading = false }
+            res.onSuccess {
+                models = it.sorted(); loading = false
+                if (it.isEmpty()) error = "Nøglen virker, men kontoen viser ingen cloud-modeller. Skriv modelnavnet manuelt (fx gpt-oss:120b) i ☁-menuen."
+            }.onFailure { error = friendlyError(it); loading = false }
         }
     }
     LaunchedEffect(Unit) { if (models.isEmpty()) reload() }

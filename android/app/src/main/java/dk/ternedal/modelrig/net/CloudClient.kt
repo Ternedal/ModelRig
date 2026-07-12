@@ -30,10 +30,13 @@ class CloudClient(private val apiKey: String, baseUrl: String = "https://ollama.
 
     private val jsonType = "application/json".toMediaType()
 
-    /** Fetch available cloud model names. Tries the native /api/tags, then the
-     *  OpenAI-compatible /v1/models. Returns empty on failure (caller falls back
-     *  to the manually-typed model). */
+    /** Fetch available cloud model names via the native /api/tags (the documented
+     *  way to list models on ollama.com's direct API), then the OpenAI-compatible
+     *  /v1/models as a fallback. Throws on an auth error so the caller can show
+     *  WHY it failed instead of a silent empty list (the "cloud just times out /
+     *  shows nothing" trap). Returns empty only if both succeed but list nothing. */
     fun listModels(): List<String> {
+        var lastErr: String? = null
         for (path in listOf("/api/tags", "/v1/models")) {
             try {
                 val req = Request.Builder()
@@ -42,7 +45,12 @@ class CloudClient(private val apiKey: String, baseUrl: String = "https://ollama.
                     .get()
                     .build()
                 http.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) return@use
+                    if (!resp.isSuccessful) {
+                        // 401/403 = bad or missing key: surface it, don't hide it.
+                        lastErr = "cloud-modeller: HTTP ${resp.code} fra $path" +
+                            (if (resp.code == 401 || resp.code == 403) " — tjek API-nøglen (ollama.com/settings/keys)" else "")
+                        return@use
+                    }
                     val obj = JSONObject(resp.body?.string() ?: return@use)
                     val names = mutableListOf<String>()
                     when {
@@ -58,10 +66,14 @@ class CloudClient(private val apiKey: String, baseUrl: String = "https://ollama.
                     val clean = names.filter { it.isNotBlank() }
                     if (clean.isNotEmpty()) return clean
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                lastErr = "cloud-modeller: ${e.message ?: "netværksfejl"} ($path)"
                 // try next path
             }
         }
+        // Both paths gave nothing usable. If there was a hard error, raise it so
+        // the picker explains the cause rather than showing an empty list.
+        lastErr?.let { throw ModelRigException(it) }
         return emptyList()
     }
 

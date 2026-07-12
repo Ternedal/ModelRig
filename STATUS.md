@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.48.0** — "Strip emojis ogsaa fra GAMLE gemte assistent-svar ved indlaesning. Anders spurgte hvorfor han talte med gammel qwen2.5-coder + saa emojis — svaret: han koerte en build FOER fixesne (voice-model-fix v1.45.0, emoji-strip v1.45.0, persona v1.43-44 er ALLE i koden, verificeret). De qwen2.5-coder-svar var VOICE-svar (🎙-chip) fra foer voice-fixet. Loose end lukket: finalize-strip rensede kun NYE svar, saa gamle samtaler viste stadig gammelt fyld — nu strippes de ogsaa ved load". Follows 1.47.0. Autonomous sessions, **2026-07-02 → 07-12**.
+Version **1.49.0** — "Cloud-diagnostik: Anders sagde cloud bare timer ud + kan ikke vaelge model. Verificeret mod Ollamas docs: /api/tags ER den rigtige liste-vej mod ollama.com, og modelnavn UDEN -cloud-suffiks er korrekt for direkte API (gpt-oss:120b, ikke -cloud). Aarsagen er derfor noegle/model, ikke kode. Fix er AERLIG diagnostik: listModels kaster nu auth/HTTP-fejl (401/403 → tjek noeglen) i stedet for tavs tom liste; picker skelner ingen-noegle / tom-liste / fejl; timeout-besked daekker cloud-tilfaeldet. Saa Anders SER hvorfor det fejler". Follows 1.48.0. Autonomous sessions, **2026-07-02 → 07-12**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
