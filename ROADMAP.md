@@ -446,7 +446,12 @@ lokalt. Bygger på V4's streaming-ASR og V5's tool-lag.
    mikrofon ja/nej] — openwakeword på enheden; intet forlader telefonen
    før wake-ordet er hørt.
 2. **Flydende samtaleloop**: streaming-ASR + kalibreret barge-in →
-   dialog uden knapper.
+   dialog uden knapper. **Output-halvdelen ✅ v1.54.0-1.55.0 (streamende
+   voice):** Kaliv taler første sætning mens resten genereres — nyt
+   `/voice/converse/stream` (NDJSON pr. sætning), app-afspiller-kø, 8 tests,
+   selv-audit fandt+fixede 3 samtidigheds-bugs. ⬜ On-device-verifikation
+   (S1-S4 i DEVICE_TEST.md). Input-halvdelen (streaming-ASR mens man taler)
+   udestår.
 3. **Multi-enhed**: per-enheds-parring; flere Android-klienter mod samme
    rig — evt. en pensioneret Android-enhed som fast Kaliv-station i
    hjemmet [moderat backend-arbejde].
@@ -455,12 +460,11 @@ lokalt. Bygger på V4's streaming-ASR og V5's tool-lag.
 5. **Kaliv Memory v3 — profil**: langtidspræferencer på tværs af
    samtaler, alt lokalt, med se/redigér/slet-UI [privacy-design].
 6. **Desktop-kærlighed** (udvidet 12/7-2026 på Anders' ønske — optaget her
-   jf. §21's lukket-endede regel). Ærligt gap-billede (læst i koden 12/7):
-   desktop er 1.816 linjer mod Androids 4.621 og er **stadig ModelRig, ikke
-   Kaliv** — gammel blå palette (Brand.kt siger det selv), intet Kaliv-navn/
-   ikon, ingen light mode, **ingen tools-mode/kort/Handlingslog (hele V5
-   mangler)**, ingen voice, og "parring" er et manuelt token-felt/env-var.
-   Fundamentet er dog sundt: chat med streaming, RAG, markdown, lokal historik.
+   jf. §21's lukket-endede regel). *(Gap-billedet fra formiddagen 12/7 —
+   "stadig ModelRig, blå palette, ingen tools" — er FORÆLDET samme aften:
+   a-d er leveret, se nedenfor. Kun e (voice) udestår.)*
+   Fundamentet: chat med streaming, RAG, markdown, lokal historik — nu også
+   Kaliv-brand, tools, pairing, chat-redesign og native tænke-animation.
    Rækkefølge (billigst-synligt først, genbrug fra Android hvor muligt):
    a. ~~Kaliv-rebrand + light/dark~~ ✅ **v1.35.0**, ikoner rettet **v1.39.0**:
       KalivColors dark+light, vinduestitel "Kaliv", jar hedder `Kaliv-…jar`.
@@ -776,7 +780,7 @@ flowchart LR
     V55["V5.5 sky-hjerne 🟡<br/>modeltest + cloud-test"]
     V5t["V5-hale ⬜<br/>tools i voice"]
     V7["V7 apparat 🟡<br/>services · selvopdatering"]
-    V6["V6 ambient ⬜<br/>wake word · streaming"]
+    V6["V6 ambient ◐<br/>streaming-voice ✅ v1.54<br/>wake word ⬜"]
     V9["V9 hjemmet ⬜"]
     V10["V10 vision ⬜"]
     V11["V11 agent v2 ⬜<br/>(kræver kæde-beslutning)"]

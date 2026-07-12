@@ -1,28 +1,34 @@
 # ModelRig
 
 A local-first AI platform: run models on your own hardware via Ollama, reach them
-from a desktop app and an Android phone, with an optional RAG service and an
-Ollama Cloud fallback for when local isn't enough.
+from a desktop app (**Kaliv** on Windows) and an Android phone (**Kaliv**), with
+Danish voice (ASR→LLM→TTS, streamed sentence-by-sentence), RAG document ingest
+(pdf/docx/pptx/html/photos), a confirmation-gated tool layer, and an optional
+Ollama Cloud brain for when local isn't enough. The backend keeps the ModelRig
+name; everything user-facing is Kaliv.
 
-Version: **1.12.1** (Status-endpoint laver ikke arbejde; barge-in fra 1.12.0)
+Version: **1.55.0** — streaming voice (Kaliv speaks the first sentence while the
+rest generates), dedicated voice cloud model, deterministic emoji-strip, photo→RAG.
+See STATUS.md line 3 for the always-current one-liner.
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-    Desktop["Desktop<br/>Compose JVM · Windows"]
-    Kaliv["Kaliv (Android)<br/>chat · voice · tools · RAG"]
-    Go["Backend (Go) :8080<br/>pairing · tokens · reverse proxy ONLY"]
+    Desktop["Kaliv Desktop<br/>Compose JVM · Windows"]
+    Kaliv["Kaliv (Android)<br/>chat · streaming voice · tools · RAG · foto→RAG"]
+    Go["Backend (Go) :8080<br/>pairing · tokens · reverse proxy ONLY<br/>flushes streams chunk-by-chunk"]
 
     subgraph Worker["Worker (Python) :8099"]
-        Pipe["RAG&nbsp;&nbsp;pdf · docx · pptx · html<br/>Voice&nbsp;&nbsp;ASR → LLM → TTS"]
+        Pipe["RAG&nbsp;&nbsp;pdf · docx · pptx · html · foto (vision)<br/>Voice&nbsp;&nbsp;ASR → LLM(stream) → sentence-TTS<br/>buffered: /voice/converse/upload<br/>streamed: /voice/converse/stream (NDJSON)"]
         Tools["Kaliv Tools<br/>registry (in code)<br/>confirmation gate<br/>audit log (append-only)<br/>Executor seam"]
+        Eval["Eval-harness<br/>tool-discipline · dansk · latency<br/>--baseline --gate = regression"]
     end
 
     Human(["human"])
-    Ollama["Ollama :11434<br/>local — ALWAYS"]
+    Ollama["Ollama :11434<br/>local — ALWAYS for embeddings"]
     DB[("SQLite<br/>RAG · audit")]
-    Cloud["Ollama Cloud<br/>(optional)"]
+    Cloud["Ollama Cloud<br/>(optional)<br/>text model ≠ voice model<br/>(cloudModel / voiceCloudModel)"]
 
     Desktop -- "local-first, cloud fallback" --> Go
     Kaliv -- "pair + bearer token" --> Go
@@ -30,9 +36,9 @@ flowchart TB
     Go -- "/api/chat · /api/tags" --> Ollama
     Go -- "/rag/* · /voice/* · /tools/*" --> Worker
     Human == "approves every write" ==> Tools
-    Worker -- "embeddings + generation<br/>ALWAYS local" --> Ollama
+    Worker -- "embeddings + generation<br/>embeddings ALWAYS local" --> Ollama
     Worker --> DB
-    Worker -. "LLM step only ·<br/>explicit toggle" .-> Cloud
+    Worker -. "voice LLM step only ·<br/>explicit toggle · keep_alive<br/>NEVER sent to cloud" .-> Cloud
 
     classDef ext stroke-dasharray: 6 4;
     class Cloud ext;
@@ -166,9 +172,13 @@ MODELRIG_HOST=0.0.0.0 ./modelrig-server      # LAN
 The backend logs this warning at startup; the Android pairing screen repeats it.
 
 ## Run order (local dev)
+
+**The easy way:** `scripts\start-kaliv.bat` starts all three processes correctly
+(including `MODELRIG_HOST=0.0.0.0` for phone reachability) and runs `/health/full`
+at the end. See `scripts/START_HERE.md`. The manual steps below are the long way.
 ```bash
 # 0. Ollama running with your models
-ollama pull qwen2.5-coder:7b
+ollama pull qwen3:14b        # confirmed primary (MODELS.md); qwen3:8b if VRAM is tight
 ollama pull nomic-embed-text
 
 # 1. Worker (RAG) — optional, only if you use /rag/*
@@ -201,25 +211,24 @@ sh tests/run_tests.sh
 ```
 
 ## Build status at a glance
-| Module   | State in this drop                    | Verified here                    |
-|----------|---------------------------------------|----------------------------------|
-| backend  | compiled binary + tests               | ✅ `go build`/`vet`, 28 (smoke 11 + V1 17) |
-| worker   | runs, logic tested                    | ✅ 34 (unit 9 + RAG 25, Ollama stubbed) |
-| e2e      | backend + worker run together         | ✅ 28 (full chain via the CLI)    |
-| desktop  | complete source, **build locally**    | ⚠️ no JVM/Gradle here             |
-| android  | complete source, **build locally**    | ⚠️ no Android SDK here            |
 
-**90 assertions** total (`sh tests/run_tests.sh`): streaming RAG chat,
-cross-service request tracing, `doctor --deep` (embedding round-trip), and token
-rotation. Streaming and the model picker in the clients are written but not
-compiled here — build locally.
+| Module   | State                                        | Verified by                          |
+|----------|-----------------------------------------------|--------------------------------------|
+| backend  | Go server, pairing + reverse proxy            | ✅ `go build` + `go test` (config, httpapi) in CI |
+| worker   | FastAPI: RAG, voice, tools, eval              | ✅ **298 tests** in CI (unit 52 · tools 124 · backup 17 · RAG 48 · paths 12 · migrate 7 · eval 18 · vision 12 · voice-stream 8) |
+| android  | Kaliv APK (minSdk 26)                         | ✅ built in CI, `kaliv-latest.apk` on every release |
+| desktop  | Kaliv Windows JAR (Compose JVM)               | ✅ built in CI, `Kaliv-windows-x64-X.Y.Z.jar` |
+| exes     | server + worker Windows executables           | ✅ built in CI, attached to every release |
 
-See **STATUS.md** for the honest breakdown: what's proven, what's only source,
-versions/assumptions, and known limitations.
+Every release ships 6 assets from a green CI run. Mutation-checked regression
+tests guard the bug classes that bit on real hardware (env trimming, path
+anchoring, keep_alive-to-cloud). The **honest rule** stands: compiled ≠ shipped,
+and CI-green ≠ works-on-device — the last mile is always on-device testing.
 
-**Building and testing the clients?** See **CLIENT_BUILD_AND_TEST.md** — a
-step-by-step handoff: build order, a smoke-test checklist, and the most likely
-Compose/Kotlin failure points with fixes.
+See **STATUS.md** for the per-release history (line 3 is always the current
+one-liner) and **ROADMAP.md** for where this is going (closed-ended at V15).
+
+**Building and testing the clients locally?** See **CLIENT_BUILD_AND_TEST.md**.
 
 ## License
 MIT — see LICENSE.

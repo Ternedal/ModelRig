@@ -202,3 +202,47 @@ For hvert trin der fejlede, ikke "det virkede ikke", men:
 
 Så retter jeg det, der faktisk er i stykker — i stedet for at gætte. Det er
 hele grunden til at denne runde er mere værd end den næste release.
+
+---
+
+## 12/7 aften — streamende voice (v1.54.0–1.55.0)
+
+Det store åbne testpunkt. **Forudsætning:** worker genstartet med v1.54.0+
+(streamingen er worker-side; en gammel worker giver 404 på stream-endpointet
+og appen fejler — så genstart workeren FØRST).
+
+### S1. Grundtest: taler den før svaret er færdigt?
+
+**Gør:** rig-mode, voice-cloud TIL med en stor model (deepseek-671b — netop
+fordi den er langsom, er effekten tydelig). Stil et spørgsmål der giver et
+langt svar ("fortæl mig om Mandø").
+**Bør se:** transskriptionen dukker op først; assistent-boblen fyldes
+sætning for sætning; **lyden starter efter første sætning** — ikke efter
+hele svaret. Med 671b: sekunder til første sætning i stedet for ½-1 minut.
+**Hvis fejl →** worker-konsollen (kører den v1.54.0+? fejler
+/voice/converse/stream?), og prøv det bufrede fallback ved at rulle app
+tilbage til v1.53.0 (endpointet er urørt).
+
+### S2. Gap/overlap mellem sætninger
+
+**Gør:** lyt til overgangene i et 4-5-sætningers svar.
+**Bør se:** små naturlige pauser (TTS-latens pr. sætning), ingen overlap,
+ingen sætninger der mangler eller kommer i forkert rækkefølge.
+**Hvis fejl →** noter HVILKET mønster (gap-længde? overlap? rækkefølge?) —
+det afgør om fixet er i afspiller-køen (app) eller chunk-timingen (worker).
+
+### S3. Barge-in + stop midt i streamen
+
+**Gør:** afbryd ved at tale (barge-in) og ved ⏹ — begge MIDT i et streamet svar.
+**Bør se:** lyden stopper hurtigt; ingen efterfølgende sætninger spiller;
+RMS-meteret opdaterer sig UNDER talen (fix fra v1.55.0); appen er straks klar.
+**Hvis fejl →** er det afspilningen der fortsætter (kø-dræning) eller
+netværket der læser videre? Skærmbillede af tilstanden hjælper.
+
+### S4. Persistens efter streamet tur
+
+**Gør:** luk samtalen, åbn den igen.
+**Bør se:** transskription som bruger-besked + hele svaret som assistent-
+besked, uden emojis (strip ved indlæsning), med 🎙-model-chip.
+**Hvis fejl →** var svaret tomt/kun markup? (så skal assistent-rækken
+mangle med vilje — det er korrekt adfærd, ikke en fejl).

@@ -1,6 +1,6 @@
-# ModelRig / Alva — handoff til ny chat
+# ModelRig / Kaliv — handoff til ny chat
 
-**Dato:** 2026-07-09 (opdateret ~22:00) · **Version:** v1.12.3 · **Repo:** `github.com/Ternedal/ModelRig` (privat)
+**Dato:** 2026-07-12 (aften) · **Version:** v1.55.0 · **Repo:** `github.com/Ternedal/ModelRig` (**PUBLIC** — gratis CI)
 
 Copy/paste dette som første besked i en ny chat.
 
@@ -8,38 +8,36 @@ Copy/paste dette som første besked i en ny chat.
 
 ## 0. Læs først: hvad der er akut
 
-1. **⚠️ GitHub PAT'en er stadig aktiv** og er brugt til ~15 releases i dag.
-   Revokér den: `github.com/settings/tokens`. Dette er højeste prioritet.
-2. **Voice-fejlen er LØST** (se §5): root cause var CUDA-DLL-søgestien.
-   Fundet via v1.12.2's fejllogning, hardware-bekræftet med manuel PATH-test
-   og fixet i v1.12.3 (workeren sætter nu selv PATH). GPU-voice kørte
-   ende-til-ende på telefonen 9/7 ~21:50: large-v3 på cuda + hermes3:8b +
-   Piper. Ny kendt mangel fundet samme aften: ingen manuel stop af
-   afspilning (se §4).
+1. **⚠️ GitHub PAT'en er stadig aktiv** og er brugt til 50+ releases.
+   Revokér den: `github.com/settings/tokens` → ny token → opdatér origin-URL
+   + Notion. Dette er højeste prioritet og har været flagget siden 9/7.
+2. **Streamende voice (v1.54.0-1.55.0) afventer on-device-test.** Kaliv skal nu
+   tale første sætning mens resten genereres. Testpunkter: (a) taler den før
+   hele svaret er færdigt, (b) opdateres RMS-meteret under tale, (c) fyldes
+   assistent-boblen sætning for sætning, (d) virker barge-in stadig midt i
+   streamen, (e) pauser/overlap mellem sætninger? Det gamle bufrede endpoint
+   er urørt som fallback.
 3. **Anders har flere kopier af repoet** (`modelrig`, `modelrig-new`,
    `modelrig-mono`) med forskellig kode-alder. Det har forårsaget flere falske
-   fejlspor. Ryd op: behold én mappe.
-4. **Appen hedder nu KALIV** (Anders' beslutning 9/7 aften; før: Alva).
-   **Rebranden:** ikon i `v1.12.4`, navn + tap-to-stop i `v1.13.0`,
-   **hele UI-paletten i `v1.16.0`** (charred black / dark walnut / ember
-   bronze / muted ivory, fra `kaliv_palette.json`). Launcher-label er
+   fejlspor. Ryd op: behold én mappe. **"Compiled ≠ shipped" og "editing the
+   tree ≠ shipping"** er standing rules af samme grund.
+4. **Appen hedder KALIV** (Anders' beslutning 9/7; før: Alva). Kun BACKEND
+   er ModelRig (server/worker/repo/API/exes); ALT brugervendt er Kaliv.
+   `applicationId dk.ternedal.modelrig` er permanent og må ALDRIG ændres.
+5. **Kør-kommandoer:** "kør" / "kør videre" = fuld autonom eksekvering uden
+   check-ins. "test jeg" = Anders tester på hardware. Anders kører flere
+   parallelle Claude-sessioner med fuld commit-autoritet — pull/rebase før
+   hvert arbejde, og tjek version-sites for kollisioner.
    `Kaliv` (verificeret i den byggede APK), worker-env er `KALIV_*` med
-   `ALVA_*`-fallback. `applicationId` er uændret `dk.ternedal.modelrig`.
-
-   ⚠️ **Lektie:** §0 påstod "rebranden er FÆRDIG" efter ikon + navn, mens
-   appen indeni stadig var safir-blå. Anders opdagede det. Et ikon er ikke
-   et brand. Skriv aldrig "færdig" om noget der ikke er efterprøvet mod
-   selve leverancen — her: paletten, tokens og UI-mockups i brand-pakken.
-
-   **Splash + velkomstskærm bygget i `v1.17.0`:** `Theme.Kaliv` sætter
-   `windowBackground` til charred black med ankh'en, så koldstart aldrig
-   blitzer platformens tema; tom-tilstanden er nu mærket + `KALIV`-wordmark
-   + "Lokal intelligens. Privat."
+   ⚠️ **Lektie (fra rebranden):** §0 påstod "rebranden er FÆRDIG" efter ikon +
+   navn, mens appen indeni stadig var safir-blå. Anders opdagede det. Et ikon
+   er ikke et brand. Skriv aldrig "færdig" om noget der ikke er efterprøvet mod
+   selve leverancen. (Desktop er siden rebrandet fuldt: Kaliv-navn v1.35.0,
+   ikoner v1.39.0, chat-redesign v1.41.0, native tænke-animation v1.47.0.)
 
    **Åben rest:** brand-fontene (Cinzel/Cormorant + Montserrat) findes ikke
    som filer i pakken — display bruger platform-serif indtil de lægges i
-   `res/font`. Desktop-klienten er stadig safir-blå; den hedder ModelRig,
-   ikke Kaliv.
+   `res/font`.
 
 ---
 
@@ -107,38 +105,40 @@ python -m piper.download_voices da_DK-talesyntese-medium
 
 ---
 
-## 3. Hvad der VIRKER (hardware-bekræftet)
+## 3. Hvad der VIRKER (hardware-bekræftet, pr. 12/7)
 
 | Feature | Bevist |
 |---|---|
-| Alva-ikon + navn | ✅ i launcheren |
-| PDF-ingest → RAG | ✅ svarede grounded om PDF-indhold |
-| DOCX-ingest → RAG | ✅ inkl. tabel-indhold |
-| TTS (Piper dansk) | ✅ forståelig dansk tale |
-| ASR (faster-whisper dansk) | ✅ høj kvalitet |
-| **Voice ende-til-ende på telefonen** | ✅ tale → ASR → LLM → TTS → afspilning |
-| **Hybrid voice (cloud-LLM)** | ✅ kimi-k2.6 svarede på tale |
+| PDF/DOCX-ingest → RAG (inkl. tabeller) | ✅ grounded svar |
+| TTS (Piper dansk) + ASR (faster-whisper, CUDA large-v3) | ✅ |
+| Voice ende-til-ende på telefonen | ✅ tale → ASR → LLM → TTS → afspilning |
+| **Voice-via-cloud** (LLM-trin til Ollama Cloud) | ✅ deepseek-671b svarede korrekt (12/7, efter keep_alive-fixet) |
+| Barge-in + tap-to-stop + RMS-meter | ✅ bekræftet i device-test-arc'en |
 | Markdown strippes fra tale | ✅ læser ikke "stjerne" op |
-| Local→cloud-fallback | ✅ set utilsigtet |
-| **CUDA / GPU-ASR** | ✅ `large-v3` loader på 3060 (verificeret isoleret 9/7) |
+| **Agent-laget** (læse rig-status, skrive noter bag bekræftelseskort) | ✅ on-device 11/7 |
+| **qwen3:14b** kender identitet + tools ("Jeg er Kaliv... læse riggens status") | ✅ 12/7 — markant bedre end hermes3 |
+| Rig-model-skifter i dropdownen (auto-load, ◈ på valgt) | ✅ 12/7 |
+| Emoji-strip (deterministisk, klient-side) + persona | ✅ 12/7 |
+| Voice-cloud-model-vælger ("Cloud-model til tale") + retur til rig | ✅ 12/7 |
+| Routing-stribe (tekst-/tale-model + cloud-indikator) | ✅ 12/7 |
+| Desktop: Kaliv-rebrand, chat-redesign, ikoner, slet-crash-fix | ✅ 12/7 |
+| CUDA / GPU-ASR (`large-v3` på 3060) | ✅ |
 
-## 4. Hvad der IKKE er testet
+## 4. Hvad der IKKE er testet (afventer Anders)
 
-- **Barge-in** (v1.12.0) — kompileret, aldrig prøvet på enhed. Tærsklen er
-  ikke længere hardkodet: v1.15.0 viser live RMS + top i statuslinjen mens
-  Kaliv taler, og følsomheden justeres i ⋮-menuen (persisteret).
-  **Fremgangsmåde:** headset på (intet ekko) → tal over Kaliv → aflæs top →
-  sæt tærsklen mellem tomgangsniveauet og toppen. Derefter samme øvelse på
-  højttaler, hvor telefonens AEC afgør om det overhovedet kan lade sig gøre.
-- **Tap-to-stop** (v1.13.0) — bygget og compile-verificeret, **ikke
-  device-testet**. Mens en stemmetur kører bliver 🎙 til ⏹. Stop hæver
-  først `playbackStop` (så `playWav`s skriveløkke returnerer) og annullerer
-  derefter coroutinen — omvendt rækkefølge ville lade lyden spille færdig.
-  Test: tryk under tale → stilhed hurtigt, appen straks klar igen.
-- **Model-chip på stemme-svar** (v1.11.0) — `◈ 🎙 hermes3:8b` / `☁ 🎙 kimi-k2.6`
-- **PDF/DOCX-upload fra telefonen** (kun testet på rig'en)
-- **Vision** (v1.1.0) — kræver `ollama pull llama3.2-vision`
-- **Desktop**: samtale-panel (søg/omdøb/kopiér) + soft-lock-fix
+- **Streamende voice (v1.54.0-1.55.0)** — DET store åbne punkt. Kaliv skal
+  tale første sætning mens resten genereres. Se §0 punkt 2 for testpunkterne.
+  Bufret endpoint urørt som fallback.
+- **Foto→RAG ("＋ Gem i Viden", v1.42.0)** — kræver `KALIV_VISION_MODEL` sat
+  på workeren (fx `llama3.2-vision:11b`); uden den svarer knappen med den
+  ærlige 501. VRAM-kabale: ASR + gen + VLM kan ikke alle være resident på
+  12 GB — model-swap-latens forventet.
+- **Eval-harnessen mod rigtige modeller** — `python -m app.eval_models
+  hermes3:8b qwen3:14b` på riggen. Giver TAL på tool-disciplin/dansk/latens.
+- **migrate_data på riggen** — `python -m app.migrate_data` (dry-run, så
+  `--apply`): samler gamle relative datafiler i data-roden.
+- **Desktop native tænke-animation (v1.47.0)** — Canvas-tegnet, kan ikke
+  fryse som WebP'en, men om kredsløbet SER rigtigt ud er ikke bekræftet.
 
 ---
 

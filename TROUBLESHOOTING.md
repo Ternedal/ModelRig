@@ -101,3 +101,46 @@ under test. **Start altid med `/health/full`** (launcheren kører det, eller
   worker-loggen ved opstart.
 - **Fix:** kør v1.34.15+ workeren. Gamle filer i tidligere opstartsmapper kan
   flyttes ind i data-roden hvis du vil beholde dem.
+
+## Voice med cloud timer ud — men almindelig cloud-chat virker fint
+
+Klassikeren fra 12/7. Årsag: workerens LLM-kald sendte `keep_alive` (en
+LOKAL-VRAM-direktiv) til Ollama Cloud, som hang requesten. Almindelig cloud-chat
+virkede præcis fordi appens CloudClient aldrig sender `keep_alive`. Fixet i
+v1.50.0 (keep_alive sendes kun til den lokale rig; T31 mutations-tjekket).
+**Hvis det opstår igen:** tjek at workeren kører v1.50.0+, og at ingen ny
+kode-sti sender lokale Ollama-parametre til et cloud-upstream.
+
+## Desktop/Android crasher med SQLITE_CONSTRAINT_FOREIGNKEY ved sletning
+
+At slette den samtale man STÅR i: convId pegede stadig på den slettede samtale,
+så næste besked-insert brød foreign key'en. Fixet i v1.46.0 på begge platforme
+(aktiv convId nulstilles via callback + addMessage guarder eksistens). **Mønstret
+generelt:** enhver "slet det aktive X"-operation skal nulstille den aktive
+peger FØR næste skrivning.
+
+## Kaliv er en emoji-drukdnet "hygge-bot" / svarer med forkert tone
+
+To lag: (1) standard-systemprompten var TOM, så modellen improviserede
+kundeservice-fyld — fixet med DEFAULT_SYSTEM-personaen (v1.43-44, gemt-tom =
+brug default). (2) Små lokale modeller (selv qwen3:14b) IGNORERER "ingen
+emojis"-instruktioner — derfor deterministisk klient-side emoji-strip på
+færdige svar + ved indlæsning af gamle (v1.45/48). **Lektien:** promptning
+alene tøjler ikke en lille models indgroede vaner; deterministisk
+efterbehandling gør.
+
+## Voice bruger en anden model end den valgte
+
+Før v1.45.0 sendte appen `model=null` for ikke-cloud voice → workeren faldt
+tilbage til GEN_MODEL (qwen2.5-coder — kodemodel, halv-norsk vrøvl). Nu sendes
+den valgte rig-model, og voice-cloud har sin EGEN model (voiceCloudModel,
+v1.52.0). **Tjek routing-striben** under headeren: den viser altid hvilken
+model der svarer tekst og tale, og om cloud er i spil.
+
+## Streamende voice: sætninger mangler / meter frosset / forkert transskription gemt
+
+v1.54.0's streaming havde tre samtidigheds-bugs fundet i selv-audit (v1.55.0):
+tabt RMS-meter-polling, race på replyIdx (hurtig første sætning kunne miste
+tekst), skrøbelig transcript-gendannelse. Alle fixet. **Hvis streaming driller
+on-device:** det bufrede endpoint (`/voice/converse/upload`) er urørt — app-
+siden kan rulles tilbage til det uden worker-ændringer.

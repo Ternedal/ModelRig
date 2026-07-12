@@ -6,11 +6,16 @@ er de to reelle svagheder vi så under test.
 
 ## Anbefaling (kort)
 
-1. **Prøv `qwen3:14b` først.** Nyeste generation (udgivet apr. 2025), trænet på
-   119 sprog — det bedste signal for stærkere dansk end hermes3 — Apache 2.0, og
-   tool-calling indbygget. **Men det er tæt** på et 3060: vægtene fylder ~8,7 GB
-   ved Q4_K_M, og der er kun 12 GB, så konteksten bliver begrænset. Test det på
-   din rig; hvis konteksten er for trang eller den er for langsom, drop til 8B.
+1. **`qwen3:14b` — BEKRÆFTET på riggen 12/7.** Kører på 3060'en, og den er
+   markant bedre end hermes3: den KENDER sin identitet og sine tools ("Jeg er
+   Kaliv... læse riggens status og tilføje noter") — det gjorde hermes3 aldrig.
+   Nyeste generation, 119 sprog, Apache 2.0, tool-calling indbygget. **Men den
+   er tæt** på 12 GB (vægtene ~8,7 GB ved Q4_K_M), så konteksten er begrænset.
+   Kendte svagheder set on-device: dropper bindestreger i dansk tekst
+   ("LollandFalster", "150200") og hallucinerer på dansk faktaviden (Mandø i
+   "Baltisk hav") — det er MODEL-svagheder, ikke app-bugs; brug cloud til hårde
+   faktaspørgsmål. Ignorerer også "ingen emojis"-instruktioner (derfor den
+   deterministiske klient-strip, v1.45.0).
 2. **Fallback: `qwen3:8b`.** Sikker plads (~6 GB), mere luft til kontekst og
    hastighed. Sandsynligvis bedre instruktionsfølgning end hermes3:8b — men da
    den også er 8B, kan den stadig af og til narre i prosa. Ikke garanteret bedre
@@ -138,3 +143,22 @@ curl http://127.0.0.1:8099/rag/ingest/image -H "Content-Type: application/json" 
 Og "hvad er det her?"-flowet kræver ingen ny kode på Android: chat-stien
 bærer allerede billeder — pull modellen, vælg den i dropdownen, vedhæft et
 foto (📎).
+
+
+## Voice-modeller (v1.52.0+): tekst-cloud ≠ tale-cloud
+
+Voice-kæden (ASR→LLM→TTS) har sin EGEN cloud-model, adskilt fra tekst:
+
+- **Tekst-cloud** (`cloudModel`): vælg den tunge model til svære spørgsmål —
+  fx `deepseek-v3.1:671b`. Vælges via ☁-chippen i cloud-mode.
+- **Tale-cloud** (`voiceCloudModel`): vælg en HURTIG model, for hele kæden
+  venter på den — fx `gpt-oss:120b`. Vælges i rig-mode: model-dropdown →
+  "Stemme svarer via cloud" til → "☁ Cloud-model til tale" → vælg.
+  Falder tilbage til tekst-cloud-modellen indtil den sættes.
+- **Lokal tale**: sluk voice-cloud-toggle → den valgte rig-model (qwen3:14b)
+  svarer. Hurtigst, men mindre kvalitet.
+
+Routing-striben under headeren viser altid begge ("◈/☁ tekst: X · 🎙/☁ tale: Y").
+Med streamende voice (v1.54.0) taler Kaliv første sætning mens resten genereres,
+så selv en stor tale-model FØLES hurtigere — men time-to-first-sentence afhænger
+stadig af modellens hastighed.

@@ -1,5 +1,9 @@
 # Alva / ModelRig — trin-for-trin testguide
 
+> **⚠️ HISTORISK DOKUMENT (9/7).** Dette var dagens test-/plan-dokument og er
+> bevaret som optegnelse. Det AKTUELLE testgrundlag er **DEVICE_TEST.md** (runbook)
+> + **TROUBLESHOOTING.md** (symptom→fix) + **STATUS.md** linje 3 (aktuel version).
+
 **Version:** v1.8.0 · **Dato:** 2026-07-09
 
 Syv ting er bygget men ikke bekræftet på din hardware. Denne guide tager dem i

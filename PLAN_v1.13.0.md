@@ -1,5 +1,9 @@
 # PLAN — v1.13.0 "Tap-to-stop + Kaliv" — ✅ LEVERET 10/7 morgen
 
+> **⚠️ HISTORISK DOKUMENT (9/7).** Dette var dagens test-/plan-dokument og er
+> bevaret som optegnelse. Det AKTUELLE testgrundlag er **DEVICE_TEST.md** (runbook)
+> + **TROUBLESHOOTING.md** (symptom→fix) + **STATUS.md** linje 3 (aktuel version).
+
 > **Denne plan er udført.** v1.13.0 er tagget, CI grøn, APK bygget.
 > Én rettelse værd at huske: planens §3a var FORKERT om mekanismen.
 > `/voice/converse` streamer ikke — appen får ét komplet WAV, og

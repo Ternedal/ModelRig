@@ -1,5 +1,9 @@
 # Alva Voice — roadmap-delta og kvalitetssikring
 
+> **⚠️ HISTORISK DOKUMENT (8/7).** Dette var dagens test-/plan-dokument og er
+> bevaret som optegnelse. Det AKTUELLE testgrundlag er **DEVICE_TEST.md** (runbook)
+> + **TROUBLESHOOTING.md** (symptom→fix) + **STATUS.md** linje 3 (aktuel version).
+
 **Dato:** 2026-07-08
 **Forfatter:** Claude (kvalitetssikring af `alva_claude_handoff_2026-07-08`)
 **Status:** Til Anders' beslutning. Voice er nu et **prioriteret roadmap-spor**, ikke en løs V3-idé.
