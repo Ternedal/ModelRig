@@ -24,8 +24,12 @@ Copy/paste dette som første besked i en ny chat.
    og opdaterings-stien. Den rigtige kur (Anders' beslutning, se STATUS):
    ny keystore som GitHub Actions-secret + workflow-trin + gradle læser env
    → én afinstallation/geninstallation på Pixel (lokale samtaler går tabt
-   medmindre de eksporteres først). Indtil da: installér KUN APK'er fra
-   github.com/Ternedal/ModelRig/releases.
+   medmindre de eksporteres først).
+   **BESLUTNING 12/7 (Anders): risikoen ACCEPTERET.** Rationale: personligt
+   projekt, installerer udelukkende APK'er fra eget repo
+   (github.com/Ternedal/ModelRig/releases). Rotation udskudt til en naturlig
+   geninstallations-lejlighed. Genåbn IKKE spørgsmålet — men hold reglen:
+   kun egne releases, og rotér hvis reglen nogensinde brydes.
 3. **Streamende voice (v1.54.0-1.55.0) afventer on-device-test.** Kaliv skal nu
    tale første sætning mens resten genereres. Testpunkter: (a) taler den før
    hele svaret er færdigt, (b) opdateres RMS-meteret under tale, (c) fyldes

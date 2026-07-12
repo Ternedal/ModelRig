@@ -328,7 +328,7 @@ acceptkriterier ligger i **`ALVA_VOICE_ROADMAP_DELTA.md`**. Kernepunkter:
    relevant først i V2 (§4 pkt. 6).
 4. **RAG-dokumenttyper:** hvad er vigtigst efter txt/md — PDF? DOCX? Stadig
    åbent — relevant først i V2 (§4 pkt. 1).
-5. ~~**Release-keystore-placering?**~~ **Afgjort DENGANG: i repoet (privat).** ⚠️ 12/7: repoet er siden blevet PUBLIC → keystore+passwords er lækket; se HANDOFF §0 pkt. 2 for kur (rotation som CI-secret)
+5. ~~**Release-keystore-placering?**~~ **Afgjort DENGANG: i repoet (privat).** ⚠️ 12/7: repoet er siden blevet PUBLIC → keystore+passwords er lækket. **Risiko accepteret af Anders 12/7** (kun egne releases installeres); rotation ved naturlig lejlighed — detaljer i HANDOFF §0 pkt. 2
    (`android/signing/`), password også i Notion Secrets som backup. Implementeret
    i 0.16.0.
 
