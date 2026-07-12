@@ -97,3 +97,11 @@ kun når Tools er på **og RAG er fra**, så personlige dokumenter aldrig auto-s
   (reelt arbejde: andet request/tool-schema-format). Test Ollama Cloud først.
 - Skal auto-cloud undgå at sende RAG-kontekst? (privacy vs. kvalitet)
 - Omkostningsloft: cloud koster pr. token; en chatty stemme-assistent kan løbe op.
+
+
+## C. Addendum 12/7 — keep_alive-fixet gælder også cloud-tools
+
+`chat_tools` sendte (som `chat_stream`) `keep_alive` ubetinget — en lokal-VRAM-
+direktiv der hænger cloud-requests. Fixet i v1.50.0: begge cloud-kapable kald
+sender kun `keep_alive` til den lokale rig (T31, mutations-tjekket). §A-
+protokollen er derfor først reelt køre-bar fra v1.50.0+.

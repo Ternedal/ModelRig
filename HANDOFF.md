@@ -11,20 +11,35 @@ Copy/paste dette som første besked i en ny chat.
 1. **⚠️ GitHub PAT'en er stadig aktiv** og er brugt til 50+ releases.
    Revokér den: `github.com/settings/tokens` → ny token → opdatér origin-URL
    + Notion. Dette er højeste prioritet og har været flagget siden 9/7.
-2. **Streamende voice (v1.54.0-1.55.0) afventer on-device-test.** Kaliv skal nu
+2. **⚠️ NYT FUND 12/7: app-keystoren + ALLE passwords ligger i det OFFENTLIGE
+   repo** (`android/signing/modelrig.keystore` + `keystore.properties`,
+   committet ved v1.10.1 mens repoet var privat; repoet blev senere public
+   for gratis CI). Konsekvens: enhver kan signere APK'er med Kalivs signatur
+   → en ondsindet APK kan installeres OVEN PÅ Anders' app (samme signatur =
+   ren opdatering) med adgang til cloud-nøgle, rig-token og samtaler.
+   Realistisk risiko: moderat (kræver at Anders narres til at installere en
+   fremmed APK — ikke fjern-udnytteligt i sig selv), men opdaterings-kanalens
+   integritet er permanent brudt med den nøgle. **Fjern den IKKE bare** —
+   CI signerer hver kaliv-latest.apk med den; fjernelse brækker release-flowet
+   og opdaterings-stien. Den rigtige kur (Anders' beslutning, se STATUS):
+   ny keystore som GitHub Actions-secret + workflow-trin + gradle læser env
+   → én afinstallation/geninstallation på Pixel (lokale samtaler går tabt
+   medmindre de eksporteres først). Indtil da: installér KUN APK'er fra
+   github.com/Ternedal/ModelRig/releases.
+3. **Streamende voice (v1.54.0-1.55.0) afventer on-device-test.** Kaliv skal nu
    tale første sætning mens resten genereres. Testpunkter: (a) taler den før
    hele svaret er færdigt, (b) opdateres RMS-meteret under tale, (c) fyldes
    assistent-boblen sætning for sætning, (d) virker barge-in stadig midt i
    streamen, (e) pauser/overlap mellem sætninger? Det gamle bufrede endpoint
    er urørt som fallback.
-3. **Anders har flere kopier af repoet** (`modelrig`, `modelrig-new`,
+4. **Anders har flere kopier af repoet** (`modelrig`, `modelrig-new`,
    `modelrig-mono`) med forskellig kode-alder. Det har forårsaget flere falske
    fejlspor. Ryd op: behold én mappe. **"Compiled ≠ shipped" og "editing the
    tree ≠ shipping"** er standing rules af samme grund.
-4. **Appen hedder KALIV** (Anders' beslutning 9/7; før: Alva). Kun BACKEND
+5. **Appen hedder KALIV** (Anders' beslutning 9/7; før: Alva). Kun BACKEND
    er ModelRig (server/worker/repo/API/exes); ALT brugervendt er Kaliv.
    `applicationId dk.ternedal.modelrig` er permanent og må ALDRIG ændres.
-5. **Kør-kommandoer:** "kør" / "kør videre" = fuld autonom eksekvering uden
+6. **Kør-kommandoer:** "kør" / "kør videre" = fuld autonom eksekvering uden
    check-ins. "test jeg" = Anders tester på hardware. Anders kører flere
    parallelle Claude-sessioner med fuld commit-autoritet — pull/rebase før
    hvert arbejde, og tjek version-sites for kollisioner.
@@ -65,6 +80,10 @@ Android-appen (samme kodebase; motoren hedder stadig ModelRig).
 ---
 
 ## 2. Sådan starter Anders rig'en (tre vinduer)
+
+**Den nemme vej:** `scripts\start-kaliv.bat` starter alle tre processer
+korrekt (inkl. `MODELRIG_HOST=0.0.0.0`) og kører `/health/full` til sidst —
+se `scripts/START_HERE.md`. Trinene herunder er den manuelle vej.
 
 **Vindue 1 — Ollama:**
 ```cmd
@@ -199,38 +218,51 @@ Sammenlign `voices_dir` fra status med hvor `.onnx`-filen faktisk ligger.
 ## 6. Arkitektur — Voice
 
 ```
-telefon → [Go-server :8080] → [worker :8099] → ASR → LLM → TTS → lyd tilbage
-                                                      ↑
-                                          rig-Ollama ELLER Ollama Cloud
+telefon → [Go-server :8080] → [worker :8099] → ASR → LLM(stream) → sætnings-TTS
+                                                      ↑                  │
+                                          rig-Ollama ELLER Ollama Cloud  │
+                                                                         ▼
+                       bufret:   ét samlet WAV tilbage (/voice/converse/upload)
+                       streamet: NDJSON pr. sætning    (/voice/converse/stream)
 ```
 
 - **ASR og TTS kører altid på rig'en** (modellerne bor der; lyden forlader
   aldrig huset)
-- **LLM-trinnet kan flytte til cloud** (toggle i model-dropdownen). Kun det
-  transskriberede spørgsmål sendes ud. Nøglen sendes fra telefon → egen rig,
-  bruges én gang, gemmes aldrig.
+- **LLM-trinnet kan flytte til cloud** (toggle i model-dropdownen; egen model
+  via `voiceCloudModel`, v1.52.0). Kun det transskriberede spørgsmål sendes ud.
+  Nøglen sendes fra telefon → egen rig, bruges én gang, gemmes aldrig.
+  **`keep_alive` sendes ALDRIG til cloud** (lokal-VRAM-direktiv; hang requesten
+  — fixet v1.50.0, T31 mutations-tjekket).
 - **Sætnings-chunking**: LLM'ens svar splittes på `.!?` og hver komplet sætning
-  synthesizes med det samme → lav *time-to-first-audio*.
+  synthesizes med det samme. **Fra v1.54.0 LEVERES de også straks** (streamet
+  endpoint) — appen afspiller første sætning mens resten genereres, i stedet
+  for at vente på det samlede WAV.
 
 **Endpoints (worker):**
 ```
 GET  /voice/asr/status          POST /voice/asr/transcribe
 GET  /voice/tts/status          POST /voice/tts/synthesize
 POST /voice/converse            (fil-sti, rig-lokal)
-POST /voice/converse/upload     (base64, telefonvendt)
+POST /voice/converse/upload     (base64, telefonvendt — BUFRET, fallback)
+POST /voice/converse/stream     (base64 → NDJSON pr. sætning — STREAMET, v1.54.0)
 GET  /rag/ingest/pdf/status     POST /rag/ingest/pdf
 GET  /rag/ingest/docx/status    POST /rag/ingest/docx
+POST /rag/ingest/image          (foto → vision-model → RAG, 501 uden vision-model)
 ```
 
-**Env-variabler:**
+**Env-variabler** (ALVA_*-navnene er BEVIDST uændrede, ligesom applicationId):
 ```
 ALVA_ASR_MODEL      (default large-v3)
 ALVA_ASR_DEVICE     (default cuda)
 ALVA_ASR_COMPUTE    (default int8)
 ALVA_TTS_VOICE      (default da_DK-talesyntese-medium)
 ALVA_TTS_VOICES_DIR (default ~/.alva/piper-voices)
-MODELRIG_OLLAMA_TIMEOUT (default 600)
+MODELRIG_OLLAMA_TIMEOUT    (default 600)
+MODELRIG_OLLAMA_KEEP_ALIVE (default 30m — kun mod LOKAL Ollama)
+MODELRIG_GEN_MODEL         (worker-fallback hvis appen ikke sender model)
 MODELRIG_HOST       (sæt til 0.0.0.0!)
+KALIV_TOOLS_ENABLED (=1 for tool-laget; off by default)
+KALIV_VISION_MODEL  (fx llama3.2-vision:11b; foto→RAG giver 501 uden)
 ```
 
 ---
@@ -329,13 +361,19 @@ MODELRIG_HOST       (sæt til 0.0.0.0!)
 
 ## 9. Toolchain (skal genopsættes i ny session)
 
-Alt ligger i `/tmp`, forsvinder mellem sessioner:
+Sandbox-layoutet pr. 12/7 (verificeret; tidligere lå alt i `/tmp`):
 ```
-JDK 21      /usr/lib/jvm/java-21-openjdk-amd64
-Gradle 8.9  /tmp/gradle-8.9    (GRADLE_USER_HOME=/tmp/gradle-home)
-Android SDK /tmp/android-sdk   (SDK 35, build-tools 35.0.0)
-Go          /tmp/goroot        (GOCACHE=/tmp/gocache GOPATH=/tmp/gopath GOFLAGS=-mod=mod)
+JDK 21      forudinstalleret (java -version = 21.0.x)
+Android SDK /home/claude/android-sdk   (SDK 35; aapt2 findes via `find`)
+            export ANDROID_HOME=/home/claude/android-sdk ANDROID_SDK_ROOT=$ANDROID_HOME
+Gradle      wrapper i repoet (android/gradlew, desktop/gradlew) — brug --offline
+Go 1.23     /usr/local/go/bin — SKAL sources: export PATH=$PATH:/usr/local/go/bin
+mermaid-cli /home/claude/.npm-global/bin/mmdc — kræv -p puppeteer-config med
+            {"args":["--no-sandbox"]} (kører som root)
+Repo-klon   /home/claude/repo (PAT indlejret i origin-URL)
 ```
+**NB:** stierne kan ændre sig mellem sandbox-generationer — verificér med
+`ls`/`which` i ny session frem for at stole på denne liste.
 
 **Byg:**
 ```bash

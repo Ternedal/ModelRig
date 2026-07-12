@@ -7,6 +7,8 @@ Version **1.55.0** — "Selv-audit af den streamende voice (v1.54.0) fandt 3 sam
 > **🎉 MILEPÆL 8/7 aften:** Hele Alva Voice-kæden er nu bevist på Anders' rig — ASR→LLM→TTS kørte ende-til-ende. Input-WAV → dansk transskription → llama3.2-svar → tale delt i sætnings-WAV'er. Alle tre Voice-lag + LLM koblet sammen og kørende. (Svar-kvaliteten var svag med den lille 1b-model — vrøvl + engelsk-indblanding — men det beviser rørene; hermes3:8b/qwen giver gode svar. TTFA-metrikken fejlede i test-one-lineren men er verificeret korrekt i selve voice_pipeline.py-modulet.)
 
 ## V1 checklist — ✅ COMPLETE (all 13 confirmed, v1.0.0 tagged)
+*(historisk V1-milepæls-optegnelse — tallene ("90 assertions", byggemiljø)
+beskriver v1.0.0-tidspunktet; aktuel tilstand = linje 3 + README)*
 Server-side is fully verified (90 assertions, backend + worker, see below).
 **Android compiles and builds to a real, signed APK here** (JDK 21 + Gradle 8.9 +
 Android SDK 35 installed in the build environment) — it is not blind source

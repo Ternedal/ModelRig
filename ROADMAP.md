@@ -82,7 +82,7 @@ telefonen, og kan installere nye versioner oven på gamle uden afinstallation.
 
 ### 0.16 — Fundament der ikke smuldrer (1–2 sessioner) — ✅ leveret i `v0.16.0` (afventer on-device-verifikation)
 - **Stabil app-signering.** Dedikeret release-keystore med fast signatur på tværs
-  af sessioner. Anbefaling: keystore committes i det private repo; password i
+  af sessioner. Anbefaling DENGANG (repo var privat): keystore committes i repoet; password i
   Notion Secrets (hentes pr. session ligesom PAT). Éngangsomkostning: skiftet fra
   debug-signatur kræver **én** afinstallation → cloud-nøgle + prompts indtastes
   igen én gang. Kommunikeres i release-noten.
@@ -202,9 +202,10 @@ Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
    (ikke det nyere 0.20.6 søgning/omdøb/del, som afventer on-device-
    bekræftelse først).
 6. **CI (GitHub Actions).** ✅ **Leveret** (`.github/workflows/build-and-release.yml`,
-   v0.19.5). Ved tag-push (`v*`): kører hele server-suiten (90 assertions),
-   bygger Android-debug-APK, og bygger **genuint cross-platform desktop-jars**
-   (Windows/macOS/Linux-runnere hver især — løser det jeg selv flaggede i
+   v0.19.5). Ved tag-push (`v*`): kører hele server-suiten (dengang 90 assertions; nu 298),
+   bygger Android-APK, og byggede dengang cross-platform desktop-jars
+   (Windows/macOS/Linux-runnere; **siden ændret: kun Windows** — Anders kører
+   udelukkende Windows+Android — løser det jeg selv flaggede i
    0.19.1: en Linux-bygget jar kan ikke køre på Windows, men en
    **Windows-runner** kan bygge en ægte Windows-jar). Til sidst pakkes
    kilde-zip'en (samme excludes som hele sessionen) og alt uploades automatisk
@@ -327,7 +328,7 @@ acceptkriterier ligger i **`ALVA_VOICE_ROADMAP_DELTA.md`**. Kernepunkter:
    relevant først i V2 (§4 pkt. 6).
 4. **RAG-dokumenttyper:** hvad er vigtigst efter txt/md — PDF? DOCX? Stadig
    åbent — relevant først i V2 (§4 pkt. 1).
-5. ~~**Release-keystore-placering?**~~ **Afgjort: privat repo**
+5. ~~**Release-keystore-placering?**~~ **Afgjort DENGANG: i repoet (privat).** ⚠️ 12/7: repoet er siden blevet PUBLIC → keystore+passwords er lækket; se HANDOFF §0 pkt. 2 for kur (rotation som CI-secret)
    (`android/signing/`), password også i Notion Secrets som backup. Implementeret
    i 0.16.0.
 

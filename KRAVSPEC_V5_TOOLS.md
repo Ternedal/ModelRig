@@ -1,6 +1,6 @@
 # KRAVSPEC — V5 "Kaliv handler" (agent-laget)
 
-**Status:** ✅ GODKENDT af Anders 2026-07-10. MVP under implementering.
+**Status:** ✅ GODKENDT 10/7 · ✅ **LEVERET & ON-DEVICE-BEVIST 11/7-2026** (læse + skrive bag bekræftelseskort, audit-log, gate i worker). Specen står som kravdokument/optegnelse; aktuel status i ROADMAP §10.
 **Skrevet:** 2026-07-10 · **Forudsætter:** v1.17.0
 **Roadmap:** `ROADMAP.md` §10 (V5), invarianter i §14
 

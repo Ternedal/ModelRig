@@ -1,5 +1,11 @@
 # ModelRig — klient-build og røgtest (handoff)
 
+> **⚠️ HISTORISK DOKUMENT (7/7).** Præmissen — "klienterne er aldrig bygget,
+> intet SDK i byggemiljøet" — er død: CI bygger APK + Windows-jar + exes på HVER
+> release (6 assets), og worker-suiten er 298 tests, ikke 90. Byggetrinnene
+> herunder kan stadig bruges til LOKALT byg, men se README "Run order" +
+> HANDOFF §9 for den aktuelle vej.
+
 Alt server-side (backend + worker + CLI) er kompileret og testet: 90 assertions
 grønne. **Det eneste, der ikke er verificeret, er de to Kotlin-klienter** (desktop
 + Android), fordi der ikke var Kotlin/Gradle/Android SDK i byggemiljøet. De er
