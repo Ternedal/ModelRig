@@ -422,6 +422,11 @@ fun App() {
                     if (showConvos) {
                         ConversationsPanel(
                             db = db,
+                            activeConvId = convId,
+                            onActiveDeleted = {
+                                convId = null
+                                messages.clear()
+                            },
                             onOpen = { id ->
                                 scope.launch {
                                     val loaded = withContext(Dispatchers.IO) { db.loadMessages(id) }
@@ -579,7 +584,7 @@ fun App() {
  * browse, switch, or clean up older ones.
  */
 @Composable
-private fun ConversationsPanel(db: DesktopChatDb, onOpen: (Long) -> Unit, onNew: () -> Unit) {
+private fun ConversationsPanel(db: DesktopChatDb, activeConvId: Long?, onOpen: (Long) -> Unit, onNew: () -> Unit, onActiveDeleted: () -> Unit) {
     var convos by remember { mutableStateOf(runCatching { db.listConversations() }.getOrElse { emptyList() }) }
     var panelError by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
@@ -659,6 +664,14 @@ private fun ConversationsPanel(db: DesktopChatDb, onOpen: (Long) -> Unit, onNew:
                             TextButton(onClick = {
                                 runCatching {
                                     db.deleteConversation(c.id)
+                                    // If we just deleted the conversation we're
+                                    // standing in, tell the parent to drop the
+                                    // dangling convId and clear the view. Otherwise
+                                    // an in-flight send (or a streaming reply
+                                    // finalizing) calls addMessage() against a gone
+                                    // conversation -> SQLITE_CONSTRAINT_FOREIGNKEY
+                                    // crash. Seen on-device 12/7.
+                                    if (activeConvId == c.id) onActiveDeleted()
                                     convos = db.listConversations()
                                 }.onFailure { panelError = it.message }
                             }) { Text("Slet", color = KalivTheme.colors.Danger, fontSize = 12.sp) }

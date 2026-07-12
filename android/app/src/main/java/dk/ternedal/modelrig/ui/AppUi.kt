@@ -94,8 +94,10 @@ fun AppUi() {
                 )
                 Screen.Convos -> ConversationsScreen(
                     db,
+                    activeConvId = openConvId,
                     onOpen = { openConvId = it; screen = Screen.Chat },
                     onNew = { openConvId = null; screen = Screen.Chat },
+                    onActiveDeleted = { openConvId = null },
                     onBack = { screen = Screen.Chat },
                 )
                 Screen.Models -> ModelsScreen(store, onBack = { screen = Screen.Chat })
@@ -1958,8 +1960,10 @@ private fun ChatScreen(
 @Composable
 private fun ConversationsScreen(
     db: ChatDb,
+    activeConvId: Long?,
     onOpen: (Long) -> Unit,
     onNew: () -> Unit,
+    onActiveDeleted: () -> Unit,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -2071,6 +2075,12 @@ private fun ConversationsScreen(
                                     }) { Text("Del", color = KalivTheme.colors.signal, fontSize = 12.sp) }
                                     TextButton(onClick = {
                                         db.deleteConversation(c.id)
+                                        // Deleting the conversation we're in would
+                                        // leave the active convId dangling, so the
+                                        // next send / streaming finalize writes to a
+                                        // gone conversation -> FOREIGN KEY crash
+                                        // (seen on desktop 12/7; same bug here).
+                                        if (activeConvId == c.id) onActiveDeleted()
                                         convos = db.listConversations()
                                     }) { Text("Slet", color = KalivTheme.colors.danger, fontSize = 12.sp) }
                                 }

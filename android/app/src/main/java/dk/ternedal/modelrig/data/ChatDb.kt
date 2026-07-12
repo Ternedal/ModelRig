@@ -77,6 +77,12 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
     fun addMessage(convId: Long, role: String, content: String) {
         val now = System.currentTimeMillis()
         val db = writableDatabase
+        // If the conversation was deleted mid-send, skip rather than insert an
+        // orphan / touch a gone row. (SQLiteDatabase.insert wouldn't throw here,
+        // but the desktop path with JDBC does -- keep both consistent.)
+        db.rawQuery("SELECT 1 FROM conversation WHERE id=?", arrayOf(convId.toString())).use {
+            if (!it.moveToFirst()) return
+        }
         db.insert("message", null, ContentValues().apply {
             put("conv_id", convId)
             put("role", role)

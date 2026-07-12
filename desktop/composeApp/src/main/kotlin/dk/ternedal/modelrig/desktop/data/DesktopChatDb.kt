@@ -103,6 +103,14 @@ class DesktopChatDb(dbPath: String = defaultDbPath()) {
 
     fun addMessage(convId: Long, role: String, content: String) {
         val now = System.currentTimeMillis()
+        // Guard against a race: if the conversation was deleted between the send
+        // starting and the reply finalizing, inserting would throw a FOREIGN KEY
+        // constraint and crash the app. Skip silently instead -- the conversation
+        // is gone, so its messages have nowhere to live anyway.
+        conn.prepareStatement("SELECT 1 FROM conversation WHERE id=?").use { ps ->
+            ps.setLong(1, convId)
+            ps.executeQuery().use { if (!it.next()) return }
+        }
         conn.prepareStatement("INSERT INTO message(conv_id, role, content, created_at) VALUES (?,?,?,?)").use { ps ->
             ps.setLong(1, convId); ps.setString(2, role); ps.setString(3, content); ps.setLong(4, now)
             ps.executeUpdate()
