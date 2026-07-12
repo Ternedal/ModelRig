@@ -16,3 +16,25 @@ func TestAddrTrimsSpacedHost(t *testing.T) {
 		t.Fatalf("Addr() = %q, want %q", got, "127.0.0.1:8099")
 	}
 }
+
+// Every string env var must be trimmed, not just the host. A batch
+// `set X=val && cmd` captures a trailing space into ALL of them, and an
+// untrimmed URL/path breaks silently the way the bind host did.
+func TestEnvValuesAreTrimmed(t *testing.T) {
+	t.Setenv("MODELRIG_OLLAMA_URL", "http://127.0.0.1:11434 ")
+	t.Setenv("MODELRIG_WORKER_URL", " http://127.0.0.1:8099")
+	t.Setenv("MODELRIG_DATA", " /tmp/x/data.json ")
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.OllamaBaseURL != "http://127.0.0.1:11434" {
+		t.Fatalf("OllamaBaseURL not trimmed: %q", c.OllamaBaseURL)
+	}
+	if c.WorkerBaseURL != "http://127.0.0.1:8099" {
+		t.Fatalf("WorkerBaseURL not trimmed: %q", c.WorkerBaseURL)
+	}
+	if c.DataPath != "/tmp/x/data.json" {
+		t.Fatalf("DataPath not trimmed: %q", c.DataPath)
+	}
+}

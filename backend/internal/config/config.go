@@ -10,7 +10,7 @@ import (
 )
 
 // Version is the ModelRig backend version.
-const Version = "1.34.15"
+const Version = "1.34.16"
 
 // Config holds the effective runtime configuration.
 type Config struct {
@@ -114,21 +114,21 @@ func applyEnv(c *Config) {
 	if v := strings.TrimSpace(os.Getenv("MODELRIG_HOST")); v != "" {
 		c.ServerHost = v
 	}
-	if v := os.Getenv("MODELRIG_PORT"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("MODELRIG_PORT")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			c.ServerPort = n
 		}
 	}
-	if v := os.Getenv("MODELRIG_OLLAMA_URL"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("MODELRIG_OLLAMA_URL")); v != "" {
 		c.OllamaBaseURL = v
 	}
-	if v := os.Getenv("MODELRIG_OLLAMA_KEY"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("MODELRIG_OLLAMA_KEY")); v != "" {
 		c.OllamaKey = v
 	}
-	if v := os.Getenv("MODELRIG_WORKER_URL"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("MODELRIG_WORKER_URL")); v != "" {
 		c.WorkerBaseURL = v
 	}
-	if v := os.Getenv("MODELRIG_DATA"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("MODELRIG_DATA")); v != "" {
 		c.DataPath = v
 	}
 	if v := os.Getenv("MODELRIG_PAIRING_TTL"); v != "" {

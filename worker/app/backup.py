@@ -65,7 +65,17 @@ def _rag_db() -> str:
 
 
 def _backend_data() -> str:
-    return os.getenv("MODELRIG_DATA_PATH", "./modelrig-data.json")
+    # The Go server reads its device-token file from MODELRIG_DATA (NOT
+    # MODELRIG_DATA_PATH -- that was a name mismatch, so backup looked in the
+    # wrong place), and anchors a relative default on the exe dir. Backup cannot
+    # see the exe dir, so it honours MODELRIG_DATA if set and otherwise falls
+    # back to the conventional data root. Either way it must match where the
+    # server actually writes, or a restore would not restore the pairing.
+    from . import paths as _paths
+    v = os.getenv("MODELRIG_DATA")
+    if v:
+        return v
+    return _paths.resolve("./modelrig-data.json")
 
 
 def items() -> list[Item]:

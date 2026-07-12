@@ -157,6 +157,9 @@ jobs:
       - name: Worker data paths
         run: PYTHONPATH=worker python3 tests/worker_paths.py
 
+      - name: Worker data migration
+        run: PYTHONPATH=worker python3 tests/worker_migrate.py
+
   android-build:
     needs: server-tests
     runs-on: ubuntu-latest
