@@ -5,7 +5,7 @@
 > Piper, ende-til-ende på telefonen. Dagens root cause (CUDA-DLL-søgesti)
 > fundet og fixet i v1.12.3 (CI grøn, 4 assets). Appen omdøbes **Alva →
 > Kaliv** (navn i v1.13.0; ikon afventer Anders' brand-pakke). Udestående
-> og nye horisonter: se §9–18 (inkl. målarkitektur i §19).
+> og nye horisonter: se §9–21 (inkl. målarkitektur i §22).
 
 **Gældende version:** 0.15.5 · **Dato:** 2026-07-04 · **Ejer:** Anders
 **Estimat-enhed:** "byggesession" = én autonom arbejdsblok med Claude; leverer typisk 1 tagget release.
@@ -26,7 +26,7 @@ og runtime-verificeret, alle leverancer tagget og released på GitHub.
 
 ---
 
-## 2. Status ved 0.15.5 *(historisk — se §20 for status pr. v1.34.17, 12/7-2026)*
+## 2. Status ved 0.15.5 *(historisk — se §23 for status pr. v1.34.17, 12/7-2026)*
 
 ### Verificeret
 - **Server:** 90 test-assertions grønne. Parring → hashede tokens, rotation,
@@ -133,7 +133,7 @@ CI, RAG-ingest fra telefonen. Alt sammen bevidst skubbet — se V2.
 > lukkes fremover med dato + notat her i docs, ikke med tags. **Reel lukning
 > udestår dog on-device** (~10 min, 3 tjek): (1) txt/md-ingest via
 > filvælgeren fra telefonen, (2) model-administration: pull + slet en lille
-> model fra appen, (3) samtale: omdøb → søg → del som markdown. Se §20.
+> model fra appen, (3) samtale: omdøb → søg → del som markdown. Se §23.
 
 Tema: fra chat-app til det, navnet lover — en kontrolflade for hele rig'en.
 
@@ -616,7 +616,102 @@ billigt. Estimat: harness 1–2 sessioner; resten ubundet forskning.
 
 ---
 
-## 18. Rækkefølge og afhængigheder (V5.5 → V12)
+## 18. V13 — "Kaliv som platform" (API udad) ⬜ RETNING 12/7-2026
+
+> **Ærlighedsmarkør for V13–V15:** jo længere ude, jo mere spekulativt.
+> Dette er RETNING, ikke løfter — hvert spor genbesøges når dets
+> forudsætninger faktisk er landet. Skrevet på Anders' anmodning 12/7.
+
+Tema: andre systemer må tale TIL Kaliv — scripts, automations, cron på
+andre maskiner. Promoverer "Kaliv-API/webhooks"-noten. For en IT-arkitekt
+er scriptability den reelle værdi: Kaliv som byggeklods, ikke kun app.
+
+1. **Kaliv-API v1**: dokumenteret HTTP-API (den findes de facto — Go-
+   serverens ruter — men udokumenteret og parring-bundet). Pr.-integration
+   API-nøgler adskilt fra enheds-parring [beslutning: scopes pr. nøgle
+   (chat / rag / tools-read) — writes ALDRIG via API uden kort, se pkt. 3].
+2. **Webhooks ind/ud**: "når X sker, fortæl Kaliv" (ind) og "når Kaliv
+   fuldfører Y, kald Z" (ud). [Teknikvalg: polling vs. push; retry-politik.]
+3. **Writes over API — den hårde beslutning**: en maskine kan ikke trykke
+   på et kort. Design-forslag (samme som V11.2): kun mod FORHÅNDSGODKENDTE
+   skabeloner ("append til netop denne note"), aldrig frie writes.
+   [Kræver Anders' eksplicitte beslutning — som V11's kæder.]
+4. **CLI-klient** [lille]: `kaliv ask "..."` fra en terminal — laveste
+   friktion for scripts, genbruger API-nøglerne.
+
+**Forudsætninger:** V7.5-hærdning (TLS, rotation, rate limits) — et API
+udad UDEN dem er en foræring til angreb; audit får origin=api.
+**Exit-kriterium:** et eksternt script stiller et RAG-spørgsmål og får
+svar via nøgle (ikke parring); en webhook-ind udløser et read-flow; audit
+viser origin=api. Estimat: 3–5 sessioner efter V7.5.
+
+---
+
+## 19. V14 — "Kaliv flere steder" (føderation & strøm) ⬜ RETNING 12/7-2026
+
+Tema: riggen er en gaming-PC — den er dyr at have tændt 24/7 og er ét
+single point of failure. Promoverer "føderation mellem rigge"-noten, men
+jordet i det FAKTISKE problem: strøm og altid-oppe.
+
+1. **Split-rig**: lille altid-oppe-node (N100-mini-PC, groft 1.500–2.500 kr,
+   ~6–10 W) kører server + små modeller + hjem-API (V9); 3060-riggen
+   vækkes (Wake-on-LAN) til tunge ture (store modeller, vision, ASR
+   large). [Beslutning: hvilke ture retfærdiggør opvågning — latens vs.
+   strøm.] Roaming udenfor hjemmet ER allerede løst (Tailscale).
+2. **Tilstandssynk mellem noder**: RAG-index, noter, memory, audit på
+   tværs. [Teknikvalg: Syncthing (færdig, filniveau) vs. litestream/
+   SQLite-replikering (renere for DB'erne) — IKKE eget synk-format.]
+   Konflikthåndtering: append-only-data (audit, noter) er trivielt;
+   memory/state kræver last-writer-wins + log.
+3. **Failover-ærlighed**: hvis GPU-noden er nede, siger Kaliv det og
+   falder tilbage til lille model / cloud (V5.5-politikken genbruges) —
+   aldrig tavs degradering.
+4. **Status-flade (valgfrit hardware)**: e-ink-skærm på hylden med
+   rig-helbred + dagens resumé (groft 300–600 kr). Ren `/health/full`-
+   forbruger — kan bygges når som helst, hører hjemme her tematisk.
+
+**Forudsætninger:** V7 komplet (services + selvopdatering — at drive TO
+noder uden det er dobbelt smerte); V13's API gør node-snak renere.
+**Exit-kriterium:** telefonen taler til altid-oppe-noden; en tung tur
+vækker 3060'eren automatisk; en note skrevet på én node findes på begge
+efter synk. Estimat: 6–10 sessioner — synk-valget er det usikre.
+
+---
+
+## 20. V15 — "Kaliv i mål" (modenhed, ikke flere features) ⬜ SLUTPUNKT 12/7-2026
+
+Tema: roadmappen skal ENDE et sted. V15 er bevidst IKKE nye evner — det
+er sporet der gør platformen færdig: sikkerhedsgennemgang, dokumentation,
+og overgang til kedelig, forudsigelig drift. Succes = Kaliv er ikke et
+projekt længere, men et apparat man glemmer.
+
+1. **Trusselsmodel + sikkerhedsgennemgang**: systematisk gennemgang af
+   HELE overfladen (parring, API-nøgler, tools, hjem-styring, føderation)
+   mod en skrevet trusselsmodel. [Beslutning: ekstern pentest (koster
+   reelt, typisk 15.000–40.000+ kr) vs. struktureret selv-review med
+   værktøjer — for et personligt system er selv-review + hårde defaults
+   sandsynligvis proportionalt.]
+2. **Eval-harnessen (V12.0) bliver permanent regressions-gate**: hver
+   modelopgradering og hver release måles — dansk-fasthed, tool-disciplin,
+   svarkvalitet. Grønt kan fejle, også for modeller.
+3. **Dokumentations-konsolidering**: HANDOFF/STATUS/TROUBLESHOOTING/
+   KRAVSPEC'er samles til én vedligeholdt bog — "sådan drives Kaliv" —
+   skrevet til Anders-om-to-år, ikke til udviklingssessionerne.
+4. **Vedligeholdstilstand defineret**: hvad opdateres (modeller, deps,
+   CVE'er), hvor ofte, og hvad rører vi IKKE. Målet er at kunne lade
+   platformen ligge i måneder uden forfald.
+5. **Exit-interview med roadmappen**: hvad blev bygget vs. planlagt,
+   hvilke beslutninger var rigtige/forkerte — skrevet ned mens det huskes.
+
+**Forudsætninger:** de spor Anders faktisk har VALGT at bygge er landet —
+V15 lukker det byggede, ikke alt det mulige.
+**Exit-kriterium:** trusselsmodellen er skrevet og gennemgået; harnessen
+kører i CI; dokumentbogen findes; tre måneders drift uden indgreb.
+Estimat: 3–5 sessioner + kalendertid (drift-beviset).
+
+---
+
+## 21. Rækkefølge og afhængigheder (V5.5 → V15)
 
 Sporene er IKKE en kø — de har forskellige forudsætninger og kan delvist
 parallelliseres. Kortet (render-verificeret):
@@ -640,21 +735,35 @@ flowchart LR
     V7 --> V8
     V10 -.->|"deler VRAM"| V12
     V55 -.->|"afgør behovet"| V11
+    V13["V13 platform/API ⬜"]
+    V14["V14 flere steder ⬜"]
+    V15["V15 i mål ⬜ SLUT"]
+    V7 -->|"7.5 hærdning"| V13
+    V13 --> V14
+    V7 --> V14
+    V9 -.-> V14
+    V11 -.-> V15
+    V13 -.-> V15
+    V14 -.-> V15
 ```
 
 **Læsning:** V10 (vision) og V12.0 (eval-harness) kan startes NÅR SOM HELST.
-V9 venter på V7.1 + V5-halen. V11 venter på en beslutning. V8 er sidst.
-**Efter V12 (åbne noter, ikke løfter):** føderation mellem flere rigge;
-e-ink-statusskærm; Kaliv-API/webhooks så andre systemer kan tale til Kaliv.
+V9 venter på V7.1 + V5-halen. V11 venter på en beslutning. V13–V14 venter
+på V7's hærdning/komplethed (stiplede pile = "informerer", fulde = "kræver").
+V15 er bevidst SIDST — den lukker det Anders faktisk valgte at bygge.
+*De tidligere "Efter V12"-noter er promoveret: API → V13 (§18), føderation →
+V14 (§19), e-ink → V14 pkt. 4. Roadmappen er hermed LUKKET-endet: der findes
+ikke et V16 — nye idéer optages i eksisterende spor eller afvises.*
 
 ---
 
-## 19. Målarkitektur — slutbilledet V1→V12 konvergerer mod
+## 22. Målarkitektur — slutbilledet V1→V15 konvergerer mod
 
 ```mermaid
 flowchart TB
     Clients["Klienter<br/>Kaliv Android ✅ · desktop ✅ · station ⬜"]
     Go["Go-server :8080 ✅<br/>adgang · proxy · rate limit<br/>TLS ⬜"]
+    API["API-nøgler/CLI ⬜ (V13)"]
 
     subgraph W["Worker :8099"]
         Core["RAG ✅ · ASR/TTS ✅ · Memory ⬜ · Vision ⬜"]
@@ -677,6 +786,8 @@ flowchart TB
     W -. "kun LLM-trin ·<br/>eksplicit toggle" .-> OC
     W --> Lager
     W -.- Drift
+    API -.-> Go
+    Node2["altid-oppe-node ⬜ (V14)<br/>synk: RAG · noter · audit"] -.- Go
 
     classDef plan stroke-dasharray: 6 4;
     class MCP,Drift plan;
@@ -719,7 +830,7 @@ klienter = tynde og danske; Ollama = eneste lokale LLM-runtime.
 
 ---
 
-## 20. Konkrete næste skridt (pr. 12/7-2026 morgen — efter device-test-dagen)
+## 23. Konkrete næste skridt (pr. 12/7-2026 morgen — efter device-test-dagen)
 
 **Hvor vi står:** V1–V5 opnået; V5 on-device-bevist 11/7 (note skrevet gennem
 kort + audit på riggen). Forbindelseskæden robust (bind, parring, data-rod).
@@ -747,7 +858,7 @@ dansk-drift), ikke kode — deraf V5.5-sporet.
    (services/selvopdatering) — apparatdriften er nu det svageste led.
 6. **Claude — næste byggesession** (efter Anders' valg i 5): enten V5.5 pkt. 3
    (auto-rute, ~1 session) eller V7 pkt. 1 (Windows-services, ~2 sessioner).
-7. **Nye horisonter (12/7):** V9–V12 tilføjet (§14–17) med afhængighedskort
-   (§18). To ting kan startes NÅR SOM HELST uden at vente på noget:
+7. **Nye horisonter (12/7):** V9–V15 tilføjet (§14–20) med afhængighedskort
+   (§21) — roadmappen er nu lukket-endet med V15 som bevidst slutpunkt. To ting kan startes NÅR SOM HELST uden at vente på noget:
    V10 (vision — fundamentet findes) og V12.0 (eval-harnessen — gør alle
    fremtidige modelvalg til målinger). Resten venter på V7/beslutninger.
