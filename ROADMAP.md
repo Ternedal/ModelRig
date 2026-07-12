@@ -336,7 +336,9 @@ Anders vælger; hvert punkt er markeret med hvad der kræves.
   altid-lyttende mikrofon ja/nej]
 - **OCR for scannede PDF'er** — i dag ærlig 422 [beslutning: Tesseract
   (Apache-2.0) vs. alternativer]
-- **Desktop-voice**: paritet på Windows-klienten [efter mobil er poleret]
+- **Desktop-voice**: paritet på Windows-klienten [gaten "efter mobil er
+  poleret" er ÅBEN pr. 12/7 — mobil er poleret; hele desktop-sporet er nu
+  konkretiseret i V6.6]
 - **Kaliv Memory v2**: RAG over egne samtaler ("hvad sagde vi om X i
   sidste uge?") — alt lokalt [design: indeksering + sletning]
 
@@ -433,7 +435,27 @@ lokalt. Bygger på V4's streaming-ASR og V5's tool-lag.
    påmindelser og baggrundsjobs med notifikationer (foreground service).
 5. **Kaliv Memory v3 — profil**: langtidspræferencer på tværs af
    samtaler, alt lokalt, med se/redigér/slet-UI [privacy-design].
-6. **Desktop-voice**: fuld paritet på Windows-klienten.
+6. **Desktop-kærlighed** (udvidet 12/7-2026 på Anders' ønske — optaget her
+   jf. §21's lukket-endede regel). Ærligt gap-billede (læst i koden 12/7):
+   desktop er 1.816 linjer mod Androids 4.621 og er **stadig ModelRig, ikke
+   Kaliv** — gammel blå palette (Brand.kt siger det selv), intet Kaliv-navn/
+   ikon, ingen light mode, **ingen tools-mode/kort/Handlingslog (hele V5
+   mangler)**, ingen voice, og "parring" er et manuelt token-felt/env-var.
+   Fundamentet er dog sundt: chat med streaming, RAG, markdown, lokal historik.
+   Rækkefølge (billigst-synligt først, genbrug fra Android hvor muligt):
+   a. **Kaliv-rebrand + light/dark** [1–2 sessioner]: paletten og
+      KalivColors-mønstret ER bygget på Android — porteres. (OBS: kun
+      visuelt navn/ikon; package-navne røres ikke.)
+   b. **Tools-mode + bekræftelseskort + Handlingslog** [2–3 sessioner]:
+      V5 på desktop. Worker-siden er identisk; det er ren klient-UI.
+      Størst reel værdi — agent-laget fra skrivebordet.
+   c. **Rigtig parring** [1 session]: samme flow som Android i stedet
+      for token-indtastning; genbruger /pair-endpoints.
+   d. **Fejlbesked-paritet** [lille]: den ærlige friendlyError-mapping
+      (tools-slået-fra, 401-genpar osv.) porteres.
+   e. **Desktop-voice**: fuld paritet — UÆNDRET sidst, efter V4's
+      streaming-ASR som planlagt.
+   Estimat a–d: 4–6 sessioner; e følger voice-sporet.
 
 **Exit-kriterium:** "Hey Kaliv" → svar → opfølgning håndfrit på mindst
 to enheder; en proaktiv påmindelse leveres uden at appen er åben.
@@ -859,6 +881,11 @@ dansk-drift), ikke kode — deraf V5.5-sporet.
 6. **Claude — næste byggesession** (efter Anders' valg i 5): enten V5.5 pkt. 3
    (auto-rute, ~1 session) eller V7 pkt. 1 (Windows-services, ~2 sessioner).
 7. **Nye horisonter (12/7):** V9–V15 tilføjet (§14–20) med afhængighedskort
-   (§21) — roadmappen er nu lukket-endet med V15 som bevidst slutpunkt. To ting kan startes NÅR SOM HELST uden at vente på noget:
+   (§21) — roadmappen er nu lukket-endet med V15 som bevidst slutpunkt.
+8. **Desktop-kærlighed (Anders' ønske 12/7):** gap-billedet er læst og
+   konkretiseret i **V6.6 a–e** — desktop er stadig ModelRig (gammel
+   palette, ingen tools/kort, ingen voice). Kan prioriteres når som helst;
+   a (rebrand+light) og b (tools-UI) er rene klient-opgaver uden
+   worker-ændringer, dvs. lav risiko for resten af stakken. To ting kan startes NÅR SOM HELST uden at vente på noget:
    V10 (vision — fundamentet findes) og V12.0 (eval-harnessen — gør alle
    fremtidige modelvalg til målinger). Resten venter på V7/beslutninger.
