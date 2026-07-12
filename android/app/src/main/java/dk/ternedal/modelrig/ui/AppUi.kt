@@ -1176,7 +1176,44 @@ private fun ChatScreen(
                 } else {
                     Box {
                         ModelChip("$currentModel  ▾", onClick = { modelMenu = true })
+                        // Auto-load the installed rig models the first time the menu
+                        // opens (and whenever it reopens empty), so there's an actual
+                        // list to pick from -- previously the list only appeared after
+                        // tapping "Genindlæs modeller", so rig mode looked like it had
+                        // no model switcher at all.
+                        LaunchedEffect(modelMenu) {
+                            if (modelMenu && models.isEmpty() && store.baseUrl != null) {
+                                val res = withContext(Dispatchers.IO) {
+                                    runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listModels() }
+                                }
+                                res.onSuccess { models = it }
+                                    .onFailure { modelError = "Kan ikke hente modeller: rig'en svarer ikke" }
+                            }
+                        }
                         DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
+                            // The installed rig models, at the TOP where a model
+                            // picker belongs. Tap one to switch the rig model.
+                            if (models.isEmpty()) {
+                                DropdownMenuItem(
+                                    enabled = false,
+                                    text = { Text("Henter modeller…", color = KalivTheme.colors.textMuted, fontSize = 13.sp) },
+                                    onClick = {},
+                                )
+                            } else {
+                                models.forEach { m ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                (if (m == currentModel) "◈  " else "     ") + m,
+                                                color = if (m == currentModel) KalivTheme.colors.signal else KalivTheme.colors.textHigh,
+                                                fontSize = 14.sp,
+                                            )
+                                        },
+                                        onClick = { currentModel = m; store.model = m; modelMenu = false },
+                                    )
+                                }
+                            }
+                            HorizontalDivider()
                             // Voice: ASR/TTS always run on the rig, but the LLM
                             // step can go to a big cloud model. Only meaningful
                             // in rig mode with a cloud key configured.
@@ -1342,12 +1379,6 @@ private fun ChatScreen(
                                     }
                                 },
                             )
-                            if (models.isNotEmpty()) HorizontalDivider()
-                            models.forEach { m ->
-                                DropdownMenuItem(text = { Text(m) }, onClick = {
-                                    currentModel = m; store.model = m; modelMenu = false
-                                })
-                            }
                         }
                     }
                 }
@@ -2492,7 +2523,7 @@ private fun StopGlyph(color: Color, modifier: Modifier) {
 private fun ThinkingIndicator() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
         AndroidView(
-            modifier = Modifier.size(28.dp),
+            modifier = Modifier.size(44.dp),
             factory = { ctx ->
                 ImageView(ctx).apply {
                     val src = ImageDecoder.createSource(ctx.resources, R.drawable.kaliv_thinking)

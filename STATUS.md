@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.39.0** — "Desktop-ikoner rettet: v1.35.0-rebrandet satte farver+navn men GLEMTE ikonerne — vindues-ikonet var stadig det gamle ModelRig icon.png fra v1.10.1, og headeren havde INTET Kaliv-maerke (kun tekst). Nu: godkendt Kaliv-app-ikon som vindues-ikon + Kaliv-wordmark i headeren (tema-skiftende), alle fra QA-pakken. Kompilerings+jar-verificeret, assets i jar. Visuelt resultat = Anders paa Windows". Follows 1.38.0 (taenke-animation). Autonomous sessions, **2026-07-02 → 07-12**.
+Version **1.40.0** — "Tre on-device-fund fra Anders: (1) rig-mode havde ingen model-skifter — listen fandtes men kom KUN frem efter tryk paa Genindlaes; nu auto-loades installerede rig-modeller naar menuen aabnes, og listen ligger OEVERST med ◈ paa den valgte. (2) taenke-ikonet var for lille (28dp) → 44dp. (3) voice-hang diagnosticeret: voiceConverse er en enkelt IKKE-streaming ASR→LLM→TTS-rundtur — foeles som hang med stor model (deepseek 671B), men har 5-min timeout + finally; afventer Anders om det er langsomt-men-virker eller reelt haenger". Follows 1.39.0 (desktop-ikoner). Autonomous sessions, **2026-07-02 → 07-12**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
