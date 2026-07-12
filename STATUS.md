@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.49.0** — "Cloud-diagnostik: Anders sagde cloud bare timer ud + kan ikke vaelge model. Verificeret mod Ollamas docs: /api/tags ER den rigtige liste-vej mod ollama.com, og modelnavn UDEN -cloud-suffiks er korrekt for direkte API (gpt-oss:120b, ikke -cloud). Aarsagen er derfor noegle/model, ikke kode. Fix er AERLIG diagnostik: listModels kaster nu auth/HTTP-fejl (401/403 → tjek noeglen) i stedet for tavs tom liste; picker skelner ingen-noegle / tom-liste / fejl; timeout-besked daekker cloud-tilfaeldet. Saa Anders SER hvorfor det fejler". Follows 1.48.0. Autonomous sessions, **2026-07-02 → 07-12**.
+Version **1.50.0** — "ROOT CAUSE fundet paa voice-via-cloud-timeout: workeren sendte keep_alive (en LOKAL-VRAM-direktiv) til Ollama Cloud. Cloud styrer ikke din VRAM, saa det hang requesten. Almindelig cloud-chat virker PRAECIS fordi appens CloudClient aldrig sender keep_alive. Fix: chat_stream (voice) + chat_tools sender kun keep_alive til den LOKALE rig, ikke cloud. T31 regressionstest, mutationstjekket. 283 worker-tests groenne". Follows 1.49.0 (cloud-diagnostik). Autonomous sessions, **2026-07-02 → 07-12**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

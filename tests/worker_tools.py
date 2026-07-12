@@ -670,5 +670,21 @@ def _t30():
 
 _t30()
 
+
+# T31: keep_alive is a LOCAL-VRAM directive and must NOT be sent to a cloud
+# upstream -- doing so hung voice-via-cloud (regular cloud chat worked precisely
+# because the app never sends keep_alive). Guard both cloud-capable oc calls.
+import inspect as _insp31
+_src_stream = _insp31.getsource(oc.chat_stream)
+_src_tools = _insp31.getsource(oc.chat_tools)
+check("if not base_url:" in _src_stream and "keep_alive" in _src_stream,
+      "T31: chat_stream only sends keep_alive to the LOCAL rig, not cloud")
+check("if not base_url:" in _src_tools and "keep_alive" in _src_tools,
+      "T31: chat_tools only sends keep_alive to the LOCAL rig, not cloud")
+# and prove neither puts keep_alive unconditionally in the payload literal
+check('"stream": True}' in _src_stream.replace("\n"," ").replace("  "," ") or
+      'stream": True}' in _src_stream,
+      "T31: chat_stream base payload has no unconditional keep_alive")
+
 print(f"\n===== TOOLS: {passed} passed, {failed} failed =====")
 sys.exit(0 if failed == 0 else 1)

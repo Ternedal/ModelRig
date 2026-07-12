@@ -83,7 +83,11 @@ async def chat_tools(messages: list[dict], tools: list[dict],
     the follow-up turn after a tool result is made chain-free.
     """
     model = model or GEN_MODEL
-    payload: dict = {"model": model, "messages": messages, "stream": False, "keep_alive": KEEP_ALIVE}
+    # keep_alive is a local-VRAM directive; don't send it to a cloud upstream
+    # (same fix as chat_stream -- it can hang the cloud request).
+    payload: dict = {"model": model, "messages": messages, "stream": False}
+    if not base_url:
+        payload["keep_alive"] = KEEP_ALIVE
     if tools:
         payload["tools"] = tools
     url = (base_url or OLLAMA_URL).rstrip("/")
@@ -115,10 +119,17 @@ async def chat_stream(messages: list[dict], model: str | None = None,
     model = model or GEN_MODEL
     url = (base_url or OLLAMA_URL).rstrip("/")
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    # keep_alive tells a LOCAL Ollama how long to keep the model in VRAM. Ollama
+    # Cloud doesn't manage your VRAM, and sending it to the cloud upstream is what
+    # made voice-via-cloud hang (regular cloud chat works precisely because the
+    # app's CloudClient never sends keep_alive). So only send it to the local rig.
+    payload: dict = {"model": model, "messages": messages, "stream": True}
+    if not base_url:
+        payload["keep_alive"] = KEEP_ALIVE
     client = httpx.AsyncClient(timeout=TIMEOUT)
     try:
         async with client.stream("POST", f"{url}/api/chat", headers=headers,
-                                 json={"model": model, "messages": messages, "stream": True, "keep_alive": KEEP_ALIVE}) as r:
+                                 json=payload) as r:
             if r.status_code != 200:
                 body = await r.aread()
                 raise OllamaError(f"chat failed ({r.status_code}): {body[:200]!r}")
