@@ -11,7 +11,7 @@ fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
         state = state,
-        title = "ModelRig",
+        title = "Kaliv",
         icon = painterResource("icon.png"),
     ) {
         App()

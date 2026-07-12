@@ -50,6 +50,9 @@ import dk.ternedal.modelrig.desktop.net.ChatResult
 import dk.ternedal.modelrig.desktop.net.ChatRouter
 import dk.ternedal.modelrig.desktop.net.OllamaClient
 import dk.ternedal.modelrig.desktop.net.RagClient
+import dk.ternedal.modelrig.desktop.net.ToolsClient
+import dk.ternedal.modelrig.desktop.net.ToolTurn
+import dk.ternedal.modelrig.desktop.net.AuditEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -68,17 +71,36 @@ private data class UiMessage(
 
 @Composable
 fun App() {
-    MaterialTheme(colorScheme = Brand.Colors) {
-        var localUrl by remember { mutableStateOf(System.getenv("MODELRIG_LOCAL_URL") ?: "http://localhost:11434") }
-        var localPath by remember { mutableStateOf("/api/chat") }
-        var localModel by remember { mutableStateOf("qwen2.5-coder:7b") }
-        var deviceToken by remember { mutableStateOf(System.getenv("MODELRIG_TOKEN") ?: "") }
-        var cloudKey by remember { mutableStateOf(System.getenv("OLLAMA_API_KEY") ?: "") }
-        var cloudModel by remember { mutableStateOf("gpt-oss:120b-cloud") }
-        var localSystem by remember { mutableStateOf("") }
-        var cloudSystem by remember { mutableStateOf("") }
-        var preferLocal by remember { mutableStateOf(true) }
+    // The DB comes FIRST now: settings persist across launches (v1.35.0).
+    // Before this, the desktop forgot everything -- URL, token, systems --
+    // unless supplied via env vars every start. Env still wins as an
+    // explicit override; the DB remembers what you typed.
+    val db = remember { DesktopChatDb() }
+    fun setting(key: String, env: String?, default: String): String =
+        System.getenv(env ?: "")?.takeIf { it.isNotBlank() }
+            ?: db.getSetting(key) ?: default
+
+    var darkMode by remember { mutableStateOf(db.getSetting("darkMode") != "false") }
+    KalivTheme(dark = darkMode) {
+        var localUrl by remember { mutableStateOf(setting("localUrl", "MODELRIG_LOCAL_URL", "http://localhost:11434")) }
+        var localPath by remember { mutableStateOf(setting("localPath", null, "/api/chat")) }
+        var localModel by remember { mutableStateOf(setting("localModel", null, "hermes3:8b")) }
+        var deviceToken by remember { mutableStateOf(setting("deviceToken", "MODELRIG_TOKEN", "")) }
+        var cloudKey by remember { mutableStateOf(setting("cloudKey", "OLLAMA_API_KEY", "")) }
+        var cloudModel by remember { mutableStateOf(setting("cloudModel", null, "gpt-oss:120b-cloud")) }
+        var localSystem by remember { mutableStateOf(setting("localSystem", null, "")) }
+        var cloudSystem by remember { mutableStateOf(setting("cloudSystem", null, "")) }
+        var preferLocal by remember { mutableStateOf(db.getSetting("preferLocal") != "false") }
         var showSettings by remember { mutableStateOf(true) }
+        var toolsMode by remember { mutableStateOf(db.getSetting("toolsMode") == "true") }
+        var pendingCard by remember { mutableStateOf<ToolTurn?>(null) }
+        var showAudit by remember { mutableStateOf(false) }
+        var auditRows by remember { mutableStateOf(listOf<AuditEntry>()) }
+        var auditError by remember { mutableStateOf<String?>(null) }
+        var pairStatus by remember { mutableStateOf<String?>(null) }
+        fun persist(key: String, value: String) {
+            try { db.putSetting(key, value) } catch (_: Exception) {}
+        }
 
         val messages = remember { mutableStateListOf<UiMessage>() }
         var input by remember { mutableStateOf("") }
@@ -95,7 +117,6 @@ fun App() {
         var showModels by remember { mutableStateOf(false) }
         var showConvos by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
-        val db = remember { DesktopChatDb() }
         var convId by remember { mutableStateOf<Long?>(null) }
 
         // Silently resume the latest conversation on startup, if any. No
@@ -135,9 +156,59 @@ fun App() {
         fun send() {
             val text = input.trim()
             if (text.isEmpty() || busy) return
+            // History for the tools path: the turns BEFORE this message --
+            // the worker gets the new message in its own field (Android parity).
+            val priorPairs = messages
+                .filter { it.role == "user" || it.role == "assistant" }
+                .map { it.role to it.text }
             messages.add(UiMessage("user", text))
             input = ""
             busy = true
+            if (toolsMode) {
+                // V5 on the desktop: non-streaming by necessity (the worker
+                // must see the whole response to detect a tool call), the
+                // confirmation card enforced by the WORKER -- this client can
+                // only render it, never bypass it.
+                val sysT = localSystem.trim().takeIf { it.isNotEmpty() }
+                val assistantIdxT = messages.size
+                messages.add(UiMessage("assistant", "", null, streaming = true))
+                scope.launch {
+                    val cid = withContext(Dispatchers.IO) {
+                        val id = convId ?: db.newConversation(source = "tools", model = localModel, title = text)
+                        db.addMessage(id, "user", text)
+                        id
+                    }
+                    if (convId == null) convId = cid
+                    val res = withContext(Dispatchers.IO) {
+                        runCatching {
+                            ToolsClient(localUrl, deviceToken.ifBlank { null })
+                                .toolsChat(text, localModel, priorPairs, sysT)
+                        }
+                    }
+                    res.onSuccess { turn ->
+                        when (turn.status) {
+                            "confirmation_required" -> {
+                                messages[assistantIdxT] = messages[assistantIdxT].copy(
+                                    text = "⚙ Kaliv foreslår: ${turn.summary.ifBlank { turn.tool }}",
+                                    streaming = false,
+                                )
+                                pendingCard = turn
+                            }
+                            else -> {
+                                val ans = turn.answer.ifBlank { "(tomt svar, status: ${turn.status})" }
+                                messages[assistantIdxT] = messages[assistantIdxT].copy(text = ans, streaming = false)
+                                withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", ans) }
+                            }
+                        }
+                    }.onFailure { e ->
+                        messages[assistantIdxT] = messages[assistantIdxT].copy(
+                            text = "Fejl: ${apiErrorHint(e.message)}", streaming = false,
+                        )
+                    }
+                    busy = false
+                }
+                return
+            }
             // System prompt reflects the PREFERRED source (preferLocal), not
             // necessarily whichever one ends up answering after a fallback —
             // a known simplification since the router picks the actual source
@@ -219,8 +290,13 @@ fun App() {
             }
         }
 
-        Column(Modifier.fillMaxSize().background(Brand.Graphite).padding(16.dp)) {
-            Header(lastSource)
+        Column(Modifier.fillMaxSize().background(KalivTheme.colors.Graphite).padding(16.dp)) {
+            Header(
+                source = lastSource,
+                dark = darkMode,
+                onToggleDark = { darkMode = !darkMode; persist("darkMode", darkMode.toString()) },
+                onAudit = { showAudit = true },
+            )
             Spacer(Modifier.height(12.dp))
             // Panel toggles live ABOVE the panels and are never pushed out of
             // view. The original layout put the settings card first and its
@@ -231,35 +307,35 @@ fun App() {
             // session's headless smoke tests could never catch.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { showSettings = !showSettings }) {
-                    Text(if (showSettings) "Skjul indstillinger" else "Indstillinger", color = Brand.Signal)
+                    Text(if (showSettings) "Skjul indstillinger" else "Indstillinger", color = KalivTheme.colors.Signal)
                 }
                 TextButton(onClick = { showConvos = !showConvos }) {
-                    Text(if (showConvos) "Skjul samtaler" else "Samtaler", color = Brand.Signal)
+                    Text(if (showConvos) "Skjul samtaler" else "Samtaler", color = KalivTheme.colors.Signal)
                 }
                 TextButton(onClick = { showModels = !showModels }) {
-                    Text(if (showModels) "Skjul modelstyring" else "Modelstyring", color = Brand.Signal)
+                    Text(if (showModels) "Skjul modelstyring" else "Modelstyring", color = KalivTheme.colors.Signal)
                 }
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box {
                     OutlinedButton(onClick = { modelMenuOpen = true }) {
-                        Text("Model: $localModel", color = Brand.TextHigh)
+                        Text("Model: $localModel", color = KalivTheme.colors.TextHigh)
                     }
                     DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
                         if (models.isEmpty()) {
                             DropdownMenuItem(text = { Text("(genindlæs modeller først)") }, onClick = { modelMenuOpen = false })
                         } else {
                             models.forEach { m ->
-                                DropdownMenuItem(text = { Text(m) }, onClick = { localModel = m; modelMenuOpen = false })
+                                DropdownMenuItem(text = { Text(m) }, onClick = { localModel = m; persist("localModel", m); modelMenuOpen = false })
                             }
                         }
                     }
                 }
                 Spacer(Modifier.width(8.dp))
-                TextButton(onClick = { loadModels() }) { Text("Genindlæs modeller", color = Brand.Signal) }
+                TextButton(onClick = { loadModels() }) { Text("Genindlæs modeller", color = KalivTheme.colors.Signal) }
             }
-            modelError?.let { Text("Modeller: $it", color = Brand.Danger, fontSize = 11.sp) }
+            modelError?.let { Text("Modeller: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
             Spacer(Modifier.height(6.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -268,12 +344,12 @@ fun App() {
                     onCheckedChange = { on -> ragMode = on; if (on) loadRagSources() },
                 )
                 Spacer(Modifier.width(6.dp))
-                Text("RAG-tilstand (mod rig'en, ikke lokal Ollama direkte/cloud)", color = Brand.TextMuted, fontSize = 12.sp)
+                Text("RAG-tilstand (mod rig'en, ikke lokal Ollama direkte/cloud)", color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
                 if (ragMode) {
                     Spacer(Modifier.width(10.dp))
                     Box {
                         OutlinedButton(onClick = { ragSourceMenuOpen = true }) {
-                            Text(ragSourceFilter?.let { "Kilde: $it" } ?: "Alle kilder", color = Brand.TextHigh)
+                            Text(ragSourceFilter?.let { "Kilde: $it" } ?: "Alle kilder", color = KalivTheme.colors.TextHigh)
                         }
                         DropdownMenu(expanded = ragSourceMenuOpen, onDismissRequest = { ragSourceMenuOpen = false }) {
                             DropdownMenuItem(text = { Text("Alle kilder") }, onClick = { ragSourceFilter = null; ragSourceMenuOpen = false })
@@ -287,10 +363,24 @@ fun App() {
                         }
                     }
                     Spacer(Modifier.width(6.dp))
-                    TextButton(onClick = { loadRagSources() }) { Text("Genindlæs kilder", color = Brand.Signal, fontSize = 12.sp) }
+                    TextButton(onClick = { loadRagSources() }) { Text("Genindlæs kilder", color = KalivTheme.colors.Signal, fontSize = 12.sp) }
                 }
             }
-            ragError?.let { Text("RAG-kilder: $it", color = Brand.Danger, fontSize = 11.sp) }
+            ragError?.let { Text("RAG-kilder: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val toolsReady = localPath.contains("/api/v1/") && deviceToken.isNotBlank()
+                Switch(
+                    checked = toolsMode && toolsReady,
+                    onCheckedChange = { on -> toolsMode = on; persist("toolsMode", on.toString()) },
+                    enabled = toolsReady,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    if (toolsReady) "Tools-tilstand (agent — hver skrivning kræver din godkendelse)"
+                    else "Tools kræver backend-sti (/api/v1/…) og parring — se Indstillinger",
+                    color = KalivTheme.colors.TextMuted, fontSize = 12.sp,
+                )
+            }
             Spacer(Modifier.height(8.dp))
 
             // Exactly one weighted child at a time: either the (scrollable)
@@ -323,16 +413,31 @@ fun App() {
                     }
                     if (showSettings) {
                         SettingsCard(
-                            localUrl, { localUrl = it },
-                            localPath, { localPath = it },
-                            localModel, { localModel = it },
-                            deviceToken, { deviceToken = it },
-                            localSystem, { localSystem = it },
-                            cloudKey, { cloudKey = it },
-                            cloudModel, { cloudModel = it },
-                            cloudSystem, { cloudSystem = it },
-                            preferLocal, { preferLocal = it },
+                            localUrl, { localUrl = it; persist("localUrl", it) },
+                            localPath, { localPath = it; persist("localPath", it) },
+                            localModel, { localModel = it; persist("localModel", it) },
+                            deviceToken, { deviceToken = it; persist("deviceToken", it) },
+                            localSystem, { localSystem = it; persist("localSystem", it) },
+                            cloudKey, { cloudKey = it; persist("cloudKey", it) },
+                            cloudModel, { cloudModel = it; persist("cloudModel", it) },
+                            cloudSystem, { cloudSystem = it; persist("cloudSystem", it) },
+                            preferLocal, { preferLocal = it; persist("preferLocal", it.toString()) },
                             db,
+                            onPair = {
+                                pairStatus = "parrer…"
+                                scope.launch {
+                                    val res = withContext(Dispatchers.IO) {
+                                        runCatching { ToolsClient(localUrl, null).pair("Kaliv Desktop") }
+                                    }
+                                    res.onSuccess {
+                                        deviceToken = it; persist("deviceToken", it)
+                                        pairStatus = "Parret ✓ — token gemt"
+                                    }.onFailure {
+                                        pairStatus = "Parring fejlede: ${apiErrorHint(it.message)}"
+                                    }
+                                }
+                            },
+                            pairStatus = pairStatus,
                         )
                         Spacer(Modifier.height(8.dp))
                     }
@@ -367,6 +472,71 @@ fun App() {
                 }
             }
         }
+
+        // The confirmation card -- V5's core promise, now on the desktop.
+        // Rendering only: the gate lives in the worker, so a modified client
+        // cannot skip it. Deny is a first-class action, not a dismiss.
+        pendingCard?.let { card ->
+            fun decide(approve: Boolean) {
+                val id = card.confirmation_id
+                pendingCard = null
+                busy = true
+                scope.launch {
+                    val res = withContext(Dispatchers.IO) {
+                        runCatching {
+                            ToolsClient(localUrl, deviceToken.ifBlank { null })
+                                .toolsConfirm(id, approve)
+                        }
+                    }
+                    val text = res.fold(
+                        onSuccess = { it.answer.ifBlank { if (approve) "Udført." else "Afvist." } },
+                        onFailure = { "Fejl: ${apiErrorHint(it.message)}" },
+                    )
+                    messages.add(UiMessage("assistant", text))
+                    val cid = convId
+                    if (cid != null) withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", text) }
+                    busy = false
+                }
+            }
+            AlertDialog(
+                onDismissRequest = { /* et kort lukkes med et VALG, ikke et klik udenfor */ },
+                title = { Text("Kaliv vil bruge et værktøj", fontWeight = FontWeight.SemiBold) },
+                text = { Text(card.summary.ifBlank { card.tool }) },
+                confirmButton = { Button(onClick = { decide(true) }) { Text("Godkend") } },
+                dismissButton = { OutlinedButton(onClick = { decide(false) }) { Text("Afvis") } },
+            )
+        }
+
+        if (showAudit) {
+            LaunchedEffect(Unit) {
+                val res = withContext(Dispatchers.IO) {
+                    runCatching { ToolsClient(localUrl, deviceToken.ifBlank { null }).toolsAudit(50) }
+                }
+                res.onSuccess { auditRows = it; auditError = null }
+                    .onFailure { auditError = apiErrorHint(it.message) }
+            }
+            AlertDialog(
+                onDismissRequest = { showAudit = false },
+                title = { Text("Handlingslog", fontWeight = FontWeight.SemiBold) },
+                text = {
+                    Column(Modifier.verticalScroll(rememberScrollState()).height(360.dp)) {
+                        auditError?.let { Text(it, color = KalivTheme.colors.Danger, fontSize = 12.sp) }
+                        if (auditRows.isEmpty() && auditError == null)
+                            Text("(ingen handlinger endnu)", color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
+                        auditRows.forEach { e ->
+                            Text(
+                                "${e.ts.take(19).replace('T', ' ')}  ·  ${e.tool}  ·  ${e.outcome}" +
+                                    (if (e.origin != "local") "  ·  ${e.origin}" else "") +
+                                    (if (e.result_summary.isNotBlank()) "\n    ${e.result_summary}" else ""),
+                                color = KalivTheme.colors.TextHigh, fontSize = 12.sp,
+                                modifier = Modifier.padding(vertical = 4.dp),
+                            )
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { showAudit = false }) { Text("Luk") } },
+            )
+        }
     }
 }
 
@@ -397,25 +567,25 @@ private fun ConversationsPanel(db: DesktopChatDb, onOpen: (Long) -> Unit, onNew:
         else convos.filter { it.title.contains(query, ignoreCase = true) }
     }
 
-    Box(Modifier.clip(RoundedCornerShape(12.dp)).background(Brand.Surface).fillMaxWidth().padding(14.dp)) {
+    Box(Modifier.clip(RoundedCornerShape(12.dp)).background(KalivTheme.colors.Surface).fillMaxWidth().padding(14.dp)) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Samtaler", color = Brand.TextHigh, fontWeight = FontWeight.SemiBold)
+                Text("Samtaler", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = onNew) { Text("+ Ny", color = Brand.Signal, fontSize = 12.sp) }
+                TextButton(onClick = onNew) { Text("+ Ny", color = KalivTheme.colors.Signal, fontSize = 12.sp) }
             }
-            panelError?.let { Spacer(Modifier.height(4.dp)); Text("Fejl: $it", color = Brand.Danger, fontSize = 11.sp) }
+            panelError?.let { Spacer(Modifier.height(4.dp)); Text("Fejl: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = query, onValueChange = { query = it },
-                placeholder = { Text("Søg i titler…", fontSize = 12.sp, color = Brand.TextMuted) },
+                placeholder = { Text("Søg i titler…", fontSize = 12.sp, color = KalivTheme.colors.TextMuted) },
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
             if (convos.isEmpty()) {
-                Text("Ingen samtaler endnu", color = Brand.TextMuted, fontSize = 13.sp)
+                Text("Ingen samtaler endnu", color = KalivTheme.colors.TextMuted, fontSize = 13.sp)
             } else if (shown.isEmpty()) {
-                Text("Ingen match på \"$query\"", color = Brand.TextMuted, fontSize = 13.sp)
+                Text("Ingen match på \"$query\"", color = KalivTheme.colors.TextMuted, fontSize = 13.sp)
             } else {
                 shown.forEach { c ->
                     if (renamingId == c.id) {
@@ -431,9 +601,9 @@ private fun ConversationsPanel(db: DesktopChatDb, onOpen: (Long) -> Unit, onNew:
                                     convos = db.listConversations()
                                 }.onFailure { panelError = it.message }
                                 renamingId = null
-                            }) { Text("Gem", color = Brand.Signal, fontSize = 12.sp) }
+                            }) { Text("Gem", color = KalivTheme.colors.Signal, fontSize = 12.sp) }
                             TextButton(onClick = { renamingId = null }) {
-                                Text("Annullér", color = Brand.TextMuted, fontSize = 12.sp)
+                                Text("Annullér", color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
                             }
                         }
                     } else {
@@ -441,14 +611,14 @@ private fun ConversationsPanel(db: DesktopChatDb, onOpen: (Long) -> Unit, onNew:
                             Column(
                                 Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).clickable { onOpen(c.id) }.padding(vertical = 4.dp),
                             ) {
-                                Text(c.title.ifBlank { "(uden titel)" }, color = Brand.TextHigh, fontSize = 13.sp, maxLines = 1)
+                                Text(c.title.ifBlank { "(uden titel)" }, color = KalivTheme.colors.TextHigh, fontSize = 13.sp, maxLines = 1)
                                 Text(
                                     "${c.source} · ${fmt.format(Date(c.updatedAt))}",
-                                    color = Brand.TextMuted, fontSize = 11.sp,
+                                    color = KalivTheme.colors.TextMuted, fontSize = 11.sp,
                                 )
                             }
                             TextButton(onClick = { renamingId = c.id; renameText = c.title }) {
-                                Text("✎", color = Brand.Signal, fontSize = 13.sp)
+                                Text("✎", color = KalivTheme.colors.Signal, fontSize = 13.sp)
                             }
                             TextButton(onClick = {
                                 runCatching {
@@ -456,14 +626,14 @@ private fun ConversationsPanel(db: DesktopChatDb, onOpen: (Long) -> Unit, onNew:
                                     copiedId = c.id
                                 }.onFailure { panelError = it.message }
                             }) {
-                                Text(if (copiedId == c.id) "Kopieret" else "Kopiér", color = Brand.Signal, fontSize = 12.sp)
+                                Text(if (copiedId == c.id) "Kopieret" else "Kopiér", color = KalivTheme.colors.Signal, fontSize = 12.sp)
                             }
                             TextButton(onClick = {
                                 runCatching {
                                     db.deleteConversation(c.id)
                                     convos = db.listConversations()
                                 }.onFailure { panelError = it.message }
-                            }) { Text("Slet", color = Brand.Danger, fontSize = 12.sp) }
+                            }) { Text("Slet", color = KalivTheme.colors.Danger, fontSize = 12.sp) }
                         }
                     }
                 }
@@ -473,22 +643,28 @@ private fun ConversationsPanel(db: DesktopChatDb, onOpen: (Long) -> Unit, onNew:
 }
 
 @Composable
-private fun Header(source: ChatResult.Source?) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("ModelRig", color = Brand.TextHigh, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.width(10.dp))
-        val label: String
-        val color = when (source) {
-            ChatResult.Source.LOCAL -> { label = "RIG"; Brand.Signal }
-            ChatResult.Source.CLOUD -> { label = "CLOUD"; Brand.Amber }
-            null -> { label = "—"; Brand.TextMuted }
+private fun Header(
+    source: ChatResult.Source?,
+    dark: Boolean,
+    onToggleDark: () -> Unit,
+    onAudit: () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        // The wordmark: user-facing = Kaliv; only the backend is ModelRig.
+        Text("KALIV", color = KalivTheme.colors.Amber, fontSize = 22.sp,
+             fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
+        Spacer(Modifier.width(12.dp))
+        val srcLabel = when (source) {
+            ChatResult.Source.LOCAL -> "svar: rig"
+            ChatResult.Source.CLOUD -> "svar: cloud"
+            null -> ""
         }
-        Box(
-            Modifier.clip(RoundedCornerShape(6.dp))
-                .background(color.copy(alpha = 0.18f))
-                .padding(horizontal = 8.dp, vertical = 3.dp)
-        ) {
-            Text(label, color = color, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        if (srcLabel.isNotEmpty())
+            Text(srcLabel, color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
+        Spacer(Modifier.weight(1f))
+        TextButton(onClick = onAudit) { Text("Handlingslog", color = KalivTheme.colors.Signal, fontSize = 12.sp) }
+        TextButton(onClick = onToggleDark) {
+            Text(if (dark) "Lys tilstand" else "Mørk tilstand", color = KalivTheme.colors.Signal, fontSize = 12.sp)
         }
     }
 }
@@ -496,7 +672,7 @@ private fun Header(source: ChatResult.Source?) {
 @Composable
 private fun MessageBubble(m: UiMessage) {
     val isUser = m.role == "user"
-    val bg = if (isUser) Brand.SurfaceHigh else Brand.Surface
+    val bg = if (isUser) KalivTheme.colors.SurfaceHigh else KalivTheme.colors.Surface
     val badge = when {
         isUser -> "dig"
         m.source == ChatResult.Source.CLOUD -> "modelrig · cloud"
@@ -504,7 +680,7 @@ private fun MessageBubble(m: UiMessage) {
         else -> "modelrig"
     }
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Text(badge, color = Brand.TextMuted, fontSize = 11.sp)
+        Text(badge, color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
         Spacer(Modifier.height(2.dp))
         Box(Modifier.clip(RoundedCornerShape(10.dp)).background(bg).fillMaxWidth().padding(12.dp)) {
             Column {
@@ -513,20 +689,20 @@ private fun MessageBubble(m: UiMessage) {
                         m.ragSources.take(4).forEach { s ->
                             Box(
                                 Modifier.clip(RoundedCornerShape(999.dp))
-                                    .background(Brand.SurfaceHigh)
+                                    .background(KalivTheme.colors.SurfaceHigh)
                                     .padding(horizontal = 8.dp, vertical = 3.dp),
                             ) {
-                                Text(s, fontSize = 10.sp, color = Brand.TextMuted)
+                                Text(s, fontSize = 10.sp, color = KalivTheme.colors.TextMuted)
                             }
                             Spacer(Modifier.width(4.dp))
                         }
                     }
                 }
                 when {
-                    isUser -> Text(m.text, color = Brand.TextHigh, fontSize = 14.sp)
-                    m.streaming && m.text.isEmpty() -> Text("…", color = Brand.TextMuted, fontSize = 14.sp)
-                    m.streaming -> Text(m.text + "▍", color = Brand.TextHigh, fontSize = 14.sp)
-                    else -> MarkdownText(m.text, color = Brand.TextHigh)
+                    isUser -> Text(m.text, color = KalivTheme.colors.TextHigh, fontSize = 14.sp)
+                    m.streaming && m.text.isEmpty() -> Text("…", color = KalivTheme.colors.TextMuted, fontSize = 14.sp)
+                    m.streaming -> Text(m.text + "▍", color = KalivTheme.colors.TextHigh, fontSize = 14.sp)
+                    else -> MarkdownText(m.text, color = KalivTheme.colors.TextHigh)
                 }
             }
         }
@@ -545,19 +721,25 @@ private fun SettingsCard(
     cloudSystem: String, onCloudSystem: (String) -> Unit,
     preferLocal: Boolean, onPreferLocal: (Boolean) -> Unit,
     db: DesktopChatDb,
+    onPair: () -> Unit,
+    pairStatus: String?,
 ) {
-    Box(Modifier.clip(RoundedCornerShape(12.dp)).background(Brand.Surface).fillMaxWidth().padding(14.dp)) {
+    Box(Modifier.clip(RoundedCornerShape(12.dp)).background(KalivTheme.colors.Surface).fillMaxWidth().padding(14.dp)) {
         Column {
-            Text("Forbindelse", color = Brand.TextHigh, fontWeight = FontWeight.SemiBold)
+            Text("Forbindelse", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
-            Field("Lokal base-URL (Ollama eller ModelRig-backend)", localUrl, onLocalUrl)
+            Field("Base-URL (Ollama direkte, eller rig'ens backend :8080)", localUrl, onLocalUrl)
             Field("Lokal chat-sti (/api/chat direkte · /api/v1/chat via backend)", localPath, onLocalPath)
             Field("Lokal model", localModel, onLocalModel)
-            Field("Enhedstoken (kun ved brug af ModelRig-backend)", token, onToken)
+            Field("Enhedstoken (kun ved brug af backenden)", token, onToken)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onPair) { Text("Par med rig (dev-mode)", color = KalivTheme.colors.Signal, fontSize = 12.sp) }
+                pairStatus?.let { Spacer(Modifier.width(8.dp)); Text(it, color = KalivTheme.colors.TextMuted, fontSize = 11.sp) }
+            }
             Field("System-instruktion, lokal (valgfri)", localSystem, onLocalSystem)
             PresetRow(db, "rig", localSystem, onLocalSystem)
             Spacer(Modifier.height(8.dp))
-            Text("Ollama Cloud-fallback", color = Brand.Amber, fontWeight = FontWeight.SemiBold)
+            Text("Ollama Cloud-fallback", color = KalivTheme.colors.Amber, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
             Field("OLLAMA_API_KEY", cloudKey, onCloudKey)
             Field("Cloud-model (fx gpt-oss:120b-cloud)", cloudModel, onCloudModel)
@@ -567,7 +749,7 @@ private fun SettingsCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(checked = preferLocal, onCheckedChange = onPreferLocal)
                 Spacer(Modifier.width(8.dp))
-                Text("Foretræk lokal, brug cloud som fallback", color = Brand.TextMuted, fontSize = 13.sp)
+                Text("Foretræk lokal, brug cloud som fallback", color = KalivTheme.colors.TextMuted, fontSize = 13.sp)
             }
         }
     }
@@ -595,13 +777,13 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
     ) {
         presets.forEach { p ->
             Box(
-                Modifier.clip(RoundedCornerShape(999.dp)).background(Brand.SurfaceHigh),
+                Modifier.clip(RoundedCornerShape(999.dp)).background(KalivTheme.colors.SurfaceHigh),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(
                         onClick = { onApply(p.prompt) },
                         contentPadding = PaddingValues(start = 12.dp, end = 4.dp),
-                    ) { Text(p.name, color = Brand.TextHigh, fontSize = 12.sp) }
+                    ) { Text(p.name, color = KalivTheme.colors.TextHigh, fontSize = 12.sp) }
                     TextButton(
                         onClick = {
                             runCatching {
@@ -610,7 +792,7 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
                             }.onFailure { presetError = "Kunne ikke slette: ${it.message}" }
                         },
                         contentPadding = PaddingValues(start = 4.dp, end = 12.dp),
-                    ) { Text("✕", color = Brand.TextMuted, fontSize = 11.sp) }
+                    ) { Text("✕", color = KalivTheme.colors.TextMuted, fontSize = 11.sp) }
                 }
             }
             Spacer(Modifier.width(6.dp))
@@ -622,7 +804,7 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
         ) {
             Text(
                 if (saving) "− Annullér" else "+ Gem som preset",
-                color = if (currentPrompt.isNotBlank()) Brand.Signal else Brand.TextMuted,
+                color = if (currentPrompt.isNotBlank()) KalivTheme.colors.Signal else KalivTheme.colors.TextMuted,
                 fontSize = 12.sp,
             )
         }
@@ -646,10 +828,10 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
                         newName = ""; saving = false
                     }.onFailure { presetError = "Kunne ikke gemme: ${it.message}" }
                 },
-            ) { Text("Gem", color = if (newName.isNotBlank()) Brand.Signal else Brand.TextMuted, fontWeight = FontWeight.Bold) }
+            ) { Text("Gem", color = if (newName.isNotBlank()) KalivTheme.colors.Signal else KalivTheme.colors.TextMuted, fontWeight = FontWeight.Bold) }
         }
     }
-    presetError?.let { Text(it, color = Brand.Danger, fontSize = 11.sp) }
+    presetError?.let { Text(it, color = KalivTheme.colors.Danger, fontSize = 11.sp) }
 }
 
 /**
@@ -669,11 +851,24 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
  * stays first so screenshots/logs still show the real status code.
  */
 private fun apiErrorHint(raw: String?): String {
-    val msg = raw ?: "ukendt fejl"
+    val msg = raw.orEmpty()
     return when {
-        "(401)" in msg -> "$msg — enhedstoken mangler eller er ugyldigt. Mint en kode (server: -pair), byt den til et token via /api/v1/pair/claim, og indsæt token'et under Indstillinger."
-        "(404)" in msg -> "$msg — endpointet findes ikke på serveren. Peger du på Ollama direkte? Denne funktion kræver ModelRig-backenden: base-URL http://<rig>:8080 og chat-sti /api/v1/chat. Kører backenden, er den måske for gammel."
-        else -> msg
+        // Ported from Android's friendlyError (v1.34.9): name the REAL cause.
+        // "Tool layer disabled" masquerading as a timeout cost a whole hunt.
+        msg.contains("tool layer is disabled") || msg.contains("(403)") ->
+            "Tool-laget er slået fra på rig'en. Start workeren med KALIV_TOOLS_ENABLED=1."
+        msg.contains("(401)") || msg.contains("401") ->
+            "Ikke godkendt (401). Parringen mangler eller er udløbet — brug \"Par med rig\" under Indstillinger."
+        msg.contains("(404)") ->
+            "Ikke fundet (404). Tjek modelnavn og at stien er /api/v1/… mod backenden."
+        msg.contains("(502)") || msg.contains("(503)") ->
+            "Rig'en/Ollama svarer ikke (502/503). Tjek at stakken kører — start-kaliv.bat viser /health/full."
+        msg.contains("timed out", ignoreCase = true) || msg.contains("HttpTimeout", ignoreCase = true) ->
+            "Tidsudløb — modellen svarede ikke i tide. Første kolde load kan tage tid; prøv igen."
+        msg.contains("Connection refused", ignoreCase = true) || msg.contains("ConnectException") ->
+            "Kan ikke nå adressen. Kører serveren, og er URL'en rigtig (Tailscale-IP hvis WiFi er slået fra)?"
+        msg.isEmpty() -> "ukendt fejl"
+        else -> msg.take(300)
     }
 }
 
@@ -718,17 +913,17 @@ private fun ModelsPanel(baseUrl: String, isBackend: Boolean, bearer: String?, on
         refresh()
     }
 
-    Box(Modifier.clip(RoundedCornerShape(12.dp)).background(Brand.Surface).fillMaxWidth().padding(14.dp)) {
+    Box(Modifier.clip(RoundedCornerShape(12.dp)).background(KalivTheme.colors.Surface).fillMaxWidth().padding(14.dp)) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Modelstyring", color = Brand.TextHigh, fontWeight = FontWeight.SemiBold)
+                Text("Modelstyring", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = { refresh() }) { Text("Genindlæs", color = Brand.Signal, fontSize = 12.sp) }
+                TextButton(onClick = { refresh() }) { Text("Genindlæs", color = KalivTheme.colors.Signal, fontSize = 12.sp) }
             }
-            loadError?.let { Spacer(Modifier.height(4.dp)); Text("Fejl: $it", color = Brand.Danger, fontSize = 11.sp) }
+            loadError?.let { Spacer(Modifier.height(4.dp)); Text("Fejl: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
             Spacer(Modifier.height(10.dp))
 
-            Text("Hent ny model", color = Brand.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text("Hent ny model", color = KalivTheme.colors.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = pullName, onValueChange = { pullName = it },
@@ -760,25 +955,25 @@ private fun ModelsPanel(baseUrl: String, isBackend: Boolean, bearer: String?, on
                     },
                 ) { Text(if (pulling) "Henter…" else "Hent") }
             }
-            pullStatus?.let { Text(it, color = Brand.Signal, fontSize = 11.sp) }
-            pullErr?.let { Text("Fejl: $it", color = Brand.Danger, fontSize = 11.sp) }
+            pullStatus?.let { Text(it, color = KalivTheme.colors.Signal, fontSize = 11.sp) }
+            pullErr?.let { Text("Fejl: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
 
             Spacer(Modifier.height(10.dp))
-            Text("Kører nu", color = Brand.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text("Kører nu", color = KalivTheme.colors.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             if (running.isEmpty()) {
-                Text("Ingen modeller i hukommelsen", color = Brand.TextMuted, fontSize = 12.sp)
+                Text("Ingen modeller i hukommelsen", color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
             } else {
                 running.forEach { m ->
-                    Text("${m.name} — ${m.sizeVramBytes / 1_000_000_000.0} GB VRAM", color = Brand.TextHigh, fontSize = 12.sp)
+                    Text("${m.name} — ${m.sizeVramBytes / 1_000_000_000.0} GB VRAM", color = KalivTheme.colors.TextHigh, fontSize = 12.sp)
                 }
             }
 
             Spacer(Modifier.height(10.dp))
-            Text("Installeret", color = Brand.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text("Installeret", color = KalivTheme.colors.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             installed.forEach { m ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("${m.name} — ${m.sizeBytes / 1_000_000_000.0} GB", color = Brand.TextHigh, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { confirmDelete = m.name }) { Text("Slet", color = Brand.Danger, fontSize = 11.sp) }
+                    Text("${m.name} — ${m.sizeBytes / 1_000_000_000.0} GB", color = KalivTheme.colors.TextHigh, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { confirmDelete = m.name }) { Text("Slet", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
                 }
             }
         }
@@ -797,9 +992,9 @@ private fun ModelsPanel(baseUrl: String, isBackend: Boolean, bearer: String?, on
                         val err = withContext(Dispatchers.IO) { runCatching { client.deleteModel(name, deletePath) }.exceptionOrNull() }
                         if (err == null) refresh() else loadError = apiErrorHint(err.message)
                     }
-                }) { Text("Slet", color = Brand.Danger) }
+                }) { Text("Slet", color = KalivTheme.colors.Danger) }
             },
-            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Annullér", color = Brand.TextMuted) } },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Annullér", color = KalivTheme.colors.TextMuted) } },
         )
     }
 }

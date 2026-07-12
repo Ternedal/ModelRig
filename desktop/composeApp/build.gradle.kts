@@ -37,8 +37,8 @@ compose.desktop {
             // ("1.0.0" on every release). Deb accepts 0.x, so keeping just it
             // lets packageVersion tell the truth.
             targetFormats(TargetFormat.Deb)
-            packageName = "ModelRig"
-            packageVersion = "1.34.17"
+            packageName = "Kaliv"
+            packageVersion = "1.35.0"
         }
     }
 }

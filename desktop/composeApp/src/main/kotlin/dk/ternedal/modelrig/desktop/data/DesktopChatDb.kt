@@ -69,6 +69,12 @@ class DesktopChatDb(dbPath: String = defaultDbPath()) {
             )
             st.execute("CREATE INDEX IF NOT EXISTS idx_message_conv ON message(conv_id)")
             st.execute(
+                """CREATE TABLE IF NOT EXISTS setting(
+                    key   TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )""",
+            )
+            st.executeUpdate(
                 """CREATE TABLE IF NOT EXISTS preset(
                      id INTEGER PRIMARY KEY AUTOINCREMENT,
                      source TEXT NOT NULL,
@@ -216,6 +222,22 @@ class DesktopChatDb(dbPath: String = defaultDbPath()) {
             val dir = File(System.getProperty("user.home"), ".modelrig")
             if (!dir.exists()) dir.mkdirs()
             return File(dir, "modelrig.db").absolutePath
+        }
+    }
+
+    /** Persisted UI/connection settings (v1.35.0 desktop love): the app used
+     *  to forget EVERYTHING between launches (env vars or retyping). */
+    fun getSetting(key: String): String? = conn.prepareStatement(
+        "SELECT value FROM setting WHERE key = ?").use { st ->
+        st.setString(1, key)
+        st.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+    }
+
+    fun putSetting(key: String, value: String) {
+        conn.prepareStatement(
+            "INSERT INTO setting(key, value) VALUES(?, ?) " +
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value").use { st ->
+            st.setString(1, key); st.setString(2, value); st.executeUpdate()
         }
     }
 }
