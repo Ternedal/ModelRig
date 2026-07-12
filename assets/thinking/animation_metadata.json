@@ -1,0 +1,10 @@
+{
+  "brand": "Kaliv",
+  "asset": "thinking_animation",
+  "frames": 32,
+  "duration_per_frame_ms": 40,
+  "loop_duration_ms": 1280,
+  "loop": "infinite",
+  "recommended_gif": "GIF/kaliv_thinking_transparent_128.gif",
+  "recommended_android": "WEBP/kaliv_thinking_transparent_256.webp"
+}

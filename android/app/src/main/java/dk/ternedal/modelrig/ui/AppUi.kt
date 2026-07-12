@@ -6,6 +6,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import android.graphics.ImageDecoder
+import android.graphics.drawable.AnimatedImageDrawable
+import android.os.Build
+import android.widget.ImageView
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -2477,6 +2482,34 @@ private fun StopGlyph(color: Color, modifier: Modifier) {
     }
 }
 
+// The Kaliv "thinking" animation -- shown in the assistant bubble while the
+// reply is still empty (the moment before the first streamed token), the same
+// place Claude shows its thinking indicator. The asset is an animated WebP;
+// Compose's painterResource would only draw the first (static) frame, so we
+// play it via AnimatedImageDrawable in a tiny ImageView. That API is 28+, so on
+// API 26-27 we fall back to the plain ellipsis rather than crash.
+@Composable
+private fun ThinkingIndicator() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        AndroidView(
+            modifier = Modifier.size(28.dp),
+            factory = { ctx ->
+                ImageView(ctx).apply {
+                    val src = ImageDecoder.createSource(ctx.resources, R.drawable.kaliv_thinking)
+                    val d = ImageDecoder.decodeDrawable(src)
+                    setImageDrawable(d)
+                    if (d is AnimatedImageDrawable) {
+                        d.repeatCount = AnimatedImageDrawable.REPEAT_INFINITE
+                        d.start()
+                    }
+                }
+            },
+        )
+    } else {
+        Text("…", color = KalivTheme.colors.textMuted, fontSize = 15.sp, lineHeight = 21.sp)
+    }
+}
+
 @Composable
 private fun Bubble(m: Msg, onRetry: (() -> Unit)? = null) {
     val isUser = m.role == "user"
@@ -2548,7 +2581,7 @@ private fun Bubble(m: Msg, onRetry: (() -> Unit)? = null) {
                     when {
                         isUser -> Text(m.text, color = KalivTheme.colors.onSignal, fontSize = 15.sp, lineHeight = 21.sp)
                         m.error -> Text(m.text, color = KalivTheme.colors.danger, fontSize = 14.sp, lineHeight = 20.sp)
-                        m.streaming && m.text.isEmpty() -> Text("…", color = KalivTheme.colors.textMuted, fontSize = 15.sp, lineHeight = 21.sp)
+                        m.streaming && m.text.isEmpty() -> ThinkingIndicator()
                         m.streaming -> Text(m.text + "▍", color = KalivTheme.colors.textHigh, fontSize = 15.sp, lineHeight = 21.sp)
                         else -> MarkdownText(m.text, color = KalivTheme.colors.textHigh)
                     }
