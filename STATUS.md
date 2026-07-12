@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.42.0** — "V10.2 lukket: foto→RAG-endpointet fra v1.37.0 var uforbundet — ingen klient kaldte det. Nu: ingestImage i Android-klienten + ＋Gem i Viden-knap paa det vedhaeftede billede (dekoder base64 → ingest → status med ✓/fejl). Hele foto→RAG-vejen er brugbar fra UI. friendlyError viser aerligt 501 hvis KALIV_VISION_MODEL mangler". Follows 1.41.0 (desktop-chat-redesign). Autonomous sessions, **2026-07-02 → 07-12**.
+Version **1.43.0** — "Kaliv fik en RIGTIG persona: app-standardprompten var TOM, saa en utethered instruct-model improviserede en tom emoji-druknet hygge-bot (svarede hej med tre linjer regnbuer). Ny DEFAULT_SYSTEM: kortfattet, dansk, aerlig, hoejst 1 emoji, kender sine tools. Gaelder ogsaa eksisterende installs (gemt-tom = brug default). qwen3:14b BEKRAEFTET bedre end hermes3 on-device (ved den er Kaliv, kender sine tools). Taenke-ikon 44→52dp. Verificeret ved build". Follows 1.42.0 (foto→RAG-UI). Autonomous sessions, **2026-07-02 → 07-12**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

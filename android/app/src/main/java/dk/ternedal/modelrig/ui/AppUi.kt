@@ -2560,7 +2560,7 @@ private fun StopGlyph(color: Color, modifier: Modifier) {
 private fun ThinkingIndicator() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
         AndroidView(
-            modifier = Modifier.size(44.dp),
+            modifier = Modifier.size(52.dp),
             factory = { ctx ->
                 ImageView(ctx).apply {
                     val src = ImageDecoder.createSource(ctx.resources, R.drawable.kaliv_thinking)

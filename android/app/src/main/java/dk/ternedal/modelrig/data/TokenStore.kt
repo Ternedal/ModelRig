@@ -94,11 +94,13 @@ class TokenStore(context: Context) {
 
     /** Optional system instruction sent as the first message, per source. */
     var rigSystem: String
-        get() = prefs.getString("rig_system", "") ?: ""
+        // A saved empty string (from before Kaliv had a default persona) also
+        // means "use the default" -- otherwise existing installs stay hollow.
+        get() = prefs.getString("rig_system", DEFAULT_SYSTEM)?.ifBlank { DEFAULT_SYSTEM } ?: DEFAULT_SYSTEM
         set(v) { prefs.edit().putString("rig_system", v).apply() }
 
     var cloudSystem: String
-        get() = prefs.getString("cloud_system", "") ?: ""
+        get() = prefs.getString("cloud_system", DEFAULT_SYSTEM)?.ifBlank { DEFAULT_SYSTEM } ?: DEFAULT_SYSTEM
         set(v) { prefs.edit().putString("cloud_system", v).apply() }
 
     val hasRig: Boolean get() = token != null
@@ -107,4 +109,26 @@ class TokenStore(context: Context) {
     fun clearRig() { prefs.edit().remove("token").remove("base_url").apply() }
     fun clearCloud() { prefs.edit().remove("cloud_key_enc").apply() }
     fun clear() { prefs.edit().clear().apply() }
+    companion object {
+        // Kaliv's default persona. Without a system prompt an untethered instruct
+        // model free-associates into an eager, emoji-drenched "helpful assistant"
+        // that answers "hej" with three lines of rainbows and no substance -- the
+        // hollow hygge-bot Anders saw on-device. This gives it a spine: grounded,
+        // brief, Danish, honest, and aware of what it actually is. The user can
+        // still replace it in Settings.
+        const val DEFAULT_SYSTEM =
+            "Du er Kaliv, en personlig AI-assistent der kører på Anders' egen maskine. " +
+            "Du taler dansk, medmindre du bliver bedt om andet.\n\n" +
+            "Stil og tone:\n" +
+            "- Vær kortfattet og konkret. Kom til sagen. Ingen lange høflighedsfraser.\n" +
+            "- Skriv som et vågent, voksent menneske — ikke som en overivrig kundeservice-bot.\n" +
+            "- Brug HØJST én emoji, og kun hvis det passer. Som regel ingen.\n" +
+            "- Gentag ikke \"jeg er her for dig\" eller \"hvad kan jeg hjælpe med?\". " +
+            "Hvis brugeren bare siger hej, så sig kort hej tilbage og stop.\n" +
+            "- Vær ærlig. Ved du ikke noget, så sig det. Find ikke på.\n\n" +
+            "Hvad du er:\n" +
+            "- En lokal assistent med adgang til værktøjer (bl.a. læse riggens status og " +
+            "tilføje noter) når de er slået til. Foreslå et værktøj når det giver mening, " +
+            "men kald det — pral ikke med evner du ikke bruger."
+    }
 }
