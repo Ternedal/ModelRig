@@ -2088,8 +2088,99 @@ private fun ConversationsScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val ioScope = rememberCoroutineScope()
     var convos by remember { mutableStateOf(db.listConversations()) }
+    var ioStatus by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
+
+    // Full backup of all conversations as JSON via SAF -- the user picks where
+    // (Downloads, Drive, ...). This is what makes a future keystore rotation or
+    // a lost phone cost nothing: conversations otherwise live ONLY in this
+    // app's private SQLite. Import restores them, with a cheap exact-duplicate
+    // check so re-importing the same file doesn't double everything.
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        ioStatus = "eksporterer…"
+        ioScope.launch {
+            val res = withContext(Dispatchers.IO) {
+                runCatching {
+                    val root = org.json.JSONObject()
+                        .put("format", "kaliv-conversations")
+                        .put("version", 1)
+                        .put("exported_at", System.currentTimeMillis())
+                    val arr = org.json.JSONArray()
+                    db.listConversations().forEach { meta ->
+                        val convObj = org.json.JSONObject()
+                            .put("title", meta.title)
+                            .put("source", meta.source)
+                            .put("model", meta.model)
+                            .put("updated_at", meta.updatedAt)
+                        val msgs = org.json.JSONArray()
+                        db.loadMessages(meta.id).forEach { (role, content) ->
+                            msgs.put(org.json.JSONObject().put("role", role).put("content", content))
+                        }
+                        convObj.put("messages", msgs)
+                        arr.put(convObj)
+                    }
+                    root.put("conversations", arr)
+                    context.contentResolver.openOutputStream(uri)?.use { out ->
+                        out.write(root.toString(2).toByteArray())
+                    } ?: throw RuntimeException("kunne ikke åbne filen til skrivning")
+                    arr.length()
+                }
+            }
+            ioStatus = res.fold({ "✓ $it samtaler eksporteret" }, { "eksport fejlede: ${it.message}" })
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        ioStatus = "importerer…"
+        ioScope.launch {
+            val res = withContext(Dispatchers.IO) {
+                runCatching {
+                    val text = context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() }
+                        ?: throw RuntimeException("kunne ikke læse filen")
+                    val root = org.json.JSONObject(text)
+                    if (root.optString("format") != "kaliv-conversations") {
+                        throw RuntimeException("ikke en Kaliv-samtale-eksport")
+                    }
+                    val arr = root.getJSONArray("conversations")
+                    var imported = 0; var skipped = 0
+                    // Snapshot existing convs once for the duplicate check.
+                    val existing = db.listConversations()
+                    for (i in 0 until arr.length()) {
+                        val c = arr.getJSONObject(i)
+                        val title = c.optString("title")
+                        val source = c.optString("source").ifBlank { "rig" }
+                        val model = c.optString("model")
+                        val msgsArr = c.optJSONArray("messages") ?: org.json.JSONArray()
+                        val msgs = (0 until msgsArr.length()).map {
+                            val m = msgsArr.getJSONObject(it)
+                            m.optString("role") to m.optString("content")
+                        }
+                        // Exact-duplicate check: same title+source AND identical
+                        // (role, content) sequence -> skip. Cheap at personal scale.
+                        val dup = existing.filter { it.title == title && it.source == source }
+                            .any { db.loadMessages(it.id) == msgs }
+                        if (dup) { skipped++; continue }
+                        val cid = db.newConversation(source, model, title)
+                        msgs.forEach { (role, content) -> db.addMessage(cid, role, content) }
+                        imported++
+                    }
+                    imported to skipped
+                }
+            }
+            res.onSuccess { (imp, skip) ->
+                convos = db.listConversations()
+                ioStatus = "✓ $imp importeret" + (if (skip > 0) " · $skip dubletter sprunget over" else "")
+            }.onFailure { ioStatus = "import fejlede: ${it.message}" }
+        }
+    }
+
     var renamingId by remember { mutableStateOf<Long?>(null) }
     var renameText by remember { mutableStateOf("") }
     val fmt = remember { SimpleDateFormat("d/M HH:mm", Locale.getDefault()) }
@@ -2109,6 +2200,23 @@ private fun ConversationsScreen(
                     Text("Samtaler", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = onNew) { Text("+ Ny", color = KalivTheme.colors.signal) }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = {
+                        val d = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(java.util.Date())
+                        exportLauncher.launch("kaliv-samtaler-$d.json")
+                    }) { Text("⬇ Eksportér alt", color = KalivTheme.colors.signal, fontSize = 12.sp) }
+                    TextButton(onClick = { importLauncher.launch(arrayOf("application/json")) }) {
+                        Text("⬆ Importér", color = KalivTheme.colors.signal, fontSize = 12.sp)
+                    }
+                    ioStatus?.let {
+                        Spacer(Modifier.width(6.dp))
+                        Text(it,
+                            color = if (it.startsWith("✓")) KalivTheme.colors.success
+                                    else if (it.endsWith("…")) KalivTheme.colors.textMuted
+                                    else KalivTheme.colors.danger,
+                            fontSize = 11.sp)
+                    }
                 }
                 OutlinedTextField(
                     value = query, onValueChange = { query = it },
