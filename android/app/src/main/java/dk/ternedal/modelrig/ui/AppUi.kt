@@ -771,6 +771,7 @@ private fun ChatScreen(
             // (consumer) through this channel. Unlimited: sentences are small and
             // we never want the reader to block on a slow player.
             val audioChan = Channel<ByteArray>(Channel.UNLIMITED)
+            var transcriptText = ""
             var transcriptShown = false
             var replyIdx = -1
             val replyBuilder = StringBuilder()
@@ -792,6 +793,18 @@ private fun ChatScreen(
                 }
                 speaking = false
             }
+            // Poll the barge-in detector at 5 Hz to drive the on-screen RMS meter
+            // (liveRms / peakRms). The streaming rewrite has to carry this over
+            // explicitly -- without it the meter sits frozen at 0 for the whole
+            // spoken turn even though barge-in detection still works.
+            val meter = detector?.let {
+                launch {
+                    while (isActive) {
+                        liveRms = it.lastRms; peakRms = it.peakRms
+                        delay(200)
+                    }
+                }
+            }
 
             try {
                 withContext(Dispatchers.IO) {
@@ -808,23 +821,22 @@ private fun ChatScreen(
                             val tt = t.trim()
                             if (tt.isNotEmpty() && !transcriptShown) {
                                 transcriptShown = true
-                                scope.launch {
-                                    messages.add(Msg("user", tt))
-                                    // Add the assistant bubble now; fill it as
-                                    // sentences arrive so text and audio track.
-                                    replyIdx = messages.size
-                                    messages.add(Msg("assistant", "", streaming = true, voiceModel = usedModel, voiceViaCloud = usedCloud))
-                                }
+                                transcriptText = tt
+                                // messages is a SnapshotStateList -- safe to mutate
+                                // from this IO thread; the recomposer picks it up.
+                                // Set replyIdx synchronously (the callbacks run in
+                                // order on the reader thread) so the first chunk
+                                // can reference it.
+                                messages.add(Msg("user", tt))
+                                replyIdx = messages.size
+                                messages.add(Msg("assistant", "", streaming = true))
                             }
                         },
                         onChunk = { _, text, chunkB64 ->
-                            replyBuilder.append(if (replyBuilder.isEmpty()) "" else " ").append(text.trim())
-                            if (replyIdx >= 0) {
-                                scope.launch {
-                                    if (replyIdx < messages.size) {
-                                        messages[replyIdx] = messages[replyIdx].copy(text = stripEmojis(replyBuilder.toString()))
-                                    }
-                                }
+                            if (replyBuilder.isNotEmpty()) replyBuilder.append(" ")
+                            replyBuilder.append(text.trim())
+                            if (replyIdx in messages.indices) {
+                                messages[replyIdx] = messages[replyIdx].copy(text = stripEmojis(replyBuilder.toString()))
                             }
                             if (chunkB64.isNotEmpty() && !playbackStop.get()) {
                                 val bytes = android.util.Base64.decode(chunkB64, android.util.Base64.DEFAULT)
@@ -833,15 +845,12 @@ private fun ChatScreen(
                         },
                         onDone = { reply, m, cloud ->
                             usedModel = m; usedCloud = cloud
-                            if (replyIdx >= 0) {
-                                scope.launch {
-                                    if (replyIdx < messages.size) {
-                                        messages[replyIdx] = messages[replyIdx].copy(
-                                            text = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() }),
-                                            streaming = false, voiceModel = m, voiceViaCloud = cloud,
-                                        )
-                                    }
-                                }
+                            val finalText = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() })
+                            if (replyIdx in messages.indices) {
+                                messages[replyIdx] = messages[replyIdx].copy(
+                                    text = finalText,
+                                    streaming = false, voiceModel = m, voiceViaCloud = cloud,
+                                )
                             }
                         },
                         onError = { status, detail -> streamError = status to detail },
@@ -857,12 +866,20 @@ private fun ChatScreen(
                 }
 
                 // Persist the finished turn like a normal rig turn.
+                // Persist the finished turn like a normal rig turn, using the
+                // captured transcript (not a fragile read-back from the message
+                // list). If the reply is empty (e.g. all-markup), still persist
+                // the user turn but skip an empty assistant row, and drop the
+                // empty bubble from the UI.
                 val finalReply = replyBuilder.toString().trim()
+                if (finalReply.isEmpty() && replyIdx in messages.indices &&
+                    messages.getOrNull(replyIdx)?.text.isNullOrBlank()) {
+                    messages.removeAt(replyIdx)
+                }
                 withContext(Dispatchers.IO) {
-                    val transcript = messages.getOrNull(replyIdx - 1)?.text?.takeIf { it.isNotBlank() }
-                    val cid = convId ?: db.newConversation("rig", currentModel, (transcript ?: "tale").take(40))
+                    val cid = convId ?: db.newConversation("rig", currentModel, transcriptText.ifBlank { "tale" }.take(40))
                     if (convId == null) convId = cid
-                    if (transcript != null) db.addMessage(cid, "user", transcript)
+                    if (transcriptText.isNotBlank()) db.addMessage(cid, "user", transcriptText)
                     if (finalReply.isNotEmpty()) db.addMessage(cid, "assistant", finalReply)
                 }
             } catch (e: CancellationException) {
@@ -876,6 +893,10 @@ private fun ChatScreen(
             } finally {
                 activeCall = null
                 player.cancel()
+                meter?.cancel()
+                // peakRms survives the turn: it's the measurement of the loudest
+                // barge-in attempt. liveRms resets to 0 (nothing playing now).
+                detector?.let { liveRms = 0.0; peakRms = it.peakRms }
                 speaking = false
                 voiceBusy = false
                 voiceJob = null
