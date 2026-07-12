@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.56.0** — "Eksport/import af ALLE samtaler (Samtaler-skaermen): ⬇ Eksportér alt skriver JSON via SAF (brugeren vaelger placering), ⬆ Importér genskaber med eksakt-dublet-check (samme titel+source+identisk besked-sekvens springes over). Motivation: samtaler bor KUN i appens private SQLite — telefontab eller en fremtidig keystore-rotation (risiko accepteret 12/7) kostede foer alt. NB: importerede samtaler faar nyt updated_at (sorterer oeverst). Verificeret: build; SAF-flowet er on-device". Follows 1.55.0. Autonomous sessions, **2026-07-02 → 07-12**.
+Version **1.57.0** — "Desktop-CHROME op paa Kaliv-niveau (Anders: -fortsat forældet-). v1.41.0 fiksede boblerne men ikke rammen: FIRE stablede raa raekker (nav-tekstlinks, model-raekke, RAG-switch m. teknisk label, tools-switch) + firkantet inputfelt + Send-knap + fuld-bredde-layout. Nu: ÉN kompakt toolbar med pille-chips (model ◈▾ m. genindlaes i menuen, ⌕RAG m. kildefilter, 🛠Tools, Samtaler/Modeller/⚙ hoejre), chatkolonne CENTRERET m. 920dp-loft, input som afrundet pille m. cirkulaer send-pil. Samme state/adfaerd — kun chromen. Verificeret: compile+jar; udseendet = Anders paa Windows". Follows 1.56.0. Autonomous sessions, **2026-07-02 → 07-12**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

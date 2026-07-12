@@ -1,6 +1,8 @@
 package dk.ternedal.modelrig.desktop
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Path
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -37,6 +39,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -341,80 +344,69 @@ fun App() {
             // else became unreachable. Found by Anders on Windows (v0.20.9
             // jar, 980x720 default window): a genuine soft-lock this
             // session's headless smoke tests could never catch.
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { showSettings = !showSettings }) {
-                    Text(if (showSettings) "Skjul indstillinger" else "Indstillinger", color = KalivTheme.colors.Signal)
-                }
-                TextButton(onClick = { showConvos = !showConvos }) {
-                    Text(if (showConvos) "Skjul samtaler" else "Samtaler", color = KalivTheme.colors.Signal)
-                }
-                TextButton(onClick = { showModels = !showModels }) {
-                    Text(if (showModels) "Skjul modelstyring" else "Modelstyring", color = KalivTheme.colors.Signal)
-                }
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Compact toolbar: same state and behavior as the four old rows
+            // (nav links, model row, RAG switch, tools switch) -- only the chrome
+            // changed, mirroring the Android header's chips.
+            val toolsReady = localPath.contains("/api/v1/") && deviceToken.isNotBlank()
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Box {
-                    OutlinedButton(onClick = { modelMenuOpen = true }) {
-                        Text("Model: $localModel", color = KalivTheme.colors.TextHigh)
-                    }
+                    ToolbarChip("\u25c8 $localModel \u25be") { modelMenuOpen = true }
                     DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
-                        if (models.isEmpty()) {
-                            DropdownMenuItem(text = { Text("(genindlæs modeller først)") }, onClick = { modelMenuOpen = false })
-                        } else {
-                            models.forEach { m ->
-                                DropdownMenuItem(text = { Text(m) }, onClick = { localModel = m; persist("localModel", m); modelMenuOpen = false })
-                            }
+                        DropdownMenuItem(
+                            text = { Text("\u21bb Genindl\u00e6s modeller", color = KalivTheme.colors.Signal, fontSize = 13.sp) },
+                            onClick = { loadModels() },
+                        )
+                        if (models.isNotEmpty()) HorizontalDivider()
+                        models.forEach { m ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        (if (m == localModel) "\u25c8  " else "     ") + m,
+                                        color = if (m == localModel) KalivTheme.colors.Signal else KalivTheme.colors.TextHigh,
+                                    )
+                                },
+                                onClick = { localModel = m; persist("localModel", m); modelMenuOpen = false },
+                            )
                         }
                     }
                 }
-                Spacer(Modifier.width(8.dp))
-                TextButton(onClick = { loadModels() }) { Text("Genindlæs modeller", color = KalivTheme.colors.Signal) }
-            }
-            modelError?.let { Text("Modeller: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
-            Spacer(Modifier.height(6.dp))
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(
-                    checked = ragMode,
-                    onCheckedChange = { on -> ragMode = on; if (on) loadRagSources() },
-                )
                 Spacer(Modifier.width(6.dp))
-                Text("RAG-tilstand (mod rig'en, ikke lokal Ollama direkte/cloud)", color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
+                ToolbarChip("\u2315 RAG", active = ragMode) { ragMode = !ragMode; if (ragMode) loadRagSources() }
                 if (ragMode) {
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(6.dp))
                     Box {
-                        OutlinedButton(onClick = { ragSourceMenuOpen = true }) {
-                            Text(ragSourceFilter?.let { "Kilde: $it" } ?: "Alle kilder", color = KalivTheme.colors.TextHigh)
-                        }
+                        ToolbarChip(ragSourceFilter?.let { "Kilde: $it \u25be" } ?: "Alle kilder \u25be") { ragSourceMenuOpen = true }
                         DropdownMenu(expanded = ragSourceMenuOpen, onDismissRequest = { ragSourceMenuOpen = false }) {
+                            DropdownMenuItem(text = { Text("\u21bb Genindl\u00e6s kilder", color = KalivTheme.colors.Signal, fontSize = 13.sp) }, onClick = { loadRagSources() })
+                            HorizontalDivider()
                             DropdownMenuItem(text = { Text("Alle kilder") }, onClick = { ragSourceFilter = null; ragSourceMenuOpen = false })
                             if (ragSources.isNotEmpty()) {
-                                ragSources.forEach { s ->
-                                    DropdownMenuItem(text = { Text(s) }, onClick = { ragSourceFilter = s; ragSourceMenuOpen = false })
+                                ragSources.forEach { src ->
+                                    DropdownMenuItem(text = { Text(src) }, onClick = { ragSourceFilter = src; ragSourceMenuOpen = false })
                                 }
                             } else {
                                 DropdownMenuItem(text = { Text("(ingen kilder ingesteret endnu)") }, onClick = { ragSourceMenuOpen = false })
                             }
                         }
                     }
-                    Spacer(Modifier.width(6.dp))
-                    TextButton(onClick = { loadRagSources() }) { Text("Genindlæs kilder", color = KalivTheme.colors.Signal, fontSize = 12.sp) }
                 }
-            }
-            ragError?.let { Text("RAG-kilder: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val toolsReady = localPath.contains("/api/v1/") && deviceToken.isNotBlank()
-                Switch(
-                    checked = toolsMode && toolsReady,
-                    onCheckedChange = { on -> toolsMode = on; persist("toolsMode", on.toString()) },
-                    enabled = toolsReady,
-                )
                 Spacer(Modifier.width(6.dp))
+                ToolbarChip("\ud83d\udee0 Tools", active = toolsMode && toolsReady, enabled = toolsReady) {
+                    toolsMode = !toolsMode; persist("toolsMode", toolsMode.toString())
+                }
+                Spacer(Modifier.weight(1f))
+                ToolbarChip("Samtaler", active = showConvos) { showConvos = !showConvos }
+                Spacer(Modifier.width(6.dp))
+                ToolbarChip("Modeller", active = showModels) { showModels = !showModels }
+                Spacer(Modifier.width(6.dp))
+                ToolbarChip("\u2699 Indstillinger", active = showSettings) { showSettings = !showSettings }
+            }
+            modelError?.let { Text("Modeller: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
+            ragError?.let { Text("RAG-kilder: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
+            if (!toolsReady) {
                 Text(
-                    if (toolsReady) "Tools-tilstand (agent — hver skrivning kræver din godkendelse)"
-                    else "Tools kræver backend-sti (/api/v1/…) og parring — se Indstillinger",
-                    color = KalivTheme.colors.TextMuted, fontSize = 12.sp,
+                    "Tools kr\u00e6ver backend-sti (/api/v1/\u2026) og parring \u2014 se \u2699 Indstillinger",
+                    color = KalivTheme.colors.TextMuted, fontSize = 11.sp,
                 )
             }
             Spacer(Modifier.height(8.dp))
@@ -492,8 +484,13 @@ fun App() {
                     }
                 }
             } else {
-                LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-                    items(messages) { m -> MessageBubble(m) }
+                // Center the conversation in wide windows instead of letting it
+                // sprawl edge-to-edge -- the single biggest "designed vs form"
+                // signal at desktop sizes.
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                    LazyColumn(Modifier.fillMaxHeight().widthIn(max = 920.dp).fillMaxWidth()) {
+                        items(messages) { m -> MessageBubble(m) }
+                    }
                 }
             }
 
@@ -723,6 +720,44 @@ private fun Header(
         TextButton(onClick = onToggleDark) {
             Text(if (dark) "Lys tilstand" else "Mørk tilstand", color = KalivTheme.colors.Signal, fontSize = 12.sp)
         }
+    }
+}
+
+
+// A compact pill chip -- the desktop counterpart of the Android header chips.
+// One row of these replaces the four stacked rows of raw switches and text
+// links that made the window read as a 2005 settings form.
+@Composable
+private fun ToolbarChip(label: String, active: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(RoundedCornerShape(999.dp))
+            .background(if (active) KalivTheme.colors.Signal else KalivTheme.colors.SurfaceHigh)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Text(
+            label,
+            color = when {
+                active -> Color(0xFFF3EFE6)
+                enabled -> KalivTheme.colors.TextHigh
+                else -> KalivTheme.colors.TextMuted
+            },
+            fontSize = 12.sp,
+        )
+    }
+}
+
+@Composable
+private fun SendGlyphDesktop(color: Color) {
+    Canvas(Modifier.size(18.dp)) {
+        val path = Path().apply {
+            moveTo(0f, 0f)
+            lineTo(size.width, size.height / 2f)
+            lineTo(0f, size.height)
+            lineTo(size.width * 0.22f, size.height / 2f)
+            close()
+        }
+        drawPath(path, color = color)
     }
 }
 
