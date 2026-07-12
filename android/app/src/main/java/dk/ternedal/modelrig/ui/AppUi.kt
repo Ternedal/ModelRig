@@ -929,7 +929,12 @@ private fun ChatScreen(
                 db.conversationMeta(openConvId) to db.loadMessages(openConvId)
             }
             val (meta, msgs) = loaded
-            msgs.forEach { (role, content) -> messages.add(Msg(role, content)) }
+            // Strip emojis from OLD assistant replies on load too. The finalize-time
+            // strip only cleans new replies; without this, opening a conversation
+            // made before the persona/strip landed still shows the old 🌟✨ filler.
+            msgs.forEach { (role, content) ->
+                messages.add(Msg(role, if (role == "assistant") stripEmojis(content) else content))
+            }
             if (meta != null) {
                 // NB: for cloud we deliberately do NOT restore the model from
                 // the conversation's metadata. store.cloudModel (set in the
