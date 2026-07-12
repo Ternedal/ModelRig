@@ -331,6 +331,15 @@ func (s *server) handleVoiceConverse(w http.ResponseWriter, r *http.Request) {
 	s.WorkerSlow.Forward(w, r, "/voice/converse/upload")
 }
 
+func (s *server) handleVoiceConverseStream(w http.ResponseWriter, r *http.Request) {
+	// Streaming voice turn: the worker emits NDJSON (transcript, then one line
+	// per spoken sentence, then done). WorkerSlow.Forward already flushes chunks
+	// as they arrive, so the phone gets each sentence's audio the moment it's
+	// ready instead of waiting for the whole reply. Long timeout for the same
+	// reason as the buffered path (Whisper load, big cloud models).
+	s.WorkerSlow.Forward(w, r, "/voice/converse/stream")
+}
+
 // handleVoiceStatus proxies the worker's ASR/TTS availability so the app can
 // show whether voice is usable on this rig before recording.
 func (s *server) handleVoiceStatus(w http.ResponseWriter, r *http.Request) {

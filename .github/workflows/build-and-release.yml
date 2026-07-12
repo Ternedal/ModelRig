@@ -171,6 +171,11 @@ jobs:
       - name: Worker vision ingest
         run: PYTHONPATH=worker python3 tests/worker_vision.py
 
+      # Streaming voice (V6): converse() fires on_transcript once + on_chunk per
+      # sentence, and stays backward-compatible with the buffered path.
+      - name: Worker voice streaming
+        run: PYTHONPATH=worker python3 tests/worker_voice_stream.py
+
   android-build:
     needs: server-tests
     runs-on: ubuntu-latest

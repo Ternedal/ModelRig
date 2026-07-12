@@ -21,7 +21,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.53.0"
+VERSION = "1.54.0"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 from . import paths as _paths
@@ -1165,3 +1165,93 @@ async def voice_converse_upload(req: ConverseUploadReq) -> dict:
     result.pop("chunks", None)
     result["audio_base64"] = audio_b64
     return result
+
+
+@app.post("/voice/converse/stream")
+async def voice_converse_stream(req: ConverseUploadReq):
+    """Streaming voice turn: same pipeline, but deliver results as they're ready
+    instead of buffering the whole reply. Emits NDJSON, one JSON object per line:
+      {"type":"transcript","text": "..."}              -- as soon as ASR is done
+      {"type":"chunk","index":0,"text":"...","audio_base64":"...","ttfa_s":1.2}
+                                                        -- one per spoken sentence
+      {"type":"done","reply":"...","model":"...","via_cloud":true,"total_s":8.1}
+      {"type":"error","status":502,"detail":"..."}      -- if the pipeline fails
+
+    The app plays each chunk's audio the moment it arrives (queued, in order), so
+    Kaliv starts speaking the first sentence while the rest is still generating --
+    the cure for the buffered endpoint's "wait for everything" latency with big
+    cloud models. ASR/TTS stay local; only the LLM step may go to cloud.
+    """
+    from . import voice_pipeline
+    import base64, tempfile, os as _os, json as _json, asyncio as _asyncio, time as _time
+    try:
+        raw = base64.b64decode(req.audio_base64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="audio_base64 is not valid base64")
+    tmp_dir = tempfile.mkdtemp(prefix="alva_voice_stream_")
+    in_path = _os.path.join(tmp_dir, "input.wav")
+    with open(in_path, "wb") as f:
+        f.write(raw)
+
+    # A queue bridges the pipeline's callbacks (producer) to the NDJSON response
+    # (consumer). None is the sentinel that the producer has finished.
+    queue: "_asyncio.Queue[dict | None]" = _asyncio.Queue()
+    t_start = _time.time()
+
+    async def on_transcript(text: str) -> None:
+        await queue.put({"type": "transcript", "text": text})
+
+    async def on_chunk(chunk: dict) -> None:
+        # Read the sentence WAV and hand the phone base64 audio it can play now.
+        try:
+            with open(chunk["wav"], "rb") as wf:
+                audio_b64 = base64.b64encode(wf.read()).decode()
+        except OSError:
+            audio_b64 = ""
+        await queue.put({
+            "type": "chunk", "index": chunk["index"], "text": chunk["text"],
+            "audio_base64": audio_b64, "synth_s": chunk.get("synth_s"),
+            "ttfa_s": round(_time.time() - t_start, 2),
+        })
+
+    async def run() -> None:
+        try:
+            result = await voice_pipeline.converse(
+                in_path, language=req.language, model=req.model, out_dir=tmp_dir,
+                llm_base_url=req.llm_base_url, llm_api_key=req.llm_api_key,
+                on_transcript=on_transcript, on_chunk=on_chunk,
+            )
+            await queue.put({
+                "type": "done", "reply": result.get("reply", ""),
+                "model": result.get("model"), "via_cloud": result.get("via_cloud", False),
+                "language": result.get("language"),
+                "time_to_first_audio_s": result.get("time_to_first_audio_s"),
+                "total_s": result.get("total_s"),
+            })
+        except voice_pipeline.VoiceBackendMissing as e:
+            _logger.info("level=warn voice=converse_stream backend_missing=%r", str(e))
+            await queue.put({"type": "error", "status": 501, "detail": str(e)})
+        except RuntimeError as e:
+            _logger.exception("level=error voice=converse_stream pipeline_failure=%r", str(e))
+            await queue.put({"type": "error", "status": 503, "detail": str(e)})
+        except oc.OllamaError as e:
+            await queue.put({"type": "error", "status": 502, "detail": f"LLM error: {e}"})
+        except Exception as e:  # never leave the consumer hanging
+            _logger.exception("level=error voice=converse_stream unexpected=%r", str(e))
+            await queue.put({"type": "error", "status": 500, "detail": str(e)})
+        finally:
+            await queue.put(None)
+
+    async def gen():
+        task = _asyncio.create_task(run())
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield (_json.dumps(item) + "\n").encode()
+        finally:
+            if not task.done():
+                task.cancel()
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson")

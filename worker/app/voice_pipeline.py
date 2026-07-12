@@ -28,6 +28,7 @@ import asyncio
 import os
 import re
 import time
+from typing import Awaitable, Callable
 
 from . import ollama_client as oc
 from . import voice_asr
@@ -126,6 +127,8 @@ async def converse(
     out_dir: str = "/tmp/alva_voice",
     llm_base_url: str | None = None,
     llm_api_key: str | None = None,
+    on_chunk: "Callable[[dict], Awaitable[None]] | None" = None,
+    on_transcript: "Callable[[str], Awaitable[None]] | None" = None,
 ) -> dict:
     """Run one full spoken turn from an audio file.
 
@@ -134,6 +137,13 @@ async def converse(
     by a large cloud model while ASR and TTS stay local on the rig. ASR/TTS
     cannot move: the models live here. The key is used for this call only and is
     never persisted.
+
+    on_transcript, if given, is awaited with the ASR text the moment it's ready
+    (before any LLM/TTS), so a streaming caller can show the transcript first.
+    on_chunk, if given, is awaited with each sentence chunk dict the moment its
+    WAV is synthesized -- this is what lets a streaming endpoint deliver audio
+    sentence-by-sentence instead of waiting for the whole reply. The buffered
+    caller passes neither and just reads the returned dict.
 
     Returns:
       {
@@ -163,6 +173,8 @@ async def converse(
     async with _ASR_LOCK:
         asr = await asyncio.to_thread(voice_asr.transcribe_wav, audio_path, language)
     transcript = asr["text"]
+    if on_transcript is not None:
+        await on_transcript(transcript)
 
     # 2+3+4. Stream the LLM; chunk on sentence boundaries; TTS each sentence as
     # soon as it completes, so first audio is ready ASAP.
@@ -192,7 +204,10 @@ async def converse(
         synth_s = round(time.time() - s0, 2)
         if first_audio_at is None:
             first_audio_at = time.time()
-        chunks.append({"index": idx, "text": sentence, "wav": wav, "synth_s": synth_s})
+        chunk = {"index": idx, "text": sentence, "wav": wav, "synth_s": synth_s}
+        chunks.append(chunk)
+        if on_chunk is not None:
+            await on_chunk(chunk)
         idx += 1
 
     async for line in oc.chat_stream(messages, model=model,

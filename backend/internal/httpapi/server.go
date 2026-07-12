@@ -87,6 +87,7 @@ func (s *server) routes() {
 	s.mux.Handle("DELETE /api/v1/rag/source", s.authMW(http.HandlerFunc(s.handleRagSourceDelete)))
 	s.mux.Handle("GET /api/v1/voice/status", s.authMW(http.HandlerFunc(s.handleVoiceStatus)))
 	s.mux.Handle("POST /api/v1/voice/converse", s.authMW(http.HandlerFunc(s.handleVoiceConverse)))
+	s.mux.Handle("POST /api/v1/voice/converse/stream", s.authMW(http.HandlerFunc(s.handleVoiceConverseStream)))
 }
 
 // ---- middleware ----

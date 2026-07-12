@@ -121,6 +121,66 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
      *
      * Returns {transcript, reply, audio_base64, time_to_first_audio_s}.
      */
+    /**
+     * Streaming voice turn: reads the worker's NDJSON (one JSON object per line)
+     * and dispatches by "type": onTranscript once (ASR text), onChunk per spoken
+     * sentence (with base64 audio to play now), onDone at the end, onError on a
+     * pipeline failure. This lets the app start speaking the first sentence while
+     * the rest is still generating -- the cure for the buffered endpoint's latency
+     * with big cloud models. registerCall hands back the OkHttp Call so the UI can
+     * cancel (barge-in / stop).
+     */
+    fun voiceConverseStream(
+        audioB64: String,
+        language: String = "da",
+        model: String? = null,
+        cloudBaseUrl: String? = null,
+        cloudKey: String? = null,
+        registerCall: ((okhttp3.Call) -> Unit)? = null,
+        onTranscript: (String) -> Unit,
+        onChunk: (index: Int, text: String, audioB64: String) -> Unit,
+        onDone: (reply: String, model: String?, viaCloud: Boolean) -> Unit,
+        onError: (status: Int, detail: String) -> Unit,
+    ) {
+        val payload = JSONObject().put("audio_base64", audioB64).put("language", language)
+        if (model != null) payload.put("model", model)
+        if (cloudBaseUrl != null && cloudKey != null) {
+            payload.put("llm_base_url", cloudBaseUrl)
+            payload.put("llm_api_key", cloudKey)
+        }
+        val body = payload.toString().toRequestBody(jsonType)
+        val builder = Request.Builder().url("$base/api/v1/voice/converse/stream").post(body)
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        val call = voiceHttp.newCall(builder.build())
+        registerCall?.invoke(call)
+        call.execute().use { resp ->
+            if (!resp.isSuccessful) {
+                val text = resp.body?.string().orEmpty()
+                throw ModelRigException("voice stream failed (${resp.code}): $text")
+            }
+            val source = resp.body?.source() ?: throw ModelRigException("empty response body")
+            while (!source.exhausted()) {
+                val line = source.readUtf8Line() ?: break
+                if (line.isBlank()) continue
+                val o = runCatching { JSONObject(line) }.getOrNull() ?: continue
+                when (o.optString("type")) {
+                    "transcript" -> onTranscript(o.optString("text"))
+                    "chunk" -> onChunk(
+                        o.optInt("index"),
+                        o.optString("text"),
+                        o.optString("audio_base64"),
+                    )
+                    "done" -> onDone(
+                        o.optString("reply"),
+                        o.optString("model").ifBlank { null },
+                        o.optBoolean("via_cloud", false),
+                    )
+                    "error" -> onError(o.optInt("status"), o.optString("detail"))
+                }
+            }
+        }
+    }
+
     fun voiceConverse(
         audioB64: String,
         language: String = "da",

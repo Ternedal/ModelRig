@@ -49,6 +49,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -756,83 +757,125 @@ private fun ChatScreen(
         ActivityResultContracts.RequestPermission(),
     ) { granted -> hasMicPermission = granted; if (!granted) voiceError = "Mikrofon-adgang nægtet" }
 
-    // One spoken turn: stop recording -> upload WAV -> rig runs ASR->LLM->TTS
-    // -> show transcript + reply in chat -> play the reply audio. No cloud
-    // fallback (voice needs the rig). Runs off the main thread.
+    // One spoken turn, STREAMING: stop recording -> upload WAV -> the rig streams
+    // back the transcript, then each sentence's audio as it's synthesized. We play
+    // each chunk the moment it arrives (queued, in order), so Kaliv starts speaking
+    // the first sentence while the rest is still generating -- instead of waiting
+    // for the whole reply (the old buffered path felt slow with big cloud models).
+    // ASR/TTS stay on the rig; only the LLM step may go to cloud. Off the main thread.
     fun runVoiceTurn(wav: ByteArray) {
         voiceBusy = true; voiceError = null; wasInterrupted = false
         speaking = false; playbackStop.set(false)
         voiceJob = scope.launch {
+            // Audio chunks flow from the network reader (producer) to the player
+            // (consumer) through this channel. Unlimited: sentences are small and
+            // we never want the reader to block on a slow player.
+            val audioChan = Channel<ByteArray>(Channel.UNLIMITED)
+            var transcriptShown = false
+            var replyIdx = -1
+            val replyBuilder = StringBuilder()
+            var usedModel: String? = null
+            var usedCloud = false
+            var streamError: Pair<Int, String>? = null
+
+            // Player: pull decoded WAVs and play each in order via playWav, which
+            // blocks until that sentence finishes (or barge-in/stop cuts it).
+            val detector = if (bargeInEnabled && hasMicPermission) {
+                dk.ternedal.modelrig.voice.BargeInDetector(rmsThreshold = bargeInThreshold.toDouble())
+            } else null
+            val player = launch(Dispatchers.IO) {
+                for (bytes in audioChan) {
+                    if (playbackStop.get()) break
+                    speaking = true
+                    val cut = dk.ternedal.modelrig.voice.VoiceCapture.playWav(bytes, detector, playbackStop)
+                    if (cut) { wasInterrupted = true; playbackStop.set(true); break }
+                }
+                speaking = false
+            }
+
             try {
-                val result = withContext(Dispatchers.IO) {
+                withContext(Dispatchers.IO) {
                     val b64 = android.util.Base64.encodeToString(wav, android.util.Base64.NO_WRAP)
-                    // Cloud answers the spoken question only if the toggle is on
-                    // AND a cloud key exists. ASR/TTS always stay on the rig.
                     val key = if (voiceUsesCloud) store.cloudKey else null
-                    ModelRigClient(store.baseUrl ?: "", store.token).voiceConverse(
+                    ModelRigClient(store.baseUrl ?: "", store.token).voiceConverseStream(
                         b64,
                         language = "da",
-                        // Use the model the user actually SELECTED in the dropdown.
-                        // Sending null made voice fall back to the worker's default
-                        // (qwen2.5-coder:7b -- a code model that rambled in half-
-                        // Norwegian), ignoring the chosen qwen3:14b entirely.
                         model = if (key != null) store.voiceCloudModel else currentModel,
                         cloudBaseUrl = if (key != null) "https://ollama.com" else null,
                         cloudKey = key,
+                        registerCall = { c -> activeCall = c },
+                        onTranscript = { t ->
+                            val tt = t.trim()
+                            if (tt.isNotEmpty() && !transcriptShown) {
+                                transcriptShown = true
+                                scope.launch {
+                                    messages.add(Msg("user", tt))
+                                    // Add the assistant bubble now; fill it as
+                                    // sentences arrive so text and audio track.
+                                    replyIdx = messages.size
+                                    messages.add(Msg("assistant", "", streaming = true, voiceModel = usedModel, voiceViaCloud = usedCloud))
+                                }
+                            }
+                        },
+                        onChunk = { _, text, chunkB64 ->
+                            replyBuilder.append(if (replyBuilder.isEmpty()) "" else " ").append(text.trim())
+                            if (replyIdx >= 0) {
+                                scope.launch {
+                                    if (replyIdx < messages.size) {
+                                        messages[replyIdx] = messages[replyIdx].copy(text = stripEmojis(replyBuilder.toString()))
+                                    }
+                                }
+                            }
+                            if (chunkB64.isNotEmpty() && !playbackStop.get()) {
+                                val bytes = android.util.Base64.decode(chunkB64, android.util.Base64.DEFAULT)
+                                audioChan.trySend(bytes)
+                            }
+                        },
+                        onDone = { reply, m, cloud ->
+                            usedModel = m; usedCloud = cloud
+                            if (replyIdx >= 0) {
+                                scope.launch {
+                                    if (replyIdx < messages.size) {
+                                        messages[replyIdx] = messages[replyIdx].copy(
+                                            text = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() }),
+                                            streaming = false, voiceModel = m, voiceViaCloud = cloud,
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                        onError = { status, detail -> streamError = status to detail },
                     )
                 }
-                val transcript = result.optString("transcript").trim()
-                val reply = result.optString("reply").trim()
-                val audioB64 = result.optString("audio_base64")
-                val usedModel = result.optString("model").ifBlank { null }
-                val usedCloud = result.optBoolean("via_cloud", false)
-                if (transcript.isNotEmpty()) messages.add(Msg("user", transcript))
-                if (reply.isNotEmpty()) {
-                    messages.add(Msg("assistant", stripEmojis(reply), voiceModel = usedModel, voiceViaCloud = usedCloud))
+                // The network stream is done; close the channel so the player
+                // finishes the queued sentences, then wait for it.
+                audioChan.close()
+                player.join()
+
+                streamError?.let { (status, detail) ->
+                    voiceError = friendlyError(RuntimeException("voice ($status): $detail"))
                 }
-                // Persist like a normal rig turn.
+
+                // Persist the finished turn like a normal rig turn.
+                val finalReply = replyBuilder.toString().trim()
                 withContext(Dispatchers.IO) {
-                    val cid = convId ?: db.newConversation("rig", currentModel, transcript.take(40))
+                    val transcript = messages.getOrNull(replyIdx - 1)?.text?.takeIf { it.isNotBlank() }
+                    val cid = convId ?: db.newConversation("rig", currentModel, (transcript ?: "tale").take(40))
                     if (convId == null) convId = cid
-                    if (transcript.isNotEmpty()) db.addMessage(cid, "user", transcript)
-                    if (reply.isNotEmpty()) db.addMessage(cid, "assistant", reply)
-                }
-                if (audioB64.isNotEmpty()) {
-                    speaking = true
-                    val detector = if (bargeInEnabled && hasMicPermission) {
-                        dk.ternedal.modelrig.voice.BargeInDetector(
-                            rmsThreshold = bargeInThreshold.toDouble(),
-                        )
-                    } else null
-                    // Poll the detector on the main scope while playback blocks
-                    // on IO. Cheap (5 Hz) and it stops with the turn.
-                    val meter = detector?.let {
-                        launch {
-                            while (isActive) {
-                                liveRms = it.lastRms; peakRms = it.peakRms
-                                delay(200)
-                            }
-                        }
-                    }
-                    val cut = try {
-                        withContext(Dispatchers.IO) {
-                            val bytes = android.util.Base64.decode(audioB64, android.util.Base64.DEFAULT)
-                            dk.ternedal.modelrig.voice.VoiceCapture.playWav(bytes, detector, playbackStop)
-                        }
-                    } finally {
-                        meter?.cancel()
-                        // peakRms survives stop(): it is the measurement.
-                        detector?.let { liveRms = 0.0; peakRms = it.peakRms }
-                    }
-                    wasInterrupted = cut
+                    if (transcript != null) db.addMessage(cid, "user", transcript)
+                    if (finalReply.isNotEmpty()) db.addMessage(cid, "assistant", finalReply)
                 }
             } catch (e: CancellationException) {
-                // The user pressed stop. Not an error -- don't paint it red.
                 wasInterrupted = true
+                playbackStop.set(true)
+                audioChan.close()
                 throw e
             } catch (e: Exception) {
                 voiceError = e.message ?: "stemme-fejl"
+                audioChan.close()
             } finally {
+                activeCall = null
+                player.cancel()
                 speaking = false
                 voiceBusy = false
                 voiceJob = null
