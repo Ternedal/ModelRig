@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.37.0** — "V10-grundarbejde: audit beviste at Android-chat + tools-stien ALLEREDE baerer billeder (V10.2/10.4 = pull en vision-model); desktop mangler billed-UI. V10.3 leveret: /rag/ingest/image — vision-model transskriberer → samme chunk/embed/store-pipeline, 501-gated paa KALIV_VISION_MODEL (aldrig gaette med gen-modellen), 12 tests, gate mutationstjekket. Testen fangede endnu en os-ikke-importeret (v1.31.0-klassen)". Follows 1.36.0 (eval-harness). Autonomous sessions, **2026-07-02 → 07-12**.
+Version **1.38.0** — "Kaliv taenke-animation i chat: den godkendte ankh-loading-animation (32 frames, 1.28s loop, bronze/guld partikel-ring) vises nu i assistent-boblen mens svaret stadig er tomt — praecis som Claudes thinking-indikator. Animeret WebP via AnimatedImageDrawable (API 28+, falder tilbage til … paa 26-27, ingen ny dependency). Kompilerings- + build-verificeret, asset i APK. UI-adfaerd (afspiller den?) = Anders paa device". Follows 1.37.0 (foto→RAG). Autonomous sessions, **2026-07-02 → 07-12**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
