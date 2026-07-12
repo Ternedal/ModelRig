@@ -1,6 +1,9 @@
 package dk.ternedal.modelrig.desktop
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Path
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.clickable
@@ -84,6 +87,9 @@ private data class UiMessage(
     val source: ChatResult.Source? = null,
     val streaming: Boolean = false,
     val ragSources: List<String> = emptyList(),
+    // For the guide's identity row ("Kaliv · 14:32"). Loaded messages carry the
+    // stored created_at; new ones stamp now.
+    val at: Long = System.currentTimeMillis(),
 )
 
 
@@ -165,7 +171,7 @@ fun App() {
             if (latest != null) {
                 val loaded = withContext(Dispatchers.IO) { db.loadMessages(latest) }
                 messages.clear()
-                loaded.forEach { (role, content) -> messages.add(UiMessage(role, content)) }
+                loaded.forEach { (role, content, at) -> messages.add(UiMessage(role, content, at = at)) }
                 convId = latest
             }
         }
@@ -329,12 +335,12 @@ fun App() {
             }
         }
 
-        Column(Modifier.fillMaxSize().background(KalivTheme.colors.Graphite).padding(16.dp)) {
+        Column(Modifier.fillMaxSize().background(KalivTheme.colors.Graphite).padding(24.dp)) {
             Header(
-                source = lastSource,
                 dark = darkMode,
-                onToggleDark = { darkMode = !darkMode; persist("darkMode", darkMode.toString()) },
-                onAudit = { showAudit = true },
+                showConvos = showConvos, onConvos = { showConvos = !showConvos },
+                showModels = showModels, onModels = { showModels = !showModels },
+                showSettings = showSettings, onSettings = { showSettings = !showSettings },
             )
             Spacer(Modifier.height(12.dp))
             // Panel toggles live ABOVE the panels and are never pushed out of
@@ -350,7 +356,7 @@ fun App() {
             val toolsReady = localPath.contains("/api/v1/") && deviceToken.isNotBlank()
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Box {
-                    ToolbarChip("\u25c8 $localModel \u25be") { modelMenuOpen = true }
+                    ToolbarChip("Model: $localModel \u25be", filled = false) { modelMenuOpen = true }
                     DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
                         DropdownMenuItem(
                             text = { Text("\u21bb Genindl\u00e6s modeller", color = KalivTheme.colors.Signal, fontSize = 13.sp) },
@@ -371,7 +377,7 @@ fun App() {
                     }
                 }
                 Spacer(Modifier.width(6.dp))
-                ToolbarChip("\u2315 RAG", active = ragMode) { ragMode = !ragMode; if (ragMode) loadRagSources() }
+                ToolbarChip(if (ragMode) "RAG: Til" else "RAG: Fra", active = ragMode, filled = false) { ragMode = !ragMode; if (ragMode) loadRagSources() }
                 if (ragMode) {
                     Spacer(Modifier.width(6.dp))
                     Box {
@@ -391,15 +397,18 @@ fun App() {
                     }
                 }
                 Spacer(Modifier.width(6.dp))
-                ToolbarChip("\ud83d\udee0 Tools", active = toolsMode && toolsReady, enabled = toolsReady) {
+                ToolbarChip(
+                    if (toolsMode && toolsReady) "Tools: Til" else "Tools: Fra",
+                    active = toolsMode && toolsReady, enabled = toolsReady, filled = false,
+                ) {
                     toolsMode = !toolsMode; persist("toolsMode", toolsMode.toString())
                 }
                 Spacer(Modifier.weight(1f))
-                ToolbarChip("Samtaler", active = showConvos) { showConvos = !showConvos }
-                Spacer(Modifier.width(6.dp))
-                ToolbarChip("Modeller", active = showModels) { showModels = !showModels }
-                Spacer(Modifier.width(6.dp))
-                ToolbarChip("\u2699 Indstillinger", active = showSettings) { showSettings = !showSettings }
+                ToolbarChip("Handlingslog", filled = false) { showAudit = true }
+                Spacer(Modifier.width(8.dp))
+                ToolbarChip(if (darkMode) "Lys tilstand" else "M\u00f8rk tilstand", filled = false) {
+                    darkMode = !darkMode; persist("darkMode", darkMode.toString())
+                }
             }
             modelError?.let { Text("Modeller: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
             ragError?.let { Text("RAG-kilder: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
@@ -431,7 +440,7 @@ fun App() {
                                 scope.launch {
                                     val loaded = withContext(Dispatchers.IO) { db.loadMessages(id) }
                                     messages.clear()
-                                    loaded.forEach { (role, content) -> messages.add(UiMessage(role, content)) }
+                                    loaded.forEach { (role, content, at) -> messages.add(UiMessage(role, content, at = at)) }
                                     convId = id
                                     showConvos = false
                                 }
@@ -495,18 +504,39 @@ fun App() {
             }
 
             Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Skriv til modellen…") },
-                    enabled = !busy,
-                    singleLine = true,
-                )
-                Spacer(Modifier.width(8.dp))
-                Button(onClick = { send() }, enabled = !busy) {
-                    Text(if (busy) "…" else "Send")
+            // Composer per the design guide: min-88dp, radius 20, 1dp border via
+            // the field shape, multi-line, placeholder "Skriv til Kaliv …"
+            // (checklist requirement), 44dp send control (radius 16). NOTE:
+            // v1.57.0's release notes claimed a pill input, but that patch
+            // silently failed to apply (escape-vs-real-char mismatch in the
+            // search anchor) -- THIS is the first shipped composer redesign.
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    modifier = Modifier.widthIn(max = 920.dp).fillMaxWidth(),
+                ) {
+                    OutlinedTextField(
+                        value = input,
+                        onValueChange = { input = it },
+                        modifier = Modifier.weight(1f).heightIn(min = 88.dp),
+                        placeholder = { Text("Skriv til Kaliv …", color = KalivTheme.colors.TextMuted) },
+                        enabled = !busy,
+                        maxLines = 5,
+                        shape = RoundedCornerShape(20.dp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    val canSend = !busy && input.isNotBlank()
+                    Box(
+                        Modifier.size(44.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (canSend) KalivTheme.colors.Signal else KalivTheme.colors.SurfaceHigh)
+                            .border(1.dp, if (canSend) KalivTheme.colors.Signal else KalivTheme.colors.Border, RoundedCornerShape(16.dp))
+                            .clickable(enabled = canSend) { send() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (busy) Text("…", color = KalivTheme.colors.TextMuted)
+                        else SendGlyphDesktop(if (canSend) Color(0xFFF3EFE6) else KalivTheme.colors.TextMuted)
+                    }
                 }
             }
         }
@@ -690,36 +720,44 @@ private fun ConversationsPanel(db: DesktopChatDb, activeConvId: Long?, onOpen: (
 
 @Composable
 private fun Header(
-    source: ChatResult.Source?,
     dark: Boolean,
-    onToggleDark: () -> Unit,
-    onAudit: () -> Unit,
+    showConvos: Boolean, onConvos: () -> Unit,
+    showModels: Boolean, onModels: () -> Unit,
+    showSettings: Boolean, onSettings: () -> Unit,
 ) {
+    // Brand row per the design guide: ankh in a bordered 40dp chip + the serif
+    // letter-spaced KALIV wordmark (EB Garamond isn't shipped as a file, so
+    // platform serif approximates it) left; primary navigation as pills right.
+    // Handlingslog/dark-mode moved DOWN to the context bar (guide's row 2).
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        // Wordmark = the clean letter-spaced KALIV plus the ankh symbol. User-
-        // facing is Kaliv; only the backend is ModelRig. (The textured wordmark
-        // image read as clutter next to the text, so we use the ankh mark instead.)
-        runCatching {
-            painterResource(if (dark) "kaliv_symbol_dark.png" else "kaliv_symbol_light.png")
-        }.getOrNull()?.let {
-            Image(painter = it, contentDescription = null, modifier = Modifier.size(26.dp))
-            Spacer(Modifier.width(8.dp))
+        Box(
+            Modifier.size(40.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(KalivTheme.colors.SurfaceHigh)
+                .border(1.dp, KalivTheme.colors.Border, RoundedCornerShape(14.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            runCatching {
+                painterResource(if (dark) "kaliv_symbol_dark.png" else "kaliv_symbol_light.png")
+            }.getOrNull()?.let {
+                Image(painter = it, contentDescription = null, modifier = Modifier.size(24.dp))
+            }
         }
-        Text("KALIV", color = KalivTheme.colors.Amber, fontSize = 22.sp,
-             fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
         Spacer(Modifier.width(12.dp))
-        val srcLabel = when (source) {
-            ChatResult.Source.LOCAL -> "svar: rig"
-            ChatResult.Source.CLOUD -> "svar: cloud"
-            null -> ""
-        }
-        if (srcLabel.isNotEmpty())
-            Text(srcLabel, color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
+        Text(
+            "KALIV",
+            color = KalivTheme.colors.TextHigh,
+            fontSize = 28.sp,
+            fontFamily = FontFamily.Serif,
+            fontWeight = FontWeight.Medium,
+            letterSpacing = 6.sp,
+        )
         Spacer(Modifier.weight(1f))
-        TextButton(onClick = onAudit) { Text("Handlingslog", color = KalivTheme.colors.Signal, fontSize = 12.sp) }
-        TextButton(onClick = onToggleDark) {
-            Text(if (dark) "Lys tilstand" else "Mørk tilstand", color = KalivTheme.colors.Signal, fontSize = 12.sp)
-        }
+        ToolbarChip("Samtaler", active = showConvos, onClick = onConvos)
+        Spacer(Modifier.width(8.dp))
+        ToolbarChip("Modelstyring", active = showModels, onClick = onModels)
+        Spacer(Modifier.width(8.dp))
+        ToolbarChip("Indstillinger", active = showSettings, onClick = onSettings)
     }
 }
 
@@ -728,21 +766,34 @@ private fun Header(
 // One row of these replaces the four stacked rows of raw switches and text
 // links that made the window read as a 2005 settings form.
 @Composable
-private fun ToolbarChip(label: String, active: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+private fun ToolbarChip(
+    label: String,
+    active: Boolean = false,
+    enabled: Boolean = true,
+    // Guide distinction: primary nav fills bronze when active; context chips
+    // (Model/RAG/Tools/utilities) stay outlined and mark "on" with bronze text.
+    filled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(14.dp)
+    val bg = if (active && filled) KalivTheme.colors.Signal else KalivTheme.colors.SurfaceHigh
     Box(
-        Modifier.clip(RoundedCornerShape(999.dp))
-            .background(if (active) KalivTheme.colors.Signal else KalivTheme.colors.SurfaceHigh)
+        Modifier.clip(shape)
+            .background(bg)
+            .border(1.dp, if (active && filled) KalivTheme.colors.Signal else KalivTheme.colors.Border, shape)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
         Text(
             label,
             color = when {
-                active -> Color(0xFFF3EFE6)
+                active && filled -> Color(0xFFF3EFE6)
+                active -> KalivTheme.colors.Signal
                 enabled -> KalivTheme.colors.TextHigh
                 else -> KalivTheme.colors.TextMuted
             },
-            fontSize = 12.sp,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
         )
     }
 }
@@ -764,41 +815,51 @@ private fun SendGlyphDesktop(color: Color) {
 @Composable
 private fun MessageBubble(m: UiMessage) {
     val isUser = m.role == "user"
-    // Match the mobile app: the user's bubble is bronze with ivory ink (6.2:1,
-    // measured), the assistant's is the raised surface. Bubbles are aligned
-    // (user right, assistant left), constrained to ~82% width, with the ankh-tail
-    // corner -- not full-width grey boxes stacked like a 90s form.
-    val bg = if (isUser) KalivTheme.colors.Signal else KalivTheme.colors.SurfaceHigh
+    // Design guide (assets/design/kaliv-ui-guide): assistant messages carry an
+    // identity row ("ankh Kaliv · 14:32", meta 12sp muted) above a SURFACE
+    // bubble with a 1dp border, uniform radius 16, max 780dp; the user's is
+    // bronze with ivory ink, max 620dp, right-aligned, no identity row. Body
+    // is 16sp at 1.55 line-height (25sp). The old ankh-tail corner and the
+    // 640dp shared cap are replaced by the guide's values.
+    val bg = if (isUser) KalivTheme.colors.Signal else KalivTheme.colors.Surface
     val fg = if (isUser) Color(0xFFF3EFE6) else KalivTheme.colors.TextHigh
-    val label = when {
-        isUser -> null // the alignment already says who
-        m.source == ChatResult.Source.CLOUD -> "☁ Kaliv · cloud"
-        m.source == ChatResult.Source.LOCAL -> "◈ Kaliv · rig"
-        else -> "Kaliv"
+    val srcBit = when (m.source) {
+        ChatResult.Source.CLOUD -> "☁ cloud · "
+        ChatResult.Source.LOCAL -> "◈ rig · "
+        else -> ""
     }
+    val timeStr = remember(m.at) { java.text.SimpleDateFormat("HH:mm").format(java.util.Date(m.at)) }
+    val shape = RoundedCornerShape(16.dp)
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        Modifier.fillMaxWidth().padding(vertical = 6.dp),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
     ) {
         Column(
-            Modifier.widthIn(max = 640.dp),
+            Modifier.widthIn(max = if (isUser) 620.dp else 780.dp),
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
         ) {
-            if (label != null) {
-                Text(label, color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
-                Spacer(Modifier.height(3.dp))
+            if (!isUser) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    runCatching {
+                        painterResource(if (KalivTheme.colors.isDark) "kaliv_symbol_dark.png" else "kaliv_symbol_light.png")
+                    }.getOrNull()?.let {
+                        Image(painter = it, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(5.dp))
+                    }
+                    Text(
+                        "Kaliv · $srcBit$timeStr",
+                        color = KalivTheme.colors.TextMuted,
+                        fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
             }
             Box(
                 Modifier
-                    .clip(
-                        RoundedCornerShape(
-                            topStart = 16.dp, topEnd = 16.dp,
-                            bottomStart = if (isUser) 16.dp else 4.dp,
-                            bottomEnd = if (isUser) 4.dp else 16.dp,
-                        )
-                    )
+                    .clip(shape)
                     .background(bg)
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .border(1.dp, if (isUser) KalivTheme.colors.Signal else KalivTheme.colors.Border, shape)
+                    .padding(16.dp),
             ) {
                 Column {
                     if (!isUser && m.ragSources.isNotEmpty()) {
@@ -806,7 +867,8 @@ private fun MessageBubble(m: UiMessage) {
                             m.ragSources.distinct().take(4).forEach { s ->
                                 Box(
                                     Modifier.clip(RoundedCornerShape(999.dp))
-                                        .background(KalivTheme.colors.Surface)
+                                        .background(KalivTheme.colors.SurfaceHigh)
+                                        .border(1.dp, KalivTheme.colors.Border, RoundedCornerShape(999.dp))
                                         .padding(horizontal = 8.dp, vertical = 3.dp),
                                 ) {
                                     Text(s, fontSize = 10.sp, color = KalivTheme.colors.TextMuted)
@@ -816,9 +878,9 @@ private fun MessageBubble(m: UiMessage) {
                         }
                     }
                     when {
-                        isUser -> Text(m.text, color = fg, fontSize = 15.sp, lineHeight = 21.sp)
+                        isUser -> Text(m.text, color = fg, fontSize = 16.sp, lineHeight = 25.sp)
                         m.streaming && m.text.isEmpty() -> DesktopThinking()
-                        m.streaming -> Text(m.text + "▍", color = fg, fontSize = 15.sp, lineHeight = 21.sp)
+                        m.streaming -> Text(m.text + "▍", color = fg, fontSize = 16.sp, lineHeight = 25.sp)
                         else -> MarkdownText(m.text, color = fg)
                     }
                 }

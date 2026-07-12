@@ -120,11 +120,18 @@ class DesktopChatDb(dbPath: String = defaultDbPath()) {
         }
     }
 
-    fun loadMessages(convId: Long): List<Pair<String, String>> {
-        val out = mutableListOf<Pair<String, String>>()
-        conn.prepareStatement("SELECT role, content FROM message WHERE conv_id=? ORDER BY id ASC").use { ps ->
+    // Data class instead of Pair so existing two-way destructures
+    // `(role, content)` keep compiling while the UI can also read the
+    // timestamp for the guide's identity row ("Kaliv · 14:32").
+    data class MsgRow(val role: String, val content: String, val at: Long)
+
+    fun loadMessages(convId: Long): List<MsgRow> {
+        val out = mutableListOf<MsgRow>()
+        conn.prepareStatement("SELECT role, content, created_at FROM message WHERE conv_id=? ORDER BY id ASC").use { ps ->
             ps.setLong(1, convId)
-            ps.executeQuery().use { rs -> while (rs.next()) out.add(rs.getString(1) to rs.getString(2)) }
+            ps.executeQuery().use { rs ->
+                while (rs.next()) out.add(MsgRow(rs.getString(1), rs.getString(2), rs.getLong(3)))
+            }
         }
         return out
     }

@@ -1,0 +1,89 @@
+{
+  "meta": {
+    "name": "Kaliv UI",
+    "version": "1.0",
+    "baseGrid": 8
+  },
+  "color": {
+    "dark": {
+      "canvas": "#0B0A09",
+      "surface": "#171411",
+      "elevated": "#211B16",
+      "border": "#4B3925",
+      "text": "#F3EFE6",
+      "muted": "#A89D90"
+    },
+    "light": {
+      "canvas": "#F7F3EC",
+      "surface": "#EDE5D8",
+      "elevated": "#FFFDF9",
+      "border": "#D7C9B4",
+      "text": "#231E19",
+      "muted": "#776D62"
+    },
+    "brand": {
+      "bronze": "#9A7136",
+      "gold": "#C69A4B",
+      "highlight": "#D8B66B"
+    },
+    "semantic": {
+      "success": "#6F8A63",
+      "warning": "#B9823F",
+      "danger": "#9C564C"
+    }
+  },
+  "spacing": {
+    "1": 4,
+    "2": 8,
+    "3": 12,
+    "4": 16,
+    "5": 20,
+    "6": 24,
+    "8": 32,
+    "10": 40,
+    "12": 48
+  },
+  "radius": {
+    "control": 14,
+    "button": 16,
+    "bubble": 16,
+    "panel": 20,
+    "round": 999
+  },
+  "typography": {
+    "body": {
+      "family": "Inter",
+      "size": 16,
+      "lineHeight": 1.55
+    },
+    "control": {
+      "family": "Inter",
+      "weight": 500,
+      "size": 14
+    },
+    "meta": {
+      "family": "Inter",
+      "weight": 500,
+      "size": 12
+    },
+    "wordmark": {
+      "family": "EB Garamond",
+      "size": 30,
+      "trackingEm": 0.22
+    }
+  },
+  "motion": {
+    "fastMs": 140,
+    "normalMs": 180,
+    "panelMs": 220,
+    "thinkingLoopMs": 1280
+  },
+  "layout": {
+    "desktopPadding": 24,
+    "headerHeight": 96,
+    "controlHeight": 40,
+    "composerMinHeight": 88,
+    "assistantMaxWidth": 780,
+    "userMaxWidth": 620
+  }
+}
