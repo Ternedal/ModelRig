@@ -56,7 +56,24 @@ eller sæt det i en Modelfile. Hvis du ser modellen "tænke højt" i stedet for 
 kalde værktøjet, er det dét der skal slås fra. (Det er faktisk en fordel ved
 Qwen3 over hermes3: tænke-tilstanden kan styres eksplicit.)
 
-## Test-protokol (sammenlign mod hermes3 på 5 minutter)
+## Test-protokol — nu ÉN kommando (v1.36.0)
+
+Den manuelle protokol herunder er erstattet af eval-harnessen (ROADMAP
+V12.0). På riggen, fra repo-mappen:
+
+```
+set PYTHONPATH=%CD%\worker
+python -m app.eval_models hermes3:8b qwen3:14b qwen3:8b
+```
+
+Den scorer hver model på (1) tool-disciplin — kalder den værktøjet, narrer
+den i prosa (løgnen fra skærmbillederne), eller over-trigger den på "hej"?
+(2) dansk-fasthed over 6 ture, (3) tre objektive smoke-checks — plus median-
+latens. `--json fil` gemmer resultatet; `--baseline hermes3:8b --gate` gør
+den til en hård port (kandidaten skal SLÅ baseline). Kør den efter hver
+`ollama pull` — så er modelvalget en måling, ikke en fornemmelse.
+
+## Manuel protokol (historisk — harnessen gør dette automatisk)
 
 Kør hver kandidat gennem de to ting der fejlede. Direkte mod Ollama, uden om app:
 

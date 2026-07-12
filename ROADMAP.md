@@ -629,11 +629,15 @@ så vi ikke brænder uger på et eksperiment uden udbytte. Motivation: de to
 tilbageværende svagheder (tool-narration, dansk-drift) er MODEL-grænser.
 V5.5 afprøver købe-vejen (større/cloud-model); dette spor er bygge-vejen.
 
-0. **Eval-harness FØRST** [1–2 sessioner, værdi uanset udfald]: automatiseret
-   dansk-benchmark over egne testcases — (a) kalder den værktøjet eller
-   narrerer den? (b) holder den dansk over 10 ture? (c) svarkvalitet på
-   Anders' faktiske opgavetyper. Køres mod hver ny modelkandidat — gør
-   ALLE fremtidige modelvalg til målinger i stedet for fornemmelser.
+0. ~~Eval-harness FØRST~~ ✅ **v1.36.0 (12/7)**: `python -m app.eval_models
+   <modeller>` scorer tool-disciplin (kaldt/narreret/over-trigget — narrations-
+   detektoren er tunet mod de FAKTISKE skærmbillede-svar), dansk-fasthed over
+   6 ture (heuristik, ærligt deklareret), 3 objektive smoke-checks + latens.
+   `--baseline X --gate` = V15.2's regressionsport, klar fra dag ét. 18 tests
+   (3 fake-personas rangeres korrekt), begge klassifikatorer mutationstjekket,
+   i CI. **Ærlig grænse:** svar-KVALITET kræver LLM-dommer — mulig senere
+   (cloud-plumbingen findes), ikke smuglet ind som falsk præcision.
+   ⬜ Kørsel mod RIGTIGE modeller = Anders på riggen (én kommando).
 1. **Go/no-go**: kør harness mod qwen3:14b/8b + bedste nye åbne modeller
    (landskabet flytter sig hurtigt). **Kun hvis** gap består OG cloud er
    uacceptabel (privacy/pris) → gå til 2. Ellers: sporet LUKKES med data.
@@ -879,9 +883,9 @@ dansk-drift), ikke kode — deraf V5.5-sporet.
    se `data_root=<sti>` i worker-loggen, kør `python -m app.migrate_data`
    (dry-run) → `--apply`, så gammel ingesteret viden følger med til data-roden.
 3. **Anders — modeltest (10 min, MODELS.md):** `ollama pull qwen3:14b` (+ 8B
-   fallback) → kør 3-punkts-protokollen (kalder den værktøjet? holder den
-   dansk? passer den i VRAM med ASR/TTS på samme kort?). Afgør hvor langt
-   lokal rækker.
+   fallback) → **kør harnessen:** `python -m app.eval_models hermes3:8b
+   qwen3:14b qwen3:8b` — scoret tabel i stedet for manuel curl. VRAM-tjek
+   (nvidia-smi) er stadig manuelt. Afgør hvor langt lokal rækker.
 4. **Anders — cloud-agent-test (5 min, CLOUD_TOOLS.md §A):** cloud-model +
    Tools til → kort med "cloud-modellen foreslår" → godkend → audit viser
    origin=cloud. Beviser V5.5 pkt. 1.
@@ -899,5 +903,5 @@ dansk-drift), ikke kode — deraf V5.5-sporet.
    Kaliv) er kodificeret øverst og auditeret rent. **Anders (5 min):** hent
    `Kaliv-windows-x64-1.35.0.jar` fra releasen og efterse på Windows —
    on-device-verifikation udestår, og det er dér desktop-fejl viser sig. To ting kan startes NÅR SOM HELST uden at vente på noget:
-   V10 (vision — fundamentet findes) og V12.0 (eval-harnessen — gør alle
-   fremtidige modelvalg til målinger). Resten venter på V7/beslutninger.
+   V10 (vision — fundamentet findes) og ~~V12.0~~ ✅ (harnessen leveret
+   v1.36.0 — se pkt. 3). Resten venter på V7/beslutninger.
