@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.46.0** — "Crash-fix: at slette den samtale man STAAR i gav SQLITE_CONSTRAINT_FOREIGNKEY (desktop crash-dialog; Android fejlede tavst). Aarsag: convId pegede paa den slettede samtale, saa naeste besked-insert brød foreign key. Fix paa BEGGE platforme: nulstil aktiv convId ved sletning (via callback, da Slet-knappen er i et andet composable-scope) + defensiv guard i addMessage der springer over hvis samtalen er vaek. Kompilerings+build-verificeret". Follows 1.45.0 (emoji-strip + voice-model). Autonomous sessions, **2026-07-02 → 07-12**.
+Version **1.47.0** — "Desktop taenke-ikon animerer nu. Det stod STILLE (statisk ankh) fordi Compose Desktops painterResource kun tegner FOERSTE frame af en animeret WebP — praecis den begraensning jeg advarede om ved v1.41.0. Loesning: droppede billed-afspilning og TEGNER animationen native med Canvas — den stille Kaliv-ankh + 12 bronze/guld partikler der kredser som en comet-ring, 1.28s loop. Garanteret at animere paa JVM, skarpt i alle stoerrelser, virker i baade lys og moerk. Kompilerings+jar-verificeret". Follows 1.46.0 (slet-crash-fix). Autonomous sessions, **2026-07-02 → 07-12**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

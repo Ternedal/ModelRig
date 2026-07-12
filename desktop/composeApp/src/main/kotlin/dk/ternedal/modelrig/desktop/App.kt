@@ -12,6 +12,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.Image
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -790,11 +798,51 @@ private fun MessageBubble(m: UiMessage) {
 // decode the frames and drive them with a small timer.
 @Composable
 private fun DesktopThinking() {
-    val painter = runCatching { painterResource("kaliv_thinking.webp") }.getOrNull()
-    if (painter != null) {
-        Image(painter = painter, contentDescription = "tænker", modifier = Modifier.size(40.dp))
-    } else {
-        Text("…", color = KalivTheme.colors.TextMuted, fontSize = 15.sp, lineHeight = 21.sp)
+    // Compose Desktop's painterResource only draws the FIRST frame of an animated
+    // WebP, so the old version sat frozen. Instead of fighting the image decoder,
+    // draw the animation natively: the still Kaliv ankh with 12 bronze/gold
+    // particles orbiting as a loading ring (the source design), on a 1.28s loop.
+    // This is guaranteed to animate on the JVM and is crisp at any size.
+    val ankh = runCatching {
+        painterResource(if (KalivTheme.colors.isDark) "kaliv_symbol_dark.png" else "kaliv_symbol_light.png")
+    }.getOrNull()
+
+    val transition = rememberInfiniteTransition(label = "thinking")
+    val angle by transition.animateFloat(
+        initialValue = 0f, targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1280, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "orbit",
+    )
+
+    val bronze = KalivTheme.colors.Signal
+    val gold = KalivTheme.colors.Amber
+    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val c = center
+            val ringR = size.minDimension * 0.42f
+            val n = 12
+            for (i in 0 until n) {
+                val a = Math.toRadians((angle + i * (360f / n)).toDouble())
+                val px = c.x + (ringR * kotlin.math.cos(a)).toFloat()
+                val py = c.y + (ringR * kotlin.math.sin(a)).toFloat()
+                // Fade + shrink around the ring so it reads as a moving comet head,
+                // not a static ring of dots.
+                val phase = i.toFloat() / n
+                val alpha = 0.25f + 0.75f * ((1f - phase))
+                val dotR = size.minDimension * (0.03f + 0.05f * (1f - phase))
+                drawCircle(
+                    color = (if (i % 2 == 0) bronze else gold).copy(alpha = alpha),
+                    radius = dotR,
+                    center = Offset(px, py),
+                )
+            }
+        }
+        if (ankh != null) {
+            Image(ankh, contentDescription = "tænker", modifier = Modifier.size(22.dp))
+        }
     }
 }
 
