@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.44.0** — "Persona haerdet + desktop fik den ogsaa. v1.43.0-personaen virkede kun HALVT (qwen3:14b ignorerede -hoejst 1 emoji- og fortsatte med 🌟✨ og -jeg er her for dig-). Ny prompt er kompromisloes: INGEN emojis nogensinde + et konkret DAARLIGT-vs-GODT-eksempel paa hej-svar. Desktop havde SAMME tomme-prompt-problem — fik nu samme persona. VIGTIGT: skaermbilleder var fra FOER v1.43.0 (gammel build) — personaen anvendes fresh fra store ogsaa i gamle samtaler". Follows 1.43.0. Autonomous sessions, **2026-07-02 → 07-12**.
+Version **1.45.0** — "TO reelle bugs fundet i seneste-build-skaermbilleder (16.08-16.10, IKKE gammel build). (1) Persona-prompten NAAR frem men modellen ignorerer den — qwen3:14b emoji-er stadig efter INGEN emojis. Fix: DETERMINISTISK emoji-stripning af det faerdige svar klientside (rig-chat proxier direkte til Ollama, saa ingen worker-rensning muligt). Dansk/tegnsaetning bevaret, verificeret. (2) Voice brugte qwen2.5-coder:7b (worker GEN_MODEL-default) IKKE den valgte qwen3:14b — derfor halv-norsk kode-model-vroevl; nu sendes currentModel. Emoji-strip ogsaa paa voice-svar". Follows 1.44.0. Autonomous sessions, **2026-07-02 → 07-12**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

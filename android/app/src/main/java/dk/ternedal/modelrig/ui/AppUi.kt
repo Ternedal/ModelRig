@@ -522,6 +522,33 @@ private fun trimHistory(
  * typo'd model name) that a raw stack-trace-ish message isn't good enough for
  * daily use.
  */
+// Kaliv shouldn't emoji (the persona says so), but small local models keep doing
+// it anyway no matter how firm the prompt is -- qwen3:14b still ended replies with
+// 🌟✨ after "INGEN emojis. Aldrig.". Since the rig chat proxies straight to Ollama
+// (no worker pass to clean it server-side), we strip emojis from the finished
+// reply client-side. Deterministic: it doesn't matter whether the model obeyed.
+// Covers the common pictographic ranges plus variation selectors and ZWJ; leaves
+// ordinary text, Danish letters, and punctuation untouched.
+private val EMOJI_REGEX = Regex(
+    "[\uD83C-\uDBFF\uDC00-\uDFFF]" +          // surrogate pairs (most emoji)
+    "|[\u2600-\u27BF]" +                          // misc symbols + dingbats (☀ ✨ ✋ etc.)
+    "|[\u2190-\u21FF]" +                          // arrows sometimes rendered as emoji
+    "|[\uFE00-\uFE0F]" +                          // variation selectors
+    "|\u200D" +                                     // zero-width joiner
+    "|[\u2B00-\u2BFF]"                            // extra symbols (⭐ etc.)
+)
+
+private fun stripEmojis(text: String): String {
+    // Remove emojis, then tidy the whitespace they leave behind (trailing spaces
+    // before newlines, doubled spaces, spaces before punctuation).
+    var t = EMOJI_REGEX.replace(text, "")
+    t = t.replace(Regex("[ \t]+([.,!?])"), "$1")
+    t = t.replace(Regex("[ \t]{2,}"), " ")
+    t = t.replace(Regex(" +\n"), "\n")
+    t = t.replace(Regex("\n{3,}"), "\n\n")
+    return t.trim()
+}
+
 private fun friendlyError(err: Throwable): String {
     val msg = err.message ?: ""
     return when {
@@ -730,7 +757,11 @@ private fun ChatScreen(
                     ModelRigClient(store.baseUrl ?: "", store.token).voiceConverse(
                         b64,
                         language = "da",
-                        model = if (key != null) store.cloudModel else null,
+                        // Use the model the user actually SELECTED in the dropdown.
+                        // Sending null made voice fall back to the worker's default
+                        // (qwen2.5-coder:7b -- a code model that rambled in half-
+                        // Norwegian), ignoring the chosen qwen3:14b entirely.
+                        model = if (key != null) store.cloudModel else currentModel,
                         cloudBaseUrl = if (key != null) "https://ollama.com" else null,
                         cloudKey = key,
                     )
@@ -742,7 +773,7 @@ private fun ChatScreen(
                 val usedCloud = result.optBoolean("via_cloud", false)
                 if (transcript.isNotEmpty()) messages.add(Msg("user", transcript))
                 if (reply.isNotEmpty()) {
-                    messages.add(Msg("assistant", reply, voiceModel = usedModel, voiceViaCloud = usedCloud))
+                    messages.add(Msg("assistant", stripEmojis(reply), voiceModel = usedModel, voiceViaCloud = usedCloud))
                 }
                 // Persist like a normal rig turn.
                 withContext(Dispatchers.IO) {
@@ -1049,9 +1080,9 @@ private fun ChatScreen(
             val cur = messages[idx]
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[idx] = when {
-                err == null -> cur.copy(streaming = false, fellBackToCloud = didFallback)
+                err == null -> cur.copy(streaming = false, text = stripEmojis(cur.text), fellBackToCloud = didFallback)
                 cur.text.isEmpty() -> cur.copy(streaming = false, error = true, text = friendlyError(err!!))
-                else -> cur.copy(streaming = false, text = cur.text + "\n\n_[afbrudt]_")
+                else -> cur.copy(streaming = false, text = stripEmojis(cur.text) + "\n\n_[afbrudt]_")
             }
             // persist the assistant reply (full or partial-cancelled), never errors
             val finalText = messages[idx].text
@@ -1130,9 +1161,9 @@ private fun ChatScreen(
             val cur = messages[i]
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[i] = when {
-                err == null -> cur.copy(streaming = false)
+                err == null -> cur.copy(streaming = false, text = stripEmojis(cur.text))
                 cur.text.isEmpty() -> cur.copy(streaming = false, error = true, text = friendlyError(err!!))
-                else -> cur.copy(streaming = false, text = cur.text + "\n\n_[afbrudt]_")
+                else -> cur.copy(streaming = false, text = stripEmojis(cur.text) + "\n\n_[afbrudt]_")
             }
             val finalText = messages[i].text
             if (cidNow != null && (err == null || cancelled)) {
