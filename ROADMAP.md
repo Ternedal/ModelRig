@@ -250,6 +250,17 @@ acceptkriterier ligger i **`ALVA_VOICE_ROADMAP_DELTA.md`**. Kernepunkter:
   NVIDIA Open Model License + tung NeMo-afhængighed (bryder exe-simpliciteten).
   Verificeret 8/7. Fase 2, som isoleret modelbytte.
 - **Nøglemetrik**: time-to-first-audio — Alva taler efter første sætnings-chunk.
+  - **VIGTIGT FUND 12/7:** pipelinen (`voice_pipeline.converse`) streamer ALLEREDE
+    internt — den splitter LLM-outputtet på sætningsgrænser og TTS'er hver sætning
+    som den kommer (per-sætnings-chunks + `time_to_first_audio_s` findes). MEN
+    `/voice/converse`-endpointet (main.py ~1145) **samler alle chunks til ét
+    `audio_base64` før det svarer** — så app'en hører først noget når HELE svaret
+    + al TTS er færdig. Det er derfor voice føles langsomt med store modeller
+    (deepseek 671b): selve stream-arbejdet er gjort, men smides væk ved at buffre.
+    **Den rigtige kur (når prioriteret):** et streamende endpoint (NDJSON, ét
+    chunk pr. sætning) + inkrementel afspilning i app'en (kø WAV-chunks, spil den
+    første mens resten genereres). Substantielt, men ikke fra bunden — pipelinen
+    leverer allerede chunks; det er levering + afspilning der mangler.
 - **Barge-in er V1-krav** men teknisk svært (akustisk ekko) — headset-først i MVP.
 - **Kræver beslutninger fra Anders før kode**: NeMo-afhængighed ja/nej,
   headset-først ja/nej, Parakeet-licens-accept. Se delta-dok §6.
