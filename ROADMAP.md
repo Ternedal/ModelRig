@@ -451,9 +451,12 @@ lokalt. Bygger på V4's streaming-ASR og V5's tool-lag.
    mangler)**, ingen voice, og "parring" er et manuelt token-felt/env-var.
    Fundamentet er dog sundt: chat med streaming, RAG, markdown, lokal historik.
    Rækkefølge (billigst-synligt først, genbrug fra Android hvor muligt):
-   a. ~~Kaliv-rebrand + light/dark~~ ✅ **v1.35.0 (12/7)**: KalivColors
-      dark+light porteret, vinduestitel "Kaliv", jar-artefaktet hedder
-      nu `Kaliv-windows-x64-…jar`. Package-navne urørt som lovet.
+   a. ~~Kaliv-rebrand + light/dark~~ ✅ **v1.35.0**, ikoner rettet **v1.39.0**:
+      KalivColors dark+light, vinduestitel "Kaliv", jar hedder `Kaliv-…jar`.
+      v1.39.0 fiksede at v1.35.0 GLEMTE ikonerne — vindues-ikonet var stadig
+      det gamle ModelRig-icon.png fra v1.10.1, og headeren havde intet mærke.
+      Nu: godkendt Kaliv-app-ikon + wordmark i header (tema-skiftende), alle
+      fra QA-pakken. Package-navne urørt.
    b. ~~Tools-mode + bekræftelseskort + Handlingslog~~ ✅ **v1.35.0**:
       ToolsClient (157 linjer) + kort med Godkend/Afvis + audit-visning.
       V5 fra skrivebordet.

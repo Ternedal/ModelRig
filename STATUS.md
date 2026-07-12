@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.38.0** — "Kaliv taenke-animation i chat: den godkendte ankh-loading-animation (32 frames, 1.28s loop, bronze/guld partikel-ring) vises nu i assistent-boblen mens svaret stadig er tomt — praecis som Claudes thinking-indikator. Animeret WebP via AnimatedImageDrawable (API 28+, falder tilbage til … paa 26-27, ingen ny dependency). Kompilerings- + build-verificeret, asset i APK. UI-adfaerd (afspiller den?) = Anders paa device". Follows 1.37.0 (foto→RAG). Autonomous sessions, **2026-07-02 → 07-12**.
+Version **1.39.0** — "Desktop-ikoner rettet: v1.35.0-rebrandet satte farver+navn men GLEMTE ikonerne — vindues-ikonet var stadig det gamle ModelRig icon.png fra v1.10.1, og headeren havde INTET Kaliv-maerke (kun tekst). Nu: godkendt Kaliv-app-ikon som vindues-ikon + Kaliv-wordmark i headeren (tema-skiftende), alle fra QA-pakken. Kompilerings+jar-verificeret, assets i jar. Visuelt resultat = Anders paa Windows". Follows 1.38.0 (taenke-animation). Autonomous sessions, **2026-07-02 → 07-12**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

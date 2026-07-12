@@ -9,9 +9,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -305,6 +308,19 @@ fun App() {
             // else became unreachable. Found by Anders on Windows (v0.20.9
             // jar, 980x720 default window): a genuine soft-lock this
             // session's headless smoke tests could never catch.
+            // Kaliv wordmark in the header -- the desktop rebrand (v1.35.0) set
+            // the palette and name but never placed the actual mark. Art swaps
+            // with the theme, mirroring the Android header.
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
+                Image(
+                    painter = painterResource(
+                        if (KalivTheme.colors.isDark) "kaliv_wordmark_dark.png"
+                        else "kaliv_wordmark_light.png"
+                    ),
+                    contentDescription = "Kaliv",
+                    modifier = Modifier.height(28.dp),
+                )
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { showSettings = !showSettings }) {
                     Text(if (showSettings) "Skjul indstillinger" else "Indstillinger", color = KalivTheme.colors.Signal)
