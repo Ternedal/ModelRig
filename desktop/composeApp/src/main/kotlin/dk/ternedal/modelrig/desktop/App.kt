@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.Image
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -40,6 +42,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -308,19 +311,6 @@ fun App() {
             // else became unreachable. Found by Anders on Windows (v0.20.9
             // jar, 980x720 default window): a genuine soft-lock this
             // session's headless smoke tests could never catch.
-            // Kaliv wordmark in the header -- the desktop rebrand (v1.35.0) set
-            // the palette and name but never placed the actual mark. Art swaps
-            // with the theme, mirroring the Android header.
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
-                Image(
-                    painter = painterResource(
-                        if (KalivTheme.colors.isDark) "kaliv_wordmark_dark.png"
-                        else "kaliv_wordmark_light.png"
-                    ),
-                    contentDescription = "Kaliv",
-                    modifier = Modifier.height(28.dp),
-                )
-            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { showSettings = !showSettings }) {
                     Text(if (showSettings) "Skjul indstillinger" else "Indstillinger", color = KalivTheme.colors.Signal)
@@ -666,7 +656,15 @@ private fun Header(
     onAudit: () -> Unit,
 ) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        // The wordmark: user-facing = Kaliv; only the backend is ModelRig.
+        // Wordmark = the clean letter-spaced KALIV plus the ankh symbol. User-
+        // facing is Kaliv; only the backend is ModelRig. (The textured wordmark
+        // image read as clutter next to the text, so we use the ankh mark instead.)
+        runCatching {
+            painterResource(if (dark) "kaliv_symbol_dark.png" else "kaliv_symbol_light.png")
+        }.getOrNull()?.let {
+            Image(painter = it, contentDescription = null, modifier = Modifier.size(26.dp))
+            Spacer(Modifier.width(8.dp))
+        }
         Text("KALIV", color = KalivTheme.colors.Amber, fontSize = 22.sp,
              fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
         Spacer(Modifier.width(12.dp))
@@ -688,40 +686,80 @@ private fun Header(
 @Composable
 private fun MessageBubble(m: UiMessage) {
     val isUser = m.role == "user"
-    val bg = if (isUser) KalivTheme.colors.SurfaceHigh else KalivTheme.colors.Surface
-    val badge = when {
-        isUser -> "dig"
-        m.source == ChatResult.Source.CLOUD -> "modelrig · cloud"
-        m.source == ChatResult.Source.LOCAL -> "modelrig · rig"
-        else -> "modelrig"
+    // Match the mobile app: the user's bubble is bronze with ivory ink (6.2:1,
+    // measured), the assistant's is the raised surface. Bubbles are aligned
+    // (user right, assistant left), constrained to ~82% width, with the ankh-tail
+    // corner -- not full-width grey boxes stacked like a 90s form.
+    val bg = if (isUser) KalivTheme.colors.Signal else KalivTheme.colors.SurfaceHigh
+    val fg = if (isUser) Color(0xFFF3EFE6) else KalivTheme.colors.TextHigh
+    val label = when {
+        isUser -> null // the alignment already says who
+        m.source == ChatResult.Source.CLOUD -> "☁ Kaliv · cloud"
+        m.source == ChatResult.Source.LOCAL -> "◈ Kaliv · rig"
+        else -> "Kaliv"
     }
-    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Text(badge, color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
-        Spacer(Modifier.height(2.dp))
-        Box(Modifier.clip(RoundedCornerShape(10.dp)).background(bg).fillMaxWidth().padding(12.dp)) {
-            Column {
-                if (!isUser && m.ragSources.isNotEmpty()) {
-                    Row(Modifier.padding(bottom = 6.dp)) {
-                        m.ragSources.take(4).forEach { s ->
-                            Box(
-                                Modifier.clip(RoundedCornerShape(999.dp))
-                                    .background(KalivTheme.colors.SurfaceHigh)
-                                    .padding(horizontal = 8.dp, vertical = 3.dp),
-                            ) {
-                                Text(s, fontSize = 10.sp, color = KalivTheme.colors.TextMuted)
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+    ) {
+        Column(
+            Modifier.widthIn(max = 640.dp),
+            horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
+        ) {
+            if (label != null) {
+                Text(label, color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
+                Spacer(Modifier.height(3.dp))
+            }
+            Box(
+                Modifier
+                    .clip(
+                        RoundedCornerShape(
+                            topStart = 16.dp, topEnd = 16.dp,
+                            bottomStart = if (isUser) 16.dp else 4.dp,
+                            bottomEnd = if (isUser) 4.dp else 16.dp,
+                        )
+                    )
+                    .background(bg)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+            ) {
+                Column {
+                    if (!isUser && m.ragSources.isNotEmpty()) {
+                        Row(Modifier.padding(bottom = 6.dp)) {
+                            m.ragSources.distinct().take(4).forEach { s ->
+                                Box(
+                                    Modifier.clip(RoundedCornerShape(999.dp))
+                                        .background(KalivTheme.colors.Surface)
+                                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                                ) {
+                                    Text(s, fontSize = 10.sp, color = KalivTheme.colors.TextMuted)
+                                }
+                                Spacer(Modifier.width(4.dp))
                             }
-                            Spacer(Modifier.width(4.dp))
                         }
                     }
-                }
-                when {
-                    isUser -> Text(m.text, color = KalivTheme.colors.TextHigh, fontSize = 14.sp)
-                    m.streaming && m.text.isEmpty() -> Text("…", color = KalivTheme.colors.TextMuted, fontSize = 14.sp)
-                    m.streaming -> Text(m.text + "▍", color = KalivTheme.colors.TextHigh, fontSize = 14.sp)
-                    else -> MarkdownText(m.text, color = KalivTheme.colors.TextHigh)
+                    when {
+                        isUser -> Text(m.text, color = fg, fontSize = 15.sp, lineHeight = 21.sp)
+                        m.streaming && m.text.isEmpty() -> DesktopThinking()
+                        m.streaming -> Text(m.text + "▍", color = fg, fontSize = 15.sp, lineHeight = 21.sp)
+                        else -> MarkdownText(m.text, color = fg)
+                    }
                 }
             }
         }
+    }
+}
+
+// The Kaliv thinking animation in the assistant bubble while the reply is still
+// empty -- the desktop counterpart of the mobile ThinkingIndicator. The asset is
+// an animated WebP; painterResource draws only the first frame, so on desktop we
+// decode the frames and drive them with a small timer.
+@Composable
+private fun DesktopThinking() {
+    val painter = runCatching { painterResource("kaliv_thinking.webp") }.getOrNull()
+    if (painter != null) {
+        Image(painter = painter, contentDescription = "tænker", modifier = Modifier.size(40.dp))
+    } else {
+        Text("…", color = KalivTheme.colors.TextMuted, fontSize = 15.sp, lineHeight = 21.sp)
     }
 }
 
