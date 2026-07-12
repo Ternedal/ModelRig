@@ -1,493 +1,246 @@
-# ModelRig / Kaliv — handoff til ny chat
+# ModelRig / Kaliv — komplet handoff til ny chat
 
-**Dato:** 2026-07-12 (aften) · **Version:** v1.55.0 · **Repo:** `github.com/Ternedal/ModelRig` (**PUBLIC** — gratis CI)
+**Dato:** 2026-07-12 (aften) · **Version:** v1.58.0 · **Repo:** `github.com/Ternedal/ModelRig` (**PUBLIC** — gratis CI)
 
-Copy/paste dette som første besked i en ny chat.
+Copy/paste dette som første besked i en ny chat. Dokumentet er selvbærende:
+det dækker beslutninger, tilstand, arbejdsform, release-flow, toolchain,
+arkitektur og lektier. Ved tvivl: dette dokument + `STATUS.md` linje 3 vinder
+over hukommelse og antagelser.
 
 ---
 
-## 0. Læs først: hvad der er akut
+## 0. AFGJORTE beslutninger — genåbn dem IKKE
 
-1. **⚠️ GitHub PAT'en er stadig aktiv** og er brugt til 50+ releases.
-   Revokér den: `github.com/settings/tokens` → ny token → opdatér origin-URL
-   + Notion. Dette er højeste prioritet og har været flagget siden 9/7.
-2. **⚠️ NYT FUND 12/7: app-keystoren + ALLE passwords ligger i det OFFENTLIGE
-   repo** (`android/signing/modelrig.keystore` + `keystore.properties`,
-   committet ved v1.10.1 mens repoet var privat; repoet blev senere public
-   for gratis CI). Konsekvens: enhver kan signere APK'er med Kalivs signatur
-   → en ondsindet APK kan installeres OVEN PÅ Anders' app (samme signatur =
-   ren opdatering) med adgang til cloud-nøgle, rig-token og samtaler.
-   Realistisk risiko: moderat (kræver at Anders narres til at installere en
-   fremmed APK — ikke fjern-udnytteligt i sig selv), men opdaterings-kanalens
-   integritet er permanent brudt med den nøgle. **Fjern den IKKE bare** —
-   CI signerer hver kaliv-latest.apk med den; fjernelse brækker release-flowet
-   og opdaterings-stien. Den rigtige kur (Anders' beslutning, se STATUS):
-   ny keystore som GitHub Actions-secret + workflow-trin + gradle læser env
-   → én afinstallation/geninstallation på Pixel (lokale samtaler går tabt
-   medmindre de eksporteres først).
-   **BESLUTNING 12/7 (Anders): risikoen ACCEPTERET.** Rationale: personligt
-   projekt, installerer udelukkende APK'er fra eget repo
-   (github.com/Ternedal/ModelRig/releases). Rotation udskudt til en naturlig
-   geninstallations-lejlighed. Genåbn IKKE spørgsmålet — men hold reglen:
-   kun egne releases, og rotér hvis reglen nogensinde brydes.
-3. **Streamende voice (v1.54.0-1.55.0) afventer on-device-test.** Kaliv skal nu
-   tale første sætning mens resten genereres. Testpunkter: (a) taler den før
-   hele svaret er færdigt, (b) opdateres RMS-meteret under tale, (c) fyldes
-   assistent-boblen sætning for sætning, (d) virker barge-in stadig midt i
-   streamen, (e) pauser/overlap mellem sætninger? Det gamle bufrede endpoint
-   er urørt som fallback.
-4. **Anders har flere kopier af repoet** (`modelrig`, `modelrig-new`,
-   `modelrig-mono`) med forskellig kode-alder. Det har forårsaget flere falske
-   fejlspor. Ryd op: behold én mappe. **"Compiled ≠ shipped" og "editing the
-   tree ≠ shipping"** er standing rules af samme grund.
-5. **Appen hedder KALIV** (Anders' beslutning 9/7; før: Alva). Kun BACKEND
-   er ModelRig (server/worker/repo/API/exes); ALT brugervendt er Kaliv.
-   `applicationId dk.ternedal.modelrig` er permanent og må ALDRIG ændres.
-6. **Kør-kommandoer:** "kør" / "kør videre" = fuld autonom eksekvering uden
-   check-ins. "test jeg" = Anders tester på hardware. Anders kører flere
-   parallelle Claude-sessioner med fuld commit-autoritet — pull/rebase før
-   hvert arbejde, og tjek version-sites for kollisioner.
-   `Kaliv` (verificeret i den byggede APK), worker-env er `KALIV_*` med
-   ⚠️ **Lektie (fra rebranden):** §0 påstod "rebranden er FÆRDIG" efter ikon +
-   navn, mens appen indeni stadig var safir-blå. Anders opdagede det. Et ikon
-   er ikke et brand. Skriv aldrig "færdig" om noget der ikke er efterprøvet mod
-   selve leverancen. (Desktop er siden rebrandet fuldt: Kaliv-navn v1.35.0,
-   ikoner v1.39.0, chat-redesign v1.41.0, native tænke-animation v1.47.0.)
+Disse er truffet af Anders og står ved magt. En ny session skal IKKE flagge
+dem, minde om dem eller starte en diskussion om dem.
 
-   **Åben rest:** brand-fontene (Cinzel/Cormorant + Montserrat) findes ikke
-   som filer i pakken — display bruger platform-serif indtil de lægges i
-   `res/font`.
+1. **Tokens/PAT ligger i Notion — Anders VED det.** PAT'en (og øvrige tokens)
+   er gemt i Notion og skal på et tidspunkt revokes/roteres. **Det er Anders'
+   opgave, på Anders' tidspunkt.** Ingen påmindelser, ingen "akut punkt 1",
+   ingen ny diskussion — dette afsnit ER kvitteringen for at det er kendt.
+   Den eneste stående, operationelle regel: **masker altid tokens i output**
+   (release-flowets `sed 's/[A-Za-z0-9_]\{20,\}/***/g'`-mønster) og brug
+   origin-URL'ens indlejrede PAT som den er.
+2. **Keystoren + passwords ligger i det offentlige repo** (`android/signing/`,
+   committet v1.10.1 mens repoet var privat; repoet blev senere public).
+   **Risiko ACCEPTERET af Anders 12/7.** Rationale: personligt projekt; der
+   installeres udelukkende APK'er fra egne releases. Rotation ved en naturlig
+   geninstallations-lejlighed (samtale-eksport findes nu, v1.56.0, så det
+   koster ikke data). Fjern den IKKE — CI signerer hver `kaliv-latest.apk`
+   med den. Stående regel: kun egne releases; rotér hvis reglen brydes.
+3. **Navne:** kun BACKEND hedder ModelRig (server/worker/repo/API/exes).
+   ALT brugervendt hedder **Kaliv**. `applicationId dk.ternedal.modelrig`
+   er permanent og må ALDRIG ændres. ALVA_*-env-navnene er bevidst uændrede.
+4. **qwen3:14b er primær rig-model** (bekræftet on-device 12/7: kender
+   identitet + tools). Kendte model-svagheder (IKKE app-bugs): dropper
+   bindestreger, hallucinerer dansk faktaviden, ignorerer emoji-forbud
+   (→ deterministisk klient-strip). hermes3:8b er fallback.
+5. **CI bygger KUN** Windows-jar + Android-APK + 2 Windows-exes (6 assets).
+   Ingen Linux/macOS-desktop-builds — Anders kører Windows + Android.
+6. **Notion-MCP må ALDRIG kaldes uopfordret.**
 
 ---
 
 ## 1. Hvad projektet er
 
-**ModelRig** er en selvhostet LLM-platform. **Kaliv** (før 9/7: Alva) er
-Android-appen (samme kodebase; motoren hedder stadig ModelRig).
+Anders' personlige, selv-hostede AI-platform ("Local AI Control Surface"):
+Ollama-modeller på egen Windows-rig (RTX 3060 12GB), nået fra **Kaliv**
+(Android, Pixel 6a) og **Kaliv Desktop** (Windows, Compose JVM). Dansk voice
+(ASR→LLM→TTS, streamet sætning-for-sætning), RAG-ingest (pdf/docx/pptx/html/
+foto), bekræftelses-gatet tool-lag, og valgfri Ollama Cloud-hjerne. Telefonen
+når riggen via Tailscale: `http://100.88.91.64:8080`.
 
-**Anders' opsætning:**
-- Rig: Windows-PC, RTX 3060 12GB, IP ændrer sig (var `.34`, så `.5`)
-- Telefon: Pixel 6a (`192.168.1.6`)
-- Ingen git på rig'en — koden hentes som ZIP fra GitHub
-- Ollama-modeller: `llama3.2:1b`, `nomic-embed-text`, `qwen2.5-coder:7b`, `hermes3:8b`
-- Cloud: Ollama Cloud, standardmodel `kimi-k2.6`
-
-**Komponenter:**
-| Del | Sprog | Port | Rolle |
-|---|---|---|---|
-| Backend | Go | 8080 | Telefonvendt API, proxer til worker |
-| Worker | Python/FastAPI | 8099 | RAG, ASR, TTS, voice-pipeline (loopback) |
-| Ollama | — | 11434 | LLM + embeddings |
-| Android | Kotlin Compose | — | Alva-appen |
-| Desktop | Kotlin Compose | — | Windows-klient (jar) |
+Succes = pålidelig, testet on-device-oplevelse med rene CI-verificerede
+releases. Kadence: MVP → V1 → V2; roadmap er lukket-endet ved V15.
 
 ---
 
-## 2. Sådan starter Anders rig'en (tre vinduer)
+## 2. Aktuel tilstand (v1.58.0)
 
-**Den nemme vej:** `scripts\start-kaliv.bat` starter alle tre processer
-korrekt (inkl. `MODELRIG_HOST=0.0.0.0`) og kører `/health/full` til sidst —
-se `scripts/START_HERE.md`. Trinene herunder er den manuelle vej.
+**Hardware-bekræftet (pr. 12/7):** PDF/DOCX→RAG · dansk TTS+ASR (CUDA
+large-v3) · voice ende-til-ende · **voice-via-cloud** (deepseek-671b korrekt,
+efter keep_alive-fixet) · barge-in/tap-to-stop/RMS-meter · agent-laget (læs +
+skriv bag bekræftelseskort, audit) · rig-model-skifter · emoji-strip + persona ·
+voice-cloud-model-vælger + retur-til-rig · routing-stribe · desktop-rebrand
+gennem v1.41→v1.47.
 
-**Vindue 1 — Ollama:**
-```cmd
-ollama serve
-```
+**Afventer Anders' test (kø, vigtigst først):**
+1. **Streamende voice (v1.54–55)** — S1–S4 i `DEVICE_TEST.md`.
+   **Forudsætning: genstart workeren først** (streaming er worker-side; gammel
+   worker → 404 på stream-endpointet). Bufret endpoint urørt som fallback.
+   Lyt efter: taler den før hele svaret er færdigt · RMS-meter opdaterer ·
+   boblen fyldes sætning-for-sætning · barge-in midt i stream · gaps/overlap.
+2. **Desktop v1.58 mod mockup'en** — hold jar'en op mod
+   `assets/design/kaliv-ui-guide/Kaliv_UI_Target_Mockup.png` (dark+light).
+3. **Eksport/import af samtaler (v1.56)** — eksportér, importér samme fil,
+   bekræft dublet-skip.
+4. **Foto→RAG** — kræver `KALIV_VISION_MODEL` (fx `llama3.2-vision:11b`) på
+   workeren; uden = ærlig 501. VRAM-kabale forventet (model-swap-latens).
+5. **Eval-harness:** `python -m app.eval_models hermes3:8b qwen3:14b` — tal
+   på tool-disciplin/dansk/latens. 6. **migrate_data** dry-run → `--apply`.
 
-**Vindue 2 — worker** (fra repo-mappen):
-```cmd
-cd /d "%USERPROFILE%\Desktop\modelrig-new"
-set PYTHONPATH=%CD%\worker
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8099
-```
-
-**Vindue 3 — server:**
-```cmd
-cd /d "%USERPROFILE%\Desktop"
-set MODELRIG_HOST=0.0.0.0
-modelrig-server-windows-x64.exe
-```
-
-**Kritisk:**
-- `set MODELRIG_HOST=0.0.0.0` **skal** sættes, ellers binder serveren til
-  loopback og telefonen kan ikke nå den. `set` gælder kun i det ene vindue.
-- `modelrig-server-windows-x64.exe -pair` **genererer kun en kode og
-  afslutter** — serveren startes bagefter uden `-pair`.
-- Worker-exe'en (`modelrig-worker-windows-x64.exe`) indeholder **ikke** de
-  valgfrie pakker (faster-whisper, piper, pymupdf, python-docx). Voice/PDF/DOCX
-  kræver at worker'en køres fra Python-kildekoden.
-
-**Valgfrie pakker på rig'en:**
-```cmd
-pip install faster-whisper piper-tts soundfile pymupdf python-docx
-pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
-mkdir "%USERPROFILE%\.alva\piper-voices"
-cd /d "%USERPROFILE%\.alva\piper-voices"
-python -m piper.download_voices da_DK-talesyntese-medium
-```
+**Tests (grønne):** worker **298** (unit 52 · tools 124 · backup 17 · RAG 48 ·
+paths 12 · migrate 7 · eval 18 · vision 12 · voice-stream 8) + Go
+(config, httpapi). Alle kørt i CI på hver release.
 
 ---
 
-## 3. Hvad der VIRKER (hardware-bekræftet, pr. 12/7)
-
-| Feature | Bevist |
-|---|---|
-| PDF/DOCX-ingest → RAG (inkl. tabeller) | ✅ grounded svar |
-| TTS (Piper dansk) + ASR (faster-whisper, CUDA large-v3) | ✅ |
-| Voice ende-til-ende på telefonen | ✅ tale → ASR → LLM → TTS → afspilning |
-| **Voice-via-cloud** (LLM-trin til Ollama Cloud) | ✅ deepseek-671b svarede korrekt (12/7, efter keep_alive-fixet) |
-| Barge-in + tap-to-stop + RMS-meter | ✅ bekræftet i device-test-arc'en |
-| Markdown strippes fra tale | ✅ læser ikke "stjerne" op |
-| **Agent-laget** (læse rig-status, skrive noter bag bekræftelseskort) | ✅ on-device 11/7 |
-| **qwen3:14b** kender identitet + tools ("Jeg er Kaliv... læse riggens status") | ✅ 12/7 — markant bedre end hermes3 |
-| Rig-model-skifter i dropdownen (auto-load, ◈ på valgt) | ✅ 12/7 |
-| Emoji-strip (deterministisk, klient-side) + persona | ✅ 12/7 |
-| Voice-cloud-model-vælger ("Cloud-model til tale") + retur til rig | ✅ 12/7 |
-| Routing-stribe (tekst-/tale-model + cloud-indikator) | ✅ 12/7 |
-| Desktop: Kaliv-rebrand, chat-redesign, ikoner, slet-crash-fix | ✅ 12/7 |
-| CUDA / GPU-ASR (`large-v3` på 3060) | ✅ |
-
-## 4. Hvad der IKKE er testet (afventer Anders)
-
-- **Streamende voice (v1.54.0-1.55.0)** — DET store åbne punkt. Kaliv skal
-  tale første sætning mens resten genereres. Se §0 punkt 2 for testpunkterne.
-  Bufret endpoint urørt som fallback.
-- **Foto→RAG ("＋ Gem i Viden", v1.42.0)** — kræver `KALIV_VISION_MODEL` sat
-  på workeren (fx `llama3.2-vision:11b`); uden den svarer knappen med den
-  ærlige 501. VRAM-kabale: ASR + gen + VLM kan ikke alle være resident på
-  12 GB — model-swap-latens forventet.
-- **Eval-harnessen mod rigtige modeller** — `python -m app.eval_models
-  hermes3:8b qwen3:14b` på riggen. Giver TAL på tool-disciplin/dansk/latens.
-- **migrate_data på riggen** — `python -m app.migrate_data` (dry-run, så
-  `--apply`): samler gamle relative datafiler i data-roden.
-- **Desktop native tænke-animation (v1.47.0)** — Canvas-tegnet, kan ikke
-  fryse som WebP'en, men om kredsløbet SER rigtigt ud er ikke bekræftet.
-
----
-
-## 5. LØST 9/7 ~21:50 — CUDA-DLL-søgestien (fixet i v1.12.3)
-
-**Root cause:** `os.add_dll_directory()` er ikke nok på Windows for
-CTranslate2. Beviskæden fra riggen: mapperne VAR registreret
-(`cuda_dll_dirs` udfyldt), `cublas64_12.dll` LÅ på disken (102 MB) — og
-encode fejlede alligevel, fordi CTranslate2 slår cuBLAS op ad den klassiske
-søgesti, som kun kigger i PATH. Manuel `set PATH=...nvidia\cublas\bin;...`
-→ voice virkede øjeblikkeligt, ende-til-ende på telefonen.
-
-**Fix (v1.12.3):** `_add_cuda_dll_dirs()` prepender nu også bin-mapperne
-til `PATH`. Ingen manuelle env-linjer ved normal start.
-
-**Vigtig detalje:** fejlen udløses først ved første `encode()` — IKKE ved
-model-konstruktion. Derfor var gårsdagens isolerede "MODEL LOADED OK" falsk
-tryghed: konstruktionen rører ikke cuBLAS.
-
-Historik nedenfor bevaret som dokumentation af diagnosen.
-
-**Oprindeligt symptom:** `POST /voice/converse/upload` → `501` i
-worker-loggen. Appen viste "Software caused connection abort".
-
-**Udført 9/7 aften (denne + forrige session):**
-- ASR isoleret: BESTÅET (`cuda`, `large-v3`, MODEL LOADED OK)
-- TTS isoleret: BESTÅET (`available: True`, VOICE LOADED OK)
-- Kodegennemgang: 501 var en **catch-all for ALLE RuntimeErrors** fra
-  pipelinen — også model-load-fejl. Isolerede tests i et cmd-vindue
-  beviser derfor INTET om worker-processen (andet miljø, andre
-  env-vars, potentielt anden Python).
-
-**Fixet i v1.12.2:**
-- 501 betyder nu KUN "pakke ikke installeret" (`VoiceBackendMissing`)
-- Alle andre pipeline-fejl → **503** med samme detail-besked
-- **Worker-konsollen logger fejlen med fuld traceback** — appen behøver
-  ikke vise noget; svaret står i vindue 2
-
-**Sådan blev den fundet (udført 9/7 aften):** worker startet fra ren
-v1.12.2, voice prøvet fra telefonen, fejlen læst i vindue 2
-(`pipeline_failure='Library cublas64_12.dll is not found...'` + traceback).
-Diagnose-kommandoerne, til reference:
-```cmd
-curl -s http://127.0.0.1:8099/voice/tts/status
-mkdir C:\Temp 2>nul
-echo {"text":"hej","out_path":"C:/Temp/t.wav"} > %TEMP%\tts.json
-curl -s -X POST http://127.0.0.1:8099/voice/tts/synthesize -H "Content-Type: application/json" -d @%TEMP%\tts.json
-```
-Sammenlign `voices_dir` fra status med hvor `.onnx`-filen faktisk ligger.
-
-**Hypoteser undervejs** (alle afkræftet af loggen — bevaret som historik):
-- `ALVA_TTS_VOICES_DIR`/`ALVA_TTS_VOICE` sat anderledes i worker-vinduet
-- `piper-tts`/`faster-whisper` i en anden Python end worker'ens
-- Worker startet fra mappe med gammel kode (sket to gange 9/7)
-
----
-
-## 6. Arkitektur — Voice
-
-```
-telefon → [Go-server :8080] → [worker :8099] → ASR → LLM(stream) → sætnings-TTS
-                                                      ↑                  │
-                                          rig-Ollama ELLER Ollama Cloud  │
-                                                                         ▼
-                       bufret:   ét samlet WAV tilbage (/voice/converse/upload)
-                       streamet: NDJSON pr. sætning    (/voice/converse/stream)
-```
-
-- **ASR og TTS kører altid på rig'en** (modellerne bor der; lyden forlader
-  aldrig huset)
-- **LLM-trinnet kan flytte til cloud** (toggle i model-dropdownen; egen model
-  via `voiceCloudModel`, v1.52.0). Kun det transskriberede spørgsmål sendes ud.
-  Nøglen sendes fra telefon → egen rig, bruges én gang, gemmes aldrig.
-  **`keep_alive` sendes ALDRIG til cloud** (lokal-VRAM-direktiv; hang requesten
-  — fixet v1.50.0, T31 mutations-tjekket).
-- **Sætnings-chunking**: LLM'ens svar splittes på `.!?` og hver komplet sætning
-  synthesizes med det samme. **Fra v1.54.0 LEVERES de også straks** (streamet
-  endpoint) — appen afspiller første sætning mens resten genereres, i stedet
-  for at vente på det samlede WAV.
-
-**Endpoints (worker):**
-```
-GET  /voice/asr/status          POST /voice/asr/transcribe
-GET  /voice/tts/status          POST /voice/tts/synthesize
-POST /voice/converse            (fil-sti, rig-lokal)
-POST /voice/converse/upload     (base64, telefonvendt — BUFRET, fallback)
-POST /voice/converse/stream     (base64 → NDJSON pr. sætning — STREAMET, v1.54.0)
-GET  /rag/ingest/pdf/status     POST /rag/ingest/pdf
-GET  /rag/ingest/docx/status    POST /rag/ingest/docx
-POST /rag/ingest/image          (foto → vision-model → RAG, 501 uden vision-model)
-```
-
-**Env-variabler** (ALVA_*-navnene er BEVIDST uændrede, ligesom applicationId):
-```
-ALVA_ASR_MODEL      (default large-v3)
-ALVA_ASR_DEVICE     (default cuda)
-ALVA_ASR_COMPUTE    (default int8)
-ALVA_TTS_VOICE      (default da_DK-talesyntese-medium)
-ALVA_TTS_VOICES_DIR (default ~/.alva/piper-voices)
-MODELRIG_OLLAMA_TIMEOUT    (default 600)
-MODELRIG_OLLAMA_KEEP_ALIVE (default 30m — kun mod LOKAL Ollama)
-MODELRIG_GEN_MODEL         (worker-fallback hvis appen ikke sender model)
-MODELRIG_HOST       (sæt til 0.0.0.0!)
-KALIV_TOOLS_ENABLED (=1 for tool-laget; off by default)
-KALIV_VISION_MODEL  (fx llama3.2-vision:11b; foto→RAG giver 501 uden)
-```
-
----
-
-## 7. Hårdt tillærte lektier (gentag ikke disse fejl)
-
-1. **Den korteste timeout i kæden vinder.** Voice fejlede fordi der var TRE
-   timeouts: Android (120s), Go-server (120s), worker→Ollama (60s). At fikse
-   klienten alene så rigtigt ud i test og fejlede i praksis. Nu: 5min / 10min /
-   600s. Almindelig chat beholder bevidst 120s.
-
-2. **PyAV blokeres af Windows Application Control.** faster-whisper dekoder lyd
-   via PyAV, hvis DLL'er Windows afviser. `voice_asr.py` dekoder nu selv med
-   `soundfile`.
-
-3. **CUDA-DLL'er er ikke på Windows' søgesti.** `pip install nvidia-cublas-cu12`
-   lægger dem i `site-packages/nvidia/*/bin`, som Windows ikke søger i.
-   `_add_cuda_dll_dirs()` registrerer dem via `os.add_dll_directory()`.
-
-4. **Et status-endpoint må ikke lave arbejde.** Jeg lod `/voice/asr/status`
-   kalde DLL-registreringen; den hang, netop når Anders skulle diagnosticere.
-
-5. **"✓ forbundet" må ikke betyde "en parring er gemt".** Den skal pinge.
-   Appen sagde "forbundet" mens alt faldt tilbage til cloud.
-
-6. **Multi-line Python one-liners virker ikke i cmd.** Skriv en `.py`-fil.
-   cmd bruger `%USERPROFILE%` ikke `~`, `mkdir` uden `-p`, `cd /d` ved drevskift.
-
-7. **On-device-test er den eneste sandhed.** Alle tre store Voice-bugs
-   (PyAV, timeouts, CUDA) var usynlige for headless builds.
-
-7b. **Læs fejlteksten FØR du fikser.** To gange på to dage: 501'eren sagde
-   `cublas64_12.dll is not found` mens vi fejlsøgte TTS, og CI sagde
-   `Artifact storage quota has been hit` mens jeg opgraderede Node-actions.
-   Svaret stod der begge gange.
-
-7c. **At kompilere er ikke at shippe.** v1.20.0 byggede rent og leverede nul
-   assets. `release`-jobbet verificerer nu at .apk/.zip/.exe faktisk ligger på
-   releasen, og fejler hvis ikke.
-
-9. **Læs koden før du skriver planen.** PLAN_v1.13.0 påstod at stop skulle
-   "annullere den kørende streaming-request". Forkert: `/voice/converse`
-   er ikke streaming — appen får ét samlet WAV, og sætnings-chunkingen sker
-   inde i workeren. Det rigtige stop er et flag som `playWav`s skriveløkke
-   tjekker, fordi coroutine-cancel ikke kan afbryde et blokerende
-   `AudioTrack.write()`.
-
-10. **Android KAN compile-verificeres i sandboxen.** JDK 21 er der;
-   `sdkmanager` + platform-35 + build-tools tager ~4 min, og
-   `./gradlew :app:assembleRelease` kører igennem. Ingen grund til at
-   skubbe utestet Kotlin ud og håbe på CI. (`local.properties` må ikke
-   committes.)
-
-10. **Blokerende arbejde i `async def` fryser hele workeren.** `tools_chat`
-   kaldte den synkrone `GATE.propose()` direkte (nvidia-smi, disk, sqlite), og
-   `voice_pipeline.converse()` kaldte `transcribe_wav()` — sekunders CUDA-arbejde.
-   Målt: et 1-sekunds tool gav **1005 ms** event-loop-stall; med `to_thread` 4 ms.
-   Alt blokerende skal i en tråd — men **behold serialiseringen** med en lås,
-   for event-loopet serialiserede dem utilsigtet, og modelobjekterne er delte.
-
-9. **En ny gren i et `when` arver ingenting.** Tools-grenen blev sat foran
-   normal-vejen og tabte lydløst: samtalehistorik (v1.25.0), RAG-kontekst
-   (v1.26.0), vedhæftet billede + persistens af svaret (v1.27.0). Ingen fejl,
-   ingen advarsel — bare et svar der manglede noget. Når du tilføjer en gren:
-   list hvad de andre grene gør, og forklar for hver ting hvorfor din ikke
-   behøver den.
-
-8. **`os.add_dll_directory` er ikke nok på Windows.** CTranslate2 loader
-   cuBLAS ad den klassiske søgesti (kun PATH). Mappen var registreret,
-   DLL'en lå på disken — load fejlede alligevel, og først ved `encode()`,
-   ikke ved konstruktion (så "MODEL LOADED OK" beviser intet om CUDA).
-   Fix i v1.12.3: sæt BÅDE add_dll_directory og PATH.
-
-8. **Fire versionskonstanter bumpes i lockstep:** `worker/app/main.py`
-   (VERSION), `backend/internal/config/config.go` (Version),
-   `desktop/composeApp/build.gradle.kts` (packageVersion),
-   `android/app/build.gradle.kts` (versionName). CI's smoke test fejler
-   releasen hvis server-exe'ens /healthz ikke matcher (fanget 9/7, v1.12.2).
-
----
-
-## 8. Arbejdsform med Anders
+## 3. Arbejdsform med Anders
 
 - **Svar på dansk.** Koncist, ærligt, direkte. Ingen falsk sikkerhed.
-- **Skeln verificeret / kvalificeret gæt / gætværk.** Sig hvad der ikke er testet.
-- **"Kør" / "kør videre"** = fuld autonom eksekvering uden check-ins.
-- **Hver release tagges `vX.Y.Z`** med CI-verifikation (vent ~5 min, tjek assets).
-- **MVP → V1 → V2.** Byg smalt, bevis, udvid.
-- **Notion-MCP må ALDRIG kaldes uopfordret.**
-- **DKK ved priser.** København/Nørrebro som kontekst.
-- Anders sætter pris på ærlig modstand. Sig fra hvis noget ikke kan bygges
-  meningsfuldt uden hans test eller beslutning — det er sket flere gange og
-  har været den rigtige beslutning.
+- **Skeln verificeret / kvalificeret antagelse / gæt.** Sig hvad der ikke er
+  testet. Standard-forbehold på UI: "verificeret ved build, ikke med øjne".
+- **"kør" / "kør videre"** = fuld autonom eksekvering uden check-ins, med
+  fuld commit-autoritet. **"test jeg"** = Anders tester på hardware.
+- **Anders kører FLERE parallelle Claude-sessioner.** Derfor: `git pull
+  --rebase` før alt arbejde, tjek version-sites for kollisioner, og forvent
+  at en anden session kan have tilføjet det samme (skete med
+  voiceCloudModel — dup fjernet, UI wired ovenpå).
+- **Ærlig modstand er ønsket.** Sig fra når noget ikke kan bygges meningsfuldt
+  uden Anders' test eller beslutning — det har flere gange været det rigtige.
+- **MVP → V1 → V2.** Byg smalt, bevis, udvid. **DKK** ved priser;
+  København/Nørrebro som kontekst.
+- Ret aldrig noget "efter øjemål" når der findes en autoritativ kilde
+  (design-tokens, fejltekster, docs) — og læs fejlteksten FØR du fikser.
 
 ---
 
-## 9. Toolchain (skal genopsættes i ny session)
+## 4. Release-flow (bevist, følges præcist)
 
-Sandbox-layoutet pr. 12/7 (verificeret; tidligere lå alt i `/tmp`):
-```
-JDK 21      forudinstalleret (java -version = 21.0.x)
-Android SDK /home/claude/android-sdk   (SDK 35; aapt2 findes via `find`)
-            export ANDROID_HOME=/home/claude/android-sdk ANDROID_SDK_ROOT=$ANDROID_HOME
-Gradle      wrapper i repoet (android/gradlew, desktop/gradlew) — brug --offline
-Go 1.23     /usr/local/go/bin — SKAL sources: export PATH=$PATH:/usr/local/go/bin
-mermaid-cli /home/claude/.npm-global/bin/mmdc — kræv -p puppeteer-config med
-            {"args":["--no-sandbox"]} (kører som root)
-Repo-klon   /home/claude/repo (PAT indlejret i origin-URL)
-```
-**NB:** stierne kan ændre sig mellem sandbox-generationer — verificér med
-`ls`/`which` i ny session frem for at stole på denne liste.
-
-**Byg:**
-```bash
-# Android (første build efter stor ændring timer ofte ud — kør igen)
-cd android && timeout 160 /tmp/gradle-8.9/bin/gradle :app:assembleDebug --no-daemon --console=plain
-
-# Backend
-cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
-
-# Worker-import-tjek
-export PYTHONPATH="$PWD/worker" && python3 -c "from app.main import app"
-```
-
-**Tests (68 assertions):**
-```bash
-python3 tests/backend_smoke.py   # 11
-python3 tests/worker_rag.py      # 32
-python3 tests/worker_unit.py     # 25
-```
-
-**APK-signatur SKAL forblive:**
-`656392b03a321501ba91769be888ed4c9baa3275479bfbb18e5205824c8ae926`
-(`applicationId` = `dk.ternedal.modelrig` — må ALDRIG ændres)
-
-**Release-flow:**
-```bash
-git add -A
-git -c commit.gpgsign=false commit -F /tmp/msg.txt   # commit via fil
-git fetch <url> main && git rebase FETCH_HEAD        # ALTID (parallel session)
-git push <url> main:main
-# opret release via GitHub API, make_latest=true, prerelease=false
-# vent ~250s, verificér run + assets
-```
+1. **Bump alle FIRE version-sites i lockstep:** `worker/app/main.py`
+   (VERSION) · `backend/internal/config/config.go` (const Version) ·
+   `android/app/build.gradle.kts` (versionName + versionCode, monotont —
+   næste er **132**) · `desktop/composeApp/build.gradle.kts` (packageVersion).
+2. Byg/verificér (APK og/eller jar) → kør tests → opdatér `STATUS.md`
+   linje 3 (indeks [2] via python splitlines).
+3. `git add -A && git -c commit.gpgsign=false commit -q -F /tmp/m.txt`
+   → `git fetch -q origin main && git rebase -q origin/main && git push
+   origin main:main` (masker tokens i output med sed-mønstret fra §0.1).
+   NB: `git pull --rebase` brokker sig ("Please commit or stash") når træet
+   er beskidt — harmløst; commit+push går igennem.
+4. POST release via GitHub API (token trækkes af origin-URL'en;
+   `make_latest:"true"`) → `sleep ~290` → verificér **CI grøn + 6 assets**:
+   `kaliv-latest.apk`, `modelrig-vX.Y.Z.apk`, `Kaliv-windows-x64-X.Y.Z.jar`,
+   zip, 2 Windows-exes.
+5. **Docs-only-ændringer = commit uden tag/bump.**
 
 ---
 
-## 10. Roadmap — hvad der kan bygges
+## 5. Sandbox-toolchain (verificér selv i ny session)
 
-**Kan bygges og verificeres uden Anders:**
-- Flere dokumentformater (PPTX, HTML) — samme mønster som PDF/DOCX
-- Forbedringer til markdown-strip, chunking, fejlbeskeder
-
-**Agent-laget (V5) — MVP bygget i `v1.18.0`:**
-- Spec godkendt af Anders 10/7. `rig_status` (read) + `note_append` (write,
-  append-only, én mappe). Bekræftelsesport håndhævet i workeren, append-only
-  audit-log, kill switch. **Slået FRA som standard** (`KALIV_TOOLS_ENABLED=1`).
-  **Fra v1.28.0 er kill switch-beslutningen persistent** (`kaliv-tools-state.json`,
-  sti via `KALIV_TOOLS_STATE`). Env-varen er kun *første-kørsel*-default: slår du
-  laget fra i appen, forbliver det slået fra efter en genstart, selv med
-  `KALIV_TOOLS_ENABLED=1` i env. Slet statefilen for at nulstille.
-- 27 tests grønne, inkl. T7/T8 (prompt injection). Kører nu i CI.
-- **v1.19.0:** modellen kan foreslå tools (`POST /tools/chat`), og Go-serveren
-  proxy'er hele laget.
-- **v1.20.0:** cloud må foreslå tools (Anders' beslutning). Reglen: **risiko
-  afgør, ikke oprindelse** — se `tools.requires_confirmation()`. Skrivning
-  kræver kortet uanset hvem der foreslog; læsning kører frit. Cloud-nøglen
-  parkeres aldrig med en ventende handling; appen gensender den med
-  beslutningen.
-- **v1.21.0: bekræftelseskortet er i appen.** ⋮-menu → "🛠 Tools" slår
-  tools-tilstand til (fra som standard; riggens `KALIV_TOOLS_ENABLED` er den
-  anden lås). Et skrivende forslag parkerer som et kort over inputfeltet —
-  intet er udført mens det står der. Afvis og Godkend er lige store.
-- **v1.22.0:** tools virker også i cloud-tilstand — men kun ved at rute
-  cloud-modellen GENNEM riggen (`/tools/chat` med `cloud_key`), for det er dér
-  gaten bor. Appens direkte `CloudClient`-vej har slet ingen tools: intet at
-  omgå, for der er ingen dør på den vej. Kortet siger "Cloud-modellen
-  foreslår:", og `origin` står på audit-rækken.
-- **v1.23.0: handlingsloggen kan læses** (⋮ → Handlingslog). Viser de sidste
-  50 rækker fra `/tools/audit`, farvet efter udfald, ☁ for cloud-oprindelse.
-  Read-only — appen kan ikke ændre eller rydde loggen.
-- ⚠️ **Ikke on-device-testet.** Kort + log er compile-verificeret, ikke prøvet
-  på Pixel'en. Kræver `KALIV_TOOLS_ENABLED=1` på riggen.
-- ⚠️ **Betingelsen står ved magt:** vilkårlige filstier eller 3.-parts
-  MCP-servere kræver separat Windows-konto + ACL'er FØRST (kravspec §5b).
-
-**Testdækning (10/7):** worker 236 tests (unit 52 · rag 48 · tools 119 · backup 17) +
-Go `internal/httpapi` 4 tests. CI kører nu `go vet` og `go test ./...` —
-det gjorde den ikke før v1.23.1, så Go-koden var reelt utestet.
-
-**Light/dark (v1.32.0):** Manuel toggle i ⋮-menuen, gemt i TokenStore (`dark_mode`,
-default true). Paletten er nu `KalivTheme.colors.X` (CompositionLocal), ikke
-globale `val`'er. **Platform-grænse:** launcher-ikonet og OS-splashens første
-frame følger *systemets* tema (via `-night`-ressourcer), IKKE in-app-toggle'en —
-OS'et vælger dem før app-processen kører. Toggle'en styrer alt Compose tegner.
-
-**Diagnose først (v1.31.0):** `GET /api/v1/health/full` (eller `/health/full`
-på workeren direkte) giver én samlet status — worker, Ollama, ASR+device, TTS,
-tools-kill-switch, disk — hver med grund. `?deep=true` tester også en embedding.
-Kig her FØRST når en device-test driller, før du gætter på hvilken del der fejler.
-
-**Kræver Anders' test:**
-- Tap-to-stop + Kaliv-navnerebrand (bygges som v1.13.0)
-- Barge-in-kalibrering (rmsThreshold)
-- De resterende tests i §4
-
-**Kræver Anders' beslutning:**
-- **Wake word** ("Hey Kaliv") — openwakeword, valgfri mode
-- *(v1.14.0 tilføjede PPTX- og HTML-ingest. PPTX kræver `pip install python-pptx`
-  på riggen; HTML kræver intet — stdlib.)*
-- **Agent-tools** — modellen kalder værktøjer via rig'en. Kræver en gennemtænkt
-  sikkerhedsmodel (hvad må kaldes, bekræftelse, prompt injection). Størst
-  usikkerhed i hele roadmappen.
-- **OCR** til scannede PDF'er (i dag: ærlig 422 "no extractable text")
+```
+Repo-klon    /home/claude/repo   (PAT indlejret i origin-URL — masker i output)
+Android SDK  /home/claude/android-sdk
+             export ANDROID_HOME=/home/claude/android-sdk ANDROID_SDK_ROOT=$ANDROID_HOME
+             aapt2 findes via: find /home/claude/android-sdk -name aapt2
+Gradle       wrapper i repoet (android/gradlew, desktop/gradlew) — brug --offline
+Go 1.23      /usr/local/go/bin — SKAL sources: export PATH=$PATH:/usr/local/go/bin
+JDK 21       forudinstalleret
+mermaid-cli  /home/claude/.npm-global/bin/mmdc — kræver -p cfg med {"args":["--no-sandbox"]}
+```
+Desktop er JVM-only Compose: tasken hedder `:composeApp:compileKotlin`
+(IKKE compileKotlinJvm). Android release-build: `:app:assembleRelease`.
+Stierne kan ændre sig mellem sandbox-generationer — verificér med `ls`/`which`.
 
 ---
 
-## 11. Licenser at kende
+## 6. Sådan starter Anders riggen
 
-- `faster-whisper` — MIT ✅
-- `piper-tts` — **GPL-3.0** (aktiv `OHF-Voice/piper1-gpl`; gl. `rhasspy/piper`
-  arkiveret okt-2025). Fint privat; tjek ved deling.
-- `PyMuPDF` — AGPL/kommerciel
-- Parakeet (dansk ASR, ikke brugt) — NVIDIA Open Model License + tung NeMo
+**Nem vej:** `scripts\start-kaliv.bat` — starter Ollama + worker + server
+korrekt (inkl. `MODELRIG_HOST=0.0.0.0`) og kører `/health/full`. Se
+`scripts/START_HERE.md` for manuel vej og fejlsøgning. Telefonen parres mod
+Tailscale-IP'en (`http://100.88.91.64:8080`), ikke LAN.
+
+---
+
+## 7. Arkitektur (kort)
+
+```
+Kaliv (Android/Desktop) → Go :8080 (pairing/tokens/reverse-proxy, flusher
+streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lokal)
+                                        └→ Ollama Cloud (valgfrit LLM-trin)
+```
+- **Voice:** ASR/TTS altid lokalt; LLM-trin kan gå til cloud med EGEN model
+  (`voiceCloudModel`, fallback til `cloudModel`). Bufret:
+  `/voice/converse/upload`. **Streamet: `/voice/converse/stream`** (NDJSON:
+  transcript → chunk pr. sætning m. base64-lyd → done). **`keep_alive`
+  sendes ALDRIG til cloud** (lokal-VRAM-direktiv; hang requests — v1.50.0).
+- **Tools:** registry i kode, bekræftelses-gate i WORKEREN (klient kan ikke
+  omgå), append-only audit. `KALIV_TOOLS_ENABLED=1` for at tænde.
+- **RAG:** pdf/docx/pptx/html + foto (`/rag/ingest/image`, 501 uden
+  `KALIV_VISION_MODEL`). Embeddings altid lokale (nomic-embed-text).
+- **Design:** `assets/design/kaliv-ui-guide/` er autoritativ
+  (kaliv-ui-tokens.json v1.0). Ændr tokens, ikke øjemål. Desktop følger den
+  fra v1.58.0; **Android kører ældre bronze (#8B6B3D) — alignment er en
+  ÅBEN Anders-beslutning.** Fonte (Inter/EB Garamond) mangler som filer.
+- Fuld env-liste og endpoints: `README.md` + `TROUBLESHOOTING.md`.
+
+---
+
+## 8. Hårdt tillærte lektier (gentag ikke disse fejl)
+
+1. **On-device-test er den eneste sandhed.** Næsten hver v1.34.x+-bug var
+   "koden korrekt, tests grønne, brudt på rigtig hardware".
+2. **At kompilere er ikke at shippe** — og **at editere træet er ikke at
+   shippe.** CI-jobbet verificerer at assets faktisk ligger på releasen.
+3. **Verificér HVER patch-erstatning individuelt.** v1.57's composer-patch
+   matchede aldrig (søge-anker med `\uXXXX`-escapes mod en fil med rigtige
+   tegn) og scriptet printede succes ubetinget → release-noten overpåstod.
+   Nu: assert pr. erstatning + grep-verifikation bagefter. Match mod filens
+   FAKTISKE indhold, ikke mod hvad du tror du skrev.
+4. **Den korteste timeout i kæden vinder.** Voice: Android/Go/worker skal
+   alle være lange (5min/10min/600s); almindelig chat bevidst 120s.
+5. **Blokerende arbejde i `async def` fryser hele workeren.** Alt tungt i
+   `to_thread` — men BEHOLD serialiseringen med en lås (delte modelobjekter).
+6. **Windows-lektierne:** env-reads kræver `TrimSpace` (cmd's `set X=val &&`
+   fanger trailing spaces — mutations-testet); datafiler ankres til exe-dir
+   (Go) / `%LOCALAPPDATA%\Kaliv` (Python); PyAV blokeres af Application
+   Control (→ soundfile); CUDA-DLL'er kræver BÅDE `add_dll_directory` OG
+   PATH; multi-line python-one-liners virker ikke i cmd; parenteser +
+   nested quotes → goto-labels og genererede `.cmd` i `%TEMP%`.
+7. **Læs fejlteksten FØR du fikser** — svaret har stået der ordret, to gange.
+8. **Et status-endpoint må ikke lave arbejde.**
+9. **En ny gren i et `when` arver ingenting.** List hvad de andre grene gør,
+   og begrund pr. ting hvorfor din ikke behøver den (kostede historik, RAG,
+   billede, persistens ad tre omgange).
+10. **Prompt alene tøjler ikke en lille models vaner** (emojis, persona) —
+    deterministisk efterbehandling gør (klient-strip på færdige + indlæste).
+11. **"Slet det aktive X" skal nulstille den aktive peger FØR næste
+    skrivning** (FK-crash på begge platforme, v1.46.0).
+12. **Compose:** `SnapshotStateList` er tråd-sikker at mutere fra IO-tråde;
+    sæt indeks-variabler synkront i callback-rækkefølgen (replyIdx-racet);
+    `painterResource` tegner kun animerede WebP'ers første frame (→ native
+    Canvas-animation); `remember` genlæses når skærmen disposes via
+    `when(screen)` — naviger tilbage skal sætte den state den forventer.
+13. **Send aldrig lokale Ollama-parametre til cloud-upstreams** (keep_alive).
+14. **Fire versionskonstanter i lockstep** — CI-smoke fejler releasen ved
+    mismatch. **"✓ forbundet" skal pinge**, ikke bare betyde "parring gemt".
+
+---
+
+## 9. Åbne byggekandidater (når Anders siger til)
+
+- **V6 input-halvdel:** streaming-ASR mens man taler (output-halvdelen ✅
+  v1.54–55) · wake word "Hey Kaliv" (beslutning: altid-lyttende mik).
+- **Design-rester:** footer-strip ("Sikker forbindelse" · "Kaliv kan tage
+  fejl") · hover-actions pr. besked (kopiér m.m.) · rigtige fonte når Anders
+  leverer .ttf · a11y-punkterne fra checklisten · Android-palet-alignment
+  (**Anders-beslutning**).
+- **Tools i voice-flowet** (V5-hale): Kaliv siger højt hvad den vil gøre og
+  venter på "ja". · **Auto-rute til cloud når Tools er på** (design i
+  CLOUD_TOOLS.md §B, kørbar fra v1.50.0+).
+- Større spor (V9 hjemmet, V10 vision-udvidelse, V11 agent v2, V12 dansk
+  model, V13 API, V14 føderation, V15 modenhed): se `ROADMAP.md` §14–20.
+
+---
+
+## 10. Dok-kort
+
+`STATUS.md` linje 3 = altid-aktuel one-liner (resten: release-historik) ·
+`ROADMAP.md` = retning, lukket-endet ved V15 · `DEVICE_TEST.md` = test-
+runbooks (S1–S4 streaming) · `TROUBLESHOOTING.md` = symptom→fix fra faktiske
+fejl · `MODELS.md` = modelvalg + voice-modeller · `CLOUD_TOOLS.md` =
+cloud-agent-status · `DRIFT.md` = Tailscale/backup/geninstallation ·
+`scripts/START_HERE.md` = opstart · `assets/design/kaliv-ui-guide/` =
+design-autoritet · Historiske (bannered): TESTGUIDE, PLAN_v1.13.0,
+ALVA_VOICE_ROADMAP_DELTA, CLIENT_BUILD_AND_TEST, KRAVSPEC_V5 (leveret).
