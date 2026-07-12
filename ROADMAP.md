@@ -6,6 +6,14 @@
 > fundet og fixet i v1.12.3 (CI grøn, 4 assets). Appen omdøbes **Alva →
 > Kaliv** (navn i v1.13.0; ikon afventer Anders' brand-pakke). Udestående
 > og nye horisonter: se §9–21 (inkl. målarkitektur i §22).
+>
+> **Navneprincip (fast regel, Anders 12/7-2026):** kun *backenden* hedder
+> **ModelRig** (server, worker, repo, API, exe-navne). **Alt brugervendt
+> hedder Kaliv** — apps, vinduestitler, ikoner, fejlbeskeder og de
+> artefakter brugeren henter (`kaliv-latest.apk`, `Kaliv-…jar`).
+> Audit 12/7: begge klienter overholder reglen (app_name/titel = Kaliv,
+> nul brugervendte ModelRig-strenge; backend-omtale i settings-labels er
+> pr. definition tilladt).
 
 **Gældende version:** 0.15.5 · **Dato:** 2026-07-04 · **Ejer:** Anders
 **Estimat-enhed:** "byggesession" = én autonom arbejdsblok med Claude; leverer typisk 1 tagget release.
@@ -443,19 +451,22 @@ lokalt. Bygger på V4's streaming-ASR og V5's tool-lag.
    mangler)**, ingen voice, og "parring" er et manuelt token-felt/env-var.
    Fundamentet er dog sundt: chat med streaming, RAG, markdown, lokal historik.
    Rækkefølge (billigst-synligt først, genbrug fra Android hvor muligt):
-   a. **Kaliv-rebrand + light/dark** [1–2 sessioner]: paletten og
-      KalivColors-mønstret ER bygget på Android — porteres. (OBS: kun
-      visuelt navn/ikon; package-navne røres ikke.)
-   b. **Tools-mode + bekræftelseskort + Handlingslog** [2–3 sessioner]:
-      V5 på desktop. Worker-siden er identisk; det er ren klient-UI.
-      Størst reel værdi — agent-laget fra skrivebordet.
-   c. **Rigtig parring** [1 session]: samme flow som Android i stedet
-      for token-indtastning; genbruger /pair-endpoints.
-   d. **Fejlbesked-paritet** [lille]: den ærlige friendlyError-mapping
-      (tools-slået-fra, 401-genpar osv.) porteres.
+   a. ~~Kaliv-rebrand + light/dark~~ ✅ **v1.35.0 (12/7)**: KalivColors
+      dark+light porteret, vinduestitel "Kaliv", jar-artefaktet hedder
+      nu `Kaliv-windows-x64-…jar`. Package-navne urørt som lovet.
+   b. ~~Tools-mode + bekræftelseskort + Handlingslog~~ ✅ **v1.35.0**:
+      ToolsClient (157 linjer) + kort med Godkend/Afvis + audit-visning.
+      V5 fra skrivebordet.
+   c. ~~Rigtig parring~~ ✅ **v1.35.0**: /api/v1/pair/claim-flowet,
+      token persisteres i settings-tabellen (env-var stadig fallback).
+   d. ~~Fejlbesked-paritet~~ ✅ **v1.35.0**: friendlyError porteret
+      (tools-slået-fra, 401-genpar, 502/503 — de ærlige beskeder).
    e. **Desktop-voice**: fuld paritet — UÆNDRET sidst, efter V4's
       streaming-ASR som planlagt.
-   Estimat a–d: 4–6 sessioner; e følger voice-sporet.
+   Status a–d: **leveret i én session (v1.35.0, parallel session, CI-grøn).**
+   ⬜ **Mangler: on-device-verifikation på Anders' Windows** — fejlklassen
+   "kompilerer+CI-grøn men brækket på rigtig skærm" gælder OGSÅ desktop
+   (jf. hele v1.34.x-arcen). e (voice) følger voice-sporet som planlagt.
 
 **Exit-kriterium:** "Hey Kaliv" → svar → opfølgning håndfrit på mindst
 to enheder; en proaktiv påmindelse leveres uden at appen er åben.
@@ -882,10 +893,11 @@ dansk-drift), ikke kode — deraf V5.5-sporet.
    (auto-rute, ~1 session) eller V7 pkt. 1 (Windows-services, ~2 sessioner).
 7. **Nye horisonter (12/7):** V9–V15 tilføjet (§14–20) med afhængighedskort
    (§21) — roadmappen er nu lukket-endet med V15 som bevidst slutpunkt.
-8. **Desktop-kærlighed (Anders' ønske 12/7):** gap-billedet er læst og
-   konkretiseret i **V6.6 a–e** — desktop er stadig ModelRig (gammel
-   palette, ingen tools/kort, ingen voice). Kan prioriteres når som helst;
-   a (rebrand+light) og b (tools-UI) er rene klient-opgaver uden
-   worker-ændringer, dvs. lav risiko for resten af stakken. To ting kan startes NÅR SOM HELST uden at vente på noget:
+8. **Desktop-kærlighed:** V6.6 **a–d LEVERET (v1.35.0, 12/7, CI-grøn)** af
+   parallel session — rebrand+light, tools+kort+Handlingslog, parring,
+   ærlige fejlbeskeder. Navneprincippet (backend=ModelRig, brugervendt=
+   Kaliv) er kodificeret øverst og auditeret rent. **Anders (5 min):** hent
+   `Kaliv-windows-x64-1.35.0.jar` fra releasen og efterse på Windows —
+   on-device-verifikation udestår, og det er dér desktop-fejl viser sig. To ting kan startes NÅR SOM HELST uden at vente på noget:
    V10 (vision — fundamentet findes) og V12.0 (eval-harnessen — gør alle
    fremtidige modelvalg til målinger). Resten venter på V7/beslutninger.
