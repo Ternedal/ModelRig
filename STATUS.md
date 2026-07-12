@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.50.0** — "ROOT CAUSE fundet paa voice-via-cloud-timeout: workeren sendte keep_alive (en LOKAL-VRAM-direktiv) til Ollama Cloud. Cloud styrer ikke din VRAM, saa det hang requesten. Almindelig cloud-chat virker PRAECIS fordi appens CloudClient aldrig sender keep_alive. Fix: chat_stream (voice) + chat_tools sender kun keep_alive til den LOKALE rig, ikke cloud. T31 regressionstest, mutationstjekket. 283 worker-tests groenne". Follows 1.49.0 (cloud-diagnostik). Autonomous sessions, **2026-07-02 → 07-12**.
+Version **1.51.0** — "Transparens: altid-synlig routing-stribe under headeren viser nu WHICH model svarer tekst (◈/☁) OG hvilken svarer tale (🎙/☁ med cloud-indikator) — foer var voice-cloud-tilstanden begravet i model-menuen og kun synlig EFTER svar via chippen. Voice-via-cloud bekraeftet virker (keep_alive-fix v1.50.0). Aerlig note: 671B cloud-model paa hele ASR→LLM→TTS-kaeden ER langsom — det er modellen, ikke koden". Follows 1.50.0. Autonomous sessions, **2026-07-02 → 07-12**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 

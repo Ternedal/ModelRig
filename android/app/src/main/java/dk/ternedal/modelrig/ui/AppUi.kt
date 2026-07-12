@@ -1478,6 +1478,29 @@ private fun ChatScreen(
                     }
                 }
             }
+            // Persistent routing strip: always shows, at a glance, WHICH model
+            // answers text and WHICH answers voice (and whether voice uses cloud).
+            // Before this, the voice-cloud state was buried in the model menu and
+            // only visible after a reply via the chip -- not transparent.
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val textLabel = when (mode) {
+                    "cloud" -> "☁ tekst: $cloudModel"
+                    else -> "◈ tekst: $currentModel"
+                }
+                Text(textLabel, color = KalivTheme.colors.textMuted, fontSize = 11.sp)
+                Spacer(Modifier.width(10.dp))
+                // Voice routing: cloud only when the toggle is on AND a key exists.
+                val voiceCloud = voiceUsesCloud && store.cloudKey != null
+                val voiceLabel = if (voiceCloud) "☁ tale: ${store.cloudModel}" else "🎙 tale: $currentModel"
+                Text(
+                    voiceLabel,
+                    color = if (voiceCloud) KalivTheme.colors.amber else KalivTheme.colors.textMuted,
+                    fontSize = 11.sp,
+                )
+            }
             if (ingesting || ingestStatus != null || ingestError != null) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
                     when {
