@@ -587,11 +587,11 @@ model KIGGER på det endnu.
    chat bærer allerede billeder hele vejen (klient → Go → Ollama urørt),
    tools-stien ligeså (T23). Pull en vision-model, vælg den i dropdownen
    → test. **Desktop mangler billed-UI helt** (→ V6.6-rest).
-3. ~~Foto → RAG (worker-siden)~~ ✅ **v1.37.0**: `/rag/ingest/image` —
-   vision-model transskriberer ordret → samme chunk/embed/store-pipeline
-   som PDF. **501-gated på `KALIV_VISION_MODEL`** (aldrig gætte med
-   gen-modellen), ærlig 422 ved tomt indhold. 12 tests, gate mutations-
-   tjekket. ⬜ Klient-UI-hook ("gem dette foto i Viden") udestår.
+3. ~~Foto → RAG~~ ✅ **worker v1.37.0 + klient-UI v1.42.0**: `/rag/ingest/image`
+   (vision-model transskriberer ordret → samme chunk/embed/store som PDF,
+   501-gated på `KALIV_VISION_MODEL`, ærlig 422). Klient: "＋ Gem i Viden"-
+   knap på det vedhæftede billede → dekoder base64 → ingestImage → status.
+   Hele foto→RAG-vejen er nu brugbar fra UI.
 4. **Vision i tools-flowet** 🟡: stien bærer allerede billedet (T23) —
    adfærden med en RIGTIG vision-model er uverificeret (Anders + model).
 

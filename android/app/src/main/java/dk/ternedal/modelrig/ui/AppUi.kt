@@ -618,6 +618,7 @@ private fun ChatScreen(
     // persisted, not resent with history (same scope as RAG document context).
     var pendingImageB64 by remember { mutableStateOf<String?>(null) }
     var pendingImageError by remember { mutableStateOf<String?>(null) }
+    var imageIngestStatus by remember { mutableStateOf<String?>(null) }
 
     // Kaliv Voice: push-to-talk state. Voice runs on the rig (ASR/TTS live
     // there), so the mic button only shows in rig mode. recording = mic is
@@ -1522,10 +1523,46 @@ private fun ChatScreen(
                     ) {
                         Text("🖼 Billede vedhæftet", color = KalivTheme.colors.signal, fontSize = 12.sp)
                         Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { pendingImageB64 = null }) {
+                        // Save the photo into the RAG index instead of (or as well
+                        // as) sending it to chat: a vision model on the rig reads
+                        // it and it becomes searchable knowledge. Needs a paired
+                        // backend + KALIV_VISION_MODEL -- the worker says so with a
+                        // clear 501 if it's off, surfaced here.
+                        TextButton(
+                            enabled = imageIngestStatus != "gemmer" && store.token != null,
+                            onClick = {
+                                val b64 = pendingImageB64 ?: return@TextButton
+                                imageIngestStatus = "gemmer"
+                                scope.launch {
+                                    val res = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            val bytes = android.util.Base64.decode(b64, android.util.Base64.NO_WRAP)
+                                            ModelRigClient(store.baseUrl ?: "", store.token)
+                                                .ingestImage("foto ${java.text.SimpleDateFormat("dd-MM HH:mm", java.util.Locale("da")).format(java.util.Date())}", bytes)
+                                        }
+                                    }
+                                    res.onSuccess {
+                                        imageIngestStatus = "✓ gemt i Viden (${it.chunksAdded} chunks)"
+                                        pendingImageB64 = null
+                                    }.onFailure {
+                                        imageIngestStatus = friendlyError(it)
+                                    }
+                                }
+                            },
+                        ) {
+                            Text("＋ Gem i Viden", color = KalivTheme.colors.signal, fontSize = 12.sp)
+                        }
+                        TextButton(onClick = { pendingImageB64 = null; imageIngestStatus = null }) {
                             Text("✕ Fjern", color = KalivTheme.colors.textMuted, fontSize = 12.sp)
                         }
                     }
+                }
+                imageIngestStatus?.let {
+                    Text(it,
+                        color = if (it.startsWith("✓")) KalivTheme.colors.success
+                                else if (it == "gemmer") KalivTheme.colors.textMuted
+                                else KalivTheme.colors.danger,
+                        fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
                 }
                 pendingImageError?.let {
                     Text("Billedfejl: $it", color = KalivTheme.colors.danger, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))

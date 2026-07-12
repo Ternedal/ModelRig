@@ -641,6 +641,30 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         }
     }
 
+    /** Ingest a photo (a document page, a whiteboard, a receipt) into the RAG
+     *  index: a vision model on the worker transcribes it, then the text goes
+     *  through the same chunk/embed/store pipeline. Requires KALIV_VISION_MODEL
+     *  on the worker -- a 501 comes back as a clear message if it's unset. */
+    fun ingestImage(source: String, imageBytes: ByteArray, chunkSize: Int = 800, overlap: Int = 150): IngestResult {
+        val b64 = android.util.Base64.encodeToString(imageBytes, android.util.Base64.NO_WRAP)
+        val payload = JSONObject()
+            .put("image_base64", b64)
+            .put("source", source)
+            .put("chunk_size", chunkSize)
+            .put("overlap", overlap)
+            .toString()
+            .toRequestBody(jsonType)
+        val builder = Request.Builder().url("$base/api/v1/rag/ingest/image").post(payload)
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        // Long timeout: a vision-model extraction plus embeddings is a slow turn.
+        voiceHttp.newCall(builder.build()).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("Foto-ingest fejlede (${resp.code}): $body")
+            val o = JSONObject(body)
+            return IngestResult(1, o.optInt("chunks_added"), o.optInt("total"))
+        }
+    }
+
     /**
      * Ingests a .docx into the RAG index by uploading its bytes (base64) to the
      * rig, which extracts text with python-docx (paragraphs + tables) and runs

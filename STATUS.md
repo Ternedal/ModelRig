@@ -1,6 +1,6 @@
 # ModelRig — STATUS (honest build report)
 
-Version **1.41.0** — "Desktop-chat lignede et 90er Java-form (flade fuldbredde grå bokse, dig/modelrig-labels). Omskrevet MessageBubble til mobil-stil: afrundede bobler med ankh-hale-hjoerne, bruger HOEJRE-justeret i bronze m. ivory-ink (6.2:1), assistent venstre i surface, ~640dp bredde-loft, Kaliv-brand (ikke modelrig), RAG-kilde-chips, taenke-animation i tom boble. Header ryddet: fjernede det textureret dobbelt-wordmark, ren ankh-symbol + KALIV-tekst i topbar. Kompilerings+jar-verificeret. Visuelt = Anders paa Windows". Follows 1.40.0 (rig-model-skifter). Autonomous sessions, **2026-07-02 → 07-12**.
+Version **1.42.0** — "V10.2 lukket: foto→RAG-endpointet fra v1.37.0 var uforbundet — ingen klient kaldte det. Nu: ingestImage i Android-klienten + ＋Gem i Viden-knap paa det vedhaeftede billede (dekoder base64 → ingest → status med ✓/fejl). Hele foto→RAG-vejen er brugbar fra UI. friendlyError viser aerligt 501 hvis KALIV_VISION_MODEL mangler". Follows 1.41.0 (desktop-chat-redesign). Autonomous sessions, **2026-07-02 → 07-12**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
 
