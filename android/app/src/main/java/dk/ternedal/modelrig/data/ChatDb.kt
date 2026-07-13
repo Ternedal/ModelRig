@@ -176,18 +176,39 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
         return writableDatabase.insert("rig_profile", null, ContentValues().apply {
             put("name", name.take(40))
             put("server_url", serverUrl)
-            put("device_token", deviceToken)
+            // Encrypted at rest (Crypto = Keystore AES-GCM). The column type is
+            // unchanged; it now holds ciphertext instead of the raw token.
+            put("device_token", Crypto.encrypt(deviceToken))
             put("created_at", System.currentTimeMillis())
         })
     }
 
     fun listRigProfiles(): List<RigProfile> {
         val out = mutableListOf<RigProfile>()
+        val migrate = mutableListOf<Pair<Long, String>>() // id -> legacy plaintext to re-encrypt
         readableDatabase.rawQuery(
             "SELECT id, name, server_url, device_token FROM rig_profile ORDER BY created_at DESC",
             null,
         ).use { c ->
-            while (c.moveToNext()) out.add(RigProfile(c.getLong(0), c.getString(1), c.getString(2), c.getString(3)))
+            while (c.moveToNext()) {
+                val id = c.getLong(0)
+                val raw = c.getString(3)
+                // Decrypt; a value that isn't ciphertext is a pre-encryption
+                // plaintext profile -- use it as-is and queue it for migration.
+                val tok = runCatching { Crypto.decrypt(raw) }.getOrElse { migrate.add(id to raw); raw }
+                out.add(RigProfile(id, c.getString(1), c.getString(2), tok))
+            }
+        }
+        // Re-encrypt legacy plaintext at rest, after the cursor is closed. A
+        // failure here doesn't affect the values already returned.
+        for ((id, plain) in migrate) {
+            runCatching {
+                writableDatabase.update(
+                    "rig_profile",
+                    ContentValues().apply { put("device_token", Crypto.encrypt(plain)) },
+                    "id=?", arrayOf(id.toString()),
+                )
+            }
         }
         return out
     }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pre-Android 12 equivalent of backup_rules.xml (android:fullBackupContent). -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="modelrig.xml"/>
+    <exclude domain="database" path="modelrig.db"/>
+</full-backup-content>

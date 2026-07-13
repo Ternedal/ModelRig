@@ -19,8 +19,20 @@ class TokenStore(context: Context) {
         set(v) { prefs.edit().putString("base_url", v).apply() }
 
     var token: String?
-        get() = prefs.getString("token", null)
-        set(v) { prefs.edit().putString("token", v).apply() }
+        // Encrypted at rest like the cloud key. It grants full rig access
+        // (chat, RAG, model + tool operations), so "low value" was wrong. A
+        // legacy plaintext "token" is migrated to "token_enc" on first read/write.
+        get() =
+            prefs.getString("token_enc", null)?.let { runCatching { Crypto.decrypt(it) }.getOrNull() }
+                ?: prefs.getString("token", null)?.also { legacy ->
+                    prefs.edit().putString("token_enc", Crypto.encrypt(legacy)).remove("token").apply()
+                }
+        set(v) {
+            val e = prefs.edit()
+            if (v.isNullOrEmpty()) e.remove("token_enc") else e.putString("token_enc", Crypto.encrypt(v))
+            e.remove("token") // drop any legacy plaintext copy
+            e.apply()
+        }
 
     var model: String
         get() = prefs.getString("model", "qwen2.5-coder:7b") ?: "qwen2.5-coder:7b"
@@ -112,10 +124,10 @@ class TokenStore(context: Context) {
         get() = prefs.getString("cloud_system", DEFAULT_SYSTEM)?.ifBlank { DEFAULT_SYSTEM } ?: DEFAULT_SYSTEM
         set(v) { prefs.edit().putString("cloud_system", v).apply() }
 
-    val hasRig: Boolean get() = token != null
+    val hasRig: Boolean get() = prefs.getString("token_enc", null) != null || prefs.getString("token", null) != null
     val hasCloud: Boolean get() = prefs.getString("cloud_key_enc", null) != null
 
-    fun clearRig() { prefs.edit().remove("token").remove("base_url").apply() }
+    fun clearRig() { prefs.edit().remove("token_enc").remove("token").remove("base_url").apply() }
     fun clearCloud() { prefs.edit().remove("cloud_key_enc").apply() }
     fun clear() { prefs.edit().clear().apply() }
     companion object {
