@@ -82,15 +82,16 @@ Bearer-token kræves stadig. Foretræk Tailscale-IP.
 Tailscale/WireGuard leverer den krypterede transport. Egen TLS er et **NEXT/apparat**-punkt
 (ROADMAP.md), ikke et P0 så længe remote går gennem Tailscale.
 
-### 4. Executable supply chain uden integritetstjek — **ÅBEN / kandidat til hærdning**
+### 4. Executable supply chain — **SHA-256 verificeret (1.58.15)**
 
-`modelrig-updater` henter server/worker/supervisor-exes over HTTPS fra seneste GitHub-release og
-swapper dem ind som live-programmer. Der verificeres **ingen** SHA-256/signatur/attestation — kun
-HTTPS-transport + at begge `/healthz` rapporterer den nye version bagefter (med auto-rollback).
-HTTPS beskytter transporten, ikke mod en kompromitteret GitHub-konto/token/release.
+`modelrig-updater` henter server/worker/supervisor-exes over HTTPS fra seneste GitHub-release.
+Releasen publicerer nu `SHA256SUMS.txt` over alle assets, og updateren verificerer hver exe's
+SHA-256 mod den **før** supervisoren stoppes — mismatch eller manglende entry afviser installationen
+(fail closed; `-insecure-skip-verify` kun for en release der ligger før checksums).
 
-**Anbefaling (auditens P2):** release-workflowet bør publicere `SHA256SUMS.txt`, og updateren
-verificere hasherne før supervisoren stoppes.
+**Ærlig grænse:** `SHA256SUMS.txt` er selv usigneret, så dette stopper et *tamperet/trunkeret asset*,
+ikke en angriber med release-write (som kunne erstatte begge). Næste niveau: signeret manifest /
+GitHub artifact attestation.
 
 ## Rotation & incident
 

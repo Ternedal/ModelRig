@@ -15,6 +15,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -204,6 +206,56 @@ func ps(args ...string) error {
 	return cmd.Run()
 }
 
+// assetURL returns the download URL for one asset by name, or "" if absent.
+func assetURL(releaseJSON []byte, name string) string {
+	var rel struct {
+		Assets []struct {
+			Name string `json:"name"`
+			URL  string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+	if json.Unmarshal(releaseJSON, &rel) != nil {
+		return ""
+	}
+	for _, a := range rel.Assets {
+		if a.Name == name {
+			return a.URL
+		}
+	}
+	return ""
+}
+
+// parseSums reads a `sha256sum` file into name->hash. Lines are "<hex>  <name>"
+// (two spaces); a leading "*" on the name (binary marker) is tolerated.
+func parseSums(data []byte) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		f := strings.Fields(line)
+		if len(f) < 2 {
+			continue
+		}
+		out[strings.TrimPrefix(f[len(f)-1], "*")] = strings.ToLower(f[0])
+	}
+	return out
+}
+
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 func main() {
 	dir, _ := os.Getwd()
 	root := flag.String("dir", dir, "ModelRig root (where the exes live)")
@@ -213,6 +265,7 @@ func main() {
 	workerHealth := flag.String("worker-health", "http://127.0.0.1:8099/healthz", "worker health URL")
 	task := flag.String("supervisor-task", "KalivSupervisor", "scheduled task that runs the supervisor")
 	checkOnly := flag.Bool("check", false, "report whether an update is available and exit")
+	skipVerify := flag.Bool("insecure-skip-verify", false, "install without checking SHA256SUMS.txt (only for a release predating checksums)")
 	flag.Parse()
 	log.SetPrefix("updater: ")
 	log.SetFlags(log.LstdFlags)
@@ -253,6 +306,11 @@ func main() {
 		return
 	}
 
+	sumsURL := assetURL(relBody, "SHA256SUMS.txt")
+	if sumsURL == "" && !*skipVerify {
+		log.Fatalf("release %s has no SHA256SUMS.txt -- refusing to install unverified (pass -insecure-skip-verify to override)", tag)
+	}
+
 	staged, err := os.MkdirTemp("", "kaliv-update-")
 	if err != nil {
 		log.Fatalf("staging dir: %v", err)
@@ -264,6 +322,36 @@ func main() {
 		if err := download(urls[t.asset], dest); err != nil {
 			log.Fatalf("download %s: %v", t.asset, err)
 		}
+	}
+
+	// Verify integrity BEFORE touching the running system: a tampered or
+	// truncated download must never reach the swap. Fail closed.
+	if sumsURL != "" {
+		sumsPath := filepath.Join(staged, "SHA256SUMS.txt")
+		if err := download(sumsURL, sumsPath); err != nil {
+			log.Fatalf("download SHA256SUMS.txt: %v", err)
+		}
+		data, err := os.ReadFile(sumsPath)
+		if err != nil {
+			log.Fatalf("read SHA256SUMS.txt: %v", err)
+		}
+		sums := parseSums(data)
+		for _, t := range targets {
+			want, ok := sums[t.asset]
+			if !ok {
+				log.Fatalf("SHA256SUMS.txt has no entry for %s -- refusing to install", t.asset)
+			}
+			got, err := fileSHA256(filepath.Join(staged, t.asset))
+			if err != nil {
+				log.Fatalf("hash %s: %v", t.asset, err)
+			}
+			if !strings.EqualFold(got, want) {
+				log.Fatalf("checksum MISMATCH for %s (want %s, got %s) -- refusing to install", t.asset, want, got)
+			}
+		}
+		log.Printf("checksums verified for %d exe(s)", len(targets))
+	} else {
+		log.Printf("WARNING: installing WITHOUT integrity verification (-insecure-skip-verify)")
 	}
 
 	backupDir := filepath.Join(*root, "backups", "exe-"+cur)

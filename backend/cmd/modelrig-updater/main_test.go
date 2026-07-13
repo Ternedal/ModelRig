@@ -90,3 +90,42 @@ func TestBackupAndSwapThenRestore(t *testing.T) {
 		t.Fatalf("after restore live = %q, want OLD", b)
 	}
 }
+
+func TestParseSums(t *testing.T) {
+	data := []byte("abc123  modelrig-server-windows-x64.exe\ndef456 *modelrig-worker-windows-x64.exe\n\n")
+	m := parseSums(data)
+	if m["modelrig-server-windows-x64.exe"] != "abc123" {
+		t.Errorf("server hash = %q, want abc123", m["modelrig-server-windows-x64.exe"])
+	}
+	if m["modelrig-worker-windows-x64.exe"] != "def456" {
+		t.Errorf("worker hash = %q, want def456 (the '*' marker should be stripped)", m["modelrig-worker-windows-x64.exe"])
+	}
+}
+
+func TestFileSHA256(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "x")
+	if err := os.WriteFile(p, []byte("abc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := fileSHA256(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Known SHA-256 of "abc".
+	if want := "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"; got != want {
+		t.Fatalf("sha256(abc) = %s, want %s", got, want)
+	}
+}
+
+func TestAssetURL(t *testing.T) {
+	rel := []byte(`{"tag_name":"v1","assets":[
+		{"name":"SHA256SUMS.txt","browser_download_url":"http://x/sums"},
+		{"name":"a.exe","browser_download_url":"http://x/a"}]}`)
+	if assetURL(rel, "SHA256SUMS.txt") != "http://x/sums" {
+		t.Error("SHA256SUMS.txt url wrong")
+	}
+	if assetURL(rel, "missing.txt") != "" {
+		t.Error("a missing asset should return empty string")
+	}
+}

@@ -313,6 +313,19 @@ jobs:
           gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes "" || true
           gh release upload "${{ github.ref_name }}" "modelrig-${{ github.ref_name }}.zip" --clobber
 
+      - name: Publish SHA256SUMS.txt over all release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The updater refuses to swap any exe whose SHA-256 doesn't match this
+          # file, so a tampered release asset can't be installed. Hashed here,
+          # after every build job (a `needs` of this one) has uploaded its asset.
+          mkdir -p _sums && cd _sums
+          gh release download "${{ github.ref_name }}" --dir . --clobber
+          rm -f SHA256SUMS.txt
+          sha256sum * > SHA256SUMS.txt
+          gh release upload "${{ github.ref_name }}" SHA256SUMS.txt --clobber
+
       - name: Verify the release actually has its assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
