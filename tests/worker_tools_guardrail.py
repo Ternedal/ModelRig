@@ -35,6 +35,8 @@ from app import tools as T  # noqa: E402
 EXPECTED = {
     "rig_status": "read",
     "note_append": "write",
+    "list_models": "read",
+    "current_datetime": "read",
 }
 
 KNOWN_RISKS = {"read", "write"}

@@ -231,6 +231,45 @@ def _run_note_append(args: dict) -> str:
     return f"appended {len(text)} chars to {path}"
 
 
+def _run_list_models(args: dict) -> str:
+    """Read-only. Which Ollama models are installed on the rig (names + sizes).
+    Talks only to the local Ollama; no argument from the model is used. Fails
+    soft: if Ollama is unreachable it says so rather than erroring the turn."""
+    import urllib.request
+    from .ollama_client import OLLAMA_URL
+    try:
+        with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=10) as r:
+            data = json.loads(r.read().decode())
+    except Exception as e:
+        return f"Kunne ikke nå Ollama på {OLLAMA_URL} ({e}). Kører 'ollama serve'?"
+    models = data.get("models") or []
+    if not models:
+        return "Ingen Ollama-modeller er installeret på riggen."
+    gb = 1024 ** 3
+    lines = []
+    for m in models:
+        name = m.get("name") or m.get("model") or "?"
+        size = m.get("size")
+        if isinstance(size, (int, float)) and size > 0:
+            lines.append(f"{name} ({size / gb:.1f} GB)")
+        else:
+            lines.append(name)
+    return "Installerede modeller:\n" + "\n".join(lines)
+
+
+_DAYS_DA = ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag"]
+_MONTHS_DA = ["januar", "februar", "marts", "april", "maj", "juni", "juli",
+              "august", "september", "oktober", "november", "december"]
+
+
+def _run_current_datetime(args: dict) -> str:
+    """Read-only. The rig's current local date and time, phrased in Danish and
+    locale-independently (LLMs are unreliable at computing weekdays). No args."""
+    n = time.localtime()
+    return (f"{_DAYS_DA[n.tm_wday]} den {n.tm_mday}. {_MONTHS_DA[n.tm_mon - 1]} "
+            f"{n.tm_year}, kl. {n.tm_hour:02d}:{n.tm_min:02d}")
+
+
 REGISTRY: dict[str, Tool] = {
     "rig_status": Tool(
         name="rig_status", risk="read",
@@ -247,6 +286,18 @@ REGISTRY: dict[str, Tool] = {
             "required": ["text"],
         },
         run=_run_note_append,
+    ),
+    "list_models": Tool(
+        name="list_models", risk="read",
+        description="Vis hvilke Ollama-modeller der er installeret på riggen (navne + størrelse).",
+        params={"type": "object", "properties": {}},
+        run=_run_list_models,
+    ),
+    "current_datetime": Tool(
+        name="current_datetime", risk="read",
+        description="Hent den aktuelle dato og klokkeslæt på riggen.",
+        params={"type": "object", "properties": {}},
+        run=_run_current_datetime,
     ),
 }
 
