@@ -174,6 +174,9 @@ func main() {
 	every := flag.Duration("interval", 10*time.Second, "supervision interval")
 	maxFails := flag.Int("max-fails", 3, "consecutive unhealthy polls before restart")
 	logMB := flag.Int64("log-max-mb", 20, "rotate a child log when it passes this size (MB)")
+	minFreeGB := flag.Float64("min-free-gb", 5, "warn when free disk falls below this (GB)")
+	vramPct := flag.Float64("vram-warn-pct", 95, "warn when VRAM usage exceeds this (%)")
+	resEvery := flag.Duration("resource-cooldown", 10*time.Minute, "minimum gap between repeats of the same resource warning")
 	flag.Parse()
 
 	if err := os.MkdirAll(*logDir, 0o755); err != nil {
@@ -208,9 +211,11 @@ func main() {
 
 	children := []child{worker, server}
 	fails := map[string]int{}
+	res := &resourceState{minFreeGB: *minFreeGB, vramWarnPct: *vramPct, cooldown: *resEvery}
 	ticker := time.NewTicker(*every)
 	defer ticker.Stop()
-	log.Printf("supervising every %s (restart after %d unhealthy polls)", *every, *maxFails)
+	log.Printf("supervising every %s (restart after %d unhealthy polls); warn under %.0f GB free or over %.0f%% VRAM",
+		*every, *maxFails, *minFreeGB, *vramPct)
 	for {
 		select {
 		case <-ctx.Done():
@@ -225,6 +230,7 @@ func main() {
 			return
 		case <-ticker.C:
 			fails = superviseOnce(children, fails, *maxFails, nil)
+			res.check(time.Now())
 		}
 	}
 }

@@ -87,3 +87,10 @@ updates the rig to the latest release safely:
 
 Run it elevated (it stops/starts the KalivSupervisor task). The current version
 is read from the running server; pass `-current 1.58.8` if the server is down.
+
+### Resource warnings (v1.58.12)
+
+The supervisor also watches for resource pressure and logs a rate-limited WARNING
+(to `logs\server.log`/console) when free disk drops below `-min-free-gb` (default
+5 GB) or VRAM passes `-vram-warn-pct` (default 95%) -- so a rig that is quietly
+filling its disk or pinning its GPU says so before a pull or a model load fails.
