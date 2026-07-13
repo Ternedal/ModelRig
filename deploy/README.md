@@ -113,3 +113,11 @@ rig therefore keeps running whatever updater version it was installed with. To g
 new updater logic (e.g. the 1.58.15 SHA-256 verification), replace
 `modelrig-updater-windows-x64.exe` **once, by hand** from the release, while the
 updater isn't running. After that, future updates verify checksums.
+
+### Supervisor heartbeat (v1.58.23)
+
+The supervisor writes `logs\supervisor-heartbeat` every tick. To have the updater
+confirm crash-recovery is actually running after an update (a supervisor can
+start the children then die), run it with
+`-heartbeat C:\...\logs\supervisor-heartbeat` -- it warns if the heartbeat is
+stale once the new version is up.

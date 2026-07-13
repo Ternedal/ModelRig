@@ -28,6 +28,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"modelrig/internal/heartbeat"
 )
 
 // child is the seam that makes the loop testable: the real implementation shells
@@ -240,6 +242,8 @@ func main() {
 	children := []child{worker, server}
 	fails := map[string]int{}
 	res := &resourceState{minFreeGB: *minFreeGB, vramWarnPct: *vramPct, cooldown: *resEvery, timeout: 3 * time.Second}
+	hbPath := filepath.Join(*logDir, "supervisor-heartbeat")
+	_ = heartbeat.Write(hbPath) // write once up front so the file exists immediately
 	ticker := time.NewTicker(*every)
 	defer ticker.Stop()
 	log.Printf("supervising every %s (restart after %d unhealthy polls); warn under %.0f GB free or over %.0f%% VRAM",
@@ -259,6 +263,7 @@ func main() {
 		case <-ticker.C:
 			fails = superviseOnce(children, fails, *maxFails, nil)
 			res.run(time.Now()) // off the watchdog path; can't block health/restart
+			_ = heartbeat.Write(hbPath) // liveness signal the updater checks after an update
 		}
 	}
 }

@@ -29,6 +29,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"modelrig/internal/heartbeat"
 )
 
 // target is one binary the updater manages: its name on the release, and where
@@ -263,6 +265,7 @@ func main() {
 	current := flag.String("current", "", "current version (default: read from the running server /healthz)")
 	serverHealth := flag.String("server-health", "http://127.0.0.1:8080/healthz", "server health URL")
 	workerHealth := flag.String("worker-health", "http://127.0.0.1:8099/healthz", "worker health URL")
+	heartbeatPath := flag.String("heartbeat", "", "supervisor heartbeat file; if set, warn when it is stale after an update")
 	task := flag.String("supervisor-task", "KalivSupervisor", "scheduled task that runs the supervisor")
 	checkOnly := flag.Bool("check", false, "report whether an update is available and exit")
 	skipVerify := flag.Bool("insecure-skip-verify", false, "install without checking SHA256SUMS.txt (only for a release predating checksums)")
@@ -374,6 +377,16 @@ func main() {
 	// with a broken worker; require the worker too before keeping the swap.
 	if verify(*serverHealth, newVersion) && verify(*workerHealth, newVersion) {
 		log.Printf("update OK: backend AND worker /healthz report %s. Backup kept at %s", newVersion, backupDir)
+		// A supervisor that started the children then died would still pass the
+		// checks above while leaving the rig without crash-recovery. If a
+		// heartbeat path was given, confirm it is being written.
+		if *heartbeatPath != "" {
+			if ok, err := heartbeat.Fresh(*heartbeatPath, 30*time.Second); !ok {
+				log.Printf("WARNING: supervisor heartbeat not fresh after update (%v) -- crash-recovery may be down; check the KalivSupervisor task", err)
+			} else {
+				log.Printf("supervisor heartbeat is fresh -- crash-recovery is running")
+			}
+		}
 		return
 	}
 
