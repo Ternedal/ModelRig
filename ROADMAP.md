@@ -1,11 +1,13 @@
 # ModelRig / Kaliv — Roadmap
 
-> **Gældende version:** 1.58.2 · **Dato:** 2026-07-13 · **Ejer:** Anders
-> **Status:** Gul. Backend er sikkerhedshærdet (audit-P0/P1 lukket i 1.58.1/1.58.2) og
-> versionsdrift er mekanisk lukket (`VERSION` + `scripts/version_tool.py` + CI-gate).
-> Platformen er endnu ikke drifts-stabil (kører på manuelt åbnede terminaler), og flere
-> NOW-punkter afventer on-device-test. Meget af det gamle roadmap var allerede bygget —
-> det resterende er i høj grad **validering på hardware**, ikke ny kode.
+> **Gældende version:** 1.58.14 · **Dato:** 2026-07-13 · **Ejer:** Anders
+> **Status:** Gul. Backend er sikkerhedshærdet, versionsdrift mekanisk lukket, og
+> **apparatdriften er bygget** (supervisor med autostart + crash-restart, updater med
+> rollback, ressource-varsling — 1.58.8–1.58.14). Fokus nu er **integration + hardening**,
+> ikke nye capabilities: to eksterne audits peger på klient-integrationsfejl (chained-writes
+> og RAG→cloud-toggle virker ikke i appen endnu), en åben auto-cloud-fallback (privacy), og
+> executable-supply-chain uden checksums. Det resterende er i høj grad **validering på
+> hardware** + klient-fixes — ikke backend-kode.
 >
 > Kompakt Now/Next/Later. **Vedtaget 13/7-2026**; afløser den gamle sprawlende roadmap,
 > hvis fulde V1–V15-historik nu ligger i `HISTORY.md` (intet slettet). Autoritativ version
@@ -52,19 +54,22 @@ risikoaccept ✅ · de 5 device-tests har resultat · recovery bevist på riggen
 
 ---
 
-## NEXT — "Kaliv som apparat"
+## NEXT → I HØJ GRAD BYGGET — "Kaliv som apparat" (1.58.8–1.58.14)
 
 **Mål:** Kaliv starter, overvåges og gendannes uden manuel terminaldans.
 
-Leverancer: Windows-services/service-manager · watchdog + genstart ved crash ·
-logrotation · automatisk backup · **bevist restore** · kontrolleret opdatering m. rollback ·
-healthcheck watchdog kan bruge · disk/GPU/VRAM-varsling · dokumenteret Tailscale/TLS-politik.
+Bygget: `modelrig-supervisor` (autostart ved logon via Task Scheduler · genstart ved crash/
+unhealth · logrotation · egen supervisor-log · indlæser `modelrig.env` til børnene) ·
+`modelrig-updater` (backup + swap + **auto-rollback**, verificerer BÅDE backend og worker) ·
+disk/VRAM-varsling (off watchdog-path, med timeout). Auto-backup fandtes i forvejen.
+
+**Udestår:** (a) **on-device-validering** af hele matricen (reboot→brugbar · kill-proc→genstart ·
+korrupt release→rollback); (b) **executable-supply-chain** — updateren verificerer ingen
+checksum/signatur; release bør publicere `SHA256SUMS.txt` (auditens P2); (c) diskchecket måler
+kun supervisorens drev; (d) TLS/reverse-proxy-politik.
 
 **Exit:** *Sluk strømmen, tænd igen → Kaliv er brugbar uden manuel processtart. En dårlig
-opdatering kan rulles tilbage.*
-
-**Hvorfor før ambient:** wake word, proaktivitet og Home Assistant er dårlige idéer at
-bygge oven på tre manuelt åbnede terminalvinduer.
+opdatering kan rulles tilbage.* — kode findes; **mangler on-device-bevis + supply-chain-integritet.**
 
 ---
 

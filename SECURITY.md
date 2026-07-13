@@ -1,6 +1,6 @@
 # SECURITY.md — ModelRig / Kaliv
 
-> Sikkerhedsbaseline pr. **13/7-2026 · v1.58.2**. Dette er en *aktuel* trusselsmodel og
+> Sikkerhedsbaseline pr. **13/7-2026 · v1.58.14**. Dette er en *aktuel* trusselsmodel og
 > risikooversigt, ikke en absolut garanti. Absolutte udsagn ("eneste sikkerhedspunkt")
 > undgås bevidst — se "Kendte, accepterede risici".
 
@@ -40,7 +40,7 @@
 | Ollama Cloud-nøgle | klient-side | Kun i Cloud-tilstand; valideres først ved chat-kald. |
 | Android signeringsnøgle | **committet i repo** | Se accepteret risiko nedenfor. |
 
-## Sikkerheds-defaults (håndhævet pr. 1.58.2)
+## Sikkerheds-defaults (håndhævet pr. 1.58.14)
 
 Alle nye kontroller **defaulter til sikker adfærd**; man opter ud eksplicit via env-vars.
 
@@ -51,6 +51,8 @@ Alle nye kontroller **defaulter til sikker adfærd**; man opter ud eksplicit via
 - Upload-limits (`KALIV_MAX_UPLOAD_MB=25`).
 - `/pair/start`: loopback-only uden admin-key; `X-Admin-Key` når sat.
 - Per-IP rate limit på pairing-claims.
+- **Agent (v2):** reads kan kæde (bounded); ethvert write kræver et menneske-godkendt kort — også i en fortsættelse efter et godkendt write. `delete_model`/`pull_model` er gated writes med navne-validering.
+- **Updater:** verificerer BÅDE backend og worker `/healthz`+version efter swap; auto-rollback ellers. Supervisoren indlæser `modelrig.env` til børnene (`MODELRIG_HOST=0.0.0.0` kræves for remote).
 
 ## Kendte, accepterede risici
 
@@ -80,6 +82,16 @@ Bearer-token kræves stadig. Foretræk Tailscale-IP.
 Tailscale/WireGuard leverer den krypterede transport. Egen TLS er et **NEXT/apparat**-punkt
 (ROADMAP.md), ikke et P0 så længe remote går gennem Tailscale.
 
+### 4. Executable supply chain uden integritetstjek — **ÅBEN / kandidat til hærdning**
+
+`modelrig-updater` henter server/worker/supervisor-exes over HTTPS fra seneste GitHub-release og
+swapper dem ind som live-programmer. Der verificeres **ingen** SHA-256/signatur/attestation — kun
+HTTPS-transport + at begge `/healthz` rapporterer den nye version bagefter (med auto-rollback).
+HTTPS beskytter transporten, ikke mod en kompromitteret GitHub-konto/token/release.
+
+**Anbefaling (auditens P2):** release-workflowet bør publicere `SHA256SUMS.txt`, og updateren
+verificere hasherne før supervisoren stoppes.
+
 ## Rotation & incident
 
 - **Device-token:** `/api/v1/token/rotate` eller CLI; revokér enhed ved tab.
@@ -89,6 +101,14 @@ Tailscale/WireGuard leverer den krypterede transport. Egen TLS er et **NEXT/appa
 
 ## Åbne sikkerhedsrelaterede beslutninger
 
-- **D3** — skal ikke-tool destruktive writes (fx modelsletning) også bag en server-side
-  confirmation gate, eller forbliver klient-bekræftelse tilstrækkelig? (Se ROADMAP.md.)
-- **D4** — privacy-regel for RAG-kontekst + auto-cloud, før nogen automatisk cloud-routing.
+- **D3 — LUKKET:** destruktive model-writes (`delete_model`/`pull_model`) kører nu gennem samme
+  server-side confirmation gate som andre writes (navne-valideret, menneske-godkendt).
+- **D4a — RAG→cloud:** samtykke-gate implementeret server-side (`allow_rag_cloud`); Android-toggle
+  er pt. ikke-funktionel (UI-fix udestår).
+- **D4b — auto-cloud-fallback (ÅBEN):** klienterne sender stadig automatisk samtale + billede til
+  cloud ved rig-fejl før første token — i konflikt med "ingen automatisk cloud-fallback". Bør slås
+  fra som default med eksplicit opt-in.
+- **Cloud-read egress (ÅBEN):** read-tools kræver ingen godkendelse, heller ikke for cloud-modeller.
+  En cloud-agent kan kæde reads (inkl. `list_documents`, der returnerer dokument-navne) og sende
+  resultaterne til cloud. Overvej egress-klassifikation (public/operational/private), hvor `private`
+  + cloud kræver samtykke.

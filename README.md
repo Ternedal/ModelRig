@@ -7,9 +7,9 @@ Danish voice (ASR→LLM→TTS, streamed sentence-by-sentence), RAG document inge
 Ollama Cloud brain for when local isn't enough. The backend keeps the ModelRig
 name; everything user-facing is Kaliv.
 
-Version: **1.55.0** — streaming voice (Kaliv speaks the first sentence while the
-rest generates), dedicated voice cloud model, deterministic emoji-strip, photo→RAG.
-See STATUS.md line 3 for the always-current one-liner.
+Current version: see `VERSION` (STATUS.md line 3 has the always-current one-liner).
+Recent lines: streaming voice, a self-supervising appliance mode (autostart +
+crash-restart + update-with-rollback), and a multi-step agent with human-gated writes.
 
 ## Architecture
 
@@ -69,8 +69,10 @@ the cloud, and only with the toggle on.
 **Tools** — the model proposes; the gate decides. Reads run. Writes stop at a
 confirmation card and execute the arguments that were shown: the worker parks
 them, so no client can alter them after approval. *Risk* decides whether a
-human is asked, not origin. A tool result cannot trigger another tool — the
-follow-up turn is sent with `tools=[]`. Off by default (`KALIV_TOOLS_ENABLED=1`).
+human is asked, not origin. Reads may chain within a turn (bounded) so the model
+can gather before answering; a write always stops for a human confirmation and is
+never chained unapproved — even after an approved write, a subsequent write gets
+its own card. Off by default (`KALIV_TOOLS_ENABLED=1`).
 See `KRAVSPEC_V5_TOOLS.md`.
 
 **The Go server is a proxy and nothing more.** Gate, whitelist and audit live in
@@ -100,8 +102,10 @@ the cloud, and only with the toggle on.
 **Tools** — the model proposes; the gate decides. Reads run. Writes stop at a
 confirmation card and execute the arguments that were shown: the worker parks
 them, so no client can alter them after approval. *Risk* decides whether a
-human is asked, not origin. A tool result cannot trigger another tool — the
-follow-up turn is sent with `tools=[]`. Off by default (`KALIV_TOOLS_ENABLED=1`).
+human is asked, not origin. Reads may chain within a turn (bounded) so the model
+can gather before answering; a write always stops for a human confirmation and is
+never chained unapproved — even after an approved write, a subsequent write gets
+its own card. Off by default (`KALIV_TOOLS_ENABLED=1`).
 See `KRAVSPEC_V5_TOOLS.md`.
 
 **The Go server is a proxy and nothing more.** Gate, whitelist and audit live in
@@ -131,8 +135,10 @@ the cloud, and only with the toggle on.
 **Tools** — the model proposes; the gate decides. Reads run. Writes stop at a
 confirmation card and execute the arguments that were shown: the worker parks
 them, so no client can alter them after approval. *Risk* decides whether a
-human is asked, not origin. A tool result cannot trigger another tool — the
-follow-up turn is sent with `tools=[]`. Off by default (`KALIV_TOOLS_ENABLED=1`).
+human is asked, not origin. Reads may chain within a turn (bounded) so the model
+can gather before answering; a write always stops for a human confirmation and is
+never chained unapproved — even after an approved write, a subsequent write gets
+its own card. Off by default (`KALIV_TOOLS_ENABLED=1`).
 See `KRAVSPEC_V5_TOOLS.md`.
 
 **The Go server is a proxy and nothing more.** Gate, whitelist and audit live in
