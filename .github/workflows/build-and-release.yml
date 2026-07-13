@@ -40,7 +40,26 @@ permissions:
   contents: write
 
 jobs:
+  version-check:
+    # Single source of truth (scripts/version_tool.py): the four version sites
+    # (worker, backend, android, desktop) and the release tag must all match the
+    # VERSION file, or the release fails HERE -- before anything builds. Catches
+    # the drift class that once had docs at 1.58.0 while the code shipped 1.58.2.
+    # On workflow_dispatch the ref is a branch, not a tag, so only the sites are
+    # checked then (no tag assertion).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Version sites (+ tag) match VERSION
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            python3 scripts/version_tool.py check --tag "${{ github.ref_name }}"
+          else
+            python3 scripts/version_tool.py check
+          fi
+
   determine-matrix:
+    needs: version-check
     # This project targets exactly two platforms: Windows (the rig: desktop
     # jar + server exes) and Android (the phone). Linux/macOS jars were pure
     # waste -- nobody ever downloaded them, and macOS runners bill at 10x
@@ -99,6 +118,7 @@ jobs:
           fi
 
   server-tests:
+    needs: version-check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
