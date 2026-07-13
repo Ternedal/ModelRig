@@ -1,3 +1,7 @@
+> ⚠️ **Aktuel autoritativ tilstand: `VERSION` (1.58.2), `ROADMAP.md`, `SECURITY.md`.**
+> Denne fil er en historisk log — ældre datoer/versioner nedenfor er ikke nødvendigvis aktuelle.
+> 13/7-2026: audit-P0/P1 lukket (1.58.1/1.58.2); VERSION-kilde + CI-gate indført; roadmap fornyet.
+
 # ModelRig — STATUS (honest build report)
 
 Version **1.58.0** — "Anders' DESIGNGUIDE anvendt paa desktop (kaliv-ui-tokens.json = autoritativ, pakken committet i assets/design/kaliv-ui-guide/): ny token-palet (bronze #9A7136, border-tokens, semantiske farver, dark+light), to-raekkes header (ankh-chip + serif-wordmark + nav-piller / kontekst-chips Model:X▾ RAG:Til Tools:Fra + Handlingslog/Moerk hoejre), bobler m. 1dp kant, radius 16, identitetsraekke -Kaliv · ◈ rig · 14:32- (created_at nu eksponeret via MsgRow), assistent max 780/bruger 620, krop 16/25sp, guide-composer (min 88dp, radius 20, -Skriv til Kaliv …-, 44dp send). PROCESFUND ejet: v1.57's composer-patch matchede ALDRIG (escape-vs-tegn) og release-noten overpaastod — nu assert pr. erstatning. Aabne rester: fonte approksimeret (Inter/EB Garamond ikke i pakken), footer-strip + hover-actions fra checklisten, a11y-punkter umaalt, Android-palet-alignment = Anders-beslutning. Verificeret: compile+jar, ikke med oejne". Follows 1.57.0. Autonomous sessions, **2026-07-02 → 07-12**.

@@ -1,3 +1,7 @@
+> ⚠️ **Aktuel autoritativ tilstand: `VERSION` (1.58.2), `ROADMAP.md`, `SECURITY.md`.**
+> Denne fil er en historisk log — ældre datoer/versioner nedenfor er ikke nødvendigvis aktuelle.
+> 13/7-2026: audit-P0/P1 lukket (1.58.1/1.58.2); VERSION-kilde + CI-gate indført; roadmap fornyet.
+
 # ModelRig / Kaliv — komplet handoff til ny chat
 
 **Dato:** 2026-07-12 (aften) · **Version:** v1.58.0 · **Repo:** `github.com/Ternedal/ModelRig` (**PUBLIC** — gratis CI)
