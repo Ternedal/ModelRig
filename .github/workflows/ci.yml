@@ -15,3 +15,39 @@ permissions:
 jobs:
   test:
     uses: ./.github/workflows/_tests.yml
+
+  # Compile the clients on every push/PR. The release workflow builds full
+  # APK/jar artifacts, but only at tag time -- so a client that stops compiling
+  # (like a bad refactor) used to reach main and only fail at release. These
+  # catch it before merge. Compile-only (fast) and on Linux (Kotlin compiles
+  # cross-platform; the packaging OS doesn't matter for catching compile errors).
+  # NOTE: this catches compile errors, not runtime/logic bugs -- a change that
+  # compiles but is logically wrong still needs on-device verification.
+  android-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v4
+      - name: Install platform + build-tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Compile Android Kotlin
+        working-directory: android
+        run: |
+          echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
+          ./gradlew :app:compileDebugKotlin --no-daemon --console=plain
+
+  desktop-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Compile desktop Kotlin
+        working-directory: desktop
+        run: ./gradlew :composeApp:compileKotlin --no-daemon --console=plain
