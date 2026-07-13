@@ -50,3 +50,24 @@ python tools/modelrig-cli.py --url http://<host>:8080 pair --code XXXX-XXXX
 python tools/modelrig-cli.py status
 python tools/modelrig-cli.py chat "hello"
 ```
+
+## Appliance mode: autostart + supervisor (v1.58.8)
+
+The launcher (`run-windows.ps1` / `start-kaliv.bat`) runs in the foreground and
+stops when you close it or reboot. For a rig that just stays up:
+
+1. Put `modelrig-supervisor-windows-x64.exe` (from the release) in the ModelRig
+   root, next to `modelrig-server-windows-x64.exe`, with the worker exe in `worker/`.
+2. Run once, elevated:
+   `powershell -ExecutionPolicy Bypass -File scripts\kaliv-autostart.ps1`
+
+The supervisor starts the worker + server at logon and restarts either one if it
+exits or stops answering `/healthz`. Child output goes to `logs\worker.log` and
+`logs\server.log` (rotated at 20 MB). Manage it with:
+
+- `Start-ScheduledTask -TaskName KalivSupervisor` (start now, no reboot)
+- `Stop-ScheduledTask  -TaskName KalivSupervisor` (stop; no restart until next logon)
+- `Get-ScheduledTask   -TaskName KalivSupervisor` (status)
+
+Tunables are flags on the exe (`-interval`, `-max-fails`, `-log-max-mb`, exe/health
+paths); run `modelrig-supervisor-windows-x64.exe -h` for all of them.
