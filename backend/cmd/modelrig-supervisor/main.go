@@ -165,6 +165,9 @@ func rotateLog(path string, maxBytes int64) error {
 	if info.Size() < maxBytes {
 		return nil
 	}
+	// Windows Rename won't overwrite an existing target, so a second rotation
+	// would fail and the log would grow unbounded. Drop the old .1 first.
+	_ = os.Remove(path + ".1")
 	return os.Rename(path, path+".1")
 }
 

@@ -1,6 +1,6 @@
 # ModelRig / Kaliv — Roadmap
 
-> **Gældende version:** 1.58.14 · **Dato:** 2026-07-13 · **Ejer:** Anders
+> **Gældende version:** se `VERSION` · **Dato:** 2026-07-13 · **Ejer:** Anders
 > **Status:** Gul. Backend er sikkerhedshærdet, versionsdrift mekanisk lukket, og
 > **apparatdriften er bygget** (supervisor med autostart + crash-restart, updater med
 > rollback, ressource-varsling — 1.58.8–1.58.14). Fokus nu er **integration + hardening**,
@@ -64,8 +64,8 @@ unhealth · logrotation · egen supervisor-log · indlæser `modelrig.env` til b
 disk/VRAM-varsling (off watchdog-path, med timeout). Auto-backup fandtes i forvejen.
 
 **Udestår:** (a) **on-device-validering** af hele matricen (reboot→brugbar · kill-proc→genstart ·
-korrupt release→rollback); (b) **executable-supply-chain** — updateren verificerer ingen
-checksum/signatur; release bør publicere `SHA256SUMS.txt` (auditens P2); (c) diskchecket måler
+korrupt release→rollback); (b) **executable-supply-chain** — SHA-256-verificeret (1.58.15: release publicerer
+`SHA256SUMS.txt`, updateren tjekker før swap); næste niveau = signeret manifest; (c) diskchecket måler
 kun supervisorens drev; (d) TLS/reverse-proxy-politik.
 
 **Exit:** *Sluk strømmen, tænd igen → Kaliv er brugbar uden manuel processtart. En dårlig

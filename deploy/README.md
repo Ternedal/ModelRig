@@ -104,3 +104,12 @@ without it the server binds to loopback and the phone can't reach it. Point the
 supervisor at a different file with `-env <path>` if needed. On every release the
 updater now verifies BOTH backend and worker `/healthz` report the new version,
 and rolls back if either doesn't.
+
+### Updating the updater itself (one-time)
+
+`modelrig-updater` updates the server, worker and supervisor — but a running exe
+can't overwrite itself on Windows, so it does **not** replace itself. An existing
+rig therefore keeps running whatever updater version it was installed with. To get
+new updater logic (e.g. the 1.58.15 SHA-256 verification), replace
+`modelrig-updater-windows-x64.exe` **once, by hand** from the release, while the
+updater isn't running. After that, future updates verify checksums.

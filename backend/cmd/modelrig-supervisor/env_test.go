@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"path/filepath"
 	"testing"
 )
@@ -32,5 +33,28 @@ func TestLoadEnvFile(t *testing.T) {
 	os.WriteFile(bad, []byte("no_equals_here\n"), 0o644)
 	if _, err := loadEnvFile(bad); err == nil {
 		t.Error("a line without = should error")
+	}
+}
+
+func TestLoadEnvFile_RealExample(t *testing.T) {
+	// The documented file the user actually copies. It carries inline comments
+	// on almost every line; the parser must not fold them into the values.
+	p := filepath.Join("..", "..", "..", "deploy", "modelrig.env.example")
+	env, err := loadEnvFile(p)
+	if err != nil {
+		t.Fatalf("the shipped env example must parse cleanly: %v", err)
+	}
+	m := map[string]string{}
+	for _, e := range env {
+		k, v, _ := strings.Cut(e, "=")
+		m[k] = v
+	}
+	if m["MODELRIG_HOST"] != "0.0.0.0" {
+		t.Fatalf("MODELRIG_HOST parsed as %q, want 0.0.0.0 (an inline comment leaked into the value)", m["MODELRIG_HOST"])
+	}
+	for k, v := range m {
+		if strings.Contains(v, "#") {
+			t.Errorf("%s=%q still contains an inline comment", k, v)
+		}
 	}
 }

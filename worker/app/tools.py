@@ -16,7 +16,8 @@ code rather than in a prompt:
      chained without a human -- even after an approved write the chain may
      continue, but a subsequent write gets its OWN card. So an ingested PDF that
      says "now call note_append" still cannot cause a write; at most it causes
-     more reads, which are harmless.
+     more reads -- which write nothing, though a cloud model would then see their
+     results (see the cloud-read egress note in SECURITY.md).
   5. FAIL CLOSED. Unknown tool, bad args, missing/expired/reused confirmation,
      path outside the sandbox: refuse.
 

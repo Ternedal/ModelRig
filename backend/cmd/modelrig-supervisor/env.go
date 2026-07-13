@@ -15,6 +15,26 @@ import (
 // the binary, the supervisor reads a small KEY=VALUE file (deploy/modelrig.env)
 // and passes those vars to its children.
 
+// stripInlineComment removes a trailing " # comment" and one layer of surrounding
+// quotes. A quoted value is taken as the quoted span (a '#' inside quotes is
+// kept); an unquoted value is cut at the first whitespace-preceded '#'. This
+// matters because the shipped env example carries an inline comment on almost
+// every line -- a parser that kept them would feed "0.0.0.0   # bind..." to the
+// server as its bind host, and the appliance would restart-loop.
+func stripInlineComment(v string) string {
+	if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') {
+		if end := strings.IndexByte(v[1:], v[0]); end >= 0 {
+			return v[1 : 1+end]
+		}
+	}
+	for i := 1; i < len(v); i++ {
+		if v[i] == '#' && (v[i-1] == ' ' || v[i-1] == '\t') {
+			return strings.TrimRight(v[:i], " \t")
+		}
+	}
+	return v
+}
+
 // loadEnvFile parses a KEY=VALUE file (# comments and blank lines ignored,
 // surrounding whitespace and a single layer of quotes trimmed from the value).
 // A missing file is not an error -- returns an empty slice -- so the flag can
@@ -49,11 +69,7 @@ func loadEnvFile(path string) ([]string, error) {
 		if k == "" {
 			return nil, fmt.Errorf("%s:%d: empty key", path, line)
 		}
-		v = strings.TrimSpace(v)
-		if len(v) >= 2 && (v[0] == '"' && v[len(v)-1] == '"' || v[0] == '\'' && v[len(v)-1] == '\'') {
-			v = v[1 : len(v)-1]
-		}
-		out = append(out, k+"="+v)
+		out = append(out, k+"="+stripInlineComment(strings.TrimSpace(v)))
 	}
 	return out, sc.Err()
 }

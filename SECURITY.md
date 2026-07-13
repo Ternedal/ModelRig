@@ -1,6 +1,6 @@
 # SECURITY.md — ModelRig / Kaliv
 
-> Sikkerhedsbaseline pr. **13/7-2026 · v1.58.14**. Dette er en *aktuel* trusselsmodel og
+> Sikkerhedsbaseline pr. **13/7-2026** (kode: se `VERSION`). Dette er en *aktuel* trusselsmodel og
 > risikooversigt, ikke en absolut garanti. Absolutte udsagn ("eneste sikkerhedspunkt")
 > undgås bevidst — se "Kendte, accepterede risici".
 
