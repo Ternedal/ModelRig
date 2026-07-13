@@ -1,0 +1,59 @@
+name: _tests
+
+# Reusable test suite. Called by ci.yml (push/PR) AND by build-and-release.yml's
+# server-tests job (release). This is the SINGLE place the test list lives, so
+# the push gate and the release gate can never run a different set of tests.
+# It has no push/tag trigger of its own -- it only runs when called.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Same single-source check the release tag gate runs -- here it also guards
+      # every push/PR, so drift surfaces immediately rather than at tag time.
+      - name: Version sites match VERSION
+        run: python3 scripts/version_tool.py check
+
+      - name: Install worker deps
+        run: pip install fastapi uvicorn httpx --break-system-packages
+
+      - name: Build backend
+        run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
+
+      - name: Backend vet
+        run: cd backend && go vet ./...
+
+      - name: Backend tests
+        run: cd backend && go test ./...
+
+      # Every integration + worker test, globbed so a new tests/*.py is included
+      # with no edit here. MODELRIG_BIN is used by the backend/e2e tests; the
+      # worker tests ignore it. set -e stops at the first failure. This is exactly
+      # the set the release job used to list inline (backend_smoke/v1, e2e,
+      # worker_*), now in one place.
+      - name: Test suite (auto-includes new tests/*.py)
+        env:
+          MODELRIG_BIN: /tmp/modelrig-server
+        run: |
+          set -e
+          for f in tests/backend_*.py tests/e2e.py tests/worker_*.py; do
+            [ -e "$f" ] || continue
+            echo "::group::$f"
+            PYTHONPATH=worker python3 "$f"
+            echo "::endgroup::"
+          done

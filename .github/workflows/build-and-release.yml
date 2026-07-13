@@ -119,93 +119,9 @@ jobs:
 
   server-tests:
     needs: version-check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.23"
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install worker deps
-        run: pip install fastapi uvicorn httpx --break-system-packages
-
-      - name: Build backend
-        run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
-
-      # The Go server had zero tests while being the thing that puts auth in
-      # front of the tool layer. go vet catches the shape errors; go test now
-      # catches the ones that matter -- see internal/httpapi/tools_test.go.
-      - name: Backend vet
-        run: cd backend && go vet ./...
-
-      - name: Backend tests
-        run: cd backend && go test ./...
-
-      - name: Backend smoke
-        run: MODELRIG_BIN=/tmp/modelrig-server python3 tests/backend_smoke.py
-
-      - name: Backend v1
-        run: MODELRIG_BIN=/tmp/modelrig-server python3 tests/backend_v1.py
-
-      - name: E2E
-        run: MODELRIG_BIN=/tmp/modelrig-server python3 tests/e2e.py
-
-      - name: Worker unit
-        run: PYTHONPATH=worker python3 tests/worker_unit.py
-
-      - name: Worker RAG
-        run: PYTHONPATH=worker python3 tests/worker_rag.py
-
-      # T7/T8 are the prompt-injection tests. If these ever go red the tool
-      # layer is unsafe and the release must not ship.
-      - name: Worker tools (agent layer)
-        run: PYTHONPATH=worker python3 tests/worker_tools.py
-
-      # D3 (codified 2026-07-13): the tool registry is a tripwire -- any new or
-      # changed tool fails this until its risk level is consciously reviewed, and
-      # every write tool must be gated. A destructive tool must never ship as read.
-      - name: Worker tools guardrail (D3)
-        run: PYTHONPATH=worker python3 tests/worker_tools_guardrail.py
-
-      # D4 (2026-07-13): RAG document content must not reach a cloud model without
-      # explicit consent. Default-secure; refuses the RAG+cloud combination.
-      - name: Worker RAG-to-cloud guard (D4)
-        run: PYTHONPATH=worker python3 tests/worker_rag_cloud.py
-
-      # Proves the backup round trip (create -> wipe -> restore -> byte-identical)
-      # on every release, so V7.3's "restore is proven once" stays proven.
-      - name: Worker backup/restore
-        run: PYTHONPATH=worker python3 tests/worker_backup.py
-
-      # Proves data files anchor to a stable root -- guards the working-dir
-      # footgun (relative paths that emptied the RAG index / reset the kill
-      # switch / split the audit log when launched from a different folder).
-      - name: Worker data paths
-        run: PYTHONPATH=worker python3 tests/worker_paths.py
-
-      - name: Worker data migration
-        run: PYTHONPATH=worker python3 tests/worker_migrate.py
-
-      # The model-eval harness's OWN logic must be trustworthy before its
-      # verdicts are (V12.0): fake personas ranked correctly, both classifiers
-      # mutation-guarded.
-      - name: Worker model-eval harness
-        run: PYTHONPATH=worker python3 tests/worker_eval.py
-
-      # Photo->RAG (V10.3): the 501 gate (no vision model -> honest refusal,
-      # never guess with the gen model) and the extract->chunk->store path.
-      - name: Worker vision ingest
-        run: PYTHONPATH=worker python3 tests/worker_vision.py
-
-      # Streaming voice (V6): converse() fires on_transcript once + on_chunk per
-      # sentence, and stays backward-compatible with the buffered path.
-      - name: Worker voice streaming
-        run: PYTHONPATH=worker python3 tests/worker_voice_stream.py
+    # Shared with ci.yml (push/PR). The single source for the test list lives
+    # in _tests.yml, so the two callers can no longer run a different set.
+    uses: ./.github/workflows/_tests.yml
 
   android-build:
     needs: server-tests
