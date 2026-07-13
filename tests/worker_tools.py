@@ -195,11 +195,11 @@ check("tools=[]" in inspect.getsource(M._final_answer)
 # T12: a disabled tool is never advertised to the model.
 g = fresh_gate()
 names = [t["function"]["name"] for t in T.ollama_tool_schema(g)]
-check(set(names) == {"rig_status", "note_append", "list_models", "current_datetime"},
+check(set(names) == {"rig_status", "note_append", "list_models", "current_datetime", "list_documents", "delete_model", "pull_model"},
       "T12: enabled tools advertised")
 g.disabled_tools.add("note_append")
 names = [t["function"]["name"] for t in T.ollama_tool_schema(g)]
-check("note_append" not in names and set(names) == {"rig_status", "list_models", "current_datetime"},
+check("note_append" not in names and set(names) == {"rig_status", "list_models", "current_datetime", "list_documents", "delete_model", "pull_model"},
       "T12: disabled tool is not advertised, not merely refused")
 
 # T13: a proposed write parks the conversation; approval runs those exact args.

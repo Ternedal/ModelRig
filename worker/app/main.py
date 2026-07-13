@@ -23,7 +23,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.58.6"
+VERSION = "1.58.7"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 
@@ -552,6 +552,13 @@ class ToolChatReq(BaseModel):
 TOOL_HISTORY_MAX_MESSAGES = 20
 TOOL_HISTORY_MAX_CHARS = 24_000
 
+# Multi-step agent (2026-07-13): within one turn the model may CHAIN read tools
+# -- check the date, then list models, then answer -- each result fed back before
+# it picks the next call. The loop is bounded so a model can't spin forever, and
+# the invariant that does NOT move: a WRITE tool still stops the turn for a
+# confirmation card; it is never chained after other calls without a human.
+TOOL_MAX_STEPS = 5
+
 
 def _trim_history(history: list) -> list:
     """Keep the tail, but never evict a leading system message.
@@ -707,72 +714,84 @@ async def tools_chat(req: ToolChatReq) -> dict:
 
     origin = "cloud" if req.cloud_key else "local"
     _schema = t.ollama_tool_schema(t.GATE)
-    _logger.info("level=info tools_chat=calling_ollama model=%r n_tools=%d n_msgs=%d url=%r",
-                 req.model, len(_schema), len(messages), req.cloud_base_url or oc.OLLAMA_URL)
-    try:
-        msg = await oc.chat_tools(messages, tools=_schema,
-                                  model=req.model, base_url=req.cloud_base_url,
-                                  api_key=req.cloud_key)
-    except oc.OllamaError as e:
-        _logger.exception("level=error tools_chat=ollama_failed")
-        raise HTTPException(status_code=502, detail=str(e))
-    _logger.info("level=info tools_chat=ollama_returned has_calls=%s content_len=%d",
-                 bool(msg.get("tool_calls")), len(msg.get("content", "")))
 
-    calls = msg.get("tool_calls") or []
-    if not calls:
-        return {"status": "answered", "answer": msg.get("content", ""),
-                "tool": None, "sources": sources}
-
-    # One tool per turn. If the model asks for several, take the first and say
-    # so: batching write actions behind one confirmation is how a user ends up
-    # approving something they did not read.
-    fn = (calls[0] or {}).get("function", {}) or {}
-    name = fn.get("name", "")
-    args = fn.get("arguments") or {}
-    if isinstance(args, str):
-        import json as _json
+    # Multi-step: the model may call read tools in a loop, each result fed back,
+    # until it answers (no tool_call) or the step budget runs out. A WRITE stops
+    # the loop and returns a confirmation card -- the invariant that never moves.
+    tools_used: list[str] = []
+    last_result: str | None = None
+    for step in range(TOOL_MAX_STEPS):
+        _logger.info("level=info tools_chat=calling_ollama step=%d model=%r n_tools=%d n_msgs=%d url=%r",
+                     step, req.model, len(_schema), len(messages), req.cloud_base_url or oc.OLLAMA_URL)
         try:
-            args = _json.loads(args)
-        except Exception:
-            raise HTTPException(status_code=400, detail="tool arguments are not valid JSON")
+            msg = await oc.chat_tools(messages, tools=_schema, model=req.model,
+                                      base_url=req.cloud_base_url, api_key=req.cloud_key)
+        except oc.OllamaError as e:
+            _logger.exception("level=error tools_chat=ollama_failed")
+            raise HTTPException(status_code=502, detail=str(e))
+        calls = msg.get("tool_calls") or []
+        _logger.info("level=info tools_chat=ollama_returned step=%d has_calls=%s content_len=%d",
+                     step, bool(calls), len(msg.get("content", "")))
+        if not calls:
+            return {"status": "answered", "answer": msg.get("content", ""),
+                    "tool": tools_used[-1] if tools_used else None,
+                    "tools_used": tools_used, "sources": sources, "origin": origin}
 
-    messages.append({"role": "assistant", "content": msg.get("content", ""),
-                     "tool_calls": calls[:1]})
-    try:
-        # Off the event loop. A tool is arbitrary blocking work: rig_status
-        # shells out to nvidia-smi with a 5s timeout, note_append touches disk,
-        # and the audit write is a synchronous sqlite commit. Called inline from
-        # an async handler, a one-second tool freezes the ENTIRE worker for one
-        # second -- voice, healthz, RAG, everything. Measured: 1005 ms of
-        # event-loop stall as written, 4 ms once offloaded.
-        result = await asyncio.to_thread(
-            t.GATE.propose, name, args, req.conversation_id,
-            messages=messages, model=req.model, origin=origin,
-        )
-    except t.ToolDenied as e:
-        m = str(e)
-        if m.startswith("unknown tool"):
-            raise HTTPException(status_code=404, detail=m)
-        if "disabled" in m:
-            raise HTTPException(status_code=403, detail=m)
-        raise HTTPException(status_code=400, detail=m)
-    except t.ToolError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        # One tool per model turn. If several are asked for, take the first --
+        # batching actions behind one decision is how a user approves something
+        # they did not read.
+        fn = (calls[0] or {}).get("function", {}) or {}
+        name = fn.get("name", "")
+        args = fn.get("arguments") or {}
+        if isinstance(args, str):
+            import json as _json
+            try:
+                args = _json.loads(args)
+            except Exception:
+                raise HTTPException(status_code=400, detail="tool arguments are not valid JSON")
 
-    if result["status"] == "confirmation_required":
-        return {**result, "extra_tool_calls_ignored": len(calls) - 1,
-                "sources": sources}
+        messages.append({"role": "assistant", "content": msg.get("content", ""),
+                         "tool_calls": calls[:1]})
+        try:
+            # Off the event loop: a tool is arbitrary blocking work (nvidia-smi,
+            # disk, a synchronous sqlite commit). Inline it and a one-second tool
+            # freezes the whole worker -- voice, healthz, RAG. Measured 1005 ms
+            # of event-loop stall as written, 4 ms once offloaded.
+            result = await asyncio.to_thread(
+                t.GATE.propose, name, args, req.conversation_id,
+                messages=messages, model=req.model, origin=origin,
+            )
+        except t.ToolDenied as e:
+            m = str(e)
+            if m.startswith("unknown tool"):
+                raise HTTPException(status_code=404, detail=m)
+            if "disabled" in m:
+                raise HTTPException(status_code=403, detail=m)
+            raise HTTPException(status_code=400, detail=m)
+        except t.ToolError as e:
+            raise HTTPException(status_code=503, detail=str(e))
 
-    # Read tool: feed the result back as DATA and let the model phrase it.
-    messages.append({"role": "tool", "content": result["result"]})
+        if result["status"] == "confirmation_required":
+            # A write ends the turn: nothing runs until the human approves the
+            # card, and the parked conversation carries the reads gathered so far.
+            return {**result, "extra_tool_calls_ignored": len(calls) - 1,
+                    "tools_used": tools_used, "sources": sources}
+
+        # Read tool: record it, feed the result back as DATA, loop for the next.
+        tools_used.append(name)
+        last_result = result["result"]
+        messages.append({"role": "tool", "content": result["result"]})
+
+    # Step budget spent on reads alone: force a final answer with tools off so
+    # the turn always terminates.
     try:
         answer = await _final_answer(messages, req.model,
                                      req.cloud_base_url, req.cloud_key)
     except oc.OllamaError as e:
         raise HTTPException(status_code=502, detail=str(e))
-    return {"status": "answered", "tool": name, "answer": answer,
-            "origin": origin, "tool_result": result["result"]}
+    return {"status": "answered", "tool": tools_used[-1] if tools_used else None,
+            "tools_used": tools_used, "answer": answer, "origin": origin,
+            "tool_result": last_result, "steps_exhausted": True}
 
 
 class ConfirmChatReq(BaseModel):

@@ -37,6 +37,9 @@ EXPECTED = {
     "note_append": "write",
     "list_models": "read",
     "current_datetime": "read",
+    "list_documents": "read",
+    "delete_model": "write",
+    "pull_model": "write",
 }
 
 KNOWN_RISKS = {"read", "write"}

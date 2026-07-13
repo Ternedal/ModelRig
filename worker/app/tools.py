@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sqlite3
 import threading
@@ -174,6 +175,12 @@ class Tool:
                 + ("Filen findes og udvides — intet overskrives."
                    if exists else "Filen findes ikke og oprettes.")
             )
+        if self.name == "delete_model":
+            return (f"Kaliv vil SLETTE Ollama-modellen '{args.get('name', '?')}' fra "
+                    f"riggen. Uigenkaldeligt indtil den hentes igen.")
+        if self.name == "pull_model":
+            return (f"Kaliv vil HENTE Ollama-modellen '{args.get('name', '?')}'. "
+                    f"Det kan tage et stykke tid; downloaden kører i baggrunden.")
         return f"Kaliv vil køre {self.name} med {json.dumps(args, ensure_ascii=False)}"
 
 
@@ -270,6 +277,79 @@ def _run_current_datetime(args: dict) -> str:
             f"{n.tm_year}, kl. {n.tm_hour:02d}:{n.tm_min:02d}")
 
 
+def _run_list_documents(args: dict) -> str:
+    """Read-only. The RAG documents ingested on the rig: source NAMES + chunk
+    counts. Names only (metadata) -- never content; the content guard (D4) is a
+    separate concern. Opens its own read connection to the same store; no arg
+    from the model is used."""
+    from .store import DocStore
+    counts: dict[str, int] = {}
+    for _id, _text, src, _idx, _emb in DocStore().all():
+        counts[src or "(uden navn)"] = counts.get(src or "(uden navn)", 0) + 1
+    if not counts:
+        return "Ingen dokumenter er ingested endnu."
+    lines = [f"{name} ({n} chunks)" for name, n in sorted(counts.items())]
+    return "Ingesterede dokumenter:\n" + "\n".join(lines)
+
+
+# Model names look like "qwen3:14b", "nomic-embed-text", "user/model:tag". This
+# shape check keeps a model-supplied argument to a name -- no paths, no shell.
+_MODEL_NAME = re.compile(r"^[A-Za-z0-9._:/-]{1,100}$")
+
+
+def _run_delete_model(args: dict) -> str:
+    """Delete an Ollama model from the rig (gated -- the human approves a card
+    that names the model). Fast and irreversible until re-pulled."""
+    import urllib.error
+    import urllib.request
+    from .ollama_client import OLLAMA_URL
+    name = (args.get("name") or "").strip()
+    if not _MODEL_NAME.match(name):
+        raise ToolDenied("delete_model requires a valid model name")
+    req = urllib.request.Request(
+        f"{OLLAMA_URL}/api/delete", method="DELETE",
+        data=json.dumps({"name": name}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        urllib.request.urlopen(req, timeout=30)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise ToolDenied(f"model '{name}' findes ikke")
+        raise ToolError(f"Ollama delete fejlede ({e.code})")
+    except Exception as e:
+        raise ToolError(f"kan ikke nå Ollama på {OLLAMA_URL}: {e}")
+    return f"Slettede Ollama-modellen '{name}'."
+
+
+def _run_pull_model(args: dict) -> str:
+    """Pull an Ollama model onto the rig (gated). A pull can take minutes, so it
+    runs in a background thread and this returns at once -- check list_models to
+    see when it lands. Best-effort: a failed background pull is not reported here
+    (the model simply won't appear), which is an accepted limitation for now."""
+    import threading
+    import urllib.request
+    from .ollama_client import OLLAMA_URL
+    name = (args.get("name") or "").strip()
+    if not _MODEL_NAME.match(name):
+        raise ToolDenied("pull_model requires a valid model name")
+
+    def _pull() -> None:
+        try:
+            req = urllib.request.Request(
+                f"{OLLAMA_URL}/api/pull", method="POST",
+                data=json.dumps({"name": name, "stream": False}).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            urllib.request.urlopen(req, timeout=3600)
+        except Exception:
+            pass  # background best-effort; the user verifies with list_models
+
+    threading.Thread(target=_pull, daemon=True).start()
+    return (f"Startede download af Ollama-modellen '{name}' i baggrunden. "
+            f"Tjek list_models om lidt for at se den lande.")
+
+
 REGISTRY: dict[str, Tool] = {
     "rig_status": Tool(
         name="rig_status", risk="read",
@@ -298,6 +378,32 @@ REGISTRY: dict[str, Tool] = {
         description="Hent den aktuelle dato og klokkeslæt på riggen.",
         params={"type": "object", "properties": {}},
         run=_run_current_datetime,
+    ),
+    "list_documents": Tool(
+        name="list_documents", risk="read",
+        description="Vis hvilke dokumenter der er ingested til RAG (navne + antal chunks).",
+        params={"type": "object", "properties": {}},
+        run=_run_list_documents,
+    ),
+    "delete_model": Tool(
+        name="delete_model", risk="write",
+        description="Slet en Ollama-model fra riggen. Kræver bekræftelse.",
+        params={
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "modelnavn, fx qwen3:14b"}},
+            "required": ["name"],
+        },
+        run=_run_delete_model,
+    ),
+    "pull_model": Tool(
+        name="pull_model", risk="write",
+        description="Hent (download) en Ollama-model til riggen. Kræver bekræftelse.",
+        params={
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "modelnavn, fx qwen3:8b"}},
+            "required": ["name"],
+        },
+        run=_run_pull_model,
     ),
 }
 
