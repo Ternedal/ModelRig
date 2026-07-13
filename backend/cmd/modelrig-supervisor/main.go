@@ -189,6 +189,15 @@ func main() {
 	}
 	log.SetPrefix("supervisor: ")
 	log.SetFlags(log.LstdFlags)
+	// The supervisor's OWN log. A hidden Scheduled Task discards stderr, so
+	// without this its warnings and restart notices go nowhere (the child logs
+	// only hold the children's output). Rotated like them; also mirrored to
+	// stderr for when the supervisor is run in a console.
+	supLog := filepath.Join(*logDir, "supervisor.log")
+	_ = rotateLog(supLog, *logMB*1024*1024)
+	if lf, err := os.OpenFile(supLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+		log.SetOutput(io.MultiWriter(lf, os.Stderr))
+	}
 
 	childEnv, err := loadEnvFile(*envFile)
 	if err != nil {
@@ -227,7 +236,7 @@ func main() {
 
 	children := []child{worker, server}
 	fails := map[string]int{}
-	res := &resourceState{minFreeGB: *minFreeGB, vramWarnPct: *vramPct, cooldown: *resEvery}
+	res := &resourceState{minFreeGB: *minFreeGB, vramWarnPct: *vramPct, cooldown: *resEvery, timeout: 3 * time.Second}
 	ticker := time.NewTicker(*every)
 	defer ticker.Stop()
 	log.Printf("supervising every %s (restart after %d unhealthy polls); warn under %.0f GB free or over %.0f%% VRAM",
@@ -246,7 +255,7 @@ func main() {
 			return
 		case <-ticker.C:
 			fails = superviseOnce(children, fails, *maxFails, nil)
-			res.check(time.Now())
+			res.run(time.Now()) // off the watchdog path; can't block health/restart
 		}
 	}
 }

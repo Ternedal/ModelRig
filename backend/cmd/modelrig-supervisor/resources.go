@@ -1,41 +1,60 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
 // Resource-pressure warnings. An unattended rig that quietly fills its disk
-// (models, logs, RAG index) or pins its VRAM (a model too large for 12 GB) fails
-// in confusing ways -- a pull that errors, a model that silently falls back to
-// CPU. The supervisor already runs a loop, so it is the natural place to notice
-// and say so in the log. The queries are Windows commands that run on the rig;
-// the parts that are easy to get wrong -- parsing nvidia-smi, deciding when a
-// number is "too low/high" -- live in the pure helpers below and are unit-tested.
-//
-// Warnings are rate-limited per resource (a full disk stays full; saying so every
-// 10 s only buries the log), so the loop can call check() every tick cheaply.
+// (models, logs, RAG index) or pins its VRAM fails in confusing ways, so the
+// supervisor watches for it. Two rules the watchdog must never break:
+//   - The check runs OFF the supervision path (its own goroutine) with a
+//     timeout, so a hung nvidia-smi or PowerShell can never freeze health
+//     polling and restarts -- an observation feature must not be able to blind
+//     the watchdog it supplements.
+//   - Warnings are rate-limited per resource (a full disk stays full).
+// The parts easy to get wrong -- parsing nvidia-smi, deciding "too low/high" --
+// are pure and unit-tested.
 
 type resourceState struct {
 	minFreeGB   float64
 	vramWarnPct float64
 	cooldown    time.Duration
+	timeout     time.Duration
 	lastDisk    time.Time
 	lastVram    time.Time
+	busy        atomic.Bool
+}
+
+// run launches a check without blocking the caller. If a previous check is still
+// in flight (a hung query being killed by its timeout), this tick is skipped so
+// checks can't pile up.
+func (rs *resourceState) run(now time.Time) {
+	if !rs.busy.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer rs.busy.Store(false)
+		rs.check(now)
+	}()
 }
 
 func (rs *resourceState) check(now time.Time) {
-	if freeGB, err := freeDiskGB(); err == nil {
+	ctx, cancel := context.WithTimeout(context.Background(), rs.timeout)
+	defer cancel()
+	if freeGB, err := freeDiskGB(ctx); err == nil {
 		if warn, msg := shouldWarnDisk(freeGB, rs.minFreeGB); warn && now.Sub(rs.lastDisk) >= rs.cooldown {
 			log.Printf("WARNING: %s", msg)
 			rs.lastDisk = now
 		}
 	}
-	if used, total, err := gpuMemory(); err == nil {
+	if used, total, err := gpuMemory(ctx); err == nil {
 		if warn, msg := shouldWarnVram(used, total, rs.vramWarnPct); warn && now.Sub(rs.lastVram) >= rs.cooldown {
 			log.Printf("WARNING: %s", msg)
 			rs.lastVram = now
@@ -43,8 +62,8 @@ func (rs *resourceState) check(now time.Time) {
 	}
 }
 
-// shouldWarnDisk decides whether the free space on the ModelRig drive is low
-// enough to act on. Below the floor, Ollama pulls and log writes start failing.
+// shouldWarnDisk decides whether free space on the ModelRig drive is low enough
+// to act on. Below the floor, Ollama pulls and log writes start failing.
 func shouldWarnDisk(freeGB, minFreeGB float64) (bool, string) {
 	if freeGB < minFreeGB {
 		return true, fmt.Sprintf(
@@ -89,12 +108,12 @@ func shouldWarnVram(used, total int, warnPct float64) (bool, string) {
 	return false, ""
 }
 
-// --- the rig-side queries (Windows). They compile everywhere but only return
-// real numbers on the rig; anywhere else they error and check() stays quiet. ---
+// --- the rig-side queries (Windows). exec.CommandContext bounds them, so a hung
+// query is killed rather than freezing the caller. They only return real numbers
+// on the rig; anywhere else they error and check() stays quiet. ---
 
-func freeDiskGB() (float64, error) {
-	// AvailableFreeSpace on the drive holding the working directory.
-	out, err := exec.Command("powershell", "-NoProfile", "-Command",
+func freeDiskGB(ctx context.Context) (float64, error) {
+	out, err := exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command",
 		"[System.IO.DriveInfo]::new((Get-Location).Path).AvailableFreeSpace").Output()
 	if err != nil {
 		return 0, err
@@ -106,8 +125,8 @@ func freeDiskGB() (float64, error) {
 	return bytes / (1024 * 1024 * 1024), nil
 }
 
-func gpuMemory() (used, total int, err error) {
-	out, err := exec.Command("nvidia-smi",
+func gpuMemory(ctx context.Context) (used, total int, err error) {
+	out, err := exec.CommandContext(ctx, "nvidia-smi",
 		"--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits").Output()
 	if err != nil {
 		return 0, 0, err
