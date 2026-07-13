@@ -166,6 +166,17 @@ jobs:
       - name: Worker tools (agent layer)
         run: PYTHONPATH=worker python3 tests/worker_tools.py
 
+      # D3 (codified 2026-07-13): the tool registry is a tripwire -- any new or
+      # changed tool fails this until its risk level is consciously reviewed, and
+      # every write tool must be gated. A destructive tool must never ship as read.
+      - name: Worker tools guardrail (D3)
+        run: PYTHONPATH=worker python3 tests/worker_tools_guardrail.py
+
+      # D4 (2026-07-13): RAG document content must not reach a cloud model without
+      # explicit consent. Default-secure; refuses the RAG+cloud combination.
+      - name: Worker RAG-to-cloud guard (D4)
+        run: PYTHONPATH=worker python3 tests/worker_rag_cloud.py
+
       # Proves the backup round trip (create -> wipe -> restore -> byte-identical)
       # on every release, so V7.3's "restore is proven once" stays proven.
       - name: Worker backup/restore

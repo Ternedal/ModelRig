@@ -23,7 +23,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.58.2"
+VERSION = "1.58.3"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 
@@ -541,6 +541,9 @@ class ToolChatReq(BaseModel):
     # reads run either way. The key is never persisted -- per request only.
     cloud_base_url: str | None = None
     cloud_key: str | None = None
+    # PRIVACY (D4): explicit per-request consent to let RAG document content
+    # reach a cloud model. Default false = the rig refuses that combination.
+    allow_rag_cloud: bool = False
 
 
 # Bounds enforced here, not in the app. A trusted client today is an old APK
@@ -599,6 +602,18 @@ async def _final_answer(messages: list[dict], model: str | None,
     return msg.get("content", "")
 
 
+def _rag_cloud_allowed(req: "ToolChatReq") -> bool:
+    """D4: may RAG document content be sent to a cloud model?
+
+    True only on explicit consent -- per request (allow_rag_cloud) or a global
+    operator opt-in (KALIV_ALLOW_RAG_CLOUD, same opt-out style as the other
+    KALIV_* privacy/security switches). Default is secure: no consent, no send.
+    """
+    if req.allow_rag_cloud:
+        return True
+    return os.getenv("KALIV_ALLOW_RAG_CLOUD", "") not in ("", "0", "false", "False", "no", "off")
+
+
 @app.post("/tools/chat")
 async def tools_chat(req: ToolChatReq) -> dict:
     """One chat turn in which the model MAY propose a tool.
@@ -655,6 +670,20 @@ async def tools_chat(req: ToolChatReq) -> dict:
             raise HTTPException(status_code=502, detail=str(e))
         matches = res.get("matches", [])
         sources = sorted({m["source"] or str(m["id"]) for m in matches})
+        # PRIVACY (D4): the retrieved chunks are the content of your own
+        # documents. If the answering model is in the cloud, that content would
+        # leave the rig. Retrieval is local, so nothing has left yet -- we simply
+        # refuse to send it onward without consent (per request allow_rag_cloud,
+        # or operator opt-in KALIV_ALLOW_RAG_CLOUD). Only fires when documents
+        # actually matched AND the target model is cloud.
+        if matches and req.cloud_key and not _rag_cloud_allowed(req):
+            raise HTTPException(
+                status_code=403,
+                detail=("RAG matched your documents and the selected model is in "
+                        "the cloud -- answering would send that document content "
+                        "off the rig. Set allow_rag_cloud=true to consent, or use "
+                        "a local model."),
+            )
         if matches:
             ctx = "\n\n".join(f"[{m['source'] or m['id']}] {m['text']}" for m in matches)
             # SECURITY: retrieved documents are UNTRUSTED text. A PDF can say
