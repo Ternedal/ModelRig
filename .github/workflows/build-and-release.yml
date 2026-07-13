@@ -281,6 +281,17 @@ jobs:
             $expected = $env:GITHUB_REF_NAME.TrimStart("v")
             if (-not $sh -or $sh.version -ne $expected) { throw "server healthz failed or wrong version: got '$($sh.version)', expected '$expected'" }
             Write-Host "server exe OK: version $($sh.version)"
+
+            # Deeper than /healthz: validate the whole-chain report + the honest
+            # capability object (both exes are up here). Ollama is intentionally
+            # dead, so don't assert overall ok -- assert the parts that don't
+            # depend on it: worker version + all 5 capability keys present.
+            $hf = Invoke-RestMethod -Uri http://127.0.0.1:8099/health/full -TimeoutSec 5
+            if ($hf.checks.worker.version -ne $expected) { throw "health/full worker version mismatch: got '$($hf.checks.worker.version)', expected '$expected'" }
+            foreach ($k in @("asr","tts","pdf","docx","cuda")) {
+              if ($null -eq $hf.capabilities.$k) { throw "health/full missing capability key '$k'" }
+            }
+            Write-Host "health/full OK: worker $($hf.checks.worker.version); capabilities $($hf.capabilities | ConvertTo-Json -Compress)"
           }
           finally {
             if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
