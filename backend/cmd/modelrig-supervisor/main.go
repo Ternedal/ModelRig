@@ -91,6 +91,7 @@ type procChild struct {
 	healthURL string
 	logPath   string
 	logMaxMB  int64
+	extraEnv  []string
 
 	mu  sync.Mutex
 	cmd *exec.Cmd
@@ -134,6 +135,9 @@ func (p *procChild) restart() error {
 	}
 	cmd := exec.Command(p.exePath)
 	cmd.Dir = p.workDir
+	if len(p.extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), p.extraEnv...)
+	}
 	cmd.Stdout = f
 	cmd.Stderr = f
 	if err := cmd.Start(); err != nil {
@@ -171,6 +175,7 @@ func main() {
 	serverHealth := flag.String("server-health", "http://127.0.0.1:8080/healthz", "server health URL")
 	workerHealth := flag.String("worker-health", "http://127.0.0.1:8099/healthz", "worker health URL")
 	logDir := flag.String("logs", filepath.Join(root, "logs"), "directory for child logs")
+	envFile := flag.String("env", filepath.Join(root, "modelrig.env"), "KEY=VALUE file of env vars for the children (e.g. MODELRIG_HOST=0.0.0.0)")
 	every := flag.Duration("interval", 10*time.Second, "supervision interval")
 	maxFails := flag.Int("max-fails", 3, "consecutive unhealthy polls before restart")
 	logMB := flag.Int64("log-max-mb", 20, "rotate a child log when it passes this size (MB)")
@@ -185,13 +190,24 @@ func main() {
 	log.SetPrefix("supervisor: ")
 	log.SetFlags(log.LstdFlags)
 
+	childEnv, err := loadEnvFile(*envFile)
+	if err != nil {
+		log.Fatalf("supervisor: bad env file %s: %v", *envFile, err)
+	}
+	if len(childEnv) > 0 {
+		log.Printf("loaded %d env var(s) from %s for the children", len(childEnv), *envFile)
+	} else {
+		log.Printf("no env file at %s; children inherit the supervisor's environment (MODELRIG_HOST must be set for remote access)", *envFile)
+	}
 	worker := &procChild{
 		label: "worker", exePath: *workerExe, workDir: filepath.Dir(*workerExe),
 		healthURL: *workerHealth, logPath: filepath.Join(*logDir, "worker.log"), logMaxMB: *logMB,
+		extraEnv: childEnv,
 	}
 	server := &procChild{
 		label: "server", exePath: *serverExe, workDir: filepath.Dir(*serverExe),
 		healthURL: *serverHealth, logPath: filepath.Join(*logDir, "server.log"), logMaxMB: *logMB,
+		extraEnv: childEnv,
 	}
 
 	// Start the worker first and give it a moment to bind before the server

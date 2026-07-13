@@ -91,15 +91,11 @@ jobs:
             exit 0
           fi
           TAG="${{ github.ref_name }}"
-          PATCH="${TAG##*.}"
-          CHANGED=$(git diff-tree --no-commit-id --name-only -r HEAD)
-          # Prebuilt Windows server/worker exes: build whenever the code they
-          # package (or their launcher) changed, and on milestones.
-          if [ "$PATCH" = "0" ] || echo "$CHANGED" | grep -qE '^(backend|worker|deploy)/'; then
-            echo "server_bins=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "server_bins=false" >> "$GITHUB_OUTPUT"
-          fi
+          # Appliance bundle (server + worker + supervisor + updater exes) builds
+          # on EVERY release: the updater requires a COMPLETE matched set in the
+          # latest release, so a partial release would stall the auto-update
+          # channel with a missing-asset error. Lockstep with build_desktop below.
+          echo "server_bins=true" >> "$GITHUB_OUTPUT"
           # Build the Windows desktop jar on EVERY release. The old "only when
           # desktop code changed" optimization meant the desktop packageVersion
           # marched forward with each version bump while NO matching jar was

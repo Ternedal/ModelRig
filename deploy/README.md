@@ -94,3 +94,13 @@ The supervisor also watches for resource pressure and logs a rate-limited WARNIN
 (to `logs\server.log`/console) when free disk drops below `-min-free-gb` (default
 5 GB) or VRAM passes `-vram-warn-pct` (default 95%) -- so a rig that is quietly
 filling its disk or pinning its GPU says so before a pull or a model load fails.
+
+### Supervisor config (v1.58.13)
+
+The supervisor sets the environment its children run with, so the appliance is
+self-bearing. Copy `deploy/modelrig.env.example` to **`modelrig.env`** in the
+ModelRig root (next to the exes). The critical line is `MODELRIG_HOST=0.0.0.0` --
+without it the server binds to loopback and the phone can't reach it. Point the
+supervisor at a different file with `-env <path>` if needed. On every release the
+updater now verifies BOTH backend and worker `/healthz` report the new version,
+and rolls back if either doesn't.

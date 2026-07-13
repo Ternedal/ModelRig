@@ -210,6 +210,7 @@ func main() {
 	repo := flag.String("repo", "Ternedal/ModelRig", "owner/name of the GitHub repo")
 	current := flag.String("current", "", "current version (default: read from the running server /healthz)")
 	serverHealth := flag.String("server-health", "http://127.0.0.1:8080/healthz", "server health URL")
+	workerHealth := flag.String("worker-health", "http://127.0.0.1:8099/healthz", "worker health URL")
 	task := flag.String("supervisor-task", "KalivSupervisor", "scheduled task that runs the supervisor")
 	checkOnly := flag.Bool("check", false, "report whether an update is available and exit")
 	flag.Parse()
@@ -280,12 +281,15 @@ func main() {
 	log.Printf("swapped to %s; restarting via supervisor", tag)
 	_ = ps(fmt.Sprintf("Start-ScheduledTask -TaskName '%s'", *task))
 
-	if verify(*serverHealth, newVersion) {
-		log.Printf("update OK: /healthz reports %s. Backup kept at %s", newVersion, backupDir)
+	// Both must report the new version. The backend's /healthz stays green even
+	// if the worker is dead, so checking only the backend would bless a release
+	// with a broken worker; require the worker too before keeping the swap.
+	if verify(*serverHealth, newVersion) && verify(*workerHealth, newVersion) {
+		log.Printf("update OK: backend AND worker /healthz report %s. Backup kept at %s", newVersion, backupDir)
 		return
 	}
 
-	log.Printf("new version did not become healthy -- ROLLING BACK to %s", cur)
+	log.Printf("backend or worker did not come up healthy on %s -- ROLLING BACK to %s", newVersion, cur)
 	_ = ps(fmt.Sprintf("Stop-ScheduledTask -TaskName '%s' -ErrorAction SilentlyContinue", *task))
 	_ = ps("Get-Process modelrig-server,modelrig-worker,modelrig-supervisor -ErrorAction SilentlyContinue | Stop-Process -Force")
 	time.Sleep(2 * time.Second)
@@ -293,8 +297,8 @@ func main() {
 		log.Fatalf("ROLLBACK FAILED (%v). Backup is at %s -- restore by hand.", err, backupDir)
 	}
 	_ = ps(fmt.Sprintf("Start-ScheduledTask -TaskName '%s'", *task))
-	if verify(*serverHealth, cur) {
-		log.Printf("rolled back to %s and it is healthy again", cur)
+	if verify(*serverHealth, cur) && verify(*workerHealth, cur) {
+		log.Printf("rolled back to %s and both backend + worker are healthy again", cur)
 	} else {
 		log.Printf("rolled back to %s but health is still not confirmed -- check the rig", cur)
 	}
