@@ -1,0 +1,62 @@
+name: ci
+
+# Runs the test suite on every push to main and on pull requests -- so a
+# regression or version drift is caught BEFORE a release tag is cut. The release
+# workflow (build-and-release.yml) only runs on tags; this is the earlier gate.
+# Tests only: no asset builds, no release, read-only token.
+#
+# Deliberately globs tests/*.py instead of listing each file, so a new test is
+# picked up automatically -- the test list itself can't drift out of sync.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Same single-source check the release gate runs -- but here on every push,
+      # so drift surfaces immediately rather than at tag time.
+      - name: Version sites match VERSION
+        run: python3 scripts/version_tool.py check
+
+      - name: Install worker deps
+        run: pip install fastapi uvicorn httpx --break-system-packages
+
+      - name: Build backend
+        run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
+
+      - name: Backend vet
+        run: cd backend && go vet ./...
+
+      - name: Backend tests
+        run: cd backend && go test ./...
+
+      # Every integration + worker test, globbed so new ones are included with no
+      # edit here. MODELRIG_BIN is used by the backend/e2e tests; the worker tests
+      # ignore it. set -e stops at the first failure.
+      - name: Test suite (auto-includes new tests/*.py)
+        env:
+          MODELRIG_BIN: /tmp/modelrig-server
+        run: |
+          set -e
+          for f in tests/backend_*.py tests/e2e.py tests/worker_*.py; do
+            [ -e "$f" ] || continue
+            echo "::group::$f"
+            PYTHONPATH=worker python3 "$f"
+            echo "::endgroup::"
+          done
