@@ -237,6 +237,10 @@ jobs:
         # go.mod is in backend/, like the server exe above.
         working-directory: backend
         run: go build -o ../modelrig-supervisor-windows-x64.exe ./cmd/modelrig-supervisor
+      - name: Build updater exe
+        # Controlled update-with-rollback for the rig (run by hand or scheduled).
+        working-directory: backend
+        run: go build -o ../modelrig-updater-windows-x64.exe ./cmd/modelrig-updater
       - name: Smoke test both exes on the real Windows runner
         shell: pwsh
         run: |
@@ -278,7 +282,7 @@ jobs:
           # which creates the tag, which fires this workflow). Create it if a
           # bare tag was pushed instead. Harmless if another job won the race.
           gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes "" || true
-          gh release upload "${{ github.ref_name }}" "modelrig-server-windows-x64.exe" "modelrig-supervisor-windows-x64.exe" "dist/modelrig-worker-windows-x64.exe" --clobber
+          gh release upload "${{ github.ref_name }}" "modelrig-server-windows-x64.exe" "modelrig-supervisor-windows-x64.exe" "modelrig-updater-windows-x64.exe" "dist/modelrig-worker-windows-x64.exe" --clobber
 
   release:
     needs: [determine-matrix, android-build, desktop-build, server-binaries]
