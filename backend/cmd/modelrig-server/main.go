@@ -52,10 +52,10 @@ func main() {
 	workerSlowClient := proxy.New(cfg.WorkerBaseURL, 10*time.Minute).WithHealthPath("/healthz")
 
 	handler := httpapi.New(httpapi.Deps{
-		Cfg:    cfg,
-		Store:  st,
-		Ollama: ollamaClient,
-		Worker: workerClient,
+		Cfg:        cfg,
+		Store:      st,
+		Ollama:     ollamaClient,
+		Worker:     workerClient,
 		WorkerSlow: workerSlowClient,
 	})
 
@@ -77,7 +77,7 @@ func main() {
 			log.Printf("         Set MODELRIG_HOST=0.0.0.0 or a Tailscale IP, then restart.")
 		}
 		if os.Getenv("MODELRIG_ADMIN_KEY") == "" {
-			log.Printf("NOTE: MODELRIG_ADMIN_KEY unset - POST /api/v1/pair/start is open (dev mode).")
+			log.Printf("NOTE: MODELRIG_ADMIN_KEY unset - POST /api/v1/pair/start accepts loopback callers only (the -pair CLI). Set MODELRIG_ADMIN_KEY to allow remote pairing.")
 		}
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen: %v", err)

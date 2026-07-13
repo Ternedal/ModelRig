@@ -24,16 +24,24 @@ func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // handlePairStart creates a single-use pairing code.
 //
-// Operator-side endpoint. If MODELRIG_ADMIN_KEY is set it must be supplied via
-// the X-Admin-Key header. If unset, the endpoint is open (dev mode) and the
-// server logs a warning at startup. The `modelrig-server -pair` CLI flag is the
-// recommended way to mint a code without exposing this endpoint at all.
+// Operator-side endpoint. Access rules:
+//   - If MODELRIG_ADMIN_KEY is set, the X-Admin-Key header must match it.
+//   - If it is unset, only a loopback caller may mint a code -- that is the
+//     on-rig `-pair` CLI (which calls this on 127.0.0.1) or a local client.
+//     A remote caller is refused, so no one on the tailnet/LAN can mint a
+//     pairing code (and then claim a device token) without the admin key.
+//
+// The `modelrig-server -pair` CLI flag is the recommended way to mint a code.
 func (s *server) handlePairStart(w http.ResponseWriter, r *http.Request) {
 	if key := os.Getenv("MODELRIG_ADMIN_KEY"); key != "" {
 		if r.Header.Get("X-Admin-Key") != key {
 			writeErr(w, http.StatusUnauthorized, "admin key required")
 			return
 		}
+	} else if !isLoopbackRemote(r) {
+		writeErr(w, http.StatusForbidden,
+			"pair/start requires a loopback caller or MODELRIG_ADMIN_KEY")
+		return
 	}
 	code, err := pairing.Code()
 	if err != nil {
@@ -438,4 +446,12 @@ func clientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// isLoopbackRemote reports whether the request originates from the loopback
+// interface (127.0.0.0/8 or ::1). pair/start uses it to allow the on-rig -pair
+// CLI to mint codes while refusing remote callers when no admin key is set.
+func isLoopbackRemote(r *http.Request) bool {
+	ip := net.ParseIP(clientIP(r))
+	return ip != nil && ip.IsLoopback()
 }
