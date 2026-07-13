@@ -131,15 +131,32 @@ jobs:
       - name: Install platform + build-tools
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Build debug APK
+      - name: Build release APK
         working-directory: android
         run: |
           echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
-          ./gradlew :app:assembleDebug --no-daemon --console=plain
+          ./gradlew :app:assembleRelease --no-daemon --console=plain
+
+      - name: Verify the release APK (signed, right package + version, not debuggable)
+        working-directory: android
+        run: |
+          set -e
+          APK=app/build/outputs/apk/release/app-release.apk
+          test -f "$APK" || { echo "no signed release APK at $APK (is the release signingConfig set?)"; exit 1; }
+          BT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/35.0.0"
+          # Signed with the release key?
+          "$BT/apksigner" verify --print-certs "$APK" >/dev/null || { echo "APK is not validly signed"; exit 1; }
+          AAPT="$BT/aapt"; [ -x "$AAPT" ] || AAPT="$BT/aapt2"
+          BADGING="$("$AAPT" dump badging "$APK")"
+          TAG="${{ github.ref_name }}"; VER="${TAG#v}"
+          echo "$BADGING" | grep -qE "package: name='dk\.ternedal\.modelrig'" || { echo "wrong package id"; exit 1; }
+          echo "$BADGING" | grep -qE "versionName='$VER'" || { echo "versionName != $VER"; echo "$BADGING" | grep versionName; exit 1; }
+          if echo "$BADGING" | grep -q "application-debuggable"; then echo "release APK is DEBUGGABLE -- wrong build"; exit 1; fi
+          echo "release APK OK: signed, package dk.ternedal.modelrig, versionName $VER, not debuggable"
 
       - name: Name APK with the release tag
         working-directory: android
-        run: cp app/build/outputs/apk/debug/app-debug.apk "../modelrig-${{ github.ref_name }}.apk"
+        run: cp app/build/outputs/apk/release/app-release.apk "../modelrig-${{ github.ref_name }}.apk"
 
       - name: Upload straight to the release
         env:
