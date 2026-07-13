@@ -217,7 +217,8 @@ check("parkeret" in open(T.note_path(), encoding="utf-8").read(),
 
 # T14: only one tool call per turn is honoured.
 src = inspect.getsource(M.tools_chat)
-check("calls[:1]" in src and "extra_tool_calls_ignored" in src,
+check("calls[:1]" in inspect.getsource(M._run_tool_loop)
+      and "extra_tool_calls_ignored" in inspect.getsource(M._run_tool_loop),
       "T14: at most one tool per turn, and the caller is told")
 
 # T16: cloud may PROPOSE; risk decides whether it needs the card.
@@ -411,8 +412,10 @@ check(sys_pos < hist_pos,
 # ---------------------------------------------------------------------------
 src = _i.getsource(_M.tools_chat)
 check("synthesize=False" in src, "T22: RAG retrieves, it does not pre-answer")
-check(src.index("synthesize=False") < src.index("chat_tools"),
-      "T22: retrieval happens before the tool decision, not after")
+check(src.index("synthesize=False") < src.index("_run_tool_loop"),
+      "T22: retrieval happens before the tool loop, not after")
+check("chat_tools" in _i.getsource(_M._run_tool_loop),
+      "T22: the tool decision (chat_tools) is made in the loop, after retrieval")
 check("wrap_as_data" in src,
       "T22: retrieved chunks enter the prompt inside the data envelope")
 check(src.index("wrap_as_data") < src.index('"content": req.message'),
@@ -468,7 +471,7 @@ check(req2.image_base64 is None and req2.rag is False and req2.history == [],
 # The confirmation path must return the parked conversation, or the answer to
 # an approved write would be phrased with no memory of what was asked.
 src_confirm = _i.getsource(_M.tools_confirm_chat)
-check("messages" in src_confirm and "_final_answer" in src_confirm,
+check("messages" in src_confirm and "_run_tool_loop" in src_confirm,
       "T23: an approved write is answered with the parked conversation")
 
 # ---------------------------------------------------------------------------
@@ -592,9 +595,9 @@ check("EXECUTOR" not in src and "propose" not in src,
 # ---------------------------------------------------------------------------
 import asyncio as _asyncio  # noqa: E402
 
-src = _i.getsource(_M.tools_chat)
+src = _i.getsource(_M._run_tool_loop)
 check("asyncio.to_thread" in src and "GATE.propose" in src,
-      "T28: tools_chat offloads propose() to a thread")
+      "T28: the tool loop offloads propose() to a thread")
 check("t.GATE.propose(" not in src.replace("t.GATE.propose,", ""),
       "T28: tools_chat never calls propose() inline")
 src_c = _i.getsource(_M.tools_confirm_chat)

@@ -631,7 +631,8 @@ class ToolGate:
         # The pending conversation travels back with the result. The caller may
         # ask the model to phrase an answer -- with tools=[] (see ollama_client
         # .chat_tools), so a tool result can never request another tool.
-        return {"status": "executed", "messages": p.messages, "model": p.model, **out}
+        return {"status": "executed", "messages": p.messages, "model": p.model,
+                "origin": p.origin, "conversation_id": p.conversation_id, **out}
 
     def _execute(self, tool: Tool, args: dict, conv: Optional[str],
                  cid: Optional[str], origin: str = "local") -> dict:
