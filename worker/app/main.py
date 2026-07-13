@@ -23,7 +23,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.58.23"
+VERSION = "1.58.24"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 
@@ -274,7 +274,12 @@ async def health_full(deep: bool = False) -> dict:
     # "unhealthy". Only the checks that represent a fault count against overall.
     # tools counts only when its state file is corrupt (ok=False above), never
     # when the layer is simply switched off.
-    faults = [k for k in ("worker", "ollama", "asr", "tts", "disk", "tools") if not checks[k]["ok"]]
+    # asr/tts are OPTIONAL: the published worker is core-only, so a missing ASR
+    # or TTS is "unsupported", not a fault -- it must not make a correctly
+    # installed core worker report itself overall unhealthy. They're still
+    # reported in checks (with a reason) for diagnosis; they just don't count
+    # against `ok`. (An installed-but-broken one is a richer-model problem.)
+    faults = [k for k in ("worker", "ollama", "disk", "tools") if not checks[k]["ok"]]
     return {"ok": not faults, "faults": faults, "capabilities": _capabilities(), "checks": checks}
 
 

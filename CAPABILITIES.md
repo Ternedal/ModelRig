@@ -1,7 +1,8 @@
 # CAPABILITIES.md — ModelRig / Kaliv worker
 
-> Aktuel version: se `VERSION`. Dette beskriver hvad workeren **faktisk** kan,
-> ikke hvad UI'en nævner. Sandheden på en kørende rig er altid `/capabilities`.
+> Aktuel version: se `VERSION`. Booleanerne betyder "dependency kan importeres" (og for
+> `cuda`: GPU-device findes) — **ikke** at den valgte model er verificeret indlæsbar. En
+> rigere model (installed/configured/verified) er planlagt. Sandheden på en rig er `/capabilities`.
 
 ## Capability-model
 

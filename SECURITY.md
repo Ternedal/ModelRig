@@ -34,10 +34,10 @@
 
 | Credential | Hvor | Note |
 |---|---|---|
-| Device-tokens | SHA-256 i store'et | Single-use pairing-kode → token. Revokér/rotér pr. enhed. |
+| Device-tokens | SHA-256 i store'et (backend); Android: Keystore-krypteret (`token_enc` + `rig_profile`); **desktop: klartekst i SQLite (DPAPI udestår)** | Single-use pairing-kode → token. Revokér/rotér pr. enhed. |
 | `MODELRIG_ADMIN_KEY` | env (valgfri) | Sat → `/pair/start` kræver `X-Admin-Key`. Unset → `/pair/start` kun loopback. |
 | GitHub PAT | Notion (Secrets) | Fine-grained, repo-scopet. Bruges til releases. Genbrugt på tværs — rotation er en stående todo. |
-| Ollama Cloud-nøgle | klient-side | Kun i Cloud-tilstand; valideres først ved chat-kald. |
+| Ollama Cloud-nøgle | Android: Keystore-krypteret; **desktop: klartekst i SQLite (DPAPI udestår)** | Kun i Cloud-tilstand; dyreste credential (kontoforbrug). |
 | Android signeringsnøgle | **committet i repo** | Se accepteret risiko nedenfor. |
 
 ## Sikkerheds-defaults (håndhævet pr. 1.58.14)
@@ -106,9 +106,9 @@ GitHub artifact attestation.
   server-side confirmation gate som andre writes (navne-valideret, menneske-godkendt).
 - **D4a — RAG→cloud:** samtykke-gate implementeret server-side (`allow_rag_cloud`); Android-toggle
   er pt. ikke-funktionel (UI-fix udestår).
-- **D4b — auto-cloud-fallback (ÅBEN):** klienterne sender stadig automatisk samtale + billede til
-  cloud ved rig-fejl før første token — i konflikt med "ingen automatisk cloud-fallback". Bør slås
-  fra som default med eksplicit opt-in.
+- **D4b — auto-cloud-fallback (LUKKET som sikker default, 1.58.19):** begge klienter falder kun
+  tilbage til cloud når `autoCloudFallback`/`autoFallback` eksplicit er slået til; et billede sendes
+  aldrig via fallback. Synligt opt-in-UI + "spørg før cloud"-kort udestår (kommer med #2a).
 - **Cloud-read egress (ÅBEN):** read-tools kræver ingen godkendelse, heller ikke for cloud-modeller.
   En cloud-agent kan kæde reads (inkl. `list_documents`, der returnerer dokument-navne) og sende
   resultaterne til cloud. Overvej egress-klassifikation (public/operational/private), hvor `private`

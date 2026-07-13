@@ -185,6 +185,8 @@ check(all(isinstance(v, bool) for v in _cj.values()),
 _hf = client.get("/health/full").json()
 check(set(_hf.get("capabilities", {}).keys()) == {"asr", "tts", "pdf", "docx", "cuda"},
       "/health/full includes the capabilities object")
+check("asr" not in _hf.get("faults", []) and "tts" not in _hf.get("faults", []),
+      "/health/full does not fault on optional asr/tts (a core worker stays healthy on those)")
 
 print(f"\n===== WORKER: {passed} passed, {failed} failed =====")
 raise SystemExit(0 if failed == 0 else 1)

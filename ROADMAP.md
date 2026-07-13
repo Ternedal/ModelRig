@@ -4,9 +4,9 @@
 > **Status:** Gul. Backend er sikkerhedshærdet, versionsdrift mekanisk lukket, og
 > **apparatdriften er bygget** (supervisor med autostart + crash-restart, updater med
 > rollback, ressource-varsling — 1.58.8–1.58.14). Fokus nu er **integration + hardening**,
-> ikke nye capabilities: to eksterne audits peger på klient-integrationsfejl (chained-writes
-> og RAG→cloud-toggle virker ikke i appen endnu), en åben auto-cloud-fallback (privacy), og
-> executable-supply-chain uden checksums. Det resterende er i høj grad **validering på
+> ikke nye capabilities. Klient- og privacy-integrationen er nu i høj grad lukket (chained-writes
+> ✅, local-first default ✅, Android credential-kryptering + backup ✅, checksums ✅); tilbage står
+> RAG→cloud state-machine (#2a) og desktop-credentials (DPAPI). Det resterende er i høj grad **validering på
 > hardware** + klient-fixes — ikke backend-kode.
 >
 > Kompakt Now/Next/Later. **Vedtaget 13/7-2026**; afløser den gamle sprawlende roadmap,
