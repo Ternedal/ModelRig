@@ -77,6 +77,29 @@ _MD_HRULE = re.compile(r"^\s*([-*_])\s*(?:\1\s*){2,}$", re.MULTILINE)
 _MD_TABLE_PIPE = re.compile(r"^\s*\|.*\|\s*$", re.MULTILINE)  # table rows: drop
 _WS = re.compile(r"[ \t]{2,}")
 
+# Emojis and pictographs: Piper can't pronounce them, so it says the Unicode name
+# or emits noise. The chat still shows them; the SPOKEN text drops them. (Anders
+# hit this 2026-07-13: emojis stripped from the display were still read aloud,
+# because the audio path never removed them.) Covers the standard emoji blocks --
+# all high Unicode, so Danish text, digits and punctuation (<= U+00FF / ASCII)
+# are untouched.
+_EMOJI = re.compile(
+    "["
+    "\U0001F1E6-\U0001F1FF"  # regional indicators (flags)
+    "\U0001F300-\U0001F5FF"  # misc symbols & pictographs
+    "\U0001F600-\U0001F64F"  # emoticons
+    "\U0001F680-\U0001F6FF"  # transport & map
+    "\U0001F700-\U0001F9FF"  # alchemical .. supplemental pictographs
+    "\U0001FA00-\U0001FAFF"  # extended-A (chess, tools, etc.)
+    "\U00002300-\U000023FF"  # misc technical (watch, hourglass, keyboard)
+    "\U00002600-\U000026FF"  # misc symbols (sun, star, warning, ...)
+    "\U00002700-\U000027BF"  # dingbats (check mark, sparkles, arrows)
+    "\U00002B00-\U00002BFF"  # misc symbols & arrows (star, arrows)
+    "\U0000FE00-\U0000FE0F"  # variation selectors
+    "\U0000200D"             # zero-width joiner (emoji sequences)
+    "]+"
+)
+
 
 # One at a time, per backend. Not for safety against Anders -- he is one user --
 # but because the model objects are shared, and because two Whisper decodes on a
@@ -105,6 +128,7 @@ def strip_markdown(text: str) -> str:
     t = _MD_BLOCKQUOTE.sub("", t)
     t = _MD_BULLET.sub("", t)
     t = _MD_NUMLIST.sub("", t)
+    t = _EMOJI.sub(" ", t)  # emojis are unspeakable; drop them (chat keeps them)
     t = _WS.sub(" ", t)
     return t.strip()
 
