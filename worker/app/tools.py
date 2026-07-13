@@ -294,6 +294,9 @@ class ToolGate:
         # Off by default on first run: power should be opted into.
         self.enabled = os.getenv("KALIV_TOOLS_ENABLED", "0") == "1"
         self.disabled_tools: set[str] = set()
+        # Set when the on-disk state file exists but cannot be read/parsed. A
+        # corrupt kill-switch file is a real fault, surfaced via /health/full.
+        self.state_error: Optional[str] = None
         if state_file:
             self._load_state()
 
@@ -312,8 +315,19 @@ class ToolGate:
         try:
             with open(self.state_file, encoding="utf-8") as f:
                 st = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError, OSError):
-            return  # first run, or a corrupt file: fall back to the env default
+        except FileNotFoundError:
+            return  # first run: keep the env-var default
+        except (json.JSONDecodeError, OSError) as e:
+            # A state file EXISTS but is unreadable/corrupt. We cannot recover the
+            # last explicit decision, so fail CLOSED: force the layer off and
+            # record the fault for /health/full, rather than silently falling
+            # back to the env default (which the launcher sets to "1"). Re-arming
+            # is a decision made while looking at the app; it writes a fresh file
+            # and clears this. See the persistence note above.
+            self.enabled = False
+            self.disabled_tools = set()
+            self.state_error = f"corrupt tool-state file ({type(e).__name__}); tools forced off"
+            return
         if isinstance(st.get("enabled"), bool):
             self.enabled = st["enabled"]
         tools = st.get("disabled_tools")
@@ -329,10 +343,12 @@ class ToolGate:
                 json.dump({"enabled": self.enabled,
                            "disabled_tools": sorted(self.disabled_tools)}, f)
             os.replace(tmp, self.state_file)  # atomic: never a half-written brake
+            self.state_error = None  # a good write clears any prior corrupt-load fault
         except OSError:
             # Cannot persist. Do not pretend the toggle stuck: the caller reads
             # the returned registry, and the in-memory state is still correct
             # for this process. Record it where it will be seen.
+            self.state_error = "could not persist tool state"
             self.audit.record(tool="_state", args={}, risk="write",
                               outcome="error", result_summary="could not persist tool state")
 

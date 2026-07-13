@@ -533,12 +533,22 @@ check("note_append" in gate_with_state().disabled_tools,
 check(gate_with_state().enabled is True,
       "T25: disabling one tool does not disarm the layer")
 
-# A corrupt state file must not brick the worker, and must not silently arm it.
+# A corrupt state file must fail CLOSED. The launcher keeps KALIV_TOOLS_ENABLED=1
+# in production, so falling back to the env default on a corrupt file would
+# silently re-arm the layer -- exactly what a kill switch must never do. The
+# fault is also surfaced (state_error) so /health/full can report it, and an
+# explicit toggle rewrites the file and clears it.
 with open(state, "w", encoding="utf-8") as f:
     f.write("{ not json")
-_os.environ["KALIV_TOOLS_ENABLED"] = "0"
-check(gate_with_state().enabled is False,
-      "T25: a corrupt state file falls back to the env default, which is off")
+_os.environ["KALIV_TOOLS_ENABLED"] = "1"  # production condition: env says ON
+g = gate_with_state()
+check(g.enabled is False,
+      "T25: a corrupt state file forces tools OFF even when the env var says ON")
+check(g.state_error is not None,
+      "T25: a corrupt state file is surfaced as a fault, not swallowed")
+g.set_enabled(True)  # an explicit decision, made while looking at the app
+check(g.state_error is None and _json.load(open(state))["enabled"] is True,
+      "T25: an explicit toggle rewrites the corrupt file and clears the fault")
 _os.environ.pop("KALIV_TOOLS_ENABLED", None)
 
 # Writes are atomic: no half-written brake.
@@ -685,6 +695,37 @@ check("if not base_url:" in _src_tools and "keep_alive" in _src_tools,
 check('"stream": True}' in _src_stream.replace("\n"," ").replace("  "," ") or
       'stream": True}' in _src_stream,
       "T31: chat_stream base payload has no unconditional keep_alive")
+
+# ---------------------------------------------------------------------------
+# T32: SSRF guard. A client supplies cloud_base_url and the worker makes a
+# server-side request to it. A client must not be able to point that at an
+# internal service. _validate_cloud_url rejects non-http(s) schemes and any host
+# that resolves to a loopback/private/link-local address; public hosts pass.
+# ---------------------------------------------------------------------------
+os.environ.pop("KALIV_CLOUD_ALLOW_PRIVATE", None)
+
+def _ssrf_rejected(u):
+    try:
+        oc._validate_cloud_url(u)
+        return False
+    except oc.OllamaError:
+        return True
+
+check(_ssrf_rejected("http://127.0.0.1:11434"), "T32: SSRF -- loopback cloud url is rejected")
+check(_ssrf_rejected("http://169.254.169.254/latest/meta-data/"),
+      "T32: SSRF -- link-local cloud-metadata url is rejected")
+check(_ssrf_rejected("http://192.168.1.10:11434"), "T32: SSRF -- private 192.168/16 url is rejected")
+check(_ssrf_rejected("http://10.0.0.5:11434"), "T32: SSRF -- private 10/8 url is rejected")
+check(_ssrf_rejected("http://[::1]:11434"), "T32: SSRF -- IPv6 loopback is rejected")
+check(_ssrf_rejected("file:///etc/passwd"), "T32: SSRF -- non-http(s) scheme is rejected")
+# Public IP literals (no DNS lookup needed) must pass -- Ollama Cloud is unaffected.
+check(not _ssrf_rejected("https://8.8.8.8/api/chat"), "T32: SSRF -- a public address is allowed")
+check(not _ssrf_rejected("https://1.1.1.1"), "T32: SSRF -- another public address is allowed")
+# The escape hatch permits a deliberately-trusted upstream on your own LAN.
+os.environ["KALIV_CLOUD_ALLOW_PRIVATE"] = "1"
+check(not _ssrf_rejected("http://192.168.1.10:11434"),
+      "T32: SSRF -- KALIV_CLOUD_ALLOW_PRIVATE=1 permits a private upstream")
+os.environ.pop("KALIV_CLOUD_ALLOW_PRIVATE", None)
 
 print(f"\n===== TOOLS: {passed} passed, {failed} failed =====")
 sys.exit(0 if failed == 0 else 1)

@@ -6,14 +6,16 @@ The backend proxies /api/v1/rag/* here; clients never call it directly.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging as pylog
+import os
 import sys
 import time as pytime
 import uuid
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import ollama_client as oc
@@ -21,9 +23,37 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.58.0"
+VERSION = "1.58.1"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
+
+
+def _is_loopback(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host == "localhost"
+
+
+@app.middleware("http")
+async def _loopback_only(request: Request, call_next):
+    # The worker has NO auth of its own: the architecture assumes it is reached
+    # only by the backend running on the same machine (loopback). Enforce that at
+    # the request layer so a stray `--host 0.0.0.0` cannot expose RAG/voice/tools
+    # on the LAN. Read the flag per-request (not at import) so it is togglable and
+    # testable. Set KALIV_WORKER_ALLOW_LAN=1 only if you deliberately run the
+    # worker on a different host than the backend.
+    if os.getenv("KALIV_WORKER_ALLOW_LAN", "0") != "1":
+        client = request.client.host if request.client else ""
+        if not _is_loopback(client):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "worker is loopback-only; set "
+                         "KALIV_WORKER_ALLOW_LAN=1 to allow non-loopback clients"},
+            )
+    return await call_next(request)
+
+
 from . import paths as _paths
 store = DocStore()
 
@@ -49,6 +79,45 @@ async def request_logger(request: Request, call_next):
     _logger.info("level=info req=%s method=%s path=%s status=%d dur_ms=%d",
                  rid, request.method, request.url.path, response.status_code, dur_ms)
     return response
+
+
+def _max_upload_bytes() -> int:
+    try:
+        mb = int(os.getenv("KALIV_MAX_UPLOAD_MB", "25"))
+    except ValueError:
+        mb = 25
+    return max(1, mb) * 1024 * 1024
+
+
+def _reject_if_too_large(raw: bytes, what: str) -> None:
+    limit = _max_upload_bytes()
+    if len(raw) > limit:
+        raise HTTPException(
+            status_code=413,
+            detail=f"{what} is {len(raw) // (1024 * 1024)} MB, over the "
+                   f"{limit // (1024 * 1024)} MB limit (raise KALIV_MAX_UPLOAD_MB)")
+
+
+@app.middleware("http")
+async def _max_body_size(request: Request, call_next):
+    # Ingest accepts base64 PDFs/DOCX/images inside JSON bodies, which FastAPI
+    # buffers wholly in RAM to parse. Reject an oversized body up front (413) via
+    # Content-Length so a huge upload can't OOM the worker before a handler runs.
+    # Tune with KALIV_MAX_UPLOAD_MB (default 25). base64 inflates the wire size
+    # ~33% over the original file, so the effective file cap is a little lower.
+    cl = request.headers.get("content-length")
+    if cl is not None:
+        try:
+            too_big = int(cl) > _max_upload_bytes()
+        except ValueError:
+            too_big = False
+        if too_big:
+            limit_mb = _max_upload_bytes() // (1024 * 1024)
+            return JSONResponse(
+                status_code=413,
+                content={"detail": f"request body exceeds the {limit_mb} MB "
+                         "limit (raise KALIV_MAX_UPLOAD_MB)"})
+    return await call_next(request)
 
 
 class IngestDoc(BaseModel):
@@ -149,9 +218,12 @@ async def health_full(deep: bool = False) -> dict:
 
     # Tools: the kill-switch state, surfaced. "Why did Kaliv refuse to act" is a
     # question this answers before it gets asked.
-    checks["tools"] = {"ok": True, "enabled": _tools.GATE.enabled,
+    checks["tools"] = {"ok": _tools.GATE.state_error is None,
+                       "enabled": _tools.GATE.enabled,
                        "disabled_tools": sorted(_tools.GATE.disabled_tools),
-                       "detail": "layer on" if _tools.GATE.enabled else "layer off (KALIV_TOOLS_ENABLED=1)"}
+                       "detail": _tools.GATE.state_error
+                                 or ("layer on" if _tools.GATE.enabled
+                                     else "layer off (KALIV_TOOLS_ENABLED=1)")}
 
     # Disk: a full disk breaks ingest, TTS output and backups at once, silently.
     try:
@@ -177,7 +249,9 @@ async def health_full(deep: bool = False) -> dict:
 
     # A subsystem that is off by choice (tools) must not drag the whole rig to
     # "unhealthy". Only the checks that represent a fault count against overall.
-    faults = [k for k in ("worker", "ollama", "asr", "tts", "disk") if not checks[k]["ok"]]
+    # tools counts only when its state file is corrupt (ok=False above), never
+    # when the layer is simply switched off.
+    faults = [k for k in ("worker", "ollama", "asr", "tts", "disk", "tools") if not checks[k]["ok"]]
     return {"ok": not faults, "faults": faults, "checks": checks}
 
 
@@ -227,6 +301,7 @@ async def ingest_pdf(req: IngestPdfReq) -> dict:
         raw = base64.b64decode(req.pdf_base64)
     except Exception:
         raise HTTPException(status_code=400, detail="pdf_base64 is not valid base64")
+    _reject_if_too_large(raw, "PDF")
     try:
         extracted = rag_pdf.extract_text(raw)
     except RuntimeError as e:
@@ -355,6 +430,7 @@ async def ingest_docx(req: IngestDocxReq) -> dict:
         raw = base64.b64decode(req.docx_base64)
     except Exception:
         raise HTTPException(status_code=400, detail="docx_base64 is not valid base64")
+    _reject_if_too_large(raw, "DOCX")
     try:
         extracted = rag_docx.extract_text(raw)
     except RuntimeError as e:

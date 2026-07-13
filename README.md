@@ -182,8 +182,10 @@ ollama pull qwen3:14b        # confirmed primary (MODELS.md); qwen3:8b if VRAM i
 ollama pull nomic-embed-text
 
 # 1. Worker (RAG) — optional, only if you use /rag/*
+# Bind to loopback: the worker has NO auth of its own and is meant to be reached
+# only by the backend on the same machine. Do not expose it on the LAN.
 cd worker && pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8099
+uvicorn app.main:app --host 127.0.0.1 --port 8099
 
 # 2. Backend
 cd ../backend && go build -o modelrig-server ./cmd/modelrig-server

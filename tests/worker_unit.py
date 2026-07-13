@@ -43,7 +43,7 @@ chunks2 = chunk_text(space_text, chunk_size=20, overlap=5)
 check(all(" " not in c[-1:] for c in chunks2), f"chunk_text (no sentence boundary) still breaks cleanly on whitespace, no trailing space -> {chunks2}")
 check(len(chunks2) > 1, "chunk_text (no sentence boundary) still splits long text into multiple chunks")
 
-client = TestClient(app)
+client = TestClient(app, client=("127.0.0.1", 12345))
 
 # 2. health
 r = client.get("/healthz")
@@ -149,6 +149,30 @@ check(h["checks"]["disk"]["ok"] in (True, False), "health_full: disk check has a
 # overall ok == no faults among the real subsystems
 faults = [k for k in ("worker","ollama","asr","tts","disk") if not h["checks"][k]["ok"]]
 check(h["ok"] == (not faults), "health_full: overall ok iff no real subsystem faults")
+
+# ---------------------------------------------------------------------------
+# Loopback guard: the worker has no auth of its own, so a non-loopback client
+# must be refused (403) unless KALIV_WORKER_ALLOW_LAN=1. The backend reaches the
+# worker on localhost, so this never affects the real path.
+# ---------------------------------------------------------------------------
+from app.main import _is_loopback
+
+check(_is_loopback("127.0.0.1") and _is_loopback("::1") and _is_loopback("localhost"),
+      "loopback guard: 127.0.0.1 / ::1 / localhost count as loopback")
+check(not _is_loopback("192.168.1.50") and not _is_loopback("10.0.0.2"),
+      "loopback guard: LAN addresses do not count as loopback")
+
+os.environ.pop("KALIV_WORKER_ALLOW_LAN", None)
+_lan = TestClient(app, client=("192.168.1.50", 40000))
+check(_lan.get("/healthz").status_code == 403,
+      "loopback guard: a LAN client is refused (403) by default")
+_loop = TestClient(app, client=("127.0.0.1", 40000))
+check(_loop.get("/healthz").status_code == 200,
+      "loopback guard: a loopback client is served")
+os.environ["KALIV_WORKER_ALLOW_LAN"] = "1"
+check(_lan.get("/healthz").status_code == 200,
+      "loopback guard: KALIV_WORKER_ALLOW_LAN=1 lets a LAN client through")
+os.environ.pop("KALIV_WORKER_ALLOW_LAN", None)
 
 print(f"\n===== WORKER: {passed} passed, {failed} failed =====")
 raise SystemExit(0 if failed == 0 else 1)

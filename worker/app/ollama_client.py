@@ -6,7 +6,10 @@ of leaking a stack trace.
 """
 from __future__ import annotations
 
+import ipaddress
 import os
+import socket
+from urllib.parse import urlparse
 
 import httpx
 
@@ -65,6 +68,42 @@ async def chat(messages: list[dict], model: str | None = None) -> str:
     return r.json().get("message", {}).get("content", "")
 
 
+def _validate_cloud_url(base_url: str) -> None:
+    """SSRF guard for the client-supplied cloud upstream.
+
+    A client passes cloud_base_url and the worker makes a server-side request to
+    it. Reject non-http(s) schemes and any host that resolves to a
+    loopback/private/link-local/reserved address, so a caller cannot turn the
+    worker into a proxy for internal services (127.0.0.1, 169.254.169.254,
+    10/172.16/192.168, ...). Public cloud hosts (Ollama Cloud) are unaffected.
+
+    Set KALIV_CLOUD_ALLOW_PRIVATE=1 to bypass -- e.g. a trusted Ollama upstream
+    on your own LAN. NOTE: the check resolves the host at validation time; it is
+    not a defence against DNS-rebinding between here and httpx's own connect.
+    That residual is accepted for a single-user, token-gated platform.
+    """
+    if os.getenv("KALIV_CLOUD_ALLOW_PRIVATE", "0") == "1":
+        return
+    parsed = urlparse(base_url)
+    if parsed.scheme not in ("http", "https"):
+        raise OllamaError(f"cloud url scheme not allowed: {parsed.scheme or '(none)'!r}")
+    host = parsed.hostname
+    if not host:
+        raise OllamaError("cloud url has no host")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as e:
+        raise OllamaError(f"cloud host does not resolve: {host}") from e
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (ip.is_loopback or ip.is_private or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            raise OllamaError(
+                f"cloud host {host} resolves to a non-public address ({ip}); "
+                "refused to prevent SSRF (set KALIV_CLOUD_ALLOW_PRIVATE=1 to allow)")
+
+
 async def chat_tools(messages: list[dict], tools: list[dict],
                      model: str | None = None, base_url: str | None = None,
                      api_key: str | None = None) -> dict:
@@ -83,6 +122,8 @@ async def chat_tools(messages: list[dict], tools: list[dict],
     the follow-up turn after a tool result is made chain-free.
     """
     model = model or GEN_MODEL
+    if base_url:
+        _validate_cloud_url(base_url)
     # keep_alive is a local-VRAM directive; don't send it to a cloud upstream
     # (same fix as chat_stream -- it can hang the cloud request).
     payload: dict = {"model": model, "messages": messages, "stream": False}
@@ -117,6 +158,8 @@ async def chat_stream(messages: list[dict], model: str | None = None,
     only for this call.
     """
     model = model or GEN_MODEL
+    if base_url:
+        _validate_cloud_url(base_url)
     url = (base_url or OLLAMA_URL).rstrip("/")
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     # keep_alive tells a LOCAL Ollama how long to keep the model in VRAM. Ollama

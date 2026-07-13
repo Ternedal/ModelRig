@@ -27,7 +27,8 @@ Any Ollama failure → HTTP 502 with a readable detail (never a stack trace).
 cd worker
 python3 -m venv .venv && source .venv/bin/activate   # optional
 pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8099
+# Loopback only: the worker has no auth; the backend reaches it on localhost.
+uvicorn app.main:app --host 127.0.0.1 --port 8099
 ```
 
 ## Config (env)

@@ -30,7 +30,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.rag import chunk_text
 
-client = TestClient(app)
+client = TestClient(app, client=("127.0.0.1", 12345))
 passed = failed = 0
 def check(cond, name):
     global passed, failed
@@ -237,6 +237,35 @@ if rag_pptx.is_available():
     check(_legacy, "pptx: legacy .ppt rejected with a clear message")
 else:
     print("  SKIP: python-pptx not installed (optional dependency)")
+
+# ---------------------------------------------------------------------------
+# Upload size limits: base64 PDFs/DOCX/images are buffered whole in RAM to be
+# parsed, so an oversized body must be refused (413) before it can OOM the
+# worker. Cap is KALIV_MAX_UPLOAD_MB (default 25), read per-request.
+# ---------------------------------------------------------------------------
+from app.main import _reject_if_too_large, _max_upload_bytes  # noqa: E402
+from fastapi import HTTPException as _HTTPExc  # noqa: E402
+
+os.environ["KALIV_MAX_UPLOAD_MB"] = "1"
+
+try:
+    _reject_if_too_large(b"x" * (2 * 1024 * 1024), "PDF")
+    check(False, "size limit: an oversized decoded upload is rejected")
+except _HTTPExc as _e:
+    check(_e.status_code == 413, "size limit: an oversized decoded upload -> 413")
+try:
+    _reject_if_too_large(b"x" * 1024, "PDF")
+    check(True, "size limit: a small decoded upload is accepted")
+except _HTTPExc:
+    check(False, "size limit: a small decoded upload is accepted")
+
+_big = "A" * int(1.2 * 1024 * 1024)  # request body > 1 MB
+_r = client.post("/rag/ingest/pdf", json={"pdf_base64": _big, "source": "big"})
+check(_r.status_code == 413, f"size limit: an oversized body -> 413 (got {_r.status_code})")
+_r = client.post("/rag/ingest/pdf", json={"pdf_base64": "AAAA", "source": "tiny"})
+check(_r.status_code != 413, f"size limit: a small body is not size-blocked (got {_r.status_code})")
+
+os.environ.pop("KALIV_MAX_UPLOAD_MB", None)
 
 print(f"\n===== WORKER V1: {passed} passed, {failed} failed =====")
 raise SystemExit(0 if failed == 0 else 1)

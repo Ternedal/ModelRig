@@ -81,17 +81,23 @@ func (s *Store) PutPairing(p Pairing) error {
 	return s.persistLocked()
 }
 
-// TakePairing atomically removes and returns a pairing (single-use).
-func (s *Store) TakePairing(code string) (Pairing, bool) {
+// TakePairing atomically removes and returns a pairing (single-use). It fails
+// closed: if the removal cannot be persisted, the code is restored in memory and
+// (Pairing{}, false, err) is returned, so the caller does NOT issue a token for a
+// claim that was never durably recorded as used.
+func (s *Store) TakePairing(code string) (Pairing, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.d.Pairings[code]
 	if !ok {
-		return Pairing{}, false
+		return Pairing{}, false, nil
 	}
 	delete(s.d.Pairings, code)
-	_ = s.persistLocked()
-	return p, true
+	if err := s.persistLocked(); err != nil {
+		s.d.Pairings[code] = p // roll back: the code was NOT consumed
+		return Pairing{}, false, err
+	}
+	return p, true, nil
 }
 
 func (s *Store) PurgeExpiredPairings(now time.Time) {
@@ -126,30 +132,53 @@ func (s *Store) Devices() []Device {
 	return out
 }
 
-// DeleteDevice removes a device by ID (revoke). Returns true if one was removed.
-func (s *Store) DeleteDevice(id string) bool {
+// DeleteDevice removes a device by ID (revoke). It fails closed: if the removal
+// cannot be persisted, the device list is restored and (false, err) is returned,
+// so a revoke can never report success while the device survives a restart.
+// Returns (true, nil) only when a device was removed and the change hit disk.
+func (s *Store) DeleteDevice(id string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	idx := -1
 	for i := range s.d.Devices {
 		if s.d.Devices[i].ID == id {
-			s.d.Devices = append(s.d.Devices[:i], s.d.Devices[i+1:]...)
-			_ = s.persistLocked()
-			return true
+			idx = i
+			break
 		}
 	}
-	return false
+	if idx == -1 {
+		return false, nil
+	}
+	old := s.d.Devices
+	next := append(append([]Device{}, old[:idx]...), old[idx+1:]...)
+	s.d.Devices = next
+	if err := s.persistLocked(); err != nil {
+		s.d.Devices = old // roll back: revoke did NOT durably happen
+		return false, err
+	}
+	return true, nil
 }
 
-// TouchByTokenHash finds a device by constant-time hash comparison, updates its
-// LastSeen, and returns it. Comparison is constant-time to avoid leaking hash
-// bytes via timing.
+// LastSeenPersistInterval bounds how often TouchByTokenHash rewrites the store.
+// LastSeen is best-effort telemetry, not security state, so persisting it on
+// every authenticated request (a full-file rewrite each time) is wasteful; we
+// coarsen it to this granularity.
+const LastSeenPersistInterval = 5 * time.Minute
+
+// TouchByTokenHash finds a device by constant-time hash comparison and records
+// LastSeen. Comparison is constant-time to avoid leaking hash bytes via timing.
+// LastSeen is coarsened to LastSeenPersistInterval and its persistence is
+// best-effort: a write failure here never fails the caller's request, because
+// LastSeen carries no security decision (auth reads TokenHash, not LastSeen).
 func (s *Store) TouchByTokenHash(hash string, now time.Time) (Device, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.d.Devices {
 		if subtle.ConstantTimeCompare([]byte(s.d.Devices[i].TokenHash), []byte(hash)) == 1 {
-			s.d.Devices[i].LastSeen = now
-			_ = s.persistLocked()
+			if now.Sub(s.d.Devices[i].LastSeen) >= LastSeenPersistInterval {
+				s.d.Devices[i].LastSeen = now
+				_ = s.persistLocked()
+			}
 			return s.d.Devices[i], true
 		}
 	}
@@ -157,17 +186,24 @@ func (s *Store) TouchByTokenHash(hash string, now time.Time) (Device, bool) {
 }
 
 // RotateToken replaces a device's token hash by ID (used when re-issuing a token
-// without re-pairing). The old hash stops validating immediately. Returns the
-// updated device.
-func (s *Store) RotateToken(id, newHash string) (Device, bool) {
+// without re-pairing). The old hash stops validating immediately. It fails
+// closed: if the new hash cannot be persisted, the old hash is restored and
+// (Device{}, false, err) is returned, so a rotation prompted by a suspected
+// token leak can never silently fail to take effect on disk (which would leave
+// the old, leaked token valid again after a restart).
+func (s *Store) RotateToken(id, newHash string) (Device, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.d.Devices {
 		if s.d.Devices[i].ID == id {
+			oldHash := s.d.Devices[i].TokenHash
 			s.d.Devices[i].TokenHash = newHash
-			_ = s.persistLocked()
-			return s.d.Devices[i], true
+			if err := s.persistLocked(); err != nil {
+				s.d.Devices[i].TokenHash = oldHash // roll back: rotation did NOT persist
+				return Device{}, false, err
+			}
+			return s.d.Devices[i], true, nil
 		}
 	}
-	return Device{}, false
+	return Device{}, false, nil
 }

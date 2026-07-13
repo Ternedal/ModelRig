@@ -74,7 +74,11 @@ func (s *server) handlePairClaim(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid code format")
 		return
 	}
-	p, ok := s.Store.TakePairing(code)
+	p, ok, err := s.Store.TakePairing(code)
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, "pairing state could not be persisted")
+		return
+	}
 	if !ok {
 		writeErr(w, http.StatusUnauthorized, "unknown or already-used code")
 		return
@@ -139,7 +143,12 @@ func (s *server) handleDeviceRevoke(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "missing device id")
 		return
 	}
-	if !s.Store.DeleteDevice(id) {
+	ok, err := s.Store.DeleteDevice(id)
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, "revocation could not be persisted")
+		return
+	}
+	if !ok {
 		writeErr(w, http.StatusNotFound, "device not found")
 		return
 	}
@@ -281,7 +290,11 @@ func (s *server) handleTokenRotate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "token generation failed")
 		return
 	}
-	updated, ok := s.Store.RotateToken(dv.ID, hash)
+	updated, ok, err := s.Store.RotateToken(dv.ID, hash)
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, "token rotation could not be persisted")
+		return
+	}
 	if !ok {
 		writeErr(w, http.StatusNotFound, "device not found")
 		return
