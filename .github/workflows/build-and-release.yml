@@ -100,22 +100,17 @@ jobs:
           else
             echo "server_bins=false" >> "$GITHUB_OUTPUT"
           fi
-          if [ "$PATCH" = "0" ]; then
-            echo "build_desktop=true" >> "$GITHUB_OUTPUT"
-            echo "Milestone release ($TAG, patch=0) -> Windows desktop jar"
-          elif echo "$CHANGED" | grep '^desktop/' | grep -vq '^desktop/composeApp/build.gradle.kts$'; then
-            # Any desktop change EXCEPT the gradle file alone: the gradle
-            # packageVersion is bumped whenever desktop ships, and a version-
-            # bump-only diff silently re-triggering builds is exactly the
-            # matrix leak discovered live on v0.20.14's run. A patch that
-            # genuinely CHANGES desktop code needs a fresh Windows jar
-            # (learned on v0.20.13's layout fix).
-            echo "build_desktop=true" >> "$GITHUB_OUTPUT"
-            echo "Patch release ($TAG), tagged commit touches desktop/ -> Windows desktop jar"
-          else
-            echo "build_desktop=false" >> "$GITHUB_OUTPUT"
-            echo "Patch release ($TAG, patch=$PATCH, no desktop changes) -> no desktop build (jar from last desktop change stays current)"
-          fi
+          # Build the Windows desktop jar on EVERY release. The old "only when
+          # desktop code changed" optimization meant the desktop packageVersion
+          # marched forward with each version bump while NO matching jar was
+          # produced -- so no desktop build ever matched the current release
+          # (caught 2026-07-13, three patches deep: 1.58.1/2/3 all skipped it).
+          # With one VERSION source and lockstep versions, every release must
+          # ship a version-matched desktop jar. The ~3 min Windows runner is the
+          # price of never handing a stale client with a fresh version number.
+          # workflow_dispatch (above) still forces the full matrix too.
+          echo "build_desktop=true" >> "$GITHUB_OUTPUT"
+          echo "Release $TAG -> Windows desktop jar (built every release for version-match)"
 
   server-tests:
     needs: version-check
