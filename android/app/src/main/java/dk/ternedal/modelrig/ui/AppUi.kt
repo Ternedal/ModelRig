@@ -643,6 +643,9 @@ private fun ChatScreen(
     var modelMenu by remember { mutableStateOf(false) }
     var cloudModel by remember { mutableStateOf(store.cloudModel) }
     var ragMode by remember { mutableStateOf(false) }
+    // D4 consent (per session, default off): may RAG document content be sent to
+    // a CLOUD model? Off -> the rig keeps document content local (refuses RAG+cloud).
+    var allowRagCloud by remember { mutableStateOf(false) }
     var ragSources by remember { mutableStateOf(listOf<String>()) }
     var ragSourceFilter by remember { mutableStateOf<String?>(null) }
     var ragSourceMenu by remember { mutableStateOf(false) }
@@ -1091,9 +1094,10 @@ private fun ChatScreen(
             // bypass, since the tool layer simply isn't on that road.
             val useTools = toolsMode && (mode == "rig" || (mode == "cloud" && store.cloudKey != null))
             // RAG and Tools compose: documents ground the answer, and the model
-            // may still propose an action about them. Retrieval only works
-            // against the rig's index, so cloud+RAG stays off.
-            val toolsWithRag = useTools && ragMode && mode == "rig"
+            // may still propose an action about them. Retrieval runs against the
+            // rig's index; sending those chunks to a CLOUD model is gated behind
+            // the D4 consent toggle (allowRagCloud), off by default.
+            val toolsWithRag = useTools && ragMode && (mode == "rig" || allowRagCloud)
             var proposal: dk.ternedal.modelrig.net.ToolTurn? = null
             val err = withContext(Dispatchers.IO) {
                 runCatching {
@@ -1117,6 +1121,7 @@ private fun ChatScreen(
                                     history = prior,
                                     rag = toolsWithRag,
                                     ragSource = if (toolsWithRag) srcFilter else null,
+                                    allowRagCloud = allowRagCloud,
                                     imageB64 = imageB64,
                                     system = sys,
                                 )
@@ -1409,6 +1414,24 @@ private fun ChatScreen(
                                         modelMenu = false
                                     },
                                 )
+                                // D4 consent: allow RAG document content to reach a
+                                // CLOUD model this session. Shown in cloud mode, where
+                                // the choice applies; default is blocked (kept local).
+                                if (mode == "cloud") {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                if (allowRagCloud) "☁ RAG→cloud: tilladt" else "☁ RAG→cloud: blokeret",
+                                                color = if (allowRagCloud) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
+                                                fontSize = 13.sp,
+                                            )
+                                        },
+                                        onClick = {
+                                            allowRagCloud = !allowRagCloud
+                                            modelMenu = false
+                                        },
+                                    )
+                                }
                                 // Source filter + add-document, shown only when RAG
                                 // is on. Opens the same source menu the header chip
                                 // used to.

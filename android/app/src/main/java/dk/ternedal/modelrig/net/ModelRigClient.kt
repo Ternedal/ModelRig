@@ -518,6 +518,7 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         history: List<Pair<String, String>> = emptyList(),
         rag: Boolean = false,
         ragSource: String? = null,
+        allowRagCloud: Boolean = false,
         imageB64: String? = null,
         system: String? = null,
     ): ToolTurn {
@@ -540,6 +541,10 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         if (rag) {
             payload.put("rag", true)
             ragSource?.let { payload.put("rag_source", it) }
+            // D4 consent: only sent when the user has explicitly allowed RAG
+            // document content to reach a cloud model this session. Default off
+            // -> the rig refuses RAG+cloud and keeps document content local.
+            if (allowRagCloud) payload.put("allow_rag_cloud", true)
         }
         // An attached image used to vanish the moment Tools was on.
         imageB64?.let { payload.put("image_base64", it) }
