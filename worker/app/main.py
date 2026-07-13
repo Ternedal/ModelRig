@@ -23,7 +23,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.58.20"
+VERSION = "1.58.21"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 
@@ -154,6 +154,29 @@ def healthz() -> dict:
     }
 
 
+def _capabilities() -> dict:
+    """What this worker can actually do, by whether each optional dependency is
+    installed. The published core worker ships WITHOUT ASR/TTS/PDF/DOCX, so this
+    lets a client enable or explain features rather than advertising a capability
+    the connected worker doesn't have. cuda reflects real GPU availability."""
+    from . import voice_asr, voice_tts, rag_pdf, rag_docx
+    return {
+        "asr": voice_asr.is_available(),
+        "tts": voice_tts.is_available(),
+        "pdf": rag_pdf.is_available(),
+        "docx": rag_docx.is_available(),
+        "cuda": voice_asr.cuda_available(),
+    }
+
+
+@app.get("/capabilities")
+def capabilities() -> dict:
+    """Lightweight capability probe: {asr, tts, pdf, docx, cuda} booleans. Cheap
+    (import checks only), so a client can call it on connect and gate its UI on
+    the answer. The same object is included in /health/full."""
+    return _capabilities()
+
+
 @app.get("/health/deep")
 async def health_deep() -> dict:
     """Actually round-trip an embedding through Ollama, so this proves the model
@@ -252,7 +275,7 @@ async def health_full(deep: bool = False) -> dict:
     # tools counts only when its state file is corrupt (ok=False above), never
     # when the layer is simply switched off.
     faults = [k for k in ("worker", "ollama", "asr", "tts", "disk", "tools") if not checks[k]["ok"]]
-    return {"ok": not faults, "faults": faults, "checks": checks}
+    return {"ok": not faults, "faults": faults, "capabilities": _capabilities(), "checks": checks}
 
 
 @app.post("/rag/ingest")

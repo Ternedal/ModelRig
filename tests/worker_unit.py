@@ -174,5 +174,17 @@ check(_lan.get("/healthz").status_code == 200,
       "loopback guard: KALIV_WORKER_ALLOW_LAN=1 lets a LAN client through")
 os.environ.pop("KALIV_WORKER_ALLOW_LAN", None)
 
+# capabilities: honest per-dependency report + inclusion in health_full
+_caps = client.get("/capabilities")
+check(_caps.status_code == 200, "/capabilities -> 200")
+_cj = _caps.json()
+check(set(_cj.keys()) == {"asr", "tts", "pdf", "docx", "cuda"},
+      f"/capabilities has the 5 capability keys -> got {sorted(_cj.keys())}")
+check(all(isinstance(v, bool) for v in _cj.values()),
+      "/capabilities values are all booleans (honest, no null/unknown)")
+_hf = client.get("/health/full").json()
+check(set(_hf.get("capabilities", {}).keys()) == {"asr", "tts", "pdf", "docx", "cuda"},
+      "/health/full includes the capabilities object")
+
 print(f"\n===== WORKER: {passed} passed, {failed} failed =====")
 raise SystemExit(0 if failed == 0 else 1)

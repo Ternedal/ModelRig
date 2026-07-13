@@ -132,6 +132,19 @@ def is_available() -> bool:
         return False
 
 
+def cuda_available() -> bool:
+    """True if a CUDA device is actually usable, not merely configured. Uses
+    CTranslate2's device count (faster-whisper's backend) so it reflects real GPU
+    availability WITHOUT loading a model. False if CT2 is absent or there's no
+    GPU -- honest for the worker's own GPU work (ASR); Ollama's GPU use is
+    separate and reported via the ollama check."""
+    try:
+        import ctranslate2
+        return ctranslate2.get_cuda_device_count() > 0
+    except Exception:
+        return False
+
+
 def _get_model():
     """Load (once) and return the WhisperModel, or raise with a clear message."""
     global _model, _load_error
