@@ -1922,24 +1922,33 @@ private fun ChatScreen(
                                             }
                                         }
                                         toolBusy = false
-                                        pendingTool = null
-                                        val text = r.getOrNull()?.answer
-                                            // 410 means the confirmation expired. A timeout is a
-                                            // denial, never an acceptance -- say so plainly.
-                                            ?: r.exceptionOrNull()?.let { e ->
-                                                if (e.message?.contains("410") == true)
-                                                    "Bekræftelsen udløb. Handlingen blev ikke udført."
-                                                else friendlyError(e)
-                                            } ?: ""
-                                        if (text.isNotBlank()) {
-                                            messages.add(Msg("assistant", text))
-                                            // Persist it. What you approved, and
-                                            // what Kaliv did about it, belongs in
-                                            // the conversation -- not only in RAM
-                                            // until the next app restart.
-                                            convId?.let { id ->
-                                                withContext(Dispatchers.IO) {
-                                                    db.addMessage(id, "assistant", text)
+                                        val next = r.getOrNull()
+                                        if (next?.status == "confirmation_required") {
+                                            // Agent v2: an approved write may continue the
+                                            // chain, and the NEXT write comes back as its own
+                                            // confirmation card. Show it instead of ending the
+                                            // turn -- one approval never authorises the next write.
+                                            pendingTool = next
+                                        } else {
+                                            pendingTool = null
+                                            val text = next?.answer
+                                                // 410 means the confirmation expired. A timeout is a
+                                                // denial, never an acceptance -- say so plainly.
+                                                ?: r.exceptionOrNull()?.let { e ->
+                                                    if (e.message?.contains("410") == true)
+                                                        "Bekræftelsen udløb. Handlingen blev ikke udført."
+                                                    else friendlyError(e)
+                                                } ?: ""
+                                            if (text.isNotBlank()) {
+                                                messages.add(Msg("assistant", text))
+                                                // Persist it. What you approved, and what
+                                                // Kaliv did about it, belongs in the
+                                                // conversation -- not only in RAM until the
+                                                // next app restart.
+                                                convId?.let { id ->
+                                                    withContext(Dispatchers.IO) {
+                                                        db.addMessage(id, "assistant", text)
+                                                    }
                                                 }
                                             }
                                         }

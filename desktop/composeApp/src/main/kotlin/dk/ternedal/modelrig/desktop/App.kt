@@ -556,14 +556,23 @@ fun App() {
                                 .toolsConfirm(id, approve)
                         }
                     }
-                    val text = res.fold(
-                        onSuccess = { it.answer.ifBlank { if (approve) "Udført." else "Afvist." } },
-                        onFailure = { "Fejl: ${apiErrorHint(it.message)}" },
-                    )
-                    messages.add(UiMessage("assistant", text))
-                    val cid = convId
-                    if (cid != null) withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", text) }
-                    busy = false
+                    val next = res.getOrNull()
+                    if (next?.status == "confirmation_required") {
+                        // Agent v2: an approved write may continue the chain, and the
+                        // next write returns as its own card. Show it -- one approval
+                        // never authorises the next write.
+                        pendingCard = next
+                        busy = false
+                    } else {
+                        val text = res.fold(
+                            onSuccess = { it.answer.ifBlank { if (approve) "Udført." else "Afvist." } },
+                            onFailure = { "Fejl: ${apiErrorHint(it.message)}" },
+                        )
+                        messages.add(UiMessage("assistant", text))
+                        val cid = convId
+                        if (cid != null) withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", text) }
+                        busy = false
+                    }
                 }
             }
             AlertDialog(
