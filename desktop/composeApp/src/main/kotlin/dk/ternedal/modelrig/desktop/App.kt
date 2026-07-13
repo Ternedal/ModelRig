@@ -136,6 +136,8 @@ fun App() {
         var localSystem by remember { mutableStateOf(setting("localSystem", null, DEFAULT_SYSTEM).ifBlank { DEFAULT_SYSTEM }) }
         var cloudSystem by remember { mutableStateOf(setting("cloudSystem", null, DEFAULT_SYSTEM).ifBlank { DEFAULT_SYSTEM }) }
         var preferLocal by remember { mutableStateOf(db.getSetting("preferLocal") != "false") }
+        // Off by default: a local failure does not auto-send the conversation to cloud.
+        var autoCloudFallback by remember { mutableStateOf(db.getSetting("autoCloudFallback") == "true") }
         var showSettings by remember { mutableStateOf(true) }
         var toolsMode by remember { mutableStateOf(db.getSetting("toolsMode") == "true") }
         var pendingCard by remember { mutableStateOf<ToolTurn?>(null) }
@@ -311,7 +313,7 @@ fun App() {
                             val cloud = if (cloudKey.isNotBlank())
                                 OllamaClient(baseUrl = "https://ollama.com", chatPath = "/api/chat", bearer = cloudKey)
                             else null
-                            ChatRouter(local, localModel, cloud, cloudModel, preferLocal).chatStream(history) { src, delta ->
+                            ChatRouter(local, localModel, cloud, cloudModel, preferLocal, autoCloudFallback).chatStream(history) { src, delta ->
                                 scope.launch {
                                     lastSource = src
                                     val cur = messages[assistantIdx]

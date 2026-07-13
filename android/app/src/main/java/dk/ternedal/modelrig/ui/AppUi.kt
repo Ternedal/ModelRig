@@ -1154,9 +1154,12 @@ private fun ChatScreen(
                                     .chatStream(rigModel, history, registerCall = hook, imageB64 = imageB64,
                                         onDelta = { d -> rigEmitted++; onDelta(d) })
                             } catch (e: Exception) {
-                                if (rigEmitted == 0 && cloudKey != null) {
+                                // local-first: a rig failure does NOT auto-send to cloud
+                                // unless the user opted in, and an attached image is
+                                // never sent via fallback -- it stays on the device.
+                                if (rigEmitted == 0 && cloudKey != null && store.autoCloudFallback) {
                                     didFallback = true
-                                    CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, imageB64 = imageB64, onDelta = onDelta)
+                                    CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
                                 } else throw e
                             }
                         }
@@ -1238,7 +1241,7 @@ private fun ChatScreen(
                                     .chatStream(rigModel, history, registerCall = hook,
                                         onDelta = { d -> rigEmitted++; onDelta(d) })
                             } catch (e: Exception) {
-                                if (rigEmitted == 0 && cloudKey != null) {
+                                if (rigEmitted == 0 && cloudKey != null && store.autoCloudFallback) {
                                     CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
                                 } else throw e
                             }

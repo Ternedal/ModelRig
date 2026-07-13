@@ -72,6 +72,17 @@ class TokenStore(context: Context) {
         set(v) { prefs.edit().putBoolean("voice_uses_cloud", v).apply() }
 
     /**
+     * When true, a rig chat that fails BEFORE emitting anything automatically
+     * retries via the cloud model. Off by default: "local-first" means the rig
+     * failing does NOT silently send the conversation to cloud -- the error is
+     * shown and the user chooses. An attached image is never sent via fallback
+     * even when this is on; it stays in the house.
+     */
+    var autoCloudFallback: Boolean
+        get() = prefs.getBoolean("auto_cloud_fallback", false)
+        set(v) { prefs.edit().putBoolean("auto_cloud_fallback", v).apply() }
+
+    /**
      * When true, speaking while Kaliv talks cuts her off (barge-in). Relies on
      * the platform's acoustic echo canceler when on speaker; a headset removes
      * the problem entirely. Off by default -- a false trigger mid-sentence is

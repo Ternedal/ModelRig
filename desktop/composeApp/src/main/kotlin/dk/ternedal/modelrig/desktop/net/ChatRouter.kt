@@ -8,11 +8,12 @@ data class ChatResult(val content: String, val source: Source) {
 /**
  * Local-first router with Ollama Cloud fallback.
  *
- * Tries the local source (local Ollama, or the ModelRig backend); on any failure
- * — unreachable rig, model not pulled, HTTP error — it transparently falls back
- * to Ollama Cloud when a key is configured. This is the desktop "cloud fallback":
- * run local when the rig is up, borrow cloud compute when it isn't (or when the
- * model is too big for the local GPU).
+ * Tries the local source (local Ollama, or the ModelRig backend). On a
+ * pre-output failure it falls back to Ollama Cloud ONLY when autoFallback is on
+ * (opt-in): local-first means the rig failing does not silently send the
+ * conversation to cloud by default -- the error is surfaced and the user chooses.
+ * When the user has explicitly preferred cloud (preferLocal=false), cloud is
+ * their choice and local is the fallback.
  */
 class ChatRouter(
     private val local: OllamaClient?,
@@ -20,12 +21,13 @@ class ChatRouter(
     private val cloud: OllamaClient?,
     private val cloudModel: String,
     private val preferLocal: Boolean = true,
+    private val autoFallback: Boolean = false,
 ) {
     private enum class Target { LOCAL, CLOUD }
 
     fun chat(messages: List<ChatMessage>): ChatResult {
         val order =
-            if (preferLocal) listOf(Target.LOCAL, Target.CLOUD)
+            if (preferLocal) (if (autoFallback) listOf(Target.LOCAL, Target.CLOUD) else listOf(Target.LOCAL))
             else listOf(Target.CLOUD, Target.LOCAL)
 
         var lastError: Exception? = null
@@ -54,7 +56,7 @@ class ChatRouter(
      */
     fun chatStream(messages: List<ChatMessage>, onDelta: (ChatResult.Source, String) -> Unit): ChatResult.Source {
         val order =
-            if (preferLocal) listOf(Target.LOCAL, Target.CLOUD)
+            if (preferLocal) (if (autoFallback) listOf(Target.LOCAL, Target.CLOUD) else listOf(Target.LOCAL))
             else listOf(Target.CLOUD, Target.LOCAL)
 
         var lastError: Exception? = null
