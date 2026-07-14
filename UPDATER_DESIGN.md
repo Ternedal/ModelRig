@@ -23,8 +23,13 @@ Windows-maskine. Crash-punkterne:
 ## 2. Transaktionsmodellen (Implementeret)
 
 **Journal:** `<root>\update-transaction.json` — skrives **før** første mutation;
-dens *tilstedeværelse* betyder "ikke committet". Skrives atomisk (tmp+rename;
-læsning falder tilbage til `.tmp`, så den kan ikke forsvinde midt i en skrivning).
+dens *tilstedeværelse* betyder "ikke committet". Skrives tmp (fsync) + rename
+med **monoton revision**; læseren betragter BÅDE hovedfil og `.tmp` og vælger
+højeste revision — et crash mellem fsync og rename kan derfor ikke få en gammel
+`verifying`-hovedfil til at vinde over en nyere `committed`-tmp. Enhver
+tvetydighed (ulæselig fil, ID-mismatch, ens revisioner med forskellig state)
+fejler lukket. Ærlig grænse: directory-metadata flushes ikke, så fuld
+power-loss-durability er ikke bevist (P2, dokumenteret).
 
 ```json
 { "id": "20260713T2155Z", "from": "1.58.28", "to": "1.58.29",
@@ -53,6 +58,19 @@ gendanne fra — der findes ingen tilstand hvor et target aldrig blev fanget.
 atomisk med `os.Mkdir` (fejler hvis den findes) — ingen check-then-act-race.
 
 ## 3. Implementeret i 1.58.29–1.58.30 (verificeret)
+
+**1.58.31 (fail-closed efter 1.58.30-audit):**
+- **Ulæselig journal = fail closed:** main behandler ikke længere en korrupt/
+  ulæselig journal som "ingen journal" — updateren stopper før per-fil-recovery
+  og versions-tjek kan erklære riggen "up to date" på ukendt transaktionsstatus.
+- **Revision-læser over begge filer:** crashet mellem tmp-fsync og rename
+  (main=`verifying`, tmp=`committed`) ruller ikke længere en verificeret sund
+  update tilbage — højeste revision vinder; konflikt fejler lukket.
+- **State-aware quiescing:** terminale journaler (`committed`/`rolled_back`) og
+  `prepared` stopper IKKE en sund kørende rig — kun arkivet færdiggøres, og
+  riggen efterlades kørende selv hvis arkiv-renamen bliver ved at fejle.
+  Aktive states stopper task + processer som før; genstart-fejl efter recovery
+  logges nu i stedet for at ignoreres.
 
 **1.58.30 (fail-closed efter 1.58.29-audit):**
 - **State-aware recovery:** `committed`/`rolled_back`-journaler (kun arkiv-rename

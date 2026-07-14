@@ -31,6 +31,11 @@ type txData struct {
 	State     string   `json:"state"`
 	Swapped   []string `json:"swapped"` // asset names already swapped in
 	UpdatedAt string   `json:"updated_at"`
+	// Revision increments on every write. After a crash both the main file and
+	// the .tmp can exist with DIFFERENT states (the tmp is written first); the
+	// higher revision is the truth. UpdatedAt can't decide this -- RFC3339 has
+	// second resolution and several writes can share a second.
+	Revision int `json:"revision"`
 }
 
 type txJournal struct {
@@ -87,6 +92,7 @@ func (j *txJournal) archive(finalState string) error {
 }
 
 func (j *txJournal) write() error {
+	j.data.Revision++
 	j.data.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	b, err := json.MarshalIndent(j.data, "", "  ")
 	if err != nil {
@@ -116,25 +122,61 @@ func (j *txJournal) write() error {
 	return os.Rename(tmp, j.path)
 }
 
-// readJournal returns the recorded transaction, or nil if none exists. If only
-// the .tmp survives (crash mid-write), it is used -- presence of either file
-// means an uncommitted transaction.
-func readJournal(path string) (*txData, error) {
-	b, err := os.ReadFile(path)
+// readOne parses a single journal file. (nil, nil) ONLY when the file does not
+// exist; an existing-but-unreadable file is an error -- unreadable transaction
+// evidence must never be treated as "no journal".
+func readOne(p string) (*txData, error) {
+	b, err := os.ReadFile(p)
 	if os.IsNotExist(err) {
-		b, err = os.ReadFile(path + ".tmp")
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
+		return nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("journal %s cannot be read: %w", p, err)
 	}
 	var d txData
 	if err := json.Unmarshal(b, &d); err != nil {
-		return nil, fmt.Errorf("journal %s is unreadable: %w", path, err)
+		return nil, fmt.Errorf("journal %s is unreadable: %w", p, err)
 	}
 	return &d, nil
+}
+
+// readJournal returns the current transaction, or nil if none exists. BOTH the
+// main file and the .tmp are considered: write() goes tmp -> fsync -> remove
+// main -> rename, so a crash can leave only the tmp, or BOTH -- and then the
+// tmp carries the NEWER state (e.g. main=verifying, tmp=committed; preferring
+// main there would roll back a verified healthy update). The monotonic
+// Revision decides. Any ambiguity -- an unreadable file, a transaction-ID
+// mismatch, equal revisions with different states -- fails closed.
+func readJournal(path string) (*txData, error) {
+	mainD, err := readOne(path)
+	if err != nil {
+		return nil, err
+	}
+	tmpD, err := readOne(path + ".tmp")
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case mainD == nil && tmpD == nil:
+		return nil, nil
+	case mainD == nil:
+		return tmpD, nil
+	case tmpD == nil:
+		return mainD, nil
+	}
+	if mainD.ID != tmpD.ID {
+		return nil, fmt.Errorf("journal conflict at %s: main and .tmp describe different transactions (%s vs %s) -- resolve by hand", path, mainD.ID, tmpD.ID)
+	}
+	if tmpD.Revision > mainD.Revision {
+		return tmpD, nil
+	}
+	if tmpD.Revision < mainD.Revision {
+		return mainD, nil
+	}
+	if tmpD.State != mainD.State {
+		return nil, fmt.Errorf("journal conflict at %s: equal revisions with different states (%s vs %s) -- resolve by hand", path, mainD.State, tmpD.State)
+	}
+	return mainD, nil
 }
 
 // recoverFromJournal undoes an uncommitted transaction as a WHOLE SET: every

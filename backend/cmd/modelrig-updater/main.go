@@ -229,6 +229,21 @@ func recoverTarget(live string) error {
 	}
 }
 
+// journalNeedsProcessStop reports whether recovering the given journal state
+// will replace live binaries -- only then must the running set be stopped
+// first. committed/rolled_back journals mean the transaction FINISHED (only
+// the forensic archive rename failed) and prepared means zero mutations
+// happened; stopping a healthy rig to retry an archive rename would be an
+// availability bug in an unattended appliance. Unknown states are treated
+// conservatively as needing a stop.
+func journalNeedsProcessStop(state string) bool {
+	switch state {
+	case "committed", "rolled_back", "prepared":
+		return false
+	}
+	return true
+}
+
 // renameFn is os.Rename, indirected so tests can inject rename failures.
 var renameFn = os.Rename
 
@@ -413,18 +428,38 @@ func main() {
 	// previous update crashed partway; restore EVERY target from that attempt's
 	// backups so the rig can never keep running a mixed-version set.
 	journalPath := filepath.Join(*root, "update-transaction.json")
-	if pending, _ := readJournal(journalPath); pending != nil {
-		// Recovery replaces live exes; Windows locks running images, so the
-		// supervisor and children must be down first. Restart only after a
-		// successful recovery -- never on a set we could not repair.
-		log.Printf("pending update transaction found (state %s) -- stopping the running set before recovery", pending.State)
-		_ = ps(fmt.Sprintf("Stop-ScheduledTask -TaskName '%s' -ErrorAction SilentlyContinue", *task))
-		_ = ps("Get-Process modelrig-server,modelrig-worker,modelrig-supervisor -ErrorAction SilentlyContinue | Stop-Process -Force")
-		time.Sleep(2 * time.Second)
-		if err := recoverFromJournal(journalPath, targets); err != nil {
-			die("%v", err)
+	pending, perr := readJournal(journalPath)
+	if perr != nil {
+		// Unreadable transaction evidence must NEVER pass as "no journal": the
+		// installation's state is unknown, so fail closed before per-file
+		// recovery or a version check can declare the rig "up to date".
+		die("transaction journal evidence exists but cannot be read: %v -- failing closed; inspect %s (and its .tmp) and restore by hand", perr, journalPath)
+	}
+	if pending != nil {
+		if journalNeedsProcessStop(pending.State) {
+			// Recovery will replace live exes; Windows locks running images, so
+			// the supervisor and children must be down first. Restart only after
+			// a successful recovery -- never on a set we could not repair.
+			log.Printf("pending update transaction found (state %s) -- stopping the running set before recovery", pending.State)
+			_ = ps(fmt.Sprintf("Stop-ScheduledTask -TaskName '%s' -ErrorAction SilentlyContinue", *task))
+			_ = ps("Get-Process modelrig-server,modelrig-worker,modelrig-supervisor -ErrorAction SilentlyContinue | Stop-Process -Force")
+			time.Sleep(2 * time.Second)
+			if err := recoverFromJournal(journalPath, targets); err != nil {
+				die("%v", err) // set may be broken: the task is NOT restarted
+			}
+			if err := ps(fmt.Sprintf("Start-ScheduledTask -TaskName '%s'", *task)); err != nil {
+				log.Printf("WARNING: recovery succeeded but the task could not be started (%v) -- start '%s' by hand", err, *task)
+			}
+		} else {
+			// committed / rolled_back / prepared: recovery only finishes the
+			// journal's archive; binaries are untouched by construction. A
+			// healthy running rig is left alone -- and left running even if the
+			// archive rename keeps failing.
+			log.Printf("terminal update transaction found (state %s) -- finishing its archive; the running set is left alone", pending.State)
+			if err := recoverFromJournal(journalPath, targets); err != nil {
+				die("%v -- the rig was left running", err)
+			}
 		}
-		_ = ps(fmt.Sprintf("Start-ScheduledTask -TaskName '%s'", *task))
 	}
 
 	// Recovery FIRST -- before reading the current version or any network call. A

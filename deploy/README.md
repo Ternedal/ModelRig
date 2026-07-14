@@ -137,3 +137,9 @@ gendannelse og starter den igen efter succes — manuel `-recover` kræver ikke
 længere at du stopper noget først. `committed`-journaler (hvor kun arkiv-
 renamen fejlede) rulles aldrig tilbage. Forbi `backed_up` kræves backup for
 ALLE targets, ellers `manual_recovery` uden at røre noget.
+
+**v1.58.31:** en ulæselig/korrupt journal stopper nu updateren (fail closed) i
+stedet for at blive ignoreret; journal-læseren vælger højeste revision af
+hovedfil/`.tmp`, så en committet update ikke rulles tilbage efter et crash midt
+i journal-skrivningen; og terminale journaler (`committed`/`rolled_back`)
+stopper ikke længere en sund kørende rig — kun arkivet færdiggøres.

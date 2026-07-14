@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -571,5 +572,106 @@ func TestRecoverFromJournal_PreparedArchivesOnly(t *testing.T) {
 	}
 	if d, _ := readJournal(jp); d != nil {
 		t.Error("journal should be archived")
+	}
+}
+
+func writeJournalFile(t *testing.T, path string, d txData) {
+	t.Helper()
+	b, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReadJournal_PicksNewerTmpRevision(t *testing.T) {
+	// The P1-2 crash: archive("committed") wrote the tmp (newer revision) and
+	// crashed before the rename -- main still says verifying. Preferring main
+	// would roll back a verified healthy update; the higher revision must win.
+	root := t.TempDir()
+	jp := filepath.Join(root, "update-transaction.json")
+	writeJournalFile(t, jp, txData{ID: "tx1", State: "verifying", Revision: 3})
+	writeJournalFile(t, jp+".tmp", txData{ID: "tx1", State: "committed", Revision: 4})
+	d, err := readJournal(jp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.State != "committed" {
+		t.Errorf("newer tmp revision must win, got state %q", d.State)
+	}
+	// and an OLDER tmp must lose to main
+	writeJournalFile(t, jp+".tmp", txData{ID: "tx1", State: "backed_up", Revision: 2})
+	if d, err := readJournal(jp); err != nil || d.State != "verifying" {
+		t.Errorf("older tmp must lose to main, got %+v err %v", d, err)
+	}
+
+	// End to end: with the committed tmp present, recovery must archive and
+	// never restore the old binary.
+	bakDir := filepath.Join(root, "bak")
+	os.MkdirAll(bakDir, 0o755)
+	tg := target{asset: "a.exe", live: filepath.Join(root, "a.exe")}
+	hbWrite(t, filepath.Join(bakDir, "a.exe"), "OLD")
+	hbWrite(t, tg.live, "NEW")
+	writeJournalFile(t, jp, txData{ID: "tx1", State: "verifying", Revision: 3, BackupDir: bakDir})
+	writeJournalFile(t, jp+".tmp", txData{ID: "tx1", State: "committed", Revision: 4, BackupDir: bakDir})
+	if err := recoverFromJournal(jp, []target{tg}); err != nil {
+		t.Fatal(err)
+	}
+	if got := hbRead(t, tg.live); got != "NEW" {
+		t.Errorf("committed tmp must prevent rollback of the healthy update: %q", got)
+	}
+	if d, _ := readJournal(jp); d != nil {
+		t.Error("journal should be archived")
+	}
+}
+
+func TestReadJournal_UnreadableFailsClosed(t *testing.T) {
+	// Unreadable transaction evidence must never pass as "no journal".
+	root := t.TempDir()
+	jp := filepath.Join(root, "update-transaction.json")
+	hbWrite(t, jp, "{not json")
+	if _, err := readJournal(jp); err == nil {
+		t.Error("corrupt main journal must fail closed")
+	}
+	os.Remove(jp)
+	hbWrite(t, jp+".tmp", "{not json")
+	if _, err := readJournal(jp); err == nil {
+		t.Error("corrupt tmp journal must fail closed")
+	}
+	writeJournalFile(t, jp, txData{ID: "tx1", State: "verifying", Revision: 3})
+	if _, err := readJournal(jp); err == nil {
+		t.Error("valid main + corrupt tmp is ambiguity and must fail closed")
+	}
+}
+
+func TestReadJournal_ConflictFailsClosed(t *testing.T) {
+	root := t.TempDir()
+	jp := filepath.Join(root, "update-transaction.json")
+	writeJournalFile(t, jp, txData{ID: "tx1", State: "verifying", Revision: 3})
+	writeJournalFile(t, jp+".tmp", txData{ID: "tx2", State: "committed", Revision: 4})
+	if _, err := readJournal(jp); err == nil {
+		t.Error("different transaction IDs must fail closed")
+	}
+	writeJournalFile(t, jp+".tmp", txData{ID: "tx1", State: "committed", Revision: 3})
+	if _, err := readJournal(jp); err == nil {
+		t.Error("equal revisions with different states must fail closed")
+	}
+	writeJournalFile(t, jp+".tmp", txData{ID: "tx1", State: "verifying", Revision: 3})
+	if d, err := readJournal(jp); err != nil || d == nil || d.State != "verifying" {
+		t.Errorf("identical duplicates should read fine, got %+v err %v", d, err)
+	}
+}
+
+func TestJournalNeedsProcessStop(t *testing.T) {
+	for state, want := range map[string]bool{
+		"committed": false, "rolled_back": false, "prepared": false,
+		"backed_up": true, "swapping": true, "verifying": true,
+		"rolling_back": true, "manual_recovery": true, "unknown-state": true,
+	} {
+		if got := journalNeedsProcessStop(state); got != want {
+			t.Errorf("journalNeedsProcessStop(%q) = %v, want %v", state, got, want)
+		}
 	}
 }
