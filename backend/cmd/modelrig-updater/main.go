@@ -190,7 +190,11 @@ func backupAndSwap(targets []target, stagedDir, backupDir string, j *txJournal) 
 			return withRollback(fmt.Errorf("swap %s: %w", t.live, err), restore(swapped, backupDir))
 		}
 		swapped = append(swapped, t)
-		_ = j.addSwapped(t.asset)
+		if jerr := j.addSwapped(t.asset); jerr != nil {
+			// After the first live mutation the journal is the recovery
+			// evidence; if it can't be recorded, stop and roll back now.
+			return withRollback(fmt.Errorf("journal write after swapping %s: %w", t.asset, jerr), restore(swapped, backupDir))
+		}
 	}
 	return nil
 }
@@ -262,7 +266,10 @@ func atomicSwapInto(srcFile, live string) error {
 		// back; if THAT also fails, keep .old and .new for manual recovery and
 		// surface both errors -- never claim the file is intact.
 		if rerr := renameFn(old, live); rerr != nil {
-			return fmt.Errorf("swap into %s failed (%v) AND restore of the original failed (%v) -- live file is missing; recover by hand from %s or %s", live, err, rerr, old, tmp)
+			// Wrap the sentinel: the live file is MISSING, so this is a failed
+			// rollback even if every other target restores cleanly -- main must
+			// go to manual_recovery and must not start the supervisor.
+			return fmt.Errorf("swap into %s failed (%v); %w: restore of the original also failed (%v) -- live file is missing; recover by hand from %s or %s", live, err, errRollbackFailed, rerr, old, tmp)
 		}
 		os.Remove(tmp)
 		return err
@@ -406,8 +413,18 @@ func main() {
 	// previous update crashed partway; restore EVERY target from that attempt's
 	// backups so the rig can never keep running a mixed-version set.
 	journalPath := filepath.Join(*root, "update-transaction.json")
-	if err := recoverFromJournal(journalPath, targets); err != nil {
-		die("%v", err)
+	if pending, _ := readJournal(journalPath); pending != nil {
+		// Recovery replaces live exes; Windows locks running images, so the
+		// supervisor and children must be down first. Restart only after a
+		// successful recovery -- never on a set we could not repair.
+		log.Printf("pending update transaction found (state %s) -- stopping the running set before recovery", pending.State)
+		_ = ps(fmt.Sprintf("Stop-ScheduledTask -TaskName '%s' -ErrorAction SilentlyContinue", *task))
+		_ = ps("Get-Process modelrig-server,modelrig-worker,modelrig-supervisor -ErrorAction SilentlyContinue | Stop-Process -Force")
+		time.Sleep(2 * time.Second)
+		if err := recoverFromJournal(journalPath, targets); err != nil {
+			die("%v", err)
+		}
+		_ = ps(fmt.Sprintf("Start-ScheduledTask -TaskName '%s'", *task))
 	}
 
 	// Recovery FIRST -- before reading the current version or any network call. A
@@ -538,7 +555,9 @@ func main() {
 		_ = ps(fmt.Sprintf("Start-ScheduledTask -TaskName '%s'", *task))
 		die("update aborted (rolled back); backups at %s -- verify the rig is on %s", backupDir, cur)
 	}
-	_ = journal.setState("verifying")
+	if err := journal.setState("verifying"); err != nil {
+		log.Printf("WARNING: could not record verifying state (%v) -- recovery would treat this as mid-swap, which is safe", err)
+	}
 
 	// Drop any pre-restart heartbeat and mark the restart instant, so the
 	// liveness check below only accepts a heartbeat the NEW supervisor writes.

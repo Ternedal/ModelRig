@@ -92,8 +92,24 @@ func (j *txJournal) write() error {
 	if err != nil {
 		return err
 	}
+	// The journal is the safety evidence after a crash, so the tmp is fsynced
+	// before the rename -- a power loss right after write() must still find the
+	// content on disk. (Directory-metadata flush isn't portable; the .tmp
+	// read-fallback covers the rename window.)
 	tmp := j.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
 		return err
 	}
 	_ = os.Remove(j.path) // Windows rename won't overwrite
@@ -136,16 +152,47 @@ func recoverFromJournal(jPath string, targets []target) error {
 	if d == nil {
 		return nil
 	}
+	j := &txJournal{path: jPath, data: *d}
+
+	// State-aware: what a leftover journal means depends on how far it got.
+	switch d.State {
+	case "committed", "rolled_back":
+		// The transaction FINISHED; only the forensic rename to .last failed.
+		// Never touch binaries here -- rolling back a healthy committed update
+		// because an archive rename failed would undo a verified release.
+		fmt.Printf("updater: journal %s is terminal (%s) -- finishing the archive, binaries untouched\n", d.ID, d.State)
+		if err := j.archive(d.State); err != nil {
+			return fmt.Errorf("could not archive terminal journal %s: %w -- remove it by hand", jPath, err)
+		}
+		_ = os.Remove(jPath + ".tmp")
+		return nil
+	case "prepared":
+		// Swaps begin only AFTER the journal records backed_up, so prepared
+		// means zero live mutations happened. Archive; restore nothing.
+		fmt.Printf("updater: journal %s crashed in prepared (nothing was swapped) -- archiving, binaries untouched\n", d.ID)
+		if err := j.archive("rolled_back"); err != nil {
+			return fmt.Errorf("could not archive journal %s: %w", jPath, err)
+		}
+		_ = os.Remove(jPath + ".tmp")
+		return nil
+	}
+
+	// backed_up / swapping / verifying / rolling_back / manual_recovery: phase 1
+	// completed, so EVERY target must have a backup. Validate before touching
+	// anything -- restoring only some targets and archiving would bless a
+	// mixed-version set as rolled_back. Fail closed instead.
+	for _, t := range targets {
+		if !fileExists(fmt.Sprintf("%s%c%s", d.BackupDir, os.PathSeparator, t.asset)) {
+			_ = j.setState("manual_recovery")
+			return fmt.Errorf("whole-set rollback impossible: backup for %s is missing from %s -- journal kept (manual_recovery); restore by hand", t.asset, d.BackupDir)
+		}
+	}
 	fmt.Printf("updater: found uncommitted update %s (%s -> %s, state %s) -- rolling the whole set back\n",
 		d.ID, d.From, d.To, d.State)
 
-	j := &txJournal{path: jPath, data: *d}
 	restored := 0
 	for _, t := range targets {
 		bak := fmt.Sprintf("%s%c%s", d.BackupDir, os.PathSeparator, t.asset)
-		if !fileExists(bak) {
-			continue // this target was never backed up (crash before phase 1 reached it)
-		}
 		if !fileExists(t.live) {
 			_ = recoverTarget(t.live) // may bring a .old back
 		}

@@ -131,3 +131,9 @@ commit/rollback; `manual_recovery` betyder: supervisor blev IKKE startet, kør
 updateren igen eller gendan fra backup-mappen. `updater.lock` holder én instans
 ad gangen (slet den manuelt efter et hårdt crash). `modelrig-updater -recover`
 reparerer offline uden netværk eller kørende server. Fuldt design: UPDATER_DESIGN.md.
+
+**v1.58.30:** journal-recovery stopper nu selv KalivSupervisor-tasken før
+gendannelse og starter den igen efter succes — manuel `-recover` kræver ikke
+længere at du stopper noget først. `committed`-journaler (hvor kun arkiv-
+renamen fejlede) rulles aldrig tilbage. Forbi `backed_up` kræves backup for
+ALLE targets, ellers `manual_recovery` uden at røre noget.

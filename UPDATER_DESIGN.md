@@ -52,7 +52,26 @@ gendanne fra — der findes ingen tilstand hvor et target aldrig blev fanget.
 **Backups:** immutable per forsøg (`backups/<ts>-<fra>-to-<til>`), claimes
 atomisk med `os.Mkdir` (fejler hvis den findes) — ingen check-then-act-race.
 
-## 3. Implementeret i 1.58.29 (verificeret)
+## 3. Implementeret i 1.58.29–1.58.30 (verificeret)
+
+**1.58.30 (fail-closed efter 1.58.29-audit):**
+- **State-aware recovery:** `committed`/`rolled_back`-journaler (kun arkiv-rename
+  fejlede) rører ALDRIG binaries — en verificeret sund update kan ikke rulles
+  tilbage af en fejlet forensik-rename. `prepared` = nul mutationer → arkivér,
+  gendan intet.
+- **Fail-closed backup-validering:** forbi `backed_up` SKAL alle targets have en
+  backup; mangler én → `manual_recovery`, intet røres. Delvis recovery kan ikke
+  længere arkiveres som `rolled_back`.
+- **Manglende live-exe = fejlet rollback:** `atomicSwapInto`s dobbelt-fejl
+  wrapper nu `errRollbackFailed`, så main går i `manual_recovery` og aldrig
+  starter supervisoren på et sæt med manglende exe — også når alle andre
+  targets gendannes fint.
+- **Stop før recovery:** en ventende journal stopper task + processer før
+  gendannelse (Windows låser kørende images) og starter først igen efter
+  verificeret recovery.
+- **Journal-durabilitet:** tmp-filen fsync'es før rename; journal-skrivefejl
+  efter første mutation ruller tilbage i stedet for at fortsætte.
+
 
 - Journal + whole-set-recovery (`journal.go`) — unit-testet inkl. crash-midt-i-
   transaktion-scenariet (A swappet, B afbrudt → begge gendannet, journal arkiveret).

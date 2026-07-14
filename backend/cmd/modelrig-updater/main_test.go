@@ -268,6 +268,9 @@ func TestAtomicSwapInto_RestoreAlsoFails(t *testing.T) {
 	if !strings.Contains(err.Error(), "recover by hand") {
 		t.Errorf("error should point to manual recovery, got: %v", err)
 	}
+	if !errors.Is(err, errRollbackFailed) {
+		t.Errorf("a missing live file IS a failed rollback -- must wrap errRollbackFailed, got: %v", err)
+	}
 	// .old must survive for recovery (live was moved there and never restored).
 	if _, e := os.Stat(live + ".old"); e != nil {
 		t.Errorf(".old should be preserved for recovery: %v", e)
@@ -446,5 +449,127 @@ func TestBackupAndSwap_AllBackupsBeforeFirstSwap(t *testing.T) {
 	}
 	if got := hbRead(t, t1.live); got != "OLD_A" {
 		t.Errorf("a.exe not restored: %q", got)
+	}
+}
+
+func TestBackupAndSwap_InnerRestoreFailureIsRollbackFailed(t *testing.T) {
+	// P1-1 end to end: A swaps fine; B's final rename fails AND its .old
+	// restore fails (live missing). A's rollback succeeds -- but the combined
+	// error must STILL be errRollbackFailed, so main goes to manual_recovery
+	// and never starts the supervisor on a set with a missing exe.
+	liveDir, stagedDir, backupDir := t.TempDir(), t.TempDir(), t.TempDir()
+	t1 := target{asset: "a.exe", live: filepath.Join(liveDir, "a.exe")}
+	t2 := target{asset: "b.exe", live: filepath.Join(liveDir, "b.exe")}
+	hbWrite(t, t1.live, "OLD_A")
+	hbWrite(t, t2.live, "OLD_B")
+	hbWrite(t, filepath.Join(stagedDir, "a.exe"), "NEW_A")
+	hbWrite(t, filepath.Join(stagedDir, "b.exe"), "NEW_B")
+
+	orig := renameFn
+	defer func() { renameFn = orig }()
+	renameFn = func(from, to string) error {
+		if strings.HasSuffix(from, "b.exe.new") || strings.HasSuffix(from, "b.exe.old") {
+			return errors.New("injected rename failure")
+		}
+		return orig(from, to)
+	}
+	err := backupAndSwap([]target{t1, t2}, stagedDir, backupDir, nil)
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	if !errors.Is(err, errRollbackFailed) {
+		t.Errorf("missing live exe must classify as rollback failure, got: %v", err)
+	}
+	if got := hbRead(t, t1.live); got != "OLD_A" {
+		t.Errorf("A should be rolled back: %q", got)
+	}
+}
+
+func TestRecoverFromJournal_CommittedNeverRollsBack(t *testing.T) {
+	// P1-3: a committed journal whose .last rename failed must NOT undo a
+	// verified healthy update at the next run -- only finish the archive.
+	root := t.TempDir()
+	bakDir := filepath.Join(root, "bak")
+	os.MkdirAll(bakDir, 0o755)
+	tg := target{asset: "a.exe", live: filepath.Join(root, "a.exe")}
+	hbWrite(t, filepath.Join(bakDir, "a.exe"), "OLD")
+	hbWrite(t, tg.live, "NEW") // the committed, healthy version
+
+	jp := filepath.Join(root, "update-transaction.json")
+	j, err := newJournal(jp, "1.0.0", "1.0.1", bakDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.data.State = "committed" // as if archive's rename failed after commit
+	if err := j.write(); err != nil {
+		t.Fatal(err)
+	}
+	if err := recoverFromJournal(jp, []target{tg}); err != nil {
+		t.Fatal(err)
+	}
+	if got := hbRead(t, tg.live); got != "NEW" {
+		t.Errorf("committed update was rolled back: %q", got)
+	}
+	if d, _ := readJournal(jp); d != nil {
+		t.Error("journal should be archived")
+	}
+	if !fileExists(jp + ".last") {
+		t.Error(".last should exist")
+	}
+}
+
+func TestRecoverFromJournal_MissingBackupFailsClosed(t *testing.T) {
+	// P1-2: past backed_up, EVERY target must have a backup. One missing ->
+	// no file is touched, the journal is kept as manual_recovery, error out.
+	root := t.TempDir()
+	bakDir := filepath.Join(root, "bak")
+	os.MkdirAll(bakDir, 0o755)
+	tA := target{asset: "a.exe", live: filepath.Join(root, "a.exe")}
+	tB := target{asset: "b.exe", live: filepath.Join(root, "b.exe")}
+	hbWrite(t, filepath.Join(bakDir, "a.exe"), "OLD_A")
+	// b.exe backup deliberately missing
+	hbWrite(t, tA.live, "NEW_A")
+	hbWrite(t, tB.live, "NEW_B")
+
+	jp := filepath.Join(root, "update-transaction.json")
+	j, err := newJournal(jp, "1.0.0", "1.0.1", bakDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.setState("backed_up")
+	if err := recoverFromJournal(jp, []target{tA, tB}); err == nil {
+		t.Fatal("missing backup must fail closed")
+	}
+	if got := hbRead(t, tA.live); got != "NEW_A" {
+		t.Errorf("no file may be touched on fail-closed, a.exe: %q", got)
+	}
+	d, _ := readJournal(jp)
+	if d == nil || d.State != "manual_recovery" {
+		t.Fatalf("journal must be kept as manual_recovery, got %+v", d)
+	}
+}
+
+func TestRecoverFromJournal_PreparedArchivesOnly(t *testing.T) {
+	// prepared = zero live mutations happened; recovery must archive and
+	// restore nothing, even if some backups exist.
+	root := t.TempDir()
+	bakDir := filepath.Join(root, "bak")
+	os.MkdirAll(bakDir, 0o755)
+	tg := target{asset: "a.exe", live: filepath.Join(root, "a.exe")}
+	hbWrite(t, filepath.Join(bakDir, "a.exe"), "OLD")
+	hbWrite(t, tg.live, "CURRENT")
+
+	jp := filepath.Join(root, "update-transaction.json")
+	if _, err := newJournal(jp, "1.0.0", "1.0.1", bakDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := recoverFromJournal(jp, []target{tg}); err != nil {
+		t.Fatal(err)
+	}
+	if got := hbRead(t, tg.live); got != "CURRENT" {
+		t.Errorf("prepared recovery must not touch live files: %q", got)
+	}
+	if d, _ := readJournal(jp); d != nil {
+		t.Error("journal should be archived")
 	}
 }
