@@ -570,7 +570,7 @@ private fun friendlyError(err: Throwable): String {
         err is java.net.UnknownHostException || err is java.net.ConnectException ->
             "Kan ikke oprette forbindelse. Tjek at rig'en kører, og at telefonen er på samme netværk (eller Tailscale)."
         err is java.net.SocketTimeoutException ->
-            "Tidsudløb — modellen svarede ikke i tide. I cloud-mode: tjek at modelnavnet findes på din konto (fx gpt-oss:120b) og at nøglen er gyldig. Ellers prøv igen eller vælg en mindre model."
+            "Tidsudløb — forbindelsen blev accepteret, men modellen sendte intet i 3 minutter. Den kan være i kø eller tænke længe (reasoning-modeller). Prøv igen, eller vælg en anden model (fx gpt-oss:120b)."
         else -> friendlyError(msg)
     }
 }

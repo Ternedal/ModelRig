@@ -82,6 +82,7 @@ class CloudClient(private val apiKey: String, baseUrl: String = "https://ollama.
         messages: List<Pair<String, String>>,
         registerCall: ((okhttp3.Call) -> Unit)? = null,
         imageB64: String? = null,
+        onThinking: ((String) -> Unit)? = null,
         onDelta: (String) -> Unit,
     ) {
         val arr = JSONArray()
@@ -101,6 +102,13 @@ class CloudClient(private val apiKey: String, baseUrl: String = "https://ollama.
             .put("model", model)
             .put("messages", arr)
             .put("stream", true)
+            // Reasoning models (the new glm-4.7/5.x family, deepseek, ...) think
+            // server-side FIRST. On cloud that surfaced as HTTP 200 + zero bytes
+            // until OkHttp's 180s readTimeout killed the call -- "Tidsudløb" with
+            // no answer (seen on-device 14/7 with glm-4.7; a bad key is rejected
+            // in <1s, so the silence was the model, not auth). A phone chat wants
+            // the direct answer; models without thinking ignore the field.
+            .put("think", false)
             .toString()
             .toRequestBody(jsonType)
 
@@ -120,10 +128,21 @@ class CloudClient(private val apiKey: String, baseUrl: String = "https://ollama.
             while (!source.exhausted()) {
                 val line = source.readUtf8Line() ?: break
                 if (line.isBlank()) continue
-                val delta = runCatching {
-                    JSONObject(line).optJSONObject("message")?.optString("content").orEmpty()
-                }.getOrDefault("")
-                if (delta.isNotEmpty()) onDelta(delta)
+                val obj = runCatching { JSONObject(line) }.getOrNull() ?: continue
+                // An in-stream {"error": ...} line (bad model, quota, ...) was
+                // dropped silently before: the stream ended with no deltas and
+                // the UI showed nothing or a misleading timeout. Name it.
+                obj.optString("error").takeIf { it.isNotBlank() }?.let {
+                    throw ModelRigException("cloud: $it")
+                }
+                val msg = obj.optJSONObject("message")
+                val delta = msg?.optString("content").orEmpty()
+                if (delta.isNotEmpty()) {
+                    onDelta(delta)
+                } else {
+                    val th = msg?.optString("thinking").orEmpty()
+                    if (th.isNotEmpty()) onThinking?.invoke(th)
+                }
             }
         }
     }

@@ -311,7 +311,7 @@ fun App() {
                         } else {
                             val local = OllamaClient(baseUrl = localUrl, chatPath = localPath, bearer = deviceToken.ifBlank { null })
                             val cloud = if (cloudKey.isNotBlank())
-                                OllamaClient(baseUrl = "https://ollama.com", chatPath = "/api/chat", bearer = cloudKey)
+                                OllamaClient(baseUrl = "https://ollama.com", chatPath = "/api/chat", bearer = cloudKey, think = false)
                             else null
                             ChatRouter(local, localModel, cloud, cloudModel, preferLocal, autoCloudFallback).chatStream(history) { src, delta ->
                                 scope.launch {

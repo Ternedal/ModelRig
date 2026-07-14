@@ -11,11 +11,19 @@ import java.time.Duration
 @Serializable
 data class ChatMessage(val role: String, val content: String)
 
+/** A bare in-stream error line from Ollama ({"error": "..."}). */
+@Serializable
+private data class ErrorLine(val error: String? = null)
+
 @Serializable
 private data class ChatRequest(
     val model: String,
     val messages: List<ChatMessage>,
     val stream: Boolean = false,
+    // null = omitted (local default behavior); false = ask the model to answer
+    // directly. Reasoning models otherwise think server-side first, which on
+    // ollama.com meant 200 + silence until the request timeout.
+    val think: Boolean? = null,
 )
 
 @Serializable
@@ -70,6 +78,7 @@ class OllamaClient(
     private val baseUrl: String,
     private val chatPath: String = "/api/chat",
     private val bearer: String? = null,
+    private val think: Boolean? = null,
     connectTimeout: Duration = Duration.ofSeconds(5),
     private val requestTimeout: Duration = Duration.ofSeconds(120),
 ) {
@@ -82,7 +91,7 @@ class OllamaClient(
     fun chat(model: String, messages: List<ChatMessage>): String {
         val payload = json.encodeToString(
             ChatRequest.serializer(),
-            ChatRequest(model = model, messages = messages, stream = false),
+            ChatRequest(model = model, messages = messages, stream = false, think = think),
         )
         val builder = HttpRequest.newBuilder()
             .uri(URI.create(baseUrl.trimEnd('/') + chatPath))
@@ -110,7 +119,7 @@ class OllamaClient(
     fun chatStream(model: String, messages: List<ChatMessage>, onDelta: (String) -> Unit) {
         val payload = json.encodeToString(
             ChatRequest.serializer(),
-            ChatRequest(model = model, messages = messages, stream = true),
+            ChatRequest(model = model, messages = messages, stream = true, think = think),
         )
         val builder = HttpRequest.newBuilder()
             .uri(URI.create(baseUrl.trimEnd('/') + chatPath))
@@ -129,6 +138,13 @@ class OllamaClient(
         }
         resp.body().forEach { line ->
             if (line.isBlank()) return@forEach
+            // An in-stream {"error": ...} line was dropped silently before (it
+            // doesn't decode as a ChatResponse), ending the stream with nothing.
+            if (line.contains("\"error\"")) {
+                runCatching { json.decodeFromString(ErrorLine.serializer(), line) }
+                    .getOrNull()?.error?.takeIf { it.isNotBlank() }
+                    ?.let { throw OllamaException("cloud: $it") }
+            }
             val delta = runCatching {
                 json.decodeFromString(ChatResponse.serializer(), line).message.content
             }.getOrDefault("")
