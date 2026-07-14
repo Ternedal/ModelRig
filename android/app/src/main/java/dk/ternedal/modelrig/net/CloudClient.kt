@@ -1,5 +1,6 @@
 package dk.ternedal.modelrig.net
 
+import okhttp3.ConnectionPool
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -26,6 +27,13 @@ class CloudClient(private val apiKey: String, baseUrl: String = "https://ollama.
     private val http = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(180, TimeUnit.SECONDS)
+        // Mobile links (4G) silently kill idle sockets in the carrier NAT; a
+        // reused pooled connection then hangs the full read timeout with zero
+        // bytes. Ping makes a dead HTTP/2 socket fail in seconds instead, and a
+        // short pool idle stops us reusing sockets that sat through an idle gap
+        // (sends minutes apart -- exactly the NAT kill window, on-device 14/7).
+        .pingInterval(30, TimeUnit.SECONDS)
+        .connectionPool(ConnectionPool(2, 30, TimeUnit.SECONDS))
         .build()
 
     private val jsonType = "application/json".toMediaType()
@@ -118,31 +126,56 @@ class CloudClient(private val apiKey: String, baseUrl: String = "https://ollama.
             .post(body)
             .build()
 
-        val call = http.newCall(req)
-        registerCall?.invoke(call)
-        call.execute().use { resp ->
-            if (!resp.isSuccessful) {
-                throw ModelRigException("cloud chat failed (${resp.code}): ${resp.body?.string().orEmpty()}")
-            }
-            val source = resp.body?.source() ?: throw ModelRigException("empty response body")
-            while (!source.exhausted()) {
-                val line = source.readUtf8Line() ?: break
-                if (line.isBlank()) continue
-                val obj = runCatching { JSONObject(line) }.getOrNull() ?: continue
-                // An in-stream {"error": ...} line (bad model, quota, ...) was
-                // dropped silently before: the stream ended with no deltas and
-                // the UI showed nothing or a misleading timeout. Name it.
-                obj.optString("error").takeIf { it.isNotBlank() }?.let {
-                    throw ModelRigException("cloud: $it")
+        // Flaky-mobile reality (on-device 14/7): in the same minute one send
+        // succeeds, one dies fast with "Network is unreachable" (a momentary
+        // radio/route blip) and one hangs the full read timeout on a NAT-killed
+        // socket. The user's manual retry almost always works because it is a
+        // FRESH attempt -- so do that automatically: one retry on a fresh
+        // connection, but ONLY if nothing of the answer arrived yet (a retried
+        // POST can bill twice server-side; it must never duplicate anything the
+        // user has seen) and never after a user cancel.
+        var emitted = false
+        var attempt = 1
+        while (true) {
+            val call = http.newCall(req)
+            registerCall?.invoke(call)
+            try {
+                call.execute().use { resp ->
+                    if (!resp.isSuccessful) {
+                        throw ModelRigException("cloud chat failed (${resp.code}): ${resp.body?.string().orEmpty()}")
+                    }
+                    val source = resp.body?.source() ?: throw ModelRigException("empty response body")
+                    while (!source.exhausted()) {
+                        val line = source.readUtf8Line() ?: break
+                        if (line.isBlank()) continue
+                        val obj = runCatching { JSONObject(line) }.getOrNull() ?: continue
+                        // An in-stream {"error": ...} line (bad model, quota, ...) was
+                        // dropped silently before: the stream ended with no deltas and
+                        // the UI showed nothing or a misleading timeout. Name it.
+                        obj.optString("error").takeIf { it.isNotBlank() }?.let {
+                            throw ModelRigException("cloud: $it")
+                        }
+                        val msg = obj.optJSONObject("message")
+                        val delta = msg?.optString("content").orEmpty()
+                        if (delta.isNotEmpty()) {
+                            emitted = true
+                            onDelta(delta)
+                        } else {
+                            val th = msg?.optString("thinking").orEmpty()
+                            if (th.isNotEmpty()) {
+                                emitted = true
+                                onThinking?.invoke(th)
+                            }
+                        }
+                    }
                 }
-                val msg = obj.optJSONObject("message")
-                val delta = msg?.optString("content").orEmpty()
-                if (delta.isNotEmpty()) {
-                    onDelta(delta)
-                } else {
-                    val th = msg?.optString("thinking").orEmpty()
-                    if (th.isNotEmpty()) onThinking?.invoke(th)
-                }
+                return
+            } catch (e: java.io.IOException) {
+                if (attempt >= 2 || emitted || call.isCanceled()) throw e
+                attempt++
+                // Never reuse the socket that just failed; let a radio blip pass.
+                http.connectionPool.evictAll()
+                Thread.sleep(1500)
             }
         }
     }

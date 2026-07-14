@@ -570,7 +570,7 @@ private fun friendlyError(err: Throwable): String {
         err is java.net.UnknownHostException || err is java.net.ConnectException ->
             "Kan ikke oprette forbindelse. Tjek at rig'en kører, og at telefonen er på samme netværk (eller Tailscale)."
         err is java.net.SocketTimeoutException ->
-            "Tidsudløb — forbindelsen blev accepteret, men modellen sendte intet i 3 minutter. Den kan være i kø eller tænke længe (reasoning-modeller). Prøv igen, eller vælg en anden model (fx gpt-oss:120b)."
+            "Tidsudløb — der kom intet svar (prøvet to gange på frisk forbindelse). Ustabilt mobilnet eller en model i kø. Prøv igen, skift til WiFi, eller vælg en anden model (fx gpt-oss:120b)."
         else -> friendlyError(msg)
     }
 }
