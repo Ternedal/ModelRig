@@ -148,6 +148,16 @@ func copyFile(src, dst string) error {
 // later target -- never leaves any live exe partially written; already-swapped
 // targets are restored from backup. On success the caller can start the new
 // binaries.
+// withRollback combines a swap failure with the result of the rollback attempt.
+// If the rollback also failed, the returned error says so, so the caller must
+// not claim the rig was restored.
+func withRollback(swapErr, restoreErr error) error {
+	if restoreErr == nil {
+		return swapErr
+	}
+	return fmt.Errorf("%w; ROLLBACK ALSO FAILED (%v) -- rig may be on mixed versions, restore from backups by hand", swapErr, restoreErr)
+}
+
 func backupAndSwap(targets []target, stagedDir, backupDir string) error {
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		return err
@@ -156,26 +166,32 @@ func backupAndSwap(targets []target, stagedDir, backupDir string) error {
 	for _, t := range targets {
 		bak := filepath.Join(backupDir, t.asset)
 		if err := copyFile(t.live, bak); err != nil {
-			restore(swapped, backupDir) // best-effort undo of what we swapped
-			return fmt.Errorf("backup %s: %w", t.live, err)
+			return withRollback(fmt.Errorf("backup %s: %w", t.live, err), restore(swapped, backupDir))
 		}
 		staged := filepath.Join(stagedDir, t.asset)
 		if err := atomicSwapInto(staged, t.live); err != nil {
-			restore(swapped, backupDir)
-			return fmt.Errorf("swap %s: %w", t.live, err)
+			return withRollback(fmt.Errorf("swap %s: %w", t.live, err), restore(swapped, backupDir))
 		}
 		swapped = append(swapped, t)
 	}
 	return nil
 }
 
-// atomicSwapInto replaces live with the contents of srcFile without ever leaving
-// live partially written. It copies srcFile to a temp file NEXT TO live (same
-// volume), then renames the original away and the temp into place. Both renames
-// are atomic on one volume and Windows-safe (each targets a path that does not
-// exist yet). A failure during the copy leaves live untouched; a failure during
-// the final rename puts the original back. So a mid-copy I/O error, a bad
-// download, or power loss mid-swap cannot corrupt the live exe.
+// renameFn is os.Rename, indirected so tests can inject rename failures.
+var renameFn = os.Rename
+
+// atomicSwapInto replaces live with the contents of srcFile. It copies srcFile to
+// live.exe.new (same volume) + fsync, then renames the original to .old and .new
+// into place, putting .old back if the final rename fails. This makes a mid-COPY
+// failure safe: live is never truncated in place, so a disk/I/O error or a bad
+// download can't corrupt it.
+//
+// LIMITATION: this is not fully crash-atomic on Windows. os.Rename is not
+// guaranteed atomic on non-Unix platforms, and there is a brief window between
+// the two renames where the live name does not exist -- a power loss there leaves
+// live missing (with .old/.new alongside) and nothing yet repairs it on startup.
+// A Windows-native ReplaceFileW plus a startup recovery pass would close that
+// (audit follow-up). For now the common failure -- I/O mid-copy -- is handled.
 func atomicSwapInto(srcFile, live string) error {
 	tmp := live + ".new"
 	old := live + ".old"
@@ -184,12 +200,17 @@ func atomicSwapInto(srcFile, live string) error {
 		return err
 	}
 	_ = os.Remove(old)
-	if err := os.Rename(live, old); err != nil {
+	if err := renameFn(live, old); err != nil {
 		os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, live); err != nil {
-		_ = os.Rename(old, live) // put the original back
+	if err := renameFn(tmp, live); err != nil {
+		// live currently does not exist (moved to old). Try to put the original
+		// back; if THAT also fails, keep .old and .new for manual recovery and
+		// surface both errors -- never claim the file is intact.
+		if rerr := renameFn(old, live); rerr != nil {
+			return fmt.Errorf("swap into %s failed (%v) AND restore of the original failed (%v) -- live file is missing; recover by hand from %s or %s", live, err, rerr, old, tmp)
+		}
 		os.Remove(tmp)
 		return err
 	}
@@ -398,9 +419,10 @@ func main() {
 	time.Sleep(2 * time.Second)
 
 	if err := backupAndSwap(targets, staged, backupDir); err != nil {
-		log.Printf("swap failed and was rolled back: %v", err)
+		// err states whether the rollback succeeded; don't assert it did.
+		log.Printf("swap failed: %v", err)
 		_ = ps(fmt.Sprintf("Start-ScheduledTask -TaskName '%s'", *task))
-		log.Fatalf("update aborted; still on %s", cur)
+		log.Fatalf("update aborted; backups at %s -- verify the rig is on %s", backupDir, cur)
 	}
 
 	// Drop any pre-restart heartbeat and mark the restart instant, so the

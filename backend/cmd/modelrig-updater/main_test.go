@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -216,4 +218,58 @@ func TestBackupAndSwapSuccess(t *testing.T) {
 		t.Errorf("backup not written: %q", got)
 	}
 	noTemp(t, tg.live)
+}
+
+func TestAtomicSwapInto_FinalRenameFailsRestores(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "app.exe")
+	src := filepath.Join(dir, "src")
+	hbWrite(t, live, "OLD")
+	hbWrite(t, src, "NEW")
+
+	orig := renameFn
+	defer func() { renameFn = orig }()
+	// Fail the .new->live rename; let live->old and the old->live restore work.
+	renameFn = func(from, to string) error {
+		if strings.HasSuffix(from, ".new") {
+			return errors.New("injected rename failure")
+		}
+		return orig(from, to)
+	}
+	if err := atomicSwapInto(src, live); err == nil {
+		t.Fatal("expected the swap to fail")
+	}
+	if got := hbRead(t, live); got != "OLD" {
+		t.Errorf("live not restored to the original: %q", got)
+	}
+	noTemp(t, live)
+}
+
+func TestAtomicSwapInto_RestoreAlsoFails(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "app.exe")
+	src := filepath.Join(dir, "src")
+	hbWrite(t, live, "OLD")
+	hbWrite(t, src, "NEW")
+
+	orig := renameFn
+	defer func() { renameFn = orig }()
+	// Fail BOTH the .new->live rename and the .old->live restore.
+	renameFn = func(from, to string) error {
+		if strings.HasSuffix(from, ".new") || strings.HasSuffix(from, ".old") {
+			return errors.New("injected rename failure")
+		}
+		return orig(from, to)
+	}
+	err := atomicSwapInto(src, live)
+	if err == nil {
+		t.Fatal("expected the swap to fail")
+	}
+	if !strings.Contains(err.Error(), "recover by hand") {
+		t.Errorf("error should point to manual recovery, got: %v", err)
+	}
+	// .old must survive for recovery (live was moved there and never restored).
+	if _, e := os.Stat(live + ".old"); e != nil {
+		t.Errorf(".old should be preserved for recovery: %v", e)
+	}
 }
