@@ -64,7 +64,7 @@ func TestProveLooping_alive(t *testing.T) {
 		}
 	}()
 	defer close(stop)
-	ok, err := ProveLooping(p, after, 60*time.Millisecond, 500*time.Millisecond)
+	ok, err := ProveLooping(p, after, 100*time.Millisecond, 2*time.Second)
 	if err != nil || !ok {
 		t.Errorf("a looping writer should prove alive: ok=%v err=%v", ok, err)
 	}

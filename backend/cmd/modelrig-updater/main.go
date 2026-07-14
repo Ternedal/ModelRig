@@ -639,11 +639,24 @@ func main() {
 		die("ROLLBACK FAILED (%v). Journal kept at %s, backups at %s -- supervisor NOT started; restore by hand or rerun the updater.", err, journalPath, backupDir)
 	}
 	_ = journal.archive("rolled_back")
+	_ = heartbeat.Remove(*heartbeatPath)
+	rollbackAt := time.Now()
 	_ = ps(fmt.Sprintf("Start-ScheduledTask -TaskName '%s'", *task))
 	if verify(*serverHealth, cur) && verify(*workerHealth, cur) {
 		log.Printf("rolled back to %s and both backend + worker are healthy again", cur)
 	} else {
 		log.Printf("rolled back to %s but health is still not confirmed -- check the rig", cur)
+	}
+	// Audit gap: rollback verified backend+worker but never that the OLD
+	// supervisor loops again -- a dead supervisor after rollback means the rig
+	// runs with no crash-recovery. Warn-only: the rollback already happened and
+	// there is nothing safe left to undo automatically.
+	if !*noHeartbeat {
+		if alive, herr := heartbeat.ProveLooping(*heartbeatPath, rollbackAt, *superInterval, 45*time.Second); !alive {
+			log.Printf("WARNING: rolled back, but the supervisor is not provably looping (%v) -- crash-recovery may be down; check the KalivSupervisor task", herr)
+		} else {
+			log.Printf("supervisor is looping again after the rollback")
+		}
 	}
 }
 

@@ -62,26 +62,42 @@ func Remove(path string) error {
 // process that writes one heartbeat at startup and then dies does not pass).
 // Returns (true, nil) only if both hold.
 func ProveLooping(path string, after time.Time, interval, settle time.Duration) (bool, error) {
-	deadline := time.Now().Add(settle)
+	// Poll frequently rather than in coarse steps: the old 500ms sleep against a
+	// settle deadline of the same size meant ONE delayed wakeup on a loaded
+	// Windows machine failed a healthy supervisor (seen as a CI flake 14/7).
+	// Read errors are transient "not yet": Write is truncate+write, so a read
+	// can catch the file empty mid-write -- that must not count as dead.
+	step := interval / 4
+	if step < 10*time.Millisecond {
+		step = 10 * time.Millisecond
+	}
+	if step > 250*time.Millisecond {
+		step = 250 * time.Millisecond
+	}
 	var first time.Time
+	deadline := time.Now().Add(settle)
 	for {
-		t, err := Read(path)
-		if err == nil && !t.Before(after) {
+		if t, err := Read(path); err == nil && !t.Before(after) {
 			first = t
 			break
 		}
 		if time.Now().After(deadline) {
 			return false, fmt.Errorf("no heartbeat newer than the restart within %s", settle)
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(step)
 	}
-	time.Sleep(interval)
-	second, err := Read(path)
-	if err != nil {
-		return false, err
+	// Phase 2: prove the supervisor LOOPS by seeing the timestamp advance --
+	// polling through a generous window (2x interval + margin) instead of one
+	// exact-interval sleep and a single read, so a scheduler-delayed tick can't
+	// fail a healthy supervisor and trigger a needless rollback (audit P2).
+	advDeadline := time.Now().Add(2*interval + 2*time.Second)
+	for {
+		if second, err := Read(path); err == nil && second.After(first) {
+			return true, nil
+		}
+		if time.Now().After(advDeadline) {
+			return false, fmt.Errorf("heartbeat did not advance within %s: supervisor started but is not looping", 2*interval+2*time.Second)
+		}
+		time.Sleep(step)
 	}
-	if !second.After(first) {
-		return false, fmt.Errorf("heartbeat did not advance: supervisor started but is not looping")
-	}
-	return true, nil
 }
