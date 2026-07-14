@@ -129,3 +129,91 @@ func TestAssetURL(t *testing.T) {
 		t.Error("a missing asset should return empty string")
 	}
 }
+
+func hbWrite(t *testing.T, p, content string) {
+	t.Helper()
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+func hbRead(t *testing.T, p string) string {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+func noTemp(t *testing.T, live string) {
+	t.Helper()
+	for _, ext := range []string{".new", ".old"} {
+		if _, err := os.Stat(live + ext); !os.IsNotExist(err) {
+			t.Errorf("temp file %s%s left behind", live, ext)
+		}
+	}
+}
+
+func TestAtomicSwapInto(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "app.exe")
+	src := filepath.Join(dir, "src")
+	hbWrite(t, live, "OLD")
+	hbWrite(t, src, "NEW")
+	if err := atomicSwapInto(src, live); err != nil {
+		t.Fatal(err)
+	}
+	if hbRead(t, live) != "NEW" {
+		t.Errorf("live not swapped: %q", hbRead(t, live))
+	}
+	noTemp(t, live)
+	// missing src -> error, live untouched (never truncated)
+	if err := atomicSwapInto(filepath.Join(dir, "nope"), live); err == nil {
+		t.Error("swap from a missing source should error")
+	}
+	if hbRead(t, live) != "NEW" {
+		t.Errorf("live changed on a failed swap: %q", hbRead(t, live))
+	}
+	noTemp(t, live)
+}
+
+func TestBackupAndSwapAtomicOnMidFailure(t *testing.T) {
+	// The audit's scenario: target 2's staged file is missing, so its swap
+	// fails. Target 1 (already swapped) must be restored and NO live file left
+	// partially written.
+	liveDir, stagedDir, backupDir := t.TempDir(), t.TempDir(), t.TempDir()
+	t1 := target{asset: "a.exe", live: filepath.Join(liveDir, "a.exe")}
+	t2 := target{asset: "b.exe", live: filepath.Join(liveDir, "b.exe")}
+	hbWrite(t, t1.live, "OLD_A")
+	hbWrite(t, t2.live, "OLD_B")
+	hbWrite(t, filepath.Join(stagedDir, "a.exe"), "NEW_A")
+	// b.exe staged file deliberately absent
+
+	if err := backupAndSwap([]target{t1, t2}, stagedDir, backupDir); err == nil {
+		t.Fatal("expected failure when a staged file is missing")
+	}
+	if got := hbRead(t, t1.live); got != "OLD_A" {
+		t.Errorf("target 1 not restored after mid-swap failure: %q", got)
+	}
+	if got := hbRead(t, t2.live); got != "OLD_B" {
+		t.Errorf("target 2 corrupted by failed swap: %q", got)
+	}
+	noTemp(t, t1.live)
+	noTemp(t, t2.live)
+}
+
+func TestBackupAndSwapSuccess(t *testing.T) {
+	liveDir, stagedDir, backupDir := t.TempDir(), t.TempDir(), t.TempDir()
+	tg := target{asset: "a.exe", live: filepath.Join(liveDir, "a.exe")}
+	hbWrite(t, tg.live, "OLD")
+	hbWrite(t, filepath.Join(stagedDir, "a.exe"), "NEW")
+	if err := backupAndSwap([]target{tg}, stagedDir, backupDir); err != nil {
+		t.Fatal(err)
+	}
+	if got := hbRead(t, tg.live); got != "NEW" {
+		t.Errorf("not swapped: %q", got)
+	}
+	if got := hbRead(t, filepath.Join(backupDir, "a.exe")); got != "OLD" {
+		t.Errorf("backup not written: %q", got)
+	}
+	noTemp(t, tg.live)
+}

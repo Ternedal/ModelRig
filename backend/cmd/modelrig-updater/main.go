@@ -135,13 +135,19 @@ func copyFile(src, dst string) error {
 		out.Close()
 		return err
 	}
+	if err = out.Sync(); err != nil { // flush to disk before a caller renames it
+		out.Close()
+		return err
+	}
 	return out.Close()
 }
 
-// backupAndSwap copies each live file into backupDir, then moves the staged
-// (downloaded) file into the live path. If any step fails partway, it restores
-// whatever it already backed up, so the rig is never left with a half-swapped
-// set. On success the caller can start the new binaries.
+// backupAndSwap copies each live file into backupDir, then atomically swaps the
+// staged (downloaded) file into the live path. Every live change is an atomic
+// rename (see atomicSwapInto), so a failure partway -- including mid-copy of a
+// later target -- never leaves any live exe partially written; already-swapped
+// targets are restored from backup. On success the caller can start the new
+// binaries.
 func backupAndSwap(targets []target, stagedDir, backupDir string) error {
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		return err
@@ -154,7 +160,7 @@ func backupAndSwap(targets []target, stagedDir, backupDir string) error {
 			return fmt.Errorf("backup %s: %w", t.live, err)
 		}
 		staged := filepath.Join(stagedDir, t.asset)
-		if err := replaceFile(staged, t.live); err != nil {
+		if err := atomicSwapInto(staged, t.live); err != nil {
 			restore(swapped, backupDir)
 			return fmt.Errorf("swap %s: %w", t.live, err)
 		}
@@ -163,19 +169,42 @@ func backupAndSwap(targets []target, stagedDir, backupDir string) error {
 	return nil
 }
 
-// replaceFile overwrites dst with src's contents (copy, not rename, so it works
-// across volumes and leaves the staged file for cleanup).
-func replaceFile(src, dst string) error {
-	return copyFile(src, dst)
+// atomicSwapInto replaces live with the contents of srcFile without ever leaving
+// live partially written. It copies srcFile to a temp file NEXT TO live (same
+// volume), then renames the original away and the temp into place. Both renames
+// are atomic on one volume and Windows-safe (each targets a path that does not
+// exist yet). A failure during the copy leaves live untouched; a failure during
+// the final rename puts the original back. So a mid-copy I/O error, a bad
+// download, or power loss mid-swap cannot corrupt the live exe.
+func atomicSwapInto(srcFile, live string) error {
+	tmp := live + ".new"
+	old := live + ".old"
+	if err := copyFile(srcFile, tmp); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	_ = os.Remove(old)
+	if err := os.Rename(live, old); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, live); err != nil {
+		_ = os.Rename(old, live) // put the original back
+		os.Remove(tmp)
+		return err
+	}
+	_ = os.Remove(old)
+	return nil
 }
 
-// restore copies each target's backed-up binary back over the live path. Used
-// both on a mid-swap failure and on a failed health check after the swap.
+// restore atomically swaps each target's backed-up binary back over the live
+// path. Used both on a mid-swap failure and on a failed health check after the
+// swap. Atomic so the undo path can't corrupt a live exe either.
 func restore(targets []target, backupDir string) error {
 	var firstErr error
 	for _, t := range targets {
 		bak := filepath.Join(backupDir, t.asset)
-		if err := copyFile(bak, t.live); err != nil && firstErr == nil {
+		if err := atomicSwapInto(bak, t.live); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
