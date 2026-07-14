@@ -273,3 +273,65 @@ func TestAtomicSwapInto_RestoreAlsoFails(t *testing.T) {
 		t.Errorf(".old should be preserved for recovery: %v", e)
 	}
 }
+
+func TestRecoverTarget(t *testing.T) {
+	// live present -> no-op
+	d1 := t.TempDir()
+	live1 := filepath.Join(d1, "app.exe")
+	hbWrite(t, live1, "LIVE")
+	hbWrite(t, live1+".old", "OLDLEFT")
+	if err := recoverTarget(live1); err != nil {
+		t.Fatal(err)
+	}
+	if hbRead(t, live1) != "LIVE" {
+		t.Error("live changed when it should not")
+	}
+
+	// live missing + .old present -> restore from .old, .new removed
+	d2 := t.TempDir()
+	live2 := filepath.Join(d2, "app.exe")
+	hbWrite(t, live2+".old", "ORIG")
+	hbWrite(t, live2+".new", "INTERRUPTED")
+	if err := recoverTarget(live2); err != nil {
+		t.Fatal(err)
+	}
+	if hbRead(t, live2) != "ORIG" {
+		t.Errorf("live not restored from .old: %q", hbRead(t, live2))
+	}
+	if _, e := os.Stat(live2 + ".new"); !os.IsNotExist(e) {
+		t.Error(".new should be removed after recovery")
+	}
+
+	// live missing + only .new -> fail closed, delete nothing
+	d3 := t.TempDir()
+	live3 := filepath.Join(d3, "app.exe")
+	hbWrite(t, live3+".new", "ONLYNEW")
+	if err := recoverTarget(live3); err == nil {
+		t.Error("only-.new should fail closed")
+	}
+	if _, e := os.Stat(live3 + ".new"); e != nil {
+		t.Error(".new must not be deleted on fail-closed")
+	}
+
+	// live missing + nothing -> error
+	d4 := t.TempDir()
+	if err := recoverTarget(filepath.Join(d4, "app.exe")); err == nil {
+		t.Error("missing live with no recovery files should error")
+	}
+}
+
+func TestAtomicSwapInto_RefusesMissingLive(t *testing.T) {
+	// The data-loss scenario: live is gone but .old (recovery copy) is present.
+	// atomicSwapInto must refuse WITHOUT deleting .old.
+	dir := t.TempDir()
+	live := filepath.Join(dir, "app.exe")
+	src := filepath.Join(dir, "src")
+	hbWrite(t, live+".old", "RECOVERY")
+	hbWrite(t, src, "NEW")
+	if err := atomicSwapInto(src, live); err == nil {
+		t.Fatal("expected refusal when live is missing")
+	}
+	if _, e := os.Stat(live + ".old"); e != nil {
+		t.Error(".old (recovery copy) must be preserved, not deleted")
+	}
+}

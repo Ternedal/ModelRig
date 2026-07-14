@@ -103,8 +103,12 @@ func selectAssets(releaseJSON []byte, want []string) (tag string, urls map[strin
 	return rel.TagName, urls, nil
 }
 
+// downloadClient bounds a stuck download so an unattended updater can't hang
+// forever on a wedged connection.
+var downloadClient = &http.Client{Timeout: 10 * time.Minute}
+
 func download(url, dest string) error {
-	resp, err := http.Get(url)
+	resp, err := downloadClient.Get(url)
 	if err != nil {
 		return err
 	}
@@ -177,6 +181,36 @@ func backupAndSwap(targets []target, stagedDir, backupDir string) error {
 	return nil
 }
 
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// recoverTarget repairs the aftermath of a crashed prior swap for one target,
+// BEFORE anything is deleted or overwritten. A crash between the two renames in
+// atomicSwapInto can leave live missing with .old (the original) and/or .new
+// (the update) beside it; proceeding blindly would let the next swap delete .old
+// (its stale-temp cleanup) and destroy the only recovery copy. Recover, or fail
+// closed on any state we can't safely resolve -- delete nothing.
+func recoverTarget(live string) error {
+	oldP, newP := live+".old", live+".new"
+	switch {
+	case fileExists(live):
+		return nil // live is present; the swap manages its own temps
+	case fileExists(oldP):
+		// interrupted mid-swap: put the original back
+		if err := os.Rename(oldP, live); err != nil {
+			return fmt.Errorf("restore %s from %s: %w", live, oldP, err)
+		}
+		os.Remove(newP) // the interrupted update; the swap will re-stage it
+		return nil
+	case fileExists(newP):
+		return fmt.Errorf("%s is missing; only %s survived a prior crash -- verify it and rename it by hand (cannot confirm it is intact)", live, newP)
+	default:
+		return fmt.Errorf("%s is missing with no .old/.new to recover from -- restore it by hand", live)
+	}
+}
+
 // renameFn is os.Rename, indirected so tests can inject rename failures.
 var renameFn = os.Rename
 
@@ -193,6 +227,11 @@ var renameFn = os.Rename
 // A Windows-native ReplaceFileW plus a startup recovery pass would close that
 // (audit follow-up). For now the common failure -- I/O mid-copy -- is handled.
 func atomicSwapInto(srcFile, live string) error {
+	// Never proceed if live is missing: the .old removal below would destroy a
+	// recovery copy left by a crashed prior swap. Recovery must run first.
+	if !fileExists(live) {
+		return fmt.Errorf("refusing to swap into %s: the live file is missing (recovery must run first)", live)
+	}
 	tmp := live + ".new"
 	old := live + ".old"
 	if err := copyFile(srcFile, tmp); err != nil {
@@ -412,7 +451,20 @@ func main() {
 		log.Printf("WARNING: installing WITHOUT integrity verification (-insecure-skip-verify)")
 	}
 
-	backupDir := filepath.Join(*root, "backups", "exe-"+cur)
+	// Repair leftovers from a crashed prior swap before touching anything, so a
+	// retry recovers instead of deleting the recovery copies.
+	for _, t := range targets {
+		if err := recoverTarget(t.live); err != nil {
+			log.Fatalf("pre-update recovery for %s failed: %v", t.asset, err)
+		}
+	}
+	// Immutable, per-attempt backup dir: a retry must not overwrite a good backup
+	// from an earlier attempt with a now-damaged live file.
+	backupDir := filepath.Join(*root, "backups",
+		fmt.Sprintf("%s-%s-to-%s", time.Now().UTC().Format("20060102T150405Z"), cur, newVersion))
+	if fileExists(backupDir) {
+		log.Fatalf("backup dir %s already exists -- refusing to overwrite a prior attempt", backupDir)
+	}
 	log.Printf("stopping supervisor + processes so the exes unlock")
 	_ = ps(fmt.Sprintf("Stop-ScheduledTask -TaskName '%s' -ErrorAction SilentlyContinue", *task))
 	_ = ps("Get-Process modelrig-server,modelrig-worker,modelrig-supervisor -ErrorAction SilentlyContinue | Stop-Process -Force")
