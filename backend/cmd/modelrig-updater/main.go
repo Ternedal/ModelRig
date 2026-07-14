@@ -359,6 +359,7 @@ func main() {
 	noHeartbeat := flag.Bool("no-heartbeat-check", false, "skip the post-update supervisor-liveness check")
 	task := flag.String("supervisor-task", "KalivSupervisor", "scheduled task that runs the supervisor")
 	checkOnly := flag.Bool("check", false, "report whether an update is available and exit")
+	recoverOnly := flag.Bool("recover", false, "repair a crashed prior swap (offline, no network) and exit")
 	skipVerify := flag.Bool("insecure-skip-verify", false, "install without checking SHA256SUMS.txt (only for a release predating checksums)")
 	flag.Parse()
 	if *heartbeatPath == "" {
@@ -371,6 +372,21 @@ func main() {
 		{"modelrig-server-windows-x64.exe", filepath.Join(*root, "modelrig-server-windows-x64.exe")},
 		{"modelrig-supervisor-windows-x64.exe", filepath.Join(*root, "modelrig-supervisor-windows-x64.exe")},
 		{"modelrig-worker-windows-x64.exe", filepath.Join(*root, "worker", "modelrig-worker-windows-x64.exe")},
+	}
+
+	// Recovery FIRST -- before reading the current version or any network call. A
+	// crash can leave a live exe missing; if that's the server, its version can't
+	// be read (the step below would exit here), so recovery must repair it before
+	// anything else. Runs on every invocation, so simply running the updater --
+	// or -recover, which needs no network -- heals a crashed rig.
+	for _, t := range targets {
+		if err := recoverTarget(t.live); err != nil {
+			log.Fatalf("startup recovery for %s failed: %v", t.asset, err)
+		}
+	}
+	if *recoverOnly {
+		log.Printf("recovery complete (-recover); nothing else to do")
+		return
 	}
 
 	cur := *current
@@ -451,19 +467,17 @@ func main() {
 		log.Printf("WARNING: installing WITHOUT integrity verification (-insecure-skip-verify)")
 	}
 
-	// Repair leftovers from a crashed prior swap before touching anything, so a
-	// retry recovers instead of deleting the recovery copies.
-	for _, t := range targets {
-		if err := recoverTarget(t.live); err != nil {
-			log.Fatalf("pre-update recovery for %s failed: %v", t.asset, err)
-		}
-	}
 	// Immutable, per-attempt backup dir: a retry must not overwrite a good backup
-	// from an earlier attempt with a now-damaged live file.
+	// from an earlier attempt with a now-damaged live file. Created atomically
+	// (os.Mkdir fails if it exists) so two updaters started in the same second
+	// can't both claim it -- the second fails closed rather than sharing it.
 	backupDir := filepath.Join(*root, "backups",
 		fmt.Sprintf("%s-%s-to-%s", time.Now().UTC().Format("20060102T150405Z"), cur, newVersion))
-	if fileExists(backupDir) {
-		log.Fatalf("backup dir %s already exists -- refusing to overwrite a prior attempt", backupDir)
+	if err := os.MkdirAll(filepath.Dir(backupDir), 0o755); err != nil {
+		log.Fatalf("create backups dir: %v", err)
+	}
+	if err := os.Mkdir(backupDir, 0o755); err != nil {
+		log.Fatalf("claim backup dir %s (another updater may be running): %v", backupDir, err)
 	}
 	log.Printf("stopping supervisor + processes so the exes unlock")
 	_ = ps(fmt.Sprintf("Stop-ScheduledTask -TaskName '%s' -ErrorAction SilentlyContinue", *task))
@@ -530,10 +544,14 @@ func assetNames(targets []target) []string {
 	return out
 }
 
+// metaClient bounds the GitHub release-metadata fetch (small payload, short
+// timeout) so a wedged connection can't block the updater before it even swaps.
+var metaClient = &http.Client{Timeout: 30 * time.Second}
+
 func httpGet(url string) ([]byte, error) {
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := metaClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
