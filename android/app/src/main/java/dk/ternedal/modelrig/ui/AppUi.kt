@@ -1107,6 +1107,21 @@ private fun ChatScreen(
                         // cloud because it is the most restrictive mode.
                         useTools -> {
                             val viaCloud = mode == "cloud"
+                            // Tools live behind the rig's gate, so cloud+tools
+                            // routes THROUGH the rig -- a tailnet address the
+                            // phone can't reach with Tailscale off (on-device
+                            // 14/7: first send hung/errored, while retry --
+                            // whose path has no tools branch -- answered
+                            // instantly via CloudClient). Probe the rig fast;
+                            // if it is unreachable in cloud mode, degrade to
+                            // plain cloud chat WITHOUT tools and say so,
+                            // instead of hanging on a route that cannot work.
+                            if (viaCloud && !ModelRigClient(store.baseUrl ?: "", store.token).quickHealth()) {
+                                val key = store.cloudKey ?: throw RuntimeException("ingen cloud-nøgle")
+                                onDelta("_Tools er ikke tilgængelige lige nu (riggen kan ikke nås) — svarer uden tools._\n\n")
+                                CloudClient(key).chatStream(cModel, history, registerCall = hook, imageB64 = imageB64, onDelta = onDelta)
+                                return@runCatching
+                            }
                             // history minus the just-added user turn (the rig
                             // appends that itself; sending it twice makes the
                             // model answer its own echo) and minus the system

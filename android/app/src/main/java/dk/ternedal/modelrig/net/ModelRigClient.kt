@@ -35,6 +35,22 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
      * working. Subsequent turns are much faster (models stay cached), but the
      * first one must be allowed to finish.
      */
+    /** Fast reachability probe: GET /healthz with a 3s budget. Used to fail
+     *  fast and degrade honestly when the rig cannot be reached from the phone
+     *  -- e.g. cloud+tools on 4G with Tailscale off, where the normal client
+     *  hangs its full read timeout on a blackholed tailnet route (on-device
+     *  14/7). False on ANY failure; never throws. */
+    fun quickHealth(): Boolean = try {
+        val quick = OkHttpClient.Builder()
+            .connectTimeout(3, TimeUnit.SECONDS)
+            .readTimeout(3, TimeUnit.SECONDS)
+            .build()
+        quick.newCall(Request.Builder().url("$base/healthz").get().build())
+            .execute().use { it.isSuccessful }
+    } catch (_: Exception) {
+        false
+    }
+
     private val voiceHttp = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.MINUTES)
