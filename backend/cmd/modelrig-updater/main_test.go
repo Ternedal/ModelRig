@@ -74,7 +74,7 @@ func TestBackupAndSwapThenRestore(t *testing.T) {
 	}
 	targets := []target{{asset: "app.exe", live: live}}
 
-	if err := backupAndSwap(targets, staged, backup); err != nil {
+	if err := backupAndSwap(targets, staged, backup, nil); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(live); string(b) != "NEW" {
@@ -190,7 +190,7 @@ func TestBackupAndSwapAtomicOnMidFailure(t *testing.T) {
 	hbWrite(t, filepath.Join(stagedDir, "a.exe"), "NEW_A")
 	// b.exe staged file deliberately absent
 
-	if err := backupAndSwap([]target{t1, t2}, stagedDir, backupDir); err == nil {
+	if err := backupAndSwap([]target{t1, t2}, stagedDir, backupDir, nil); err == nil {
 		t.Fatal("expected failure when a staged file is missing")
 	}
 	if got := hbRead(t, t1.live); got != "OLD_A" {
@@ -208,7 +208,7 @@ func TestBackupAndSwapSuccess(t *testing.T) {
 	tg := target{asset: "a.exe", live: filepath.Join(liveDir, "a.exe")}
 	hbWrite(t, tg.live, "OLD")
 	hbWrite(t, filepath.Join(stagedDir, "a.exe"), "NEW")
-	if err := backupAndSwap([]target{tg}, stagedDir, backupDir); err != nil {
+	if err := backupAndSwap([]target{tg}, stagedDir, backupDir, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := hbRead(t, tg.live); got != "NEW" {
@@ -333,5 +333,118 @@ func TestAtomicSwapInto_RefusesMissingLive(t *testing.T) {
 	}
 	if _, e := os.Stat(live + ".old"); e != nil {
 		t.Error(".old (recovery copy) must be preserved, not deleted")
+	}
+}
+
+func TestJournalLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	jp := filepath.Join(dir, "update-transaction.json")
+	j, err := newJournal(jp, "1.0.0", "1.0.1", filepath.Join(dir, "bak"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := readJournal(jp); d == nil || d.State != "prepared" {
+		t.Fatalf("journal should exist as prepared, got %+v", d)
+	}
+	// a second transaction must be refused while one is recorded
+	if _, err := newJournal(jp, "1.0.0", "1.0.1", "x"); err == nil {
+		t.Error("a second journal over an existing one should be refused")
+	}
+	j.setState("backed_up")
+	j.addSwapped("a.exe")
+	d, _ := readJournal(jp)
+	if d.State != "swapping" || len(d.Swapped) != 1 || d.Swapped[0] != "a.exe" {
+		t.Fatalf("state/swapped not persisted: %+v", d)
+	}
+	if err := j.archive("committed"); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := readJournal(jp); d != nil {
+		t.Error("archived journal should read as no pending transaction")
+	}
+	if !fileExists(jp + ".last") {
+		t.Error(".last forensic copy should exist after archive")
+	}
+	// nil journal is a no-op everywhere (tests + optional use)
+	var nilJ *txJournal
+	if nilJ.setState("x") != nil || nilJ.addSwapped("y") != nil || nilJ.archive("z") != nil {
+		t.Error("nil journal methods should no-op")
+	}
+}
+
+func TestRecoverFromJournal_WholeSet(t *testing.T) {
+	// Crash mid-transaction: A was swapped to NEW, B's swap was interrupted
+	// (live missing, .new left). The whole-set recovery must put BOTH back to
+	// their pre-transaction versions and archive the journal.
+	root := t.TempDir()
+	bakDir := filepath.Join(root, "bak")
+	os.MkdirAll(bakDir, 0o755)
+	tA := target{asset: "a.exe", live: filepath.Join(root, "a.exe")}
+	tB := target{asset: "b.exe", live: filepath.Join(root, "b.exe")}
+	hbWrite(t, filepath.Join(bakDir, "a.exe"), "OLD_A")
+	hbWrite(t, filepath.Join(bakDir, "b.exe"), "OLD_B")
+	hbWrite(t, tA.live, "NEW_A")          // swapped before the crash
+	hbWrite(t, tB.live+".new", "NEW_B")   // interrupted: live missing, .new left
+
+	jp := filepath.Join(root, "update-transaction.json")
+	j, err := newJournal(jp, "1.0.0", "1.0.1", bakDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.setState("backed_up")
+	j.addSwapped("a.exe")
+
+	if err := recoverFromJournal(jp, []target{tA, tB}); err != nil {
+		t.Fatal(err)
+	}
+	if got := hbRead(t, tA.live); got != "OLD_A" {
+		t.Errorf("A not rolled back: %q", got)
+	}
+	if got := hbRead(t, tB.live); got != "OLD_B" {
+		t.Errorf("B not restored: %q", got)
+	}
+	if d, _ := readJournal(jp); d != nil {
+		t.Error("journal should be archived after whole-set rollback")
+	}
+	noTemp(t, tA.live)
+	noTemp(t, tB.live)
+	// no journal -> no-op
+	if err := recoverFromJournal(jp, []target{tA, tB}); err != nil {
+		t.Errorf("recovery with no journal should be a no-op: %v", err)
+	}
+}
+
+func TestAcquireLockExclusive(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "updater.lock")
+	if err := acquireLock(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := acquireLock(p); err == nil {
+		t.Error("second acquire should fail while the lock exists")
+	}
+	releaseLock(p)
+	if err := acquireLock(p); err != nil {
+		t.Errorf("acquire after release should succeed: %v", err)
+	}
+}
+
+func TestBackupAndSwap_AllBackupsBeforeFirstSwap(t *testing.T) {
+	// Phase 1 must capture EVERY target before any swap: with target 2's staged
+	// file missing, its swap fails -- but its backup must already exist.
+	liveDir, stagedDir, backupDir := t.TempDir(), t.TempDir(), t.TempDir()
+	t1 := target{asset: "a.exe", live: filepath.Join(liveDir, "a.exe")}
+	t2 := target{asset: "b.exe", live: filepath.Join(liveDir, "b.exe")}
+	hbWrite(t, t1.live, "OLD_A")
+	hbWrite(t, t2.live, "OLD_B")
+	hbWrite(t, filepath.Join(stagedDir, "a.exe"), "NEW_A")
+	// b.exe staged deliberately absent
+	if err := backupAndSwap([]target{t1, t2}, stagedDir, backupDir, nil); err == nil {
+		t.Fatal("expected failure")
+	}
+	if got := hbRead(t, filepath.Join(backupDir, "b.exe")); got != "OLD_B" {
+		t.Errorf("b.exe must be backed up BEFORE the first swap, got %q", got)
+	}
+	if got := hbRead(t, t1.live); got != "OLD_A" {
+		t.Errorf("a.exe not restored: %q", got)
 	}
 }

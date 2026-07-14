@@ -18,6 +18,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -152,31 +153,44 @@ func copyFile(src, dst string) error {
 // later target -- never leaves any live exe partially written; already-swapped
 // targets are restored from backup. On success the caller can start the new
 // binaries.
+// errRollbackFailed marks that an automatic rollback did NOT succeed; callers
+// must fail closed and must NOT restart the supervisor on a broken set.
+var errRollbackFailed = fmt.Errorf("ROLLBACK FAILED")
+
 // withRollback combines a swap failure with the result of the rollback attempt.
-// If the rollback also failed, the returned error says so, so the caller must
-// not claim the rig was restored.
+// If the rollback also failed, the returned error wraps errRollbackFailed so
+// the caller can detect it (errors.Is) and never claims the rig was restored.
 func withRollback(swapErr, restoreErr error) error {
 	if restoreErr == nil {
 		return swapErr
 	}
-	return fmt.Errorf("%w; ROLLBACK ALSO FAILED (%v) -- rig may be on mixed versions, restore from backups by hand", swapErr, restoreErr)
+	return fmt.Errorf("%v; %w (%v) -- rig may be on mixed versions, restore from backups by hand", swapErr, errRollbackFailed, restoreErr)
 }
 
-func backupAndSwap(targets []target, stagedDir, backupDir string) error {
+func backupAndSwap(targets []target, stagedDir, backupDir string, j *txJournal) error {
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		return err
 	}
+	// Phase 1: back up EVERY target before the FIRST swap, so any crash after
+	// any swap always has a complete pre-transaction set to restore from --
+	// there is no state where some targets were never captured.
+	for _, t := range targets {
+		if err := copyFile(t.live, filepath.Join(backupDir, t.asset)); err != nil {
+			return fmt.Errorf("backup %s: %w", t.live, err) // nothing swapped yet
+		}
+	}
+	if err := j.setState("backed_up"); err != nil {
+		return fmt.Errorf("journal: %w", err)
+	}
+	// Phase 2: swap. Each completed swap is recorded in the journal, so a crash
+	// here tells the whole-set recovery exactly what to undo.
 	var swapped []target
 	for _, t := range targets {
-		bak := filepath.Join(backupDir, t.asset)
-		if err := copyFile(t.live, bak); err != nil {
-			return withRollback(fmt.Errorf("backup %s: %w", t.live, err), restore(swapped, backupDir))
-		}
-		staged := filepath.Join(stagedDir, t.asset)
-		if err := atomicSwapInto(staged, t.live); err != nil {
+		if err := atomicSwapInto(filepath.Join(stagedDir, t.asset), t.live); err != nil {
 			return withRollback(fmt.Errorf("swap %s: %w", t.live, err), restore(swapped, backupDir))
 		}
 		swapped = append(swapped, t)
+		_ = j.addSwapped(t.asset)
 	}
 	return nil
 }
@@ -374,6 +388,28 @@ func main() {
 		{"modelrig-worker-windows-x64.exe", filepath.Join(*root, "worker", "modelrig-worker-windows-x64.exe")},
 	}
 
+	// The whole run holds an exclusive lock: two updaters at once would
+	// interleave swaps and race the journal. log.Fatalf skips defers, so fatal
+	// paths below go through die(), which releases the lock first.
+	lockPath := filepath.Join(*root, "updater.lock")
+	if err := acquireLock(lockPath); err != nil {
+		log.Fatalf("%v", err)
+	}
+	defer releaseLock(lockPath)
+	die := func(format string, a ...any) {
+		releaseLock(lockPath)
+		log.Printf("FATAL: "+format, a...)
+		os.Exit(1)
+	}
+
+	// Whole-set recovery FIRST: an uncommitted transaction journal means a
+	// previous update crashed partway; restore EVERY target from that attempt's
+	// backups so the rig can never keep running a mixed-version set.
+	journalPath := filepath.Join(*root, "update-transaction.json")
+	if err := recoverFromJournal(journalPath, targets); err != nil {
+		die("%v", err)
+	}
+
 	// Recovery FIRST -- before reading the current version or any network call. A
 	// crash can leave a live exe missing; if that's the server, its version can't
 	// be read (the step below would exit here), so recovery must repair it before
@@ -381,7 +417,7 @@ func main() {
 	// or -recover, which needs no network -- heals a crashed rig.
 	for _, t := range targets {
 		if err := recoverTarget(t.live); err != nil {
-			log.Fatalf("startup recovery for %s failed: %v", t.asset, err)
+			die("startup recovery for %s failed: %v", t.asset, err)
 		}
 	}
 	if *recoverOnly {
@@ -393,21 +429,21 @@ func main() {
 	if cur == "" {
 		cur = readRunningVersion(*serverHealth)
 		if cur == "" {
-			log.Fatalf("could not read current version from %s; pass -current", *serverHealth)
+			die("could not read current version from %s; pass -current", *serverHealth)
 		}
 	}
 
 	relBody, err := httpGet(fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", *repo))
 	if err != nil {
-		log.Fatalf("fetch latest release: %v", err)
+		die("fetch latest release: %v", err)
 	}
 	tag, urls, err := selectAssets(relBody, assetNames(targets))
 	if err != nil {
-		log.Fatalf("%v", err)
+		die("%v", err)
 	}
 	newer, err := isNewer(cur, tag)
 	if err != nil {
-		log.Fatalf("version compare: %v", err)
+		die("version compare: %v", err)
 	}
 	if !newer {
 		log.Printf("already up to date (running %s, latest %s)", cur, tag)
@@ -421,19 +457,19 @@ func main() {
 
 	sumsURL := assetURL(relBody, "SHA256SUMS.txt")
 	if sumsURL == "" && !*skipVerify {
-		log.Fatalf("release %s has no SHA256SUMS.txt -- refusing to install unverified (pass -insecure-skip-verify to override)", tag)
+		die("release %s has no SHA256SUMS.txt -- refusing to install unverified (pass -insecure-skip-verify to override)", tag)
 	}
 
 	staged, err := os.MkdirTemp("", "kaliv-update-")
 	if err != nil {
-		log.Fatalf("staging dir: %v", err)
+		die("staging dir: %v", err)
 	}
 	defer os.RemoveAll(staged)
 	for _, t := range targets {
 		dest := filepath.Join(staged, t.asset)
 		log.Printf("downloading %s", t.asset)
 		if err := download(urls[t.asset], dest); err != nil {
-			log.Fatalf("download %s: %v", t.asset, err)
+			die("download %s: %v", t.asset, err)
 		}
 	}
 
@@ -442,24 +478,24 @@ func main() {
 	if sumsURL != "" {
 		sumsPath := filepath.Join(staged, "SHA256SUMS.txt")
 		if err := download(sumsURL, sumsPath); err != nil {
-			log.Fatalf("download SHA256SUMS.txt: %v", err)
+			die("download SHA256SUMS.txt: %v", err)
 		}
 		data, err := os.ReadFile(sumsPath)
 		if err != nil {
-			log.Fatalf("read SHA256SUMS.txt: %v", err)
+			die("read SHA256SUMS.txt: %v", err)
 		}
 		sums := parseSums(data)
 		for _, t := range targets {
 			want, ok := sums[t.asset]
 			if !ok {
-				log.Fatalf("SHA256SUMS.txt has no entry for %s -- refusing to install", t.asset)
+				die("SHA256SUMS.txt has no entry for %s -- refusing to install", t.asset)
 			}
 			got, err := fileSHA256(filepath.Join(staged, t.asset))
 			if err != nil {
-				log.Fatalf("hash %s: %v", t.asset, err)
+				die("hash %s: %v", t.asset, err)
 			}
 			if !strings.EqualFold(got, want) {
-				log.Fatalf("checksum MISMATCH for %s (want %s, got %s) -- refusing to install", t.asset, want, got)
+				die("checksum MISMATCH for %s (want %s, got %s) -- refusing to install", t.asset, want, got)
 			}
 		}
 		log.Printf("checksums verified for %d exe(s)", len(targets))
@@ -474,22 +510,35 @@ func main() {
 	backupDir := filepath.Join(*root, "backups",
 		fmt.Sprintf("%s-%s-to-%s", time.Now().UTC().Format("20060102T150405Z"), cur, newVersion))
 	if err := os.MkdirAll(filepath.Dir(backupDir), 0o755); err != nil {
-		log.Fatalf("create backups dir: %v", err)
+		die("create backups dir: %v", err)
 	}
 	if err := os.Mkdir(backupDir, 0o755); err != nil {
-		log.Fatalf("claim backup dir %s (another updater may be running): %v", backupDir, err)
+		die("claim backup dir %s: %v", backupDir, err)
+	}
+	// The journal is written BEFORE the first mutation; its presence at next
+	// start means this transaction did not commit and must be rolled back whole.
+	journal, err := newJournal(journalPath, cur, newVersion, backupDir)
+	if err != nil {
+		die("%v", err)
 	}
 	log.Printf("stopping supervisor + processes so the exes unlock")
 	_ = ps(fmt.Sprintf("Stop-ScheduledTask -TaskName '%s' -ErrorAction SilentlyContinue", *task))
 	_ = ps("Get-Process modelrig-server,modelrig-worker,modelrig-supervisor -ErrorAction SilentlyContinue | Stop-Process -Force")
 	time.Sleep(2 * time.Second)
 
-	if err := backupAndSwap(targets, staged, backupDir); err != nil {
-		// err states whether the rollback succeeded; don't assert it did.
+	if err := backupAndSwap(targets, staged, backupDir, journal); err != nil {
+		if errors.Is(err, errRollbackFailed) {
+			// The set may be mixed/broken: keep the journal (next run's whole-set
+			// recovery will finish the job) and do NOT start the supervisor on it.
+			_ = journal.setState("manual_recovery")
+			die("swap failed AND rollback failed: %v -- journal kept at %s, supervisor NOT started", err, journalPath)
+		}
 		log.Printf("swap failed: %v", err)
+		_ = journal.archive("rolled_back")
 		_ = ps(fmt.Sprintf("Start-ScheduledTask -TaskName '%s'", *task))
-		log.Fatalf("update aborted; backups at %s -- verify the rig is on %s", backupDir, cur)
+		die("update aborted (rolled back); backups at %s -- verify the rig is on %s", backupDir, cur)
 	}
+	_ = journal.setState("verifying")
 
 	// Drop any pre-restart heartbeat and mark the restart instant, so the
 	// liveness check below only accepts a heartbeat the NEW supervisor writes.
@@ -517,17 +566,25 @@ func main() {
 		}
 	}
 	if healthOK && superOK {
+		if err := journal.archive("committed"); err != nil {
+			log.Printf("WARNING: update succeeded but the journal could not be archived (%v) -- remove %s by hand or the next run will roll this update back", err, journalPath)
+		}
 		log.Printf("update OK: backend + worker report %s and the supervisor is looping. Backup kept at %s", newVersion, backupDir)
 		return
 	}
 
 	log.Printf("update did not come up healthy + alive on %s -- ROLLING BACK to %s", newVersion, cur)
+	_ = journal.setState("rolling_back")
 	_ = ps(fmt.Sprintf("Stop-ScheduledTask -TaskName '%s' -ErrorAction SilentlyContinue", *task))
 	_ = ps("Get-Process modelrig-server,modelrig-worker,modelrig-supervisor -ErrorAction SilentlyContinue | Stop-Process -Force")
 	time.Sleep(2 * time.Second)
 	if err := restore(targets, backupDir); err != nil {
-		log.Fatalf("ROLLBACK FAILED (%v). Backup is at %s -- restore by hand.", err, backupDir)
+		// Broken set: keep the journal so the next run finishes the rollback,
+		// and do NOT start the supervisor on it.
+		_ = journal.setState("manual_recovery")
+		die("ROLLBACK FAILED (%v). Journal kept at %s, backups at %s -- supervisor NOT started; restore by hand or rerun the updater.", err, journalPath, backupDir)
 	}
+	_ = journal.archive("rolled_back")
 	_ = ps(fmt.Sprintf("Start-ScheduledTask -TaskName '%s'", *task))
 	if verify(*serverHealth, cur) && verify(*workerHealth, cur) {
 		log.Printf("rolled back to %s and both backend + worker are healthy again", cur)

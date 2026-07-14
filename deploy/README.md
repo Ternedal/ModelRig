@@ -121,3 +121,13 @@ updater removes the old heartbeat, restarts, and requires a fresh heartbeat that
 then advances -- proving the new supervisor is looping. If that can't be proven,
 the update ROLLS BACK. On by default; the path defaults to the install's
 `logs\supervisor-heartbeat`.
+
+### Update-transaktion, lock og offline recovery (v1.58.29)
+
+En update er nu én transaktion: `update-transaction.json` i roden skrives før
+første ændring — findes den ved næste kørsel, rulles HELE sættet tilbage fra
+forsøgets backup-mappe (ingen blandede versioner). Arkiveres som `.last` ved
+commit/rollback; `manual_recovery` betyder: supervisor blev IKKE startet, kør
+updateren igen eller gendan fra backup-mappen. `updater.lock` holder én instans
+ad gangen (slet den manuelt efter et hårdt crash). `modelrig-updater -recover`
+reparerer offline uden netværk eller kørende server. Fuldt design: UPDATER_DESIGN.md.
