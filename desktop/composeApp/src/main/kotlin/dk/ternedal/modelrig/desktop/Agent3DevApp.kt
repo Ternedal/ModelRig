@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -62,6 +61,8 @@ fun Agent3DevApp() {
         }
         var token by remember { mutableStateOf(setting("deviceToken", "MODELRIG_TOKEN", "")) }
         var message by remember { mutableStateOf("") }
+        var useMemory by remember { mutableStateOf(false) }
+        var memorySubjects by remember { mutableStateOf("") }
         var preview by remember { mutableStateOf<Agent3PlanPreview?>(null) }
         var run by remember { mutableStateOf<Agent3Run?>(null) }
         var busy by remember { mutableStateOf(false) }
@@ -73,6 +74,13 @@ fun Agent3DevApp() {
             return Agent3Client(baseUrl.trim(), token.trim())
         }
 
+        fun selectedSubjects(): List<String> = memorySubjects
+            .split(',')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .take(20)
+
         fun previewPlan() {
             val text = message.trim()
             if (text.isEmpty() || busy) return
@@ -81,7 +89,14 @@ fun Agent3DevApp() {
             run = null
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
-                    runCatching { client().previewPlan(message = text, mode = "rig") }
+                    runCatching {
+                        client().previewPlan(
+                            message = text,
+                            mode = "rig",
+                            useMemory = useMemory,
+                            memorySubjects = if (useMemory) selectedSubjects() else emptyList(),
+                        )
+                    }
                 }
                 busy = false
                 result.onSuccess { preview = it }
@@ -211,6 +226,35 @@ fun Agent3DevApp() {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (useMemory) {
+                        Button(onClick = { useMemory = false; memorySubjects = ""; preview = null }) {
+                            Text("Memory: til")
+                        }
+                    } else {
+                        OutlinedButton(onClick = { useMemory = true; preview = null }) {
+                            Text("Memory: fra")
+                        }
+                    }
+                    Text(
+                        if (useMemory) "Kun bekræftede records sendes til den lokale planner."
+                        else "Planner-memory er opt-in og slukket.",
+                        color = KalivTheme.colors.TextMuted,
+                        fontSize = 11.sp,
+                    )
+                }
+                if (useMemory) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = memorySubjects,
+                        onValueChange = { memorySubjects = it; preview = null },
+                        label = { Text("Valgfrit subject-filter, kommasepareret") },
+                        supportingText = { Text("Tomt felt bruger alle eligible memories inden for serverens budget.") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
                 Button(enabled = !busy && message.isNotBlank(), onClick = ::previewPlan) {
                     Text(if (busy) "Arbejder…" else "Lav plan-preview")
                 }
@@ -259,6 +303,39 @@ private fun PlanCard(preview: Agent3PlanPreview, busy: Boolean, onStart: () -> U
         if (preview.rationale.isNotBlank()) {
             Spacer(Modifier.height(6.dp))
             Text(preview.rationale, color = KalivTheme.colors.TextHigh, fontSize = 13.sp)
+        }
+        if (preview.memoryContext.requested) {
+            Spacer(Modifier.height(10.dp))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(KalivTheme.colors.SurfaceHigh)
+                    .padding(10.dp),
+            ) {
+                Text("Memory receipt", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (preview.memoryContext.sentToModel) "Sendt til planner · ${preview.memoryContext.target}"
+                    else "Anmodet, men ingen eligible memory blev sendt",
+                    color = if (preview.memoryContext.sentToModel) KalivTheme.colors.Signal else KalivTheme.colors.TextMuted,
+                    fontSize = 11.sp,
+                )
+                Text(
+                    "inkluderet=${preview.memoryContext.includedIds.size} · udelukket=${preview.memoryContext.excludedIds.size} · tegn=${preview.memoryContext.characterCount}",
+                    color = KalivTheme.colors.TextMuted,
+                    fontSize = 10.sp,
+                )
+                if (preview.memoryContext.includedIds.isNotEmpty()) {
+                    Text(
+                        "ids: ${preview.memoryContext.includedIds.joinToString(", ")}",
+                        color = KalivTheme.colors.TextMuted,
+                        fontSize = 9.sp,
+                    )
+                }
+                preview.memoryContext.sha256?.let {
+                    Text("sha256: $it", color = KalivTheme.colors.TextMuted, fontSize = 9.sp)
+                }
+            }
         }
         Spacer(Modifier.height(10.dp))
         if (preview.plan.isEmpty()) {
