@@ -193,9 +193,24 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
             while (c.moveToNext()) {
                 val id = c.getLong(0)
                 val raw = c.getString(3)
-                // Decrypt; a value that isn't ciphertext is a pre-encryption
-                // plaintext profile -- use it as-is and queue it for migration.
-                val tok = runCatching { Crypto.decrypt(raw) }.getOrElse { migrate.add(id to raw); raw }
+                // Three-way, fail-closed (audit 1.58.36): an "enc:v1:" value
+                // that fails to decrypt is INVALID (corrupt, or the Keystore
+                // key was lost after restore/device move) -- never treat it as
+                // plaintext and never re-encrypt it: that launders garbage into
+                // a valid-looking secret and destroys the profile. Server
+                // tokens are lowercase hex, so true pre-encryption plaintext is
+                // recognizable; anything else prefixless is old-format
+                // ciphertext (1.58.17..36) and gets the prefix on rewrite.
+                val tok = when {
+                    Crypto.isEncrypted(raw) ->
+                        runCatching { Crypto.decrypt(raw) }.getOrElse { "" } // invalid -> re-pair
+                    raw.matches(Regex("[0-9a-f]{16,}")) ->
+                        raw.also { migrate.add(id to it) } // legacy plaintext
+                    else ->
+                        runCatching { Crypto.decrypt(raw) }
+                            .getOrElse { "" } // old-format ciphertext, undecryptable -> re-pair
+                            .also { if (it.isNotEmpty()) migrate.add(id to it) } // rewrite with prefix
+                }
                 out.add(RigProfile(id, c.getString(1), c.getString(2), tok))
             }
         }

@@ -113,3 +113,12 @@ GitHub artifact attestation.
   En cloud-agent kan kæde reads (inkl. `list_documents`, der returnerer dokument-navne) og sende
   resultaterne til cloud. Overvej egress-klassifikation (public/operational/private), hvor `private`
   + cloud kræver samtykke.
+
+## Kontrakt: writes (præcisering, 1.58.37)
+
+**Tool-/model-initierede writes er server-gated** (parkeres, godkendelseskort,
+TTL, immutable argumenter). **Eksplicit brugerinitierede administrationskald**
+(`/models/pull`, `/models/delete` m.fl.) er bearer-beskyttede og
+klient-bekræftede — serveren gater dem ikke igen. Enhver klient med gyldig
+device-token kan altså kalde dem direkte; det er den bevidste kontrakt, ikke et
+hul i tool-gaten. (Cloud-initierede READS er fortsat ugatede — åbent punkt #6.)

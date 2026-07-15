@@ -164,7 +164,7 @@ Ollama Cloud (https://ollama.com, model `:cloud`) with `OLLAMA_API_KEY`.
   RAG, device mgmt, `doctor` health check, token `rotate`). Runnable today; used
   to drive the e2e test.
 - **tests/** — worker unit + RAG tests, backend smoke + V1 tests, and an
-  end-to-end integration test. `sh tests/run_tests.sh` runs all 55 assertions.
+  end-to-end integration test. `sh tests/run_tests.sh` runs the full suite (see CI for the current counts).
 - **deploy/** — env reference, a Windows launcher (`run-windows.ps1`), and systemd
   units for running the worker + backend as services.
 
