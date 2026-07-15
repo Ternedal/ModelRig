@@ -3,6 +3,7 @@ package dk.ternedal.modelrig.desktop
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -148,7 +149,7 @@ fun Agent3DevApp() {
         Column(
             Modifier
                 .fillMaxSize()
-                .background(KalivTheme.colors.Background)
+                .background(KalivTheme.colors.Graphite)
                 .padding(20.dp)
                 .verticalScroll(rememberScrollState()),
         ) {
@@ -335,7 +336,7 @@ private fun StepCard(number: Int, step: Agent3Step, active: Boolean = false) {
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(9.dp))
-            .background(if (active) KalivTheme.colors.SurfaceHigh else KalivTheme.colors.Background)
+            .background(if (active) KalivTheme.colors.SurfaceHigh else KalivTheme.colors.Graphite)
             .padding(10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
