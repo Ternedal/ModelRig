@@ -41,6 +41,11 @@ jobs:
       - name: Backend tests
         run: cd backend && go vet ./... && go test ./...
 
+      - name: Python lint gate (syntax + undefined names)
+        run: |
+          pip install --quiet ruff
+          ruff check --select E9,F63,F7,F82 worker/ tests/
+
       # Every integration + worker test, globbed so a new tests/*.py is included
       # with no edit here. MODELRIG_BIN is used by the backend/e2e tests; the
       # worker tests ignore it. The complete log is also persisted as an artifact
