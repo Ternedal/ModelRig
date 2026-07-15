@@ -74,9 +74,22 @@ deleted = store.create(
     value="old value",
     sensitivity="operational",
 )
-store.delete(deleted.id)
+deleted_tombstone = store.delete(deleted.id)
 
-records = [public, operational, private, secret, pending, expired, malicious, deleted, public]
+# Feed the compiler current records. The deleted object returned by create() is
+# an immutable historical snapshot and intentionally still says `active`; the
+# delete operation returns the fresh tombstone that represents current state.
+records = [
+    public,
+    operational,
+    private,
+    secret,
+    pending,
+    expired,
+    malicious,
+    deleted_tombstone,
+    public,
+]
 compiler = MemoryContextCompiler()
 
 local = compiler.compile(records, target=ContextTarget.LOCAL, max_chars=20_000)
