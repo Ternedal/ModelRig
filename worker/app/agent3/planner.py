@@ -2,15 +2,23 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import ollama_client as oc
-from .core import CapabilitySnapshot, RouteKind, TurnRequest
+from .core import (
+    Agent3Orchestrator,
+    AgentRun,
+    AgentStep,
+    CapabilitySnapshot,
+    RouteKind,
+    TurnRequest,
+)
 from .integration import Agent3PlanError, PlannedToolCall, V2ToolAdapter
+from .plan_store import PlanStore, PlanStoreError
 from .routing import StrictTurnRouter
 
 
@@ -31,6 +39,22 @@ def _strip_code_fence(text: str) -> str:
     value = text.strip()
     match = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", value, flags=re.DOTALL | re.IGNORECASE)
     return match.group(1).strip() if match else value
+
+
+def _clone_steps(run: AgentRun) -> list[AgentStep]:
+    return [
+        AgentStep(
+            tool=step.tool,
+            args=dict(step.args),
+            risk=step.risk,
+            sensitivity=step.sensitivity,
+            egress=step.egress,
+            origin=step.origin,
+            conversation_id=step.conversation_id,
+            summary=step.summary,
+        )
+        for step in run.steps
+    ]
 
 
 class TypedPlanner:
@@ -100,14 +124,23 @@ class PlanPreviewReq(BaseModel):
     mode: str = Field(default="rig", pattern="^(rig|cloud)$")
     rag: bool = False
     allow_rag_cloud: bool = False
+    allow_private_cloud: bool = False
     cloud_ready: bool = False
     conversation_id: str | None = None
     planner_model: str | None = None
+    proactive: bool = False
 
 
-def build_planner_router(adapter: V2ToolAdapter, planner: TypedPlanner | None = None) -> APIRouter:
+def build_planner_router(
+    adapter: V2ToolAdapter,
+    planner: TypedPlanner | None = None,
+    *,
+    orchestrator: Agent3Orchestrator | None = None,
+    plan_store: PlanStore | None = None,
+) -> APIRouter:
     router = APIRouter(prefix="/experimental/agent3", tags=["experimental-agent3"])
     planner = planner or TypedPlanner(adapter)
+    plan_store = plan_store or PlanStore(":memory:")
     turn_router = StrictTurnRouter()
 
     @router.post("/plan")
@@ -136,6 +169,24 @@ def build_planner_router(adapter: V2ToolAdapter, planner: TypedPlanner | None = 
             steps = adapter.build_steps(proposal.calls, route, req.conversation_id)
         except (PlannerError, Agent3PlanError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        plan_id: str | None = None
+        expires_in_seconds: int | None = None
+        if steps:
+            template = AgentRun(
+                request=request,
+                route=route,
+                steps=steps,
+                proactive=req.proactive,
+                allow_private_cloud=req.allow_private_cloud,
+            )
+            payload = json.dumps(
+                {"run": template.to_json(), "capabilities": asdict(caps)},
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            plan_id, expires_in_seconds = plan_store.save(payload)
+
         return {
             "route": {
                 "kind": route.kind.value,
@@ -157,7 +208,41 @@ def build_planner_router(adapter: V2ToolAdapter, planner: TypedPlanner | None = 
                 }
                 for step in steps
             ],
+            "plan_id": plan_id,
+            "expires_in_seconds": expires_in_seconds,
             "executed": False,
         }
+
+    @router.post("/plans/{plan_id}/start")
+    def start_reviewed_plan(plan_id: str) -> dict[str, Any]:
+        if orchestrator is None:
+            raise HTTPException(status_code=501, detail="plan execution is not mounted")
+        try:
+            envelope = json.loads(plan_store.consume(plan_id))
+            template = AgentRun.from_json(envelope["run"])
+            stored_caps = CapabilitySnapshot(**envelope["capabilities"])
+        except PlanStoreError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (KeyError, TypeError, json.JSONDecodeError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail="stored plan is invalid") from exc
+
+        # Recheck the gate at start time. A kill-switch decision made after the
+        # preview wins over the earlier plan.
+        caps = CapabilitySnapshot(
+            rig_reachable=stored_caps.rig_reachable,
+            worker_ready=stored_caps.worker_ready,
+            tools_ready=bool(adapter.tools.GATE.enabled and not adapter.tools.GATE.state_error),
+            cloud_ready=stored_caps.cloud_ready,
+            rag_ready=stored_caps.rag_ready,
+            voice_ready=stored_caps.voice_ready,
+        )
+        run = orchestrator.start_with_steps(
+            template.request,
+            caps,
+            _clone_steps(template),
+            proactive=template.proactive,
+            allow_private_cloud=template.allow_private_cloud,
+        )
+        return {"run": json.loads(run.to_json()), "plan_id": plan_id}
 
     return router
