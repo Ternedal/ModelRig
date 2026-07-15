@@ -50,4 +50,15 @@ jobs:
           java-version: "21"
       - name: Compile desktop Kotlin
         working-directory: desktop
-        run: ./gradlew :composeApp:compileKotlin --no-daemon --console=plain
+        run: |
+          set -o pipefail
+          ./gradlew :composeApp:compileKotlin --no-daemon --console=plain 2>&1 \
+            | tee /tmp/desktop-compile.log
+      - name: Upload failed desktop compiler log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-compile-log
+          path: /tmp/desktop-compile.log
+          if-no-files-found: error
+          retention-days: 7
