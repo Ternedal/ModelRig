@@ -22,21 +22,29 @@ def check(cond, name):
         print(f"  FAIL: {name}")
 
 
+def route_paths() -> list[str]:
+    # FastAPI normally exposes APIRoute objects with `.path`, but the current
+    # dependency version also keeps an internal `_IncludedRouter` marker in the
+    # route list after include_router(). It is not an HTTP route and must not make
+    # this feature-flag test depend on a private implementation detail.
+    return [path for route in run_worker.app.routes if (path := getattr(route, "path", None))]
+
+
 os.environ["KALIV_AGENT3_ENABLED"] = "0"
-before = [r.path for r in run_worker.app.routes]
+before = route_paths()
 check(run_worker._mount_optional_agent3() is False, "feature remains off without explicit flag")
-check([r.path for r in run_worker.app.routes] == before, "flag-off mount changes no routes")
+check(route_paths() == before, "flag-off mount changes no routes")
 
 os.environ["KALIV_AGENT3_ENABLED"] = "1"
 check(run_worker._mount_optional_agent3() is True, "feature mounts after explicit flag")
-paths = [r.path for r in run_worker.app.routes]
+paths = route_paths()
 check("/experimental/agent3/status" in paths, "run API is mounted")
 check("/experimental/agent3/plan" in paths, "planner API is mounted")
 check("/experimental/agent3/plans/{plan_id}/start" in paths, "single-use plan start is mounted")
 
 count = len(paths)
 check(run_worker._mount_optional_agent3() is True, "second mount call is harmless")
-check(len(run_worker.app.routes) == count, "second mount does not duplicate routes")
+check(len(route_paths()) == count, "second mount does not duplicate routes")
 
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)
