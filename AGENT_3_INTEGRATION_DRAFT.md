@@ -2,52 +2,27 @@
 
 Status: eksperimentelt, feature-flagged og ikke koblet til den normale chat-routing.
 
-## Hvad denne branch leverer
+## Leveret
 
-- Persistent `AgentRun`/`AgentStep`-state-machine i SQLite.
-- Én ren `TurnRouter`; retry må ikke skifte route eller droppe tools.
-- Serverautoritativ retry: original besked, route-flags og valideret plan genbruges fra SQLite.
-- Deterministisk policy for write/destructive/admin, cloud-egress og proaktivitet.
-- Cloud-initierede read-tools kræver også et konkret godkendelseskort.
-- Immutable confirmation digest + udløbstid.
-- Crashregel: et step fundet i `executing` genkøres aldrig blindt.
-- Adapter til det eksisterende Agent v2 `REGISTRY` og `ToolGate`.
-- V2-gaten forbliver load-bearing for whitelist, kill switch, argumentkontrol og audit.
-- Lokal typed, plan-only LLM-planner med stramt JSON-format.
-- Kortlivede, single-use `plan_id`-tokens mellem preview og run-start.
-- Eksperimentel FastAPI under `/experimental/agent3`.
-- Bearer-beskyttet backend-proxy under `/api/v1/experimental/agent3`.
-- Dormant Agent 3.0-mount i den normale release-worker.
-- Android- og desktop-transport med samme typed plan/run/confirmation-kontrakt.
-- Isoleret Android plan/run-UI, som kun åbnes med et eksplicit intent-extra.
-- Isoleret desktop plan/run-UI, som kun åbnes med `--agent3`.
-- Read-only end-to-end smoke-klient gennem den rigtige Bearer-gateway.
-- Memory 3.0-datalag med proveniens, review-status, versioner, expiry og tombstones.
-- Eksplicit memory-management API; ingen automatisk modelhukommelse.
-- Memory-context compiler med hårdt budget og eksplicit lokal/cloud-policy.
-- Context-preview API, som viser den eksakte blok uden at sende den til en model.
-- Isoleret Android memory-management UI via et separat intent-extra.
-- Isoleret desktop memory-management UI via `--agent3-memory`.
-- Agent v2 `/tools/chat` og de normale chatflows er urørte.
+### Execution og planner
 
-## Start worker og backend
+- Persistent `AgentRun`/`AgentStep` state-machine i SQLite.
+- Serverautoritativ retry genbruger original besked, route-flags og valideret plan.
+- Deterministisk policy for writes, destructive/admin, cloud-egress og proaktivitet.
+- Hvert write/destructive/admin-step kræver sin egen immutable confirmation med TTL.
+- Alle cloud-initierede tools, også reads, kræver et konkret confirmation-kort.
+- Et step fundet i `executing` efter crash genkøres aldrig blindt.
+- Agent v2 `REGISTRY` og `ToolGate` forbliver load-bearing for whitelist, kill switch, argumentkontrol og audit.
+- Lokal typed, plan-only LLM-planner.
+- Modellen må kun foreslå `{tool,args}`; risk, sensitivity, egress og approval tilføjes i kode.
+- Previewede planer gemmes som kortlivede single-use `plan_id`-tokens.
+- Run-start accepterer ingen erstatningsplan fra klienten.
 
-Agent 3.0 kræver eksplicit opt-in på både worker og Go-backend:
+### Eksperimentel API-overflade
 
-```powershell
-$env:KALIV_AGENT3_ENABLED = "1"
-$env:KALIV_TOOLS_ENABLED = "1"
-```
-
-Den normale release-worker indeholder modulet, men monterer ingen Agent 3.0-routes eller
-databaser uden flaget. Til Python-udvikling kan det separate entrypoint stadig bruges:
-
-```powershell
-python worker/run_worker_agent3.py
-```
-
-Workerens normale loopback-regel gælder stadig. Startes Go-backenden med samme feature
-flag, kan API'et nås gennem den normale Bearer-beskyttede gateway:
+Agent 3.0 findes kun, når `KALIV_AGENT3_ENABLED=1` ved processtart.
+Worker-routes ligger under `/experimental/agent3`; remote adgang går gennem den normale
+Bearer-beskyttede Go-gateway under `/api/v1/experimental/agent3`.
 
 ```text
 POST   /api/v1/experimental/agent3/plan
@@ -60,6 +35,37 @@ GET    /api/v1/experimental/agent3/runs/{id}/events
 POST   /api/v1/experimental/agent3/runs/{id}/confirm
 POST   /api/v1/experimental/agent3/runs/{id}/resume
 POST   /api/v1/experimental/agent3/runs/{id}/cancel
+```
+
+Den normale release-worker indeholder modulet, men monterer ingen Agent 3.0-routes eller
+databaser uden flaget. Agent v2 `/tools/chat` og de normale klientflows er urørte.
+
+## Memory 3.0
+
+### Datalag og administration
+
+Memory-store er lokal SQLite og indeholder:
+
+- subject, predicate, value og type,
+- public/operational/private/secret sensitivity,
+- proveniens: explicit user, tool observation, import eller inference,
+- confidence og pending/confirmed/rejected review-status,
+- versioner via `supersedes_id`,
+- expiry og active/superseded/deleted lifecycle.
+
+Regler:
+
+- explicit user memory er confirmed som udgangspunkt,
+- inferred/imported/tool-observed memory er pending,
+- correction opretter en ny version og superseder den gamle atomisk,
+- delete fjerner value og source-reference og efterlader kun en tombstone,
+- remote API kan ikke oprette eller rette secret memory,
+- eksisterende lokale secrets redigeres over API og udelades fra normale lister,
+- pending, rejected, expired og deleted records bruges ikke som kontekst.
+
+Bearer-beskyttede memory-routes:
+
+```text
 GET    /api/v1/experimental/agent3/memory
 POST   /api/v1/experimental/agent3/memory
 GET    /api/v1/experimental/agent3/memory/search
@@ -72,91 +78,68 @@ POST   /api/v1/experimental/agent3/memory/{id}/correct
 DELETE /api/v1/experimental/agent3/memory/{id}
 ```
 
-Flaget skal være aktivt ved processtart. Når det er slukket, registrerer backenden ingen
-Agent 3.0-routes, og workeren mounter ikke modulet.
+### Context compiler
 
-## Planner- og run-flow
-
-1. `POST /plan` kalder en lokal plan-only model.
-2. Modellen må kun returnere `{steps:[{tool,args}], rationale}`.
-3. Ukendte/deaktiverede tools og ekstra felter som `risk` eller `approved` afvises.
-4. Registry-adapteren tilføjer risiko, sensitivitet, egress og menneskelig summary fra kode.
-5. Den validerede plan gemmes server-side og returneres med et kortlivet `plan_id`.
-6. `POST /plans/{plan_id}/start` tager ingen ny planpayload og bruger kun den gemte plan.
-7. `plan_id` er single-use. Udløb eller genbrug afvises.
-8. Lokale read-steps kan køre direkte.
-9. Write/destructive/admin og alle cloud-initierede tool-kald parkerer på hvert sit confirmation-kort.
-
-Det oprindelige udvikler-endpoint `POST /runs` kan fortsat tage en eksplicit plan til
-testformål, men produktflowet bør bruge plan-preview + `plan_id`.
-
-En retry sender kun `retry_of_run_id`. Workerens run-store leverer den oprindelige
-besked, mode, tools/RAG-flags og plan. Ændrede klientfelter eller en ny plan kan derfor
-ikke ændre betydningen af en retry.
-
-## Memory 3.0
-
-Memory 3.0 er fortsat **eksplicit og administrativt**. Ingen chat, planner eller agent
-læser endnu automatisk memory-tabellen.
-
-Datalaget gemmer:
-
-- `subject`, `predicate`, `value` og type,
-- sensitivitet: public, operational, private eller secret,
-- proveniens: explicit user, tool observation, import eller inference,
-- confidence og review-status,
-- versioner via `supersedes_id`,
-- expiry og lifecycle-status.
-
-Regler:
-
-- eksplicit brugerdata er confirmed som udgangspunkt,
-- inferred/imported/tool-observed data er pending,
-- correction opretter en ny version og superseder den gamle atomisk,
-- delete fjerner value og source-reference og efterlader kun en tombstone,
-- secret records kan ikke oprettes eller rettes via remote API,
-- eksisterende lokale secrets redigeres over API og udelades fra normale lister,
-- pending, rejected, expired og deleted records bruges ikke som kontekst.
-
-### Context-preview
-
-`POST /memory/context-preview` er side-effect-free og returnerer:
-
-- exact context text,
-- inkluderede og udelukkede memory-id'er,
-- tegnantal og target,
-- `sent_to_model: false`.
-
-Compileren:
+Compileren producerer en afgrænset, versioneret JSON-datablok og:
 
 - markerer memory som user-controlled reference data, aldrig instruktioner,
 - fjerner `source_ref`,
 - blokerer secrets altid,
 - tillader private records lokalt,
-- kræver eksplicit `allow_private_cloud` for private cloud-preview,
+- kræver `allow_private_cloud=true` for private cloud-context,
 - unicode-escaper markup-lignende tekst,
-- respekterer hårdt `max_chars` og `max_records`.
+- respekterer hårde `max_chars` og `max_records`.
 
-Preview betyder ikke consent til fremtidig afsendelse. Den automatiske modelintegration
-skal senere have en særskilt, eksplicit policy og UI-kontrakt.
+`POST /memory/context-preview` er side-effect-free og returnerer den eksakte blok,
+inkluderede/udelukkede ids, target og tegnantal med `sent_to_model=false`.
 
-### Memory-management UI
+### Eksplicit planner-memory
 
-Begge klienter har nu en separat developer-only memory-skærm. Den kan:
+Planner-memory er **slukket som standard**. Memory-store læses ikke, medmindre et
+plan-preview eksplicit sender:
 
-- liste og søge aktive memories,
-- oprette explicit confirmed memories,
-- bekræfte eller afvise pending records,
-- rette en memory som en ny version,
-- vise versionshistorik,
-- slette værdien med en totrinsbekræftelse og bevare en indholdsfri tombstone.
+```json
+{
+  "use_memory": true,
+  "memory_subjects": ["valgfrit-subject"],
+  "memory_max_chars": 4000,
+  "memory_max_records": 25
+}
+```
 
-UI'et har ingen knap til secrets, ingen automatisk retrieval og ingen modelkald.
+Serveren vælger privacy-target ud fra den valgte route:
 
-## Android-udkast
+- lokal route bruger lokal memory-policy,
+- cloud-route bruger cloud-policy,
+- private cloud-records kræver stadig `allow_private_cloud=true`,
+- secret records blokeres altid.
 
-Androids normale launcher åbner fortsat `AppUi()` uden ændringer. Agent 3.0-skærmene kan
-kun åbnes eksplicit fra ADB gennem den eksisterende `MainActivity`.
+Preview-svaret indeholder en autoritativ `memory_context` receipt:
+
+```json
+{
+  "requested": true,
+  "sent_to_model": true,
+  "target": "local",
+  "included_ids": ["..."],
+  "excluded_ids": ["..."],
+  "character_count": 1234,
+  "sha256": "..."
+}
+```
+
+SHA-256 matcher den præcise memoryblok, plan-modellen modtog. Receipt gemmes sammen med
+den single-use plan og returneres igen ved plan-start. Memory ændrer ikke tool-policy,
+confirmation-krav eller run-state-machine.
+
+Der findes fortsat **ingen automatisk memory retrieval i normal chat**. Planner-memory
+kræver et nyt, synligt opt-in for hvert preview og valget gemmes ikke automatisk i klienten.
+
+## Developer-only klienter
+
+### Android
+
+Normal launcher åbner fortsat `AppUi()`.
 
 Plan/run-skærm:
 
@@ -174,95 +157,77 @@ adb shell am start -S `
   --ez dk.ternedal.modelrig.extra.AGENT3_MEMORY true
 ```
 
-Plan/run-skærmen kan:
+Plan/run-skærmen har:
 
-- lave plan-preview,
-- vise route, rationale, args, risiko, sensitivitet og egress,
-- starte den viste single-use plan,
-- vise run- og step-status,
-- godkende eller afvise et step,
-- opdatere eller annullere et run.
+- plan-preview, single-use start, run-status og confirmation,
+- eksplicit memory-toggle, som altid starter slået fra,
+- valgfrit kommasepareret subject-filter,
+- synlig receipt med ids, target, tegnantal og SHA-256.
 
-Memory-skærmen bruger den allerede gemte rig-URL og device-token. Der er ingen
-launcher-knap, deep-link eller automatisk chat-routing til nogen af skærmene.
+Memory-skærmen kan list/search/create/review/correct/history/delete. Delete kræver to
+separate tryk og efterlader kun en indholdsfri tombstone.
 
-## Desktop-udkast
+### Desktop
 
-Plan/run-skærmen åbnes med `--agent3`:
+Plan/run:
 
 ```powershell
 cd desktop
 .\gradlew.bat :composeApp:run --args="--agent3"
 ```
 
-Memory-management åbnes separat med `--agent3-memory`:
+Memory-management:
 
 ```powershell
 cd desktop
 .\gradlew.bat :composeApp:run --args="--agent3-memory"
 ```
 
-Uden flag kaldes den eksisterende `App()` præcis som før. Udviklerskærmene genbruger
-som udgangspunkt desktop-databasens `localUrl` og `deviceToken`, med følgende env-
-overrides:
+Desktop har samme explicit memory-toggle, subject-filter, receipt og administrative
+memory-lifecycle som Android. Uden flag kaldes den normale `App()` præcis som før.
 
-```text
-MODELRIG_AGENT3_URL
-MODELRIG_LOCAL_URL
-MODELRIG_TOKEN
-```
-
-Plan/run-skærmen har samme preview/start/run/confirm/cancel-kontrakt som Android.
-Memory-skærmen har samme administrative lifecycle som Android og sender ikke memory til
-en model.
-
-## Read-only på-rig smoke
-
-Smoke-scriptet går gennem den rigtige Go-gateway og bruger kun `rig_status`:
+## Aktivering
 
 ```powershell
-$env:MODELRIG_TOKEN = "<paired device token>"
-python scripts/agent3_smoke.py --base-url http://127.0.0.1:8080
+$env:KALIV_AGENT3_ENABLED = "1"
+$env:KALIV_TOOLS_ENABLED = "1"
 ```
 
-Det validerer:
+Workerens loopback-regel gælder fortsat. Til Python-udvikling kan det separate entrypoint
+bruges:
 
-1. Bearer-beskyttet Agent 3.0-status,
-2. lokal read-only plan,
-3. single-use plan-start,
-4. completed persistent run,
-5. run-created/step-started/step-succeeded/run-completed events.
+```powershell
+python worker/run_worker_agent3.py
+```
 
 ## Sikkerhedsinvarianter
 
-1. Hvert write/destructive/admin-step får sin egen godkendelse.
-2. Alle cloud-initierede tools, også reads, får et konkret godkendelseskort.
-3. Godkendelsen er bundet til step-id, tool, args, risiko, sensitivitet, egress og origin.
-4. Ændres payloaden, afvises godkendelsen.
-5. Timeout er afvisning.
-6. Tool-kill-switch kan stadig afvise mellem preview, kort og eksekvering.
-7. Private read-resultater til cloud kræver både cloud-consent og per-call confirmation.
-8. Secrets må aldrig sendes til cloud.
-9. Proaktive runs er read-only.
-10. Et muligt side-effect fundet i `executing` efter crash genkøres ikke automatisk.
-11. Retry genbruger den serverlagrede plan og route; klienten kan ikke nedgradere den.
-12. Remote adgang går gennem backendens eksisterende Bearer-middleware.
-13. Planner-output kan ikke definere risiko, godkendelse, sensitivitet eller egress.
-14. En vist plan kan kun startes gennem dens uændrede single-use `plan_id`.
-15. Agent 3.0 er fraværende fra API-overfladen, når feature flaget er slukket.
-16. De normale Android- og desktop-chatflows vælger aldrig Agent 3.0 i denne draft.
-17. Memory sendes ikke automatisk til nogen model.
-18. Context-preview er gennemsigtigt, budgetteret og eksplicit markeret som ikke-afsendt.
-19. Memory-sletning i klient-UI kræver to separate tryk.
+1. Planner-memory er per-request opt-in og falsk som standard.
+2. Manglende memory-store ved opt-in fejler lukket, før modellen kaldes.
+3. Subject-, lifecycle-, review-, expiry- og privacy-filter håndhæves server-side.
+4. Secrets kommer aldrig i planner-context.
+5. Receiptens SHA matcher den præcise memoryblok, modellen modtog.
+6. Receipt bindes til den gemte single-use plan.
+7. Memory kan ikke definere risk, approval, sensitivity eller egress.
+8. Memory kan ikke omgå write- eller cloud-tool-confirmation.
+9. Hvert side-effect-step får sin egen godkendelse.
+10. Payloadændring eller confirmation-timeout afvises.
+11. Tool-kill-switch kan afvise efter preview og før eksekvering.
+12. Retry genbruger serverlagret plan og route.
+13. Proaktive runs er read-only.
+14. Remote adgang kræver Bearer-token; der findes ingen loopback-auth-bypass.
+15. Normale Android-, desktop- og Agent v2-chatflows vælger aldrig Agent 3.0.
 
-## Test
+## Test og CI
+
+Nøglechecks:
 
 ```bash
 PYTHONPATH=worker python3 tests/worker_agent3_integration.py
 PYTHONPATH=worker python3 tests/worker_agent3_retry.py
 PYTHONPATH=worker python3 tests/worker_agent3_planner.py
 PYTHONPATH=worker python3 tests/worker_agent3_plan_store.py
-PYTHONPATH=worker python3 tests/worker_agent3_entrypoint.py
+PYTHONPATH=worker python3 tests/worker_agent3_planner_memory.py
 PYTHONPATH=worker python3 tests/worker_agent3_cloud_read_policy.py
 PYTHONPATH=worker python3 tests/worker_agent3_smoke_cli.py
 PYTHONPATH=worker python3 tests/worker_agent3_memory.py
@@ -271,29 +236,28 @@ PYTHONPATH=worker python3 tests/worker_agent3_memory_context.py
 cd backend && go test ./internal/httpapi/
 ```
 
-Python-testene bruger fake modeller/gates og kræver hverken Ollama, GPU eller netværk.
-De dækker routing, persistence, immutable confirmations, planner-injection, plan-TTL,
-single-use, preview→run-binding, feature-flag mounting, cloud-read policy, smoke-flow,
-memory-lifecycle, secret-redaction og context-preview.
+Planner-memory-testen beviser:
 
-Repository-CI kører desuden:
+- intet memory-read eller promptblock uden opt-in,
+- local/cloud privacy-policy,
+- secret- og pending-blokering,
+- subject-filter,
+- zero-budget-adfærd,
+- fail-closed uden store,
+- receipt-SHA mod den faktiske modelbesked,
+- receipt-binding til plan-start,
+- uændret write-confirmation.
 
-- fuld backend- og worker-suite,
-- Windows appliance-tests,
-- Android Kotlin-kompilering inklusive begge developer-only skærme,
-- desktop Kotlin-kompilering inklusive begge developer-only skærme.
-
-CI uploader den fulde Python- eller desktop-compilerlog som artifact ved fejl, så den
-første traceback/kompileringsfejl ikke forsvinder i GitHubs afkortede logvisning.
+Repository-CI kører desuden backend/worker, Windows appliance, Android Kotlin og desktop
+Kotlin. Ved fejl uploades den fulde Python- eller desktop-compilerlog som artifact.
 
 ## Ikke leveret endnu
 
-- Replanner, der kan ændre resterende read-steps efter et resultat uden at ændre godkendte writes.
-- Integration i det normale Android/desktop `TurnRouter`- og chatflow.
-- Produkt-UX for eksplicit downgrade-valg, run-timeline og Agent 3.0 som almindelig chatmode.
-- Automatisk, policy-styret memory-retrieval og prompt-integration.
+- Replanner for resterende read-steps.
+- Integration i normal Android/desktop `TurnRouter` og chatflow.
+- Automatisk relevance-ranking eller memory retrieval i normal chat.
 - Kryptering-at-rest for secret memory.
 - Proactive inbox og scheduler.
 - Capability Graph til RigGate og fremtidige rigs.
-- Sandbox executor/Windows-konto til tredjeparts-MCP og vilkårlige filtools.
-- On-device og på-rig end-to-end-validering af planner → plan-id → confirmation → tool-resultat.
+- Sandbox executor til tredjeparts-MCP og vilkårlige filtools.
+- On-device og på-rig end-to-end-validering med rigtig planner-model.
