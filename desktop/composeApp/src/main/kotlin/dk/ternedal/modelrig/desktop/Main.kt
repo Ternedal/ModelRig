@@ -6,14 +6,18 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 
-fun main() = application {
-    val state = rememberWindowState(width = 1000.dp, height = 820.dp)
+fun main(args: Array<String>) = application {
+    val agent3 = args.contains("--agent3")
+    val state = rememberWindowState(
+        width = if (agent3) 900.dp else 1000.dp,
+        height = 820.dp,
+    )
     Window(
         onCloseRequest = ::exitApplication,
         state = state,
-        title = "Kaliv",
+        title = if (agent3) "Kaliv · Agent 3.0 draft" else "Kaliv",
         icon = painterResource("icon.png"),
     ) {
-        App()
+        if (agent3) Agent3DevApp() else App()
     }
 }
