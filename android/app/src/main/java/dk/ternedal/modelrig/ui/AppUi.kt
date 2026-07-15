@@ -2675,7 +2675,7 @@ private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
                             if (err != null) {
                                 pullError = err.message; pullStatus = null
                             } else {
-                                pullStatus = "Færdig: $name"; pullName = ""
+                                pullStatus = "Færdig og verificeret: $name"; pullName = ""
                                 refresh()
                             }
                         }

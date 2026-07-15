@@ -448,6 +448,13 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         token?.let { builder.header("Authorization", "Bearer $it") }
         val call = http.newCall(builder.build())
         registerCall?.invoke(call)
+        // Stream END is not success (audit 1.58.36 #7): a proxy timeout or a
+        // dropped connection also ends the stream cleanly, and this function
+        // used to return normally then -- the UI said "Færdig" for a model
+        // that was never installed. Success now requires BOTH Ollama's final
+        // {"status":"success"} line AND the model actually appearing in the
+        // installed list afterwards.
+        var sawSuccess = false
         call.execute().use { resp ->
             if (!resp.isSuccessful) {
                 throw ModelRigException("pull failed (${resp.code}): ${resp.body?.string().orEmpty()}")
@@ -460,9 +467,24 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
                     val o = JSONObject(line)
                     val err = o.optString("error")
                     if (err.isNotEmpty()) throw ModelRigException("pull error: $err")
-                    onProgress(o.optString("status"), o.optLong("completed", 0L), o.optLong("total", 0L))
+                    val st = o.optString("status")
+                    if (st == "success") sawSuccess = true
+                    onProgress(st, o.optLong("completed", 0L), o.optLong("total", 0L))
                 }.onFailure { if (it is ModelRigException) throw it }
             }
+        }
+        if (!sawSuccess) {
+            throw ModelRigException(
+                "download-strømmen sluttede uden Ollamas 'success' — hentningen er IKKE fuldført (afbrudt forbindelse eller timeout). Prøv igen."
+            )
+        }
+        // Verify: trust, but check the shelf. Ollama registers untagged names
+        // as "<name>:latest".
+        val installed = runCatching { listModels() }.getOrElse {
+            throw ModelRigException("pull meldte succes, men verifikationen kunne ikke køre (${it.message}) — tjek modeloversigten manuelt")
+        }
+        if (name !in installed && "$name:latest" !in installed) {
+            throw ModelRigException("pull meldte succes, men $name findes ikke i modeloversigten — tjek riggen")
         }
     }
 

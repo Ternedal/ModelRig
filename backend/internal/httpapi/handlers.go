@@ -197,7 +197,14 @@ func (s *server) handleModelsRunning(w http.ResponseWriter, r *http.Request) {
 // flushes as bytes arrive, so progress reaches the client live, same as
 // streaming chat.
 func (s *server) handleModelsPull(w http.ResponseWriter, r *http.Request) {
-	s.Ollama.Forward(w, r, "/api/pull")
+	// A pull can legitimately run far past the chat timeout (a ~9 GB model on
+	// a home line is 15+ minutes; http.Client.Timeout bounds the WHOLE
+	// exchange incl. the streamed body). With the default timeout the stream
+	// was cut mid-download and the phone -- which treated stream-end as done
+	// -- showed "Færdig" for a model that was never installed (audit 1.58.36
+	// #7). Two hours is a deliberate ceiling, not "no timeout": a wedged pull
+	// still ends, and a client disconnect cancels via r.Context() before that.
+	s.Ollama.WithTimeout(2 * time.Hour).Forward(w, r, "/api/pull")
 }
 
 // handleModelsDelete proxies model removal (DELETE /api/delete, body
