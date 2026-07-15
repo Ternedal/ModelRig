@@ -31,3 +31,8 @@ Thumbs.db
 # Kaliv Tools: kill-switch state (per-rig, never committed)
 kaliv-tools-state.json
 kaliv-tools-state.json.tmp
+
+# Agent 3.0 on-rig validation: local rolling report with host/run identifiers.
+# Review and copy a successful run to a dated evidence filename before committing.
+/validation/agent3-rig-validation-latest.json
+/validation/agent3-rig-validation-latest.json.tmp
