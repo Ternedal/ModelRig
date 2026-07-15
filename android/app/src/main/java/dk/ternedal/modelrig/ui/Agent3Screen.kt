@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -42,6 +41,8 @@ import kotlinx.coroutines.withContext
 fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
     val scope = rememberCoroutineScope()
     var message by remember { mutableStateOf("") }
+    var useMemory by remember { mutableStateOf(false) }
+    var memorySubjects by remember { mutableStateOf("") }
     var preview by remember { mutableStateOf<Agent3Client.PlanPreview?>(null) }
     var run by remember { mutableStateOf<Agent3Client.Run?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -55,6 +56,13 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
         return Agent3Client(base, token)
     }
 
+    fun selectedSubjects(): List<String> = memorySubjects
+        .split(',')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .distinct()
+        .take(20)
+
     fun previewPlan() {
         val text = message.trim()
         if (text.isEmpty() || busy) return
@@ -63,7 +71,14 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
         run = null
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { client().previewPlan(message = text, mode = "rig") }
+                runCatching {
+                    client().previewPlan(
+                        message = text,
+                        mode = "rig",
+                        useMemory = useMemory,
+                        memorySubjects = if (useMemory) selectedSubjects() else emptyList(),
+                    )
+                }
             }
             busy = false
             result.onSuccess { preview = it }
@@ -176,6 +191,38 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
                         label = { Text("Hvad skal agenten planlægge?") },
                     )
                     Spacer(Modifier.height(10.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        if (useMemory) {
+                            Button(onClick = { useMemory = false; memorySubjects = ""; preview = null }) {
+                                Text("Memory: til")
+                            }
+                        } else {
+                            OutlinedButton(onClick = { useMemory = true; preview = null }) {
+                                Text("Memory: fra")
+                            }
+                        }
+                    }
+                    Text(
+                        if (useMemory) "Kun bekræftede records sendes til den lokale planner."
+                        else "Planner-memory er opt-in og slukket.",
+                        color = KalivTheme.colors.textMuted,
+                        fontSize = 11.sp,
+                    )
+                    if (useMemory) {
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = memorySubjects,
+                            onValueChange = { memorySubjects = it; preview = null },
+                            label = { Text("Valgfrit subject-filter, kommasepareret") },
+                            supportingText = { Text("Tomt felt bruger alle eligible memories inden for serverens budget.") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
                     Button(
                         enabled = !busy && message.isNotBlank(),
                         onClick = { previewPlan() },
@@ -236,6 +283,38 @@ private fun Agent3PlanCard(
             if (preview.rationale.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 Text(preview.rationale, fontSize = 13.sp, color = KalivTheme.colors.textHigh)
+            }
+            if (preview.memoryContext.requested) {
+                Spacer(Modifier.height(10.dp))
+                Surface(color = KalivTheme.colors.surfaceHigh, shape = RoundedCornerShape(10.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(10.dp)) {
+                        Text("Memory receipt", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (preview.memoryContext.sentToModel) {
+                                "Sendt til planner · ${preview.memoryContext.target}"
+                            } else {
+                                "Anmodet, men ingen eligible memory blev sendt"
+                            },
+                            color = if (preview.memoryContext.sentToModel) KalivTheme.colors.success else KalivTheme.colors.textMuted,
+                            fontSize = 11.sp,
+                        )
+                        Text(
+                            "inkluderet=${preview.memoryContext.includedIds.size} · udelukket=${preview.memoryContext.excludedIds.size} · tegn=${preview.memoryContext.characterCount}",
+                            color = KalivTheme.colors.textMuted,
+                            fontSize = 10.sp,
+                        )
+                        if (preview.memoryContext.includedIds.isNotEmpty()) {
+                            Text(
+                                "ids: ${preview.memoryContext.includedIds.joinToString(", ")}",
+                                color = KalivTheme.colors.textMuted,
+                                fontSize = 9.sp,
+                            )
+                        }
+                        preview.memoryContext.sha256?.let {
+                            Text("sha256: $it", color = KalivTheme.colors.textMuted, fontSize = 9.sp)
+                        }
+                    }
+                }
             }
             Spacer(Modifier.height(10.dp))
             if (preview.steps.isEmpty()) {
