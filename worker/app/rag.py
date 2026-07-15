@@ -62,16 +62,33 @@ def chunk_text(text: str, chunk_size: int = 800, overlap: int = 150) -> list[str
 
 
 async def ingest(store: DocStore, documents: list[dict],
-                 chunk_size: int = 800, overlap: int = 150) -> int:
-    """Chunk each document, embed every chunk, store it. Returns chunks added."""
+                 chunk_size: int = 800, overlap: int = 150) -> tuple[int, int]:
+    """Chunk each document, embed every chunk, store it.
+
+    REPLACE-BY-SOURCE: re-ingesting a source replaces its previous chunks
+    instead of appending duplicates. Without this, every re-ingest (an updated
+    PDF, a double tap) doubled the source's chunks -- retrieval then returned
+    near-identical duplicates that crowded other sources out of top_k, and the
+    index only ever grew (audit 1.58.36 / RAG_DESIGN.md R1). The delete happens
+    once per distinct source per CALL, so several documents sharing a source in
+    one request still land together. A None/empty source is never deleted --
+    unnamed snippets keep append semantics on purpose (there is no identity to
+    replace).
+
+    Returns (chunks_added, chunks_replaced)."""
     added = 0
+    replaced = 0
+    cleared: set[str] = set()
     for d in documents:
         source = d.get("source")
+        if source and source not in cleared:
+            replaced += store.delete_source(source)
+            cleared.add(source)
         for idx, piece in enumerate(chunk_text(d.get("text") or "", chunk_size, overlap)):
             emb = await oc.embed(piece)
             store.add(piece, emb, source, idx)
             added += 1
-    return added
+    return added, replaced
 
 
 async def query(

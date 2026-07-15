@@ -23,7 +23,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.58.39"
+VERSION = "1.58.40"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 
@@ -285,14 +285,23 @@ async def health_full(deep: bool = False) -> dict:
 
 @app.post("/rag/ingest")
 async def ingest(req: IngestReq) -> dict:
+    # Mirror the honest 422 the pdf/docx/pptx paths give for unextractable
+    # content: a blank document must not "succeed" as a silent zero-chunk
+    # no-op.
+    for d in req.documents:
+        if not (d.text or "").strip():
+            raise HTTPException(
+                status_code=422,
+                detail=f"document '{d.source or '?'}' has no text to ingest",
+            )
     try:
-        chunks = await rag.ingest(
+        chunks, replaced = await rag.ingest(
             store, [d.model_dump() for d in req.documents],
             chunk_size=req.chunk_size, overlap=req.overlap,
         )
     except oc.OllamaError as e:
         raise HTTPException(status_code=502, detail=str(e))
-    return {"documents": len(req.documents), "chunks_added": chunks, "total": store.count()}
+    return {"documents": len(req.documents), "chunks_added": chunks, "replaced": replaced, "total": store.count()}
 
 
 @app.get("/rag/ingest/pdf/status")
@@ -341,7 +350,7 @@ async def ingest_pdf(req: IngestPdfReq) -> dict:
             detail="no extractable text in PDF (is it a scan? OCR isn't supported yet)",
         )
     try:
-        chunks = await rag.ingest(
+        chunks, replaced = await rag.ingest(
             store,
             [{"text": extracted["text"], "source": req.source}],
             chunk_size=req.chunk_size, overlap=req.overlap,
@@ -352,7 +361,7 @@ async def ingest_pdf(req: IngestPdfReq) -> dict:
         "source": req.source,
         "pages": extracted["pages"],
         "chars": extracted["chars"],
-        "chunks_added": chunks,
+        "chunks_added": chunks, "replaced": replaced,
         "total": store.count(),
     }
 
@@ -433,12 +442,12 @@ async def ingest_image(req: IngestImageReq) -> dict:
             "the vision model found no readable content in the image"))
     src = req.source or "foto"
     try:
-        chunks = await rag.ingest(store, [{"text": text, "source": src}],
+        chunks, replaced = await rag.ingest(store, [{"text": text, "source": src}],
                                   chunk_size=req.chunk_size, overlap=req.overlap)
     except oc.OllamaError as e:
         raise HTTPException(status_code=502, detail=str(e))
     return {"source": src, "model": model, "extracted_chars": len(text),
-            "chunks_added": chunks, "total": store.count()}
+            "chunks_added": chunks, "replaced": replaced, "total": store.count()}
 
 
 @app.post("/rag/ingest/docx")
@@ -466,7 +475,7 @@ async def ingest_docx(req: IngestDocxReq) -> dict:
     if not extracted["text"]:
         raise HTTPException(status_code=422, detail="no extractable text in DOCX")
     try:
-        chunks = await rag.ingest(
+        chunks, replaced = await rag.ingest(
             store,
             [{"text": extracted["text"], "source": req.source}],
             chunk_size=req.chunk_size, overlap=req.overlap,
@@ -477,7 +486,7 @@ async def ingest_docx(req: IngestDocxReq) -> dict:
         "source": req.source,
         "paragraphs": extracted["paragraphs"],
         "chars": extracted["chars"],
-        "chunks_added": chunks,
+        "chunks_added": chunks, "replaced": replaced,
         "total": store.count(),
     }
 
@@ -1036,7 +1045,7 @@ async def ingest_pptx(req: IngestPptxReq) -> dict:
     if not extracted["text"]:
         raise HTTPException(status_code=422, detail="no extractable text in PPTX")
     try:
-        chunks = await rag.ingest(
+        chunks, replaced = await rag.ingest(
             store,
             [{"text": extracted["text"], "source": req.source}],
             chunk_size=req.chunk_size, overlap=req.overlap,
@@ -1047,7 +1056,7 @@ async def ingest_pptx(req: IngestPptxReq) -> dict:
         "source": req.source,
         "slides": extracted["slides"],
         "chars": extracted["chars"],
-        "chunks_added": chunks,
+        "chunks_added": chunks, "replaced": replaced,
         "total": store.count(),
     }
 
@@ -1088,7 +1097,7 @@ async def ingest_html(req: IngestHtmlReq) -> dict:
     if not extracted["text"]:
         raise HTTPException(status_code=422, detail="no extractable text in HTML")
     try:
-        chunks = await rag.ingest(
+        chunks, replaced = await rag.ingest(
             store,
             [{"text": extracted["text"], "source": req.source}],
             chunk_size=req.chunk_size, overlap=req.overlap,
@@ -1099,7 +1108,7 @@ async def ingest_html(req: IngestHtmlReq) -> dict:
         "source": req.source,
         "title": extracted["title"],
         "chars": extracted["chars"],
-        "chunks_added": chunks,
+        "chunks_added": chunks, "replaced": replaced,
         "total": store.count(),
     }
 

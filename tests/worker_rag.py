@@ -267,5 +267,42 @@ check(_r.status_code != 413, f"size limit: a small body is not size-blocked (got
 
 os.environ.pop("KALIV_MAX_UPLOAD_MB", None)
 
+# ---- replace-by-source (1.58.40): re-ingest must update, not duplicate ----
+r = client.post("/rag/ingest", json={"documents": [{"text": "kilo lima mike original fact", "source": "replay"}]})
+check(r.status_code == 200, "replace: first ingest of 'replay' -> 200")
+base_total = r.json()["total"]
+check(r.json().get("replaced") == 0, "replace: first ingest replaced nothing")
+
+r = client.post("/rag/ingest", json={"documents": [{"text": "kilo lima mike UPDATED fact", "source": "replay"}]})
+check(r.status_code == 200, "replace: re-ingest of 'replay' -> 200")
+check(r.json()["total"] == base_total, f"replace: total stable on re-ingest -> {r.json()['total']} == {base_total}")
+check(r.json().get("replaced", 0) >= 1, "replace: response reports replaced chunks")
+
+r = client.post("/rag/query", json={"query": "kilo lima mike", "top_k": 3, "synthesize": False, "source": "replay"})
+texts = [m["text"] for m in r.json()["matches"]]
+check(any("UPDATED" in t for t in texts), "replace: query returns the NEW content")
+check(not any("original" in t for t in texts), "replace: the old chunks are gone (no duplicates)")
+
+# distinct sources are untouched by a replace
+r = client.post("/rag/ingest", json={"documents": [{"text": "november oscar papa other doc", "source": "bystander"}]})
+before = r.json()["total"]
+client.post("/rag/ingest", json={"documents": [{"text": "kilo lima mike THIRD version", "source": "replay"}]})
+r = client.post("/rag/query", json={"query": "november oscar papa", "top_k": 1, "synthesize": False, "source": "bystander"})
+check(len(r.json()["matches"]) == 1, "replace: other sources untouched by a replay replace")
+
+# several documents sharing a source in ONE call land together (delete once per call)
+r = client.post("/rag/ingest", json={"documents": [
+    {"text": "quebec romeo part one", "source": "multi"},
+    {"text": "quebec romeo part two", "source": "multi"},
+]})
+check(r.status_code == 200, "replace: multi-doc same-source call -> 200")
+r = client.post("/rag/query", json={"query": "quebec romeo", "top_k": 5, "synthesize": False, "source": "multi"})
+check(len(r.json()["matches"]) == 2, f"replace: both parts kept within one call -> {len(r.json()['matches'])}")
+
+# blank text is an honest 422, like every other ingest path
+r = client.post("/rag/ingest", json={"documents": [{"text": "   ", "source": "blank"}]})
+check(r.status_code == 422, f"blank document -> 422 (got {r.status_code})")
+
 print(f"\n===== WORKER V1: {passed} passed, {failed} failed =====")
 raise SystemExit(0 if failed == 0 else 1)
+
