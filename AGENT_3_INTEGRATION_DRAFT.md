@@ -26,6 +26,8 @@ Status: eksperimentelt, feature-flagged og ikke koblet til den normale chat-rout
 - Eksplicit memory-management API; ingen automatisk modelhukommelse.
 - Memory-context compiler med hårdt budget og eksplicit lokal/cloud-policy.
 - Context-preview API, som viser den eksakte blok uden at sende den til en model.
+- Isoleret Android memory-management UI via et separat intent-extra.
+- Isoleret desktop memory-management UI via `--agent3-memory`.
 - Agent v2 `/tools/chat` og de normale chatflows er urørte.
 
 ## Start worker og backend
@@ -138,10 +140,25 @@ Compileren:
 Preview betyder ikke consent til fremtidig afsendelse. Den automatiske modelintegration
 skal senere have en særskilt, eksplicit policy og UI-kontrakt.
 
+### Memory-management UI
+
+Begge klienter har nu en separat developer-only memory-skærm. Den kan:
+
+- liste og søge aktive memories,
+- oprette explicit confirmed memories,
+- bekræfte eller afvise pending records,
+- rette en memory som en ny version,
+- vise versionshistorik,
+- slette værdien med en totrinsbekræftelse og bevare en indholdsfri tombstone.
+
+UI'et har ingen knap til secrets, ingen automatisk retrieval og ingen modelkald.
+
 ## Android-udkast
 
-Androids normale launcher åbner fortsat `AppUi()` uden ændringer. Agent 3.0-skærmen kan
-kun åbnes eksplicit fra ADB gennem den eksisterende `MainActivity`:
+Androids normale launcher åbner fortsat `AppUi()` uden ændringer. Agent 3.0-skærmene kan
+kun åbnes eksplicit fra ADB gennem den eksisterende `MainActivity`.
+
+Plan/run-skærm:
 
 ```powershell
 adb shell am start -S `
@@ -149,7 +166,15 @@ adb shell am start -S `
   --ez dk.ternedal.modelrig.extra.AGENT3 true
 ```
 
-Skærmen kan:
+Memory-management:
+
+```powershell
+adb shell am start -S `
+  -n dk.ternedal.modelrig/.MainActivity `
+  --ez dk.ternedal.modelrig.extra.AGENT3_MEMORY true
+```
+
+Plan/run-skærmen kan:
 
 - lave plan-preview,
 - vise route, rationale, args, risiko, sensitivitet og egress,
@@ -158,19 +183,26 @@ Skærmen kan:
 - godkende eller afvise et step,
 - opdatere eller annullere et run.
 
-Der er ingen launcher-knap, deep-link eller automatisk chat-routing til Agent 3.0 endnu.
-Memory-management er heller ikke føjet til klient-UI'et endnu.
+Memory-skærmen bruger den allerede gemte rig-URL og device-token. Der er ingen
+launcher-knap, deep-link eller automatisk chat-routing til nogen af skærmene.
 
 ## Desktop-udkast
 
-Desktop-entrypointet vælger kun Agent 3.0-skærmen med `--agent3`:
+Plan/run-skærmen åbnes med `--agent3`:
 
 ```powershell
 cd desktop
 .\gradlew.bat :composeApp:run --args="--agent3"
 ```
 
-Uden flaget kaldes den eksisterende `App()` præcis som før. Udviklerskærmen genbruger
+Memory-management åbnes separat med `--agent3-memory`:
+
+```powershell
+cd desktop
+.\gradlew.bat :composeApp:run --args="--agent3-memory"
+```
+
+Uden flag kaldes den eksisterende `App()` præcis som før. Udviklerskærmene genbruger
 som udgangspunkt desktop-databasens `localUrl` og `deviceToken`, med følgende env-
 overrides:
 
@@ -180,8 +212,9 @@ MODELRIG_LOCAL_URL
 MODELRIG_TOKEN
 ```
 
-Skærmen har samme preview/start/run/confirm/cancel-kontrakt som Android. Memory-
-management er endnu ikke koblet på desktop-UI'et.
+Plan/run-skærmen har samme preview/start/run/confirm/cancel-kontrakt som Android.
+Memory-skærmen har samme administrative lifecycle som Android og sender ikke memory til
+en model.
 
 ## Read-only på-rig smoke
 
@@ -220,6 +253,7 @@ Det validerer:
 16. De normale Android- og desktop-chatflows vælger aldrig Agent 3.0 i denne draft.
 17. Memory sendes ikke automatisk til nogen model.
 18. Context-preview er gennemsigtigt, budgetteret og eksplicit markeret som ikke-afsendt.
+19. Memory-sletning i klient-UI kræver to separate tryk.
 
 ## Test
 
@@ -246,8 +280,8 @@ Repository-CI kører desuden:
 
 - fuld backend- og worker-suite,
 - Windows appliance-tests,
-- Android Kotlin-kompilering,
-- desktop Kotlin-kompilering.
+- Android Kotlin-kompilering inklusive begge developer-only skærme,
+- desktop Kotlin-kompilering inklusive begge developer-only skærme.
 
 CI uploader den fulde Python- eller desktop-compilerlog som artifact ved fejl, så den
 første traceback/kompileringsfejl ikke forsvinder i GitHubs afkortede logvisning.
@@ -258,7 +292,6 @@ første traceback/kompileringsfejl ikke forsvinder i GitHubs afkortede logvisnin
 - Integration i det normale Android/desktop `TurnRouter`- og chatflow.
 - Produkt-UX for eksplicit downgrade-valg, run-timeline og Agent 3.0 som almindelig chatmode.
 - Automatisk, policy-styret memory-retrieval og prompt-integration.
-- Memory-management UI på Android og desktop.
 - Kryptering-at-rest for secret memory.
 - Proactive inbox og scheduler.
 - Capability Graph til RigGate og fremtidige rigs.
