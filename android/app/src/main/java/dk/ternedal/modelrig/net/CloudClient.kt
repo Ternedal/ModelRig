@@ -116,7 +116,11 @@ class CloudClient(private val apiKey: String, baseUrl: String = "https://ollama.
             // no answer (seen on-device 14/7 with glm-4.7; a bad key is rejected
             // in <1s, so the silence was the model, not auth). A phone chat wants
             // the direct answer; models without thinking ignore the field.
-            .put("think", false)
+            // Per-model thinking policy (P2-4): most reasoning models accept a
+            // boolean, but gpt-oss only accepts "low"/"medium"/"high" and
+            // ignores booleans -- and it is the very model our error text
+            // recommends. "low" is its closest direct-answer mode.
+            .put("think", if (model.startsWith("gpt-oss")) "low" else false)
             .toString()
             .toRequestBody(jsonType)
 
@@ -134,7 +138,16 @@ class CloudClient(private val apiKey: String, baseUrl: String = "https://ollama.
         // connection, but ONLY if nothing of the answer arrived yet (a retried
         // POST can bill twice server-side; it must never duplicate anything the
         // user has seen) and never after a user cancel.
-        var emitted = false
+        // Progress tracking, split on purpose (audit P2-2/P2-3):
+        //  - sawServerProgress: ANY frame arrived (content OR thinking). Blocks
+        //    the automatic retry -- the server demonstrably processed the
+        //    request, so re-POSTing could double the work/billing. Thinking
+        //    counts even though the UI may not render it.
+        //  - sawContent: something USER-VISIBLE arrived. An EOF without it is
+        //    not success (HTTP 200 + empty/thinking-only stream ended as a
+        //    blank bubble before); it becomes a concrete error instead.
+        var sawServerProgress = false
+        var sawContent = false
         var attempt = 1
         while (true) {
             val call = http.newCall(req)
@@ -158,24 +171,40 @@ class CloudClient(private val apiKey: String, baseUrl: String = "https://ollama.
                         val msg = obj.optJSONObject("message")
                         val delta = msg?.optString("content").orEmpty()
                         if (delta.isNotEmpty()) {
-                            emitted = true
+                            sawServerProgress = true
+                            sawContent = true
                             onDelta(delta)
                         } else {
                             val th = msg?.optString("thinking").orEmpty()
                             if (th.isNotEmpty()) {
-                                emitted = true
+                                sawServerProgress = true
                                 onThinking?.invoke(th)
                             }
                         }
                     }
                 }
+                // EOF without any visible content is not a success: surface it
+                // as a concrete error instead of a silent empty bubble.
+                if (!sawContent) {
+                    throw ModelRigException(
+                        if (sawServerProgress) "modellen tænkte, men afsluttede uden et svar — prøv igen eller vælg en anden model"
+                        else "modellen afsluttede uden svar (tom stream) — prøv igen"
+                    )
+                }
                 return
             } catch (e: java.io.IOException) {
-                if (attempt >= 2 || emitted || call.isCanceled()) throw e
+                if (attempt >= 2 || sawServerProgress || call.isCanceled()) throw e
                 attempt++
-                // Never reuse the socket that just failed; let a radio blip pass.
+                // Never reuse the socket that just failed; let a radio blip
+                // pass -- but stay cancellable: Stop during the backoff cancels
+                // the (already dead) registered call, so re-check it every
+                // 100 ms and once more before the next attempt fires (P1-3).
                 http.connectionPool.evictAll()
-                Thread.sleep(1500)
+                repeat(15) {
+                    if (call.isCanceled()) throw e
+                    Thread.sleep(100)
+                }
+                if (call.isCanceled()) throw e
             }
         }
     }

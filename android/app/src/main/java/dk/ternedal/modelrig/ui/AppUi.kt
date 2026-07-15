@@ -1116,11 +1116,15 @@ private fun ChatScreen(
                             // if it is unreachable in cloud mode, degrade to
                             // plain cloud chat WITHOUT tools and say so,
                             // instead of hanging on a route that cannot work.
+                            // No implicit downgrade (audit P1-2): "slet model X"
+                            // silently answered WITHOUT tools changes what the
+                            // turn means. Fail fast with the choice spelled out
+                            // -- retry (needs the rig) or turn Tools off for
+                            // plain cloud chat. Also fixes P2-1: no synthetic
+                            // note in the bubble, so a later error shows as the
+                            // real error, not "[afbrudt]".
                             if (viaCloud && !ModelRigClient(store.baseUrl ?: "", store.token).quickHealth()) {
-                                val key = store.cloudKey ?: throw RuntimeException("ingen cloud-nøgle")
-                                onDelta("_Tools er ikke tilgængelige lige nu (riggen kan ikke nås) — svarer uden tools._\n\n")
-                                CloudClient(key).chatStream(cModel, history, registerCall = hook, imageB64 = imageB64, onDelta = onDelta)
-                                return@runCatching
+                                throw dk.ternedal.modelrig.net.ModelRigException("Riggen kan ikke nås, og Tools er slået til — tool-kørsel går gennem riggens sikkerhedsgate. Prøv igen når riggen kan nås (Tailscale/hjemmenetværk), eller slå Tools fra for at chatte direkte med cloud uden tools.")
                             }
                             // history minus the just-added user turn (the rig
                             // appends that itself; sending it twice makes the
@@ -1217,6 +1221,12 @@ private fun ChatScreen(
         val t = userMsg.text
         val useCloud = mode == "cloud"
         val useRag = mode == "rig" && ragMode
+        // A retry must not silently change what the turn MEANS (audit P1-1):
+        // the original send had a tools branch, so the retry gets the same one
+        // -- same gate, same probe, same semantics. Only the image is gone
+        // (consumed by the original turn).
+        val useTools = toolsMode && (mode == "rig" || (mode == "cloud" && store.cloudKey != null))
+        val toolsWithRag = useTools && ragMode && (mode == "rig" || allowRagCloud)
         val sys = (if (useCloud) store.cloudSystem else store.rigSystem).trim()
         val convo = messages.filterIndexed { idx2, mm -> idx2 != i && !mm.error }.map { it.role to it.text }
         val history = trimHistory(sys, convo)
@@ -1226,6 +1236,7 @@ private fun ChatScreen(
         val cidNow = convId
         messages[i] = Msg("assistant", "", streaming = true)
         busy = true
+        var proposal: dk.ternedal.modelrig.net.ToolTurn? = null
         scope.launch {
             val onDelta: (String) -> Unit = { delta ->
                 scope.launch { val cur = messages[i]; messages[i] = cur.copy(text = cur.text + delta) }
@@ -1237,6 +1248,32 @@ private fun ChatScreen(
             val err = withContext(Dispatchers.IO) {
                 runCatching {
                     when {
+                        useTools -> {
+                            val viaCloud = mode == "cloud"
+                            if (viaCloud && !ModelRigClient(store.baseUrl ?: "", store.token).quickHealth()) {
+                                throw dk.ternedal.modelrig.net.ModelRigException("Riggen kan ikke nås, og Tools er slået til — tool-kørsel går gennem riggens sikkerhedsgate. Prøv igen når riggen kan nås (Tailscale/hjemmenetværk), eller slå Tools fra for at chatte direkte med cloud uden tools.")
+                            }
+                            val prior = history.dropLast(1).filter { it.first != "system" }
+                            val turn = ModelRigClient(store.baseUrl ?: "", store.token)
+                                .toolsChat(
+                                    t,
+                                    model = if (viaCloud) cModel else rigModel,
+                                    cloudBaseUrl = if (viaCloud) "https://ollama.com" else null,
+                                    cloudKey = if (viaCloud) store.cloudKey else null,
+                                    history = prior,
+                                    rag = toolsWithRag,
+                                    ragSource = if (toolsWithRag) srcFilter else null,
+                                    allowRagCloud = allowRagCloud,
+                                    imageB64 = null,
+                                    system = sys,
+                                )
+                            if (turn.sources.isNotEmpty()) onSources(turn.sources)
+                            if (turn.status == "confirmation_required") {
+                                proposal = turn
+                            } else {
+                                onDelta(turn.answer)
+                            }
+                        }
                         useRag -> ModelRigClient(store.baseUrl ?: "", store.token)
                             .ragChatStream(t, rigModel, srcFilter, registerCall = hook, onSources = onSources, onDelta = onDelta)
                         useCloud -> {
@@ -1265,6 +1302,8 @@ private fun ChatScreen(
                 }.exceptionOrNull()
             }
             activeCall = null
+            // Same as the main path: a parked write proposal surfaces the card.
+            proposal?.let { pendingTool = it }
             val cur = messages[i]
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[i] = when {
@@ -1273,7 +1312,9 @@ private fun ChatScreen(
                 else -> cur.copy(streaming = false, text = stripEmojis(cur.text) + "\n\n_[afbrudt]_")
             }
             val finalText = messages[i].text
-            if (cidNow != null && (err == null || cancelled)) {
+            // Mirror the main path: a parked proposal has no answer yet --
+            // never persist a blank assistant turn.
+            if (cidNow != null && (err == null || cancelled) && finalText.isNotBlank()) {
                 withContext(Dispatchers.IO) { db.addMessage(cidNow, "assistant", finalText) }
             }
             busy = false

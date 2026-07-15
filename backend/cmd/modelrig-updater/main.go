@@ -431,9 +431,14 @@ func main() {
 	pending, perr := readJournal(journalPath)
 	if perr != nil {
 		// Unreadable transaction evidence must NEVER pass as "no journal": the
-		// installation's state is unknown, so fail closed before per-file
-		// recovery or a version check can declare the rig "up to date".
-		die("transaction journal evidence exists but cannot be read: %v -- failing closed; inspect %s (and its .tmp) and restore by hand", perr, journalPath)
+		// installation's state is unknown -- and so is the RUNTIME's (it could
+		// be mid-verify on a half-swapped set). Fail closed for the whole
+		// appliance: stop the running set conservatively, keep the evidence,
+		// and require manual recovery. No automatic restart on unknown state.
+		log.Printf("journal evidence is ambiguous -- stopping the running set conservatively before failing closed")
+		_ = ps(fmt.Sprintf("Stop-ScheduledTask -TaskName '%s' -ErrorAction SilentlyContinue", *task))
+		_ = ps("Get-Process modelrig-server,modelrig-worker,modelrig-supervisor -ErrorAction SilentlyContinue | Stop-Process -Force")
+		die("transaction journal evidence exists but cannot be read: %v -- failing closed; runtime stopped, evidence kept. Inspect %s (and its .tmp) and restore by hand", perr, journalPath)
 	}
 	if pending != nil {
 		if journalNeedsProcessStop(pending.State) {
@@ -638,26 +643,31 @@ func main() {
 		_ = journal.setState("manual_recovery")
 		die("ROLLBACK FAILED (%v). Journal kept at %s, backups at %s -- supervisor NOT started; restore by hand or rerun the updater.", err, journalPath, backupDir)
 	}
-	_ = journal.archive("rolled_back")
+	// Files are restored -- but "rolled_back" is a claim about the APPLIANCE,
+	// not the disk. Archiving here would terminalize the transaction while the
+	// old runtime might never come up, leaving a down rig whose journal says
+	// everything finished fine. So: restart, PROVE the old runtime (backend +
+	// worker versions and an advancing supervisor heartbeat), and only then
+	// archive. Anything unproven keeps the journal as manual_recovery -- the
+	// next run's whole-set recovery re-restores idempotently and retries.
 	_ = heartbeat.Remove(*heartbeatPath)
 	rollbackAt := time.Now()
 	_ = ps(fmt.Sprintf("Start-ScheduledTask -TaskName '%s'", *task))
-	if verify(*serverHealth, cur) && verify(*workerHealth, cur) {
-		log.Printf("rolled back to %s and both backend + worker are healthy again", cur)
-	} else {
-		log.Printf("rolled back to %s but health is still not confirmed -- check the rig", cur)
-	}
-	// Audit gap: rollback verified backend+worker but never that the OLD
-	// supervisor loops again -- a dead supervisor after rollback means the rig
-	// runs with no crash-recovery. Warn-only: the rollback already happened and
-	// there is nothing safe left to undo automatically.
+	oldRuntimeOK := verify(*serverHealth, cur) && verify(*workerHealth, cur)
+	oldSuperOK := true
 	if !*noHeartbeat {
-		if alive, herr := heartbeat.ProveLooping(*heartbeatPath, rollbackAt, *superInterval, 45*time.Second); !alive {
-			log.Printf("WARNING: rolled back, but the supervisor is not provably looping (%v) -- crash-recovery may be down; check the KalivSupervisor task", herr)
-		} else {
-			log.Printf("supervisor is looping again after the rollback")
+		alive, herr := heartbeat.ProveLooping(*heartbeatPath, rollbackAt, *superInterval, 45*time.Second)
+		oldSuperOK = alive
+		if !alive {
+			log.Printf("supervisor is not provably looping after the rollback (%v)", herr)
 		}
 	}
+	if !oldRuntimeOK || !oldSuperOK {
+		_ = journal.setState("manual_recovery")
+		die("files were restored to %s but the OLD runtime is not proven up (backend/worker healthy: %v, supervisor looping: %v) -- journal kept at %s; rerun the updater (recovery re-restores idempotently) or check the KalivSupervisor task", cur, oldRuntimeOK, oldSuperOK, journalPath)
+	}
+	_ = journal.archive("rolled_back")
+	log.Printf("rolled back to %s: backend + worker healthy and the supervisor is looping", cur)
 }
 
 func assetNames(targets []target) []string {
