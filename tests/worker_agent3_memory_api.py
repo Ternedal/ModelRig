@@ -115,6 +115,56 @@ check(expired.id not in normal_ids, "expired rows are excluded by default")
 all_ids = {item["id"] for item in client.get("/experimental/agent3/memory?include_expired=true").json()["memories"]}
 check(expired.id in all_ids, "expired rows require explicit include flag")
 
+rig_memory = store.create(
+    subject="modelrig",
+    predicate="gpu",
+    value="RTX 3060 12GB",
+    sensitivity="public",
+    source_ref="conversation:must-not-leak",
+)
+local_preview = client.post(
+    "/experimental/agent3/memory/context-preview",
+    json={"target": "local", "max_chars": 50_000},
+)
+check(local_preview.status_code == 200, "local context preview is available")
+local_context = local_preview.json()
+check(local_context["sent_to_model"] is False, "preview never sends context to a model")
+check(
+    {corrected["id"], pending.id, rig_memory.id}.issubset(set(local_context["included_ids"])),
+    "local preview includes confirmed private and non-private memories",
+)
+check(secret.id not in local_context["included_ids"], "context preview never includes secret memory")
+check("conversation:must-not-leak" not in local_context["text"], "context preview strips source references")
+
+cloud_preview = client.post(
+    "/experimental/agent3/memory/context-preview",
+    json={"target": "cloud", "max_chars": 50_000},
+).json()
+check(corrected["id"] not in cloud_preview["included_ids"], "cloud preview excludes private memory by default")
+check(pending.id in cloud_preview["included_ids"] and rig_memory.id in cloud_preview["included_ids"], "cloud preview keeps operational and public memory")
+cloud_private = client.post(
+    "/experimental/agent3/memory/context-preview",
+    json={"target": "cloud", "allow_private_cloud": True, "max_chars": 50_000},
+).json()
+check(corrected["id"] in cloud_private["included_ids"], "private memory enters cloud preview only with explicit consent")
+
+subject_preview = client.post(
+    "/experimental/agent3/memory/context-preview",
+    json={"subjects": ["modelrig"], "max_chars": 50_000},
+).json()
+check(subject_preview["included_ids"] == [rig_memory.id], "context preview can be restricted to explicit subjects")
+check(client.post(
+    "/experimental/agent3/memory/context-preview",
+    json={"subjects": ["modelrig", "modelrig"]},
+).status_code == 422, "duplicate subject filters are rejected")
+small_preview = client.post(
+    "/experimental/agent3/memory/context-preview",
+    json={"target": "local", "max_chars": 10},
+).json()
+check(small_preview["text"] == "" and small_preview["included_ids"] == [], "context preview enforces hard character budget")
+
+# Delete only after preview assertions so the active corrected version is visible
+# to the context compiler.
 deleted_resp = client.delete(f"/experimental/agent3/memory/{corrected['id']}")
 check(deleted_resp.status_code == 200, "memory can be deleted through API")
 deleted = deleted_resp.json()["memory"]
