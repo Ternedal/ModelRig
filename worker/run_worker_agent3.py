@@ -16,6 +16,8 @@ import uvicorn
 
 from app.main import app
 from app.agent3.api import mount_agent3
+from app.agent3.integration import V2ToolAdapter
+from app.agent3.planner import build_planner_router
 
 
 def _is_loopback(host: str) -> bool:
@@ -33,7 +35,11 @@ if __name__ == "__main__":
             "no auth of its own. Set KALIV_WORKER_ALLOW_LAN=1 to override.\n"
         )
         sys.exit(1)
-    if not mount_agent3(app):
+    if mount_agent3(app):
+        # Plan preview is mounted only in this experimental entrypoint. It never
+        # executes tools; it returns a code-validated plan for inspection/start.
+        app.include_router(build_planner_router(V2ToolAdapter()))
+    else:
         sys.stderr.write(
             "Agent 3.0 was not mounted because KALIV_AGENT3_ENABLED is not 1. "
             "The ordinary worker API will still start.\n"
