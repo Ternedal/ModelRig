@@ -1,6 +1,6 @@
 """Experimental worker entrypoint for the isolated Agent 3.0 draft.
 
-Production `worker/run_worker.py` and `/tools/chat` remain unchanged. Run with:
+Production `/tools/chat` remains unchanged. Run with:
 
     set KALIV_AGENT3_ENABLED=1
     python worker/run_worker_agent3.py
@@ -18,6 +18,8 @@ from app.main import app
 from app import paths as app_paths
 from app.agent3.api import mount_agent3
 from app.agent3.integration import V2ToolAdapter
+from app.agent3.memory import MemoryStore
+from app.agent3.memory_api import build_memory_router
 from app.agent3.plan_store import PlanStore
 from app.agent3.planner import build_planner_router
 
@@ -38,10 +40,10 @@ if __name__ == "__main__":
         )
         sys.exit(1)
     if mount_agent3(app):
-        # Previewed plans are persisted separately, expire quickly and are
-        # single-use. Starting one rechecks the V2 kill switch before execution.
         adapter = V2ToolAdapter()
         plan_db = app_paths.resolve("./kaliv-agent3-plans.db", env="KALIV_AGENT3_PLAN_DB")
+        memory_db = app_paths.resolve("./kaliv-agent3-memory.db", env="KALIV_AGENT3_MEMORY_DB")
+        memory_store = MemoryStore(memory_db)
         app.include_router(
             build_planner_router(
                 adapter,
@@ -49,6 +51,8 @@ if __name__ == "__main__":
                 plan_store=PlanStore(plan_db),
             )
         )
+        app.include_router(build_memory_router(memory_store))
+        app.state.agent3_memory_store = memory_store
     else:
         sys.stderr.write(
             "Agent 3.0 was not mounted because KALIV_AGENT3_ENABLED is not 1. "
