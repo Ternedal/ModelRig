@@ -53,6 +53,25 @@ class V2ToolAdapter:
             from .. import tools as tools_module  # lazy: avoids import cycles
         self.tools = tools_module
 
+    def is_enabled(self, name: str) -> bool:
+        gate = self.tools.GATE
+        checker = getattr(gate, "is_enabled", None)
+        if callable(checker):
+            return bool(checker(name))
+        return bool(getattr(gate, "enabled", False) and name in self.tools.REGISTRY)
+
+    def tool_catalog(self) -> list[dict[str, Any]]:
+        """Planner-facing catalog. Risk/sensitivity are deliberately omitted."""
+        return [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "params": tool.params,
+            }
+            for tool in self.tools.REGISTRY.values()
+            if self.is_enabled(tool.name)
+        ]
+
     def build_steps(
         self,
         calls: list[PlannedToolCall],
@@ -68,6 +87,8 @@ class V2ToolAdapter:
             tool = self.tools.REGISTRY.get(call.tool)
             if tool is None:
                 raise Agent3PlanError(f"unknown tool: {call.tool}")
+            if not self.is_enabled(call.tool):
+                raise Agent3PlanError(f"tool disabled: {call.tool}")
             if not isinstance(call.args, dict):
                 raise Agent3PlanError(f"arguments for {call.tool} must be an object")
             risk = _RISK_OVERRIDES.get(
