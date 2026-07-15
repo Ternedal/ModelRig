@@ -8,7 +8,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-/** Experimental Agent 3.0 API client. Not wired into AppUi yet. */
+/** Experimental Agent 3.0 API client. Used only by the explicit developer screen. */
 class Agent3Client(baseUrl: String, private val token: String) {
     private val base = baseUrl.trimEnd('/')
     private val jsonType = "application/json".toMediaType()
@@ -32,6 +32,16 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val error: String?,
     )
 
+    data class MemoryReceipt(
+        val requested: Boolean,
+        val sentToModel: Boolean,
+        val target: String?,
+        val includedIds: List<String>,
+        val excludedIds: List<String>,
+        val characterCount: Int,
+        val sha256: String?,
+    )
+
     data class PlanPreview(
         val planId: String?,
         val expiresInSeconds: Int?,
@@ -39,6 +49,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val rationale: String,
         val steps: List<Step>,
         val executed: Boolean,
+        val memoryContext: MemoryReceipt,
     )
 
     data class Run(
@@ -67,6 +78,10 @@ class Agent3Client(baseUrl: String, private val token: String) {
         conversationId: String? = null,
         plannerModel: String? = null,
         proactive: Boolean = false,
+        useMemory: Boolean = false,
+        memorySubjects: List<String> = emptyList(),
+        memoryMaxChars: Int = 4_000,
+        memoryMaxRecords: Int = 25,
     ): PlanPreview {
         val payload = JSONObject()
             .put("message", message)
@@ -76,6 +91,10 @@ class Agent3Client(baseUrl: String, private val token: String) {
             .put("allow_private_cloud", allowPrivateCloud)
             .put("cloud_ready", cloudReady)
             .put("proactive", proactive)
+            .put("use_memory", useMemory)
+            .put("memory_subjects", JSONArray(memorySubjects))
+            .put("memory_max_chars", memoryMaxChars)
+            .put("memory_max_records", memoryMaxRecords)
         conversationId?.let { payload.put("conversation_id", it) }
         plannerModel?.let { payload.put("planner_model", it) }
         val root = post("/api/v1/experimental/agent3/plan", payload)
@@ -86,6 +105,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
             rationale = root.optString("rationale"),
             steps = parseSteps(root.optJSONArray("plan") ?: JSONArray()),
             executed = root.optBoolean("executed", false),
+            memoryContext = parseMemoryReceipt(root.optJSONObject("memory_context")),
         )
     }
 
@@ -152,8 +172,10 @@ class Agent3Client(baseUrl: String, private val token: String) {
         http.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                val detail = runCatching { JSONObject(text).optString("error") }
-                    .getOrNull()?.ifBlank { null } ?: text.take(500)
+                val detail = runCatching {
+                    val root = JSONObject(text)
+                    root.optString("error").ifBlank { root.optString("detail") }
+                }.getOrNull()?.ifBlank { null } ?: text.take(500)
                 throw ModelRigException("Agent 3.0 failed (${response.code}): $detail")
             }
             return runCatching { JSONObject(text) }
@@ -170,6 +192,19 @@ class Agent3Client(baseUrl: String, private val token: String) {
         answer = o.nullableString("answer"),
         error = o.nullableString("error"),
     )
+
+    private fun parseMemoryReceipt(o: JSONObject?): MemoryReceipt {
+        val receipt = o ?: JSONObject()
+        return MemoryReceipt(
+            requested = receipt.optBoolean("requested", false),
+            sentToModel = receipt.optBoolean("sent_to_model", false),
+            target = receipt.nullableString("target"),
+            includedIds = receipt.optJSONArray("included_ids").toStrings(),
+            excludedIds = receipt.optJSONArray("excluded_ids").toStrings(),
+            characterCount = receipt.optInt("character_count", 0),
+            sha256 = receipt.nullableString("sha256"),
+        )
+    }
 
     private fun parseSteps(arr: JSONArray): List<Step> = buildList {
         for (i in 0 until arr.length()) {
@@ -189,6 +224,13 @@ class Agent3Client(baseUrl: String, private val token: String) {
                     error = s.nullableString("error"),
                 )
             )
+        }
+    }
+
+    private fun JSONArray?.toStrings(): List<String> = buildList {
+        val values = this@toStrings ?: return@buildList
+        for (index in 0 until values.length()) {
+            values.optString(index).takeIf { it.isNotBlank() }?.let(::add)
         }
     }
 
