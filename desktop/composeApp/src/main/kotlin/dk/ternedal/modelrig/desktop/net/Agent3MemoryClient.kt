@@ -96,7 +96,7 @@ class Agent3MemoryClient(baseUrl: String, private val bearer: String) {
         ).memory
 
     fun delete(memoryId: String): Agent3Memory =
-        decode<MemoryEnvelope>(delete("/api/v1/experimental/agent3/memory/${path(memoryId)}")).memory
+        decode<MemoryEnvelope>(deleteRequest("/api/v1/experimental/agent3/memory/${path(memoryId)}")).memory
 
     private fun request(path: String): HttpRequest.Builder = HttpRequest.newBuilder(URI.create(base + path))
         .header("Content-Type", "application/json")
@@ -108,7 +108,7 @@ class Agent3MemoryClient(baseUrl: String, private val bearer: String) {
     private fun post(path: String, body: String): String =
         send(request(path).POST(HttpRequest.BodyPublishers.ofString(body)).build())
 
-    private fun delete(path: String): String = send(request(path).DELETE().build())
+    private fun deleteRequest(path: String): String = send(request(path).DELETE().build())
 
     private fun send(request: HttpRequest): String {
         val response = http.send(request, HttpResponse.BodyHandlers.ofString())
