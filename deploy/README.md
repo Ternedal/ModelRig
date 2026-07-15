@@ -149,3 +149,10 @@ gamle runtime er BEVIST oppe — ellers beholdes journalen som `manual_recovery`
 og næste updater-kørsel gendanner idempotent. En ulæselig/konfliktende journal
 stopper nu hele apparatet konservativt (task + processer) før updateren fejler
 lukket; evidensen bevares, ingen automatisk genstart.
+
+**v1.58.37 — atomisk release-flow:** releasen oprettes som **draft** via API,
+og git-tagget pushes derefter separat (GitHub opretter ikke tags for drafts —
+uden tag-push starter buildet aldrig). CI uploader assets + SHA256SUMS til
+draften, verificerer hele asset-listen, og publicerer først derefter
+(`--draft=false --latest`). En halvt uploadet release kan aldrig blive synlig
+eller samles op af updateren.
