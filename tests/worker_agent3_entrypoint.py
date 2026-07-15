@@ -24,21 +24,28 @@ def check(cond, name):
         print(f"  FAIL: {name}")
 
 
+def client() -> TestClient:
+    # The worker deliberately rejects non-loopback hosts. Starlette's default
+    # TestClient host is `testclient`, so use the same loopback origin as the
+    # real Go backend -> worker connection.
+    return TestClient(run_worker.app, base_url="http://127.0.0.1")
+
+
 os.environ["KALIV_AGENT3_ENABLED"] = "0"
 before_count = len(run_worker.app.routes)
 check(run_worker._mount_optional_agent3() is False, "feature remains off without explicit flag")
-with TestClient(run_worker.app) as client:
-    check(client.get("/experimental/agent3/status").status_code == 404, "flag-off worker exposes no Agent 3.0 API")
+with client() as c:
+    check(c.get("/experimental/agent3/status").status_code == 404, "flag-off worker exposes no Agent 3.0 API")
 check(len(run_worker.app.routes) == before_count, "flag-off mount changes no route registrations")
 
 os.environ["KALIV_AGENT3_ENABLED"] = "1"
 check(run_worker._mount_optional_agent3() is True, "feature mounts after explicit flag")
-with TestClient(run_worker.app) as client:
-    check(client.get("/experimental/agent3/status").status_code == 200, "run API is reachable")
+with client() as c:
+    check(c.get("/experimental/agent3/status").status_code == 200, "run API is reachable")
     # Validation errors prove the POST route exists without calling Ollama.
-    check(client.post("/experimental/agent3/plan", json={}).status_code == 422, "planner API is reachable")
+    check(c.post("/experimental/agent3/plan", json={}).status_code == 422, "planner API is reachable")
     # A missing single-use plan is a domain conflict, not a missing route.
-    check(client.post("/experimental/agent3/plans/missing/start").status_code == 409, "single-use plan start is reachable")
+    check(c.post("/experimental/agent3/plans/missing/start").status_code == 409, "single-use plan start is reachable")
 
 mounted_count = len(run_worker.app.routes)
 check(run_worker._mount_optional_agent3() is True, "second mount call is harmless")
