@@ -42,6 +42,17 @@ data class Agent3Step(
 )
 
 @Serializable
+data class Agent3MemoryReceipt(
+    val requested: Boolean = false,
+    @SerialName("sent_to_model") val sentToModel: Boolean = false,
+    val target: String? = null,
+    @SerialName("included_ids") val includedIds: List<String> = emptyList(),
+    @SerialName("excluded_ids") val excludedIds: List<String> = emptyList(),
+    @SerialName("character_count") val characterCount: Int = 0,
+    val sha256: String? = null,
+)
+
+@Serializable
 data class Agent3PlanPreview(
     @SerialName("plan_id") val planId: String? = null,
     @SerialName("expires_in_seconds") val expiresInSeconds: Int? = null,
@@ -49,6 +60,7 @@ data class Agent3PlanPreview(
     val rationale: String = "",
     val plan: List<Agent3Step> = emptyList(),
     val executed: Boolean = false,
+    @SerialName("memory_context") val memoryContext: Agent3MemoryReceipt = Agent3MemoryReceipt(),
 )
 
 @Serializable
@@ -80,6 +92,10 @@ private data class PlanRequest(
     @SerialName("conversation_id") val conversationId: String? = null,
     @SerialName("planner_model") val plannerModel: String? = null,
     val proactive: Boolean = false,
+    @SerialName("use_memory") val useMemory: Boolean = false,
+    @SerialName("memory_subjects") val memorySubjects: List<String> = emptyList(),
+    @SerialName("memory_max_chars") val memoryMaxChars: Int = 4_000,
+    @SerialName("memory_max_records") val memoryMaxRecords: Int = 25,
 )
 
 @Serializable
@@ -98,7 +114,7 @@ private data class RunsEnvelope(val runs: List<Agent3Run> = emptyList())
 @Serializable
 private data class EventsEnvelope(val events: List<Agent3Event> = emptyList())
 
-/** Experimental Agent 3.0 transport. Not connected to the desktop UI yet. */
+/** Experimental Agent 3.0 transport. Used only by the explicit developer UI. */
 class Agent3Client(baseUrl: String, private val bearer: String) {
     private val base = baseUrl.trimEnd('/')
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
@@ -116,20 +132,28 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
         conversationId: String? = null,
         plannerModel: String? = null,
         proactive: Boolean = false,
+        useMemory: Boolean = false,
+        memorySubjects: List<String> = emptyList(),
+        memoryMaxChars: Int = 4_000,
+        memoryMaxRecords: Int = 25,
     ): Agent3PlanPreview = decode(
         post(
             "/api/v1/experimental/agent3/plan",
             json.encodeToString(
                 PlanRequest(
-                    message,
-                    mode,
-                    rag,
-                    allowRagCloud,
-                    allowPrivateCloud,
-                    cloudReady,
-                    conversationId,
-                    plannerModel,
-                    proactive,
+                    message = message,
+                    mode = mode,
+                    rag = rag,
+                    allowRagCloud = allowRagCloud,
+                    allowPrivateCloud = allowPrivateCloud,
+                    cloudReady = cloudReady,
+                    conversationId = conversationId,
+                    plannerModel = plannerModel,
+                    proactive = proactive,
+                    useMemory = useMemory,
+                    memorySubjects = memorySubjects,
+                    memoryMaxChars = memoryMaxChars,
+                    memoryMaxRecords = memoryMaxRecords,
                 )
             ),
         )
