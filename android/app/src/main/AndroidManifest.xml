@@ -20,6 +20,14 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Kaliv.Splash">
+        <!-- Internal, developer-only Agent 3.0 host. No launcher or deep-link,
+             and not exported to other apps. The normal MainActivity remains the
+             only product entrypoint. -->
+        <activity
+            android:name=".Agent3Activity"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.Kaliv"
+            android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:windowSoftInputMode="adjustResize"
