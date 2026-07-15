@@ -9,7 +9,8 @@ import androidx.compose.ui.window.rememberWindowState
 fun main(args: Array<String>) = application {
     val agent3 = args.contains("--agent3")
     val agent3Memory = args.contains("--agent3-memory")
-    val experimental = agent3 || agent3Memory
+    val agent3Validation = args.contains("--agent3-validation")
+    val experimental = agent3 || agent3Memory || agent3Validation
     val state = rememberWindowState(
         width = if (experimental) 900.dp else 1000.dp,
         height = 820.dp,
@@ -18,6 +19,7 @@ fun main(args: Array<String>) = application {
         onCloseRequest = ::exitApplication,
         state = state,
         title = when {
+            agent3Validation -> "Kaliv · Agent 3.0 Validation Center"
             agent3Memory -> "Kaliv · Memory 3.0 draft"
             agent3 -> "Kaliv · Agent 3.0 draft"
             else -> "Kaliv"
@@ -25,6 +27,7 @@ fun main(args: Array<String>) = application {
         icon = painterResource("icon.png"),
     ) {
         when {
+            agent3Validation -> Agent3ValidationDevApp()
             agent3Memory -> Agent3MemoryDevApp()
             agent3 -> Agent3DevApp()
             else -> App()
