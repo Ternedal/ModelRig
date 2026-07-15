@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from .core import (
     Agent3Orchestrator,
     AgentRun,
+    AgentStep,
     AgentRunStore,
     CapabilitySnapshot,
     ConfirmationError,
@@ -18,6 +19,7 @@ from .core import (
     TurnRequest,
 )
 from .integration import Agent3PlanError, PlannedToolCall, V2ToolAdapter
+from .routing import StrictTurnRouter
 
 
 class PlanStepReq(BaseModel):
@@ -61,6 +63,23 @@ def _run_payload(run: AgentRun) -> dict[str, Any]:
     return data
 
 
+def _clone_steps(run: AgentRun) -> list[AgentStep]:
+    """Clone the validated original plan with fresh step IDs and no old results."""
+    return [
+        AgentStep(
+            tool=step.tool,
+            args=dict(step.args),
+            risk=step.risk,
+            sensitivity=step.sensitivity,
+            egress=step.egress,
+            origin=step.origin,
+            conversation_id=step.conversation_id,
+            summary=step.summary,
+        )
+        for step in run.steps
+    ]
+
+
 def _default_caps(req: StartReq, adapter: V2ToolAdapter) -> CapabilitySnapshot:
     tools_ready = bool(adapter.tools.GATE.enabled and not adapter.tools.GATE.state_error)
     return CapabilitySnapshot(
@@ -79,6 +98,7 @@ def build_router(
     capability_provider: Callable[[StartReq, V2ToolAdapter], CapabilitySnapshot] = _default_caps,
 ) -> APIRouter:
     router = APIRouter(prefix="/experimental/agent3", tags=["experimental-agent3"])
+    orchestrator.router = StrictTurnRouter()
 
     @router.get("/status")
     def status() -> dict[str, Any]:
@@ -92,6 +112,36 @@ def build_router(
 
     @router.post("/runs")
     def start(req: StartReq) -> dict[str, Any]:
+        caps = capability_provider(req, adapter)
+
+        if req.retry_of_run_id:
+            original = orchestrator.store.load(req.retry_of_run_id)
+            if original is None:
+                raise HTTPException(status_code=404, detail="original run not found")
+            # Retry semantics are server-owned: ignore mutable current UI state and
+            # client plan fields. Reuse the stored message, route flags and plan.
+            request = TurnRequest(
+                message=original.request.message,
+                mode=original.request.mode,
+                tools=original.request.tools,
+                rag=original.request.rag,
+                has_image=original.request.has_image,
+                voice=original.request.voice,
+                allow_rag_cloud=original.request.allow_rag_cloud,
+                auto_cloud_fallback=original.request.auto_cloud_fallback,
+                retry_of_run_id=original.id,
+                original_route=original.route.kind,
+                conversation_id=original.request.conversation_id,
+            )
+            run = orchestrator.start_with_steps(
+                request,
+                caps,
+                _clone_steps(original),
+                proactive=original.proactive,
+                allow_private_cloud=original.allow_private_cloud,
+            )
+            return {"run": _run_payload(run)}
+
         if not req.plan:
             raise HTTPException(
                 status_code=422,
@@ -111,12 +161,18 @@ def build_router(
             voice=req.voice,
             allow_rag_cloud=req.allow_rag_cloud,
             auto_cloud_fallback=req.auto_cloud_fallback,
-            retry_of_run_id=req.retry_of_run_id,
-            original_route=req.original_route,
             conversation_id=req.conversation_id,
         )
-        caps = capability_provider(req, adapter)
         route = orchestrator.router.route(request, caps)
+        if route.kind in {RouteKind.UNAVAILABLE, RouteKind.ASK_BEFORE_DOWNGRADE}:
+            run = orchestrator.start_with_steps(
+                request,
+                caps,
+                [],
+                proactive=req.proactive,
+                allow_private_cloud=req.allow_private_cloud,
+            )
+            return {"run": _run_payload(run)}
         try:
             calls = [PlannedToolCall(step.tool, step.args) for step in req.plan]
             steps = adapter.build_steps(calls, route, req.conversation_id)
@@ -186,6 +242,7 @@ def build_default_runtime() -> tuple[Agent3Orchestrator, V2ToolAdapter]:
     db_path = _paths.resolve("./kaliv-agent3.db", env="KALIV_AGENT3_DB")
     store = AgentRunStore(db_path)
     orchestrator = Agent3Orchestrator(store=store, executor=adapter.execute)
+    orchestrator.router = StrictTurnRouter()
     return orchestrator, adapter
 
 
