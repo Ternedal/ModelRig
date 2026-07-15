@@ -96,6 +96,12 @@ def _base_assessment(max_age_hours: float) -> dict[str, Any]:
     }
 
 
+def _finish_blocked(assessment: dict[str, Any], reason: str) -> dict[str, Any]:
+    assessment["reasons"] = [reason]
+    assessment["write_pilot_reasons"] = [reason]
+    return assessment
+
+
 def assess_report(
     report: Any,
     *,
@@ -117,25 +123,29 @@ def assess_report(
     assessment["report_sha256"] = report_sha256
 
     if not isinstance(report, dict):
-        assessment["reasons"] = ["report_must_be_an_object"]
-        assessment["write_pilot_reasons"] = list(assessment["reasons"])
-        return assessment
+        return _finish_blocked(assessment, "report_must_be_an_object")
 
-    assessment["schema"] = report.get("schema") if isinstance(report.get("schema"), str) else None
+    assessment["schema"] = (
+        report.get("schema") if isinstance(report.get("schema"), str) else None
+    )
     target = _object(report.get("target"))
     checks = _object(report.get("checks"))
     cleanup = _object(report.get("cleanup"))
 
     validated_version = target.get("modelrig_version")
     worker_version = target.get("worker_version")
+    planner_model = target.get("planner_model")
+    declared_decision = target.get("write_decision")
     assessment["validated_version"] = (
         validated_version if isinstance(validated_version, str) else None
     )
     assessment["planner_model"] = (
-        target.get("planner_model") if isinstance(target.get("planner_model"), str) else None
+        planner_model.strip()
+        if isinstance(planner_model, str) and planner_model.strip()
+        else None
     )
     assessment["write_decision"] = (
-        target.get("write_decision") if target.get("write_decision") in {"deny", "approve"} else None
+        declared_decision if declared_decision in {"deny", "approve"} else None
     )
 
     structural_reasons: list[str] = []
@@ -149,6 +159,10 @@ def assess_report(
         structural_reasons.append("worker_version_missing")
     elif isinstance(validated_version, str) and worker_version != validated_version:
         structural_reasons.append("backend_worker_version_mismatch")
+    if assessment["planner_model"] is None:
+        structural_reasons.append("planner_model_missing")
+    if assessment["write_decision"] is None:
+        structural_reasons.append("write_decision_invalid")
 
     finished = _parse_timestamp(report.get("finished_at"))
     if finished is None:
@@ -232,10 +246,17 @@ def assess_report(
     )
 
     write = _object(checks.get("write_confirmation"))
-    decision = write.get("decision")
+    actual_decision = write.get("decision")
+    if (
+        assessment["write_decision"] is not None
+        and actual_decision != assessment["write_decision"]
+    ):
+        structural_reasons.append("write_decision_mismatch")
+    decision_matches = actual_decision == assessment["write_decision"]
     write_events = _strings(write.get("event_kinds"))
     denied_path = (
-        decision == "deny"
+        decision_matches
+        and actual_decision == "deny"
         and write.get("state") == "cancelled"
         and write.get("mutation_expected") is False
         and _ordered_contains(
@@ -251,7 +272,8 @@ def assess_report(
         and "step_succeeded" not in write_events
     )
     approved_path = (
-        decision == "approve"
+        decision_matches
+        and actual_decision == "approve"
         and write.get("state") == "completed"
         and write.get("mutation_expected") is True
         and _ordered_contains(
@@ -341,57 +363,39 @@ def evaluate_configured_report(
     assessment = _base_assessment(max_age_hours or DEFAULT_MAX_AGE_HOURS)
     assessment["current_version"] = current_version
     if age_error:
-        assessment["reasons"] = [age_error]
-        assessment["write_pilot_reasons"] = [age_error]
-        return assessment
+        return _finish_blocked(assessment, age_error)
 
     raw_path = (env.get("KALIV_AGENT3_VALIDATION_REPORT") or "").strip()
     if not raw_path:
-        assessment["reasons"] = ["report_path_not_configured"]
-        assessment["write_pilot_reasons"] = list(assessment["reasons"])
-        return assessment
+        return _finish_blocked(assessment, "report_path_not_configured")
 
     assessment["configured"] = True
     path = Path(raw_path).expanduser()
     if path.is_symlink():
-        assessment["reasons"] = ["report_symlink_not_allowed"]
-        assessment["write_pilot_reasons"] = list(assessment["reasons"])
-        return assessment
+        return _finish_blocked(assessment, "report_symlink_not_allowed")
     if not path.is_file():
-        assessment["reasons"] = ["report_not_found"]
-        assessment["write_pilot_reasons"] = list(assessment["reasons"])
-        return assessment
+        return _finish_blocked(assessment, "report_not_found")
 
     assessment["present"] = True
     try:
         size = path.stat().st_size
     except OSError:
-        assessment["reasons"] = ["report_stat_failed"]
-        assessment["write_pilot_reasons"] = list(assessment["reasons"])
-        return assessment
+        return _finish_blocked(assessment, "report_stat_failed")
     if size <= 0:
-        assessment["reasons"] = ["report_empty"]
-        assessment["write_pilot_reasons"] = list(assessment["reasons"])
-        return assessment
+        return _finish_blocked(assessment, "report_empty")
     if size > MAX_REPORT_BYTES:
-        assessment["reasons"] = ["report_too_large"]
-        assessment["write_pilot_reasons"] = list(assessment["reasons"])
-        return assessment
+        return _finish_blocked(assessment, "report_too_large")
 
     try:
         raw = path.read_bytes()
     except OSError:
-        assessment["reasons"] = ["report_read_failed"]
-        assessment["write_pilot_reasons"] = list(assessment["reasons"])
-        return assessment
+        return _finish_blocked(assessment, "report_read_failed")
     digest = hashlib.sha256(raw).hexdigest()
     try:
         report = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
         assessment["report_sha256"] = digest
-        assessment["reasons"] = ["report_invalid_json"]
-        assessment["write_pilot_reasons"] = list(assessment["reasons"])
-        return assessment
+        return _finish_blocked(assessment, "report_invalid_json")
 
     return assess_report(
         report,
