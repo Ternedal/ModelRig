@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from .memory import MemoryConflict, MemoryNotFound, MemoryRecord, MemoryStore, MemoryStoreError
+from .memory_context import ContextTarget, MemoryContextCompiler
 
 
 class CreateMemoryReq(BaseModel):
@@ -25,6 +26,14 @@ class CorrectMemoryReq(BaseModel):
     sensitivity: str | None = Field(default=None, pattern="^(public|operational|private)$")
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     expires_at: float | None = None
+
+
+class ContextPreviewReq(BaseModel):
+    target: str = Field(default="local", pattern="^(local|cloud)$")
+    allow_private_cloud: bool = False
+    subjects: list[str] = Field(default_factory=list, max_length=50)
+    max_chars: int = Field(default=12_000, ge=0, le=50_000)
+    max_records: int = Field(default=50, ge=0, le=200)
 
 
 def _source_ref(request: Request) -> str:
@@ -50,6 +59,7 @@ def _raise(exc: Exception) -> None:
 
 def build_memory_router(store: MemoryStore) -> APIRouter:
     router = APIRouter(prefix="/experimental/agent3/memory", tags=["experimental-agent3-memory"])
+    compiler = MemoryContextCompiler()
 
     @router.get("")
     def list_memories(
@@ -104,6 +114,44 @@ def build_memory_router(store: MemoryStore) -> APIRouter:
         except MemoryStoreError as exc:
             _raise(exc)
         return {"memories": [_payload(record) for record in records]}
+
+    @router.post("/context-preview")
+    def preview_context(req: ContextPreviewReq) -> dict[str, Any]:
+        # Preview is transparent and side-effect free: it returns the exact block
+        # that a future caller could choose to pass to a model, but never calls a
+        # model itself. Secret records are excluded before compilation.
+        try:
+            records = store.list(
+                review_status="confirmed",
+                lifecycle_status="active",
+                include_expired=False,
+                include_secret=False,
+                limit=500,
+            )
+        except MemoryStoreError as exc:
+            _raise(exc)
+        if req.subjects:
+            subjects = {subject.strip() for subject in req.subjects if subject.strip()}
+            if len(subjects) != len(req.subjects):
+                raise HTTPException(status_code=422, detail="subjects must be unique non-empty strings")
+            records = [record for record in records if record.subject in subjects]
+        context = compiler.compile(
+            records,
+            target=ContextTarget(req.target),
+            allow_private_cloud=req.allow_private_cloud,
+            max_chars=req.max_chars,
+            max_records=req.max_records,
+        )
+        return {
+            "target": context.target.value,
+            "allow_private_cloud": req.allow_private_cloud,
+            "candidate_count": len(records),
+            "included_ids": list(context.included_ids),
+            "excluded_ids": list(context.excluded_ids),
+            "character_count": context.character_count,
+            "text": context.text,
+            "sent_to_model": False,
+        }
 
     @router.get("/{memory_id}")
     def get_memory(memory_id: str) -> dict[str, Any]:
