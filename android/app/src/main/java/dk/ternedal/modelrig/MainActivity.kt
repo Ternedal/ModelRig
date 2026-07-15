@@ -4,8 +4,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.remember
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import dk.ternedal.modelrig.data.TokenStore
+import dk.ternedal.modelrig.ui.Agent3Screen
 import dk.ternedal.modelrig.ui.AppUi
+import dk.ternedal.modelrig.ui.theme.ModelRigTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -15,6 +19,27 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { AppUi() }
+
+        // Developer-only Agent 3.0 entry. The launcher sends no such extra, so
+        // normal users always get AppUi exactly as before. ADB can open the draft
+        // explicitly without exporting a second activity:
+        //
+        // adb shell am start -S -n dk.ternedal.modelrig/.MainActivity \
+        //   --ez dk.ternedal.modelrig.extra.AGENT3 true
+        val openAgent3 = intent?.getBooleanExtra(EXTRA_AGENT3, false) == true
+        setContent {
+            if (openAgent3) {
+                val store = remember { TokenStore(this) }
+                ModelRigTheme(dark = store.darkMode) {
+                    Agent3Screen(store = store, onClose = { finish() })
+                }
+            } else {
+                AppUi()
+            }
+        }
+    }
+
+    companion object {
+        const val EXTRA_AGENT3 = "dk.ternedal.modelrig.extra.AGENT3"
     }
 }
