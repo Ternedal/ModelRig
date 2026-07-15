@@ -22,6 +22,7 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
@@ -56,7 +57,8 @@ class Client:
         except urllib.error.HTTPError as exc:
             raw = exc.read().decode("utf-8", errors="replace")
             try:
-                detail = json.loads(raw).get("detail") or json.loads(raw).get("error") or raw
+                parsed = json.loads(raw)
+                detail = parsed.get("detail") or parsed.get("error") or raw
             except json.JSONDecodeError:
                 detail = raw
             raise SmokeError(f"{method} {path} returned HTTP {exc.code}: {detail}") from exc
