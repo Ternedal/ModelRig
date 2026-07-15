@@ -59,16 +59,14 @@ class MemoryRecord:
 class MemoryStore:
     """Local, user-controlled Agent 3.0 memory with provenance and versioning.
 
-    This module is deliberately storage-only. It does not call an LLM, inject
-    memories into prompts, expose an HTTP API, or send anything to cloud.
+    Storage only: this module does not call an LLM, build prompts, expose HTTP,
+    or send data to cloud.
 
-    Rules:
     - explicit user memories default to confirmed;
     - inferred/imported/tool-observed memories default to pending;
     - corrections create a new row and supersede the old row atomically;
-    - deletion keeps only a content-free tombstone, not the original value;
-    - pending/rejected/expired/deleted/secret records are excluded from normal
-      context retrieval unless the caller explicitly opts into the relevant class.
+    - deletion erases value/source provenance and leaves a tombstone;
+    - normal context excludes pending, rejected, expired, deleted and secret rows.
     """
 
     def __init__(self, path: str):
@@ -105,7 +103,7 @@ class MemoryStore:
         )
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_agent_memories_lookup "
-            "ON agent_memories(subject, predicate, lifecycle_status, review_status)"
+            "ON agent_memories(subject,predicate,lifecycle_status,review_status)"
         )
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_agent_memories_updated "
@@ -143,22 +141,11 @@ class MemoryStore:
             review_status=review_status,
             expires_at=expires_at,
         )
-        with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
-                record = self._insert_locked(**fields)
-                self._conn.commit()
-                return record
-            except Exception:
-                self._conn.rollback()
-                raise
+        with self._transaction():
+            return self._insert_locked(**fields)
 
     def get(self, memory_id: str, *, include_deleted: bool = False) -> MemoryRecord:
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM agent_memories WHERE id=?",
-                (self._clean_id(memory_id),),
-            ).fetchone()
+        row = self._row_by_id(memory_id)
         if row is None or (row["lifecycle_status"] == "deleted" and not include_deleted):
             raise MemoryNotFound("memory not found")
         return self._record(row)
@@ -170,30 +157,24 @@ class MemoryStore:
         return self._set_review(memory_id, expected="pending", target="rejected")
 
     def _set_review(self, memory_id: str, *, expected: str, target: str) -> MemoryRecord:
-        now = time.time()
-        with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
-                row = self._conn.execute(
-                    "SELECT * FROM agent_memories WHERE id=?",
-                    (self._clean_id(memory_id),),
-                ).fetchone()
-                if row is None or row["lifecycle_status"] != "active":
-                    raise MemoryNotFound("active memory not found")
-                if row["review_status"] != expected:
-                    raise MemoryConflict(f"memory is {row['review_status']}, not {expected}")
+        memory_id = self._clean_id(memory_id)
+        with self._transaction():
+            row = self._conn.execute(
+                "SELECT * FROM agent_memories WHERE id=?", (memory_id,)
+            ).fetchone()
+            if row is None or row["lifecycle_status"] != "active":
+                raise MemoryNotFound("active memory not found")
+            if row["review_status"] != expected:
+                raise MemoryConflict(f"memory is {row['review_status']}, not {expected}")
+            self._conn.execute(
+                "UPDATE agent_memories SET review_status=?,updated_at=? WHERE id=?",
+                (target, time.time(), memory_id),
+            )
+            return self._record(
                 self._conn.execute(
-                    "UPDATE agent_memories SET review_status=?,updated_at=? WHERE id=?",
-                    (target, now, row["id"]),
-                )
-                updated = self._conn.execute(
-                    "SELECT * FROM agent_memories WHERE id=?", (row["id"],)
+                    "SELECT * FROM agent_memories WHERE id=?", (memory_id,)
                 ).fetchone()
-                self._conn.commit()
-                return self._record(updated)
-            except Exception:
-                self._conn.rollback()
-                raise
+            )
 
     def correct(
         self,
@@ -207,63 +188,52 @@ class MemoryStore:
     ) -> MemoryRecord:
         """Create a confirmed user correction and supersede the old version."""
         old_id = self._clean_id(memory_id)
-        with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
-                row = self._conn.execute(
-                    "SELECT * FROM agent_memories WHERE id=?", (old_id,)
-                ).fetchone()
-                if row is None or row["lifecycle_status"] != "active":
-                    raise MemoryNotFound("active memory not found")
-                fields = self._validate_fields(
-                    subject=row["subject"],
-                    predicate=row["predicate"],
-                    value=value,
-                    kind=row["kind"],
-                    sensitivity=sensitivity or row["sensitivity"],
-                    source_type="user_explicit",
-                    source_ref=source_ref,
-                    confidence=confidence,
-                    review_status="confirmed",
-                    expires_at=expires_at,
-                )
-                new_record = self._insert_locked(**fields, supersedes_id=old_id)
-                now = time.time()
-                changed = self._conn.execute(
-                    "UPDATE agent_memories SET lifecycle_status='superseded',updated_at=? "
-                    "WHERE id=? AND lifecycle_status='active'",
-                    (now, old_id),
-                ).rowcount
-                if changed != 1:
-                    raise MemoryConflict("memory changed while correction was being created")
-                self._conn.commit()
-                return new_record
-            except Exception:
-                self._conn.rollback()
-                raise
+        with self._transaction():
+            row = self._conn.execute(
+                "SELECT * FROM agent_memories WHERE id=?", (old_id,)
+            ).fetchone()
+            if row is None or row["lifecycle_status"] != "active":
+                raise MemoryNotFound("active memory not found")
+            fields = self._validate_fields(
+                subject=row["subject"],
+                predicate=row["predicate"],
+                value=value,
+                kind=row["kind"],
+                sensitivity=sensitivity or row["sensitivity"],
+                source_type="user_explicit",
+                source_ref=source_ref,
+                confidence=confidence,
+                review_status="confirmed",
+                expires_at=expires_at,
+            )
+            replacement = self._insert_locked(**fields, supersedes_id=old_id)
+            changed = self._conn.execute(
+                "UPDATE agent_memories SET lifecycle_status='superseded',updated_at=? "
+                "WHERE id=? AND lifecycle_status='active'",
+                (time.time(), old_id),
+            ).rowcount
+            if changed != 1:
+                raise MemoryConflict("memory changed while correction was being created")
+            return replacement
 
     def delete(self, memory_id: str) -> MemoryRecord:
-        """Erase content and retain only a non-sensitive tombstone."""
+        """Erase value/source provenance and retain a content-free lifecycle tombstone."""
+        memory_id = self._clean_id(memory_id)
         now = time.time()
-        with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
-                changed = self._conn.execute(
-                    "UPDATE agent_memories SET value='',source_ref=NULL,review_status='rejected',"
-                    "lifecycle_status='deleted',updated_at=?,deleted_at=? "
-                    "WHERE id=? AND lifecycle_status!='deleted'",
-                    (now, now, self._clean_id(memory_id)),
-                ).rowcount
-                if changed != 1:
-                    raise MemoryNotFound("memory not found")
-                row = self._conn.execute(
+        with self._transaction():
+            changed = self._conn.execute(
+                "UPDATE agent_memories SET value='',source_ref=NULL,review_status='rejected',"
+                "lifecycle_status='deleted',updated_at=?,deleted_at=? "
+                "WHERE id=? AND lifecycle_status!='deleted'",
+                (now, now, memory_id),
+            ).rowcount
+            if changed != 1:
+                raise MemoryNotFound("memory not found")
+            return self._record(
+                self._conn.execute(
                     "SELECT * FROM agent_memories WHERE id=?", (memory_id,)
                 ).fetchone()
-                self._conn.commit()
-                return self._record(row)
-            except Exception:
-                self._conn.rollback()
-                raise
+            )
 
     def list(
         self,
@@ -285,13 +255,11 @@ class MemoryStore:
             clauses.append("predicate=?")
             params.append(self._clean_text("predicate", predicate, 200))
         if review_status is not None:
-            self._choice("review_status", review_status, REVIEW_STATES)
             clauses.append("review_status=?")
-            params.append(review_status)
+            params.append(self._choice("review_status", review_status, REVIEW_STATES))
         if lifecycle_status is not None:
-            self._choice("lifecycle_status", lifecycle_status, LIFECYCLE_STATES)
             clauses.append("lifecycle_status=?")
-            params.append(lifecycle_status)
+            params.append(self._choice("lifecycle_status", lifecycle_status, LIFECYCLE_STATES))
         if not include_expired:
             clauses.append("(expires_at IS NULL OR expires_at>?)")
             params.append(time.time())
@@ -346,12 +314,14 @@ class MemoryStore:
         limit: int = 50,
         max_chars: int = 12_000,
     ) -> list[MemoryRecord]:
-        """Return only active, confirmed, unexpired records for local context.
+        """Return bounded active/confirmed/unexpired records for local context.
 
-        The caller receives typed records rather than a prebuilt prompt, so prompt
-        delimiting and injection handling remain an explicit responsibility of the
-        future context compiler.
+        Records are returned as typed values rather than prompt text. Oversized
+        records are skipped; even the first candidate may never break max_chars.
         """
+        budget = max(0, int(max_chars))
+        if budget == 0:
+            return []
         clauses = [
             "lifecycle_status='active'",
             "review_status='confirmed'",
@@ -380,8 +350,8 @@ class MemoryStore:
         for row in rows:
             record = self._record(row)
             size = len(record.subject) + len(record.predicate) + len(record.value)
-            if result and used + size > max(1, int(max_chars)):
-                break
+            if used + size > budget:
+                continue
             result.append(record)
             used += size
         return result
@@ -439,10 +409,11 @@ class MemoryStore:
                 None,
             ),
         )
-        row = self._conn.execute(
-            "SELECT * FROM agent_memories WHERE id=?", (memory_id,)
-        ).fetchone()
-        return self._record(row)
+        return self._record(
+            self._conn.execute(
+                "SELECT * FROM agent_memories WHERE id=?", (memory_id,)
+            ).fetchone()
+        )
 
     def _validate_fields(
         self,
@@ -482,13 +453,39 @@ class MemoryStore:
             "kind": kind,
             "sensitivity": sensitivity,
             "source_type": source_type,
-            "source_ref": None
-            if source_ref is None
-            else self._clean_text("source_ref", source_ref, 1000),
+            "source_ref": None if source_ref is None else self._clean_text("source_ref", source_ref, 1000),
             "confidence": confidence,
             "review_status": review_status,
             "expires_at": expires_at,
         }
+
+    def _row_by_id(self, memory_id: str) -> sqlite3.Row | None:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT * FROM agent_memories WHERE id=?", (self._clean_id(memory_id),)
+            ).fetchone()
+
+    class _Transaction:
+        def __init__(self, store: "MemoryStore"):
+            self.store = store
+
+        def __enter__(self):
+            self.store._lock.acquire()
+            self.store._conn.execute("BEGIN IMMEDIATE")
+            return self
+
+        def __exit__(self, exc_type, _exc, _tb):
+            try:
+                if exc_type is None:
+                    self.store._conn.commit()
+                else:
+                    self.store._conn.rollback()
+            finally:
+                self.store._lock.release()
+            return False
+
+    def _transaction(self) -> "MemoryStore._Transaction":
+        return self._Transaction(self)
 
     @staticmethod
     def _clean_text(name: str, value: Any, maximum: int) -> str:
