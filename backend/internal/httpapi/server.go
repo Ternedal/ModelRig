@@ -96,6 +96,7 @@ func (s *server) routes() {
 	if os.Getenv("KALIV_AGENT3_ENABLED") == "1" {
 		s.mux.Handle("GET /api/v1/experimental/agent3/status", s.authMW(http.HandlerFunc(s.handleAgent3Status)))
 		s.mux.Handle("POST /api/v1/experimental/agent3/plan", s.authMW(http.HandlerFunc(s.handleAgent3Plan)))
+		s.mux.Handle("POST /api/v1/experimental/agent3/plans/{id}/start", s.authMW(http.HandlerFunc(s.handleAgent3PlanStart)))
 		s.mux.Handle("GET /api/v1/experimental/agent3/runs", s.authMW(http.HandlerFunc(s.handleAgent3RunsList)))
 		s.mux.Handle("POST /api/v1/experimental/agent3/runs", s.authMW(http.HandlerFunc(s.handleAgent3RunsStart)))
 		s.mux.Handle("GET /api/v1/experimental/agent3/runs/{id}", s.authMW(http.HandlerFunc(s.handleAgent3RunGet)))
