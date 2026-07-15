@@ -26,6 +26,40 @@ def _is_loopback(host: str) -> bool:
         return host == "localhost"
 
 
+def _mount_optional_agent3() -> bool:
+    """Mount the dormant Agent 3.0 draft only after explicit operator opt-in.
+
+    Imports stay inside the feature branch so the ordinary worker creates no
+    Agent 3.0 databases or routes when KALIV_AGENT3_ENABLED is unset. The import
+    statements remain statically visible to PyInstaller, so the release worker
+    can be tested on the rig without a separate Python environment.
+    """
+    if os.getenv("KALIV_AGENT3_ENABLED", "0") != "1":
+        return False
+    if getattr(app.state, "agent3_planner_mounted", False):
+        return True
+
+    from app import paths as app_paths
+    from app.agent3.api import mount_agent3
+    from app.agent3.integration import V2ToolAdapter
+    from app.agent3.plan_store import PlanStore
+    from app.agent3.planner import build_planner_router
+
+    if not mount_agent3(app):
+        return False
+    adapter = V2ToolAdapter()
+    plan_db = app_paths.resolve("./kaliv-agent3-plans.db", env="KALIV_AGENT3_PLAN_DB")
+    app.include_router(
+        build_planner_router(
+            adapter,
+            orchestrator=app.state.agent3_orchestrator,
+            plan_store=PlanStore(plan_db),
+        )
+    )
+    app.state.agent3_planner_mounted = True
+    return True
+
+
 if __name__ == "__main__":
     host = os.getenv("MODELRIG_WORKER_HOST", "127.0.0.1")
     # The worker has no auth and is meant to be reached only by the backend on the
@@ -38,6 +72,7 @@ if __name__ == "__main__":
             "same machine. Set KALIV_WORKER_ALLOW_LAN=1 to override.\n"
         )
         sys.exit(1)
+    _mount_optional_agent3()
     uvicorn.run(
         app,
         host=host,
