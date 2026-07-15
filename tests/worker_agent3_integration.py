@@ -162,7 +162,13 @@ private_ok = orch.start_with_steps(
     adapter.build_steps([PlannedToolCall("list_documents", {})], private_route, "conv-4"),
     allow_private_cloud=True,
 )
-check(private_ok.state == RunState.COMPLETED, "explicit private-cloud consent allows the read")
+check(
+    private_ok.state == RunState.WAITING_CONFIRMATION,
+    "private-cloud consent still requires a concrete tool confirmation",
+)
+private_step = private_ok.steps[0]
+private_ok = orch.confirm(private_ok.id, private_step.id, "approve", private_step.confirmation_digest)
+check(private_ok.state == RunState.COMPLETED, "approved private cloud read completes")
 
 proactive = orch.start_with_steps(
     TurnRequest("proaktiv", mode="rig", tools=True),
