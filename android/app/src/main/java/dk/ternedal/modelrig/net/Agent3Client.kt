@@ -1,0 +1,206 @@
+package dk.ternedal.modelrig.net
+
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.concurrent.TimeUnit
+
+/** Experimental Agent 3.0 API client. Not wired into AppUi yet. */
+class Agent3Client(baseUrl: String, private val token: String) {
+    private val base = baseUrl.trimEnd('/')
+    private val jsonType = "application/json".toMediaType()
+    private val http = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        // Plan preview may cold-load the local planner model.
+        .readTimeout(5, TimeUnit.MINUTES)
+        .build()
+
+    data class Step(
+        val id: String?,
+        val tool: String,
+        val args: String,
+        val risk: String,
+        val sensitivity: String,
+        val egress: String,
+        val summary: String,
+        val state: String?,
+        val confirmationDigest: String?,
+        val confirmationExpiresAt: Double?,
+        val error: String?,
+    )
+
+    data class PlanPreview(
+        val planId: String?,
+        val expiresInSeconds: Int?,
+        val routeKind: String,
+        val rationale: String,
+        val steps: List<Step>,
+        val executed: Boolean,
+    )
+
+    data class Run(
+        val id: String,
+        val state: String,
+        val routeKind: String,
+        val currentStep: Int,
+        val steps: List<Step>,
+        val answer: String?,
+        val error: String?,
+    )
+
+    data class Event(
+        val timestamp: Double,
+        val kind: String,
+        val payload: String,
+    )
+
+    fun previewPlan(
+        message: String,
+        mode: String = "rig",
+        rag: Boolean = false,
+        allowRagCloud: Boolean = false,
+        allowPrivateCloud: Boolean = false,
+        cloudReady: Boolean = false,
+        conversationId: String? = null,
+        plannerModel: String? = null,
+        proactive: Boolean = false,
+    ): PlanPreview {
+        val payload = JSONObject()
+            .put("message", message)
+            .put("mode", mode)
+            .put("rag", rag)
+            .put("allow_rag_cloud", allowRagCloud)
+            .put("allow_private_cloud", allowPrivateCloud)
+            .put("cloud_ready", cloudReady)
+            .put("proactive", proactive)
+        conversationId?.let { payload.put("conversation_id", it) }
+        plannerModel?.let { payload.put("planner_model", it) }
+        val root = post("/api/v1/experimental/agent3/plan", payload)
+        return PlanPreview(
+            planId = root.nullableString("plan_id"),
+            expiresInSeconds = root.nullableInt("expires_in_seconds"),
+            routeKind = root.optJSONObject("route")?.optString("kind").orEmpty(),
+            rationale = root.optString("rationale"),
+            steps = parseSteps(root.optJSONArray("plan") ?: JSONArray()),
+            executed = root.optBoolean("executed", false),
+        )
+    }
+
+    fun startPlan(planId: String): Run {
+        val root = post("/api/v1/experimental/agent3/plans/$planId/start", JSONObject())
+        return parseRun(root.requireObject("run"))
+    }
+
+    fun getRun(runId: String): Run {
+        val root = get("/api/v1/experimental/agent3/runs/$runId")
+        return parseRun(root.requireObject("run"))
+    }
+
+    fun listRuns(): List<Run> {
+        val arr = get("/api/v1/experimental/agent3/runs").optJSONArray("runs") ?: JSONArray()
+        return buildList {
+            for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { add(parseRun(it)) }
+        }
+    }
+
+    fun events(runId: String): List<Event> {
+        val arr = get("/api/v1/experimental/agent3/runs/$runId/events")
+            .optJSONArray("events") ?: JSONArray()
+        return buildList {
+            for (i in 0 until arr.length()) {
+                val e = arr.optJSONObject(i) ?: continue
+                add(Event(e.optDouble("ts"), e.optString("kind"), e.opt("payload")?.toString().orEmpty()))
+            }
+        }
+    }
+
+    fun confirm(runId: String, stepId: String, digest: String, approve: Boolean): Run {
+        val payload = JSONObject()
+            .put("step_id", stepId)
+            .put("digest", digest)
+            .put("decision", if (approve) "approve" else "deny")
+        val root = post("/api/v1/experimental/agent3/runs/$runId/confirm", payload)
+        return parseRun(root.requireObject("run"))
+    }
+
+    fun resume(runId: String): Run {
+        val root = post("/api/v1/experimental/agent3/runs/$runId/resume", JSONObject())
+        return parseRun(root.requireObject("run"))
+    }
+
+    fun cancel(runId: String): Run {
+        val root = post("/api/v1/experimental/agent3/runs/$runId/cancel", JSONObject())
+        return parseRun(root.requireObject("run"))
+    }
+
+    private fun get(path: String): JSONObject = execute(
+        Request.Builder().url(base + path).get().header("Authorization", "Bearer $token").build(),
+    )
+
+    private fun post(path: String, payload: JSONObject): JSONObject = execute(
+        Request.Builder()
+            .url(base + path)
+            .post(payload.toString().toRequestBody(jsonType))
+            .header("Authorization", "Bearer $token")
+            .build(),
+    )
+
+    private fun execute(request: Request): JSONObject {
+        http.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                val detail = runCatching { JSONObject(text).optString("error") }
+                    .getOrNull()?.ifBlank { null } ?: text.take(500)
+                throw ModelRigException("Agent 3.0 failed (${response.code}): $detail")
+            }
+            return runCatching { JSONObject(text) }
+                .getOrElse { throw ModelRigException("Agent 3.0 returned invalid JSON") }
+        }
+    }
+
+    private fun parseRun(o: JSONObject): Run = Run(
+        id = o.optString("id"),
+        state = o.optString("state"),
+        routeKind = o.optJSONObject("route")?.optString("kind").orEmpty(),
+        currentStep = o.optInt("current_step"),
+        steps = parseSteps(o.optJSONArray("steps") ?: JSONArray()),
+        answer = o.nullableString("answer"),
+        error = o.nullableString("error"),
+    )
+
+    private fun parseSteps(arr: JSONArray): List<Step> = buildList {
+        for (i in 0 until arr.length()) {
+            val s = arr.optJSONObject(i) ?: continue
+            add(
+                Step(
+                    id = s.nullableString("id"),
+                    tool = s.optString("tool"),
+                    args = s.optJSONObject("args")?.toString() ?: "{}",
+                    risk = s.optString("risk"),
+                    sensitivity = s.optString("sensitivity"),
+                    egress = s.optString("egress"),
+                    summary = s.optString("summary"),
+                    state = s.nullableString("state"),
+                    confirmationDigest = s.nullableString("confirmation_digest"),
+                    confirmationExpiresAt = s.nullableDouble("confirmation_expires_at"),
+                    error = s.nullableString("error"),
+                )
+            )
+        }
+    }
+
+    private fun JSONObject.requireObject(name: String): JSONObject =
+        optJSONObject(name) ?: throw ModelRigException("Agent 3.0 response missing '$name'")
+
+    private fun JSONObject.nullableString(name: String): String? =
+        if (!has(name) || isNull(name)) null else optString(name).ifBlank { null }
+
+    private fun JSONObject.nullableInt(name: String): Int? =
+        if (!has(name) || isNull(name)) null else optInt(name)
+
+    private fun JSONObject.nullableDouble(name: String): Double? =
+        if (!has(name) || isNull(name)) null else optDouble(name)
+}
