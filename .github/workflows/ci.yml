@@ -38,7 +38,7 @@ jobs:
         working-directory: android
         run: |
           echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
-          ./gradlew :app:compileDebugKotlin --no-daemon --console=plain
+          ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest --no-daemon --console=plain
 
   desktop-compile:
     runs-on: ubuntu-latest
