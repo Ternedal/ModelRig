@@ -22,6 +22,11 @@ func agent3RunTarget(r *http.Request, suffix string) string {
 	return agent3Target(r, "/experimental/agent3/runs/"+id+suffix)
 }
 
+func agent3PlanTarget(r *http.Request) string {
+	id := url.PathEscape(r.PathValue("id"))
+	return agent3Target(r, "/experimental/agent3/plans/"+id+"/start")
+}
+
 func (s *server) handleAgent3Status(w http.ResponseWriter, r *http.Request) {
 	s.Worker.Forward(w, r, agent3Target(r, "/experimental/agent3/status"))
 }
@@ -29,6 +34,11 @@ func (s *server) handleAgent3Status(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleAgent3Plan(w http.ResponseWriter, r *http.Request) {
 	// Planning invokes the local LLM but never executes a tool.
 	s.WorkerSlow.Forward(w, r, agent3Target(r, "/experimental/agent3/plan"))
+}
+
+func (s *server) handleAgent3PlanStart(w http.ResponseWriter, r *http.Request) {
+	// A reviewed single-use plan may immediately run reads or park on a write.
+	s.WorkerSlow.Forward(w, r, agent3PlanTarget(r))
 }
 
 func (s *server) handleAgent3RunsList(w http.ResponseWriter, r *http.Request) {
