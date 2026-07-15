@@ -23,8 +23,8 @@ android {
         applicationId = "dk.ternedal.modelrig"
         minSdk = 26
         targetSdk = 35
-        versionCode = 167          // monotonic, bumped every release (not tied to semver)
-        versionName = "1.58.37"
+        versionCode = 168          // monotonic, bumped every release (not tied to semver)
+        versionName = "1.58.38"
     }
 
     signingConfigs {
@@ -59,6 +59,7 @@ android {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     val composeBom = platform("androidx.compose:compose-bom:2024.09.03")
     implementation(composeBom)
     implementation("androidx.compose.material3:material3")

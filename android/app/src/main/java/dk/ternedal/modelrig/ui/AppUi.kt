@@ -41,6 +41,8 @@ import dk.ternedal.modelrig.R
 import dk.ternedal.modelrig.data.ChatDb
 import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.net.CloudClient
+import dk.ternedal.modelrig.logic.TurnInput
+import dk.ternedal.modelrig.logic.TurnRouter
 import dk.ternedal.modelrig.net.ModelRigClient
 import dk.ternedal.modelrig.ui.theme.*
 import kotlinx.coroutines.Dispatchers
@@ -1040,8 +1042,12 @@ private fun ChatScreen(
         // Allow an image-only turn (vision: "describe this" with no text).
         if ((t.isEmpty() && pendingImageB64 == null) || busy) return@onSend
         messages.add(Msg("user", t)); input = ""; busy = true
-        val useCloud = mode == "cloud"
-        val useRag = mode == "rig" && ragMode
+        // Route decision comes from the ONE table-tested router (see
+        // TurnRouter) -- the retry path derives its flags from the same place,
+        // so send and retry cannot diverge again.
+        val turnPlan = TurnRouter.plan(TurnInput(mode, toolsMode, ragMode, store.cloudKey != null, allowRagCloud))
+        val useCloud = turnPlan.useCloud
+        val useRag = turnPlan.useRag
         val sys = (if (useCloud) store.cloudSystem else store.rigSystem).trim()
         val convo = messages.filter { !it.error }.map { it.role to it.text }
         val history = trimHistory(sys, convo)
@@ -1092,12 +1098,12 @@ private fun ChatScreen(
             // model THROUGH the rig, because that is where the gate lives. The
             // app's direct CloudClient path has no tools at all: nothing to
             // bypass, since the tool layer simply isn't on that road.
-            val useTools = toolsMode && (mode == "rig" || (mode == "cloud" && store.cloudKey != null))
+            val useTools = turnPlan.useTools
             // RAG and Tools compose: documents ground the answer, and the model
             // may still propose an action about them. Retrieval runs against the
             // rig's index; sending those chunks to a CLOUD model is gated behind
             // the D4 consent toggle (allowRagCloud), off by default.
-            val toolsWithRag = useTools && ragMode && (mode == "rig" || allowRagCloud)
+            val toolsWithRag = turnPlan.toolsWithRag
             var proposal: dk.ternedal.modelrig.net.ToolTurn? = null
             val err = withContext(Dispatchers.IO) {
                 runCatching {
@@ -1219,14 +1225,15 @@ private fun ChatScreen(
         val userMsg = messages.getOrNull(i - 1) ?: return@retry
         if (userMsg.role != "user") return@retry
         val t = userMsg.text
-        val useCloud = mode == "cloud"
-        val useRag = mode == "rig" && ragMode
-        // A retry must not silently change what the turn MEANS (audit P1-1):
-        // the original send had a tools branch, so the retry gets the same one
-        // -- same gate, same probe, same semantics. Only the image is gone
-        // (consumed by the original turn).
-        val useTools = toolsMode && (mode == "rig" || (mode == "cloud" && store.cloudKey != null))
-        val toolsWithRag = useTools && ragMode && (mode == "rig" || allowRagCloud)
+        // ONE router for send + retry (audit P1-1 -> 1.58.38): the retry can
+        // no longer diverge from the original turn's route -- the decision
+        // lives in TurnRouter and is table-tested on the JVM. Only the image
+        // is gone (consumed by the original turn).
+        val turnPlan = TurnRouter.plan(TurnInput(mode, toolsMode, ragMode, store.cloudKey != null, allowRagCloud))
+        val useCloud = turnPlan.useCloud
+        val useRag = turnPlan.useRag
+        val useTools = turnPlan.useTools
+        val toolsWithRag = turnPlan.toolsWithRag
         val sys = (if (useCloud) store.cloudSystem else store.rigSystem).trim()
         val convo = messages.filterIndexed { idx2, mm -> idx2 != i && !mm.error }.map { it.role to it.text }
         val history = trimHistory(sys, convo)

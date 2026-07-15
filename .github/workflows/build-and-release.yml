@@ -131,6 +131,12 @@ jobs:
       - name: Install platform + build-tools
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
+      - name: Unit tests (JVM)
+        working-directory: android
+        run: |
+          echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
+          ./gradlew :app:testDebugUnitTest --no-daemon --console=plain
+
       - name: Build release APK
         working-directory: android
         run: |
