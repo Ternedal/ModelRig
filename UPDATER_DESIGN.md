@@ -59,6 +59,17 @@ atomisk med `os.Mkdir` (fejler hvis den findes) — ingen check-then-act-race.
 
 ## 3. Implementeret i 1.58.29–1.58.30 (verificeret)
 
+**1.58.36 (fail-closed efter 1.58.35-audit):**
+- **Rollback bevises før den erklæres:** `rolled_back` arkiveres først når den
+  GAMLE runtime er bevist oppe (backend+worker-versioner + fremadskridende
+  supervisor-heartbeat). Ubevist → journal beholdes som `manual_recovery`;
+  næste kørsel re-restorer idempotent. En nede-rig kan ikke bære en journal
+  der påstår rollbacken lykkedes.
+- **Tvetydig journal stopper apparatet, ikke kun updateren:** korrupt/
+  konfliktende journal-evidens stopper task + processer konservativt FØR
+  fail-closed — en muligvis mid-verify runtime kører ikke videre med ukendt
+  status. Ingen automatisk genstart på ukendt tilstand.
+
 **1.58.31 (fail-closed efter 1.58.30-audit):**
 - **Ulæselig journal = fail closed:** main behandler ikke længere en korrupt/
   ulæselig journal som "ingen journal" — updateren stopper før per-fil-recovery
