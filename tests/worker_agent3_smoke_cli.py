@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -10,6 +11,10 @@ from pathlib import Path
 spec = importlib.util.spec_from_file_location("agent3_smoke", Path("scripts/agent3_smoke.py"))
 assert spec and spec.loader
 smoke = importlib.util.module_from_spec(spec)
+# dataclasses resolves postponed annotations through sys.modules while the class
+# decorator runs. Register the dynamically loaded module before exec_module,
+# exactly as Python's normal import machinery does.
+sys.modules[spec.name] = smoke
 spec.loader.exec_module(smoke)
 
 
