@@ -15,8 +15,10 @@ import sys
 import uvicorn
 
 from app.main import app
+from app import paths as app_paths
 from app.agent3.api import mount_agent3
 from app.agent3.integration import V2ToolAdapter
+from app.agent3.plan_store import PlanStore
 from app.agent3.planner import build_planner_router
 
 
@@ -36,9 +38,17 @@ if __name__ == "__main__":
         )
         sys.exit(1)
     if mount_agent3(app):
-        # Plan preview is mounted only in this experimental entrypoint. It never
-        # executes tools; it returns a code-validated plan for inspection/start.
-        app.include_router(build_planner_router(V2ToolAdapter()))
+        # Previewed plans are persisted separately, expire quickly and are
+        # single-use. Starting one rechecks the V2 kill switch before execution.
+        adapter = V2ToolAdapter()
+        plan_db = app_paths.resolve("./kaliv-agent3-plans.db", env="KALIV_AGENT3_PLAN_DB")
+        app.include_router(
+            build_planner_router(
+                adapter,
+                orchestrator=app.state.agent3_orchestrator,
+                plan_store=PlanStore(plan_db),
+            )
+        )
     else:
         sys.stderr.write(
             "Agent 3.0 was not mounted because KALIV_AGENT3_ENABLED is not 1. "
