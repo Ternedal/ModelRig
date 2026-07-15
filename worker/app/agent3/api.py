@@ -20,6 +20,7 @@ from .core import (
 )
 from .integration import Agent3PlanError, PlannedToolCall, V2ToolAdapter
 from .routing import StrictTurnRouter
+from .validation_gate import evaluate_configured_report
 
 
 class PlanStepReq(BaseModel):
@@ -92,22 +93,36 @@ def _default_caps(req: StartReq, adapter: V2ToolAdapter) -> CapabilitySnapshot:
     )
 
 
+ValidationProvider = Callable[[], dict[str, Any]]
+
+
 def build_router(
     orchestrator: Agent3Orchestrator,
     adapter: V2ToolAdapter,
     capability_provider: Callable[[StartReq, V2ToolAdapter], CapabilitySnapshot] = _default_caps,
+    validation_provider: ValidationProvider | None = None,
+    worker_version: str | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/experimental/agent3", tags=["experimental-agent3"])
     orchestrator.router = StrictTurnRouter()
+    validation_provider = validation_provider or (
+        lambda: evaluate_configured_report(current_version=worker_version)
+    )
 
     @router.get("/status")
     def status() -> dict[str, Any]:
+        validation = validation_provider()
         return {
             "enabled": True,
             "experimental": True,
             "planner": "explicit-plan-only",
             "production_tools_path_untouched": True,
             "max_steps": orchestrator.max_steps,
+            "worker_version": worker_version,
+            "rig_validation": validation,
+            # Promotion evidence is advisory in this draft. Even a valid report
+            # cannot activate production routing or tool execution by itself.
+            "production_activation": False,
         }
 
     @router.post("/runs")
@@ -253,7 +268,13 @@ def mount_agent3(app: FastAPI) -> bool:
     if getattr(app.state, "agent3_mounted", False):
         return True
     orchestrator, adapter = build_default_runtime()
-    app.include_router(build_router(orchestrator, adapter))
+    app.include_router(
+        build_router(
+            orchestrator,
+            adapter,
+            worker_version=getattr(app, "version", None),
+        )
+    )
     app.state.agent3_mounted = True
     app.state.agent3_orchestrator = orchestrator
     return True
