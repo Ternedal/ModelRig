@@ -25,6 +25,8 @@ func TestAgent3RoutesRequireFeatureFlagAndAuth(t *testing.T) {
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/status", http.StatusNotFound)
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/memory", http.StatusNotFound)
 		assertStatus(t, s.mux, http.MethodDelete, "/api/v1/experimental/agent3/memory/example", http.StatusNotFound)
+		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/runs/example/replans", http.StatusNotFound)
+		assertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/runs/example/replan", http.StatusNotFound)
 	})
 
 	t.Run("flag on still requires bearer auth", func(t *testing.T) {
@@ -35,5 +37,7 @@ func TestAgent3RoutesRequireFeatureFlagAndAuth(t *testing.T) {
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/status", http.StatusUnauthorized)
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/memory", http.StatusUnauthorized)
 		assertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/memory/example/correct", http.StatusUnauthorized)
+		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/runs/example/replans", http.StatusUnauthorized)
+		assertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/runs/example/replan", http.StatusUnauthorized)
 	})
 }
