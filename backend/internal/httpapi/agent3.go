@@ -43,6 +43,11 @@ func (s *server) handleAgent3Status(w http.ResponseWriter, r *http.Request) {
 	s.Worker.Forward(w, r, agent3Target(r, "/experimental/agent3/status"))
 }
 
+func (s *server) handleAgent3Capabilities(w http.ResponseWriter, r *http.Request) {
+	// The graph is observational only: it cannot route, enable tools or promote Agent 3.0.
+	s.Worker.Forward(w, r, agent3Target(r, "/experimental/agent3/capabilities"))
+}
+
 func (s *server) handleAgent3Plan(w http.ResponseWriter, r *http.Request) {
 	// Planning invokes the local LLM but never executes a tool.
 	s.WorkerSlow.Forward(w, r, agent3Target(r, "/experimental/agent3/plan"))
