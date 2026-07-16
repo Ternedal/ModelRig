@@ -343,33 +343,138 @@ def _run_delete_model(args: dict) -> str:
     return f"Slettede Ollama-modellen '{name}'."
 
 
-def _run_pull_model(args: dict) -> str:
-    """Pull an Ollama model onto the rig (gated). A pull can take minutes, so it
-    runs in a background thread and this returns at once -- check list_models to
-    see when it lands. Best-effort: a failed background pull is not reported here
-    (the model simply won't appear), which is an accepted limitation for now."""
-    import threading
+_jobstore = None
+
+
+def _get_jobstore():
+    global _jobstore
+    if _jobstore is None:
+        from .jobs import JobStore
+        _jobstore = JobStore()
+    return _jobstore
+
+
+def _pull_model_job(job_id: str, name: str) -> None:
+    """The background body of a pull job. Every outcome lands as a terminal
+    status WITH a reason -- the old fire-and-forget version swallowed all
+    errors, so a failed download was indistinguishable from a slow one
+    (analysis 2026-07-16 F-004). Completion mirrors the 1.58.39 client
+    contract: Ollama's final success line AND the model on the shelf."""
     import urllib.request
     from .ollama_client import OLLAMA_URL
+    js = _get_jobstore()
+    js.update(job_id, status="running", detail="forbinder til Ollama")
+    try:
+        req = urllib.request.Request(
+            f"{OLLAMA_URL}/api/pull", method="POST",
+            data=json.dumps({"name": name, "stream": True}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        saw_success = False
+        last_write = 0.0
+        last_total = -1
+        with urllib.request.urlopen(req, timeout=7200) as resp:
+            for raw in resp:
+                if js.cancel_requested(job_id):
+                    js.update(job_id, status="cancelled",
+                              detail="annulleret af brugeren")
+                    return
+                line = raw.decode("utf-8", "replace").strip()
+                if not line:
+                    continue
+                try:
+                    o = json.loads(line)
+                except ValueError:
+                    continue
+                err = o.get("error") or ""
+                if err:
+                    js.update(job_id, status="failed", detail=f"ollama: {err}")
+                    return
+                st = o.get("status") or ""
+                if st == "success":
+                    saw_success = True
+                # Throttle progress writes: a big model streams thousands of
+                # lines; one sqlite write per line is pointless churn. But a
+                # NEW layer (total changed) always lands, so fast streams
+                # still record real progress, and the success line never
+                # zeroes the fields (it carries no completed/total).
+                now = time.time()
+                total = int(o.get("total") or 0)
+                if now - last_write >= 0.5 or total != last_total:
+                    fields: dict = {"detail": st or "henter"}
+                    if total:
+                        fields["progress_completed"] = int(o.get("completed") or 0)
+                        fields["progress_total"] = total
+                    js.update(job_id, **fields)
+                    last_write = now
+                    last_total = total
+        if not saw_success:
+            js.update(job_id, status="failed",
+                      detail="strømmen sluttede uden Ollamas 'success' — "
+                             "download ufuldstændig (afbrudt/timeout); kør igen")
+            return
+        with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=30) as t:
+            tags = json.load(t)
+        names = {m.get("name") or "" for m in tags.get("models", [])}
+        if name in names or f"{name}:latest" in names:
+            js.update(job_id, status="completed",
+                      detail=f"{name} installeret og verificeret i modeloversigten")
+        else:
+            js.update(job_id, status="failed",
+                      detail=f"pull meldte succes, men {name} findes ikke i "
+                             f"modeloversigten — tjek riggen")
+    except Exception as e:  # terminal truth, never a silent death
+        js.update(job_id, status="failed", detail=f"{type(e).__name__}: {e}")
+
+
+def _run_pull_model(args: dict) -> str:
+    """Pull an Ollama model onto the rig (gated). Runs as a persistent JOB:
+    the returned id can be followed with job_status and stopped with
+    cancel_job. Completion requires Ollama's success line AND the model
+    actually appearing in the installed list."""
+    import threading
     name = (args.get("name") or "").strip()
     if not _MODEL_NAME.match(name):
         raise ToolDenied("pull_model requires a valid model name")
+    job_id = _get_jobstore().create("pull_model", f"model {name}")
+    threading.Thread(
+        target=_pull_model_job, args=(job_id, name), daemon=True,
+    ).start()
+    return (f"Startede download af '{name}' som job {job_id}. "
+            f"Følg status med job_status; annullér med cancel_job.")
 
-    def _pull() -> None:
-        try:
-            req = urllib.request.Request(
-                f"{OLLAMA_URL}/api/pull", method="POST",
-                data=json.dumps({"name": name, "stream": False}).encode(),
-                headers={"Content-Type": "application/json"},
-            )
-            urllib.request.urlopen(req, timeout=3600)
-        except Exception:
-            pass  # background best-effort; the user verifies with list_models
 
-    threading.Thread(target=_pull, daemon=True).start()
-    return (f"Startede download af Ollama-modellen '{name}' i baggrunden. "
-            f"Tjek list_models om lidt for at se den lande.")
+def _fmt_job(j: dict) -> str:
+    pct = ""
+    if j["progress_total"]:
+        pct = f" ({100 * j['progress_completed'] // j['progress_total']}%)"
+    return f"[{j['id']}] {j['kind']}: {j['status']}{pct} — {j['detail']}"
 
+
+def _run_job_status(args: dict) -> str:
+    """Read-only. One job by id, or the latest jobs when no id is given."""
+    js = _get_jobstore()
+    job_id = (args.get("job_id") or "").strip()
+    if job_id:
+        j = js.get(job_id)
+        if not j:
+            return f"Intet job med id {job_id}."
+        return _fmt_job(j)
+    jobs = js.recent(5)
+    if not jobs:
+        return "Ingen jobs endnu."
+    return "Seneste jobs:\n" + "\n".join(_fmt_job(j) for j in jobs)
+
+
+def _run_cancel_job(args: dict) -> str:
+    """Write (gated): request cooperative cancellation of a running job."""
+    job_id = (args.get("job_id") or "").strip()
+    if not job_id:
+        raise ToolDenied("cancel_job requires a job_id")
+    if _get_jobstore().request_cancel(job_id):
+        return (f"Annullering af job {job_id} er anmodet — jobbet stopper ved "
+                f"næste kontrolpunkt (typisk inden for få sekunder).")
+    return f"Job {job_id} findes ikke eller er allerede afsluttet."
 
 REGISTRY: dict[str, Tool] = {
     "rig_status": Tool(
@@ -399,6 +504,22 @@ REGISTRY: dict[str, Tool] = {
         description="Hent den aktuelle dato og klokkeslæt på riggen.",
         params={"type": "object", "properties": {}},
         run=_run_current_datetime,
+    ),
+    "job_status": Tool(
+        name="job_status", risk="read",
+        description="Status på baggrundsjobs (fx modeldownloads): fremdrift, terminal status og årsag. Uden job_id vises de seneste.",
+        params={"type": "object", "properties": {"job_id": {"type": "string"}}},
+        run=_run_job_status,
+    ),
+    "cancel_job": Tool(
+        name="cancel_job", risk="write",
+        description="Annullér et kørende baggrundsjob (fx en modeldownload).",
+        params={
+            "type": "object",
+            "properties": {"job_id": {"type": "string"}},
+            "required": ["job_id"],
+        },
+        run=_run_cancel_job,
     ),
     "list_documents": Tool(
         name="list_documents", risk="read",
