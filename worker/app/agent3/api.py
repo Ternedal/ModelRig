@@ -25,6 +25,10 @@ from .replan_runtime import (
     ReplanJournalError,
 )
 from .replanner import ReadSuffixReplanner, ReplanError
+from .review_orchestrator import (
+    ReadReviewStore,
+    ReviewingAgent3Orchestrator,
+)
 from .routing import StrictTurnRouter
 from .validation_gate import evaluate_configured_report
 
@@ -49,6 +53,7 @@ class StartReq(BaseModel):
     retry_of_run_id: str | None = None
     original_route: RouteKind | None = None
     proactive: bool = False
+    review_reads: bool = False
     plan: list[PlanStepReq] = Field(default_factory=list, max_length=12)
 
 
@@ -121,6 +126,36 @@ def build_router(
     validation_provider = validation_provider or (
         lambda: evaluate_configured_report(current_version=worker_version)
     )
+    reviewing = isinstance(orchestrator, ReviewingAgent3Orchestrator)
+
+    def read_review(run_id: str) -> dict[str, Any]:
+        if not reviewing:
+            return {"enabled": False, "waiting": False}
+        return orchestrator.review_store.get(run_id)
+
+    def response(run: AgentRun, **extra: Any) -> dict[str, Any]:
+        payload = {"run": _run_payload(run), "read_review": read_review(run.id)}
+        payload.update(extra)
+        return payload
+
+    def start_steps(
+        request: TurnRequest,
+        caps: CapabilitySnapshot,
+        steps: list[AgentStep],
+        *,
+        proactive: bool,
+        allow_private_cloud: bool,
+        review_reads: bool,
+    ) -> AgentRun:
+        if review_reads and not reviewing:
+            raise HTTPException(status_code=501, detail="read review is not mounted")
+        kwargs = {
+            "proactive": proactive,
+            "allow_private_cloud": allow_private_cloud,
+        }
+        if reviewing:
+            kwargs["review_reads"] = review_reads
+        return orchestrator.start_with_steps(request, caps, steps, **kwargs)
 
     def recover_or_block(run_id: str) -> list[dict[str, Any]]:
         """Resolve any write-ahead replan before the run may move again."""
@@ -148,6 +183,7 @@ def build_router(
             "replanner": (
                 "explicit-pending-read-window" if replan_service is not None else "disabled"
             ),
+            "read_review": "opt-in-persistent" if reviewing else "disabled",
             "production_tools_path_untouched": True,
             "max_steps": orchestrator.max_steps,
             "worker_version": worker_version,
@@ -180,14 +216,16 @@ def build_router(
                 original_route=original.route.kind,
                 conversation_id=original.request.conversation_id,
             )
-            run = orchestrator.start_with_steps(
+            original_review = read_review(original.id)["enabled"]
+            run = start_steps(
                 request,
                 caps,
                 _clone_steps(original),
                 proactive=original.proactive,
                 allow_private_cloud=original.allow_private_cloud,
+                review_reads=bool(original_review),
             )
-            return {"run": _run_payload(run)}
+            return response(run)
 
         if not req.plan:
             raise HTTPException(
@@ -212,27 +250,29 @@ def build_router(
         )
         route = orchestrator.router.route(request, caps)
         if route.kind in {RouteKind.UNAVAILABLE, RouteKind.ASK_BEFORE_DOWNGRADE}:
-            run = orchestrator.start_with_steps(
+            run = start_steps(
                 request,
                 caps,
                 [],
                 proactive=req.proactive,
                 allow_private_cloud=req.allow_private_cloud,
+                review_reads=req.review_reads,
             )
-            return {"run": _run_payload(run)}
+            return response(run)
         try:
             calls = [PlannedToolCall(step.tool, step.args) for step in req.plan]
             steps = adapter.build_steps(calls, route, req.conversation_id)
-            run = orchestrator.start_with_steps(
+            run = start_steps(
                 request,
                 caps,
                 steps,
                 proactive=req.proactive,
                 allow_private_cloud=req.allow_private_cloud,
+                review_reads=req.review_reads,
             )
         except Agent3PlanError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"run": _run_payload(run)}
+        return response(run)
 
     @router.get("/runs")
     def list_runs(limit: int = 50) -> dict[str, Any]:
@@ -244,7 +284,7 @@ def build_router(
         run = orchestrator.store.load(run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="run not found")
-        return {"run": _run_payload(run), "replan_recovery": recovery}
+        return response(run, replan_recovery=recovery)
 
     @router.get("/runs/{run_id}/events")
     def get_events(run_id: str, limit: int = 200) -> dict[str, Any]:
@@ -291,7 +331,7 @@ def build_router(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except (ReplanError, ReplanJournalError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {"run": _run_payload(revised), "replan": receipt.to_dict()}
+        return response(revised, replan=receipt.to_dict())
 
     @router.post("/runs/{run_id}/confirm")
     def confirm(run_id: str, req: ConfirmReq) -> dict[str, Any]:
@@ -302,7 +342,7 @@ def build_router(
             raise HTTPException(status_code=404, detail="run not found") from exc
         except ConfirmationError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {"run": _run_payload(run)}
+        return response(run)
 
     @router.post("/runs/{run_id}/resume")
     def resume(run_id: str) -> dict[str, Any]:
@@ -313,7 +353,7 @@ def build_router(
             raise HTTPException(status_code=404, detail="run not found") from exc
         except RunConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {"run": _run_payload(run)}
+        return response(run)
 
     @router.post("/runs/{run_id}/cancel")
     def cancel(run_id: str, _req: CancelReq | None = None) -> dict[str, Any]:
@@ -322,7 +362,7 @@ def build_router(
             run = orchestrator.cancel(run_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="run not found") from exc
-        return {"run": _run_payload(run)}
+        return response(run)
 
     return router
 
@@ -345,8 +385,16 @@ def build_default_runtime() -> tuple[Agent3Orchestrator, V2ToolAdapter]:
 
     adapter = V2ToolAdapter()
     db_path = _paths.resolve("./kaliv-agent3.db", env="KALIV_AGENT3_DB")
+    review_path = _paths.resolve(
+        "./kaliv-agent3-read-reviews.db",
+        env="KALIV_AGENT3_REVIEW_DB",
+    )
     store = AgentRunStore(db_path)
-    orchestrator = Agent3Orchestrator(store=store, executor=adapter.execute)
+    orchestrator = ReviewingAgent3Orchestrator(
+        store=store,
+        executor=adapter.execute,
+        review_store=ReadReviewStore(review_path),
+    )
     orchestrator.router = StrictTurnRouter()
     return orchestrator, adapter
 
@@ -388,4 +436,5 @@ def mount_agent3(app: FastAPI) -> bool:
     app.state.agent3_mounted = True
     app.state.agent3_orchestrator = orchestrator
     app.state.agent3_replanner = replan_service
+    app.state.agent3_read_review_store = orchestrator.review_store
     return True
