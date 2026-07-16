@@ -87,8 +87,9 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
     }
 
     fun startPlan() {
-        val id = preview?.planId ?: return
-        if (busy) return
+        val current = preview ?: return
+        val id = current.planId ?: return
+        if (current.capabilityReceipt?.allowed == false || busy) return
         busy = true
         error = null
         scope.launch {
@@ -272,6 +273,7 @@ private fun Agent3PlanCard(
     busy: Boolean,
     onStart: () -> Unit,
 ) {
+    val capabilityAllowed = preview.capabilityReceipt?.allowed != false
     Surface(color = KalivTheme.colors.surface, shape = RoundedCornerShape(14.dp)) {
         Column(Modifier.fillMaxWidth().padding(14.dp)) {
             Text("Plan-preview", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
@@ -316,6 +318,10 @@ private fun Agent3PlanCard(
                     }
                 }
             }
+            preview.capabilityReceipt?.let {
+                Spacer(Modifier.height(10.dp))
+                Agent3CapabilityReceiptCard(it)
+            }
             Spacer(Modifier.height(10.dp))
             if (preview.steps.isEmpty()) {
                 Text("Planen indeholder ingen tool-steps.", color = KalivTheme.colors.textMuted)
@@ -327,7 +333,7 @@ private fun Agent3PlanCard(
             }
             Spacer(Modifier.height(12.dp))
             Button(
-                enabled = !busy && preview.planId != null && preview.steps.isNotEmpty(),
+                enabled = !busy && capabilityAllowed && preview.planId != null && preview.steps.isNotEmpty(),
                 onClick = onStart,
             ) {
                 Text("Start den viste plan")
