@@ -105,8 +105,9 @@ fun Agent3DevApp() {
         }
 
         fun startPlan() {
-            val id = preview?.planId ?: return
-            if (busy) return
+            val current = preview ?: return
+            val id = current.planId ?: return
+            if (current.capabilityReceipt?.allowed == false || busy) return
             busy = true
             error = null
             scope.launch {
@@ -293,6 +294,7 @@ private fun DevCard(content: @Composable ColumnScope.() -> Unit) {
 
 @Composable
 private fun PlanCard(preview: Agent3PlanPreview, busy: Boolean, onStart: () -> Unit) {
+    val capabilityAllowed = preview.capabilityReceipt?.allowed != false
     DevCard {
         Text("Plan-preview", color = KalivTheme.colors.TextHigh, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Text(
@@ -337,6 +339,10 @@ private fun PlanCard(preview: Agent3PlanPreview, busy: Boolean, onStart: () -> U
                 }
             }
         }
+        preview.capabilityReceipt?.let {
+            Spacer(Modifier.height(10.dp))
+            Agent3CapabilityReceiptCard(it)
+        }
         Spacer(Modifier.height(10.dp))
         if (preview.plan.isEmpty()) {
             Text("Ingen tool-steps.", color = KalivTheme.colors.TextMuted)
@@ -348,7 +354,7 @@ private fun PlanCard(preview: Agent3PlanPreview, busy: Boolean, onStart: () -> U
         }
         Spacer(Modifier.height(12.dp))
         Button(
-            enabled = !busy && preview.planId != null && preview.plan.isNotEmpty(),
+            enabled = !busy && capabilityAllowed && preview.planId != null && preview.plan.isNotEmpty(),
             onClick = onStart,
         ) { Text("Start den viste plan") }
         preview.expiresInSeconds?.let {
