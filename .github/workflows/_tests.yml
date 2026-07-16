@@ -46,17 +46,14 @@ jobs:
           pip install --quiet ruff
           ruff check --select E9,F63,F7,F82 worker/ tests/
 
-      # Every integration + worker test, globbed so a new tests/*.py is included
-      # with no edit here. MODELRIG_BIN is used by the backend/e2e tests; the
-      # worker tests ignore it. set -e stops at the first failure. This is exactly
-      # the set the release job used to list inline (backend_smoke/v1, e2e,
-      # worker_*), now in one place.
+      # Every integration, worker and workflow-contract test is globbed so a new
+      # matching file enters both push and release gates automatically.
       - name: Test suite (auto-includes new tests/*.py)
         env:
           MODELRIG_BIN: /tmp/modelrig-server
         run: |
           set -e
-          for f in tests/backend_*.py tests/e2e.py tests/worker_*.py; do
+          for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
             [ -e "$f" ] || continue
             echo "::group::$f"
             PYTHONPATH=worker python3 "$f"
