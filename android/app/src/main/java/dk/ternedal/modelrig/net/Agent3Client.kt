@@ -42,6 +42,17 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val sha256: String?,
     )
 
+    data class ReadReview(
+        val enabled: Boolean,
+        val waiting: Boolean,
+        val windowStart: Int?,
+        val windowEnd: Int?,
+        val removableStepIds: List<String>,
+        val completedStepId: String?,
+        val completedTool: String?,
+        val updatedAt: Double?,
+    )
+
     data class PlanPreview(
         val planId: String?,
         val expiresInSeconds: Int?,
@@ -50,6 +61,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val steps: List<Step>,
         val executed: Boolean,
         val memoryContext: MemoryReceipt,
+        val reviewReads: Boolean,
     )
 
     data class Run(
@@ -60,6 +72,12 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val steps: List<Step>,
         val answer: String?,
         val error: String?,
+    )
+
+    data class RunEnvelope(
+        val run: Run,
+        val reviewReads: Boolean,
+        val readReview: ReadReview,
     )
 
     data class Event(
@@ -82,6 +100,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
         memorySubjects: List<String> = emptyList(),
         memoryMaxChars: Int = 4_000,
         memoryMaxRecords: Int = 25,
+        reviewReads: Boolean = false,
     ): PlanPreview {
         val payload = JSONObject()
             .put("message", message)
@@ -95,6 +114,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
             .put("memory_subjects", JSONArray(memorySubjects))
             .put("memory_max_chars", memoryMaxChars)
             .put("memory_max_records", memoryMaxRecords)
+            .put("review_reads", reviewReads)
         conversationId?.let { payload.put("conversation_id", it) }
         plannerModel?.let { payload.put("planner_model", it) }
         val root = post("/api/v1/experimental/agent3/plan", payload)
@@ -106,13 +126,16 @@ class Agent3Client(baseUrl: String, private val token: String) {
             steps = parseSteps(root.optJSONArray("plan") ?: JSONArray()),
             executed = root.optBoolean("executed", false),
             memoryContext = parseMemoryReceipt(root.optJSONObject("memory_context")),
+            reviewReads = root.optBoolean("review_reads", false),
         )
     }
 
-    fun startPlan(planId: String): Run {
+    fun startPlanEnvelope(planId: String): RunEnvelope {
         val root = post("/api/v1/experimental/agent3/plans/$planId/start", JSONObject())
-        return parseRun(root.requireObject("run"))
+        return parseRunEnvelope(root)
     }
+
+    fun startPlan(planId: String): Run = startPlanEnvelope(planId).run
 
     fun getRun(runId: String): Run {
         val root = get("/api/v1/experimental/agent3/runs/$runId")
@@ -183,6 +206,12 @@ class Agent3Client(baseUrl: String, private val token: String) {
         }
     }
 
+    private fun parseRunEnvelope(root: JSONObject): RunEnvelope = RunEnvelope(
+        run = parseRun(root.requireObject("run")),
+        reviewReads = root.optBoolean("review_reads", false),
+        readReview = parseReadReview(root.optJSONObject("read_review")),
+    )
+
     private fun parseRun(o: JSONObject): Run = Run(
         id = o.optString("id"),
         state = o.optString("state"),
@@ -203,6 +232,20 @@ class Agent3Client(baseUrl: String, private val token: String) {
             excludedIds = receipt.optJSONArray("excluded_ids").toStrings(),
             characterCount = receipt.optInt("character_count", 0),
             sha256 = receipt.nullableString("sha256"),
+        )
+    }
+
+    private fun parseReadReview(o: JSONObject?): ReadReview {
+        val review = o ?: JSONObject()
+        return ReadReview(
+            enabled = review.optBoolean("enabled", false),
+            waiting = review.optBoolean("waiting", false),
+            windowStart = review.nullableInt("window_start"),
+            windowEnd = review.nullableInt("window_end"),
+            removableStepIds = review.optJSONArray("removable_step_ids").toStrings(),
+            completedStepId = review.nullableString("completed_step_id"),
+            completedTool = review.nullableString("completed_tool"),
+            updatedAt = review.nullableDouble("updated_at"),
         )
     }
 
