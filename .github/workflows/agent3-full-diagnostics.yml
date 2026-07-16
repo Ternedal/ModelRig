@@ -1,0 +1,69 @@
+name: agent3-full-diagnostics
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  full-test-log:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.23"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install worker deps
+        run: pip install -r worker/requirements.txt --break-system-packages
+
+      - name: Build backend
+        run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
+
+      - name: Generate authoritative current state
+        run: python3 scripts/current_state.py
+
+      - name: Upload generated current state
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent3-generated-current-state
+          path: CURRENT_STATE.md
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Full repository test log
+        env:
+          MODELRIG_BIN: /tmp/modelrig-server
+        shell: bash
+        run: |
+          set -o pipefail
+          : > /tmp/modelrig-full-test.log
+          status=0
+          for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
+            [ -e "$f" ] || continue
+            echo "::group::$f"
+            echo "===== $f =====" | tee -a /tmp/modelrig-full-test.log
+            PYTHONPATH=worker python3 "$f" 2>&1 | tee -a /tmp/modelrig-full-test.log || {
+              status=${PIPESTATUS[0]}
+              echo "FAILED: $f (exit $status)" | tee -a /tmp/modelrig-full-test.log
+              echo "::endgroup::"
+              break
+            }
+            echo "::endgroup::"
+          done
+          exit "$status"
+
+      - name: Upload full failed test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent3-full-test-log
+          path: /tmp/modelrig-full-test.log
+          if-no-files-found: error
+          retention-days: 7

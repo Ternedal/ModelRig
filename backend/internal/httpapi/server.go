@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -29,7 +30,7 @@ type Deps struct {
 
 type server struct {
 	Deps
-	mux         *http.ServeMux
+	mux          *http.ServeMux
 	claimLimiter *rateLimiter
 }
 
@@ -88,6 +89,31 @@ func (s *server) routes() {
 	s.mux.Handle("GET /api/v1/voice/status", s.authMW(http.HandlerFunc(s.handleVoiceStatus)))
 	s.mux.Handle("POST /api/v1/voice/converse", s.authMW(http.HandlerFunc(s.handleVoiceConverse)))
 	s.mux.Handle("POST /api/v1/voice/converse/stream", s.authMW(http.HandlerFunc(s.handleVoiceConverseStream)))
+
+	// Agent 3.0 is deliberately absent from the normal API surface unless the
+	// operator opts into the experimental worker and backend together. Even when
+	// enabled, every route remains behind the same Bearer-token middleware.
+	if os.Getenv("KALIV_AGENT3_ENABLED") == "1" {
+		s.mux.Handle("GET /api/v1/experimental/agent3/status", s.authMW(http.HandlerFunc(s.handleAgent3Status)))
+		s.mux.Handle("GET /api/v1/experimental/agent3/capabilities", s.authMW(http.HandlerFunc(s.handleAgent3Capabilities)))
+		s.mux.Handle("POST /api/v1/experimental/agent3/plan", s.authMW(http.HandlerFunc(s.handleAgent3Plan)))
+		s.mux.Handle("POST /api/v1/experimental/agent3/plans/{id}/start", s.authMW(http.HandlerFunc(s.handleAgent3PlanStart)))
+		s.mux.Handle("/api/v1/experimental/agent3/memory", s.authMW(http.HandlerFunc(s.handleAgent3Memory)))
+		s.mux.Handle("/api/v1/experimental/agent3/memory/{rest...}", s.authMW(http.HandlerFunc(s.handleAgent3Memory)))
+		s.mux.Handle("GET /api/v1/experimental/agent3/runs", s.authMW(http.HandlerFunc(s.handleAgent3RunsList)))
+		s.mux.Handle("POST /api/v1/experimental/agent3/runs", s.authMW(http.HandlerFunc(s.handleAgent3RunsStart)))
+		s.mux.Handle("GET /api/v1/experimental/agent3/runs/{id}", s.authMW(http.HandlerFunc(s.handleAgent3RunGet)))
+		s.mux.Handle("GET /api/v1/experimental/agent3/runs/{id}/events", s.authMW(http.HandlerFunc(s.handleAgent3RunEvents)))
+		s.mux.Handle("GET /api/v1/experimental/agent3/runs/{id}/capability-receipt", s.authMW(http.HandlerFunc(s.handleAgent3RunCapabilityReceipt)))
+		s.mux.Handle("GET /api/v1/experimental/agent3/runs/{id}/replans", s.authMW(http.HandlerFunc(s.handleAgent3RunReplans)))
+		s.mux.Handle("POST /api/v1/experimental/agent3/runs/{id}/replan", s.authMW(http.HandlerFunc(s.handleAgent3RunReplan)))
+		s.mux.Handle("POST /api/v1/experimental/agent3/runs/{id}/replan-preview", s.authMW(http.HandlerFunc(s.handleAgent3RunReplanPreview)))
+		s.mux.Handle("POST /api/v1/experimental/agent3/runs/{id}/answer-preview", s.authMW(http.HandlerFunc(s.handleAgent3RunAnswerPreview)))
+		s.mux.Handle("POST /api/v1/experimental/agent3/replan-previews/{id}/apply", s.authMW(http.HandlerFunc(s.handleAgent3ReplanPreviewApply)))
+		s.mux.Handle("POST /api/v1/experimental/agent3/runs/{id}/confirm", s.authMW(http.HandlerFunc(s.handleAgent3RunConfirm)))
+		s.mux.Handle("POST /api/v1/experimental/agent3/runs/{id}/resume", s.authMW(http.HandlerFunc(s.handleAgent3RunResume)))
+		s.mux.Handle("POST /api/v1/experimental/agent3/runs/{id}/cancel", s.authMW(http.HandlerFunc(s.handleAgent3RunCancel)))
+	}
 }
 
 // ---- middleware ----
@@ -117,7 +143,7 @@ func (r *statusRecorder) Flush() {
 // logging assigns (or accepts) a request ID, propagates it downstream and back to
 // the client via X-Request-ID, and emits one structured key=value line per
 // request. The same ID is forwarded to upstreams by the proxy, so a single
-// request can be traced across backend and worker logs.
+// request can be traced across backend + worker logs.
 func logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
