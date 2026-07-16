@@ -41,6 +41,7 @@ jobs:
       - name: Backend tests
         run: cd backend && go vet ./... && go test ./...
 
+      # Main's syntax/undefined-name gate remains mandatory for Agent 3.0.
       - name: Python lint gate (syntax + undefined names)
         run: |
           pip install --quiet ruff
