@@ -23,7 +23,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.58.50"
+VERSION = "1.58.51"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 
@@ -972,6 +972,19 @@ async def rag_chat(req: QueryReq):
                 yield chunk
         except oc.OllamaError as e:
             yield (json.dumps({"error": str(e)}) + "\n").encode()
+        except asyncio.CancelledError:
+            # The client hung up. Nothing to report to nobody; let the
+            # cancellation propagate so the response closes cleanly.
+            raise
+        except Exception as e:  # never leave the consumer guessing
+            # The client requires a terminal event since 1.58.49: a stream that
+            # simply stops is reported as "afbrudt undervejs" -- true, but it
+            # names the symptom instead of the cause. Anything unexpected in
+            # here (Ollama dying mid-stream, a read error, a bug) must still
+            # leave a REASON on the wire, exactly like the voice generator has
+            # always done.
+            _logger.exception("level=error rag=chat_stream unexpected=%r", str(e))
+            yield (json.dumps({"error": f"{type(e).__name__}: {e}"}) + "\n").encode()
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 
