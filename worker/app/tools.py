@@ -42,7 +42,13 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Optional
 
-Risk = Literal["read", "write"]
+# "desktop" = touches the user's own session (screenshot/click/type). It is not
+# a kind of write: a write can be undone by the tool that made it, while a
+# stray click lands in whatever window is really there. It carries write's
+# confirmation PLUS Tier B policy (desktop_policy.py): screenshot binding, a
+# target allowlist, a rate limit, and local-model-only planning. No tool
+# declares it yet -- the rules land before the plumbing (ISOLATION_DESIGN I3/I4).
+Risk = Literal["read", "write", "desktop"]
 
 # Confirmations are short-lived on purpose: an approval you granted a minute
 # ago should not authorise an action proposed since.
@@ -81,7 +87,7 @@ def requires_confirmation(tool: "Tool", origin: str) -> bool:
     question itself already went out the same way. Proportionate. If a future
     read tool returns document contents, revisit THIS function.
     """
-    return tool.risk == "write"
+    return tool.risk in ("write", "desktop")
 
 
 class ToolError(RuntimeError):
