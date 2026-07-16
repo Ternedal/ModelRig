@@ -28,6 +28,11 @@ func agent3PlanTarget(r *http.Request) string {
 	return agent3Target(r, "/experimental/agent3/plans/"+id+"/start")
 }
 
+func agent3ReplanPreviewTarget(r *http.Request) string {
+	id := url.PathEscape(r.PathValue("id"))
+	return agent3Target(r, "/experimental/agent3/replan-previews/"+id+"/apply")
+}
+
 func agent3MemoryTarget(r *http.Request) string {
 	const publicPrefix = "/api/v1/experimental/agent3/memory"
 	suffix := strings.TrimPrefix(r.URL.Path, publicPrefix)
@@ -80,6 +85,17 @@ func (s *server) handleAgent3RunReplan(w http.ResponseWriter, r *http.Request) {
 	// Explicit replanning validates registry-owned tool metadata and persists one
 	// bounded read-only revision. It does not call a model.
 	s.Worker.Forward(w, r, agent3RunTarget(r, "/replan"))
+}
+
+func (s *server) handleAgent3RunReplanPreview(w http.ResponseWriter, r *http.Request) {
+	// Preview invokes the local read-only replanner model but cannot mutate the run.
+	s.WorkerSlow.Forward(w, r, agent3RunTarget(r, "/replan-preview"))
+}
+
+func (s *server) handleAgent3ReplanPreviewApply(w http.ResponseWriter, r *http.Request) {
+	// Apply consumes a reviewed single-use token. The request cannot supply a new
+	// plan or tool arguments and does not invoke the model again.
+	s.Worker.Forward(w, r, agent3ReplanPreviewTarget(r))
 }
 
 func (s *server) handleAgent3RunConfirm(w http.ResponseWriter, r *http.Request) {
