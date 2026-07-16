@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.remember
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import dk.ternedal.modelrig.data.TokenStore
+import dk.ternedal.modelrig.ui.Agent3CapabilityScreen
 import dk.ternedal.modelrig.ui.Agent3MemoryScreen
 import dk.ternedal.modelrig.ui.Agent3ReplanScreen
 import dk.ternedal.modelrig.ui.Agent3ReviewScreen
@@ -38,6 +39,9 @@ class MainActivity : ComponentActivity() {
         //   --ez dk.ternedal.modelrig.extra.AGENT3_VALIDATION true
         //
         // adb shell am start -S -n dk.ternedal.modelrig/.MainActivity \
+        //   --ez dk.ternedal.modelrig.extra.AGENT3_CAPABILITIES true
+        //
+        // adb shell am start -S -n dk.ternedal.modelrig/.MainActivity \
         //   --ez dk.ternedal.modelrig.extra.AGENT3_REPLAN true
         //
         // adb shell am start -S -n dk.ternedal.modelrig/.MainActivity \
@@ -45,10 +49,17 @@ class MainActivity : ComponentActivity() {
         val openAgent3 = intent?.getBooleanExtra(EXTRA_AGENT3, false) == true
         val openAgent3Memory = intent?.getBooleanExtra(EXTRA_AGENT3_MEMORY, false) == true
         val openAgent3Validation = intent?.getBooleanExtra(EXTRA_AGENT3_VALIDATION, false) == true
+        val openAgent3Capabilities = intent?.getBooleanExtra(EXTRA_AGENT3_CAPABILITIES, false) == true
         val openAgent3Replan = intent?.getBooleanExtra(EXTRA_AGENT3_REPLAN, false) == true
         val openAgent3Review = intent?.getBooleanExtra(EXTRA_AGENT3_REVIEW, false) == true
         setContent {
             when {
+                openAgent3Capabilities -> {
+                    val store = remember { TokenStore(this) }
+                    ModelRigTheme(dark = store.darkMode) {
+                        Agent3CapabilityScreen(store = store, onClose = { finish() })
+                    }
+                }
                 openAgent3Review -> {
                     val store = remember { TokenStore(this) }
                     ModelRigTheme(dark = store.darkMode) {
@@ -88,6 +99,7 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_AGENT3 = "dk.ternedal.modelrig.extra.AGENT3"
         const val EXTRA_AGENT3_MEMORY = "dk.ternedal.modelrig.extra.AGENT3_MEMORY"
         const val EXTRA_AGENT3_VALIDATION = "dk.ternedal.modelrig.extra.AGENT3_VALIDATION"
+        const val EXTRA_AGENT3_CAPABILITIES = "dk.ternedal.modelrig.extra.AGENT3_CAPABILITIES"
         const val EXTRA_AGENT3_REPLAN = "dk.ternedal.modelrig.extra.AGENT3_REPLAN"
         const val EXTRA_AGENT3_REVIEW = "dk.ternedal.modelrig.extra.AGENT3_REVIEW"
     }
