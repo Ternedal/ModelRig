@@ -1,242 +1,196 @@
-# ModelRig
+# ModelRig / Kaliv
 
-A local-first AI platform: run models on your own hardware via Ollama, reach them
-from a desktop app (**Kaliv** on Windows) and an Android phone (**Kaliv**), with
-Danish voice (ASR→LLM→TTS, streamed sentence-by-sentence), RAG document ingest
-(pdf/docx/pptx/html/photos), a confirmation-gated tool layer, and an optional
-Ollama Cloud brain for when local isn't enough. The backend keeps the ModelRig
-name; everything user-facing is Kaliv.
+ModelRig is a local-first AI platform for Anders' Windows rig and Android phone.
+**ModelRig** is the backend/appliance; **Kaliv** is the user-facing desktop and
+Android assistant.
 
-Current version: see `VERSION` (STATUS.md line 3 has the always-current one-liner).
-Recent lines: streaming voice, a self-supervising appliance mode (autostart +
-crash-restart + update-with-rollback), and a multi-step agent with human-gated writes.
+It combines:
+
+- local Ollama models;
+- optional direct Ollama Cloud chat;
+- Danish voice: local ASR → LLM → local TTS;
+- RAG ingest for text, PDF, DOCX, PPTX, HTML and photos;
+- a server-side tool gate with human confirmation for model-initiated writes;
+- Windows autostart, supervision and transactional update/rollback.
+
+The authoritative software version is always [`VERSION`](VERSION). Current
+priorities and accepted risks live in [`ROADMAP.md`](ROADMAP.md) and
+[`SECURITY.md`](SECURITY.md).
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-    Desktop["Kaliv Desktop<br/>Compose JVM · Windows"]
-    Kaliv["Kaliv (Android)<br/>chat · streaming voice · tools · RAG · foto→RAG"]
-    Go["Backend (Go) :8080<br/>pairing · tokens · reverse proxy ONLY<br/>flushes streams chunk-by-chunk"]
+    Android["Kaliv Android\nchat · voice · RAG · tools"]
+    Desktop["Kaliv Desktop\nWindows Compose"]
+    Backend["ModelRig backend :8080\npairing · bearer auth · gateway"]
+    Worker["Worker :8099 loopback-only\nRAG · voice · tools · eval"]
+    Ollama["Ollama :11434\nlocal models + embeddings"]
+    Cloud["Ollama Cloud\noptional"]
+    Store[("Local SQLite / JSON stores")]
 
-    subgraph Worker["Worker (Python) :8099"]
-        Pipe["RAG&nbsp;&nbsp;pdf · docx · pptx · html · foto (vision)<br/>Voice&nbsp;&nbsp;ASR → LLM(stream) → sentence-TTS<br/>buffered: /voice/converse/upload<br/>streamed: /voice/converse/stream (NDJSON)"]
-        Tools["Kaliv Tools<br/>registry (in code)<br/>confirmation gate<br/>audit log (append-only)<br/>Executor seam"]
-        Eval["Eval-harness<br/>tool-discipline · dansk · latency<br/>--baseline --gate = regression"]
-    end
-
-    Human(["human"])
-    Ollama["Ollama :11434<br/>local — ALWAYS for embeddings"]
-    DB[("SQLite<br/>RAG · audit")]
-    Cloud["Ollama Cloud<br/>(optional)<br/>text model ≠ voice model<br/>(cloudModel / voiceCloudModel)"]
-
-    Desktop -- "local-first, cloud fallback" --> Go
-    Kaliv -- "pair + bearer token" --> Go
-    Kaliv -. "direct cloud chat: rig not involved,<br/>NO tools exist on this road" .-> Cloud
-    Go -- "/api/chat · /api/tags" --> Ollama
-    Go -- "/rag/* · /voice/* · /tools/*" --> Worker
-    Human == "approves every write" ==> Tools
-    Worker -- "embeddings + generation<br/>embeddings ALWAYS local" --> Ollama
-    Worker --> DB
-    Worker -. "voice LLM step only ·<br/>explicit toggle · keep_alive<br/>NEVER sent to cloud" .-> Cloud
-
-    classDef ext stroke-dasharray: 6 4;
-    class Cloud ext;
+    Android --> Backend
+    Desktop --> Backend
+    Backend --> Ollama
+    Backend --> Worker
+    Worker --> Ollama
+    Worker --> Store
+    Android -. "direct cloud chat; no tools" .-> Cloud
+    Worker -. "explicit cloud LLM step" .-> Cloud
 ```
 
-**Two cloud roads, and they are not the same thing.**
+### Trust boundaries
 
-```mermaid
-flowchart LR
-    subgraph R1["Road 1 — no tools exist on this road. Nothing to bypass: there is no door."]
-        K1["Kaliv"] --> C1["Ollama Cloud"]
-    end
-    subgraph R2["Road 2 — /tools/chat with cloud_key: cloud proposes, the gate decides, you approve writes"]
-        K2["Kaliv"] --> G2["Go"] --> W2["Worker<br/>(the gate lives here)"] --> C2["Ollama Cloud"]
-    end
+- The **Go backend is the only remote gateway**. Remote calls require a bearer
+  device token; localhost gets no authentication bypass.
+- The **worker is loopback-only** and has no independent remote authentication.
+- Tailscale/WireGuard is the sanctioned remote transport. Do not expose the
+  plain HTTP backend directly to the internet.
+- Embeddings are always local. Audio stays local; only the transcript may reach
+  cloud when the user explicitly enables cloud voice.
+- Model-initiated writes are parked server-side and require a human confirmation
+  card. The arguments shown are the arguments executed.
+- Direct cloud chat is a separate road and has no tool layer at all.
+
+See [`SECURITY.md`](SECURITY.md) for the complete threat model, credential
+storage and accepted risks.
+
+## Repository layout
+
+| Path | Purpose |
+|---|---|
+| `backend/` | Go gateway, pairing, token store, proxies, supervisor and updater |
+| `worker/` | FastAPI RAG, voice, tools, eval and hardened ASGI entrypoint |
+| `android/` | Kaliv Android app |
+| `desktop/` | Kaliv Windows desktop app |
+| `scripts/` | Windows launch/autostart and validation helpers |
+| `deploy/` | Environment reference and service launchers |
+| `tests/` | Backend, worker, integration and workflow contract tests |
+
+## Start the rig on Windows
+
+The normal appliance path is:
+
+```powershell
+scripts\start-kaliv.bat
 ```
 
-Embeddings NEVER go to the cloud. `oc.embed()` has no `base_url` and no
-`api_key` parameter, so the RAG index cannot be built over the network —
-enforced by the signature, not by a runtime check. Only the LLM step can leave
-the rig, and only with the toggle on. When a cloud model proposes a write, the
-card says who asked: *"Cloud-modellen foreslår: …"*
+It starts Ollama, the hardened worker and the backend, then prints
+`/health/full`. For persistent appliance mode, install the scheduled supervisor
+as described in [`deploy/README.md`](deploy/README.md).
 
-**Voice** — audio never leaves the house. ASR (faster-whisper, CUDA) and TTS
-(Piper, Danish) always run on the rig. Only the transcribed question may go to
-the cloud, and only with the toggle on.
+### Manual development start
 
-**Tools** — the model proposes; the gate decides. Reads run. Writes stop at a
-confirmation card and execute the arguments that were shown: the worker parks
-them, so no client can alter them after approval. *Risk* decides whether a
-human is asked, not origin. Reads may chain within a turn (bounded) so the model
-can gather before answering; a write always stops for a human confirmation and is
-never chained unapproved — even after an approved write, a subsequent write gets
-its own card. Off by default (`KALIV_TOOLS_ENABLED=1`).
-See `KRAVSPEC_V5_TOOLS.md`.
-
-**The Go server is a proxy and nothing more.** Gate, whitelist and audit live in
-the worker, so an old or tampered client cannot find a friendlier backend.
-
-Cloud fallback (desktop): if local is down/insufficient →
-Ollama Cloud (https://ollama.com, model `:cloud`) with `OLLAMA_API_KEY`.
-
-**Two cloud roads, and they are not the same thing.**
-
-```
-  road 1   Kaliv ─────────────────────────────▶ Ollama Cloud
-           The rig is never involved. There are NO tools on this road.
-           Nothing to bypass: there is no door, not an open one.
-
-  road 2   Kaliv ──▶ Go ──▶ Worker ──▶ Ollama Cloud
-                            └─ gate ─┘
-           /tools/chat with cloud_key. A cloud model proposes, the gate
-           decides, you approve every write. The card says who asked:
-           "Cloud-modellen foreslår: …"
-```
-
-**Voice** — audio never leaves the house. ASR (faster-whisper, CUDA) and TTS
-(Piper, Danish) always run on the rig. Only the transcribed question may go to
-the cloud, and only with the toggle on.
-
-**Tools** — the model proposes; the gate decides. Reads run. Writes stop at a
-confirmation card and execute the arguments that were shown: the worker parks
-them, so no client can alter them after approval. *Risk* decides whether a
-human is asked, not origin. Reads may chain within a turn (bounded) so the model
-can gather before answering; a write always stops for a human confirmation and is
-never chained unapproved — even after an approved write, a subsequent write gets
-its own card. Off by default (`KALIV_TOOLS_ENABLED=1`).
-See `KRAVSPEC_V5_TOOLS.md`.
-
-**The Go server is a proxy and nothing more.** Gate, whitelist and audit live in
-the worker, so an old or tampered client cannot find a friendlier backend.
-
-Cloud fallback (desktop): if local is down/insufficient →
-Ollama Cloud (https://ollama.com, model `:cloud`) with `OLLAMA_API_KEY`.
-
-**Two cloud roads, and they are not the same thing.**
-
-```
-  road 1   Kaliv ─────────────────────────────▶ Ollama Cloud
-           The rig is never involved. There are NO tools on this road.
-           Nothing to bypass: there is no door, not an open one.
-
-  road 2   Kaliv ──▶ Go ──▶ Worker ──▶ Ollama Cloud
-                            └─ gate ─┘
-           /tools/chat with cloud_key. A cloud model proposes, the gate
-           decides, you approve every write. The card says who asked:
-           "Cloud-modellen foreslår: …"
-```
-
-**Voice** — audio never leaves the house. ASR (faster-whisper, CUDA) and TTS
-(Piper, Danish) always run on the rig. Only the transcribed question may go to
-the cloud, and only with the toggle on.
-
-**Tools** — the model proposes; the gate decides. Reads run. Writes stop at a
-confirmation card and execute the arguments that were shown: the worker parks
-them, so no client can alter them after approval. *Risk* decides whether a
-human is asked, not origin. Reads may chain within a turn (bounded) so the model
-can gather before answering; a write always stops for a human confirmation and is
-never chained unapproved — even after an approved write, a subsequent write gets
-its own card. Off by default (`KALIV_TOOLS_ENABLED=1`).
-See `KRAVSPEC_V5_TOOLS.md`.
-
-**The Go server is a proxy and nothing more.** Gate, whitelist and audit live in
-the worker, so an old or tampered client cannot find a friendlier backend.
-
-Cloud fallback (desktop): if local is down/insufficient →
-Ollama Cloud (https://ollama.com, model `:cloud`) with `OLLAMA_API_KEY`.
-
-- **backend/** — Go, stdlib only. Device pairing (short `XXXX-XXXX` codes) →
-  hashed bearer tokens, device list + **revoke**, brute-force **rate limiting** on
-  claim, then reverse-proxies chat/models to Ollama (streaming) and RAG to the
-  worker. Auth is loopback-free.
-- **worker/** — Python FastAPI. RAG: **chunk** (overlapping) → embed via Ollama →
-  SQLite → cosine retrieval → optional synthesis, plus **streaming RAG chat**
-  (retrieve + stream the answer). Source management: list, stats, delete, filter.
-- **desktop/** — Compose Desktop (JVM). **Streaming** chat with local-first +
-  Ollama Cloud fallback, model picker, branded UI.
-- **android/** — Compose Android V1. Talk to your **rig** (backend → local models
-  + RAG) **or directly to Ollama Cloud** (no rig needed). Material 3 dark UI,
-  dependency-free **Markdown** rendering (code blocks + copy), Keystore-encrypted
-  cloud key. Source — build locally (an APK ships on the GitHub release).
-- **tools/** — `modelrig-cli.py`, a dependency-free reference client (pair, chat,
-  RAG, device mgmt, `doctor` health check, token `rotate`). Runnable today; used
-  to drive the e2e test.
-- **tests/** — worker unit + RAG tests, backend smoke + V1 tests, and an
-  end-to-end integration test. `sh tests/run_tests.sh` runs the full suite (see CI for the current counts).
-- **deploy/** — env reference, a Windows launcher (`run-windows.ps1`), and systemd
-  units for running the worker + backend as services.
-
-## ⚠️ The one gotcha that wastes an afternoon
-The backend defaults to binding **`127.0.0.1`**. That is unreachable from your
-phone or any other machine. Before pairing Android, set:
-```bash
-MODELRIG_HOST=0.0.0.0 ./modelrig-server      # LAN
-# or bind a Tailscale IP for remote access
-```
-The backend logs this warning at startup; the Android pairing screen repeats it.
-
-## Run order (local dev)
-
-**The easy way:** `scripts\start-kaliv.bat` starts all three processes correctly
-(including `MODELRIG_HOST=0.0.0.0` for phone reachability) and runs `/health/full`
-at the end. See `scripts/START_HERE.md`. The manual steps below are the long way.
-```bash
-# 0. Ollama running with your models
-ollama pull qwen3:14b        # confirmed primary (MODELS.md); qwen3:8b if VRAM is tight
+```powershell
+# 1. Ollama
+ollama serve
+ollama pull qwen3:14b
 ollama pull nomic-embed-text
 
-# 1. Worker (RAG) — optional, only if you use /rag/*
-# Bind to loopback: the worker has NO auth of its own and is meant to be reached
-# only by the backend on the same machine. Do not expose it on the LAN.
-cd worker && pip install -r requirements.txt
-uvicorn app.main:app --host 127.0.0.1 --port 8099
+# 2. Worker — loopback only
+cd worker
+pip install -r requirements.txt
+python -m uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099
 
-# 2. Backend
-cd ../backend && go build -o modelrig-server ./cmd/modelrig-server
-MODELRIG_HOST=0.0.0.0 ./modelrig-server
-
-# 3. Pair a device
-./modelrig-server -pair            # (server stopped) OR:
-curl -X POST http://localhost:8080/api/v1/pair/start   # (server running)
-
-# 4a. Desktop
-cd ../desktop && gradle run
-
-# 4b. Android
-cd ../android && ./gradlew assembleDebug
-
-# 4c. Or the reference CLI (works today, no build)
-python tools/modelrig-cli.py --url http://localhost:8080 pair --code XXXX-XXXX
-python tools/modelrig-cli.py doctor    # backend / worker / ollama health
-python tools/modelrig-cli.py chat "hello"
+# 3. Backend — use 0.0.0.0 or a Tailscale IP for the phone
+cd ..\backend
+go build -o modelrig-server.exe .\cmd\modelrig-server
+$env:MODELRIG_HOST = "0.0.0.0"
+.\modelrig-server.exe
 ```
 
-Run the tests (Unix/WSL, needs Go + Python worker deps):
+`app.entrypoint:app` is mandatory for production/manual runtime. It wraps
+FastAPI outside the request parser so chunked uploads are bounded before being
+buffered and voice temp audio is removed after the final stream frame. Directly
+launching `app.main:app` is only for focused route tests.
+
+## Pair a client
+
+With the backend running:
+
+```powershell
+.\modelrig-server.exe -pair
+```
+
+The CLI asks the live server to create the code. If the server is genuinely
+offline, it writes to the same exe-anchored device store that normal startup
+uses. A reachable but unhealthy server never triggers a second file writer.
+
+The backend defaults to `127.0.0.1`; that address cannot be reached from the
+phone. Set `MODELRIG_HOST=0.0.0.0` for LAN access or bind a Tailscale IP.
+
+## Worker hardening
+
+The production worker entrypoint enforces two process-boundary guarantees:
+
+1. `KALIV_MAX_UPLOAD_MB` applies to requests with or without `Content-Length`,
+   before FastAPI parses and buffers their JSON body.
+2. Temporary `alva_voice_*` directories are removed after the last active HTTP
+   response completes or is cancelled, including streaming voice responses.
+
+Focused regression coverage lives in `tests/worker_hardening.py`.
+
+## Streaming contract
+
+A stream ending is not automatically a successful operation.
+
+- Desktop chat requires Ollama's terminal `done=true` line.
+- Desktop and Android model pulls require terminal `status=success` and then
+  verify that the model appears in the installed-model list.
+- Mid-stream protocol errors are surfaced rather than silently converted into a
+  completed answer/download.
+
+Android chat/RAG/voice terminal unification remains a separate client refactor;
+see the active validation file and PR notes rather than assuming it is complete.
+
+## Tests
+
+The shared CI workflow runs on every push and pull request:
+
 ```bash
 sh tests/run_tests.sh
 ```
 
-## Build status at a glance
+CI additionally performs:
 
-| Module   | State                                        | Verified by                          |
-|----------|-----------------------------------------------|--------------------------------------|
-| backend  | Go server, pairing + reverse proxy            | ✅ `go build` + `go test` (config, httpapi) in CI |
-| worker   | FastAPI: RAG, voice, tools, eval              | ✅ **298 tests** in CI (unit 52 · tools 124 · backup 17 · RAG 48 · paths 12 · migrate 7 · eval 18 · vision 12 · voice-stream 8) |
-| android  | Kaliv APK (minSdk 26)                         | ✅ built in CI, `kaliv-latest.apk` on every release |
-| desktop  | Kaliv Windows JAR (Compose JVM)               | ✅ built in CI, `Kaliv-windows-x64-X.Y.Z.jar` |
-| exes     | server + worker Windows executables           | ✅ built in CI, attached to every release |
+- version-source consistency checks;
+- Go build, vet and tests;
+- Python syntax/undefined-name linting;
+- all matching backend, worker, integration and workflow-contract tests;
+- Windows-native updater/supervisor tests;
+- Android compilation and JVM unit tests;
+- desktop compilation.
 
-Every release ships 6 assets from a green CI run. Mutation-checked regression
-tests guard the bug classes that bit on real hardware (env trimming, path
-anchoring, keep_alive-to-cloud). The **honest rule** stands: compiled ≠ shipped,
-and CI-green ≠ works-on-device — the last mile is always on-device testing.
+Test counts are intentionally not hardcoded here; CI is the current source of
+truth. Green CI proves code/build behavior, not the physical rig, phone, network
+or release channel. Those results belong in the current `VALIDATION-*.md` file.
 
-See **STATUS.md** for the per-release history (line 3 is always the current
-one-liner) and **ROADMAP.md** for where this is going (closed-ended at V15).
+## Releases and updates
 
-**Building and testing the clients locally?** See **CLIENT_BUILD_AND_TEST.md**.
+Tag releases use one draft-first authority:
+
+1. ensure a private draft exists;
+2. build and upload Android, desktop and appliance assets;
+3. generate `SHA256SUMS.txt`;
+4. verify the complete asset set while it is still a draft;
+5. publish and mark latest only in the final step.
+
+A bare tag cannot create a public half-release. The invariant is pinned by
+`tests/workflow_release.py`.
+
+The Windows updater performs whole-set transactional update and rollback. See
+[`UPDATER_DESIGN.md`](UPDATER_DESIGN.md) and [`deploy/README.md`](deploy/README.md).
+
+## Project documentation
+
+- [`ROADMAP.md`](ROADMAP.md): current Now / Next / Later and decisions
+- [`SECURITY.md`](SECURITY.md): trust boundaries, credentials and risks
+- [`UPDATER_DESIGN.md`](UPDATER_DESIGN.md): transactional appliance updates
+- `VALIDATION-*.md`: hardware/on-device proof for a concrete version
+- [`HISTORY.md`](HISTORY.md): historical development record
+- [`STATUS.md`](STATUS.md) and [`HANDOFF.md`](HANDOFF.md): historical logs; not
+  substitutes for `VERSION`, roadmap or current validation
 
 ## License
-MIT — see LICENSE.
+
+MIT — see [`LICENSE`](LICENSE).
