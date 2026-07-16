@@ -33,6 +33,9 @@ DEFAULT_SCREEN_TTL_S = 20.0
 DEFAULT_TOLERANCE = 6
 DEFAULT_RATE_LIMIT = 12
 DEFAULT_RATE_WINDOW_S = 60.0
+# Bound the registry (analysis F-213): a long computer-use session issues a
+# screenshot per step, and refs that outlive their TTL are dead weight.
+MAX_SCREENS = 64
 
 
 class DesktopDenied(RuntimeError):
@@ -50,6 +53,29 @@ class ScreenRef:
 
 def _mk_id(phash: str, issued_at: float) -> str:
     return hashlib.sha256(f"{phash}:{issued_at:.6f}".encode()).hexdigest()[:16]
+
+
+def hamming(a: str, b: str) -> int:
+    """Bit distance between two perceptual hashes, given as hex.
+
+    Lives HERE, in the trusted layer, and not in the caller (analysis F-204).
+    The whole screenshot binding rests on this number: if the caller computed
+    it, then a caller bug -- or a caller that simply passes 0 -- would turn the
+    entire policy into theatre while every test still passed. The capture layer
+    (I3, Windows) produces the hash; the comparison that decides is ours.
+
+    Fail-closed: anything that is not two same-length hex strings is treated as
+    maximally different rather than as a match.
+    """
+    if not a or not b or len(a) != len(b):
+        return _MAX_DISTANCE
+    try:
+        return bin(int(a, 16) ^ int(b, 16)).count("1")
+    except ValueError:
+        return _MAX_DISTANCE
+
+
+_MAX_DISTANCE = 1 << 30
 
 
 class ScreenRegistry:
@@ -70,13 +96,25 @@ class ScreenRegistry:
 
     def issue(self, phash: str, now: float | None = None) -> ScreenRef:
         now = time.time() if now is None else now
+        self._prune(now)
         ref = ScreenRef(_mk_id(phash, now), phash, now)
         self._screens[ref.screen_id] = ref
         return ref
 
-    def verify(self, screen_id: str, current_phash: str, distance: int,
+    def _prune(self, now: float) -> None:
+        for sid in [s for s, r in self._screens.items() if now - r.issued_at > self.ttl_s]:
+            self._screens.pop(sid, None)
+        while len(self._screens) >= MAX_SCREENS:
+            oldest = min(self._screens, key=lambda s: self._screens[s].issued_at)
+            self._screens.pop(oldest, None)
+
+    def verify(self, screen_id: str, current_phash: str,
                now: float | None = None) -> None:
-        """Raise DesktopDenied unless the plan still matches the live screen."""
+        """Raise DesktopDenied unless the plan still matches the LIVE screen.
+
+        The caller hands over what the screen looks like NOW; this layer decides
+        how different that is. The caller cannot hand over the verdict.
+        """
         now = time.time() if now is None else now
         ref = self._screens.get(screen_id)
         if ref is None:
@@ -89,6 +127,7 @@ class ScreenRegistry:
                 f"screenshottet er {age:.0f}s gammelt (grænse {self.ttl_s:.0f}s) — "
                 "skærmen kan have flyttet sig; tag et nyt"
             )
+        distance = hamming(ref.phash, current_phash)
         if distance > self.tolerance:
             raise DesktopDenied(
                 f"skærmen har ændret sig siden planen blev lagt (afstand {distance} > "

@@ -15,10 +15,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 
 from app import tools as T  # noqa: E402
 from app.desktop_policy import (  # noqa: E402
+    MAX_SCREENS,
     DesktopDenied,
     RateLimiter,
     ScreenRegistry,
     TargetAllowlist,
+    hamming,
     require_local_origin,
 )
 
@@ -46,30 +48,53 @@ def denied(fn, *a, **k) -> str | None:
 # --- screenshot binding: the core mechanism ---------------------------------
 
 reg = ScreenRegistry(ttl_s=20.0, tolerance=6)
-ref = reg.issue("phash-abc", now=1000.0)
+# Real perceptual-hash shapes: hex digests. The registry computes the distance
+# ITSELF (analysis F-204) -- the caller says what the screen looks like now, it
+# does not get to say how different that is.
+SCREEN = "ff00ff00ff00ff00"
+CARET = "ff00ff00ff00ff01"      # one bit: a blinking caret
+DIALOG = "ff00ff00ffff0f0f"     # many bits: something appeared
 
-check(reg.verify(ref.screen_id, "phash-abc", distance=0, now=1005.0) is None,
+check(hamming(SCREEN, SCREEN) == 0, "identical hashes are distance 0")
+check(hamming(SCREEN, CARET) == 1, "a single flipped bit is distance 1")
+check(hamming(SCREEN, DIALOG) > 6, "a materially different screen exceeds the tolerance")
+check(hamming(SCREEN, "") == hamming(SCREEN, "abc") == hamming(SCREEN, "zzzzzzzzzzzzzzzz"),
+      "garbage/short/non-hex hashes are all treated as maximally different (fail-closed)")
+check(hamming(SCREEN, "zzzzzzzzzzzzzzzz") > 6, "a hash it cannot parse never counts as a match")
+
+ref = reg.issue(SCREEN, now=1000.0)
+
+check(reg.verify(ref.screen_id, SCREEN, now=1005.0) is None,
       "an unchanged screen inside the TTL is actionable")
-check(reg.verify(ref.screen_id, "phash-abc", distance=6, now=1005.0) is None,
-      "a blinking caret (distance == tolerance) does not invalidate a plan")
+check(reg.verify(ref.screen_id, CARET, now=1005.0) is None,
+      "a blinking caret (1 bit) does not invalidate a plan")
 
-msg = denied(reg.verify, ref.screen_id, "phash-xyz", 7, 1005.0)
+msg = denied(reg.verify, ref.screen_id, DIALOG, 1005.0)
 check(msg is not None and "ændret sig" in msg,
       "a screen that moved beyond tolerance REFUSES the action (a dialog appeared)")
 
-msg = denied(reg.verify, ref.screen_id, "phash-abc", 0, 1031.0)
+msg = denied(reg.verify, ref.screen_id, SCREEN, 1031.0)
 check(msg is not None and "gammelt" in msg,
       "a plan older than the TTL is refused even if the screen looks identical")
 
-msg = denied(reg.verify, "never-issued", "phash-abc", 0, 1005.0)
+msg = denied(reg.verify, "never-issued", SCREEN, 1005.0)
 check(msg is not None and "ukendt" in msg,
       "an action quoting an unknown screen id is refused (no acting from memory)")
 
-# The same screenshot may drive several clicks in one plan -- freshness is
-# re-checked against the LIVE screen each time, which is stronger than rationing.
-r2 = reg.issue("phash-def", now=2000.0)
-ok = all(reg.verify(r2.screen_id, "phash-def", 0, 2000.0 + i) is None for i in range(3))
+r2 = reg.issue("aa55aa55aa55aa55", now=2000.0)
+ok = all(reg.verify(r2.screen_id, "aa55aa55aa55aa55", 2000.0 + i) is None for i in range(3))
 check(ok, "one screenshot can back a multi-step plan, re-verified at every step")
+
+# F-213: the registry must not grow forever during a long session.
+big = ScreenRegistry(ttl_s=20.0, tolerance=6)
+for i in range(200):
+    big.issue(f"{i:016x}", now=3000.0 + i * 0.01)
+check(len(big._screens) <= MAX_SCREENS,
+      f"the registry is bounded ({len(big._screens)} <= {MAX_SCREENS}) -- no unbounded state")
+stale = ScreenRegistry(ttl_s=5.0, tolerance=6)
+stale.issue(SCREEN, now=4000.0)
+stale.issue(CARET, now=4100.0)
+check(len(stale._screens) == 1, "expired screen refs are pruned when a new one is issued")
 
 # --- allowlist: fail-closed by construction ---------------------------------
 

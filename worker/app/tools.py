@@ -181,6 +181,11 @@ class Tool:
     # their thread must outlive the call, and the JobStore already gives them
     # persistent truth.
     isolate: bool = False
+    # Exactly which environment variables the isolated child may see. Empty =
+    # no application environment at all (analysis F-203). A tool that needs the
+    # documents root or a DB path names it here; nothing is inherited by
+    # prefix, so a future COOKIE/SESSION/AUTH cannot ride along unnoticed.
+    env_allow: tuple = ()
 
     def human_summary(self, args: dict) -> str:
         """What the confirmation card shows. Action, target, consequence --
