@@ -95,6 +95,7 @@ func (s *server) routes() {
 	// enabled, every route remains behind the same Bearer-token middleware.
 	if os.Getenv("KALIV_AGENT3_ENABLED") == "1" {
 		s.mux.Handle("GET /api/v1/experimental/agent3/status", s.authMW(http.HandlerFunc(s.handleAgent3Status)))
+		s.mux.Handle("GET /api/v1/experimental/agent3/capabilities", s.authMW(http.HandlerFunc(s.handleAgent3Capabilities)))
 		s.mux.Handle("POST /api/v1/experimental/agent3/plan", s.authMW(http.HandlerFunc(s.handleAgent3Plan)))
 		s.mux.Handle("POST /api/v1/experimental/agent3/plans/{id}/start", s.authMW(http.HandlerFunc(s.handleAgent3PlanStart)))
 		s.mux.Handle("/api/v1/experimental/agent3/memory", s.authMW(http.HandlerFunc(s.handleAgent3Memory)))
