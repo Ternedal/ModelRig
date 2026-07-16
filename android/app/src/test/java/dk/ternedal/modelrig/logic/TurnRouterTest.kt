@@ -22,28 +22,37 @@ class TurnRouterTest {
 
     private val table = listOf(
         Row("rig plain", "rig", false, false, false, false,
-            TurnPlan(useTools = false, useRag = false, useCloud = false, toolsWithRag = false)),
+            TurnPlan(useTools = false, useRag = false, useCloud = false, toolsWithRag = false, useRagCloud = false)),
         Row("rig rag", "rig", false, true, false, false,
-            TurnPlan(useTools = false, useRag = true, useCloud = false, toolsWithRag = false)),
+            TurnPlan(useTools = false, useRag = true, useCloud = false, toolsWithRag = false, useRagCloud = false)),
         Row("rig tools", "rig", true, false, false, false,
-            TurnPlan(useTools = true, useRag = false, useCloud = false, toolsWithRag = false)),
+            TurnPlan(useTools = true, useRag = false, useCloud = false, toolsWithRag = false, useRagCloud = false)),
         Row("rig tools+rag", "rig", true, true, false, false,
-            TurnPlan(useTools = true, useRag = true, useCloud = false, toolsWithRag = true)),
+            TurnPlan(useTools = true, useRag = true, useCloud = false, toolsWithRag = true, useRagCloud = false)),
         Row("cloud plain", "cloud", false, false, true, false,
-            TurnPlan(useTools = false, useRag = false, useCloud = true, toolsWithRag = false)),
+            TurnPlan(useTools = false, useRag = false, useCloud = true, toolsWithRag = false, useRagCloud = false)),
         Row("cloud tools (key)", "cloud", true, false, true, false,
-            TurnPlan(useTools = true, useRag = false, useCloud = true, toolsWithRag = false)),
+            TurnPlan(useTools = true, useRag = false, useCloud = true, toolsWithRag = false, useRagCloud = false)),
         Row("cloud tools+rag, rag-to-cloud NOT allowed", "cloud", true, true, true, false,
-            TurnPlan(useTools = true, useRag = false, useCloud = true, toolsWithRag = false)),
+            TurnPlan(useTools = true, useRag = false, useCloud = true, toolsWithRag = false, useRagCloud = false)),
         Row("cloud tools+rag, rag-to-cloud allowed", "cloud", true, true, true, true,
-            TurnPlan(useTools = true, useRag = false, useCloud = true, toolsWithRag = true)),
+            TurnPlan(useTools = true, useRag = false, useCloud = true, toolsWithRag = true, useRagCloud = false)),
         // Historical bug pins:
         Row("cloud tools WITHOUT key -> plain cloud (tools can't run; key gates the rig route)",
             "cloud", true, false, false, false,
-            TurnPlan(useTools = false, useRag = false, useCloud = true, toolsWithRag = false)),
-        Row("rag stays rig-only outside tools (RAG-in-cloud is #2a, not a silent route)",
+            TurnPlan(useTools = false, useRag = false, useCloud = true, toolsWithRag = false, useRagCloud = false)),
+        // The pre-2a pin ("RAG never silently routes to cloud") is SUPERSEDED by
+        // design: with the persisted consent given, cloud+rag now plans the
+        // rig-mediated useRagCloud route (dormant until trin 3-4 wire it).
+        Row("cloud rag WITH consent -> useRagCloud (2a trin 2; dormant)",
             "cloud", false, true, true, true,
-            TurnPlan(useTools = false, useRag = false, useCloud = true, toolsWithRag = false)),
+            TurnPlan(useTools = false, useRag = false, useCloud = true, toolsWithRag = false, useRagCloud = true)),
+        Row("cloud rag WITHOUT consent -> plain cloud, never silent RAG egress (INV-06)",
+            "cloud", false, true, true, false,
+            TurnPlan(useTools = false, useRag = false, useCloud = true, toolsWithRag = false, useRagCloud = false)),
+        Row("cloud rag with consent but NO key -> no rig-mediated route (key gates it, like tools)",
+            "cloud", false, true, false, true,
+            TurnPlan(useTools = false, useRag = false, useCloud = true, toolsWithRag = false, useRagCloud = false)),
     )
 
     @Test
