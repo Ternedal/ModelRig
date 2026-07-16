@@ -303,6 +303,50 @@ check(len(r.json()["matches"]) == 2, f"replace: both parts kept within one call 
 r = client.post("/rag/ingest", json={"documents": [{"text": "   ", "source": "blank"}]})
 check(r.status_code == 422, f"blank document -> 422 (got {r.status_code})")
 
+
+# ---- terminal guarantee (1.58.51): a stream must never just stop ----------
+# The client requires a terminal event; a generator that dies silently makes it
+# report "afbrudt" -- the symptom, not the cause. Every failure shape must
+# leave a reason on the wire.
+import app.ollama_client as _oc_mod  # noqa: E402
+
+_real_chat_stream = _oc_mod.chat_stream
+
+client.post("/rag/ingest", json={"documents": [{"text": "terminal guarantee probe alfa", "source": "term"}]})
+
+
+def _boom_generic(*a, **k):
+    async def _gen():
+        yield (json.dumps({"message": {"content": "halv"}}) + "\n").encode()
+        raise RuntimeError("ollama vanished mid-stream")
+    return _gen()
+
+
+_oc_mod.chat_stream = _boom_generic
+r = client.post("/rag/chat", json={"query": "terminal guarantee probe", "top_k": 2})
+lines = [ln for ln in r.text.strip().split("\n") if ln.strip()]
+last = json.loads(lines[-1]) if lines else {}
+check(r.status_code == 200, "unexpected mid-stream failure: headers already sent -> 200 + in-band error")
+check("error" in last, f"the LAST line names the failure, not silence -> {str(last)[:60]}")
+check("ollama vanished" in last.get("error", ""), "the reason survives to the client")
+check(any("halv" in ln for ln in lines), "content emitted before the failure is not lost")
+
+
+def _boom_ollama(*a, **k):
+    async def _gen():
+        raise _oc_mod.OllamaError("model not found")
+        yield b""  # pragma: no cover -- makes this an async generator
+    return _gen()
+
+
+_oc_mod.chat_stream = _boom_ollama
+r = client.post("/rag/chat", json={"query": "terminal guarantee probe", "top_k": 2})
+last = json.loads([ln for ln in r.text.strip().split("\n") if ln.strip()][-1])
+check("model not found" in last.get("error", ""), "a known OllamaError still reports as before")
+
+_oc_mod.chat_stream = _real_chat_stream
+
+
 print(f"\n===== WORKER V1: {passed} passed, {failed} failed =====")
 raise SystemExit(0 if failed == 0 else 1)
 

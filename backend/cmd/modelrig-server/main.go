@@ -29,6 +29,13 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
+	// Resolve the store path before EVERY execution mode. Previously this only
+	// happened on normal server startup, so `modelrig-server -pair` with the
+	// server stopped wrote a relative modelrig-data.json in the caller's working
+	// directory while the later server opened the exe-anchored store. The CLI
+	// printed a valid-looking code that the running server could never claim.
+	cfg.ResolveDataPath()
+
 	if *pairFlag {
 		if err := pairCLI(cfg); err != nil {
 			log.Fatalf("pair: %v", err)
@@ -36,7 +43,6 @@ func main() {
 		return
 	}
 
-	cfg.ResolveDataPath()
 	log.Printf("  device store: %s", cfg.DataPath)
 	st, err := store.Open(cfg.DataPath)
 	if err != nil {
@@ -114,10 +120,13 @@ func purgeLoop(st *store.Store, stop <-chan struct{}) {
 func pairCLI(cfg config.Config) error {
 	localURL := fmt.Sprintf("http://127.0.0.1:%d", cfg.ServerPort)
 
-	if serverUp(localURL) {
+	// Any HTTP response proves a server owns the port/store. Do not fall back to
+	// direct file writes merely because /healthz returns a non-2xx response: that
+	// would create a second writer precisely while the live process is unhealthy.
+	if serverReachable(localURL) {
 		code, err := requestPairStart(localURL)
 		if err != nil {
-			return fmt.Errorf("server is up but pair/start failed: %w", err)
+			return fmt.Errorf("server is reachable but pair/start failed: %w", err)
 		}
 		printCode(code, cfg.PairingTTL, "issued by the running server")
 		return nil
@@ -139,14 +148,14 @@ func pairCLI(cfg config.Config) error {
 	return nil
 }
 
-func serverUp(baseURL string) bool {
-	client := &http.Client{Timeout: 800 * time.Millisecond}
+func serverReachable(baseURL string) bool {
+	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Get(baseURL + "/healthz")
 	if err != nil {
 		return false
 	}
 	defer resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	return true
 }
 
 func requestPairStart(baseURL string) (string, error) {

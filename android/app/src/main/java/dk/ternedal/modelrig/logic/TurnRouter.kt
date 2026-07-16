@@ -23,6 +23,14 @@ package dk.ternedal.modelrig.logic
  *    original code.
  *  - toolsWithRag: the tools turn may also search documents; in cloud mode
  *    only when the user explicitly allowed RAG-to-cloud.
+ *  - useRagCloud (CLIENT_STATE_DESIGN.md trin 2, DORMANT until trin 3-4 wire
+ *    the UI + execution): document knowledge in cloud mode WITHOUT tools --
+ *    the rig's /rag/chat runs with the cloud model, so the synthesis is
+ *    egress and requires the persisted allowRagCloud consent AND a cloud key
+ *    (the route is rig-mediated and cloud-billed, mirroring the tools gate).
+ *    Tools win when both apply (the toolsWithRag path already covers that).
+ *    AppUi does not read this field yet; landing it tested-but-unwired first
+ *    is deliberate -- the decision table is the verifiable core.
  */
 data class TurnInput(
     val mode: String, // "rig" | "cloud"
@@ -37,6 +45,7 @@ data class TurnPlan(
     val useRag: Boolean,
     val useCloud: Boolean,
     val toolsWithRag: Boolean,
+    val useRagCloud: Boolean,
 )
 
 object TurnRouter {
@@ -47,6 +56,7 @@ object TurnRouter {
             useRag = i.mode == "rig" && i.ragMode,
             useCloud = i.mode == "cloud",
             toolsWithRag = useTools && i.ragMode && (i.mode == "rig" || i.allowRagCloud),
+            useRagCloud = i.mode == "cloud" && i.ragMode && !useTools && i.hasCloudKey && i.allowRagCloud,
         )
     }
 }

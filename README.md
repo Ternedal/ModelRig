@@ -7,7 +7,9 @@ Danish voice (ASR→LLM→TTS, streamed sentence-by-sentence), RAG document inge
 Ollama Cloud brain for when local isn't enough. The backend keeps the ModelRig
 name; everything user-facing is Kaliv.
 
-Current version: see `VERSION` (STATUS.md line 3 has the always-current one-liner).
+Current version: see `VERSION`. For what actually exists right now — tools with their
+risk/sensitivity, the dormant switches and their defaults, design-doc status — see
+**CURRENT_STATE.md**, which is GENERATED from the code and CI-checked for drift.
 Recent lines: streaming voice, a self-supervising appliance mode (autostart +
 crash-restart + update-with-rollback), and a multi-step agent with human-gated writes.
 
@@ -81,72 +83,6 @@ the worker, so an old or tampered client cannot find a friendlier backend.
 Cloud fallback (desktop): if local is down/insufficient →
 Ollama Cloud (https://ollama.com, model `:cloud`) with `OLLAMA_API_KEY`.
 
-**Two cloud roads, and they are not the same thing.**
-
-```
-  road 1   Kaliv ─────────────────────────────▶ Ollama Cloud
-           The rig is never involved. There are NO tools on this road.
-           Nothing to bypass: there is no door, not an open one.
-
-  road 2   Kaliv ──▶ Go ──▶ Worker ──▶ Ollama Cloud
-                            └─ gate ─┘
-           /tools/chat with cloud_key. A cloud model proposes, the gate
-           decides, you approve every write. The card says who asked:
-           "Cloud-modellen foreslår: …"
-```
-
-**Voice** — audio never leaves the house. ASR (faster-whisper, CUDA) and TTS
-(Piper, Danish) always run on the rig. Only the transcribed question may go to
-the cloud, and only with the toggle on.
-
-**Tools** — the model proposes; the gate decides. Reads run. Writes stop at a
-confirmation card and execute the arguments that were shown: the worker parks
-them, so no client can alter them after approval. *Risk* decides whether a
-human is asked, not origin. Reads may chain within a turn (bounded) so the model
-can gather before answering; a write always stops for a human confirmation and is
-never chained unapproved — even after an approved write, a subsequent write gets
-its own card. Off by default (`KALIV_TOOLS_ENABLED=1`).
-See `KRAVSPEC_V5_TOOLS.md`.
-
-**The Go server is a proxy and nothing more.** Gate, whitelist and audit live in
-the worker, so an old or tampered client cannot find a friendlier backend.
-
-Cloud fallback (desktop): if local is down/insufficient →
-Ollama Cloud (https://ollama.com, model `:cloud`) with `OLLAMA_API_KEY`.
-
-**Two cloud roads, and they are not the same thing.**
-
-```
-  road 1   Kaliv ─────────────────────────────▶ Ollama Cloud
-           The rig is never involved. There are NO tools on this road.
-           Nothing to bypass: there is no door, not an open one.
-
-  road 2   Kaliv ──▶ Go ──▶ Worker ──▶ Ollama Cloud
-                            └─ gate ─┘
-           /tools/chat with cloud_key. A cloud model proposes, the gate
-           decides, you approve every write. The card says who asked:
-           "Cloud-modellen foreslår: …"
-```
-
-**Voice** — audio never leaves the house. ASR (faster-whisper, CUDA) and TTS
-(Piper, Danish) always run on the rig. Only the transcribed question may go to
-the cloud, and only with the toggle on.
-
-**Tools** — the model proposes; the gate decides. Reads run. Writes stop at a
-confirmation card and execute the arguments that were shown: the worker parks
-them, so no client can alter them after approval. *Risk* decides whether a
-human is asked, not origin. Reads may chain within a turn (bounded) so the model
-can gather before answering; a write always stops for a human confirmation and is
-never chained unapproved — even after an approved write, a subsequent write gets
-its own card. Off by default (`KALIV_TOOLS_ENABLED=1`).
-See `KRAVSPEC_V5_TOOLS.md`.
-
-**The Go server is a proxy and nothing more.** Gate, whitelist and audit live in
-the worker, so an old or tampered client cannot find a friendlier backend.
-
-Cloud fallback (desktop): if local is down/insufficient →
-Ollama Cloud (https://ollama.com, model `:cloud`) with `OLLAMA_API_KEY`.
-
 - **backend/** — Go, stdlib only. Device pairing (short `XXXX-XXXX` codes) →
   hashed bearer tokens, device list + **revoke**, brute-force **rate limiting** on
   claim, then reverse-proxies chat/models to Ollama (streaming) and RAG to the
@@ -191,7 +127,7 @@ ollama pull nomic-embed-text
 # Bind to loopback: the worker has NO auth of its own and is meant to be reached
 # only by the backend on the same machine. Do not expose it on the LAN.
 cd worker && pip install -r requirements.txt
-uvicorn app.main:app --host 127.0.0.1 --port 8099
+uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099
 
 # 2. Backend
 cd ../backend && go build -o modelrig-server ./cmd/modelrig-server
@@ -223,17 +159,23 @@ sh tests/run_tests.sh
 | Module   | State                                        | Verified by                          |
 |----------|-----------------------------------------------|--------------------------------------|
 | backend  | Go server, pairing + reverse proxy            | ✅ `go build` + `go test` (config, httpapi) in CI |
-| worker   | FastAPI: RAG, voice, tools, eval              | ✅ **298 tests** in CI (unit 52 · tools 124 · backup 17 · RAG 48 · paths 12 · migrate 7 · eval 18 · vision 12 · voice-stream 8) |
+| worker   | FastAPI: RAG, voice, tools, jobs, isolation   | ✅ full suite in CI — `tests/worker_*.py` + `tests/workflow_*.py`, auto-globbed (live counts in the CI log; this file does not keep score) |
 | android  | Kaliv APK (minSdk 26)                         | ✅ built in CI, `kaliv-latest.apk` on every release |
 | desktop  | Kaliv Windows JAR (Compose JVM)               | ✅ built in CI, `Kaliv-windows-x64-X.Y.Z.jar` |
 | exes     | server + worker Windows executables           | ✅ built in CI, attached to every release |
 
-Every release ships 6 assets from a green CI run. Mutation-checked regression
+Every release ships its full asset set (both APKs, the desktop JAR, the three
+Windows exes, the zip and `SHA256SUMS.txt`) from a green CI run: the release is
+created as a DRAFT, assets are verified against the expected list, and only
+then is it published — so a half-uploaded release is never visible. Regression
 tests guard the bug classes that bit on real hardware (env trimming, path
-anchoring, keep_alive-to-cloud). The **honest rule** stands: compiled ≠ shipped,
-and CI-green ≠ works-on-device — the last mile is always on-device testing.
+anchoring, keep_alive-to-cloud, retry losing a turn's route, streams ending
+without a terminal event). The **honest rule** stands: compiled ≠ shipped, and
+CI-green ≠ works-on-device — the last mile is always on-device testing.
 
-See **STATUS.md** for the per-release history (line 3 is always the current
+See **STATUS.md** for the per-release history (a log, not a status page — for
+current state read CURRENT_STATE.md; the old "line 3 is always current"
+convention required a human to remember and spent 55 releases wrong
 one-liner) and **ROADMAP.md** for where this is going (closed-ended at V15).
 
 **Building and testing the clients locally?** See **CLIENT_BUILD_AND_TEST.md**.

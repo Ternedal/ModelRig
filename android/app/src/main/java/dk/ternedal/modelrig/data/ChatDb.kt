@@ -201,14 +201,14 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
                 // tokens are lowercase hex, so true pre-encryption plaintext is
                 // recognizable; anything else prefixless is old-format
                 // ciphertext (1.58.17..36) and gets the prefix on rewrite.
-                val tok = when {
-                    Crypto.isEncrypted(raw) ->
+                val tok = when (dk.ternedal.modelrig.logic.TokenFormat.classify(raw)) {
+                    dk.ternedal.modelrig.logic.StoredTokenForm.ENCRYPTED_V1 ->
                         runCatching { Crypto.decrypt(raw) }.getOrElse { "" } // invalid -> re-pair
-                    raw.matches(Regex("[0-9a-f]{16,}")) ->
-                        raw.also { migrate.add(id to it) } // legacy plaintext
-                    else ->
+                    dk.ternedal.modelrig.logic.StoredTokenForm.LEGACY_PLAINTEXT ->
+                        raw.also { migrate.add(id to it) }
+                    dk.ternedal.modelrig.logic.StoredTokenForm.OLD_FORMAT_CIPHERTEXT ->
                         runCatching { Crypto.decrypt(raw) }
-                            .getOrElse { "" } // old-format ciphertext, undecryptable -> re-pair
+                            .getOrElse { "" } // undecryptable -> re-pair, never plaintext
                             .also { if (it.isNotEmpty()) migrate.add(id to it) } // rewrite with prefix
                 }
                 out.add(RigProfile(id, c.getString(1), c.getString(2), tok))

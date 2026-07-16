@@ -40,6 +40,10 @@ EXPECTED = {
     "list_documents": "read",
     "delete_model": "write",
     "pull_model": "write",
+    # 1.58.47 (F-004): background jobs got real. Reading status is read;
+    # cancelling a running job mutates it and stays behind the write gate.
+    "job_status": "read",
+    "cancel_job": "write",
 }
 
 KNOWN_RISKS = {"read", "write"}

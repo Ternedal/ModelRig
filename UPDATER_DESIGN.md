@@ -1,5 +1,7 @@
 # UPDATER_DESIGN.md — transaktionel updater for ModelRig/Kaliv
 
+**Status:** LIVE · §4a self-update UDESTÅR (manuel udskiftning indtil da) · **Ejer:** Anders (rig)
+
 > Autoritativt design for updaterens fejl- og recovery-model. Afløser den
 > inkrementelle patch-tilgang: syv audits fandt hver ét nyt edge case, fordi
 > swappet ikke var én transaktion. Dette dokument samler modellen ét sted og

@@ -36,13 +36,37 @@ import os
 import re
 import shutil
 import sqlite3
+import socket
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Optional
 
-Risk = Literal["read", "write"]
+# "desktop" = touches the user's own session (screenshot/click/type). It is not
+# a kind of write: a write can be undone by the tool that made it, while a
+# stray click lands in whatever window is really there. It carries write's
+# confirmation PLUS Tier B policy (desktop_policy.py): screenshot binding, a
+# target allowlist, a rate limit, and local-model-only planning. No tool
+# declares it yet -- the rules land before the plumbing (ISOLATION_DESIGN I3/I4).
+Risk = Literal["read", "write", "desktop"]
+
+# WHAT A TOOL'S RESULT IS, as opposed to what it does (analysis F-208). Risk
+# gates the ACTION; sensitivity gates where the ANSWER may travel. They are
+# orthogonal: list_documents is a harmless read that returns YOUR document
+# names, and a cloud model reading them is an egress event with no card, no
+# consent and nothing in the product that ever said so out loud.
+#
+#   public       already public or content-free (the clock)
+#   operational  reveals your rig: GPU, models, job state. Not secret, not
+#                nothing -- it is a description of your machine
+#   private      your content: document names, note text, RAG passages
+#   secret       credentials and keys. Never leaves, with or without consent
+#
+# Dormant: the gate only ENFORCES the secret rule (a no-op today, since no tool
+# is secret) plus private-blocking behind KALIV_EGRESS_GATE. Turning the gate
+# on is Anders' open decision #6, not mine to make quietly.
+Sensitivity = Literal["public", "operational", "private", "secret"]
 
 # Confirmations are short-lived on purpose: an approval you granted a minute
 # ago should not authorise an action proposed since.
@@ -64,6 +88,36 @@ def tools_dir() -> str:
     return os.path.join(os.path.expanduser("~"), "Documents", "Kaliv")
 
 
+def egress_gate_enabled() -> bool:
+    """Off by default: enforcing this is decision #6, and it is Anders'."""
+    return os.getenv("KALIV_EGRESS_GATE", "").strip().lower() in ("1", "true", "on")
+
+
+def may_egress(sensitivity: str, consent: bool = False) -> bool:
+    """May a result with this sensitivity reach a CLOUD model?
+
+    Pure, so the rule can be read and tested instead of inferred from call
+    sites. `secret` is absolute -- consent cannot buy it, because the whole
+    point of a secret is that no single yes/no in a chat window is worth it.
+    """
+    if sensitivity == "secret":
+        return False
+    if sensitivity == "private":
+        return bool(consent)
+    return True
+
+
+def egress_denial(tool: "Tool", consent: bool = False) -> str | None:
+    """Why this tool's result must not go to a cloud model, or None."""
+    if may_egress(tool.sensitivity, consent):
+        return None
+    if tool.sensitivity == "secret":
+        return (f"{tool.name} returnerer hemmeligheder og må aldrig sendes til "
+                "en cloud-model — heller ikke med samtykke")
+    return (f"{tool.name} returnerer dit eget indhold ({tool.sensitivity}); "
+            "en cloud-model må kun se det med et udtrykkeligt samtykke")
+
+
 def requires_confirmation(tool: "Tool", origin: str) -> bool:
     """Risk decides, not origin. Anders, 2026-07-10:
 
@@ -81,7 +135,7 @@ def requires_confirmation(tool: "Tool", origin: str) -> bool:
     question itself already went out the same way. Proportionate. If a future
     read tool returns document contents, revisit THIS function.
     """
-    return tool.risk == "write"
+    return tool.risk in ("write", "desktop")
 
 
 class ToolError(RuntimeError):
@@ -168,6 +222,21 @@ class Tool:
     description: str
     params: dict = field(default_factory=dict)
     run: Callable[[dict], str] = None  # type: ignore[assignment]
+    # Run this tool in a child process instead of inside the worker
+    # (ISOLATION_DESIGN.md I0). No tool sets it yet -- the substrate ships and
+    # is tested BEFORE the first tool that needs it (file read, and later the
+    # desktop tools). Tools owning background work keep running in-process:
+    # their thread must outlive the call, and the JobStore already gives them
+    # persistent truth.
+    # Where this tool's RESULT may travel. Defaults to the conservative middle:
+    # a new tool has to argue its way to "public", never inherit it.
+    sensitivity: str = "operational"
+    isolate: bool = False
+    # Exactly which environment variables the isolated child may see. Empty =
+    # no application environment at all (analysis F-203). A tool that needs the
+    # documents root or a DB path names it here; nothing is inherited by
+    # prefix, so a future COOKIE/SESSION/AUTH cannot ride along unnoticed.
+    env_allow: tuple = ()
 
     def human_summary(self, args: dict) -> str:
         """What the confirmation card shows. Action, target, consequence --
@@ -343,43 +412,229 @@ def _run_delete_model(args: dict) -> str:
     return f"Slettede Ollama-modellen '{name}'."
 
 
-def _run_pull_model(args: dict) -> str:
-    """Pull an Ollama model onto the rig (gated). A pull can take minutes, so it
-    runs in a background thread and this returns at once -- check list_models to
-    see when it lands. Best-effort: a failed background pull is not reported here
-    (the model simply won't appear), which is an accepted limitation for now."""
-    import threading
+_jobstore = None
+
+
+def _get_jobstore():
+    global _jobstore
+    if _jobstore is None:
+        from .jobs import JobStore
+        _jobstore = JobStore()
+    return _jobstore
+
+
+# How long a pull may go without a single byte before we call it dead, and how
+# often the cancel watcher looks. Env-tunable because only the rig can say what
+# a 70B digest verification really costs (VALIDATION F4).
+_PULL_READ_TIMEOUT_S = int(os.getenv("KALIV_PULL_READ_TIMEOUT_S", "600"))
+_CANCEL_POLL_S = 0.4
+
+
+def _unblock(resp) -> None:
+    """Wake a thread blocked reading this response, then close it.
+
+    resp.close() alone does NOT do it: closing the file object does not
+    interrupt a thread already sitting in recv() -- the read stays parked until
+    the far end sends something or the socket times out, which is the entire
+    bug (F-206). Shutting the socket down is what actually wakes it.
+
+    http.client hangs the socket off resp.fp.raw._sock. That is private, so
+    every step is guarded and the cancel test is what proves it still works on
+    this interpreter.
+    """
+    try:
+        sock = resp.fp.raw._sock
+        sock.shutdown(socket.SHUT_RDWR)
+    except Exception:
+        pass
+    try:
+        resp.close()
+    except Exception:
+        pass
+
+
+def _pull_model_job(job_id: str, name: str) -> None:
+    """The background body of a pull job. Every outcome lands as a terminal
+    status WITH a reason -- the old fire-and-forget version swallowed all
+    errors, so a failed download was indistinguishable from a slow one
+    (analysis 2026-07-16 F-004). Completion mirrors the 1.58.39 client
+    contract: Ollama's final success line AND the model on the shelf."""
     import urllib.request
     from .ollama_client import OLLAMA_URL
+    js = _get_jobstore()
+    js.update(job_id, status="running", detail="forbinder til Ollama")
+
+    # cancel_job promises the download stops in seconds. Checking the flag
+    # between NDJSON lines only honours that WHILE DATA FLOWS: with a silent
+    # socket -- Ollama verifying a digest, a wedged network -- the loop sat
+    # inside a read and the promise was worth nothing until the read timeout
+    # (analysis F-206). So a watcher polls the flag and CLOSES the response,
+    # which is what actually unblocks a blocked read.
+    state: dict = {"resp": None}
+    done = threading.Event()
+    cancelled = threading.Event()
+
+    def _watch_for_cancel() -> None:
+        while not done.wait(_CANCEL_POLL_S):
+            if js.cancel_requested(job_id):
+                cancelled.set()
+                r = state.get("resp")
+                if r is not None:
+                    _unblock(r)
+                    return
+                # Still connecting: there is nothing to close yet. Keep
+                # watching instead of giving up, so the close lands the moment
+                # a response exists -- otherwise a cancel that arrives during
+                # the handshake is simply lost and the job hangs.
+
+    watcher = threading.Thread(target=_watch_for_cancel, daemon=True,
+                               name=f"pull-cancel-{job_id[:8]}")
+    watcher.start()
+    try:
+        req = urllib.request.Request(
+            f"{OLLAMA_URL}/api/pull", method="POST",
+            data=json.dumps({"name": name, "stream": True}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        saw_success = False
+        last_write = 0.0
+        last_total = -1
+        # Per-READ timeout, not a total budget: a big model can download for
+        # hours, but silence this long means the far end is gone. The old 7200
+        # made a dead Ollama look like a slow one for two hours.
+        with urllib.request.urlopen(req, timeout=_PULL_READ_TIMEOUT_S) as resp:
+            state["resp"] = resp
+            if cancelled.is_set():  # asked to stop while we were connecting
+                js.update(job_id, status="cancelled", detail="annulleret af brugeren")
+                return
+            for raw in resp:
+                if js.cancel_requested(job_id):
+                    js.update(job_id, status="cancelled",
+                              detail="annulleret af brugeren")
+                    return
+                line = raw.decode("utf-8", "replace").strip()
+                if not line:
+                    continue
+                try:
+                    o = json.loads(line)
+                except ValueError:
+                    continue
+                err = o.get("error") or ""
+                if err:
+                    js.update(job_id, status="failed", detail=f"ollama: {err}")
+                    return
+                st = o.get("status") or ""
+                if st == "success":
+                    saw_success = True
+                # Throttle progress writes: a big model streams thousands of
+                # lines; one sqlite write per line is pointless churn. But a
+                # NEW layer (total changed) always lands, so fast streams
+                # still record real progress, and the success line never
+                # zeroes the fields (it carries no completed/total).
+                now = time.time()
+                total = int(o.get("total") or 0)
+                if now - last_write >= 0.5 or total != last_total:
+                    fields: dict = {"detail": st or "henter"}
+                    if total:
+                        fields["progress_completed"] = int(o.get("completed") or 0)
+                        fields["progress_total"] = total
+                    js.update(job_id, **fields)
+                    last_write = now
+                    last_total = total
+        if cancelled.is_set():
+            # The watcher shut the socket down under us, which ends the
+            # iteration cleanly rather than raising. Without this, a cancel
+            # would be reported as "the stream ended without success" -- true,
+            # and a lie about who ended it.
+            js.update(job_id, status="cancelled", detail="annulleret af brugeren")
+            return
+        if not saw_success:
+            js.update(job_id, status="failed",
+                      detail="strømmen sluttede uden Ollamas 'success' — "
+                             "download ufuldstændig (afbrudt/timeout); kør igen")
+            return
+        with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=30) as t:
+            tags = json.load(t)
+        names = {m.get("name") or "" for m in tags.get("models", [])}
+        if name in names or f"{name}:latest" in names:
+            js.update(job_id, status="completed",
+                      detail=f"{name} installeret og verificeret i modeloversigten")
+        else:
+            js.update(job_id, status="failed",
+                      detail=f"pull meldte succes, men {name} findes ikke i "
+                             f"modeloversigten — tjek riggen")
+    except Exception as e:  # terminal truth, never a silent death
+        # A read that blew up because the watcher closed the socket under it is
+        # a CANCELLATION, not a failure. Reporting it as "OSError" would be
+        # true and useless.
+        if cancelled.is_set():
+            js.update(job_id, status="cancelled", detail="annulleret af brugeren")
+            return
+        js.update(job_id, status="failed", detail=f"{type(e).__name__}: {e}")
+    finally:
+        done.set()
+
+
+def _run_pull_model(args: dict) -> str:
+    """Pull an Ollama model onto the rig (gated). Runs as a persistent JOB:
+    the returned id can be followed with job_status and stopped with
+    cancel_job. Completion requires Ollama's success line AND the model
+    actually appearing in the installed list."""
+    import threading
     name = (args.get("name") or "").strip()
     if not _MODEL_NAME.match(name):
         raise ToolDenied("pull_model requires a valid model name")
+    job_id = _get_jobstore().create("pull_model", f"model {name}")
+    threading.Thread(
+        target=_pull_model_job, args=(job_id, name), daemon=True,
+    ).start()
+    return (f"Startede download af '{name}' som job {job_id}. "
+            f"Følg status med job_status; annullér med cancel_job.")
 
-    def _pull() -> None:
-        try:
-            req = urllib.request.Request(
-                f"{OLLAMA_URL}/api/pull", method="POST",
-                data=json.dumps({"name": name, "stream": False}).encode(),
-                headers={"Content-Type": "application/json"},
-            )
-            urllib.request.urlopen(req, timeout=3600)
-        except Exception:
-            pass  # background best-effort; the user verifies with list_models
 
-    threading.Thread(target=_pull, daemon=True).start()
-    return (f"Startede download af Ollama-modellen '{name}' i baggrunden. "
-            f"Tjek list_models om lidt for at se den lande.")
+def _fmt_job(j: dict) -> str:
+    pct = ""
+    if j["progress_total"]:
+        pct = f" ({100 * j['progress_completed'] // j['progress_total']}%)"
+    return f"[{j['id']}] {j['kind']}: {j['status']}{pct} — {j['detail']}"
 
+
+def _run_job_status(args: dict) -> str:
+    """Read-only. One job by id, or the latest jobs when no id is given."""
+    js = _get_jobstore()
+    job_id = (args.get("job_id") or "").strip()
+    if job_id:
+        j = js.get(job_id)
+        if not j:
+            return f"Intet job med id {job_id}."
+        return _fmt_job(j)
+    jobs = js.recent(5)
+    if not jobs:
+        return "Ingen jobs endnu."
+    return "Seneste jobs:\n" + "\n".join(_fmt_job(j) for j in jobs)
+
+
+def _run_cancel_job(args: dict) -> str:
+    """Write (gated): request cooperative cancellation of a running job."""
+    job_id = (args.get("job_id") or "").strip()
+    if not job_id:
+        raise ToolDenied("cancel_job requires a job_id")
+    if _get_jobstore().request_cancel(job_id):
+        return (f"Annullering af job {job_id} er anmodet — jobbet stopper ved "
+                f"næste kontrolpunkt (typisk inden for få sekunder).")
+    return f"Job {job_id} findes ikke eller er allerede afsluttet."
 
 REGISTRY: dict[str, Tool] = {
     "rig_status": Tool(
         name="rig_status", risk="read",
+        sensitivity="operational",  # GPU, VRAM, uptime -- a description of your machine
         description="Læs riggens tilstand: GPU, VRAM, disk, ASR/TTS-status.",
         params={"type": "object", "properties": {}},
         run=_run_rig_status,
     ),
     "note_append": Tool(
         name="note_append", risk="write",
+        sensitivity="private",  # your own text, written back to you
         description="Tilføj tekst til Kalivs notesfil. Kan kun appende.",
         params={
             "type": "object",
@@ -390,24 +645,46 @@ REGISTRY: dict[str, Tool] = {
     ),
     "list_models": Tool(
         name="list_models", risk="read",
+        sensitivity="operational",  # which models you run says something about you, but not much
         description="Vis hvilke Ollama-modeller der er installeret på riggen (navne + størrelse).",
         params={"type": "object", "properties": {}},
         run=_run_list_models,
     ),
     "current_datetime": Tool(
         name="current_datetime", risk="read",
+        sensitivity="public",  # the clock is not yours; it is everyone's
         description="Hent den aktuelle dato og klokkeslæt på riggen.",
         params={"type": "object", "properties": {}},
         run=_run_current_datetime,
     ),
+    "job_status": Tool(
+        name="job_status", risk="read",
+        sensitivity="operational",  # job state and progress
+        description="Status på baggrundsjobs (fx modeldownloads): fremdrift, terminal status og årsag. Uden job_id vises de seneste.",
+        params={"type": "object", "properties": {"job_id": {"type": "string"}}},
+        run=_run_job_status,
+    ),
+    "cancel_job": Tool(
+        name="cancel_job", risk="write",
+        sensitivity="operational",  # acts on the rig, returns rig state
+        description="Annullér et kørende baggrundsjob (fx en modeldownload).",
+        params={
+            "type": "object",
+            "properties": {"job_id": {"type": "string"}},
+            "required": ["job_id"],
+        },
+        run=_run_cancel_job,
+    ),
     "list_documents": Tool(
         name="list_documents", risk="read",
+        sensitivity="private",  # YOUR document names -- the F-208 case in one line
         description="Vis hvilke dokumenter der er ingested til RAG (navne + antal chunks).",
         params={"type": "object", "properties": {}},
         run=_run_list_documents,
     ),
     "delete_model": Tool(
         name="delete_model", risk="write",
+        sensitivity="operational",  # acts on the rig, returns rig state
         description="Slet en Ollama-model fra riggen. Kræver bekræftelse.",
         params={
             "type": "object",
@@ -418,6 +695,7 @@ REGISTRY: dict[str, Tool] = {
     ),
     "pull_model": Tool(
         name="pull_model", risk="write",
+        sensitivity="operational",  # acts on the rig, returns rig state
         description="Hent (download) en Ollama-model til riggen. Kræver bekræftelse.",
         params={
             "type": "object",
@@ -438,7 +716,21 @@ class InProcessExecutor:
         return tool.run(args)
 
 
-EXECUTOR = InProcessExecutor()
+def _select_executor():
+    """In-process unless KALIV_TOOL_ISOLATION=process.
+
+    Dormant on purpose: the isolation substrate lands tested and unused, so the
+    rig's validation baseline stays exactly what it was. Turning it on today is
+    also a no-op in practice -- ProcessExecutor delegates every tool that does
+    not declare isolate=True, and none does yet.
+    """
+    if os.getenv("KALIV_TOOL_ISOLATION", "").strip().lower() in ("process", "1", "true"):
+        from .toolhost import ProcessExecutor
+        return ProcessExecutor(InProcessExecutor())
+    return InProcessExecutor()
+
+
+EXECUTOR = _select_executor()
 
 
 # ---------------------------------------------------------------------------
@@ -577,6 +869,26 @@ class ToolGate:
                               result_summary="tool disabled", origin=origin)
             raise ToolDenied(f"tool disabled: {name}")
 
+        # Egress (analysis F-208). A cloud-proposed tool's RESULT lands back in
+        # the cloud model's context, so a read that returns your document names
+        # is an egress event even though nothing was written. Two rules, only
+        # one of them live:
+        #   secret  -- always enforced. A no-op today (no tool is secret) and
+        #              deliberately so: the rule exists BEFORE the first tool
+        #              that needs it, not after.
+        #   private -- only when KALIV_EGRESS_GATE is on, because gating reads
+        #              is Anders' open decision #6. Off = today's documented
+        #              behaviour, unchanged.
+        if origin == "cloud":
+            if tool.sensitivity == "secret" or egress_gate_enabled():
+                why = egress_denial(tool, consent=False)
+                if why:
+                    self.audit.record(tool=name, args=args, risk=tool.risk,
+                                      outcome="blocked", conversation_id=conversation_id,
+                                      result_summary=f"egress: {tool.sensitivity}",
+                                      origin=origin)
+                    raise ToolDenied(why)
+
         if not requires_confirmation(tool, origin):
             return {"status": "executed",
                     **self._execute(tool, args, conversation_id, None, origin)}
@@ -591,10 +903,15 @@ class ToolGate:
             "status": "confirmation_required",
             "confirmation_id": cid,
             "tool": name,
-            "risk": "write",
+            # The card must show the tool's OWN risk. Hardcoding "write" was
+            # harmless while write was the only confirmable class; a desktop
+            # action (screenshot/click/type) is not a write and must not be
+            # labelled as one on the card the human approves.
+            "risk": tool.risk,
             "origin": origin,
-            # The card says who asked. A cloud model suggesting a write to your
-            # notes is not the same event as your own rig suggesting it.
+            # The card says who asked, and what KIND of thing it is. A cloud
+            # model suggesting a write to your notes is not the same event as
+            # your own rig suggesting it; a desktop action is a third kind.
             "summary": (("Cloud-modellen foreslår: " if origin == "cloud" else "")
                         + tool.human_summary(args)),
             "expires_in_seconds": CONFIRM_TTL_SECONDS,

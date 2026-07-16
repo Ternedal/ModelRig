@@ -11,10 +11,6 @@ import java.time.Duration
 @Serializable
 data class ChatMessage(val role: String, val content: String)
 
-/** A bare in-stream error line from Ollama ({"error": "..."}). */
-@Serializable
-private data class ErrorLine(val error: String? = null)
-
 @Serializable
 private data class ChatRequest(
     val model: String,
@@ -29,8 +25,13 @@ private data class ChatRequest(
 @Serializable
 private data class RespMessage(val role: String = "", val content: String = "")
 
+/** One Ollama NDJSON chat line. A terminal line carries done=true. */
 @Serializable
-private data class ChatResponse(val message: RespMessage = RespMessage())
+private data class ChatResponse(
+    val message: RespMessage = RespMessage(),
+    val done: Boolean = false,
+    val error: String? = null,
+)
 
 @Serializable
 private data class TagModel(val name: String = "")
@@ -136,19 +137,27 @@ class OllamaClient(
         if (resp.statusCode() !in 200..299) {
             throw OllamaException("chat failed (${resp.statusCode()})")
         }
+        // Fail-closed streaming (analysis F-005, ported from PR #3): EOF is not
+        // success. A dropped socket or proxy timeout also ends the sequence
+        // cleanly, so completion requires Ollama's explicit done=true line, and
+        // an undecodable line is an error rather than silently skipped.
+        var sawDone = false
         resp.body().forEach { line ->
             if (line.isBlank()) return@forEach
-            // An in-stream {"error": ...} line was dropped silently before (it
-            // doesn't decode as a ChatResponse), ending the stream with nothing.
-            if (line.contains("\"error\"")) {
-                runCatching { json.decodeFromString(ErrorLine.serializer(), line) }
-                    .getOrNull()?.error?.takeIf { it.isNotBlank() }
-                    ?.let { throw OllamaException("cloud: $it") }
+            val item = runCatching {
+                json.decodeFromString(ChatResponse.serializer(), line)
+            }.getOrElse {
+                throw OllamaException("invalid chat stream line: ${line.take(160)}")
             }
-            val delta = runCatching {
-                json.decodeFromString(ChatResponse.serializer(), line).message.content
-            }.getOrDefault("")
-            if (delta.isNotEmpty()) onDelta(delta)
+            item.error?.takeIf { it.isNotBlank() }
+                ?.let { throw OllamaException("chat stream: $it") }
+            if (item.message.content.isNotEmpty()) onDelta(item.message.content)
+            if (item.done) sawDone = true
+        }
+        if (!sawDone) {
+            throw OllamaException(
+                "chat stream ended without done=true — the response was interrupted and is not complete"
+            )
         }
     }
 
@@ -217,7 +226,7 @@ class OllamaClient(
         val payload = json.encodeToString(PullRequest.serializer(), PullRequest(model))
         val builder = HttpRequest.newBuilder()
             .uri(URI.create(baseUrl.trimEnd('/') + pullPath))
-            .timeout(Duration.ofMinutes(30))
+            .timeout(Duration.ofHours(2))
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(payload))
         bearer?.let { builder.header("Authorization", "Bearer $it") }
@@ -227,11 +236,39 @@ class OllamaClient(
             throw OllamaException("cannot reach $baseUrl: ${e.message}")
         }
         if (resp.statusCode() !in 200..299) throw OllamaException("pull failed (${resp.statusCode()})")
+        // Same contract as Kaliv's pullModel (1.58.39) and chatStream above:
+        // stream end is NOT success. Completion requires BOTH the final
+        // status=success line AND the model appearing in the installed list.
+        var sawSuccess = false
         resp.body().forEach { line ->
             if (line.isBlank()) return@forEach
-            val p = runCatching { json.decodeFromString(PullProgressLine.serializer(), line) }.getOrNull() ?: return@forEach
+            val p = runCatching {
+                json.decodeFromString(PullProgressLine.serializer(), line)
+            }.getOrElse {
+                throw OllamaException("invalid pull stream line: ${line.take(160)}")
+            }
             if (p.error.isNotEmpty()) throw OllamaException("pull error: ${p.error}")
+            if (p.status == "success") sawSuccess = true
             onProgress(p.status, p.completed, p.total)
+        }
+        if (!sawSuccess) {
+            throw OllamaException(
+                "pull stream ended without Ollama status=success — the download is not complete"
+            )
+        }
+        val modelsPath = if (pullPath.startsWith("/api/v1/")) "/api/v1/models" else "/api/tags"
+        val installed = try {
+            listModels(modelsPath)
+        } catch (e: Exception) {
+            throw OllamaException(
+                "pull reported success, but installed-model verification failed: ${e.message}"
+            )
+        }
+        val latestName = if (model.contains(':')) model else "$model:latest"
+        if (model !in installed && latestName !in installed) {
+            throw OllamaException(
+                "pull reported success, but $model is not present in the installed model list"
+            )
         }
     }
 
