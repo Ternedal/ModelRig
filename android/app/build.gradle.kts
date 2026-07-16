@@ -23,8 +23,8 @@ android {
         applicationId = "dk.ternedal.modelrig"
         minSdk = 26
         targetSdk = 35
-        versionCode = 178          // monotonic, bumped every release (not tied to semver)
-        versionName = "1.58.48"
+        versionCode = 179          // monotonic, bumped every release (not tied to semver)
+        versionName = "1.58.49"
     }
 
     signingConfigs {
@@ -60,6 +60,10 @@ android {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    // org.json lives in the Android framework; the unit-test stub throws on
+    // every call. StreamContract parses real NDJSON, so the tests need a real
+    // implementation on the JVM test classpath.
+    testImplementation("org.json:json:20240303")
     val composeBom = platform("androidx.compose:compose-bom:2024.09.03")
     implementation(composeBom)
     implementation("androidx.compose.material3:material3")

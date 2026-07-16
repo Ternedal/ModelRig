@@ -5,6 +5,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
+import dk.ternedal.modelrig.logic.StreamContract
+import dk.ternedal.modelrig.logic.StreamEvent
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -175,24 +177,30 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
                 throw ModelRigException("voice stream failed (${resp.code}): $text")
             }
             val source = resp.body?.source() ?: throw ModelRigException("empty response body")
+            // Voice had the worst version of the bug: if the stream ended
+            // without "done", NO callback fired at all -- not onDone, not
+            // onError -- so the turn just hung there spinning.
+            var sawTerminal = false
             while (!source.exhausted()) {
                 val line = source.readUtf8Line() ?: break
-                if (line.isBlank()) continue
-                val o = runCatching { JSONObject(line) }.getOrNull() ?: continue
-                when (o.optString("type")) {
-                    "transcript" -> onTranscript(o.optString("text"))
-                    "chunk" -> onChunk(
-                        o.optInt("index"),
-                        o.optString("text"),
-                        o.optString("audio_base64"),
-                    )
-                    "done" -> onDone(
-                        o.optString("reply"),
-                        o.optString("model").ifBlank { null },
-                        o.optBoolean("via_cloud", false),
-                    )
-                    "error" -> onError(o.optInt("status"), o.optString("detail"))
+                when (val ev = StreamContract.parse(line)) {
+                    is StreamEvent.Transcript -> onTranscript(ev.text)
+                    is StreamEvent.Chunk -> onChunk(ev.index, ev.text, ev.audioB64)
+                    is StreamEvent.Done -> {
+                        sawTerminal = true
+                        onDone(ev.reply, ev.model, ev.viaCloud)
+                    }
+                    is StreamEvent.Failure -> {
+                        sawTerminal = true
+                        onError(ev.status, ev.message)
+                    }
+                    else -> {}
                 }
+            }
+            if (!sawTerminal) {
+                throw ModelRigException(
+                    "stemmesvaret blev afbrudt — forbindelsen lukkede før riggen var færdig; prøv igen"
+                )
             }
         }
     }
@@ -262,14 +270,25 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
                 throw ModelRigException("chat failed (${resp.code}): ${resp.body?.string().orEmpty()}")
             }
             val source = resp.body?.source() ?: throw ModelRigException("empty response body")
+            // One contract for every stream (StreamContract): the body running
+            // out is not completion -- a proxy timeout ends it identically --
+            // and an in-stream {"error"} line is a failure, not an empty delta
+            // to drop on the floor. Both bit here before 1.58.49.
+            var sawDone = false
+            var sawContent = false
             while (!source.exhausted()) {
                 val line = source.readUtf8Line() ?: break
-                if (line.isBlank()) continue
-                val delta = runCatching {
-                    JSONObject(line).optJSONObject("message")?.optString("content").orEmpty()
-                }.getOrDefault("")
-                if (delta.isNotEmpty()) onDelta(delta)
+                when (val ev = StreamContract.parse(line)) {
+                    is StreamEvent.Delta -> { sawContent = true; onDelta(ev.text) }
+                    is StreamEvent.Done -> {
+                        if (ev.trailingDelta.isNotEmpty()) { sawContent = true; onDelta(ev.trailingDelta) }
+                        sawDone = true
+                    }
+                    is StreamEvent.Failure -> throw ModelRigException("chat: ${ev.message}")
+                    else -> {}
+                }
             }
+            StreamContract.terminalFailure(sawDone, sawContent)?.let { throw ModelRigException(it) }
         }
     }
 
@@ -307,31 +326,25 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
                 throw ModelRigException("rag chat failed (${resp.code}): ${resp.body?.string().orEmpty()}")
             }
             val source = resp.body?.source() ?: throw ModelRigException("empty response body")
-            var first = true
+            // The sources header is now recognised by SHAPE, not by position --
+            // it was "the first line", which quietly meant a stream that opened
+            // with anything else lost its header handling.
+            var sawDone = false
+            var sawContent = false
             while (!source.exhausted()) {
                 val line = source.readUtf8Line() ?: break
-                if (line.isBlank()) continue
-                if (first) {
-                    first = false
-                    val srcArr = runCatching { JSONObject(line).optJSONArray("sources") }.getOrNull()
-                    if (srcArr != null) {
-                        val names = mutableListOf<String>()
-                        for (i in 0 until srcArr.length()) {
-                            val s = srcArr.optJSONObject(i)?.optString("source").orEmpty()
-                            if (s.isNotEmpty()) names.add(s)
-                        }
-                        onSources(names)
-                        continue
+                when (val ev = StreamContract.parse(line)) {
+                    is StreamEvent.Sources -> onSources(ev.names)
+                    is StreamEvent.Delta -> { sawContent = true; onDelta(ev.text) }
+                    is StreamEvent.Done -> {
+                        if (ev.trailingDelta.isNotEmpty()) { sawContent = true; onDelta(ev.trailingDelta) }
+                        sawDone = true
                     }
-                    // fell through: first line wasn't a sources header, treat as content below
+                    is StreamEvent.Failure -> throw ModelRigException("rag chat: ${ev.message}")
+                    else -> {}
                 }
-                val err = runCatching { JSONObject(line).optString("error") }.getOrDefault("")
-                if (err.isNotEmpty()) throw ModelRigException("rag chat error: $err")
-                val delta = runCatching {
-                    JSONObject(line).optJSONObject("message")?.optString("content").orEmpty()
-                }.getOrDefault("")
-                if (delta.isNotEmpty()) onDelta(delta)
             }
+            StreamContract.terminalFailure(sawDone, sawContent)?.let { throw ModelRigException(it) }
         }
     }
 
