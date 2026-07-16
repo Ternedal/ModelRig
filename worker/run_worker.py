@@ -60,6 +60,7 @@ def _mount_optional_agent3() -> bool:
 
     from app import paths as app_paths
     from app.agent3.api import mount_agent3
+    from app.agent3.capability_graph_api import build_capability_graph_router
     from app.agent3.integration import V2ToolAdapter
     from app.agent3.memory import MemoryStore
     from app.agent3.memory_api import build_memory_router
@@ -99,9 +100,16 @@ def _mount_optional_agent3() -> bool:
     routing_app.include_router(
         build_outcome_answer_router(routing_app.state.agent3_orchestrator.store)
     )
+    routing_app.include_router(
+        build_capability_graph_router(
+            adapter,
+            worker_version=getattr(routing_app, "version", None),
+        )
+    )
     routing_app.state.agent3_memory_store = memory_store
     routing_app.state.agent3_replan_preview_service = replan_preview_service
     routing_app.state.agent3_outcome_answer_mounted = True
+    routing_app.state.agent3_capability_graph_mounted = True
     routing_app.state.agent3_planner_mounted = True
     return True
 
