@@ -42,6 +42,23 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val sha256: String?,
     )
 
+    data class CapabilityBlocker(
+        val capabilityId: String,
+        val state: String,
+        val reason: String,
+    )
+
+    data class CapabilityReceipt(
+        val schema: String,
+        val graphSha256: String,
+        val planSha256: String,
+        val route: String,
+        val allowed: Boolean,
+        val requiredCapabilityIds: List<String>,
+        val blockers: List<CapabilityBlocker>,
+        val productionActivation: Boolean,
+    )
+
     data class ReadReview(
         val enabled: Boolean,
         val waiting: Boolean,
@@ -61,6 +78,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val steps: List<Step>,
         val executed: Boolean,
         val memoryContext: MemoryReceipt,
+        val capabilityReceipt: CapabilityReceipt?,
         val reviewReads: Boolean,
     )
 
@@ -78,6 +96,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val run: Run,
         val reviewReads: Boolean,
         val readReview: ReadReview,
+        val capabilityReceipt: CapabilityReceipt?,
     )
 
     data class Event(
@@ -126,6 +145,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
             steps = parseSteps(root.optJSONArray("plan") ?: JSONArray()),
             executed = root.optBoolean("executed", false),
             memoryContext = parseMemoryReceipt(root.optJSONObject("memory_context")),
+            capabilityReceipt = parseCapabilityReceipt(root.optJSONObject("capability_receipt")),
             reviewReads = root.optBoolean("review_reads", false),
         )
     }
@@ -210,6 +230,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
         run = parseRun(root.requireObject("run")),
         reviewReads = root.optBoolean("review_reads", false),
         readReview = parseReadReview(root.optJSONObject("read_review")),
+        capabilityReceipt = parseCapabilityReceipt(root.optJSONObject("capability_receipt")),
     )
 
     private fun parseRun(o: JSONObject): Run = Run(
@@ -233,6 +254,65 @@ class Agent3Client(baseUrl: String, private val token: String) {
             characterCount = receipt.optInt("character_count", 0),
             sha256 = receipt.nullableString("sha256"),
         )
+    }
+
+    private fun parseCapabilityReceipt(o: JSONObject?): CapabilityReceipt? {
+        val receipt = o ?: return null
+        val parsed = CapabilityReceipt(
+            schema = receipt.optString("schema"),
+            graphSha256 = receipt.optString("graph_sha256"),
+            planSha256 = receipt.optString("plan_sha256"),
+            route = receipt.optString("route"),
+            allowed = receipt.optBoolean("allowed", false),
+            requiredCapabilityIds = receipt.optJSONArray("required_capability_ids").toStrings(),
+            blockers = buildList {
+                val values = receipt.optJSONArray("blockers") ?: JSONArray()
+                for (index in 0 until values.length()) {
+                    val blocker = values.optJSONObject(index) ?: continue
+                    add(
+                        CapabilityBlocker(
+                            capabilityId = blocker.optString("capability_id"),
+                            state = blocker.optString("state"),
+                            reason = blocker.optString("reason"),
+                        )
+                    )
+                }
+            },
+            productionActivation = receipt.optBoolean("production_activation", true),
+        )
+        validateCapabilityReceipt(parsed)
+        return parsed
+    }
+
+    private fun validateCapabilityReceipt(receipt: CapabilityReceipt) {
+        if (receipt.schema != "kaliv-agent3-capability-receipt/v1") {
+            throw ModelRigException("Ukendt capability receipt-schema: ${receipt.schema}")
+        }
+        if (receipt.productionActivation) {
+            throw ModelRigException("Ugyldigt capability receipt: produktion må aldrig aktiveres")
+        }
+        val digest = Regex("^[0-9a-f]{64}$")
+        if (!digest.matches(receipt.graphSha256) || !digest.matches(receipt.planSha256)) {
+            throw ModelRigException("Ugyldigt capability receipt: SHA-256-binding mangler")
+        }
+        if (receipt.route.isBlank()) {
+            throw ModelRigException("Ugyldigt capability receipt: route mangler")
+        }
+        if (
+            receipt.requiredCapabilityIds.any { it.isBlank() } ||
+            receipt.requiredCapabilityIds.distinct().size != receipt.requiredCapabilityIds.size
+        ) {
+            throw ModelRigException("Ugyldigt capability receipt: capability-id'er er ugyldige")
+        }
+        if (receipt.blockers.any {
+                it.capabilityId.isBlank() || it.state.isBlank() || it.reason.isBlank()
+            }
+        ) {
+            throw ModelRigException("Ugyldigt capability receipt: blocker er ufuldstændig")
+        }
+        if (receipt.allowed && receipt.blockers.isNotEmpty()) {
+            throw ModelRigException("Ugyldigt capability receipt: tilladt plan har blockers")
+        }
     }
 
     private fun parseReadReview(o: JSONObject?): ReadReview {
