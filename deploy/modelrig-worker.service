@@ -9,7 +9,8 @@ User=modelrig
 WorkingDirectory=/opt/modelrig/worker
 EnvironmentFile=/opt/modelrig/modelrig.env
 # Use the venv's uvicorn if you installed into one, e.g. /opt/modelrig/worker/.venv/bin/uvicorn
-ExecStart=/usr/bin/env uvicorn app.main:app --host 127.0.0.1 --port 8099
+# app.entrypoint wraps FastAPI with the real body-limit/temp-cleanup ASGI guard.
+ExecStart=/usr/bin/env uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099
 Restart=on-failure
 RestartSec=3
 
