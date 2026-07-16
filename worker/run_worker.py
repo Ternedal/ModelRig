@@ -3,8 +3,8 @@
 Exists so the worker can ship as a single prebuilt Windows exe (built + smoke-
 tested in CI on a real Windows runner) for people who don't want a Python
 toolchain on the rig. Imports the app OBJECT statically -- not the
-"app.main:app" string form -- so PyInstaller's dependency graph actually sees
-fastapi/uvicorn/httpx and bundles them.
+"app.entrypoint:app" string form -- so PyInstaller's dependency graph actually
+sees fastapi/uvicorn/httpx and bundles them.
 
 Defaults mirror deploy/run-windows.ps1: loopback on 8099 (the worker is only
 ever called by the backend on the same machine; it is deliberately NOT
@@ -16,7 +16,10 @@ import sys
 
 import uvicorn
 
-from app.main import app
+# Production must use the outer ASGI guard: it bounds chunked request bodies
+# before FastAPI parses them and removes voice temp data after the final stream
+# frame. Importing app.main directly bypasses those two guarantees.
+from app.entrypoint import app
 
 
 def _is_loopback(host: str) -> bool:
