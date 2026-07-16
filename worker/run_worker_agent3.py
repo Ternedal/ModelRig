@@ -15,7 +15,11 @@ import sys
 import uvicorn
 from app import paths as app_paths
 from app.agent3.api import mount_agent3
-from app.agent3.capability_graph_api import build_capability_graph_router
+from app.agent3.capability_graph_api import (
+    build_capability_graph_router,
+    build_runtime_capability_graph,
+)
+from app.agent3.capability_receipt_api import build_capability_receipt_router
 from app.agent3.integration import V2ToolAdapter
 from app.agent3.memory import MemoryStore
 from app.agent3.memory_api import build_memory_router
@@ -46,6 +50,7 @@ if __name__ == "__main__":
         sys.exit(1)
     if mount_agent3(app):
         adapter = V2ToolAdapter()
+        worker_version = getattr(app, "version", None)
         plan_db = app_paths.resolve("./kaliv-agent3-plans.db", env="KALIV_AGENT3_PLAN_DB")
         memory_db = app_paths.resolve("./kaliv-agent3-memory.db", env="KALIV_AGENT3_MEMORY_DB")
         memory_store = MemoryStore(memory_db)
@@ -53,6 +58,13 @@ if __name__ == "__main__":
             adapter,
             app.state.agent3_replanner,
         )
+
+        def graph_provider():
+            return build_runtime_capability_graph(
+                adapter,
+                worker_version=worker_version,
+            )
+
         app.include_router(
             build_planner_router(
                 adapter,
@@ -72,13 +84,20 @@ if __name__ == "__main__":
         app.include_router(
             build_capability_graph_router(
                 adapter,
-                worker_version=getattr(app, "version", None),
+                worker_version=worker_version,
+            )
+        )
+        app.include_router(
+            build_capability_receipt_router(
+                app.state.agent3_orchestrator.store,
+                graph_provider,
             )
         )
         app.state.agent3_memory_store = memory_store
         app.state.agent3_replan_preview_service = replan_preview_service
         app.state.agent3_outcome_answer_mounted = True
         app.state.agent3_capability_graph_mounted = True
+        app.state.agent3_capability_receipt_mounted = True
     else:
         sys.stderr.write(
             "Agent 3.0 was not mounted because KALIV_AGENT3_ENABLED is not 1. "
