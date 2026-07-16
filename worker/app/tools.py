@@ -283,14 +283,29 @@ def _run_current_datetime(args: dict) -> str:
             f"{n.tm_year}, kl. {n.tm_hour:02d}:{n.tm_min:02d}")
 
 
+# Lazy module singleton for the tool's read connection. A fresh DocStore() per
+# tool call opened a new SQLite connection each invocation and never closed it
+# explicitly -- a file-handle leak on a long-running Windows process (repo
+# analysis 1.58.40, confirming the external audit). One connection, reused;
+# SQLite handles it alongside main.py's ingest/query connection fine.
+_docstore = None
+
+
+def _get_docstore():
+    global _docstore
+    if _docstore is None:
+        from .store import DocStore
+        _docstore = DocStore()
+    return _docstore
+
+
 def _run_list_documents(args: dict) -> str:
     """Read-only. The RAG documents ingested on the rig: source NAMES + chunk
     counts. Names only (metadata) -- never content; the content guard (D4) is a
-    separate concern. Opens its own read connection to the same store; no arg
-    from the model is used."""
-    from .store import DocStore
+    separate concern. Reuses the module's read connection; no arg from the
+    model is used."""
     counts: dict[str, int] = {}
-    for _id, _text, src, _idx, _emb in DocStore().all():
+    for _id, _text, src, _idx, _emb in _get_docstore().all():
         counts[src or "(uden navn)"] = counts.get(src or "(uden navn)", 0) + 1
     if not counts:
         return "Ingen dokumenter er ingested endnu."
