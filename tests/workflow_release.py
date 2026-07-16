@@ -9,11 +9,13 @@ state transition after asset verification.
 from pathlib import Path
 
 text = Path(".github/workflows/build-and-release.yml").read_text(encoding="utf-8")
+ensure_block = text.split("  ensure-draft-release:", 1)[1].split("\n  determine-matrix:", 1)[0]
 
 checks = {
     "single release-create authority": text.count("gh release create") == 1,
     "creation is explicitly draft": "gh release create \"$TAG\" --draft" in text,
     "existing release is forced back to draft": "gh release edit \"$TAG\" --draft=true" in text,
+    "draft authority has explicit repo context": "actions/checkout@v5" in ensure_block,
     "draft state is verified before build uploads": "state=$(gh release view \"$TAG\" --json isDraft" in text,
     "asset verification checks draft visibility": "release became public before verification" in text,
     "only final transition publishes": text.count("--draft=false --latest") == 1,
