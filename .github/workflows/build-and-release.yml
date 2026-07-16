@@ -34,6 +34,9 @@ jobs:
     needs: version-check
     runs-on: ubuntu-latest
     steps:
+      # gh needs explicit repository context. The checkout makes this job behave
+      # identically locally and in Actions rather than relying on implicit env.
+      - uses: actions/checkout@v5
       - name: Ensure one private draft exists
         if: github.ref_type == 'tag'
         env:
