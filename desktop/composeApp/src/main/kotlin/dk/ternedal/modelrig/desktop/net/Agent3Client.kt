@@ -53,6 +53,25 @@ data class Agent3MemoryReceipt(
 )
 
 @Serializable
+data class Agent3CapabilityBlocker(
+    @SerialName("capability_id") val capabilityId: String = "",
+    val state: String = "",
+    val reason: String = "",
+)
+
+@Serializable
+data class Agent3CapabilityReceipt(
+    val schema: String = "",
+    @SerialName("graph_sha256") val graphSha256: String = "",
+    @SerialName("plan_sha256") val planSha256: String = "",
+    val route: String = "",
+    val allowed: Boolean = false,
+    @SerialName("required_capability_ids") val requiredCapabilityIds: List<String> = emptyList(),
+    val blockers: List<Agent3CapabilityBlocker> = emptyList(),
+    @SerialName("production_activation") val productionActivation: Boolean = false,
+)
+
+@Serializable
 data class Agent3ReadReview(
     val enabled: Boolean = false,
     val waiting: Boolean = false,
@@ -73,6 +92,7 @@ data class Agent3PlanPreview(
     val plan: List<Agent3Step> = emptyList(),
     val executed: Boolean = false,
     @SerialName("memory_context") val memoryContext: Agent3MemoryReceipt = Agent3MemoryReceipt(),
+    @SerialName("capability_receipt") val capabilityReceipt: Agent3CapabilityReceipt? = null,
     @SerialName("review_reads") val reviewReads: Boolean = false,
 )
 
@@ -124,6 +144,7 @@ data class Agent3RunEnvelope(
     val run: Agent3Run = Agent3Run(),
     @SerialName("review_reads") val reviewReads: Boolean = false,
     @SerialName("read_review") val readReview: Agent3ReadReview = Agent3ReadReview(),
+    @SerialName("capability_receipt") val capabilityReceipt: Agent3CapabilityReceipt? = null,
 )
 
 @Serializable
@@ -155,32 +176,41 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
         memorySubjects: List<String> = emptyList(),
         memoryMaxChars: Int = 4_000,
         memoryMaxRecords: Int = 25,
-    ): Agent3PlanPreview = decode(
-        post(
-            "/api/v1/experimental/agent3/plan",
-            json.encodeToString(
-                PlanRequest(
-                    message = message,
-                    mode = mode,
-                    rag = rag,
-                    allowRagCloud = allowRagCloud,
-                    allowPrivateCloud = allowPrivateCloud,
-                    cloudReady = cloudReady,
-                    conversationId = conversationId,
-                    plannerModel = plannerModel,
-                    proactive = proactive,
-                    reviewReads = reviewReads,
-                    useMemory = useMemory,
-                    memorySubjects = memorySubjects,
-                    memoryMaxChars = memoryMaxChars,
-                    memoryMaxRecords = memoryMaxRecords,
-                )
-            ),
+    ): Agent3PlanPreview {
+        val preview = decode<Agent3PlanPreview>(
+            post(
+                "/api/v1/experimental/agent3/plan",
+                json.encodeToString(
+                    PlanRequest(
+                        message = message,
+                        mode = mode,
+                        rag = rag,
+                        allowRagCloud = allowRagCloud,
+                        allowPrivateCloud = allowPrivateCloud,
+                        cloudReady = cloudReady,
+                        conversationId = conversationId,
+                        plannerModel = plannerModel,
+                        proactive = proactive,
+                        reviewReads = reviewReads,
+                        useMemory = useMemory,
+                        memorySubjects = memorySubjects,
+                        memoryMaxChars = memoryMaxChars,
+                        memoryMaxRecords = memoryMaxRecords,
+                    )
+                ),
+            )
         )
-    )
+        validateCapabilityReceipt(preview.capabilityReceipt)
+        return preview
+    }
 
-    fun startPlanEnvelope(planId: String): Agent3RunEnvelope =
-        decode(post("/api/v1/experimental/agent3/plans/$planId/start", "{}"))
+    fun startPlanEnvelope(planId: String): Agent3RunEnvelope {
+        val envelope = decode<Agent3RunEnvelope>(
+            post("/api/v1/experimental/agent3/plans/$planId/start", "{}")
+        )
+        validateCapabilityReceipt(envelope.capabilityReceipt)
+        return envelope
+    }
 
     fun startPlan(planId: String): Agent3Run = startPlanEnvelope(planId).run
 
@@ -205,6 +235,34 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
 
     fun cancel(runId: String): Agent3Run =
         decode<Agent3RunEnvelope>(post("/api/v1/experimental/agent3/runs/$runId/cancel", "{}")).run
+
+    private fun validateCapabilityReceipt(receipt: Agent3CapabilityReceipt?) {
+        if (receipt == null) return
+        if (receipt.schema != "kaliv-agent3-capability-receipt/v1") {
+            throw Agent3Exception("Unsupported Agent 3.0 capability receipt schema: ${receipt.schema}")
+        }
+        if (receipt.productionActivation) {
+            throw Agent3Exception("Invalid capability receipt: it must never activate production")
+        }
+        val digest = Regex("^[0-9a-f]{64}$")
+        if (!digest.matches(receipt.graphSha256) || !digest.matches(receipt.planSha256)) {
+            throw Agent3Exception("Invalid capability receipt: malformed SHA-256 binding")
+        }
+        if (receipt.route.isBlank()) {
+            throw Agent3Exception("Invalid capability receipt: route is missing")
+        }
+        if (receipt.requiredCapabilityIds.any { it.isBlank() } ||
+            receipt.requiredCapabilityIds.size != receipt.requiredCapabilityIds.distinct().size
+        ) {
+            throw Agent3Exception("Invalid capability receipt: required capability ids are invalid")
+        }
+        if (receipt.blockers.any { it.capabilityId.isBlank() || it.state.isBlank() || it.reason.isBlank() }) {
+            throw Agent3Exception("Invalid capability receipt: blocker is incomplete")
+        }
+        if (receipt.allowed && receipt.blockers.isNotEmpty()) {
+            throw Agent3Exception("Invalid capability receipt: allowed plan contains blockers")
+        }
+    }
 
     private fun builder(path: String): HttpRequest.Builder = HttpRequest.newBuilder(URI.create(base + path))
         .header("Content-Type", "application/json")
