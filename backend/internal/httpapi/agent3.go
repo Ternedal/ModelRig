@@ -81,6 +81,12 @@ func (s *server) handleAgent3RunEvents(w http.ResponseWriter, r *http.Request) {
 	s.Worker.Forward(w, r, agent3RunTarget(r, "/events"))
 }
 
+func (s *server) handleAgent3RunCapabilityReceipt(w http.ResponseWriter, r *http.Request) {
+	// The receipt evaluates a stored run against the current read-only graph. It
+	// returns hashes and blockers only and never advances or executes the run.
+	s.Worker.Forward(w, r, agent3RunTarget(r, "/capability-receipt"))
+}
+
 func (s *server) handleAgent3RunReplans(w http.ResponseWriter, r *http.Request) {
 	// Replan history and recovery are local journal reads.
 	s.Worker.Forward(w, r, agent3RunTarget(r, "/replans"))
