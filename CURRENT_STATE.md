@@ -87,7 +87,6 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_replan_runtime.py`
 - `tests/worker_agent3_replanner.py`
 - `tests/worker_agent3_retry.py`
-- `tests/worker_agent3_routing_preview.py`
 - `tests/worker_agent3_review_api_apply.py`
 - `tests/worker_agent3_review_api_approve.py`
 - `tests/worker_agent3_review_api_deny.py`
@@ -98,6 +97,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_review_replan_api.py`
 - `tests/worker_agent3_rig_evidence.py`
 - `tests/worker_agent3_rig_validation_cli.py`
+- `tests/worker_agent3_routing_preview.py`
 - `tests/worker_agent3_smoke_cli.py`
 - `tests/worker_agent3_validation_gate.py`
 - `tests/worker_agent3_validation_status.py`
