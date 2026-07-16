@@ -25,6 +25,19 @@ def check(cond, name):
         print(f"  FAIL: {name}")
 
 
+def route_count() -> int:
+    # Current main wraps FastAPI in HardenedWorkerApp so body limits and streaming
+    # cleanup happen outside request parsing. HTTP requests must still go through
+    # the wrapper, while route-registration assertions inspect its documented
+    # underlying ASGI app.
+    app = run_worker.app
+    inner = getattr(app, "app", app)
+    routes = getattr(inner, "routes", None)
+    if routes is None:
+        raise AssertionError("worker app exposes no inspectable FastAPI route table")
+    return len(routes)
+
+
 async def request(method: str, path: str, payload: dict | None = None) -> httpx.Response:
     # The worker's security middleware checks request.client.host, not the Host
     # header. ASGITransport lets the test set the actual ASGI peer to loopback;
@@ -39,10 +52,10 @@ def status(method: str, path: str, payload: dict | None = None) -> int:
 
 
 os.environ["KALIV_AGENT3_ENABLED"] = "0"
-before_count = len(run_worker.app.routes)
+before_count = route_count()
 check(run_worker._mount_optional_agent3() is False, "feature remains off without explicit flag")
 check(status("GET", "/experimental/agent3/status") == 404, "flag-off worker exposes no Agent 3.0 API")
-check(len(run_worker.app.routes) == before_count, "flag-off mount changes no route registrations")
+check(route_count() == before_count, "flag-off mount changes no route registrations")
 
 os.environ["KALIV_AGENT3_ENABLED"] = "1"
 check(run_worker._mount_optional_agent3() is True, "feature mounts after explicit flag")
@@ -52,9 +65,9 @@ check(status("POST", "/experimental/agent3/plan", {}) == 422, "planner API is re
 # A missing single-use plan is a domain conflict, not a missing route.
 check(status("POST", "/experimental/agent3/plans/missing/start") == 409, "single-use plan start is reachable")
 
-mounted_count = len(run_worker.app.routes)
+mounted_count = route_count()
 check(run_worker._mount_optional_agent3() is True, "second mount call is harmless")
-check(len(run_worker.app.routes) == mounted_count, "second mount does not duplicate registrations")
+check(route_count() == mounted_count, "second mount does not duplicate registrations")
 
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)
