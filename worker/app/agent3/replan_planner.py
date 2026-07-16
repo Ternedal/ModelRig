@@ -36,7 +36,11 @@ def _strip_code_fence(text: str) -> str:
 
 def _bounded_json(value: Any, max_chars: int) -> str:
     try:
-        encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+        # Preserve producer field order. Sorting can move a large, low-value field
+        # ahead of status/error fields and starve them when the observation is
+        # truncated. Python dict insertion order is deterministic for a given tool
+        # result and is the more useful bounded representation here.
+        encoded = json.dumps(value, ensure_ascii=False, default=str)
     except Exception:
         encoded = json.dumps(str(value), ensure_ascii=False)
     if len(encoded) <= max_chars:
@@ -119,7 +123,10 @@ class TypedReadReplanPlanner:
                 "LLM replanning is local-only in this draft; cloud runs require explicit manual replans"
             )
 
-        window = self.policy.window(run)
+        try:
+            window = self.policy.window(run)
+        except ReplanError as exc:
+            raise ReplanPlannerError(str(exc)) from exc
         catalog = self._read_catalog()
         if not catalog:
             raise ReplanPlannerError("no read tools are enabled")
