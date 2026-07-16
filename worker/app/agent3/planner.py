@@ -10,6 +10,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import ollama_client as oc
+from .capability_graph import CapabilityGraph
+from .capability_receipt import agent_run_plan_sha256, evaluate_run_capabilities
 from .core import (
     Agent3Orchestrator,
     AgentRun,
@@ -37,6 +39,7 @@ class PlanProposal:
 
 
 ChatFn = Callable[[list[dict], str | None], Awaitable[str]]
+CapabilityGraphProvider = Callable[[], CapabilityGraph]
 
 
 def _strip_code_fence(text: str) -> str:
@@ -192,6 +195,7 @@ def build_planner_router(
     plan_store: PlanStore | None = None,
     memory_store: MemoryStore | None = None,
     memory_compiler: MemoryContextCompiler | None = None,
+    capability_graph_provider: CapabilityGraphProvider | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/experimental/agent3", tags=["experimental-agent3"])
     planner = planner or TypedPlanner(adapter)
@@ -199,6 +203,17 @@ def build_planner_router(
     memory_compiler = memory_compiler or MemoryContextCompiler()
     turn_router = StrictTurnRouter()
     reviewing = isinstance(orchestrator, ReviewingAgent3Orchestrator)
+
+    def capability_receipt(template: AgentRun) -> dict[str, Any] | None:
+        if capability_graph_provider is None:
+            return None
+        try:
+            return evaluate_run_capabilities(
+                capability_graph_provider(),
+                template,
+            ).to_dict()
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @router.post("/plan")
     async def preview(req: PlanPreviewReq) -> dict[str, Any]:
@@ -226,7 +241,7 @@ def build_planner_router(
             raise HTTPException(status_code=409, detail=route.reason)
 
         memory_context = ""
-        receipt = _empty_memory_receipt(requested=req.use_memory)
+        memory_receipt = _empty_memory_receipt(requested=req.use_memory)
         if req.use_memory:
             if memory_store is None:
                 raise HTTPException(status_code=409, detail="memory planning is not mounted")
@@ -249,7 +264,7 @@ def build_planner_router(
                 max_records=req.memory_max_records,
             )
             memory_context = compiled.text
-            receipt = _memory_receipt(compiled)
+            memory_receipt = _memory_receipt(compiled)
 
         try:
             proposal = await planner.plan(
@@ -263,6 +278,7 @@ def build_planner_router(
 
         plan_id: str | None = None
         expires_in_seconds: int | None = None
+        capability_receipt_payload: dict[str, Any] | None = None
         if steps:
             template = AgentRun(
                 request=request,
@@ -271,19 +287,23 @@ def build_planner_router(
                 proactive=req.proactive,
                 allow_private_cloud=req.allow_private_cloud,
             )
+            capability_receipt_payload = capability_receipt(template)
+            envelope: dict[str, Any] = {
+                "run": template.to_json(),
+                "capabilities": asdict(caps),
+                "memory_context": memory_receipt,
+                "review_reads": req.review_reads,
+            }
+            if capability_receipt_payload is not None:
+                envelope["capability_receipt"] = capability_receipt_payload
             payload = json.dumps(
-                {
-                    "run": template.to_json(),
-                    "capabilities": asdict(caps),
-                    "memory_context": receipt,
-                    "review_reads": req.review_reads,
-                },
+                envelope,
                 ensure_ascii=False,
                 sort_keys=True,
             )
             plan_id, expires_in_seconds = plan_store.save(payload)
 
-        return {
+        response: dict[str, Any] = {
             "route": {
                 "kind": route.kind.value,
                 "reason": route.reason,
@@ -307,9 +327,12 @@ def build_planner_router(
             "plan_id": plan_id,
             "expires_in_seconds": expires_in_seconds,
             "executed": False,
-            "memory_context": receipt,
+            "memory_context": memory_receipt,
             "review_reads": req.review_reads,
         }
+        if capability_receipt_payload is not None:
+            response["capability_receipt"] = capability_receipt_payload
+        return response
 
     @router.post("/plans/{plan_id}/start")
     def start_reviewed_plan(plan_id: str) -> dict[str, Any]:
@@ -321,6 +344,7 @@ def build_planner_router(
             stored_caps = CapabilitySnapshot(**envelope["capabilities"])
             memory_receipt = envelope.get("memory_context", _empty_memory_receipt())
             review_reads = bool(envelope.get("review_reads", False))
+            stored_capability_receipt = envelope.get("capability_receipt")
         except PlanStoreError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (KeyError, TypeError, json.JSONDecodeError, ValueError) as exc:
@@ -328,6 +352,32 @@ def build_planner_router(
 
         if review_reads and not reviewing:
             raise HTTPException(status_code=409, detail="read review is not mounted")
+
+        current_capability_receipt: dict[str, Any] | None = None
+        if stored_capability_receipt is not None:
+            if not isinstance(stored_capability_receipt, dict):
+                raise HTTPException(status_code=409, detail="stored capability receipt is invalid")
+            if capability_graph_provider is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="capability receipt validation is not mounted",
+                )
+            if stored_capability_receipt.get("plan_sha256") != agent_run_plan_sha256(template):
+                raise HTTPException(
+                    status_code=409,
+                    detail="stored capability receipt does not match the plan",
+                )
+            current_capability_receipt = capability_receipt(template)
+            if current_capability_receipt != stored_capability_receipt:
+                raise HTTPException(
+                    status_code=409,
+                    detail="capability receipt is stale; preview the plan again",
+                )
+            if not bool(current_capability_receipt.get("allowed", False)):
+                raise HTTPException(
+                    status_code=409,
+                    detail="plan is blocked by current capabilities",
+                )
 
         # Recheck the gate at start time. A kill-switch decision made after the
         # preview wins over the earlier plan.
@@ -356,12 +406,15 @@ def build_planner_router(
             if reviewing
             else {"enabled": False, "waiting": False}
         )
-        return {
+        response = {
             "run": json.loads(run.to_json()),
             "plan_id": plan_id,
             "memory_context": memory_receipt,
             "review_reads": review_reads,
             "read_review": read_review,
         }
+        if current_capability_receipt is not None:
+            response["capability_receipt"] = current_capability_receipt
+        return response
 
     return router
