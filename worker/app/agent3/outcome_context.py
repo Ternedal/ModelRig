@@ -173,7 +173,7 @@ class OutcomeContextCompiler:
             result: dict[str, Any] = {}
             items = list(value.items())[: self.max_collection_items]
             for key, item in items:
-                result[self._bounded_string(str(key))] = self._json_safe(
+                result[self._safe_key(key)] = self._json_safe(
                     item,
                     depth=depth + 1,
                 )
@@ -187,9 +187,30 @@ class OutcomeContextCompiler:
                 result.append({"truncated_items": len(value) - len(items)})
             return result
         if isinstance(value, (set, frozenset)):
-            ordered = sorted(value, key=lambda item: (type(item).__name__, repr(item)))
-            return self._json_safe(ordered, depth=depth)
+            items = list(value)[: self.max_collection_items]
+            normalized = [self._json_safe(item, depth=depth + 1) for item in items]
+            normalized.sort(key=self._stable_sort_key)
+            if len(value) > len(items):
+                normalized.append({"truncated_items": len(value) - len(items)})
+            return normalized
         return {"unsupported_type": type(value).__name__}
+
+    def _safe_key(self, value: Any) -> str:
+        if value is None or isinstance(value, (bool, int, str)):
+            return self._bounded_string(str(value))
+        if isinstance(value, float):
+            return self._bounded_string(str(value) if math.isfinite(value) else type(value).__name__)
+        return f"unsupported-key:{type(value).__name__}"
+
+    @staticmethod
+    def _stable_sort_key(value: Any) -> str:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
 
     def _bounded_string(self, value: str) -> str:
         if len(value) <= self.max_string_chars:
