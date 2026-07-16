@@ -13,19 +13,19 @@ import os
 import sys
 
 import uvicorn
-
-from app.main import app
 from app import paths as app_paths
 from app.agent3.api import mount_agent3
 from app.agent3.integration import V2ToolAdapter
 from app.agent3.memory import MemoryStore
 from app.agent3.memory_api import build_memory_router
+from app.agent3.outcome_answer_api import build_outcome_answer_router
 from app.agent3.plan_store import PlanStore
 from app.agent3.planner import build_planner_router
 from app.agent3.replan_preview_api import (
     build_default_replan_preview_service,
     build_replan_preview_router,
 )
+from app.main import app
 
 
 def _is_loopback(host: str) -> bool:
@@ -67,8 +67,10 @@ if __name__ == "__main__":
                 review_store=app.state.agent3_read_review_store,
             )
         )
+        app.include_router(build_outcome_answer_router(app.state.agent3_orchestrator.store))
         app.state.agent3_memory_store = memory_store
         app.state.agent3_replan_preview_service = replan_preview_service
+        app.state.agent3_outcome_answer_mounted = True
     else:
         sys.stderr.write(
             "Agent 3.0 was not mounted because KALIV_AGENT3_ENABLED is not 1. "
