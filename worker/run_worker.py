@@ -26,6 +26,23 @@ def _is_loopback(host: str) -> bool:
         return host == "localhost"
 
 
+def _routing_app():
+    """Return the inner FastAPI app used for route and state registration.
+
+    Current main wraps FastAPI in HardenedWorkerApp so bounded-body enforcement
+    and streaming cleanup remain the outermost ASGI boundary. Optional Agent 3.0
+    routes must be registered on the wrapped FastAPI app, while uvicorn and HTTP
+    tests continue to call the hardened outer app.
+    """
+
+    candidate = app
+    while not hasattr(candidate, "state") and hasattr(candidate, "app"):
+        candidate = candidate.app
+    if not hasattr(candidate, "state") or not hasattr(candidate, "include_router"):
+        raise RuntimeError("worker app exposes no FastAPI routing surface")
+    return candidate
+
+
 def _mount_optional_agent3() -> bool:
     """Mount the dormant Agent 3.0 draft only after explicit operator opt-in.
 
@@ -36,7 +53,9 @@ def _mount_optional_agent3() -> bool:
     """
     if os.getenv("KALIV_AGENT3_ENABLED", "0") != "1":
         return False
-    if getattr(app.state, "agent3_planner_mounted", False):
+
+    routing_app = _routing_app()
+    if getattr(routing_app.state, "agent3_planner_mounted", False):
         return True
 
     from app import paths as app_paths
@@ -51,7 +70,7 @@ def _mount_optional_agent3() -> bool:
         build_replan_preview_router,
     )
 
-    if not mount_agent3(app):
+    if not mount_agent3(routing_app):
         return False
     adapter = V2ToolAdapter()
     plan_db = app_paths.resolve("./kaliv-agent3-plans.db", env="KALIV_AGENT3_PLAN_DB")
@@ -59,26 +78,26 @@ def _mount_optional_agent3() -> bool:
     memory_store = MemoryStore(memory_db)
     replan_preview_service = build_default_replan_preview_service(
         adapter,
-        app.state.agent3_replanner,
+        routing_app.state.agent3_replanner,
     )
-    app.include_router(
+    routing_app.include_router(
         build_planner_router(
             adapter,
-            orchestrator=app.state.agent3_orchestrator,
+            orchestrator=routing_app.state.agent3_orchestrator,
             plan_store=PlanStore(plan_db),
             memory_store=memory_store,
         )
     )
-    app.include_router(build_memory_router(memory_store))
-    app.include_router(
+    routing_app.include_router(build_memory_router(memory_store))
+    routing_app.include_router(
         build_replan_preview_router(
             replan_preview_service,
-            review_store=app.state.agent3_read_review_store,
+            review_store=routing_app.state.agent3_read_review_store,
         )
     )
-    app.state.agent3_memory_store = memory_store
-    app.state.agent3_replan_preview_service = replan_preview_service
-    app.state.agent3_planner_mounted = True
+    routing_app.state.agent3_memory_store = memory_store
+    routing_app.state.agent3_replan_preview_service = replan_preview_service
+    routing_app.state.agent3_planner_mounted = True
     return True
 
 
