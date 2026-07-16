@@ -70,7 +70,12 @@ def _mount_optional_agent3() -> bool:
         )
     )
     app.include_router(build_memory_router(memory_store))
-    app.include_router(build_replan_preview_router(replan_preview_service))
+    app.include_router(
+        build_replan_preview_router(
+            replan_preview_service,
+            review_store=app.state.agent3_read_review_store,
+        )
+    )
     app.state.agent3_memory_store = memory_store
     app.state.agent3_replan_preview_service = replan_preview_service
     app.state.agent3_planner_mounted = True
