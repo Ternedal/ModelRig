@@ -131,6 +131,12 @@ jobs:
       - name: Install platform + build-tools
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
+      - name: Unit tests (JVM)
+        working-directory: android
+        run: |
+          echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
+          ./gradlew :app:testDebugUnitTest --no-daemon --console=plain
+
       - name: Build release APK
         working-directory: android
         run: |
@@ -378,3 +384,13 @@ jobs:
           else
             echo "desktop jar not built for this tag; not required"
           fi
+
+      - name: Publish the release (atomic -- nothing is public until verified)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The release is created as a DRAFT; assets and SHA256SUMS land on the
+          # draft, the step above verifies the full asset list, and only THEN is
+          # it published and marked latest -- so a half-uploaded release can
+          # never be visible or picked up by the updater (audit 1.58.36).
+          gh release edit "${{ github.ref_name }}" --draft=false --latest

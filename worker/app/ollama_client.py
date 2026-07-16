@@ -112,11 +112,14 @@ async def chat_tools(messages: list[dict], tools: list[dict],
     Returns Ollama's message dict: {"content": str, "tool_calls": [...]} .
 
     A cloud model MAY propose tools (Anders' revision 2026-07-10, superseding
-    the earlier "local only" rule) -- but proposing is not executing. Every
-    cloud-originated call goes through the confirmation card, including READ
-    tools, because a read result must travel back to the cloud model to be
-    phrased: the tool output leaves the house. The gate enforces that, not
-    this function; see tools.ToolGate.propose(origin=...).
+    the earlier "local only" rule) -- but proposing is not executing. WRITES
+    are gated: they park server-side and require the confirmation card,
+    regardless of origin. READS are NOT gated (the gate checks risk=="write"
+    only) -- so a cloud-originated read runs without a card and its result
+    travels back to the cloud model: the tool output leaves the house. That is
+    a documented OPEN privacy point (SECURITY.md, decision #6 / egress
+    classification); do not assume a read-consent gate exists because of an
+    old version of this comment. See tools.ToolGate.propose(origin=...).
 
     Pass tools=[] to guarantee the model cannot request a tool -- that is how
     the follow-up turn after a tool result is made chain-free.

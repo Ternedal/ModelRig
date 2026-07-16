@@ -15,9 +15,20 @@ import javax.crypto.spec.GCMParameterSpec
  * never leaves the Keystore/TEE, and there is no external dependency (Jetpack
  * Security's EncryptedSharedPreferences is deprecated, so it is avoided).
  *
- * Stored form: base64( 12-byte GCM IV || ciphertext+tag ).
+ * Stored form: "enc:v1:" + base64( 12-byte GCM IV || ciphertext+tag ). The
+ * prefix makes ciphertext SELF-IDENTIFYING: a reader can distinguish "encrypted
+ * value that failed to decrypt" (corrupt, or the Keystore key was lost after a
+ * restore/device move -> INVALID, require re-pair) from "legacy plaintext that
+ * predates encryption" (-> migrate). Without it, a failed decrypt was
+ * indistinguishable from plaintext, and re-"migrating" garbage laundered it
+ * into a valid-looking secret (audit 1.58.36). Prefixless values are accepted
+ * on read for backward compatibility.
  */
 internal object Crypto {
+    const val PREFIX = "enc:v1:"
+
+    fun isEncrypted(v: String): Boolean = v.startsWith(PREFIX)
+
     private const val ALIAS = "modelrig_cloud_key"
     private const val KEYSTORE = "AndroidKeyStore"
     private const val TRANSFORM = "AES/GCM/NoPadding"
@@ -49,11 +60,11 @@ internal object Crypto {
         val out = ByteArray(iv.size + ct.size)
         System.arraycopy(iv, 0, out, 0, iv.size)
         System.arraycopy(ct, 0, out, iv.size, ct.size)
-        return Base64.encodeToString(out, Base64.NO_WRAP)
+        return PREFIX + Base64.encodeToString(out, Base64.NO_WRAP)
     }
 
     fun decrypt(data: String): String {
-        val raw = Base64.decode(data, Base64.NO_WRAP)
+        val raw = Base64.decode(data.removePrefix(PREFIX), Base64.NO_WRAP)
         val iv = raw.copyOfRange(0, IV_LEN)
         val ct = raw.copyOfRange(IV_LEN, raw.size)
         val cipher = Cipher.getInstance(TRANSFORM)

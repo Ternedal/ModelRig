@@ -1,4 +1,4 @@
-> ⚠️ **Aktuel autoritativ tilstand: `VERSION` (1.58.2), `ROADMAP.md`, `SECURITY.md`.**
+> ⚠️ **Aktuel autoritativ tilstand: `VERSION` (bump'es hver release — se filen), `ROADMAP.md`, `SECURITY.md`.**
 > Denne fil er en historisk log — ældre datoer/versioner nedenfor er ikke nødvendigvis aktuelle.
 > 13/7-2026: audit-P0/P1 lukket (1.58.1/1.58.2); VERSION-kilde + CI-gate indført; roadmap fornyet.
 
