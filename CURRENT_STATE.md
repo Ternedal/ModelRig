@@ -29,6 +29,7 @@ travel. They are orthogonal.
 
 | Env | Default |
 |---|---|
+| `KALIV_AGENT3_ENABLED` | `0` |
 | `KALIV_ALLOW_RAG_CLOUD` | `` |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` |
 | `KALIV_DATA_DIR` | `(unset)` |
@@ -59,6 +60,46 @@ Run by glob, so a file that matches is a file that runs
 - `tests/backend_smoke.py`
 - `tests/backend_v1.py`
 - `tests/e2e.py`
+- `tests/worker_agent3_capability_graph.py`
+- `tests/worker_agent3_capability_graph_api.py`
+- `tests/worker_agent3_capability_receipt.py`
+- `tests/worker_agent3_capability_receipt_api.py`
+- `tests/worker_agent3_cloud_read_policy.py`
+- `tests/worker_agent3_entrypoint.py`
+- `tests/worker_agent3_integration.py`
+- `tests/worker_agent3_memory.py`
+- `tests/worker_agent3_memory_api.py`
+- `tests/worker_agent3_memory_context.py`
+- `tests/worker_agent3_outcome_answer.py`
+- `tests/worker_agent3_outcome_answer_api.py`
+- `tests/worker_agent3_outcome_context.py`
+- `tests/worker_agent3_outcome_context_adversarial.py`
+- `tests/worker_agent3_plan_store.py`
+- `tests/worker_agent3_planner.py`
+- `tests/worker_agent3_planner_capability_binding.py`
+- `tests/worker_agent3_planner_memory.py`
+- `tests/worker_agent3_planner_review.py`
+- `tests/worker_agent3_planner_review_guard.py`
+- `tests/worker_agent3_replan_api.py`
+- `tests/worker_agent3_replan_planner.py`
+- `tests/worker_agent3_replan_preview.py`
+- `tests/worker_agent3_replan_preview_api.py`
+- `tests/worker_agent3_replan_runtime.py`
+- `tests/worker_agent3_replanner.py`
+- `tests/worker_agent3_retry.py`
+- `tests/worker_agent3_review_api_apply.py`
+- `tests/worker_agent3_review_api_approve.py`
+- `tests/worker_agent3_review_api_deny.py`
+- `tests/worker_agent3_review_api_resume.py`
+- `tests/worker_agent3_review_api_start.py`
+- `tests/worker_agent3_review_binding.py`
+- `tests/worker_agent3_review_reads.py`
+- `tests/worker_agent3_review_replan_api.py`
+- `tests/worker_agent3_rig_evidence.py`
+- `tests/worker_agent3_rig_validation_cli.py`
+- `tests/worker_agent3_smoke_cli.py`
+- `tests/worker_agent3_validation_gate.py`
+- `tests/worker_agent3_validation_status.py`
 - `tests/worker_agent_continue.py`
 - `tests/worker_agent_multistep.py`
 - `tests/worker_audit.py`
