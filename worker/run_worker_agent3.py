@@ -15,6 +15,7 @@ import sys
 import uvicorn
 from app import paths as app_paths
 from app.agent3.api import mount_agent3
+from app.agent3.capability_graph_api import build_capability_graph_router
 from app.agent3.integration import V2ToolAdapter
 from app.agent3.memory import MemoryStore
 from app.agent3.memory_api import build_memory_router
@@ -68,9 +69,16 @@ if __name__ == "__main__":
             )
         )
         app.include_router(build_outcome_answer_router(app.state.agent3_orchestrator.store))
+        app.include_router(
+            build_capability_graph_router(
+                adapter,
+                worker_version=getattr(app, "version", None),
+            )
+        )
         app.state.agent3_memory_store = memory_store
         app.state.agent3_replan_preview_service = replan_preview_service
         app.state.agent3_outcome_answer_mounted = True
+        app.state.agent3_capability_graph_mounted = True
     else:
         sys.stderr.write(
             "Agent 3.0 was not mounted because KALIV_AGENT3_ENABLED is not 1. "
