@@ -12,8 +12,8 @@ from app.agent3.core import AgentRunStore, CapabilitySnapshot
 from app.agent3.integration import V2ToolAdapter
 from app.agent3.plan_store import PlanStore
 from app.agent3.replan_planner import TypedReadReplanPlanner
+from app.agent3.replan_preview import ReplanPreviewService
 from app.agent3.replan_preview_api import build_replan_preview_router
-from app.agent3.replan_review import ReviewAwareReplanPreviewService
 from app.agent3.replan_runtime import PersistentReadReplanner, ReplanJournal
 from app.agent3.replanner import ReadSuffixReplanner
 from app.agent3.review_orchestrator import ReadReviewStore, ReviewingAgent3Orchestrator
@@ -83,12 +83,11 @@ persistent = PersistentReadReplanner(
     ReplanJournal(os.path.join(root, "journal.db")),
     policy,
 )
-service = ReviewAwareReplanPreviewService(
+service = ReplanPreviewService(
     run_store,
     persistent,
     TypedReadReplanPlanner(adapter, policy, chat_fn=scripted_chat),
     PlanStore(os.path.join(root, "previews.db"), ttl_seconds=300),
-    review_store=review_store,
 )
 
 
@@ -111,7 +110,7 @@ app.include_router(
         replan_service=persistent,
     )
 )
-app.include_router(build_replan_preview_router(service))
+app.include_router(build_replan_preview_router(service, review_store=review_store))
 client = TestClient(app)
 
 started = client.post(
@@ -167,6 +166,8 @@ new_read_id = applied["run"]["steps"][1]["id"]
 assert new_read_id != old_read_id
 assert applied["run"]["steps"][2]["id"] == write_id
 assert applied["run"]["steps"][2]["args"] == {"text": "immutable-tail"}
+assert applied["read_review"]["waiting"] is True
+assert applied["read_review"]["removable_step_ids"] == [new_read_id]
 assert executor.calls == ["rig_status"]
 assert calls["planner"] == 1
 
@@ -182,11 +183,4 @@ assert loaded["read_review"]["removable_step_ids"] == [new_read_id]
 assert old_read_id not in loaded["read_review"]["removable_step_ids"]
 assert executor.calls == ["rig_status"]
 
-events = client.get(f"/experimental/agent3/runs/{run_id}/events").json()["events"]
-rebound = [event for event in events if event["kind"] == "replan_review_rebound"]
-assert len(rebound) == 1
-assert rebound[0]["payload"]["execution_resumed"] is False
-assert rebound[0]["payload"]["previous_removable_step_ids"] == [old_read_id]
-assert rebound[0]["payload"]["removable_step_ids"] == [new_read_id]
-
-print("30 passed, 0 failed")
+print("27 passed, 0 failed")
