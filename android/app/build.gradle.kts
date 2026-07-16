@@ -68,7 +68,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     // Android 12+ splash. Without this the app only set windowBackground, which
     // the system splash overrides on 12+ -- so on a Pixel there was effectively
     // no branded splash. This API is the supported way to theme it.
