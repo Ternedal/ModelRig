@@ -126,5 +126,60 @@ finally:
 check(all(t.risk != "desktop" for t in T.REGISTRY.values()),
       "the probe is gone: no real tool declares desktop yet")
 
+# --- egress classes (F-208): where a RESULT may travel ----------------------
+# Risk gates the action; sensitivity gates the answer. list_documents is the
+# case in one line: a harmless read that hands your document names to whoever
+# asked -- including a cloud model, with no card and nothing said out loud.
+
+check(T.may_egress("public"), "public results travel freely")
+check(T.may_egress("operational"), "operational results travel (today's documented behaviour)")
+check(not T.may_egress("private"), "private needs consent")
+check(T.may_egress("private", consent=True), "consent unlocks private")
+check(not T.may_egress("secret", consent=True),
+      "consent CANNOT unlock a secret -- that is what makes it one")
+
+check(T.REGISTRY["list_documents"].sensitivity == "private",
+      "list_documents is private: it returns YOUR document names")
+check(T.REGISTRY["current_datetime"].sensitivity == "public", "the clock is public")
+check(T.REGISTRY["rig_status"].sensitivity == "operational", "rig state is operational")
+check(all(t.sensitivity in ("public", "operational", "private", "secret")
+          for t in T.REGISTRY.values()),
+      "every registered tool is classified explicitly -- no tool inherits a default nobody chose")
+
+# secret is enforced NOW, though nothing is secret yet: the rule exists before
+# the tool that needs it, not after.
+vault = T.Tool(name="_audit_probe_vault", description="probe", risk="read",
+               sensitivity="secret", run=lambda a: "hunter2")
+T.REGISTRY[vault.name] = vault
+try:
+    g = gate()
+    msg = denied(g.propose, vault.name, {}, conversation_id="c9", origin="cloud")
+    check(msg is not None and "aldrig" in msg,
+          "a secret-returning tool refuses a CLOUD origin, gate flag or not")
+    check(last(g).get("outcome") == "blocked", "the refused egress is in the audit")
+    out = g.propose(vault.name, {}, conversation_id="c10", origin="local")
+    check(out.get("status") == "executed", "the same tool runs fine for a LOCAL model")
+finally:
+    del T.REGISTRY[vault.name]
+
+# private stays open until Anders decides #6 -- dormant, not silently changed
+g = gate()
+out = g.propose("list_documents", {}, conversation_id="c11", origin="cloud")
+check(out.get("status") == "executed",
+      "with the gate off, cloud reads behave exactly as documented today")
+
+os.environ["KALIV_EGRESS_GATE"] = "1"
+try:
+    g = gate()
+    msg = denied(g.propose, "list_documents", {}, conversation_id="c12", origin="cloud")
+    check(msg is not None and "samtykke" in msg,
+          "with the gate ON, a cloud model is refused your document names")
+    check(g.propose("rig_status", {}, conversation_id="c13", origin="cloud").get("status") == "executed",
+          "the gate refuses PRIVATE results, not everything -- rig state still answers")
+finally:
+    os.environ.pop("KALIV_EGRESS_GATE", None)
+
+check(not T.egress_gate_enabled(), "the gate is OFF by default -- #6 is Anders' call, not a quiet default")
+
 print(f"\n===== WORKER AUDIT: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

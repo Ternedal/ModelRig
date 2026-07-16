@@ -51,6 +51,23 @@ from typing import Any, Callable, Literal, Optional
 # declares it yet -- the rules land before the plumbing (ISOLATION_DESIGN I3/I4).
 Risk = Literal["read", "write", "desktop"]
 
+# WHAT A TOOL'S RESULT IS, as opposed to what it does (analysis F-208). Risk
+# gates the ACTION; sensitivity gates where the ANSWER may travel. They are
+# orthogonal: list_documents is a harmless read that returns YOUR document
+# names, and a cloud model reading them is an egress event with no card, no
+# consent and nothing in the product that ever said so out loud.
+#
+#   public       already public or content-free (the clock)
+#   operational  reveals your rig: GPU, models, job state. Not secret, not
+#                nothing -- it is a description of your machine
+#   private      your content: document names, note text, RAG passages
+#   secret       credentials and keys. Never leaves, with or without consent
+#
+# Dormant: the gate only ENFORCES the secret rule (a no-op today, since no tool
+# is secret) plus private-blocking behind KALIV_EGRESS_GATE. Turning the gate
+# on is Anders' open decision #6, not mine to make quietly.
+Sensitivity = Literal["public", "operational", "private", "secret"]
+
 # Confirmations are short-lived on purpose: an approval you granted a minute
 # ago should not authorise an action proposed since.
 CONFIRM_TTL_SECONDS = 60
@@ -69,6 +86,36 @@ def tools_dir() -> str:
     if d:
         return d
     return os.path.join(os.path.expanduser("~"), "Documents", "Kaliv")
+
+
+def egress_gate_enabled() -> bool:
+    """Off by default: enforcing this is decision #6, and it is Anders'."""
+    return os.getenv("KALIV_EGRESS_GATE", "").strip().lower() in ("1", "true", "on")
+
+
+def may_egress(sensitivity: str, consent: bool = False) -> bool:
+    """May a result with this sensitivity reach a CLOUD model?
+
+    Pure, so the rule can be read and tested instead of inferred from call
+    sites. `secret` is absolute -- consent cannot buy it, because the whole
+    point of a secret is that no single yes/no in a chat window is worth it.
+    """
+    if sensitivity == "secret":
+        return False
+    if sensitivity == "private":
+        return bool(consent)
+    return True
+
+
+def egress_denial(tool: "Tool", consent: bool = False) -> str | None:
+    """Why this tool's result must not go to a cloud model, or None."""
+    if may_egress(tool.sensitivity, consent):
+        return None
+    if tool.sensitivity == "secret":
+        return (f"{tool.name} returnerer hemmeligheder og må aldrig sendes til "
+                "en cloud-model — heller ikke med samtykke")
+    return (f"{tool.name} returnerer dit eget indhold ({tool.sensitivity}); "
+            "en cloud-model må kun se det med et udtrykkeligt samtykke")
 
 
 def requires_confirmation(tool: "Tool", origin: str) -> bool:
@@ -181,6 +228,9 @@ class Tool:
     # desktop tools). Tools owning background work keep running in-process:
     # their thread must outlive the call, and the JobStore already gives them
     # persistent truth.
+    # Where this tool's RESULT may travel. Defaults to the conservative middle:
+    # a new tool has to argue its way to "public", never inherit it.
+    sensitivity: str = "operational"
     isolate: bool = False
     # Exactly which environment variables the isolated child may see. Empty =
     # no application environment at all (analysis F-203). A tool that needs the
@@ -577,12 +627,14 @@ def _run_cancel_job(args: dict) -> str:
 REGISTRY: dict[str, Tool] = {
     "rig_status": Tool(
         name="rig_status", risk="read",
+        sensitivity="operational",  # GPU, VRAM, uptime -- a description of your machine
         description="Læs riggens tilstand: GPU, VRAM, disk, ASR/TTS-status.",
         params={"type": "object", "properties": {}},
         run=_run_rig_status,
     ),
     "note_append": Tool(
         name="note_append", risk="write",
+        sensitivity="private",  # your own text, written back to you
         description="Tilføj tekst til Kalivs notesfil. Kan kun appende.",
         params={
             "type": "object",
@@ -593,24 +645,28 @@ REGISTRY: dict[str, Tool] = {
     ),
     "list_models": Tool(
         name="list_models", risk="read",
+        sensitivity="operational",  # which models you run says something about you, but not much
         description="Vis hvilke Ollama-modeller der er installeret på riggen (navne + størrelse).",
         params={"type": "object", "properties": {}},
         run=_run_list_models,
     ),
     "current_datetime": Tool(
         name="current_datetime", risk="read",
+        sensitivity="public",  # the clock is not yours; it is everyone's
         description="Hent den aktuelle dato og klokkeslæt på riggen.",
         params={"type": "object", "properties": {}},
         run=_run_current_datetime,
     ),
     "job_status": Tool(
         name="job_status", risk="read",
+        sensitivity="operational",  # job state and progress
         description="Status på baggrundsjobs (fx modeldownloads): fremdrift, terminal status og årsag. Uden job_id vises de seneste.",
         params={"type": "object", "properties": {"job_id": {"type": "string"}}},
         run=_run_job_status,
     ),
     "cancel_job": Tool(
         name="cancel_job", risk="write",
+        sensitivity="operational",  # acts on the rig, returns rig state
         description="Annullér et kørende baggrundsjob (fx en modeldownload).",
         params={
             "type": "object",
@@ -621,12 +677,14 @@ REGISTRY: dict[str, Tool] = {
     ),
     "list_documents": Tool(
         name="list_documents", risk="read",
+        sensitivity="private",  # YOUR document names -- the F-208 case in one line
         description="Vis hvilke dokumenter der er ingested til RAG (navne + antal chunks).",
         params={"type": "object", "properties": {}},
         run=_run_list_documents,
     ),
     "delete_model": Tool(
         name="delete_model", risk="write",
+        sensitivity="operational",  # acts on the rig, returns rig state
         description="Slet en Ollama-model fra riggen. Kræver bekræftelse.",
         params={
             "type": "object",
@@ -637,6 +695,7 @@ REGISTRY: dict[str, Tool] = {
     ),
     "pull_model": Tool(
         name="pull_model", risk="write",
+        sensitivity="operational",  # acts on the rig, returns rig state
         description="Hent (download) en Ollama-model til riggen. Kræver bekræftelse.",
         params={
             "type": "object",
@@ -809,6 +868,26 @@ class ToolGate:
                               outcome="blocked", conversation_id=conversation_id,
                               result_summary="tool disabled", origin=origin)
             raise ToolDenied(f"tool disabled: {name}")
+
+        # Egress (analysis F-208). A cloud-proposed tool's RESULT lands back in
+        # the cloud model's context, so a read that returns your document names
+        # is an egress event even though nothing was written. Two rules, only
+        # one of them live:
+        #   secret  -- always enforced. A no-op today (no tool is secret) and
+        #              deliberately so: the rule exists BEFORE the first tool
+        #              that needs it, not after.
+        #   private -- only when KALIV_EGRESS_GATE is on, because gating reads
+        #              is Anders' open decision #6. Off = today's documented
+        #              behaviour, unchanged.
+        if origin == "cloud":
+            if tool.sensitivity == "secret" or egress_gate_enabled():
+                why = egress_denial(tool, consent=False)
+                if why:
+                    self.audit.record(tool=name, args=args, risk=tool.risk,
+                                      outcome="blocked", conversation_id=conversation_id,
+                                      result_summary=f"egress: {tool.sensitivity}",
+                                      origin=origin)
+                    raise ToolDenied(why)
 
         if not requires_confirmation(tool, origin):
             return {"status": "executed",

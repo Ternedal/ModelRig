@@ -109,10 +109,22 @@ GitHub artifact attestation.
 - **D4b — auto-cloud-fallback (LUKKET som sikker default, 1.58.19):** begge klienter falder kun
   tilbage til cloud når `autoCloudFallback`/`autoFallback` eksplicit er slået til; et billede sendes
   aldrig via fallback. Synligt opt-in-UI + "spørg før cloud"-kort udestår (kommer med #2a).
-- **Cloud-read egress (ÅBEN):** read-tools kræver ingen godkendelse, heller ikke for cloud-modeller.
-  En cloud-agent kan kæde reads (inkl. `list_documents`, der returnerer dokument-navne) og sende
-  resultaterne til cloud. Overvej egress-klassifikation (public/operational/private), hvor `private`
-  + cloud kræver samtykke.
+- **Cloud-read egress (ÅBEN — men nu klassificeret, 1.58.57):** read-tools kræver stadig ingen
+  godkendelse for cloud-modeller. Det nye er, at det ikke længere er usagt: hvert tool har en
+  `sensitivity`, der siger hvor dets **resultat** må rejse (ortogonalt på `risk`, som styrer hvad
+  det må **gøre**):
+
+  | Klasse | Betyder | Til en cloud-model? |
+  |---|---|---|
+  | `public` | Allerede offentligt/indholdsløst (uret) | Altid |
+  | `operational` | Beskriver riggen: GPU, modeller, jobstatus | Ja — nuværende, dokumenterede adfærd |
+  | `private` | Dit indhold: dokumentnavne, notetekst | **Kun med samtykke** — håndhæves bag `KALIV_EGRESS_GATE=1` indtil beslutning #6 |
+  | `secret` | Nøgler | **Aldrig.** Samtykke kan ikke købe det. Håndhæves ALLEREDE — reglen findes før det første tool der får brug for den |
+
+  `list_documents` er klassificeret `private`. Med gaten slået fra (default) opfører den sig præcis
+  som før, så dette lukker ikke #6 — det gør beslutningen konkret og prøvbar: sæt
+  `KALIV_EGRESS_GATE=1` på workeren og se hvad gating af reads faktisk koster i praksis, før du
+  vælger.
 
 ## Kontrakt: writes (præcisering, 1.58.37)
 
