@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from .core import (
     AgentRun,
@@ -16,6 +16,9 @@ from .plan_store import PlanStore, PlanStoreError
 from .replan_planner import ReadReplanProposal, ReplanPlannerError, TypedReadReplanPlanner
 from .replan_runtime import PersistentReadReplanner, ReplanJournalError, plan_digest
 from .replanner import ReplanError
+
+if TYPE_CHECKING:
+    from .review_orchestrator import ReadReviewStore
 
 
 class ReplanPreviewError(RuntimeError):
@@ -146,11 +149,13 @@ class ReplanPreviewService:
         replanner: PersistentReadReplanner,
         planner: TypedReadReplanPlanner,
         preview_store: PlanStore,
+        review_store: "ReadReviewStore | None" = None,
     ):
         self.run_store = run_store
         self.replanner = replanner
         self.planner = planner
         self.preview_store = preview_store
+        self.review_store = review_store
 
     def _recover_or_raise(self, run_id: str) -> None:
         self.replanner.recover(run_id)
@@ -248,6 +253,24 @@ class ReplanPreviewService:
             # an error is safer than pretending the preview receipt matched; the
             # journal remains the source of truth for operator review.
             raise ReplanPreviewError("committed replan receipt does not match reviewed preview")
+
+        if self.review_store is not None:
+            review = self.review_store.get(revised.id)
+            if review["enabled"] and review["waiting"]:
+                completed_step_id = review.get("completed_step_id")
+                completed_tool = review.get("completed_tool")
+                if not isinstance(completed_step_id, str) or not isinstance(completed_tool, str):
+                    raise ReplanPreviewError(
+                        "committed replan cannot rebind an incomplete read review checkpoint"
+                    )
+                self.review_store.set_waiting(
+                    revised.id,
+                    completed_step_id=completed_step_id,
+                    completed_tool=completed_tool,
+                    window_start=receipt.start,
+                    window_end=receipt.new_end,
+                    removable_step_ids=list(receipt.added_step_ids),
+                )
 
         # Keep the service contract identical to the eventual HTTP shape: tuples
         # become JSON arrays and no Python-specific container leaks to callers.
