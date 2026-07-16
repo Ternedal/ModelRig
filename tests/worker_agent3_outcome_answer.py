@@ -83,11 +83,12 @@ async def valid_chat(messages, model):
     calls["messages"] = messages
     calls["model"] = model
     prompt = json.dumps(messages, ensure_ascii=False)
+    user_content = messages[1]["content"]
     assert "online" in prompt
     assert "argument-not-for-answer" not in prompt
     assert "secret-result-not-for-answer" not in prompt
-    assert "\\u003cresult\\u003e" in prompt
-    assert "\\u003cnu\\u003e" in prompt
+    assert "\\u003cresult\\u003e" in user_content
+    assert "\\u003cnu\\u003e" in user_content
     return '```json\n{"answer":"Riggen er online.","limitations":["Ingen temperaturdata.","Ingen temperaturdata."]}\n```'
 
 
