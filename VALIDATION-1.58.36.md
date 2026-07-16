@@ -1,6 +1,9 @@
 # VALIDATION-1.58.36.md
 
 > **Formål:** on-device-bevis for alt det, CI kun kan kompilere/unit-teste.
+> **Genvej:** `deploy\validate-rig.ps1` automatiserer de mekaniske tjek (A0/A5,
+> journal/lock, B4/B7, og A2–A4 med `-Destructive`) og gemmer en paste-klar
+> resultatblok i `logs\validate-rig-latest.md`. Telefondelene er stadig manuelle.
 > Udfyld **Resultat** (✅/❌/⏭️) + **Note** under test. Dette er den sidste store
 > ting mellem 8,4 og 9+ — auditsene har sagt det samme siden første runde.
 
