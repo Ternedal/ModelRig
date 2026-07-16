@@ -108,4 +108,25 @@ assert client.post(
     f"/experimental/agent3/plans/{preview_body['plan_id']}/start"
 ).status_code == 409
 
-print("11 passed, 0 failed")
+# Without explicit opt-in, the reviewed runtime retains the old contiguous-read
+# behavior and returns a disabled review receipt.
+plain_preview = client.post(
+    "/experimental/agent3/plan",
+    json={"message": "check rig normally", "mode": "rig"},
+)
+assert plain_preview.status_code == 200, plain_preview.text
+plain_preview_body = plain_preview.json()
+assert plain_preview_body["review_reads"] is False
+plain = client.post(
+    f"/experimental/agent3/plans/{plain_preview_body['plan_id']}/start"
+)
+assert plain.status_code == 200, plain.text
+plain_body = plain.json()
+assert plain_body["review_reads"] is False
+assert plain_body["read_review"]["enabled"] is False
+assert plain_body["read_review"]["waiting"] is False
+assert plain_body["run"]["state"] == "completed"
+assert plain_body["run"]["current_step"] == 2
+assert executed[-2:] == ["rig_status", "list_models"]
+
+print("19 passed, 0 failed")
