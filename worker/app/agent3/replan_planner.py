@@ -134,10 +134,11 @@ class TypedReadReplanPlanner:
         observations, observation_characters = self._completed_observations(run, window)
         immutable_tail = [
             {
+                "id": step.id,
                 "tool": step.tool,
                 "risk": step.risk.value,
-                "summary": step.summary,
-                # args, result and confirmation fields are deliberately omitted.
+                "state": step.state.value,
+                # args, summary, result and confirmation fields are deliberately omitted.
             }
             for step in run.steps[window.end :]
         ]
