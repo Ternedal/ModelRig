@@ -92,6 +92,12 @@ func (s *server) handleAgent3RunReplanPreview(w http.ResponseWriter, r *http.Req
 	s.WorkerSlow.Forward(w, r, agent3RunTarget(r, "/replan-preview"))
 }
 
+func (s *server) handleAgent3RunAnswerPreview(w http.ResponseWriter, r *http.Request) {
+	// Answer preview invokes a local answer-only model over bounded, redacted
+	// successful tool results. It never persists or delivers the synthesized text.
+	s.WorkerSlow.Forward(w, r, agent3RunTarget(r, "/answer-preview"))
+}
+
 func (s *server) handleAgent3ReplanPreviewApply(w http.ResponseWriter, r *http.Request) {
 	// Apply consumes a reviewed single-use token. The request cannot supply a new
 	// plan or tool arguments and does not invoke the model again.
