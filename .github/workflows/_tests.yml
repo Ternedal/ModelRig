@@ -56,7 +56,7 @@ jobs:
           MODELRIG_BIN: /tmp/modelrig-server
         run: |
           set -e
-          for f in tests/backend_*.py tests/e2e.py tests/worker_*.py; do
+          for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
             [ -e "$f" ] || continue
             echo "::group::$f"
             PYTHONPATH=worker python3 "$f"
