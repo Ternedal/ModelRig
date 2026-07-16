@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
+from typing import Any, Protocol
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from .core import AgentRun, RiskClass, RunState, StepState
 from .integration import V2ToolAdapter
 from .plan_store import PlanStore
 from .replan_planner import TypedReadReplanPlanner
@@ -16,6 +17,21 @@ from .replan_runtime import PersistentReadReplanner
 
 class ReplanPreviewReq(BaseModel):
     planner_model: str | None = Field(default=None, max_length=200)
+
+
+class ReadReviewStoreLike(Protocol):
+    def get(self, run_id: str) -> dict[str, Any]: ...
+
+    def set_waiting(
+        self,
+        run_id: str,
+        *,
+        completed_step_id: str,
+        completed_tool: str,
+        window_start: int,
+        window_end: int,
+        removable_step_ids: list[str],
+    ) -> None: ...
 
 
 def _step_payload(step) -> dict[str, Any]:
@@ -29,7 +45,47 @@ def _step_payload(step) -> dict[str, Any]:
     }
 
 
-def build_replan_preview_router(service: ReplanPreviewService) -> APIRouter:
+def _rebind_read_review(
+    review_store: ReadReviewStoreLike | None,
+    run: AgentRun,
+) -> dict[str, Any] | None:
+    if review_store is None:
+        return None
+    review = review_store.get(run.id)
+    if not review.get("enabled") or not review.get("waiting"):
+        return review
+
+    completed_step_id = review.get("completed_step_id")
+    completed_tool = review.get("completed_tool")
+    if not isinstance(completed_step_id, str) or not completed_step_id:
+        raise ReplanPreviewError("waiting read review has no completed step binding")
+    if not isinstance(completed_tool, str) or not completed_tool:
+        raise ReplanPreviewError("waiting read review has no completed tool binding")
+
+    start = run.current_step
+    end = start
+    while end < len(run.steps):
+        step = run.steps[end]
+        if step.state != StepState.PENDING or step.risk != RiskClass.READ:
+            break
+        end += 1
+    removable_ids = [step.id for step in run.steps[start:end]]
+    review_store.set_waiting(
+        run.id,
+        completed_step_id=completed_step_id,
+        completed_tool=completed_tool,
+        window_start=start,
+        window_end=end,
+        removable_step_ids=removable_ids,
+    )
+    return review_store.get(run.id)
+
+
+def build_replan_preview_router(
+    service: ReplanPreviewService,
+    *,
+    review_store: ReadReviewStoreLike | None = None,
+) -> APIRouter:
     router = APIRouter(prefix="/experimental/agent3", tags=["experimental-agent3-replanner"])
 
     @router.post("/runs/{run_id}/replan-preview")
@@ -72,9 +128,26 @@ def build_replan_preview_router(service: ReplanPreviewService) -> APIRouter:
             raise HTTPException(status_code=404, detail="run not found") from exc
         except ReplanPreviewError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        try:
+            read_review = _rebind_read_review(review_store, run)
+        except Exception as exc:
+            # The replan is already committed and journalled. Never continue with a
+            # stale review checkpoint: block the run and leave an explicit audit event.
+            run.state = RunState.BLOCKED
+            run.error = "read review synchronization failed after committed replan"
+            service.run_store.save(run)
+            service.run_store.event(
+                run.id,
+                "replan_review_sync_failed",
+                {"reason": str(exc)[:500]},
+            )
+            raise HTTPException(status_code=409, detail=run.error) from exc
+
         return {
             "run": json.loads(run.to_json()),
             "replan": receipt,
+            "read_review": read_review,
             "preview": {
                 "preview_id": preview_id,
                 "run_id": stored.run_id,
