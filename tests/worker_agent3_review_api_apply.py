@@ -54,7 +54,12 @@ calls = {"planner": 0}
 async def scripted_chat(messages, model):
     calls["planner"] += 1
     assert model == "local-replanner"
-    assert "note_append" not in messages[0]["content"]
+    system = messages[0]["content"]
+    catalog = system.split("READ_TOOL_CATALOG=", 1)[1].split(
+        "\nREMOVABLE_READ_WINDOW=", 1
+    )[0]
+    assert '"name": "note_append"' not in catalog
+    assert "immutable-tail" not in system
     return '{"steps":[{"tool":"rig_status","args":{"detail":true}}],"rationale":"Replace the remaining read with one fresh status call"}'
 
 
