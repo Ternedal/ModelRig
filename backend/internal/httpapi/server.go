@@ -104,6 +104,7 @@ func (s *server) routes() {
 		s.mux.Handle("POST /api/v1/experimental/agent3/runs", s.authMW(http.HandlerFunc(s.handleAgent3RunsStart)))
 		s.mux.Handle("GET /api/v1/experimental/agent3/runs/{id}", s.authMW(http.HandlerFunc(s.handleAgent3RunGet)))
 		s.mux.Handle("GET /api/v1/experimental/agent3/runs/{id}/events", s.authMW(http.HandlerFunc(s.handleAgent3RunEvents)))
+		s.mux.Handle("GET /api/v1/experimental/agent3/runs/{id}/capability-receipt", s.authMW(http.HandlerFunc(s.handleAgent3RunCapabilityReceipt)))
 		s.mux.Handle("GET /api/v1/experimental/agent3/runs/{id}/replans", s.authMW(http.HandlerFunc(s.handleAgent3RunReplans)))
 		s.mux.Handle("POST /api/v1/experimental/agent3/runs/{id}/replan", s.authMW(http.HandlerFunc(s.handleAgent3RunReplan)))
 		s.mux.Handle("POST /api/v1/experimental/agent3/runs/{id}/replan-preview", s.authMW(http.HandlerFunc(s.handleAgent3RunReplanPreview)))
