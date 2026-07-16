@@ -53,6 +53,18 @@ data class Agent3MemoryReceipt(
 )
 
 @Serializable
+data class Agent3ReadReview(
+    val enabled: Boolean = false,
+    val waiting: Boolean = false,
+    @SerialName("window_start") val windowStart: Int? = null,
+    @SerialName("window_end") val windowEnd: Int? = null,
+    @SerialName("removable_step_ids") val removableStepIds: List<String> = emptyList(),
+    @SerialName("completed_step_id") val completedStepId: String? = null,
+    @SerialName("completed_tool") val completedTool: String? = null,
+    @SerialName("updated_at") val updatedAt: Double? = null,
+)
+
+@Serializable
 data class Agent3PlanPreview(
     @SerialName("plan_id") val planId: String? = null,
     @SerialName("expires_in_seconds") val expiresInSeconds: Int? = null,
@@ -61,6 +73,7 @@ data class Agent3PlanPreview(
     val plan: List<Agent3Step> = emptyList(),
     val executed: Boolean = false,
     @SerialName("memory_context") val memoryContext: Agent3MemoryReceipt = Agent3MemoryReceipt(),
+    @SerialName("review_reads") val reviewReads: Boolean = false,
 )
 
 @Serializable
@@ -92,6 +105,7 @@ private data class PlanRequest(
     @SerialName("conversation_id") val conversationId: String? = null,
     @SerialName("planner_model") val plannerModel: String? = null,
     val proactive: Boolean = false,
+    @SerialName("review_reads") val reviewReads: Boolean = false,
     @SerialName("use_memory") val useMemory: Boolean = false,
     @SerialName("memory_subjects") val memorySubjects: List<String> = emptyList(),
     @SerialName("memory_max_chars") val memoryMaxChars: Int = 4_000,
@@ -106,7 +120,11 @@ private data class ConfirmRequest(
 )
 
 @Serializable
-private data class RunEnvelope(val run: Agent3Run = Agent3Run())
+data class Agent3RunEnvelope(
+    val run: Agent3Run = Agent3Run(),
+    @SerialName("review_reads") val reviewReads: Boolean = false,
+    @SerialName("read_review") val readReview: Agent3ReadReview = Agent3ReadReview(),
+)
 
 @Serializable
 private data class RunsEnvelope(val runs: List<Agent3Run> = emptyList())
@@ -132,6 +150,7 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
         conversationId: String? = null,
         plannerModel: String? = null,
         proactive: Boolean = false,
+        reviewReads: Boolean = false,
         useMemory: Boolean = false,
         memorySubjects: List<String> = emptyList(),
         memoryMaxChars: Int = 4_000,
@@ -150,6 +169,7 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
                     conversationId = conversationId,
                     plannerModel = plannerModel,
                     proactive = proactive,
+                    reviewReads = reviewReads,
                     useMemory = useMemory,
                     memorySubjects = memorySubjects,
                     memoryMaxChars = memoryMaxChars,
@@ -159,11 +179,13 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
         )
     )
 
-    fun startPlan(planId: String): Agent3Run =
-        decode<RunEnvelope>(post("/api/v1/experimental/agent3/plans/$planId/start", "{}")).run
+    fun startPlanEnvelope(planId: String): Agent3RunEnvelope =
+        decode(post("/api/v1/experimental/agent3/plans/$planId/start", "{}"))
+
+    fun startPlan(planId: String): Agent3Run = startPlanEnvelope(planId).run
 
     fun getRun(runId: String): Agent3Run =
-        decode<RunEnvelope>(get("/api/v1/experimental/agent3/runs/$runId")).run
+        decode<Agent3RunEnvelope>(get("/api/v1/experimental/agent3/runs/$runId")).run
 
     fun listRuns(): List<Agent3Run> =
         decode<RunsEnvelope>(get("/api/v1/experimental/agent3/runs")).runs
@@ -175,14 +197,14 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
         val body = json.encodeToString(
             ConfirmRequest(stepId, if (approve) "approve" else "deny", digest)
         )
-        return decode<RunEnvelope>(post("/api/v1/experimental/agent3/runs/$runId/confirm", body)).run
+        return decode<Agent3RunEnvelope>(post("/api/v1/experimental/agent3/runs/$runId/confirm", body)).run
     }
 
     fun resume(runId: String): Agent3Run =
-        decode<RunEnvelope>(post("/api/v1/experimental/agent3/runs/$runId/resume", "{}")).run
+        decode<Agent3RunEnvelope>(post("/api/v1/experimental/agent3/runs/$runId/resume", "{}")).run
 
     fun cancel(runId: String): Agent3Run =
-        decode<RunEnvelope>(post("/api/v1/experimental/agent3/runs/$runId/cancel", "{}")).run
+        decode<Agent3RunEnvelope>(post("/api/v1/experimental/agent3/runs/$runId/cancel", "{}")).run
 
     private fun builder(path: String): HttpRequest.Builder = HttpRequest.newBuilder(URI.create(base + path))
         .header("Content-Type", "application/json")
