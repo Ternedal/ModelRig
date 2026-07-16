@@ -1,0 +1,49 @@
+name: agent3-sync-main-once
+
+on:
+  push:
+    branches:
+      - agent/agent3-integration-draft-v2
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Merge current main fail-closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+
+          set +e
+          git merge --no-ff --no-commit origin/main
+          status=$?
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            if [ "$conflicts" != "CURRENT_STATE.md" ]; then
+              echo "Unexpected merge conflicts:" >&2
+              printf '%s\n' "$conflicts" >&2
+              exit 1
+            fi
+            git checkout --theirs CURRENT_STATE.md
+            git add CURRENT_STATE.md
+          fi
+
+          python3 scripts/current_state.py
+          git add -A
+          git diff --cached --check
+          git commit -m "merge: sync Agent 3.0 draft with main 1.58.59"
+          git push origin HEAD:agent/agent3-integration-draft-v2
