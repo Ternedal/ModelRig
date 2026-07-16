@@ -314,10 +314,21 @@ branch-ejer eller en beslutning.**
 7. **[GÆLD]** Notion-status for 1.58.44–52 er IKKE afleveret: connectoren
    forsvandt midt i sessionen (auth-fejl, dukker ikke op i tool-søgning).
    Post dem samlet når Anders re-autentificerer.
-8. **[KOORDINERING]** Der kører til tider TO sessioner samtidig. 16/7 landede
-   den anden JobStore på main mens denne læste analysen — opdaget sekunder før
-   dobbeltarbejde. **Fetch/rebase + tjek `origin/main` FØR hvert push**, og
-   overvej klare baner hvis begge er varme.
+8. **[SELV-DISCIPLIN — VIGTIG]** **Der er ÉN session. Der er aldrig en
+   "parallel session".** Anders retryer timeout'ede svar; containeren beholder
+   arbejdet (commits, filer, endda pushes), mens den nye kontekst ikke har det.
+   Resultatet: du finder arbejde i dit eget træ som du ikke husker.
+   **Konkluder aldrig at en anden har lavet det.** Din sandbox er din alene —
+   ingen anden kan lægge ukommitterede filer i dit arbejdstræ.
+
+   **Tjek reflogen FØR du attribuerer noget:** `git reflog --date=iso | head`.
+   `commit:` = du skabte den lokalt. `pull:`/`rebase:`/`fast-forward` = den kom
+   udefra. 16/7 byggede jeg selv JobStoren (715e06a, 12:59) og I1 read-scope
+   (d94577e, 18:09) — og fortalte Anders at "den parallelle session" havde
+   gjort det. Det var forkert, det stod i release-noter og i dette dokument, og
+   Anders måtte selv fange det. Efter et retry: kør `git status` + `git reflog`
+   + `git log origin/main -1` og genopbyg sandheden derfra, ikke fra en
+   fortælling.
 
 ---
 

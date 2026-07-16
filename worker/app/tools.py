@@ -739,10 +739,15 @@ class ToolGate:
             "status": "confirmation_required",
             "confirmation_id": cid,
             "tool": name,
-            "risk": "write",
+            # The card must show the tool's OWN risk. Hardcoding "write" was
+            # harmless while write was the only confirmable class; a desktop
+            # action (screenshot/click/type) is not a write and must not be
+            # labelled as one on the card the human approves.
+            "risk": tool.risk,
             "origin": origin,
-            # The card says who asked. A cloud model suggesting a write to your
-            # notes is not the same event as your own rig suggesting it.
+            # The card says who asked, and what KIND of thing it is. A cloud
+            # model suggesting a write to your notes is not the same event as
+            # your own rig suggesting it; a desktop action is a third kind.
             "summary": (("Cloud-modellen foreslår: " if origin == "cloud" else "")
                         + tool.human_summary(args)),
             "expires_in_seconds": CONFIRM_TTL_SECONDS,
