@@ -3,8 +3,8 @@
 Exists so the worker can ship as a single prebuilt Windows exe (built + smoke-
 tested in CI on a real Windows runner) for people who don't want a Python
 toolchain on the rig. Imports the app OBJECT statically -- not the
-"app.main:app" string form -- so PyInstaller's dependency graph actually sees
-fastapi/uvicorn/httpx and bundles them.
+"app.entrypoint:app" string form -- so PyInstaller's dependency graph actually
+sees fastapi/uvicorn/httpx and bundles them.
 
 Defaults mirror deploy/run-windows.ps1: loopback on 8099 (the worker is only
 ever called by the backend on the same machine; it is deliberately NOT
@@ -16,7 +16,11 @@ import sys
 
 import uvicorn
 
-from app.main import app
+# Production must use the outer ASGI guard: it bounds chunked request bodies
+# before FastAPI parses them and removes voice temp data after the final stream
+# frame. Optional Agent 3.0 routes are mounted on the wrapped FastAPI instance,
+# while uvicorn continues to serve this hardened outer app.
+from app.entrypoint import app
 
 
 def _is_loopback(host: str) -> bool:
@@ -27,14 +31,7 @@ def _is_loopback(host: str) -> bool:
 
 
 def _routing_app():
-    """Return the inner FastAPI app used for route and state registration.
-
-    Current main wraps FastAPI in HardenedWorkerApp so bounded-body enforcement
-    and streaming cleanup remain the outermost ASGI boundary. Optional Agent 3.0
-    routes must be registered on the wrapped FastAPI app, while uvicorn and HTTP
-    tests continue to call the hardened outer app.
-    """
-
+    """Return the inner FastAPI routing surface behind the hardened ASGI guard."""
     candidate = app
     while not hasattr(candidate, "state") and hasattr(candidate, "app"):
         candidate = candidate.app
@@ -44,13 +41,7 @@ def _routing_app():
 
 
 def _mount_optional_agent3() -> bool:
-    """Mount the dormant Agent 3.0 draft only after explicit operator opt-in.
-
-    Imports stay inside the feature branch so the ordinary worker creates no
-    Agent 3.0 databases or routes when KALIV_AGENT3_ENABLED is unset. The import
-    statements remain statically visible to PyInstaller, so the release worker
-    can be tested on the rig without a separate Python environment.
-    """
+    """Mount the dormant Agent 3.0 draft only after explicit operator opt-in."""
     if os.getenv("KALIV_AGENT3_ENABLED", "0") != "1":
         return False
 
@@ -135,10 +126,15 @@ def _mount_optional_agent3() -> bool:
 
 
 if __name__ == "__main__":
+    # Isolated tool execution re-invokes this exe with --tool-child (a frozen
+    # build has no python -m). This must run before server setup or Agent 3.0
+    # databases are opened.
+    if "--tool-child" in sys.argv:
+        from app.tool_child import main as _child_main
+
+        raise SystemExit(_child_main())
+
     host = os.getenv("MODELRIG_WORKER_HOST", "127.0.0.1")
-    # The worker has no auth and is meant to be reached only by the backend on the
-    # same machine. Fail fast instead of silently exposing RAG/voice/tools on the
-    # LAN. Override with KALIV_WORKER_ALLOW_LAN=1 if that is genuinely intended.
     if not _is_loopback(host) and os.getenv("KALIV_WORKER_ALLOW_LAN", "0") != "1":
         sys.stderr.write(
             f"refusing to bind worker to non-loopback host {host!r}: the worker has "
