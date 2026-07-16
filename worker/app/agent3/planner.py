@@ -22,6 +22,7 @@ from .integration import Agent3PlanError, PlannedToolCall, V2ToolAdapter
 from .memory import MemoryStore
 from .memory_context import ContextTarget, MemoryContext, MemoryContextCompiler
 from .plan_store import PlanStore, PlanStoreError
+from .review_orchestrator import ReviewingAgent3Orchestrator
 from .routing import StrictTurnRouter
 
 
@@ -176,6 +177,7 @@ class PlanPreviewReq(BaseModel):
     conversation_id: str | None = None
     planner_model: str | None = None
     proactive: bool = False
+    review_reads: bool = False
     use_memory: bool = False
     memory_subjects: list[str] = Field(default_factory=list, max_length=20)
     memory_max_chars: int = Field(default=4_000, ge=0, le=12_000)
@@ -196,9 +198,13 @@ def build_planner_router(
     plan_store = plan_store or PlanStore(":memory:")
     memory_compiler = memory_compiler or MemoryContextCompiler()
     turn_router = StrictTurnRouter()
+    reviewing = isinstance(orchestrator, ReviewingAgent3Orchestrator)
 
     @router.post("/plan")
     async def preview(req: PlanPreviewReq) -> dict[str, Any]:
+        if req.review_reads and orchestrator is not None and not reviewing:
+            raise HTTPException(status_code=409, detail="read review is not mounted")
+
         tools_ready = bool(adapter.tools.GATE.enabled and not adapter.tools.GATE.state_error)
         caps = CapabilitySnapshot(
             rig_reachable=True,
@@ -270,6 +276,7 @@ def build_planner_router(
                     "run": template.to_json(),
                     "capabilities": asdict(caps),
                     "memory_context": receipt,
+                    "review_reads": req.review_reads,
                 },
                 ensure_ascii=False,
                 sort_keys=True,
@@ -301,6 +308,7 @@ def build_planner_router(
             "expires_in_seconds": expires_in_seconds,
             "executed": False,
             "memory_context": receipt,
+            "review_reads": req.review_reads,
         }
 
     @router.post("/plans/{plan_id}/start")
@@ -312,10 +320,14 @@ def build_planner_router(
             template = AgentRun.from_json(envelope["run"])
             stored_caps = CapabilitySnapshot(**envelope["capabilities"])
             memory_receipt = envelope.get("memory_context", _empty_memory_receipt())
+            review_reads = bool(envelope.get("review_reads", False))
         except PlanStoreError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (KeyError, TypeError, json.JSONDecodeError, ValueError) as exc:
             raise HTTPException(status_code=409, detail="stored plan is invalid") from exc
+
+        if review_reads and not reviewing:
+            raise HTTPException(status_code=409, detail="read review is not mounted")
 
         # Recheck the gate at start time. A kill-switch decision made after the
         # preview wins over the earlier plan.
@@ -327,17 +339,29 @@ def build_planner_router(
             rag_ready=stored_caps.rag_ready,
             voice_ready=stored_caps.voice_ready,
         )
+        kwargs: dict[str, Any] = {
+            "proactive": template.proactive,
+            "allow_private_cloud": template.allow_private_cloud,
+        }
+        if reviewing:
+            kwargs["review_reads"] = review_reads
         run = orchestrator.start_with_steps(
             template.request,
             caps,
             _clone_steps(template),
-            proactive=template.proactive,
-            allow_private_cloud=template.allow_private_cloud,
+            **kwargs,
+        )
+        read_review = (
+            orchestrator.review_store.get(run.id)
+            if reviewing
+            else {"enabled": False, "waiting": False}
         )
         return {
             "run": json.loads(run.to_json()),
             "plan_id": plan_id,
             "memory_context": memory_receipt,
+            "review_reads": review_reads,
+            "read_review": read_review,
         }
 
     return router
