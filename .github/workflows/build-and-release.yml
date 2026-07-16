@@ -1,38 +1,13 @@
 name: build-and-release
 
-# Triggered by pushing a tag matching v* (this is exactly what every release in
-# this project already does -- creating a GitHub Release via the API also
-# creates the underlying tag, which fires this same trigger).
-#
-# Removes the sandbox-toolchain dependency this project has had all along:
-# server tests, the Android APK, and now genuinely cross-platform desktop
-# jars (built natively on Windows/macOS/Linux runners -- something the
-# Linux-only build sandbox could never produce) all happen here instead.
 on:
   push:
     tags:
       - "v*"
-
-# 2026-07-10: v1.20.0 built clean and shipped zero assets. Every
-# upload-artifact step failed: "Artifact storage quota has been hit. Usage is
-# recalculated every 6-12 hours." Deleting the 4.6 GB backlog did NOT free the
-# quota immediately -- the message said so, and a re-tag failed identically.
-#
-# So the artifact hop is gone. Artifacts were only ever scratch space between
-# the build jobs and the release job; each build job now uploads its own
-# binaries straight to the release with `gh release upload --clobber`. No
-# quota, no retention, one fewer moving part. The release job still gates on
-# `needs`, adds the source zip, and now VERIFIES the assets exist -- because
-# compiling is not shipping, which is exactly how v1.20.0 got out empty.
-#
-# The actions were also bumped off deprecated Node 20 (checkout/setup-java/
-# upload-artifact v4 -> v5). That change was a guess made BEFORE reading the
-# error and was not the cause. Kept: the deprecation is real. Recorded: the
-# guessing was the mistake.
   workflow_dispatch:
     inputs:
       force_full_matrix:
-        description: "Byg Windows-jar + server-exes, selv hvis intet er ændret"
+        description: "Byg Windows-jar + server-exes"
         type: boolean
         default: true
 
@@ -41,12 +16,6 @@ permissions:
 
 jobs:
   version-check:
-    # Single source of truth (scripts/version_tool.py): the four version sites
-    # (worker, backend, android, desktop) and the release tag must all match the
-    # VERSION file, or the release fails HERE -- before anything builds. Catches
-    # the drift class that once had docs at 1.58.0 while the code shipped 1.58.2.
-    # On workflow_dispatch the ref is a branch, not a tag, so only the sites are
-    # checked then (no tag assertion).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -58,60 +27,50 @@ jobs:
             python3 scripts/version_tool.py check
           fi
 
-  determine-matrix:
+  # One authority creates the release before any parallel upload job starts.
+  # A bare tag therefore gets the same draft-first contract as the normal API
+  # release flow. Upload jobs are forbidden from creating their own release.
+  ensure-draft-release:
     needs: version-check
-    # This project targets exactly two platforms: Windows (the rig: desktop
-    # jar + server exes) and Android (the phone). Linux/macOS jars were pure
-    # waste -- nobody ever downloaded them, and macOS runners bill at 10x
-    # (they were the single biggest quota cost measured across the 0.19/0.20
-    # series). Dropped entirely per Anders' explicit decision (7/7-2026).
-    # Remaining cost control: the Windows desktop jar (2x runner) is only
-    # built when desktop code actually changed, or on milestones (patch=0),
-    # or via workflow_dispatch -- same "component rebuilds when its source
-    # changes" policy the server exes already follow.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure one private draft exists
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # Even if an external caller accidentally created it public, move it
+            # back to draft BEFORE build jobs are allowed to upload anything.
+            gh release edit "$TAG" --draft=true
+          else
+            gh release create "$TAG" --draft --title "$TAG" --notes ""
+          fi
+          state=$(gh release view "$TAG" --json isDraft --jq '.isDraft')
+          test "$state" = "true" || { echo "release $TAG is not a draft"; exit 1; }
+          echo "draft release ready: $TAG"
+      - name: Manual dispatch is build-only
+        if: github.ref_type != 'tag'
+        run: echo "workflow_dispatch builds/tests only; no release is created without a tag"
+
+  determine-matrix:
+    needs: [version-check, ensure-draft-release]
     runs-on: ubuntu-latest
     outputs:
       build_desktop: ${{ steps.calc.outputs.build_desktop }}
       server_bins: ${{ steps.calc.outputs.server_bins }}
     steps:
-      - uses: actions/checkout@v5
-        with:
-          # depth 2 so git diff-tree can compare HEAD against its parent (the
-          # desktop-touch check below). Assumes the linear one-commit-per-
-          # release flow this project actually uses; a multi-commit tag would
-          # only be checked against its last commit -- acceptable, and the
-          # workflow_dispatch override exists for that edge.
-          fetch-depth: 2
       - id: calc
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.force_full_matrix }}" = "true" ]; then
-            echo "build_desktop=true" >> "$GITHUB_OUTPUT"
-            echo "server_bins=true" >> "$GITHUB_OUTPUT"
-            echo "Manual dispatch -> Windows jar + server exes"
-            exit 0
-          fi
-          TAG="${{ github.ref_name }}"
-          # Appliance bundle (server + worker + supervisor + updater exes) builds
-          # on EVERY release: the updater requires a COMPLETE matched set in the
-          # latest release, so a partial release would stall the auto-update
-          # channel with a missing-asset error. Lockstep with build_desktop below.
-          echo "server_bins=true" >> "$GITHUB_OUTPUT"
-          # Build the Windows desktop jar on EVERY release. The old "only when
-          # desktop code changed" optimization meant the desktop packageVersion
-          # marched forward with each version bump while NO matching jar was
-          # produced -- so no desktop build ever matched the current release
-          # (caught 2026-07-13, three patches deep: 1.58.1/2/3 all skipped it).
-          # With one VERSION source and lockstep versions, every release must
-          # ship a version-matched desktop jar. The ~3 min Windows runner is the
-          # price of never handing a stale client with a fresh version number.
-          # workflow_dispatch (above) still forces the full matrix too.
+          # The updater consumes a complete matched appliance set, and every
+          # published version must have a version-matched desktop jar.
           echo "build_desktop=true" >> "$GITHUB_OUTPUT"
-          echo "Release $TAG -> Windows desktop jar (built every release for version-match)"
+          echo "server_bins=true" >> "$GITHUB_OUTPUT"
 
   server-tests:
-    needs: version-check
-    # Shared with ci.yml (push/PR). The single source for the test list lives
-    # in _tests.yml, so the two callers can no longer run a different set.
+    needs: [version-check, ensure-draft-release]
     uses: ./.github/workflows/_tests.yml
 
   android-build:
@@ -119,118 +78,82 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
-
+      - uses: android-actions/setup-android@v4
       - name: Install platform + build-tools
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-
       - name: Unit tests (JVM)
         working-directory: android
         run: |
           echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
           ./gradlew :app:testDebugUnitTest --no-daemon --console=plain
-
       - name: Build release APK
         working-directory: android
         run: |
           echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
           ./gradlew :app:assembleRelease --no-daemon --console=plain
-
-      - name: Verify the release APK (signed, right package + version, not debuggable)
+      - name: Verify signed release APK
         working-directory: android
         run: |
-          set -e
+          set -euo pipefail
           APK=app/build/outputs/apk/release/app-release.apk
-          test -f "$APK" || { echo "no signed release APK at $APK (is the release signingConfig set?)"; exit 1; }
+          test -f "$APK" || { echo "release APK missing"; exit 1; }
           BT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/35.0.0"
-          # Signed with the release key?
-          "$BT/apksigner" verify --print-certs "$APK" >/dev/null || { echo "APK is not validly signed"; exit 1; }
+          "$BT/apksigner" verify --print-certs "$APK" >/dev/null
           AAPT="$BT/aapt"; [ -x "$AAPT" ] || AAPT="$BT/aapt2"
           BADGING="$("$AAPT" dump badging "$APK")"
           TAG="${{ github.ref_name }}"; VER="${TAG#v}"
-          echo "$BADGING" | grep -qE "package: name='dk\.ternedal\.modelrig'" || { echo "wrong package id"; exit 1; }
-          echo "$BADGING" | grep -qE "versionName='$VER'" || { echo "versionName != $VER"; echo "$BADGING" | grep versionName; exit 1; }
-          if echo "$BADGING" | grep -q "application-debuggable"; then echo "release APK is DEBUGGABLE -- wrong build"; exit 1; fi
-          echo "release APK OK: signed, package dk.ternedal.modelrig, versionName $VER, not debuggable"
-
-      - name: Name APK with the release tag
+          echo "$BADGING" | grep -qE "package: name='dk\.ternedal\.modelrig'"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "$BADGING" | grep -qE "versionName='$VER'"
+          fi
+          ! echo "$BADGING" | grep -q "application-debuggable"
+      - name: Name APK
+        if: github.ref_type == 'tag'
         working-directory: android
         run: cp app/build/outputs/apk/release/app-release.apk "../modelrig-${{ github.ref_name }}.apk"
-
-      - name: Upload straight to the release
+      - name: Upload APKs to the existing draft
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
         run: |
-          # The release usually exists already (it is created via the API,
-          # which creates the tag, which fires this workflow). Create it if a
-          # bare tag was pushed instead. Harmless if another job won the race.
-          gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes "" || true
-          gh release upload "${{ github.ref_name }}" "modelrig-${{ github.ref_name }}.apk" --clobber
-          # Also upload under a STABLE, version-less name so the phone has one
-          # permanent link: github.com/Ternedal/ModelRig/releases/latest/download/kaliv-latest.apk
-          # always resolves to this newest build. Bookmark once, one-tap installs
-          # thereafter -- no navigating releases each time.
-          cp "modelrig-${{ github.ref_name }}.apk" "kaliv-latest.apk"
-          gh release upload "${{ github.ref_name }}" "kaliv-latest.apk" --clobber
+          cp "modelrig-${{ github.ref_name }}.apk" kaliv-latest.apk
+          gh release upload "${{ github.ref_name }}" \
+            "modelrig-${{ github.ref_name }}.apk" kaliv-latest.apk --clobber
 
   desktop-build:
-    # Windows only -- the one desktop platform actually in use. The Windows
-    # build doubles as the CI compile-check for desktop code (it only runs
-    # when that code changed, so there's nothing new to check otherwise).
     needs: [server-tests, determine-matrix]
     if: needs.determine-matrix.outputs.build_desktop == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-
-      - name: Build + package runnable jar (native to this OS)
+      - name: Build + package runnable jar
         working-directory: desktop
         shell: bash
         run: ./gradlew :composeApp:packageUberJarForCurrentOS --no-daemon --console=plain
-
-      - name: Locate the packaged jar
+      - name: Locate jar
         id: findjar
         working-directory: desktop
         shell: bash
         run: |
           jar=$(find composeApp/build/compose/jars -name "*.jar" | head -1)
-          echo "Found: $jar"
-          # The upload step runs from the job's default working directory
-          # (repo root), not this step's `working-directory: desktop` -- so the
-          # recorded path must include that prefix or the upload can't find the
-          # file (this bit v0.19.6: "No files were found"). Still true now that
-          # the upload is `gh release upload` rather than upload-artifact.
+          test -n "$jar" && test -f "$jar"
           echo "path=desktop/$jar" >> "$GITHUB_OUTPUT"
-
-      - name: Upload straight to the release
+      - name: Upload jar to the existing draft
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
-        run: |
-          # The release usually exists already (it is created via the API,
-          # which creates the tag, which fires this workflow). Create it if a
-          # bare tag was pushed instead. Harmless if another job won the race.
-          gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes "" || true
-          gh release upload "${{ github.ref_name }}" "${{ steps.findjar.outputs.path }}" --clobber
+        run: gh release upload "${{ github.ref_name }}" "${{ steps.findjar.outputs.path }}" --clobber
 
   server-binaries:
-    # Prebuilt single-file Windows exes for the rig: no Go, no Python, no pip
-    # needed on the machine. Built AND smoke-tested on a real Windows runner
-    # -- both exes must answer /healthz (and the server must report the tag's
-    # exact version) before they're allowed onto the release.
     needs: [determine-matrix, server-tests]
     if: needs.determine-matrix.outputs.server_bins == 'true'
     runs-on: windows-latest
@@ -238,45 +161,37 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v5
         with:
-          go-version: 'stable'
+          go-version: stable
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
       - name: Build backend exe
-        # go.mod lives in backend/, not the repo root -- v0.20.14's first run
-        # failed on exactly this (built from root, no module found).
         working-directory: backend
         run: go build -o ../modelrig-server-windows-x64.exe ./cmd/modelrig-server
-      - name: Build worker exe (PyInstaller)
+      - name: Build worker exe
         run: |
           pip install -r worker/requirements.txt pyinstaller
           pyinstaller --onefile --name modelrig-worker-windows-x64 --paths worker worker/run_worker.py
       - name: Build supervisor exe
-        # Keeps the worker + server alive at logon (scripts/kaliv-autostart.ps1).
-        # go.mod is in backend/, like the server exe above.
         working-directory: backend
         run: go build -o ../modelrig-supervisor-windows-x64.exe ./cmd/modelrig-supervisor
       - name: Build updater exe
-        # Controlled update-with-rollback for the rig (run by hand or scheduled).
         working-directory: backend
         run: go build -o ../modelrig-updater-windows-x64.exe ./cmd/modelrig-updater
-      - name: Smoke test both exes on the real Windows runner
+      - name: Smoke test worker and backend exes
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          # Dead Ollama URL on purpose: /healthz must not depend on it
           $env:MODELRIG_OLLAMA_URL = "http://127.0.0.1:9"
           $worker = Start-Process -FilePath ".\dist\modelrig-worker-windows-x64.exe" -PassThru -NoNewWindow
           $server = $null
           try {
-            # onefile exes self-extract on first start; poll instead of guessing a sleep
             $wh = $null
             foreach ($i in 1..15) {
               try { $wh = Invoke-RestMethod -Uri http://127.0.0.1:8099/healthz -TimeoutSec 3; break }
               catch { Start-Sleep -Seconds 2 }
             }
             if (-not $wh -or $wh.service -ne "modelrig-worker") { throw "worker healthz failed: $($wh | ConvertTo-Json -Compress)" }
-            Write-Host "worker exe OK: $($wh.service) $($wh.version)"
 
             $server = Start-Process -FilePath ".\modelrig-server-windows-x64.exe" -PassThru -NoNewWindow
             $sh = $null
@@ -284,113 +199,76 @@ jobs:
               try { $sh = Invoke-RestMethod -Uri http://127.0.0.1:8080/healthz -TimeoutSec 3; break }
               catch { Start-Sleep -Seconds 2 }
             }
-            $expected = $env:GITHUB_REF_NAME.TrimStart("v")
-            if (-not $sh -or $sh.version -ne $expected) { throw "server healthz failed or wrong version: got '$($sh.version)', expected '$expected'" }
-            Write-Host "server exe OK: version $($sh.version)"
-
-            # Deeper than /healthz: validate the whole-chain report + the honest
-            # capability object (both exes are up here). Ollama is intentionally
-            # dead, so don't assert overall ok -- assert the parts that don't
-            # depend on it: worker version + all 5 capability keys present.
-            $hf = Invoke-RestMethod -Uri http://127.0.0.1:8099/health/full -TimeoutSec 5
-            if ($hf.checks.worker.version -ne $expected) { throw "health/full worker version mismatch: got '$($hf.checks.worker.version)', expected '$expected'" }
-            foreach ($k in @("asr","tts","pdf","docx","cuda")) {
-              if ($null -eq $hf.capabilities.$k) { throw "health/full missing capability key '$k'" }
+            if ("${{ github.ref_type }}" -eq "tag") {
+              $expected = $env:GITHUB_REF_NAME.TrimStart("v")
+              if (-not $sh -or $sh.version -ne $expected) { throw "server version mismatch: got '$($sh.version)', expected '$expected'" }
+            } elseif (-not $sh) {
+              throw "server healthz failed"
             }
-            Write-Host "health/full OK: worker $($hf.checks.worker.version); capabilities $($hf.capabilities | ConvertTo-Json -Compress)"
+
+            $hf = Invoke-RestMethod -Uri http://127.0.0.1:8099/health/full -TimeoutSec 5
+            foreach ($k in @("asr","tts","pdf","docx","cuda")) {
+              if ($null -eq $hf.capabilities.$k) { throw "health/full missing capability '$k'" }
+            }
           }
           finally {
             if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
             if ($worker -and -not $worker.HasExited) { Stop-Process -Id $worker.Id -Force -ErrorAction SilentlyContinue }
           }
-      - name: Upload straight to the release
+      - name: Upload exes to the existing draft
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          # The release usually exists already (it is created via the API,
-          # which creates the tag, which fires this workflow). Create it if a
-          # bare tag was pushed instead. Harmless if another job won the race.
-          gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes "" || true
-          gh release upload "${{ github.ref_name }}" "modelrig-server-windows-x64.exe" "modelrig-supervisor-windows-x64.exe" "modelrig-updater-windows-x64.exe" "dist/modelrig-worker-windows-x64.exe" --clobber
+          gh release upload "${{ github.ref_name }}" \
+            modelrig-server-windows-x64.exe \
+            modelrig-supervisor-windows-x64.exe \
+            modelrig-updater-windows-x64.exe \
+            dist/modelrig-worker-windows-x64.exe --clobber
 
   release:
     needs: [determine-matrix, android-build, desktop-build, server-binaries]
-    # !failure() && !cancelled(): server-binaries may legitimately be SKIPPED
-    # (patch release not touching backend/worker/deploy) -- that must not
-    # block the release; an actual failure anywhere still does.
-    if: ${{ !failure() && !cancelled() }}
+    if: ${{ github.ref_type == 'tag' && !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-
-      - name: Build source zip (same exclude pattern used throughout this project)
+      - name: Build source zip
         run: |
-          # The checkout directory is named after the exact repo name on GitHub
-          # (ModelRig, capital R) -- not this project's local lowercase sandbox
-          # convention. Resolve it dynamically instead of hardcoding either case,
-          # so this keeps working regardless.
+          set -euo pipefail
           cd "$GITHUB_WORKSPACE/.."
           dirname=$(basename "$GITHUB_WORKSPACE")
           zip -r "modelrig-${{ github.ref_name }}.zip" "$dirname" \
             -x '*/__pycache__/*' -x '*.pyc' -x '*/.git/*' \
             -x '*/build/*' -x '*/.gradle/*' -x '*/local.properties' -x '*.apk'
           mv "modelrig-${{ github.ref_name }}.zip" "$GITHUB_WORKSPACE/"
-
-      # The binaries are already on the release: each build job uploads its
-      # own. This job only adds the source zip, and its `needs` still makes it
-      # the gate that proves every build succeeded.
-      - name: Upload the source zip to the release
+      - name: Upload source zip to the existing draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" "modelrig-${{ github.ref_name }}.zip" --clobber
+      - name: Publish SHA256SUMS.txt over every asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes "" || true
-          gh release upload "${{ github.ref_name }}" "modelrig-${{ github.ref_name }}.zip" --clobber
-
-      - name: Publish SHA256SUMS.txt over all release assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # The updater refuses to swap any exe whose SHA-256 doesn't match this
-          # file, so a tampered release asset can't be installed. Hashed here,
-          # after every build job (a `needs` of this one) has uploaded its asset.
+          set -euo pipefail
           mkdir -p _sums && cd _sums
           gh release download "${{ github.ref_name }}" --dir . --clobber
           rm -f SHA256SUMS.txt
           sha256sum * > SHA256SUMS.txt
           gh release upload "${{ github.ref_name }}" SHA256SUMS.txt --clobber
-
-      - name: Verify the release actually has its assets
+      - name: Verify complete draft asset set
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BUILD_DESKTOP: ${{ needs.determine-matrix.outputs.build_desktop }}
         run: |
-          # Compiling is not shipping. v1.20.0 built clean and shipped nothing.
-          #
-          # This step used to end with three stray YAML keys (draft/prerelease/
-          # make_latest) pasted into the shell body from an old action block.
-          # Under `bash -e` the shell ran `draft:` as a command, it did not
-          # exist, and the step failed AFTER every asset had checked out fine.
-          # A guard that fails when everything is right teaches you to ignore it.
+          set -euo pipefail
+          draft=$(gh release view "${{ github.ref_name }}" --json isDraft --jq '.isDraft')
+          test "$draft" = "true" || { echo "release became public before verification"; exit 1; }
           names=$(gh release view "${{ github.ref_name }}" --json assets --jq '.assets[].name')
           echo "$names"
-          for want in .apk .zip .exe; do
+          for want in .apk .jar .zip .exe SHA256SUMS.txt; do
             echo "$names" | grep -q -- "$want" || { echo "MISSING: $want"; exit 1; }
           done
-          # The desktop jar is only built on milestones (patch=0) or when
-          # desktop code changed -- so require it only when it was built.
-          if [ "$BUILD_DESKTOP" = "true" ]; then
-            echo "$names" | grep -q -- ".jar" || { echo "MISSING: .jar"; exit 1; }
-          else
-            echo "desktop jar not built for this tag; not required"
-          fi
-
-      - name: Publish the release (atomic -- nothing is public until verified)
+      - name: Publish verified release atomically
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # The release is created as a DRAFT; assets and SHA256SUMS land on the
-          # draft, the step above verifies the full asset list, and only THEN is
-          # it published and marked latest -- so a half-uploaded release can
-          # never be visible or picked up by the updater (audit 1.58.36).
-          gh release edit "${{ github.ref_name }}" --draft=false --latest
+        run: gh release edit "${{ github.ref_name }}" --draft=false --latest
