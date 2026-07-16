@@ -7,9 +7,9 @@ import (
 )
 
 // Agent 3.0 is an experimental, feature-flagged worker API. The Go server does
-// not implement planning, memory or policy; it remains the authenticated gateway
-// and forwards to the loopback-only worker. Routes are registered only when
-// KALIV_AGENT3_ENABLED=1.
+// not implement planning, memory, replanning or policy; it remains the
+// authenticated gateway and forwards to the loopback-only worker. Routes are
+// registered only when KALIV_AGENT3_ENABLED=1.
 
 func agent3Target(r *http.Request, path string) string {
 	if r.URL.RawQuery != "" {
@@ -69,6 +69,17 @@ func (s *server) handleAgent3RunGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleAgent3RunEvents(w http.ResponseWriter, r *http.Request) {
 	s.Worker.Forward(w, r, agent3RunTarget(r, "/events"))
+}
+
+func (s *server) handleAgent3RunReplans(w http.ResponseWriter, r *http.Request) {
+	// Replan history and recovery are local journal reads.
+	s.Worker.Forward(w, r, agent3RunTarget(r, "/replans"))
+}
+
+func (s *server) handleAgent3RunReplan(w http.ResponseWriter, r *http.Request) {
+	// Explicit replanning validates registry-owned tool metadata and persists one
+	// bounded read-only revision. It does not call a model.
+	s.Worker.Forward(w, r, agent3RunTarget(r, "/replan"))
 }
 
 func (s *server) handleAgent3RunConfirm(w http.ResponseWriter, r *http.Request) {
