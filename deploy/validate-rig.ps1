@@ -1,4 +1,4 @@
-# validate-rig.ps1 -- automatiserer de mekaniske dele af VALIDATION-1.58.36.md
+# validate-rig.ps1 -- automatiserer de mekaniske dele af VALIDATION-1.58.49.md
 # paa riggen. Standard = READ-ONLY (ingen processer roeres). Crash-restart-
 # testene (A2-A4) kraever -Destructive og bekraefter foer hvert kill (spring
 # bekraeftelsen over med -Force). Alt output ender i en paste-klar
@@ -191,7 +191,7 @@ foreach ($r in $results) {
 $outFile = Join-Path $Root "logs\validate-rig-latest.md"
 New-Item -ItemType Directory -Path (Split-Path $outFile) -Force | Out-Null
 $md.ToString() | Set-Content -Path $outFile -Encoding UTF8
-Write-Host "Markdown-blok gemt: $outFile (paste ind i VALIDATION-1.58.36.md)"
+Write-Host "Markdown-blok gemt: $outFile (paste ind i VALIDATION-1.58.49.md)"
 Write-Host "Manuelle tests tilbage: A1 (reboot), B1-B3/B5-B6/B8 (update-scenarier), C/D/E/F (telefon)."
 
 exit $(if ($fail -gt 0) { 1 } else { 0 })
