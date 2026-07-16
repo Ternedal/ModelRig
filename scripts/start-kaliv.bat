@@ -32,8 +32,8 @@ echo   [1/3] Ollama koerer allerede.
 
 :worker
 :: --- 2. Worker (Python) ----------------------------------------------------
-if exist "%REPO%\worker\app\main.py" goto worker_ok
-echo   [FEJL] finder ikke worker\app\main.py under %REPO%
+if exist "%REPO%\worker\app\entrypoint.py" goto worker_ok
+echo   [FEJL] finder ikke worker\app\entrypoint.py under %REPO%
 echo          Ligger start-kaliv.bat i den rigtige repo-kopi?
 pause
 exit /b 1
@@ -52,7 +52,7 @@ echo   [2/3] starter worker med tools slaaet til (port 8099)...
 >>"%TEMP%\kaliv_worker.cmd" echo cd /d "%REPO%"
 >>"%TEMP%\kaliv_worker.cmd" echo set "KALIV_TOOLS_ENABLED=1"
 >>"%TEMP%\kaliv_worker.cmd" echo set "PYTHONPATH=%REPO%\worker"
->>"%TEMP%\kaliv_worker.cmd" echo python -m uvicorn app.main:app --host 127.0.0.1 --port 8099
+>>"%TEMP%\kaliv_worker.cmd" echo python -m uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099
 start "Kaliv worker" cmd /k "%TEMP%\kaliv_worker.cmd"
 
 :server
