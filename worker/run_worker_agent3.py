@@ -22,6 +22,10 @@ from app.agent3.memory import MemoryStore
 from app.agent3.memory_api import build_memory_router
 from app.agent3.plan_store import PlanStore
 from app.agent3.planner import build_planner_router
+from app.agent3.replan_preview_api import (
+    build_default_replan_preview_service,
+    build_replan_preview_router,
+)
 
 
 def _is_loopback(host: str) -> bool:
@@ -44,6 +48,10 @@ if __name__ == "__main__":
         plan_db = app_paths.resolve("./kaliv-agent3-plans.db", env="KALIV_AGENT3_PLAN_DB")
         memory_db = app_paths.resolve("./kaliv-agent3-memory.db", env="KALIV_AGENT3_MEMORY_DB")
         memory_store = MemoryStore(memory_db)
+        replan_preview_service = build_default_replan_preview_service(
+            adapter,
+            app.state.agent3_replanner,
+        )
         app.include_router(
             build_planner_router(
                 adapter,
@@ -53,7 +61,9 @@ if __name__ == "__main__":
             )
         )
         app.include_router(build_memory_router(memory_store))
+        app.include_router(build_replan_preview_router(replan_preview_service))
         app.state.agent3_memory_store = memory_store
+        app.state.agent3_replan_preview_service = replan_preview_service
     else:
         sys.stderr.write(
             "Agent 3.0 was not mounted because KALIV_AGENT3_ENABLED is not 1. "
