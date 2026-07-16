@@ -83,6 +83,17 @@ class TokenStore(context: Context) {
         set(v) { prefs.edit().putBoolean("auto_cloud_fallback", v).apply() }
 
     /**
+     * D4 consent, PERSISTED (2a trin 1): may RAG document content leave the
+     * house to a cloud model? Off by default -- local-first. Used by the
+     * tools-with-RAG path today and by the useRagCloud route when trin 3-4
+     * wire it. Until 1.58.45 this only existed as a dead remember{false} in
+     * the UI: the consent literally could not be given.
+     */
+    var allowRagCloud: Boolean
+        get() = prefs.getBoolean("allow_rag_cloud", false)
+        set(v) { prefs.edit().putBoolean("allow_rag_cloud", v).apply() }
+
+    /**
      * When true, speaking while Kaliv talks cuts her off (barge-in). Relies on
      * the platform's acoustic echo canceler when on speaker; a headset removes
      * the problem entirely. Off by default -- a false trigger mid-sentence is

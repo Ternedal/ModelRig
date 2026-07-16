@@ -645,9 +645,11 @@ private fun ChatScreen(
     var modelMenu by remember { mutableStateOf(false) }
     var cloudModel by remember { mutableStateOf(store.cloudModel) }
     var ragMode by remember { mutableStateOf(false) }
-    // D4 consent (per session, default off): may RAG document content be sent to
-    // a CLOUD model? Off -> the rig keeps document content local (refuses RAG+cloud).
-    var allowRagCloud by remember { mutableStateOf(false) }
+    // D4 consent, persisted (2a trin 1): may RAG document content be sent to
+    // a CLOUD model? Off -> the rig keeps document content local. Backed by
+    // TokenStore so the choice survives restarts; toggled in the ⋮-menu.
+    var allowRagCloud by remember { mutableStateOf(store.allowRagCloud) }
+    var autoFallback by remember { mutableStateOf(store.autoCloudFallback) }
     var ragSources by remember { mutableStateOf(listOf<String>()) }
     var ragSourceFilter by remember { mutableStateOf<String?>(null) }
     var ragSourceMenu by remember { mutableStateOf(false) }
@@ -1656,6 +1658,31 @@ private fun ChatScreen(
                                 Text(if (darkMode) "☀  Lyst tema" else "☾  Mørkt tema")
                             },
                             onClick = { overflow = false; onToggleDark(!darkMode) },
+                        )
+                        // 2a trin 1: the consents become REAL -- persisted in
+                        // TokenStore, toggleable here next to the theme toggle
+                        // (the app's only other toggle). Before this,
+                        // allowRagCloud was a dead remember{false}: the D4
+                        // consent literally could not be given by a user.
+                        DropdownMenuItem(
+                            text = {
+                                Text(if (allowRagCloud) "✓  Dokumentviden → cloud: TIL" else "Dokumentviden → cloud: FRA")
+                            },
+                            onClick = {
+                                overflow = false
+                                allowRagCloud = !allowRagCloud
+                                store.allowRagCloud = allowRagCloud
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(if (autoFallback) "✓  Auto cloud-fallback: TIL" else "Auto cloud-fallback: FRA")
+                            },
+                            onClick = {
+                                overflow = false
+                                autoFallback = !autoFallback
+                                store.autoCloudFallback = autoFallback
+                            },
                         )
                     }
                 }
