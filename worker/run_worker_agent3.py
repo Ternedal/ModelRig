@@ -71,6 +71,7 @@ if __name__ == "__main__":
                 orchestrator=app.state.agent3_orchestrator,
                 plan_store=PlanStore(plan_db),
                 memory_store=memory_store,
+                capability_graph_provider=graph_provider,
             )
         )
         app.include_router(build_memory_router(memory_store))
