@@ -1,7 +1,11 @@
-fastapi>=0.111,<1.0
-uvicorn>=0.30,<1.0
-httpx>=0.27,<1.0
-pydantic>=2.7,<3.0
+# PINNED (==) on purpose: these are the exact versions the full worker suites
+# run green against (repo analysis 1.58.40 P3 -- lock before Agent 3 grows).
+# CI installs from THIS file, so tests and the released worker exe use the
+# same versions. Bump deliberately: change here, run the suites, ship.
+fastapi==0.139.0
+uvicorn==0.51.0
+httpx==0.28.1
+pydantic==2.13.4
 # Optional -- Alva Voice ASR only. NOT installed by default (keeps the base
 # worker light). Install on the rig with: pip install faster-whisper
 # faster-whisper>=1.0
