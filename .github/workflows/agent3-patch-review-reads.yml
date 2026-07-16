@@ -1,0 +1,188 @@
+name: agent3-patch-review-reads
+
+on:
+  push:
+    branches:
+      - agent/agent3-integration-draft-v2
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          persist-credentials: true
+
+      - name: Apply exact Agent 3.0 review-read patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("worker/app/agent3/core.py")
+          text = path.read_text(encoding="utf-8")
+
+          def replace_once(old: str, new: str) -> None:
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected one exact core block, found {count}: {old[:80]!r}")
+              text = text.replace(old, new, 1)
+
+          old_defaults = '''        proactive: bool = False,
+                  allow_private_cloud: bool = False,
+              ) -> AgentRun:'''
+          if text.count(old_defaults) != 2:
+              raise SystemExit("expected exactly two public start signatures")
+          text = text.replace(
+              old_defaults,
+              '''        proactive: bool = False,
+                  allow_private_cloud: bool = False,
+                  review_reads: bool = False,
+              ) -> AgentRun:''',
+          )
+
+          replace_once(
+              '''        return self._start_routed(request, route, steps, proactive, allow_private_cloud)''',
+              '''        return self._start_routed(
+                  request,
+                  route,
+                  steps,
+                  proactive,
+                  allow_private_cloud,
+                  review_reads,
+              )''',
+          )
+          replace_once(
+              '''        return self._start_routed(request, route, list(steps), proactive, allow_private_cloud)''',
+              '''        return self._start_routed(
+                  request,
+                  route,
+                  list(steps),
+                  proactive,
+                  allow_private_cloud,
+                  review_reads,
+              )''',
+          )
+          replace_once(
+              '''        steps: list[AgentStep],
+                  proactive: bool,
+                  allow_private_cloud: bool,
+              ) -> AgentRun:''',
+              '''        steps: list[AgentStep],
+                  proactive: bool,
+                  allow_private_cloud: bool,
+                  review_reads: bool,
+              ) -> AgentRun:''',
+          )
+          replace_once(
+              '''            steps=steps,
+                  proactive=proactive,
+                  allow_private_cloud=allow_private_cloud,
+              )''',
+              '''            steps=steps,
+                  proactive=proactive,
+                  allow_private_cloud=allow_private_cloud,
+                  review_reads=review_reads,
+              )''',
+          )
+          replace_once(
+              '''    proactive: bool = False
+              allow_private_cloud: bool = False
+              schema_version: int = 1''',
+              '''    proactive: bool = False
+              allow_private_cloud: bool = False
+              review_reads: bool = False
+              waiting_replan: bool = False
+              schema_version: int = 2''',
+          )
+          replace_once(
+              '''        if run.state == RunState.WAITING_CONFIRMATION:
+                  return run
+
+              while run.current_step < len(run.steps):''',
+              '''        if run.state == RunState.WAITING_CONFIRMATION:
+                  return run
+              if run.waiting_replan:
+                  run.waiting_replan = False
+                  self.store.save(run)
+                  self.store.event(
+                      run.id,
+                      "replan_review_resumed",
+                      {"current_step": run.current_step},
+                  )
+
+              while run.current_step < len(run.steps):''',
+          )
+          replace_once(
+              '''            self._execute(run, step)
+                  if run.state == RunState.FAILED:
+                      return run
+                  run.current_step += 1
+                  run.state = RunState.RUNNING
+                  self.store.save(run)
+
+              run.state = RunState.COMPLETED''',
+              '''            self._execute(run, step)
+                  if run.state == RunState.FAILED:
+                      return run
+                  completed_read = (
+                      step.risk == RiskClass.READ and step.state == StepState.SUCCEEDED
+                  )
+                  run.current_step += 1
+                  run.state = RunState.RUNNING
+                  self.store.save(run)
+
+                  if completed_read and run.review_reads:
+                      window = self._pending_read_window(run)
+                      if window is not None:
+                          start, end = window
+                          run.waiting_replan = True
+                          self.store.save(run)
+                          self.store.event(
+                              run.id,
+                              "replan_review_required",
+                              {
+                                  "completed_step_id": step.id,
+                                  "completed_tool": step.tool,
+                                  "window_start": start,
+                                  "window_end": end,
+                                  "removable_step_ids": [
+                                      item.id for item in run.steps[start:end]
+                                  ],
+                              },
+                          )
+                          return run
+
+              run.state = RunState.COMPLETED''',
+          )
+          replace_once(
+              '''    def confirm(self, run_id: str, step_id: str, decision: str, digest: str) -> AgentRun:''',
+              '''    @staticmethod
+              def _pending_read_window(run: AgentRun) -> tuple[int, int] | None:
+                  start = run.current_step
+                  end = start
+                  while end < len(run.steps):
+                      item = run.steps[end]
+                      if item.state != StepState.PENDING or item.risk != RiskClass.READ:
+                          break
+                      end += 1
+                  return (start, end) if end > start else None
+
+              def confirm(self, run_id: str, step_id: str, decision: str, digest: str) -> AgentRun:''',
+          )
+
+          path.write_text(text, encoding="utf-8")
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add worker/app/agent3/core.py
+          git diff --cached --check
+          git commit -m "draft(agent3): pause opt-in runs for read replan review [skip ci]"
+          git push origin HEAD:agent/agent3-integration-draft-v2
