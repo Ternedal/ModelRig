@@ -168,6 +168,13 @@ class Tool:
     description: str
     params: dict = field(default_factory=dict)
     run: Callable[[dict], str] = None  # type: ignore[assignment]
+    # Run this tool in a child process instead of inside the worker
+    # (ISOLATION_DESIGN.md I0). No tool sets it yet -- the substrate ships and
+    # is tested BEFORE the first tool that needs it (file read, and later the
+    # desktop tools). Tools owning background work keep running in-process:
+    # their thread must outlive the call, and the JobStore already gives them
+    # persistent truth.
+    isolate: bool = False
 
     def human_summary(self, args: dict) -> str:
         """What the confirmation card shows. Action, target, consequence --
@@ -559,7 +566,21 @@ class InProcessExecutor:
         return tool.run(args)
 
 
-EXECUTOR = InProcessExecutor()
+def _select_executor():
+    """In-process unless KALIV_TOOL_ISOLATION=process.
+
+    Dormant on purpose: the isolation substrate lands tested and unused, so the
+    rig's validation baseline stays exactly what it was. Turning it on today is
+    also a no-op in practice -- ProcessExecutor delegates every tool that does
+    not declare isolate=True, and none does yet.
+    """
+    if os.getenv("KALIV_TOOL_ISOLATION", "").strip().lower() in ("process", "1", "true"):
+        from .toolhost import ProcessExecutor
+        return ProcessExecutor(InProcessExecutor())
+    return InProcessExecutor()
+
+
+EXECUTOR = _select_executor()
 
 
 # ---------------------------------------------------------------------------

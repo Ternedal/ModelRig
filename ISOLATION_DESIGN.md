@@ -130,7 +130,8 @@ ikke-allowlisted vindue = fejl + audit-post.
 
 | Fase | Indhold | Acceptance |
 |---|---|---|
-| **I0 — substratet** | ToolHost-proces + Job Object + timeout + output-cap + IPC. **Nul nye tools**; eksisterende `rig_status` flyttes over som kanariefugl | Tool-suiter uændret grønne gennem ToolHost; en kunstigt hængende handling dræbes og rapporteres som fejl (ikke tavshed); ToolHost-crash rører ikke workeren |
+| **I0a — portabelt substrat** ✅ **LEVERET (1.58.48)** | `toolhost.ProcessExecutor` + `tool_child`: per-kald child-proces, håndhævet timeout m. kill, output-cap, fejl/afvisning krydser grænsen korrekt, credential-fri child-env (allowlist), frozen-exe child-mode. **Dormant**: `KALIV_TOOL_ISOLATION=process` + `Tool.isolate` — ingen tools sætter det endnu | ✅ 13/13 nye tests inkl. ægte child-proces der kører et rigtigt registry-tool; alle eksisterende suiter grønne BÅDE med og uden isolation slået til (delegation bevist sikker) |
+| **I0b — Windows-rettighedslaget** 🔶 UDESTÅR (kræver rig) | Job Object (kill-on-close, hukommelses-/proces-lofter), reduceret token, lav integritet. **Grandchildren dækkes ikke af `subprocess`-kill på Windows uden Job Object** — kendt hul, markeret i koden | Hængende procestræ dør helt; tool kan ikke læse uden for scoped rod (OS-nægtet); nedgraderet ToolHost bryder ikke voice/eksisterende tools |
 | **I1 — Tier A: fil-læs** | `read_file` (scoped rod, reduceret token, størrelsesloft) | Sti uden for roden = OS-nægtet, ikke Python-tjekket; audit viser sti + bytes |
 | **I2 — Tier A: run_command** | Ingen netværk, scoped cwd, timeout, output-cap, `write`-klasse | Netværkskald indefra fejler; 30s-loop dræbes; output afkortet med markering |
 | **I3 — Tier B: se** | `screenshot` (`desktop`, lokal-model-only, `screen_id`, audit m. thumbnail) | Cloud-origin nægtes uden eksplicit samtykke; hvert screenshot i audit |

@@ -30,6 +30,14 @@ def _is_loopback(host: str) -> bool:
 
 
 if __name__ == "__main__":
+    # Isolated tool execution re-invokes this exe with --tool-child (a frozen
+    # build has no python -m). Must run before any server setup: the child does
+    # one tool call on stdin/stdout and exits.
+    if "--tool-child" in sys.argv:
+        from app.tool_child import main as _child_main
+
+        raise SystemExit(_child_main())
+
     host = os.getenv("MODELRIG_WORKER_HOST", "127.0.0.1")
     # The worker has no auth and is meant to be reached only by the backend on the
     # same machine. Fail fast instead of silently exposing RAG/voice/tools on the
