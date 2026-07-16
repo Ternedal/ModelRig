@@ -25,7 +25,9 @@ import javax.crypto.spec.GCMParameterSpec
  * on read for backward compatibility.
  */
 internal object Crypto {
-    const val PREFIX = "enc:v1:"
+    // Defined in the pure layer (TokenFormat) and re-exported here so the
+    // classification rule and the encoder can never disagree about the string.
+    const val PREFIX = dk.ternedal.modelrig.logic.TokenFormat.PREFIX
 
     fun isEncrypted(v: String): Boolean = v.startsWith(PREFIX)
 
