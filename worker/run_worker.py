@@ -46,6 +46,10 @@ def _mount_optional_agent3() -> bool:
     from app.agent3.memory_api import build_memory_router
     from app.agent3.plan_store import PlanStore
     from app.agent3.planner import build_planner_router
+    from app.agent3.replan_preview_api import (
+        build_default_replan_preview_service,
+        build_replan_preview_router,
+    )
 
     if not mount_agent3(app):
         return False
@@ -53,6 +57,10 @@ def _mount_optional_agent3() -> bool:
     plan_db = app_paths.resolve("./kaliv-agent3-plans.db", env="KALIV_AGENT3_PLAN_DB")
     memory_db = app_paths.resolve("./kaliv-agent3-memory.db", env="KALIV_AGENT3_MEMORY_DB")
     memory_store = MemoryStore(memory_db)
+    replan_preview_service = build_default_replan_preview_service(
+        adapter,
+        app.state.agent3_replanner,
+    )
     app.include_router(
         build_planner_router(
             adapter,
@@ -62,7 +70,9 @@ def _mount_optional_agent3() -> bool:
         )
     )
     app.include_router(build_memory_router(memory_store))
+    app.include_router(build_replan_preview_router(replan_preview_service))
     app.state.agent3_memory_store = memory_store
+    app.state.agent3_replan_preview_service = replan_preview_service
     app.state.agent3_planner_mounted = True
     return True
 
