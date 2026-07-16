@@ -1,5 +1,7 @@
 # CLIENT_STATE_DESIGN.md — #2a: uafhængige tilstande, samtykke-UI og capability-gating
 
+**Status:** DELVIST · trin 1-2 leveret (1.58.44/45) · trin 3-5 kræver device-test · **Ejer:** Anders
+
 > Design + handoff for klientens tilstandsmodel. **Dette er device-verificeret
 > arbejde** — to tidligere blinde forsøg fejlede, så implementering sker i
 > "test jeg"-loopet (APK → screenshots → itération), aldrig blindt. Den

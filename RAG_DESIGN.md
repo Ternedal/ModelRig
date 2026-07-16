@@ -1,5 +1,7 @@
 # RAG_DESIGN.md — hærdning af dokumentviden (RAG)
 
+**Status:** LIVE · replace-by-source leveret (1.58.40) · §5-kalibrering kræver rig · **Ejer:** Anders
+
 > Autoritativt design for RAG-ingest/-retrieval, grundet i **kodelæsning**
 > (rag.py, store.py, main.py's seks ingest-endpoints, rag_pdf/docx/pptx) — ikke
 > i antagelser. Skelner Implementeret / Planlagt / Åbent-kræver-rig-data.

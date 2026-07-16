@@ -1,5 +1,7 @@
 # VALIDATION-1.58.49.md
 
+**Status:** AFVENTER KØRSEL · resultatfelter tomme · gælder 1.58.49+ · **Ejer:** Anders (rig + telefon)
+
 > **Formål:** on-device-bevis for alt det, CI kun kan kompilere/unit-teste.
 > Udfyld **Resultat** (✅/❌/⏭️) + **Note** under test. Dette er porten mellem
 > "CI-grøn" og "tør stole på det" — og den er nu ajour med hvad der faktisk er

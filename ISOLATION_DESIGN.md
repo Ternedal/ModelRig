@@ -1,5 +1,7 @@
 # ISOLATION_DESIGN.md — sandboxing før computer-use (F-012)
 
+**Status:** LIVE · I0a+I0c leveret (dormant) · I0b afventer rig · **Ejer:** Anders (gates) — se CURRENT_STATE.md for switches
+
 > **Beslutning (Anders, 16/7-2026):** computer-use ER en del af pakken. Lokal
 > PC-styring først, browser senere. Ligger EFTER Agent 3 + valideringsrunden.
 > **Isolation løses FØRST** — før det første computer-use-tool.

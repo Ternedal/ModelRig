@@ -7,7 +7,9 @@ Danish voice (ASR→LLM→TTS, streamed sentence-by-sentence), RAG document inge
 Ollama Cloud brain for when local isn't enough. The backend keeps the ModelRig
 name; everything user-facing is Kaliv.
 
-Current version: see `VERSION` (STATUS.md line 3 has the always-current one-liner).
+Current version: see `VERSION`. For what actually exists right now — tools with their
+risk/sensitivity, the dormant switches and their defaults, design-doc status — see
+**CURRENT_STATE.md**, which is GENERATED from the code and CI-checked for drift.
 Recent lines: streaming voice, a self-supervising appliance mode (autostart +
 crash-restart + update-with-rollback), and a multi-step agent with human-gated writes.
 
@@ -171,7 +173,9 @@ anchoring, keep_alive-to-cloud, retry losing a turn's route, streams ending
 without a terminal event). The **honest rule** stands: compiled ≠ shipped, and
 CI-green ≠ works-on-device — the last mile is always on-device testing.
 
-See **STATUS.md** for the per-release history (line 3 is always the current
+See **STATUS.md** for the per-release history (a log, not a status page — for
+current state read CURRENT_STATE.md; the old "line 3 is always current"
+convention required a human to remember and spent 55 releases wrong
 one-liner) and **ROADMAP.md** for where this is going (closed-ended at V15).
 
 **Building and testing the clients locally?** See **CLIENT_BUILD_AND_TEST.md**.
