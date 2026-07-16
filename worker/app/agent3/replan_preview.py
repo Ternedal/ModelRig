@@ -249,4 +249,7 @@ class ReplanPreviewService:
             # journal remains the source of truth for operator review.
             raise ReplanPreviewError("committed replan receipt does not match reviewed preview")
 
-        return revised, receipt.to_dict(), stored
+        # Keep the service contract identical to the eventual HTTP shape: tuples
+        # become JSON arrays and no Python-specific container leaks to callers.
+        receipt_payload = json.loads(json.dumps(receipt.to_dict(), ensure_ascii=False))
+        return revised, receipt_payload, stored
