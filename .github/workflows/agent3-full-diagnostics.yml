@@ -26,6 +26,17 @@ jobs:
       - name: Build backend
         run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
 
+      - name: Generate authoritative current state
+        run: python3 scripts/current_state.py
+
+      - name: Upload generated current state
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent3-generated-current-state
+          path: CURRENT_STATE.md
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Full repository test log
         env:
           MODELRIG_BIN: /tmp/modelrig-server
