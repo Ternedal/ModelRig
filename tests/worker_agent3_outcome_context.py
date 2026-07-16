@@ -119,7 +119,7 @@ check(cloud_private.included_step_ids == (read_step.id, private_step.id), "expli
 zero = compiler.compile(run, max_chars=0)
 check(zero.text == "" and zero.sha256 is None and zero.included_step_ids == (), "zero budget emits no block")
 
-large = make_step("large", {"blob": "x" * 30_000})
+large = make_step("large", {f"field-{i}": "x" * 500 for i in range(100)})
 small = make_step("small", {"ok": True})
 budgeted = compiler.compile([large, small], max_chars=2_000)
 check(budgeted.included_step_ids == (small.id,), "oversize result does not starve a later small result")
