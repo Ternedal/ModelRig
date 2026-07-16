@@ -97,7 +97,7 @@ def build_capability_graph(
     validation = validation_assessment or {}
     developer_eligible = bool(validation.get("eligible_for_developer_preview", False))
     write_eligible = bool(validation.get("eligible_for_write_pilot", False))
-    blockers = validation.get("blockers", [])
+    blockers = validation.get("blockers", validation.get("reasons", []))
     blocker_count = len(blockers) if isinstance(blockers, list) else 0
 
     nodes: list[CapabilityNode] = [
@@ -112,6 +112,24 @@ def build_capability_graph(
             "infrastructure",
             "ready" if caps.worker_ready else "unavailable",
             "worker ready" if caps.worker_ready else "worker is not ready",
+        ),
+        CapabilityNode(
+            "cloud",
+            "model_runtime",
+            "ready" if caps.cloud_ready else "unavailable",
+            "cloud model route ready" if caps.cloud_ready else "cloud model route is unavailable",
+        ),
+        CapabilityNode(
+            "rag",
+            "retrieval",
+            "ready" if caps.rag_ready and caps.worker_ready else "unavailable",
+            "local retrieval ready" if caps.rag_ready else "local retrieval is unavailable",
+        ),
+        CapabilityNode(
+            "voice",
+            "input_output",
+            "ready" if caps.voice_ready and caps.worker_ready else "unavailable",
+            "voice pipeline ready" if caps.voice_ready else "voice pipeline is unavailable",
         ),
         CapabilityNode(
             "tool_gate",
@@ -165,6 +183,9 @@ def build_capability_graph(
 
     edges: list[CapabilityEdge] = [
         CapabilityEdge("worker", "rig"),
+        CapabilityEdge("cloud", "rig"),
+        CapabilityEdge("rag", "worker"),
+        CapabilityEdge("voice", "worker"),
         CapabilityEdge("tool_gate", "worker"),
         CapabilityEdge("planner.local", "tool_gate"),
         CapabilityEdge("memory.local", "worker"),
