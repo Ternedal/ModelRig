@@ -48,20 +48,38 @@ jobs:
 
       # Every integration + worker test, globbed so a new tests/*.py is included
       # with no edit here. MODELRIG_BIN is used by the backend/e2e tests; the
-      # worker tests ignore it. set -e stops at the first failure. This is exactly
-      # the set the release job used to list inline (backend_smoke/v1, e2e,
-      # worker_*), now in one place.
+      # worker tests ignore it. The first failure still stops the suite, while the
+      # complete output is retained so Actions truncation never hides the traceback.
       - name: Test suite (auto-includes new tests/*.py)
         env:
           MODELRIG_BIN: /tmp/modelrig-server
+        shell: bash
         run: |
-          set -e
+          set -o pipefail
+          : > /tmp/modelrig-test-suite.log
+          status=0
           for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
             [ -e "$f" ] || continue
             echo "::group::$f"
-            PYTHONPATH=worker python3 "$f"
+            echo "===== $f =====" | tee -a /tmp/modelrig-test-suite.log
+            PYTHONPATH=worker python3 "$f" 2>&1 | tee -a /tmp/modelrig-test-suite.log || {
+              status=${PIPESTATUS[0]}
+              echo "FAILED: $f (exit $status)" | tee -a /tmp/modelrig-test-suite.log
+              echo "::endgroup::"
+              break
+            }
             echo "::endgroup::"
           done
+          exit "$status"
+
+      - name: Upload failed test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: modelrig-test-suite-log
+          path: /tmp/modelrig-test-suite.log
+          if-no-files-found: error
+          retention-days: 7
 
   # The appliance code (updater swap/recovery/journal, supervisor rotation,
   # heartbeat) leans on file semantics that DIFFER on Windows -- os.Rename won't
