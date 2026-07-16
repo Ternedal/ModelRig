@@ -64,6 +64,12 @@ class FakeOllama(BaseHTTPRequestHandler):
         elif mode == "error":
             line({"status": "downloading"})
             line({"error": "manifest unknown"})
+        elif mode == "stall":
+            # One line, then silence with the socket held open -- exactly what
+            # a stalled pull looks like. Cancel must not have to wait for the
+            # next byte.
+            line({"status": "downloading", "completed": 1, "total": 9})
+            time.sleep(30)
         elif mode == "slow":
             for i in range(40):
                 line({"status": "downloading", "completed": i, "total": 40})
@@ -168,6 +174,25 @@ s1.update(rid, status="running")
 s2 = JobStore(p2)  # "new process"
 check(s2.get(rid)["status"] == "interrupted", "restart marks running jobs interrupted")
 check("genstartet" in s2.get(rid)["detail"], "interrupted detail explains why")
+
+# ---- F-206: cancel must cost seconds even when the stream has stalled -------
+# The JobStore promises cancel_job stops a pull in seconds. Checking cancel
+# between NDJSON lines only honours that while data flows; with a silent socket
+# the loop sat in a read (2h timeout) and the promise was worthless.
+SCENARIO["pull"] = "stall"
+SCENARIO["tags_has_model"] = False
+jid = job_id_from(_run_pull_model({"name": MODEL}))
+time.sleep(1.0)  # let it connect and receive the first line
+check(_get_jobstore().get(jid)["status"] == "running", "the stalled pull is running")
+
+t0 = time.time()
+_run_cancel_job({"job_id": jid})
+j = wait_terminal(jid, timeout=10)
+elapsed = time.time() - t0
+check(j["status"] == "cancelled",
+      f"a STALLED pull still cancels (status={j['status']})")
+check(elapsed < 5,
+      f"cancel costs seconds, not the read timeout ({elapsed:.1f}s)")
 
 # terminal immutability
 s2.update(rid, status="completed")

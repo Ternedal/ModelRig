@@ -36,6 +36,7 @@ import os
 import re
 import shutil
 import sqlite3
+import socket
 import threading
 import time
 import uuid
@@ -372,6 +373,36 @@ def _get_jobstore():
     return _jobstore
 
 
+# How long a pull may go without a single byte before we call it dead, and how
+# often the cancel watcher looks. Env-tunable because only the rig can say what
+# a 70B digest verification really costs (VALIDATION F4).
+_PULL_READ_TIMEOUT_S = int(os.getenv("KALIV_PULL_READ_TIMEOUT_S", "600"))
+_CANCEL_POLL_S = 0.4
+
+
+def _unblock(resp) -> None:
+    """Wake a thread blocked reading this response, then close it.
+
+    resp.close() alone does NOT do it: closing the file object does not
+    interrupt a thread already sitting in recv() -- the read stays parked until
+    the far end sends something or the socket times out, which is the entire
+    bug (F-206). Shutting the socket down is what actually wakes it.
+
+    http.client hangs the socket off resp.fp.raw._sock. That is private, so
+    every step is guarded and the cancel test is what proves it still works on
+    this interpreter.
+    """
+    try:
+        sock = resp.fp.raw._sock
+        sock.shutdown(socket.SHUT_RDWR)
+    except Exception:
+        pass
+    try:
+        resp.close()
+    except Exception:
+        pass
+
+
 def _pull_model_job(job_id: str, name: str) -> None:
     """The background body of a pull job. Every outcome lands as a terminal
     status WITH a reason -- the old fire-and-forget version swallowed all
@@ -382,6 +413,33 @@ def _pull_model_job(job_id: str, name: str) -> None:
     from .ollama_client import OLLAMA_URL
     js = _get_jobstore()
     js.update(job_id, status="running", detail="forbinder til Ollama")
+
+    # cancel_job promises the download stops in seconds. Checking the flag
+    # between NDJSON lines only honours that WHILE DATA FLOWS: with a silent
+    # socket -- Ollama verifying a digest, a wedged network -- the loop sat
+    # inside a read and the promise was worth nothing until the read timeout
+    # (analysis F-206). So a watcher polls the flag and CLOSES the response,
+    # which is what actually unblocks a blocked read.
+    state: dict = {"resp": None}
+    done = threading.Event()
+    cancelled = threading.Event()
+
+    def _watch_for_cancel() -> None:
+        while not done.wait(_CANCEL_POLL_S):
+            if js.cancel_requested(job_id):
+                cancelled.set()
+                r = state.get("resp")
+                if r is not None:
+                    _unblock(r)
+                    return
+                # Still connecting: there is nothing to close yet. Keep
+                # watching instead of giving up, so the close lands the moment
+                # a response exists -- otherwise a cancel that arrives during
+                # the handshake is simply lost and the job hangs.
+
+    watcher = threading.Thread(target=_watch_for_cancel, daemon=True,
+                               name=f"pull-cancel-{job_id[:8]}")
+    watcher.start()
     try:
         req = urllib.request.Request(
             f"{OLLAMA_URL}/api/pull", method="POST",
@@ -391,7 +449,14 @@ def _pull_model_job(job_id: str, name: str) -> None:
         saw_success = False
         last_write = 0.0
         last_total = -1
-        with urllib.request.urlopen(req, timeout=7200) as resp:
+        # Per-READ timeout, not a total budget: a big model can download for
+        # hours, but silence this long means the far end is gone. The old 7200
+        # made a dead Ollama look like a slow one for two hours.
+        with urllib.request.urlopen(req, timeout=_PULL_READ_TIMEOUT_S) as resp:
+            state["resp"] = resp
+            if cancelled.is_set():  # asked to stop while we were connecting
+                js.update(job_id, status="cancelled", detail="annulleret af brugeren")
+                return
             for raw in resp:
                 if js.cancel_requested(job_id):
                     js.update(job_id, status="cancelled",
@@ -426,6 +491,13 @@ def _pull_model_job(job_id: str, name: str) -> None:
                     js.update(job_id, **fields)
                     last_write = now
                     last_total = total
+        if cancelled.is_set():
+            # The watcher shut the socket down under us, which ends the
+            # iteration cleanly rather than raising. Without this, a cancel
+            # would be reported as "the stream ended without success" -- true,
+            # and a lie about who ended it.
+            js.update(job_id, status="cancelled", detail="annulleret af brugeren")
+            return
         if not saw_success:
             js.update(job_id, status="failed",
                       detail="strømmen sluttede uden Ollamas 'success' — "
@@ -442,7 +514,15 @@ def _pull_model_job(job_id: str, name: str) -> None:
                       detail=f"pull meldte succes, men {name} findes ikke i "
                              f"modeloversigten — tjek riggen")
     except Exception as e:  # terminal truth, never a silent death
+        # A read that blew up because the watcher closed the socket under it is
+        # a CANCELLATION, not a failure. Reporting it as "OSError" would be
+        # true and useless.
+        if cancelled.is_set():
+            js.update(job_id, status="cancelled", detail="annulleret af brugeren")
+            return
         js.update(job_id, status="failed", detail=f"{type(e).__name__}: {e}")
+    finally:
+        done.set()
 
 
 def _run_pull_model(args: dict) -> str:
