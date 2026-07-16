@@ -28,7 +28,7 @@ cd worker
 python3 -m venv .venv && source .venv/bin/activate   # optional
 pip install -r requirements.txt
 # Loopback only: the worker has no auth; the backend reaches it on localhost.
-uvicorn app.main:app --host 127.0.0.1 --port 8099
+uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099
 ```
 
 ## Config (env)
