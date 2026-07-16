@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
@@ -72,7 +73,7 @@ def build_replan_preview_router(service: ReplanPreviewService) -> APIRouter:
         except ReplanPreviewError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {
-            "run": __import__("json").loads(run.to_json()),
+            "run": json.loads(run.to_json()),
             "replan": receipt,
             "preview": {
                 "preview_id": preview_id,
