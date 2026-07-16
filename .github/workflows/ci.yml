@@ -48,6 +48,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      # Keep main's compile gate and Agent 3.0's full compiler log on failure.
       - name: Compile desktop Kotlin
         working-directory: desktop
         run: |
