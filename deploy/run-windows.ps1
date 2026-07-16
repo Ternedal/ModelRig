@@ -41,8 +41,10 @@ if ($workerExe) {
     $worker = Start-Process -FilePath $workerExe.FullName `
         -WorkingDirectory $workerDir -PassThru -NoNewWindow
 } else {
+    # app.entrypoint wraps FastAPI at the ASGI boundary: real request-body
+    # limits for chunked uploads + cleanup after streaming voice completes.
     $worker = Start-Process -FilePath "python" `
-        -ArgumentList "-m","uvicorn","app.main:app","--host","127.0.0.1","--port","8099" `
+        -ArgumentList "-m","uvicorn","app.entrypoint:app","--host","127.0.0.1","--port","8099" `
         -WorkingDirectory $workerDir -PassThru -NoNewWindow
 }
 
