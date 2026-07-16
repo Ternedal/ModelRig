@@ -28,6 +28,7 @@ func TestAgent3RoutesRequireFeatureFlagAndAuth(t *testing.T) {
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/capabilities", http.StatusNotFound)
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/memory", http.StatusNotFound)
 		assertStatus(t, s.mux, http.MethodDelete, "/api/v1/experimental/agent3/memory/example", http.StatusNotFound)
+		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/runs/example/capability-receipt", http.StatusNotFound)
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/runs/example/replans", http.StatusNotFound)
 		assertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/runs/example/replan", http.StatusNotFound)
 		assertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/runs/example/replan-preview", http.StatusNotFound)
@@ -44,6 +45,7 @@ func TestAgent3RoutesRequireFeatureFlagAndAuth(t *testing.T) {
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/capabilities", http.StatusUnauthorized)
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/memory", http.StatusUnauthorized)
 		assertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/memory/example/correct", http.StatusUnauthorized)
+		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/runs/example/capability-receipt", http.StatusUnauthorized)
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/runs/example/replans", http.StatusUnauthorized)
 		assertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/runs/example/replan", http.StatusUnauthorized)
 		assertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/runs/example/replan-preview", http.StatusUnauthorized)
@@ -80,6 +82,38 @@ func TestAgent3CapabilitiesProxiesToWorkerOnly(t *testing.T) {
 	}
 	if len(*ollamaHits) != 0 {
 		t.Fatalf("capabilities bypassed worker and reached Ollama: %v", *ollamaHits)
+	}
+}
+
+func TestAgent3RunCapabilityReceiptProxiesToWorkerOnly(t *testing.T) {
+	t.Setenv("KALIV_AGENT3_ENABLED", "1")
+	h, workerHits, ollamaHits := upstreams(t)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/experimental/agent3/runs/run-1/capability-receipt",
+		nil,
+	)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("capability receipt: got %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("capability receipt returned invalid JSON: %v", err)
+	}
+	if body["upstream"] != "worker" {
+		t.Fatalf("capability receipt went to %q, want worker", body["upstream"])
+	}
+	want := "/experimental/agent3/runs/run-1/capability-receipt"
+	if len(*workerHits) != 1 || (*workerHits)[0] != want {
+		t.Fatalf("worker hits = %v, want %s", *workerHits, want)
+	}
+	if len(*ollamaHits) != 0 {
+		t.Fatalf("capability receipt bypassed worker and reached Ollama: %v", *ollamaHits)
 	}
 }
 
