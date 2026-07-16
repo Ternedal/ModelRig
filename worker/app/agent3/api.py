@@ -10,8 +10,8 @@ from pydantic import BaseModel, Field
 from .core import (
     Agent3Orchestrator,
     AgentRun,
-    AgentStep,
     AgentRunStore,
+    AgentStep,
     CapabilitySnapshot,
     ConfirmationError,
     RouteKind,
@@ -19,6 +19,12 @@ from .core import (
     TurnRequest,
 )
 from .integration import Agent3PlanError, PlannedToolCall, V2ToolAdapter
+from .replan_runtime import (
+    PersistentReadReplanner,
+    ReplanJournal,
+    ReplanJournalError,
+)
+from .replanner import ReadSuffixReplanner, ReplanError
 from .routing import StrictTurnRouter
 from .validation_gate import evaluate_configured_report
 
@@ -50,6 +56,12 @@ class ConfirmReq(BaseModel):
     step_id: str
     decision: str = Field(pattern="^(approve|deny)$")
     digest: str
+
+
+class ReplanReq(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
+    # Empty is valid: it means the remaining pending read window is unnecessary.
+    plan: list[PlanStepReq] = Field(default_factory=list, max_length=12)
 
 
 class CancelReq(BaseModel):
@@ -102,12 +114,29 @@ def build_router(
     capability_provider: Callable[[StartReq, V2ToolAdapter], CapabilitySnapshot] = _default_caps,
     validation_provider: ValidationProvider | None = None,
     worker_version: str | None = None,
+    replan_service: PersistentReadReplanner | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/experimental/agent3", tags=["experimental-agent3"])
     orchestrator.router = StrictTurnRouter()
     validation_provider = validation_provider or (
         lambda: evaluate_configured_report(current_version=worker_version)
     )
+
+    def recover_or_block(run_id: str) -> list[dict[str, Any]]:
+        """Resolve any write-ahead replan before the run may move again."""
+        if replan_service is None:
+            return []
+        try:
+            outcomes = replan_service.recover(run_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+        conflicts = replan_service.journal.conflicts(run_id)
+        if conflicts:
+            raise HTTPException(
+                status_code=409,
+                detail="run has an unresolved replan recovery conflict",
+            )
+        return outcomes
 
     @router.get("/status")
     def status() -> dict[str, Any]:
@@ -116,6 +145,9 @@ def build_router(
             "enabled": True,
             "experimental": True,
             "planner": "explicit-plan-only",
+            "replanner": (
+                "explicit-pending-read-window" if replan_service is not None else "disabled"
+            ),
             "production_tools_path_untouched": True,
             "max_steps": orchestrator.max_steps,
             "worker_version": worker_version,
@@ -208,10 +240,11 @@ def build_router(
 
     @router.get("/runs/{run_id}")
     def get_run(run_id: str) -> dict[str, Any]:
+        recovery = recover_or_block(run_id)
         run = orchestrator.store.load(run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="run not found")
-        return {"run": _run_payload(run)}
+        return {"run": _run_payload(run), "replan_recovery": recovery}
 
     @router.get("/runs/{run_id}/events")
     def get_events(run_id: str, limit: int = 200) -> dict[str, Any]:
@@ -219,8 +252,50 @@ def build_router(
             raise HTTPException(status_code=404, detail="run not found")
         return {"events": orchestrator.store.events(run_id, limit)}
 
+    @router.get("/runs/{run_id}/replans")
+    def get_replans(run_id: str) -> dict[str, Any]:
+        if replan_service is None:
+            raise HTTPException(status_code=501, detail="replanner is not mounted")
+        recovery = recover_or_block(run_id)
+        if orchestrator.store.load(run_id) is None:
+            raise HTTPException(status_code=404, detail="run not found")
+        revision, replan_count = replan_service.journal.revision_state(run_id)
+        return {
+            "revision": revision,
+            "replan_count": replan_count,
+            "transactions": replan_service.journal.history(run_id),
+            "replan_recovery": recovery,
+        }
+
+    @router.post("/runs/{run_id}/replan")
+    def replan(run_id: str, req: ReplanReq) -> dict[str, Any]:
+        if replan_service is None:
+            raise HTTPException(status_code=501, detail="replanner is not mounted")
+        recover_or_block(run_id)
+        run = orchestrator.store.load(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="run not found")
+        try:
+            calls = [PlannedToolCall(step.tool, step.args) for step in req.plan]
+            replacement_steps = adapter.build_steps(
+                calls,
+                run.route,
+                run.request.conversation_id,
+            )
+            revised, receipt = replan_service.apply(
+                run_id,
+                replacement_steps,
+                reason=req.reason,
+            )
+        except Agent3PlanError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (ReplanError, ReplanJournalError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"run": _run_payload(revised), "replan": receipt.to_dict()}
+
     @router.post("/runs/{run_id}/confirm")
     def confirm(run_id: str, req: ConfirmReq) -> dict[str, Any]:
+        recover_or_block(run_id)
         try:
             run = orchestrator.confirm(run_id, req.step_id, req.decision, req.digest)
         except KeyError as exc:
@@ -231,6 +306,7 @@ def build_router(
 
     @router.post("/runs/{run_id}/resume")
     def resume(run_id: str) -> dict[str, Any]:
+        recover_or_block(run_id)
         try:
             run = orchestrator.advance(run_id)
         except KeyError as exc:
@@ -241,6 +317,7 @@ def build_router(
 
     @router.post("/runs/{run_id}/cancel")
     def cancel(run_id: str, _req: CancelReq | None = None) -> dict[str, Any]:
+        recover_or_block(run_id)
         try:
             run = orchestrator.cancel(run_id)
         except KeyError as exc:
@@ -248,6 +325,19 @@ def build_router(
         return {"run": _run_payload(run)}
 
     return router
+
+
+def _bounded_env_int(name: str, default: int, *, low: int, high: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer") from exc
+    if value < low or value > high:
+        raise RuntimeError(f"{name} must be between {low} and {high}")
+    return value
 
 
 def build_default_runtime() -> tuple[Agent3Orchestrator, V2ToolAdapter]:
@@ -261,6 +351,24 @@ def build_default_runtime() -> tuple[Agent3Orchestrator, V2ToolAdapter]:
     return orchestrator, adapter
 
 
+def build_default_replanner(orchestrator: Agent3Orchestrator) -> PersistentReadReplanner:
+    from .. import paths as _paths
+
+    journal_path = _paths.resolve(
+        "./kaliv-agent3-replans.db",
+        env="KALIV_AGENT3_REPLAN_DB",
+    )
+    max_replans = _bounded_env_int("KALIV_AGENT3_MAX_REPLANS", 3, low=0, high=20)
+    return PersistentReadReplanner(
+        orchestrator.store,
+        ReplanJournal(journal_path),
+        ReadSuffixReplanner(
+            max_steps=orchestrator.max_steps,
+            max_replans=max_replans,
+        ),
+    )
+
+
 def mount_agent3(app: FastAPI) -> bool:
     """Mount once, only when the explicit feature flag is enabled."""
     if os.getenv("KALIV_AGENT3_ENABLED", "0") != "1":
@@ -268,13 +376,16 @@ def mount_agent3(app: FastAPI) -> bool:
     if getattr(app.state, "agent3_mounted", False):
         return True
     orchestrator, adapter = build_default_runtime()
+    replan_service = build_default_replanner(orchestrator)
     app.include_router(
         build_router(
             orchestrator,
             adapter,
             worker_version=getattr(app, "version", None),
+            replan_service=replan_service,
         )
     )
     app.state.agent3_mounted = True
     app.state.agent3_orchestrator = orchestrator
+    app.state.agent3_replanner = replan_service
     return True
