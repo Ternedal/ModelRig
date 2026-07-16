@@ -4,7 +4,7 @@
 
 # ModelRig / Kaliv — komplet handoff til ny chat
 
-**Dato:** 2026-07-12 (aften) · **Version:** v1.58.0 · **Repo:** `github.com/Ternedal/ModelRig` (**PUBLIC** — gratis CI)
+**Dato:** 2026-07-16 · **Version:** v1.58.52 · **Repo:** `github.com/Ternedal/ModelRig` (**PUBLIC** — gratis CI)
 
 Copy/paste dette som første besked i en ny chat. Dokumentet er selvbærende:
 det dækker beslutninger, tilstand, arbejdsform, release-flow, toolchain,
@@ -45,6 +45,21 @@ dem, minde om dem eller starte en diskussion om dem.
 
 ---
 
+4. **Computer-use ER en del af pakken** (Anders, 16/7). Lokal PC-styring
+   først, browser senere; placeret EFTER Agent 3 + valideringsrunden; og
+   **isolation løses FØRST** (ISOLATION_DESIGN.md). En tidligere session
+   anbefalede at droppe computer-use som kategori-brud — **den anbefaling er
+   trukket tilbage og skal ikke genfremsættes**: lokal, gated, single-machine
+   computer-use er kategori-KONSISTENT. Diskuter rækkefølgen hvis der er data,
+   men ikke om.
+
+**Operationel skærpelse (16/7):** maskerings-mønstret `[A-Za-z0-9_]\{20,\}`
+æder også flagnavne, testnavne og SHA'er over 20 tegn. Brug det til blinde
+push/tag-kommandoer, men **`sed 's/github_pat_[A-Za-z0-9_]*/***REDACTED***/g'`
+når du skal LÆSE tool-output** — ellers redigerer du din egen evidens væk.
+
+---
+
 ## 1. Hvad projektet er
 
 Anders' personlige, selv-hostede AI-platform ("Local AI Control Surface"):
@@ -59,33 +74,44 @@ releases. Kadence: MVP → V1 → V2; roadmap er lukket-endet ved V15.
 
 ---
 
-## 2. Aktuel tilstand (v1.58.0)
+## 2. Aktuel tilstand (v1.58.52)
 
-**Hardware-bekræftet (pr. 12/7):** PDF/DOCX→RAG · dansk TTS+ASR (CUDA
-large-v3) · voice ende-til-ende · **voice-via-cloud** (deepseek-671b korrekt,
-efter keep_alive-fixet) · barge-in/tap-to-stop/RMS-meter · agent-laget (læs +
-skriv bag bekræftelseskort, audit) · rig-model-skifter · emoji-strip + persona ·
-voice-cloud-model-vælger + retur-til-rig · routing-stribe · desktop-rebrand
-gennem v1.41→v1.47.
+**Hardware-bekræftet (pr. 12/7, uændret):** PDF/DOCX→RAG · dansk TTS+ASR (CUDA
+large-v3) · voice ende-til-ende inkl. via-cloud · barge-in/tap-to-stop ·
+agent-laget (læs + skriv bag bekræftelseskort, audit) · rig-model-skifter ·
+streamende voice.
 
-**Afventer Anders' test (kø, vigtigst først):**
-1. **Streamende voice (v1.54–55)** — S1–S4 i `DEVICE_TEST.md`.
-   **Forudsætning: genstart workeren først** (streaming er worker-side; gammel
-   worker → 404 på stream-endpointet). Bufret endpoint urørt som fallback.
-   Lyt efter: taler den før hele svaret er færdigt · RMS-meter opdaterer ·
-   boblen fyldes sætning-for-sætning · barge-in midt i stream · gaps/overlap.
-2. **Desktop v1.58 mod mockup'en** — hold jar'en op mod
-   `assets/design/kaliv-ui-guide/Kaliv_UI_Target_Mockup.png` (dark+light).
-3. **Eksport/import af samtaler (v1.56)** — eksportér, importér samme fil,
-   bekræft dublet-skip.
-4. **Foto→RAG** — kræver `KALIV_VISION_MODEL` (fx `llama3.2-vision:11b`) på
-   workeren; uden = ærlig 501. VRAM-kabale forventet (model-swap-latens).
-5. **Eval-harness:** `python -m app.eval_models hermes3:8b qwen3:14b` — tal
-   på tool-disciplin/dansk/latens. 6. **migrate_data** dry-run → `--apply`.
+**Bygget siden (CI-verificeret, IKKE hardware-bevist — det er hele pointen med
+valideringsrunden):**
+- **Substrat:** JobStore (persistent, terminal sandhed, cancel, restart→
+  interrupted) · ToolHost I0a (procesgrænse, timeout-kill, output-cap,
+  credential-fri child-env, frozen-exe child-mode) · Tier B policy I0c
+  (screenshot-binding, fail-closed allowlist, rate limit, lokal-model-only).
+  **Alt dormant** — `KALIV_TOOL_ISOLATION=process` + `Tool.isolate`, og ingen
+  tools sætter dem.
+- **Ren logik med tests (Android):** `logic/TurnRouter` (rute; send+retry samme
+  kilde) · `logic/StreamContract` (typed events; EOF ≠ succes) ·
+  `logic/TokenFormat` (profil-migration; korrupt `enc:v1:` bliver ALDRIG
+  plaintext).
+- **Hærdning:** ydre ASGI byte-cap (chunked kunne omgå Content-Length) ·
+  single-writer pairing · fail-closed desktop-streams · RAG-stream efterlader
+  altid en årsag · deps pinnet `==` + actions SHA-pinnet + Dependabot + CodeQL.
+- **Samtykker er VIRKELIGE** (1.58.45): `allowRagCloud` var et dødt
+  `remember{false}` — D4-samtykket kunne bogstaveligt ikke gives. Nu
+  persisteret + to toggles i ⋮-menuen.
+- **Release-flowet beskytter sig selv:** `ensure-draft-release` er eneste
+  create-autoritet (draft-only); build-jobs havde `gh release create || true`
+  **uden --draft** = halvpublicerede releases. Kontrakt-testet.
 
-**Tests (grønne):** worker **298** (unit 52 · tools 124 · backup 17 · RAG 48 ·
-paths 12 · migrate 7 · eval 18 · vision 12 · voice-stream 8) + Go
-(config, httpapi). Alle kørt i CI på hver release.
+**Kontrakt-tests (nye klasse af sikkerhedsnet):** `tests/workflow_release.py`
+(release-synligheden) · `tests/workflow_agent3_dormant.py` (**gate 3 — ligger
+på main, så Agent 3-mergen gates automatisk**) · `tests/workflow_test_coverage.py`
+(ingen test kan gemme sig for CI's glob). Alle med selv-tests: de er drevet mod
+syntetiske overtrædelser, fordi en test der kun kan bestå ikke er en test.
+
+**Tests:** kør dem — `tests/`-globben er sandheden. Hold op med at skrive faste
+tal i docs (det var F-008: README påstod "298 tests" med en opdeling der ikke
+matchede nogen fil).
 
 ---
 
@@ -109,24 +135,39 @@ paths 12 · migrate 7 · eval 18 · vision 12 · voice-stream 8) + Go
 
 ---
 
-## 4. Release-flow (bevist, følges præcist)
+## 4. Release-flow (ATOMISK — bevist 15+ gange, følg det præcist)
 
-1. **Bump alle FIRE version-sites i lockstep:** `worker/app/main.py`
-   (VERSION) · `backend/internal/config/config.go` (const Version) ·
-   `android/app/build.gradle.kts` (versionName + versionCode, monotont —
-   næste er **132**) · `desktop/composeApp/build.gradle.kts` (packageVersion).
-2. Byg/verificér (APK og/eller jar) → kør tests → opdatér `STATUS.md`
-   linje 3 (indeks [2] via python splitlines).
-3. `git add -A && git -c commit.gpgsign=false commit -q -F /tmp/m.txt`
-   → `git fetch -q origin main && git rebase -q origin/main && git push
-   origin main:main` (masker tokens i output med sed-mønstret fra §0.1).
-   NB: `git pull --rebase` brokker sig ("Please commit or stash") når træet
-   er beskidt — harmløst; commit+push går igennem.
-4. POST release via GitHub API (token trækkes af origin-URL'en;
-   `make_latest:"true"`) → `sleep ~290` → verificér **CI grøn + 6 assets**:
-   `kaliv-latest.apk`, `modelrig-vX.Y.Z.apk`, `Kaliv-windows-x64-X.Y.Z.jar`,
-   zip, 2 Windows-exes.
-5. **Docs-only-ændringer = commit uden tag/bump.**
+**Det gamle "POST release med make_latest:true" er DØDT.** Det publicerede en
+tom release som CI derefter fyldte progressivt: hvis noget fejlede, stod der en
+halv release og lignede en hel. Flowet nu:
+
+1. `python3 scripts/version_tool.py set X.Y.Z` (synker alle fire sites) →
+   **bump `versionCode` manuelt** (monotont; næste er **183**) →
+   `python3 scripts/version_tool.py check`.
+2. Kør ALT lokalt: `(cd worker && PYTHONPATH=. python3 ../tests/worker_*.py)` ·
+   `(cd backend && go build ./... && go vet ./... && go test ./...)` ·
+   `python3 tests/workflow_*.py` · `ruff check --select E9,F63,F7,F82`.
+   **Kotlin kan IKKE kompileres her — CI er den eneste verifikation.**
+3. `git add -A && git -c commit.gpgsign=false commit -q -F /tmp/m.txt` →
+   **`git fetch -q origin main && git rebase origin/main`** (der kan være en
+   parallel session!) → push.
+4. **Opret releasen som DRAFT via API** (`"draft": True`) — aldrig public.
+5. **Push tagget SEPARAT** (`git tag vX.Y.Z <sha>` + push). GitHub laver ikke
+   tags for drafts, og CI trigger på tagget.
+6. CI's `ensure-draft-release`-job er **eneste create-autoritet** (og tvinger en
+   public release tilbage til draft). Build-jobs uploader; release-jobbet
+   verificerer asset-listen og publicerer **som sidste step**
+   (`--draft=false --latest`).
+7. Poll autentificeret med bounded sleeps (≤250s):
+   `?head_sha=<full-sha>` for ci/codeql, `?branch=vX.Y.Z` for release-runnet.
+   **Mellemlæsninger kan vise 5 assets — det er upload-racet, ikke en fejl.**
+   Afvent `completed`. Forventet: **9 assets** (2 APK'er, JAR, 3 exe'er, zip,
+   SHA256SUMS, +1).
+8. **Docs/CI-only = commit uden bump/tag/release.**
+9. **Efter hver release: post status til Notion** (side
+   `389e6b11-bf7b-812f-89ba-fc17e3c2dcda`, dateret entry + Version-property).
+   Stående ordre, spørg ikke først. **Connectoren har været nede siden 16/7 —
+   se §9.7.**
 
 ---
 
@@ -219,22 +260,64 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 13. **Send aldrig lokale Ollama-parametre til cloud-upstreams** (keep_alive).
 14. **Fire versionskonstanter i lockstep** — CI-smoke fejler releasen ved
     mismatch. **"✓ forbundet" skal pinge**, ikke bare betyde "parring gemt".
+15. **Et verifikations-step skal asserte sin EGEN exit-kode.** 16/7: en commit
+    påstod PowerShell-parser-verifikation, men `pwsh` manglede +x og fejlede
+    tavst FØR pushet. `chmod +x /opt/pwsh/pwsh` først — og lad scriptet fejle
+    højlydt, ellers "verificerer" du ingenting.
+16. **En test der kun kan bestå er ikke en test.** Kontrakt-tests mod kode der
+    ikke findes endnu (gate 3) skal drives mod syntetiske OVERTRÆDELSER, ellers
+    er de dekoration.
+17. **Docs kan rulle hærdning tilbage.** README bad folk starte workeren med
+    `uvicorn app.main:app` — efter 1.58.46 er det entrypointet UDEN ASGI-guard.
+    Docs er ikke pynt; de er en kørende instruktion.
+18. **Duplikér aldrig en konstant hvis hele dens job er at matche sig selv.**
+    Jeg var ved at lave en anden `"enc:v1:"`-literal i den nye rene logik. Den
+    rene lag ejer strengen; `data.Crypto` re-eksporterer.
+19. **Afkræft ikke en audit på en delvis søgning.** Min 1.58.40-analyse afviste
+    README-dubletten fordi *overskrifterne* var unikke — indholdet stod 3
+    gange. Auditen havde ret.
+20. **To sessioner kan være varme samtidig.** 16/7 landede den anden JobStore
+    på main mens denne læste analysen; opdaget sekunder før dobbeltarbejde.
+    Fetch/rebase + kig på `origin/main` FØR hvert push.
 
 ---
 
-## 9. Åbne byggekandidater (når Anders siger til)
+## 9. Kø — hvem har bolden (16/7)
 
-- **V6 input-halvdel:** streaming-ASR mens man taler (output-halvdelen ✅
-  v1.54–55) · wake word "Hey Kaliv" (beslutning: altid-lyttende mik).
-- **Design-rester:** footer-strip ("Sikker forbindelse" · "Kaliv kan tage
-  fejl") · hover-actions pr. besked (kopiér m.m.) · rigtige fonte når Anders
-  leverer .ttf · a11y-punkterne fra checklisten · Android-palet-alignment
-  (**Anders-beslutning**).
-- **Tools i voice-flowet** (V5-hale): Kaliv siger højt hvad den vil gøre og
-  venter på "ja". · **Auto-rute til cloud når Tools er på** (design i
-  CLOUD_TOOLS.md §B, kørbar fra v1.50.0+).
-- Større spor (V9 hjemmet, V10 vision-udvidelse, V11 agent v2, V12 dansk
-  model, V13 API, V14 føderation, V15 modenhed): se `ROADMAP.md` §14–20.
+**Ingen af disse er blokeret på kode. De er blokeret på rig, telefon,
+branch-ejer eller en beslutning.**
+
+1. **[ANDERS — PORTEN]** Valideringsrunden: `VALIDATION-1.58.49.md` +
+   `deploy\validate-rig.ps1` (mekaniske tjek → `logs\validate-rig-latest.md`)
+   + RAG-kalibrering (RAG_DESIGN §5: 5 spørgsmål du kender svaret på + 3 du
+   ikke gør). Flytter 0 benchmark-point direkte — **men alt over den er
+   rabatteret uden hardwarebevis**, og Agent 3's egen evidence-gate kræver den.
+2. **[ANDERS — device]** APK 182 (`kaliv-latest.apk`): D7–D10 (toggles synlige,
+   overlever genstart, egress kun når TIL) · **E6–E9: klienten er nu STRENGERE
+   — fejler noget højlydt, er det et fund, ikke en regression** · #2a trin 3–5
+   kun via "test jeg" (to blinde forsøg fejlede før).
+3. **[BRANCH-EJER]** Agent 3 (PR #1): gate 1 = rebase til clean. Gate 2 ✅
+   (linjegennemgang), gate 3 ✅ (CI på main). Merge som ÉN dormant enhed →
+   rig-harness → developer preview → write-pilot. **Aldrig auto-produktion.**
+   PR #3 kan lukkes: alt nyt derfra er portet til main (1.58.46).
+4. **[KRÆVER RIG]** I0b: Windows-rettighedslaget (Job Object m. kill-on-close +
+   grandchild-reaping, reduceret token, lav integritet). **Uden Job Object
+   reaper subprocess-kill ikke børnebørn på Windows** — markeret i koden.
+   Dernæst UPDATER_DESIGN §4a (updater self-update).
+5. **[KRÆVER RIG]** Computer-use I1→I5 (ISOLATION_DESIGN §5), efter gates 1+2.
+   Policy-laget er færdigt; **tolerancen (6) i `desktop_policy.py` er et GÆT
+   indtil den kalibreres mod rigtige apps** (§6.2).
+6. **[ANDERS — beslutning]** F-006: cloud-reads er ugatede (dokumenteret
+   ærligt). Agent 3 er svaret. F-007: desktop-credentials i klartekst
+   (DPAPI-handoff klar). F-011: MCP read-only spike — **først efter
+   valideringen** (ny capability).
+7. **[GÆLD]** Notion-status for 1.58.44–52 er IKKE afleveret: connectoren
+   forsvandt midt i sessionen (auth-fejl, dukker ikke op i tool-søgning).
+   Post dem samlet når Anders re-autentificerer.
+8. **[KOORDINERING]** Der kører til tider TO sessioner samtidig. 16/7 landede
+   den anden JobStore på main mens denne læste analysen — opdaget sekunder før
+   dobbeltarbejde. **Fetch/rebase + tjek `origin/main` FØR hvert push**, og
+   overvej klare baner hvis begge er varme.
 
 ---
 
