@@ -1,0 +1,58 @@
+name: agent3-sync-main
+
+on:
+  push:
+    branches:
+      - agent/agent3-integration-draft-v2
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Merge main with guarded conflict resolution
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          if ! git merge --no-ff --no-commit origin/main; then
+            mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+            printf 'conflicts: %s\n' "${conflicts[*]}"
+            for path in "${conflicts[@]}"; do
+              case "$path" in
+                .github/workflows/_tests.yml)
+                  # Keep Agent 3.0's full failure artifact; its test list already
+                  # includes main's workflow_* coverage.
+                  git checkout --ours -- "$path"
+                  git add "$path"
+                  ;;
+                worker/run_worker.py)
+                  # Main's new app.entrypoint + --tool-child isolation is the
+                  # security baseline. Agent 3.0 is re-mounted in a later commit.
+                  git checkout --theirs -- "$path"
+                  git add "$path"
+                  ;;
+                *)
+                  echo "unexpected merge conflict: $path" >&2
+                  git merge --abort
+                  exit 1
+                  ;;
+              esac
+            done
+          fi
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            echo "unresolved merge conflicts remain" >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "merge: sync Agent 3.0 draft with main 1.58.49"
+          git push origin HEAD:agent/agent3-integration-draft-v2
