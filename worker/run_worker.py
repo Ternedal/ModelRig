@@ -100,6 +100,7 @@ def _mount_optional_agent3() -> bool:
             orchestrator=routing_app.state.agent3_orchestrator,
             plan_store=PlanStore(plan_db),
             memory_store=memory_store,
+            capability_graph_provider=graph_provider,
         )
     )
     routing_app.include_router(build_memory_router(memory_store))
