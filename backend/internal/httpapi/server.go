@@ -124,7 +124,12 @@ func (s *server) routes() {
 		s.mux.Handle("GET /api/v1/experimental/agent3/runs/{id}/events", s.authMW(http.HandlerFunc(s.handleAgent3RunEvents)))
 		s.mux.Handle("GET /api/v1/experimental/agent3/runs/{id}/capability-receipt", s.authMW(http.HandlerFunc(s.handleAgent3RunCapabilityReceipt)))
 		s.mux.Handle("GET /api/v1/experimental/agent3/runs/{id}/replans", s.authMW(http.HandlerFunc(s.handleAgent3RunReplans)))
-		s.mux.Handle("POST /api/v1/experimental/agent3/runs/{id}/replan", s.authMW(http.HandlerFunc(s.handleAgent3RunReplan)))
+		// POST .../runs/{id}/replan is gone (F-608): it carried a
+		// client-authored replacement plan, and the worker now only mounts it
+		// behind the same test fixture flag as explicit start. Proxying a route
+		// the worker does not serve is an API surface that lies about itself.
+		// Production replanning is replan-preview + a single-use apply, which is
+		// what both clients already call.
 		s.mux.Handle("POST /api/v1/experimental/agent3/runs/{id}/replan-preview", s.authMW(http.HandlerFunc(s.handleAgent3RunReplanPreview)))
 		s.mux.Handle("POST /api/v1/experimental/agent3/runs/{id}/answer-preview", s.authMW(http.HandlerFunc(s.handleAgent3RunAnswerPreview)))
 		s.mux.Handle("POST /api/v1/experimental/agent3/replan-previews/{id}/apply", s.authMW(http.HandlerFunc(s.handleAgent3ReplanPreviewApply)))

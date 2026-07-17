@@ -13,6 +13,7 @@ Run: python3 tests/workflow_activation_readiness.py
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -79,17 +80,55 @@ check("Serverbygget plan:** ja" in text,
       "the generated page records that the client-plan blocker is closed")
 check(note in text, "the computed authority result reaches the rendered page")
 
-# Drive the detector in the unsafe direction: reintroducing a plan field must
-# fail closed instead of silently keeping the green verdict.
-from app.agent3 import api as _api  # noqa: E402
-_saved = _api.StartReq.model_fields
-try:
-    _api.StartReq.model_fields = {**_saved, "plan": object()}
-    ok, unsafe_note = AR.plan_authority()
-    check(ok is False and "klienten" in unsafe_note,
-          "self-test: a reintroduced client plan field restores the blocker")
-finally:
-    _api.StartReq.model_fields = _saved
+def _doors_with_fixture() -> list[str]:
+    """Build the router WITH the client-plan fixture on and count the doors.
+
+    A detector that always answers [] is indistinguishable from a closed door,
+    and mine did exactly that for one build: reading body_field.type_ instead of
+    field_info.annotation returned None on pydantic v2, so it reported zero
+    doors while /replan stood open. This is the check that tells the difference.
+    """
+    import tempfile as _tf
+
+    tmp = _tf.mkdtemp()
+    for var, name in (("KALIV_AUDIT_DB", "a.db"), ("KALIV_TOOLS_STATE", "s.json"),
+                      ("MODELRIG_DB", "r.db")):
+        os.environ.setdefault(var, os.path.join(tmp, name))
+    os.environ.setdefault("KALIV_TOOLS_DIR", tmp)
+
+    from app.agent3.api import build_router as _br
+    from app.agent3.core import Agent3Orchestrator as _Orch, AgentRunStore as _St
+    from app.agent3.integration import V2ToolAdapter as _Ad
+
+    ad = _Ad()
+    router = _br(_Orch(_St(os.path.join(tmp, "runs.db")), ad.execute, max_steps=8),
+                 ad, worker_version="selftest", allow_client_plans=True)
+    out = []
+    for route in router.routes:
+        body = getattr(route, "body_field", None)
+        model = None
+        if body is not None:
+            model = (getattr(getattr(body, "field_info", None), "annotation", None)
+                     or getattr(body, "type_", None))
+        if model is not None and "plan" in getattr(model, "model_fields", {}):
+            out.append(getattr(route, "path", "?"))
+    return sorted(out)
+
+
+# Drive the detector in the unsafe direction. This used to overwrite
+# StartReq.model_fields with a fake dict, which simulated a door by poking
+# pydantic. The gate no longer reads models -- it builds the production router
+# and looks at the routes -- so the fake dict now breaks the BUILD, which is
+# fail-closed and correct but reports a different reason. Better: open a real
+# door and check it is seen.
+_fixture_doors = _doors_with_fixture()
+check(len(_fixture_doors) == 2,
+      f"self-test: with the fixture flag on, the detector finds both real "
+      f"client-plan doors ({_fixture_doors}) -- so [] in production means "
+      "closed, not blind"
+      if len(_fixture_doors) == 2
+      else f"the detector found {len(_fixture_doors)} of 2 known doors: "
+           f"{_fixture_doors}")
 
 # --- the scheduler's approval proves knowledge, not consent (F-503/F-504) ---
 
@@ -146,6 +185,24 @@ try:
           "a comment saying 'Bearer' no longer makes the approval look safe")
 finally:
     _api.write_text(_orig, encoding="utf-8")
+
+# --- plan authority is a property, not a door (F-608) ----------------------
+# The gate read StartReq, found no client plan, and wrote "the plan is built and
+# stored on the server". ReplanReq.plan was open the whole time and the page
+# said SAFE -- verified, it did. It attested to the door I had just fixed.
+
+_doors = AR._client_plan_routes()
+check(_doors is not None,
+      "the gate can build the production router and look"
+      if _doors is not None
+      else "the gate could not build the router -- it must not report safety it "
+           "could not check")
+check(_doors == [],
+      "no production route accepts a client-authored plan"
+      if _doors == []
+      else f"client-authored plans are reachable via {_doors}")
+
+
 
 print(f"\n===== ACTIVATION READINESS: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

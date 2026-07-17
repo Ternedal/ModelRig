@@ -79,7 +79,11 @@ service = PersistentReadReplanner(
 )
 orch = Agent3Orchestrator(store, adapter.execute, max_steps=8)
 app = FastAPI()
-app.include_router(build_router(orch, adapter, replan_service=service, worker_version="test"))
+# The raw replacement-plan route is a fixture now, not a production door
+# (F-608): replanning in production is server-authored via replan-preview, and
+# this suite drives the door that no client ever called.
+app.include_router(build_router(orch, adapter, replan_service=service,
+                                worker_version="test", allow_client_plans=True))
 client = TestClient(app)
 
 

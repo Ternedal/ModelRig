@@ -291,6 +291,7 @@ def build_router(
             include_in_schema=False,
         )
 
+
     @router.post("/runs/{run_id}/retry")
     def retry(run_id: str, req: RetryReq) -> dict[str, Any]:
         original = orchestrator.store.load(run_id)
@@ -354,7 +355,6 @@ def build_router(
             "replan_recovery": recovery,
         }
 
-    @router.post("/runs/{run_id}/replan")
     def replan(run_id: str, req: ReplanReq) -> dict[str, Any]:
         if replan_service is None:
             raise HTTPException(status_code=501, detail="replanner is not mounted")
@@ -410,6 +410,30 @@ def build_router(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="run not found") from exc
         return response(run)
+
+    # The raw replacement-plan door, behind the same flag as the explicit-start
+    # fixture and off by default (F-608).
+    #
+    # The initial plan is server-authored: a model writes it, the server stores
+    # it, and the client gets a short-lived single-use id. Then this route let
+    # the client hand in a replacement plan for the rest of the read window.
+    # Constrained to fresh pending reads, so not an escalation -- but "the plan
+    # is server-authored" was true of the door I had just fixed and false of
+    # this one, and ACTIVATION_READINESS said SAFE the entire time, because it
+    # read the door I had checked rather than the property.
+    #
+    # Production replanning goes through /runs/{id}/replan-preview: the server
+    # authors the replacement, stores it, and the client applies it by consuming
+    # a single-use preview id. Kaliv and the desktop client already do exactly
+    # that. This door had no callers at all -- it existed because it was built
+    # first, and nothing ever went back to close it.
+    if allow_client_plans:
+        router.add_api_route(
+            "/runs/{run_id}/replan",
+            replan,
+            methods=["POST"],
+            include_in_schema=False,
+        )
 
     return router
 

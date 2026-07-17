@@ -92,12 +92,6 @@ func (s *server) handleAgent3RunReplans(w http.ResponseWriter, r *http.Request) 
 	s.Worker.Forward(w, r, agent3RunTarget(r, "/replans"))
 }
 
-func (s *server) handleAgent3RunReplan(w http.ResponseWriter, r *http.Request) {
-	// Explicit replanning validates registry-owned tool metadata and persists one
-	// bounded read-only revision. It does not call a model.
-	s.Worker.Forward(w, r, agent3RunTarget(r, "/replan"))
-}
-
 func (s *server) handleAgent3RunReplanPreview(w http.ResponseWriter, r *http.Request) {
 	// Preview invokes the local read-only replanner model but cannot mutate the run.
 	s.WorkerSlow.Forward(w, r, agent3RunTarget(r, "/replan-preview"))

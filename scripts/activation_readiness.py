@@ -190,19 +190,93 @@ def _try_to_mint_a_standing_grant() -> bool | None:
         return None
 
 
+def _client_plan_routes() -> list[str] | None:
+    """Which routes does the PRODUCTION router register that take a client plan?
+
+    Built, not read. `ExplicitStartReq` exists and carries a plan field, and it
+    is fine: it is only routed when allow_client_plans=True, which is the hidden
+    fixture the design intends. Reading models would flag it and teach the
+    reader to ignore this line. Building the router answers the question that
+    matters -- what can actually be POSTed to.
+    """
+    import tempfile  # noqa: PLC0415
+
+    try:
+        tmp = tempfile.mkdtemp()
+        for var, name in (("KALIV_AUDIT_DB", "a.db"), ("KALIV_TOOLS_STATE", "s.json"),
+                          ("KALIV_JOBS_DB", "j.db"), ("MODELRIG_DB", "r.db")):
+            os.environ.setdefault(var, os.path.join(tmp, name))
+        os.environ.setdefault("KALIV_TOOLS_DIR", tmp)
+
+        from app.agent3.api import build_router  # noqa: PLC0415
+        from app.agent3.core import Agent3Orchestrator, AgentRunStore  # noqa: PLC0415
+        from app.agent3.integration import V2ToolAdapter  # noqa: PLC0415
+
+        adapter = V2ToolAdapter()
+        store = AgentRunStore(os.path.join(tmp, "runs.db"))
+        orch = Agent3Orchestrator(store, adapter.execute, max_steps=8)
+        router = build_router(orch, adapter, worker_version="readiness")
+
+        found = []
+        for route in router.routes:
+            body = getattr(route, "body_field", None)
+            # pydantic v2 keeps the model on field_info.annotation; v1 kept it on
+            # type_. Reading only type_ returned None here and the gate reported
+            # zero doors -- the third probe today that was itself the broken
+            # thing. A gate that cannot find the door reports safety.
+            model = None
+            if body is not None:
+                model = (getattr(getattr(body, "field_info", None), "annotation", None)
+                         or getattr(body, "type_", None))
+            if model is not None and "plan" in getattr(model, "model_fields", {}):
+                methods = "/".join(sorted(getattr(route, "methods", []) or []))
+                found.append(f"{methods} {getattr(route, 'path', '?')}")
+        return sorted(found)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).warning("kunne ikke bygge agent3-routeren: %r", exc)
+        return None
+
+
 def plan_authority() -> tuple[bool, str]:
-    """Prove production run creation cannot accept a client-authored plan."""
+    """Can a client author a plan through ANY door? (F-608)
+
+    This used to read StartReq -- run creation -- and conclude that "the plan is
+    built and stored on the server". That is a claim about the system, computed
+    from one door, by someone who had just finished fixing that door.
+
+    ReplanReq.plan was open the whole time. The page said SAFE. Verified: it did.
+
+    So the doors are enumerated rather than remembered. A request model with a
+    `plan` field is a place a client can hand one in, and the next one will be
+    added by someone with a good reason who has not read this.
+    """
     try:
         sys.path.insert(0, str(ROOT / "worker"))
-        from app.agent3.api import StartReq, build_router  # noqa: PLC0415
+        from pydantic import BaseModel  # noqa: PLC0415
+
+        from app.agent3 import api as _api  # noqa: PLC0415
+        from app.agent3.api import build_router  # noqa: PLC0415
         from app.agent3.planner import build_planner_router  # noqa: PLC0415, F401
 
-        client_plan = "plan" in getattr(StartReq, "model_fields", {})
+        # Not "which models have a plan field" -- that flags the deliberate
+        # test fixture, and a gate that cries wolf about a design that is
+        # correct is a gate nobody reads. What matters is which doors the
+        # PRODUCTION router actually registers, so we build it and look.
+        doors = _client_plan_routes()
         fixture_default = inspect.signature(build_router).parameters[
             "allow_client_plans"
         ].default
-        if client_plan:
-            return False, "run-requesten accepterer stadig en plan fra klienten"
+        if doors is None:
+            return False, (
+                "kunne ikke bygge produktions-routeren og se efter — gaten "
+                "gætter ikke på om en dør er der"
+            )
+        if doors:
+            return False, (
+                "klienten kan stadig forfatte en plan via "
+                + ", ".join(f"`{d}`" for d in doors)
+                + " — planen er kun serverejet i den dør jeg sidst kiggede på"
+            )
         if fixture_default is not False:
             return False, "test-fixturen for klientplaner er aktiv som standard"
         return True, (
