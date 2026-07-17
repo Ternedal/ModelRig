@@ -3,8 +3,8 @@
 > **Genereret af `scripts/activation_readiness.py`. Ret ikke i hånden.**
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
-**Version på main:** `1.58.70`  
-**Genereret:** 2026-07-17 10:57 UTC
+**Version på main:** `1.58.71`  
+**Genereret:** 2026-07-17 11:11 UTC
 
 ---
 
@@ -13,8 +13,16 @@
 Blokerende:
 
 - **Fysisk rig-validering:** ingen rapport på disken — fysisk validering er ikke kørt
+- **Planen kommer fra klienten, ikke fra serveren** — `/experimental/agent3/runs` tager en `plan` i request-body. Gaten afviser stadig alt klienten ikke selv måtte bede om, så det er ikke en rettighedseskalering; men planen er ikke serverens løfte, og det er dét der skal holde før software må handle selv. Forsvinder når planlæggeren kobles til en model
 
 Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet uden evidens. Koden kan være korrekt i tests og fejle på Windows, Ollama, Tailscale eller en Pixel 6a — det er dét fysisk validering er til for, og det er ikke noget CI kan gøre for dig.
+
+---
+
+## Planautoritet
+
+- **Serverbygget plan:** NEJ
+- **Detalje:** **Planen kommer fra klienten, ikke fra serveren** — `/experimental/agent3/runs` tager en `plan` i request-body. Gaten afviser stadig alt klienten ikke selv måtte bede om, så det er ikke en rettighedseskalering; men planen er ikke serverens løfte, og det er dét der skal holde før software må handle selv. Forsvinder når planlæggeren kobles til en model
 
 ---
 

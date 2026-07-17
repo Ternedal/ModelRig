@@ -101,6 +101,42 @@ def validation() -> dict:
     return a
 
 
+def plan_authority() -> tuple[bool, str]:
+    """Does the run API let a CLIENT hand the server a plan? (F-310)
+
+    Computed, because this is the blocker most likely to be forgotten: it is
+    invisible from the outside, it is nobody's bug, and it disappears on its own
+    the day the planner is wired up. Which is exactly why a human reading this
+    page after a clean rig validation would flip the flag without ever hearing
+    about it.
+
+    Agent 3's plan is currently supplied by the caller -- deliberately, since
+    the planner is not connected to a model yet and the V2 adapter remains the
+    security boundary. The gate still refuses anything the client could not
+    have asked for through /tools/chat, so this is not an escalation. It does
+    mean the plan is not the SERVER's promise, and "server-authoritative" is
+    the property that has to hold before software is allowed to act on its own.
+    """
+    try:
+        sys.path.insert(0, str(ROOT / "worker"))
+        from app.agent3.api import StartReq  # noqa: PLC0415
+
+        fields = getattr(StartReq, "model_fields", {})
+        if "plan" in fields:
+            return False, (
+                "**Planen kommer fra klienten, ikke fra serveren** — "
+                "`/experimental/agent3/runs` tager en `plan` i request-body. "
+                "Gaten afviser stadig alt klienten ikke selv måtte bede om, så "
+                "det er ikke en rettighedseskalering; men planen er ikke "
+                "serverens løfte, og det er dét der skal holde før software må "
+                "handle selv. Forsvinder når planlæggeren kobles til en model"
+            )
+        return True, "planen bygges på serveren"
+    except Exception as exc:  # noqa: BLE001
+        # Fail closed: if we cannot read the API, we do not get to say it is fine.
+        return False, f"kunne ikke læse plan-autoriteten: {exc}"
+
+
 def dormancy() -> tuple[bool, str]:
     """Run the CI gate that proves Agent 3 is asleep, and report what it said."""
     r = subprocess.run([sys.executable, str(ROOT / "tests" / "workflow_agent3_dormant.py")],
@@ -113,6 +149,7 @@ def render() -> str:
     v = version()
     val = validation()
     dormant_ok, dormant_line = dormancy()
+    server_plans, plan_note = plan_authority()
     flags = flag_defaults()
     switches = [f for f in flags if f[2] != "indstilling"]
     active = [f for f in switches if f[2] == "**AKTIV**"]
@@ -124,6 +161,8 @@ def render() -> str:
         )
     if not dormant_ok:
         blockers.append("**Dormans-gaten fejler** — koden er ikke i den tilstand den påstår")
+    if not server_plans:
+        blockers.append(plan_note)
 
     verdict = "NEJ" if blockers else "JA"
 
@@ -162,6 +201,13 @@ def render() -> str:
                      "version-bundet til denne main.")
 
     lines += [
+        "",
+        "---",
+        "",
+        "## Planautoritet",
+        "",
+        f"- **Serverbygget plan:** {'ja' if server_plans else 'NEJ'}",
+        f"- **Detalje:** {plan_note}",
         "",
         "---",
         "",

@@ -63,5 +63,36 @@ check("agent3-validation-latest.json" in text and "/home/" not in text,
       "the report path is relative -- an absolute one bakes one machine into a "
       "committed file")
 
+# --- the blocker that would otherwise be forgotten (F-310) ------------------
+# Physical validation is the blocker everyone knows about. This is the one that
+# is invisible from the outside, is nobody's bug, and disappears on its own when
+# the planner lands -- which is exactly why a human reading this page after a
+# clean rig run would flip the flag without ever hearing about it.
+
+import sys as _sys  # noqa: E402
+_sys.path.insert(0, str(ROOT / "scripts"))
+import activation_readiness as AR  # noqa: E402
+
+server_plans, note = AR.plan_authority()
+check(server_plans is False,
+      "the run API still takes a client-supplied plan, and the page says so "
+      "rather than leaving physical validation as the only blocker")
+check("serveren" in note, "the blocker explains WHOSE promise the plan is")
+check("Forsvinder" in note or "planlæggeren" in note,
+      "and says what removes it, so it is a stage rather than a complaint")
+check(note in text, "the computed blocker actually reaches the rendered page")
+
+# Drive the detector: if the API ever stops taking a plan, this must flip.
+from app.agent3 import api as _api  # noqa: E402
+_saved = _api.StartReq.model_fields
+try:
+    _api.StartReq.model_fields = {k: v for k, v in _saved.items() if k != "plan"}
+    ok, _ = AR.plan_authority()
+    check(ok is True,
+          "self-test: with no client plan field, the blocker clears -- a check "
+          "that can only fail is as useless as one that can only pass")
+finally:
+    _api.StartReq.model_fields = _saved
+
 print(f"\n===== ACTIVATION READINESS: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
