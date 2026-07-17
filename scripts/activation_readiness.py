@@ -151,6 +151,60 @@ def plan_authority() -> tuple[bool, str]:
         return False, f"kunne ikke læse plan-autoriteten: {exc}"
 
 
+def schedule_approval_authority() -> tuple[bool, str]:
+    """Does a scheduled write's approval prove a human, or just knowledge? (F-503/F-504)
+
+    The scheduler's whole premise is that Anders approves a standing grant ONCE,
+    at creation, and the tool gate later honours it without a card because there
+    is nobody awake at 03:00 to show one to. That trade is only sound if the
+    approval is evidence that a human decided.
+
+    It is not. The approval travelling to the gate is fingerprint(tool, args) --
+    a SHA-256 of two things the caller already knows. It is not a secret, it is
+    not issued by anything, and it can be computed in one line by any process
+    that can reach loopback. /schedules is loopback-checked and holds no token,
+    so "Anders approved this write" currently means "someone knew the tool name
+    and the arguments".
+
+    Latent today: none of the nine tools can make a local HTTP request, so
+    nothing on the rig can walk through this door. It becomes live the day a
+    shell, http, MCP or file-with-network tool lands -- which is exactly the day
+    a prompt-injected model would find it. Same shape as a desktop action
+    classified as a READ: harmless until the capability it waits for arrives.
+
+    Deliberately computed here rather than patched in the API: Anders owns
+    schedule_api.py and is building the human control surface right now, and the
+    real fix -- server-issued, single-use, expiring tokens bound to a UI
+    confirmation behind an authenticated operator session -- belongs with that
+    work, not bolted on underneath it by someone else at the same time.
+    """
+    try:
+        sys.path.insert(0, str(ROOT / "worker"))
+        from app.schedule_api import CreateScheduleReq  # noqa: PLC0415
+
+        fields = getattr(CreateScheduleReq, "model_fields", {})
+        if "approved_fingerprint" not in fields:
+            return True, "godkendelsen kommer ikke fra klienten"
+
+        src = (ROOT / "worker" / "app" / "schedule_api.py").read_text(encoding="utf-8")
+        has_auth = any(t in src for t in ("Bearer", "Depends(", "operator_session",
+                                          "approval_token", "consume_approval"))
+        if has_auth:
+            return True, "schedule-administration kræver mere end loopback"
+        return False, (
+            "**En planlagt skrivnings godkendelse beviser kendskab, ikke samtykke.** "
+            "`approved_fingerprint` er `sha256(tool + args)` — ikke en hemmelighed, "
+            "ikke udstedt af noget, beregnelig på én linje af enhver proces der kan "
+            "nå loopback. `/schedules` har ingen token. Latent i dag, fordi ingen af "
+            "de ni tools kan lave et lokalt HTTP-kald — live den dag et shell-, "
+            "http-, MCP- eller filværktøj med netværk lander, hvilket er præcis den "
+            "dag en prompt-injiceret model ville finde døren. Kræver serverudstedte, "
+            "engangs, kortlivede tokens bundet til en faktisk UI-bekræftelse"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return False, f"kunne ikke læse schedule-godkendelsen: {exc}"
+
+
 def dormancy() -> tuple[bool, str]:
     """Run the CI gate that proves Agent 3 is asleep, and report what it said."""
     r = subprocess.run([sys.executable, str(ROOT / "tests" / "workflow_agent3_dormant.py")],
@@ -164,6 +218,7 @@ def render() -> str:
     val = validation()
     dormant_ok, dormant_line = dormancy()
     server_plans, plan_note = plan_authority()
+    approval_ok, approval_note = schedule_approval_authority()
     flags = flag_defaults()
     switches = [f for f in flags if f[2] != "indstilling"]
     active = [f for f in switches if f[2] == "**AKTIV**"]
@@ -177,6 +232,7 @@ def render() -> str:
         blockers.append("**Dormans-gaten fejler** — koden er ikke i den tilstand den påstår")
     if not server_plans:
         blockers.append(plan_note)
+
 
     verdict = "NEJ" if blockers else "JA"
 
@@ -218,7 +274,22 @@ def render() -> str:
         "",
         "---",
         "",
-        "## Planautoritet",
+        f"## Kan scheduleren aktiveres nu? **{'NEJ' if not approval_ok else verdict}**",
+        "",
+        # A separate verdict on purpose. The scheduler and Agent 3 fail for
+        # different reasons, and a page that pools their blockers tells a reader
+        # that Agent 3 is held up by something that has nothing to do with it --
+        # which is how a page earns the right to be skimmed.
+        (approval_note if not approval_ok
+         else "Ingen blokerende fund specifikke for scheduleren."),
+        "",
+        f"- **Beviser en godkendelse et menneske:** {'ja' if approval_ok else 'NEJ'}",
+        "- **Fysisk validering gælder også her:** scheduleren kører på den samme "
+        "rig, så rapporten er en forudsætning for begge.",
+        "",
+        "---",
+        "",
+        "## Planautoritet (Agent 3)",
         "",
         f"- **Serverbygget plan:** {'ja' if server_plans else 'NEJ'}",
         f"- **Detalje:** {plan_note}",

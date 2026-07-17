@@ -3,8 +3,8 @@
 > **Genereret af `scripts/activation_readiness.py`. Ret ikke i hånden.**
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
-**Version på main:** `1.58.77`  
-**Genereret:** 2026-07-17 13:42 UTC
+**Version på main:** `1.58.78`  
+**Genereret:** 2026-07-17 14:56 UTC
 
 ---
 
@@ -19,7 +19,16 @@ Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet
 
 ---
 
-## Planautoritet
+## Kan scheduleren aktiveres nu? **NEJ**
+
+**En planlagt skrivnings godkendelse beviser kendskab, ikke samtykke.** `approved_fingerprint` er `sha256(tool + args)` — ikke en hemmelighed, ikke udstedt af noget, beregnelig på én linje af enhver proces der kan nå loopback. `/schedules` har ingen token. Latent i dag, fordi ingen af de ni tools kan lave et lokalt HTTP-kald — live den dag et shell-, http-, MCP- eller filværktøj med netværk lander, hvilket er præcis den dag en prompt-injiceret model ville finde døren. Kræver serverudstedte, engangs, kortlivede tokens bundet til en faktisk UI-bekræftelse
+
+- **Beviser en godkendelse et menneske:** NEJ
+- **Fysisk validering gælder også her:** scheduleren kører på den samme rig, så rapporten er en forudsætning for begge.
+
+---
+
+## Planautoritet (Agent 3)
 
 - **Serverbygget plan:** NEJ
 - **Detalje:** **To veje ind, og kun den ene er serverens løfte.** `/experimental/agent3/plans/{plan_id}/start` er serverautoritativ: `/plan` bygger planen ud fra et mål via modellen, gemmer den, og `start` tager kun id'et — klienten kan ikke røre det der køres. Men `/experimental/agent3/runs` tager stadig en `plan` i request-body ved siden af. Gaten afviser alt klienten ikke selv måtte bede om, så det er ikke en rettighedseskalering — men så længe den dør står åben, er "serverautoritativ" en egenskab ved den vej du valgte, ikke ved systemet

@@ -98,5 +98,34 @@ try:
 finally:
     _api.StartReq.model_fields = _saved
 
+# --- the scheduler's approval proves knowledge, not consent (F-503/F-504) ---
+
+approval_ok, approval_note = AR.schedule_approval_authority()
+check(approval_ok is False,
+      "the page says a scheduled write's approval does not prove a human decided")
+check("kendskab" in approval_note and "samtykke" in approval_note,
+      "and names the actual distinction: knowing the arguments is not consenting")
+check("Latent" in approval_note,
+      "and says it is latent today rather than crying wolf -- no tool can reach "
+      "loopback yet")
+check(approval_note in text, "the blocker reaches the rendered page")
+
+check("## Kan scheduleren aktiveres nu?" in text,
+      "the scheduler has its OWN verdict: pooling blockers would tell a reader "
+      "Agent 3 is held up by something unrelated to Agent 3")
+check(approval_note not in text.split("## Kan scheduleren")[0],
+      "...and the scheduler's blocker does not appear under the Agent 3 verdict")
+
+# Drive it: if the API grows a real approval mechanism, this must clear.
+from app.schedule_api import CreateScheduleReq as _CSR  # noqa: E402
+_saved = _CSR.model_fields
+try:
+    _CSR.model_fields = {k: v for k, v in _saved.items() if k != "approved_fingerprint"}
+    ok, _ = AR.schedule_approval_authority()
+    check(ok is True,
+          "self-test: with no client-supplied fingerprint the blocker clears")
+finally:
+    _CSR.model_fields = _saved
+
 print(f"\n===== ACTIVATION READINESS: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
