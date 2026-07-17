@@ -1,16 +1,22 @@
 """Production ASGI entrypoint.
 
-Import the FastAPI application, attach process-owned optional services, then put
-the body-limit/temp-cleanup guard outside it. Run with
-``uvicorn app.entrypoint:app``. Tests that need direct route access may still
-import ``app.main:app``; process launchers must use this module so parsing,
-streaming and scheduler lifecycle are guarded at the ASGI boundary.
+Import the FastAPI application, attach process-owned optional services and the
+local operator-only schedule API, then put the body-limit/temp-cleanup guard
+outside it. Run with ``uvicorn app.entrypoint:app``. Tests that need direct route
+access may still import ``app.main:app``; process launchers must use this module
+so parsing, streaming and scheduler lifecycle are guarded at the ASGI boundary.
 """
 from .hardening import harden
 from .main import app as fastapi_app
+from .schedule_api import build_schedule_router
 from .schedule_runtime import scheduler_lifespan
 
-# The raw route app stays inert for unit tests.  Only the documented production
+# Route construction is side-effect free: no schedule/job/audit DB is opened and
+# ToolGate is not imported until an operator explicitly calls an admin route.
+# There is no model-visible tool for creating schedules.
+fastapi_app.include_router(build_schedule_router())
+
+# The raw route app stays inert for unit tests. Only the documented production
 # entrypoint owns process lifecycle, and the hook itself creates no scheduler
 # resources unless KALIV_SCHEDULER is explicitly enabled.
 fastapi_app.router.lifespan_context = scheduler_lifespan
