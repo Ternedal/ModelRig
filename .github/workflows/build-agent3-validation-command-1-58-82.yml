@@ -78,12 +78,37 @@ jobs:
           python3 scripts/activation_readiness.py --check
           git diff --check -- . ':(exclude)ACTIVATION_READINESS.md'
       - name: Run focused validation command contracts
+        id: focused
+        shell: bash
         run: |
-          set -euo pipefail
-          env PYTHONPATH=worker python3 tests/worker_agent3_validation_path_contract.py
-          env PYTHONPATH=worker python3 tests/worker_agent3_rig_validation_cli.py
-          env PYTHONPATH=worker python3 tests/worker_agent3_rig_evidence.py
-          env PYTHONPATH=worker python3 tests/workflow_activation_readiness.py
+          set +e
+          : > /tmp/agent3-validation-command-tests.log
+          status=0
+          run_cmd() {
+            echo ">>> $*" | tee -a /tmp/agent3-validation-command-tests.log
+            "$@" >> /tmp/agent3-validation-command-tests.log 2>&1
+            rc=$?
+            echo "<<< rc=$rc" | tee -a /tmp/agent3-validation-command-tests.log
+            if [ $rc -ne 0 ] && [ $status -eq 0 ]; then status=$rc; fi
+          }
+          run_cmd env PYTHONPATH=worker python3 tests/worker_agent3_validation_path_contract.py
+          run_cmd env PYTHONPATH=worker python3 tests/worker_agent3_rig_validation_cli.py
+          run_cmd env PYTHONPATH=worker python3 tests/worker_agent3_rig_evidence.py
+          run_cmd env PYTHONPATH=worker python3 tests/workflow_activation_readiness.py
+          cat /tmp/agent3-validation-command-tests.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload focused validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent3-validation-command-tests-log
+          path: /tmp/agent3-validation-command-tests.log
+          if-no-files-found: error
+          retention-days: 3
+      - name: Fail when focused validation contracts failed
+        if: steps.focused.outputs.status != '0'
+        run: exit 1
       - name: Push one clean product commit
         run: |
           set -euo pipefail
