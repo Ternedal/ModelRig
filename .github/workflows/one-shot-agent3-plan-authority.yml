@@ -1,0 +1,670 @@
+name: one-shot-agent3-plan-authority
+
+on:
+  push:
+    branches: [agent/agent3-plan-authority-builder-1-58-78]
+
+permissions:
+  contents: write
+
+jobs:
+  build-clean-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: agent/agent3-plan-authority-builder-1-58-78
+          fetch-depth: 8
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: 'stable'
+      - name: Checkout exact main parent without the builder workflow
+        run: |
+          set -euo pipefail
+          git checkout --detach 7ef5444213a360d3342bc21d576eeff61211b10d
+          test "$(git rev-parse HEAD)" = "7ef5444213a360d3342bc21d576eeff61211b10d"
+          test "$(cat VERSION)" = "1.58.77"
+      - name: Install patch and worker dependencies
+        run: pip install -r worker/requirements.txt libcst --break-system-packages
+      - name: Apply guarded server-authority patch
+        run: |
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import re
+          import textwrap
+          from pathlib import Path
+
+          import libcst as cst
+
+          ROOT = Path('.')
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = ROOT / path
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one replacement anchor, found {count}: {old[:120]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # --- worker API: production has no client-plan route -----------------
+          replace_once(
+              'worker/app/agent3/api.py',
+              'from pydantic import BaseModel, Field',
+              'from pydantic import BaseModel, ConfigDict, Field',
+          )
+          old_models = '''class StartReq(BaseModel):
+              message: str = Field(min_length=1, max_length=20_000)
+              mode: str = Field(default="rig", pattern="^(rig|cloud)$")
+              tools: bool = True
+              rag: bool = False
+              has_image: bool = False
+              voice: bool = False
+              allow_rag_cloud: bool = False
+              allow_private_cloud: bool = False
+              auto_cloud_fallback: bool = False
+              cloud_ready: bool = False
+              conversation_id: str | None = None
+              retry_of_run_id: str | None = None
+              original_route: RouteKind | None = None
+              proactive: bool = False
+              review_reads: bool = False
+              plan: list[PlanStepReq] = Field(default_factory=list, max_length=12)
+          '''
+          new_models = '''class StartReq(BaseModel):
+              """Shared request facts for the test-only explicit-plan fixture.
+
+              Production run creation is server-authored through /plan followed by the
+              single-use /plans/{plan_id}/start endpoint. Deliberately no plan field.
+              """
+
+              message: str = Field(min_length=1, max_length=20_000)
+              mode: str = Field(default="rig", pattern="^(rig|cloud)$")
+              tools: bool = True
+              rag: bool = False
+              has_image: bool = False
+              voice: bool = False
+              allow_rag_cloud: bool = False
+              allow_private_cloud: bool = False
+              auto_cloud_fallback: bool = False
+              cloud_ready: bool = False
+              conversation_id: str | None = None
+              proactive: bool = False
+              review_reads: bool = False
+
+
+          class ExplicitStartReq(StartReq):
+              """Test fixture only; never mounted by the production entrypoint."""
+
+              plan: list[PlanStepReq] = Field(default_factory=list, max_length=12)
+
+
+          class RetryReq(BaseModel):
+              """The only client-owned retry fact is whether its cloud key is ready."""
+
+              model_config = ConfigDict(extra="forbid")
+              cloud_ready: bool = False
+          '''
+          replace_once('worker/app/agent3/api.py', old_models, new_models)
+          replace_once(
+              'worker/app/agent3/api.py',
+              'def _default_caps(req: StartReq, adapter: V2ToolAdapter) -> CapabilitySnapshot:',
+              'def _default_caps(req: StartReq | RetryReq, adapter: V2ToolAdapter) -> CapabilitySnapshot:',
+          )
+          replace_once(
+              'worker/app/agent3/api.py',
+              '    capability_provider: Callable[[StartReq, V2ToolAdapter], CapabilitySnapshot] = _default_caps,\n'
+              '    validation_provider: ValidationProvider | None = None,\n'
+              '    worker_version: str | None = None,\n'
+              '    replan_service: PersistentReadReplanner | None = None,\n'
+              ') -> APIRouter:',
+              '    capability_provider: Callable[[StartReq | RetryReq, V2ToolAdapter], CapabilitySnapshot] = _default_caps,\n'
+              '    validation_provider: ValidationProvider | None = None,\n'
+              '    worker_version: str | None = None,\n'
+              '    replan_service: PersistentReadReplanner | None = None,\n'
+              '    *,\n'
+              '    allow_client_plans: bool = False,\n'
+              ') -> APIRouter:',
+          )
+          replace_once(
+              'worker/app/agent3/api.py',
+              '            "planner": "explicit-plan-only",',
+              '            "planner": "server-authored-plan-token",\n'
+              '            "client_plan_route": allow_client_plans,',
+          )
+
+          api_path = ROOT / 'worker/app/agent3/api.py'
+          api_text = api_path.read_text(encoding='utf-8')
+          begin = api_text.index('    @router.post("/runs")\n')
+          end = api_text.index('    @router.get("/runs")\n', begin)
+          replacement = '''    def start_explicit(req: ExplicitStartReq) -> dict[str, Any]:
+              """Exercise the low-level adapter in tests without exposing it in production."""
+              caps = capability_provider(req, adapter)
+              if not req.plan:
+                  raise HTTPException(status_code=422, detail="the test fixture requires a plan")
+              if not req.tools:
+                  raise HTTPException(status_code=400, detail="an explicit tool plan requires tools=true")
+              request = TurnRequest(
+                  message=req.message,
+                  mode=req.mode,
+                  tools=req.tools,
+                  rag=req.rag,
+                  has_image=req.has_image,
+                  voice=req.voice,
+                  allow_rag_cloud=req.allow_rag_cloud,
+                  auto_cloud_fallback=req.auto_cloud_fallback,
+                  conversation_id=req.conversation_id,
+              )
+              route = orchestrator.router.route(request, caps)
+              if route.kind in {RouteKind.UNAVAILABLE, RouteKind.ASK_BEFORE_DOWNGRADE}:
+                  run = start_steps(
+                      request,
+                      caps,
+                      [],
+                      proactive=req.proactive,
+                      allow_private_cloud=req.allow_private_cloud,
+                      review_reads=req.review_reads,
+                  )
+                  return response(run)
+              try:
+                  calls = [PlannedToolCall(step.tool, step.args) for step in req.plan]
+                  steps = adapter.build_steps(calls, route, req.conversation_id)
+                  run = start_steps(
+                      request,
+                      caps,
+                      steps,
+                      proactive=req.proactive,
+                      allow_private_cloud=req.allow_private_cloud,
+                      review_reads=req.review_reads,
+                  )
+              except Agent3PlanError as exc:
+                  raise HTTPException(status_code=400, detail=str(exc)) from exc
+              return response(run)
+
+              # Production never sets this. Keeping the fixture explicit means unit tests
+              # can exercise the orchestrator without pretending a caller-authored plan is
+              # part of the public contract.
+
+          if allow_client_plans:
+              router.add_api_route(
+                  "/runs",
+                  start_explicit,
+                  methods=["POST"],
+                  include_in_schema=False,
+              )
+
+          @router.post("/runs/{run_id}/retry")
+          def retry(run_id: str, req: RetryReq) -> dict[str, Any]:
+              original = orchestrator.store.load(run_id)
+              if original is None:
+                  raise HTTPException(status_code=404, detail="original run not found")
+              caps = capability_provider(req, adapter)
+              request = TurnRequest(
+                  message=original.request.message,
+                  mode=original.request.mode,
+                  tools=original.request.tools,
+                  rag=original.request.rag,
+                  has_image=original.request.has_image,
+                  voice=original.request.voice,
+                  allow_rag_cloud=original.request.allow_rag_cloud,
+                  auto_cloud_fallback=original.request.auto_cloud_fallback,
+                  retry_of_run_id=original.id,
+                  original_route=original.route.kind,
+                  conversation_id=original.request.conversation_id,
+              )
+              original_review = read_review(original.id)["enabled"]
+              run = start_steps(
+                  request,
+                  caps,
+                  _clone_steps(original),
+                  proactive=original.proactive,
+                  allow_private_cloud=original.allow_private_cloud,
+                  review_reads=bool(original_review),
+              )
+              return response(run)
+
+          '''
+          api_path.write_text(api_text[:begin] + replacement + api_text[end:], encoding='utf-8')
+
+          # --- backend surface -------------------------------------------------
+          old_start_handler = '''func (s *server) handleAgent3RunsStart(w http.ResponseWriter, r *http.Request) {
+              // A run may execute several read steps or wait on a model-backed adapter in a
+              // later phase, so use the long-lived worker proxy just like /tools/chat.
+              s.WorkerSlow.Forward(w, r, agent3Target(r, "/experimental/agent3/runs"))
+          }
+
+          '''
+          new_retry_handler = '''func (s *server) handleAgent3RunRetry(w http.ResponseWriter, r *http.Request) {
+              // Retry clones the stored request, route and validated plan. The body may
+              // report cloud-key readiness only; it cannot replace any executable step.
+              s.WorkerSlow.Forward(w, r, agent3RunTarget(r, "/retry"))
+          }
+
+          '''
+          replace_once('backend/internal/httpapi/agent3.go', old_start_handler, new_retry_handler)
+          replace_once(
+              'backend/internal/httpapi/server.go',
+              '\t\ts.mux.Handle("GET /api/v1/experimental/agent3/runs", s.authMW(http.HandlerFunc(s.handleAgent3RunsList)))\n'
+              '\t\ts.mux.Handle("POST /api/v1/experimental/agent3/runs", s.authMW(http.HandlerFunc(s.handleAgent3RunsStart)))\n'
+              '\t\ts.mux.Handle("GET /api/v1/experimental/agent3/runs/{id}", s.authMW(http.HandlerFunc(s.handleAgent3RunGet)))',
+              '\t\ts.mux.Handle("GET /api/v1/experimental/agent3/runs", s.authMW(http.HandlerFunc(s.handleAgent3RunsList)))\n'
+              '\t\ts.mux.Handle("GET /api/v1/experimental/agent3/runs/{id}", s.authMW(http.HandlerFunc(s.handleAgent3RunGet)))\n'
+              '\t\ts.mux.Handle("POST /api/v1/experimental/agent3/runs/{id}/retry", s.authMW(http.HandlerFunc(s.handleAgent3RunRetry)))',
+          )
+          replace_once(
+              'backend/internal/httpapi/agent3_test.go',
+              '\t\tassertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/runs/example/capability-receipt", http.StatusNotFound)',
+              '\t\tassertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/runs/example/retry", http.StatusNotFound)\n'
+              '\t\tassertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/runs/example/capability-receipt", http.StatusNotFound)',
+          )
+          replace_once(
+              'backend/internal/httpapi/agent3_test.go',
+              '\t\tassertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/runs/example/capability-receipt", http.StatusUnauthorized)',
+              '\t\tassertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/runs/example/retry", http.StatusUnauthorized)\n'
+              '\t\tassertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/runs/example/capability-receipt", http.StatusUnauthorized)',
+          )
+          backend_test = ROOT / 'backend/internal/httpapi/agent3_test.go'
+          backend_text = backend_test.read_text(encoding='utf-8')
+          marker = 'func TestAgent3AnswerPreviewProxiesToWorkerOnly(t *testing.T) {'
+          if backend_text.count(marker) != 1:
+              raise SystemExit('backend agent3 retry test insertion marker drifted')
+          retry_test = '''func TestAgent3RetryProxiesToWorkerOnly(t *testing.T) {
+              t.Setenv("KALIV_AGENT3_ENABLED", "1")
+              h, workerHits, ollamaHits := upstreams(t)
+
+              req := httptest.NewRequest(
+                  http.MethodPost,
+                  "/api/v1/experimental/agent3/runs/run-1/retry",
+                  strings.NewReader(`{"cloud_ready":true}`),
+              )
+              req.Header.Set("Authorization", "Bearer "+testToken)
+              req.Header.Set("Content-Type", "application/json")
+              rec := httptest.NewRecorder()
+              h.ServeHTTP(rec, req)
+
+              if rec.Code != http.StatusOK {
+                  t.Fatalf("retry: got %d, want 200: %s", rec.Code, rec.Body.String())
+              }
+              if len(*workerHits) != 1 || (*workerHits)[0] != "/experimental/agent3/runs/run-1/retry" {
+                  t.Fatalf("worker hits = %v, want retry worker path", *workerHits)
+              }
+              if len(*ollamaHits) != 0 {
+                  t.Fatalf("retry bypassed worker and reached Ollama: %v", *ollamaHits)
+              }
+          }
+
+          '''
+          backend_test.write_text(backend_text.replace(marker, retry_test + marker, 1), encoding='utf-8')
+
+          # --- clients expose the new server-owned retry ----------------------
+          android_anchor = '''    fun events(runId: String): List<Event> {
+              val arr = get("/api/v1/experimental/agent3/runs/$runId/events")
+                  .optJSONArray("events") ?: JSONArray()
+              return buildList {
+                  for (i in 0 until arr.length()) {
+                      val e = arr.optJSONObject(i) ?: continue
+                      add(Event(e.optDouble("ts"), e.optString("kind"), e.opt("payload")?.toString().orEmpty()))
+                  }
+              }
+          }
+
+          '''
+          android_retry = android_anchor + '''    fun retry(runId: String, cloudReady: Boolean = false): Run {
+              val payload = JSONObject().put("cloud_ready", cloudReady)
+              val root = post("/api/v1/experimental/agent3/runs/$runId/retry", payload)
+              return parseRun(root.requireObject("run"))
+          }
+
+          '''
+          replace_once(
+              'android/app/src/main/java/dk/ternedal/modelrig/net/Agent3Client.kt',
+              android_anchor,
+              android_retry,
+          )
+          replace_once(
+              'desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/Agent3Client.kt',
+              '''@Serializable
+          private data class ConfirmRequest(
+              @SerialName("step_id") val stepId: String,
+              val decision: String,
+              val digest: String,
+          )
+          ''',
+              '''@Serializable
+          private data class ConfirmRequest(
+              @SerialName("step_id") val stepId: String,
+              val decision: String,
+              val digest: String,
+          )
+
+          @Serializable
+          private data class RetryRequest(
+              @SerialName("cloud_ready") val cloudReady: Boolean = false,
+          )
+          ''',
+          )
+          replace_once(
+              'desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/Agent3Client.kt',
+              '''    fun events(runId: String): List<Agent3Event> =
+                  decode<EventsEnvelope>(get("/api/v1/experimental/agent3/runs/$runId/events")).events
+
+          ''',
+              '''    fun events(runId: String): List<Agent3Event> =
+                  decode<EventsEnvelope>(get("/api/v1/experimental/agent3/runs/$runId/events")).events
+
+              fun retry(runId: String, cloudReady: Boolean = false): Agent3Run =
+                  decode<Agent3RunEnvelope>(
+                      post(
+                          "/api/v1/experimental/agent3/runs/$runId/retry",
+                          json.encodeToString(RetryRequest(cloudReady)),
+                      )
+                  ).run
+
+          ''',
+          )
+
+          # --- test-only explicit route opt-in -------------------------------
+          direct_collection = re.compile(
+              r'''(?sx)(?:\.post\(\s*|\.request\(\s*["']POST["']\s*,\s*)
+                  ["']/experimental/agent3/runs["']'''
+          )
+
+          class EnableFixture(cst.CSTTransformer):
+              def __init__(self) -> None:
+                  self.changed = 0
+
+              def leave_Call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.Call:
+                  func = original_node.func
+                  is_build = isinstance(func, cst.Name) and func.value == 'build_router'
+                  is_build = is_build or (
+                      isinstance(func, cst.Attribute)
+                      and isinstance(func.attr, cst.Name)
+                      and func.attr.value == 'build_router'
+                  )
+                  if not is_build:
+                      return updated_node
+                  if any(arg.keyword and arg.keyword.value == 'allow_client_plans' for arg in original_node.args):
+                      return updated_node
+                  self.changed += 1
+                  return updated_node.with_changes(
+                      args=[
+                          *updated_node.args,
+                          cst.Arg(
+                              value=cst.Name('True'),
+                              keyword=cst.Name('allow_client_plans'),
+                          ),
+                      ]
+                  )
+
+          fixture_files: list[str] = []
+          for path in sorted((ROOT / 'tests').glob('*.py')):
+              text = path.read_text(encoding='utf-8')
+              if not direct_collection.search(text):
+                  continue
+              if 'build_router' not in text:
+                  raise SystemExit(f'{path}: direct client-plan test has no build_router opt-in point')
+              transformer = EnableFixture()
+              updated = cst.parse_module(text).visit(transformer).code
+              if transformer.changed == 0:
+                  raise SystemExit(f'{path}: found direct client-plan route but patched no build_router call')
+              path.write_text(updated, encoding='utf-8')
+              fixture_files.append(str(path))
+          if len(fixture_files) < 5:
+              raise SystemExit(f'expected several explicit-plan fixture tests, got {fixture_files}')
+
+          # Retry now has a dedicated, strict route. Keep the original explicit
+          # plan only as setup through the opt-in test fixture.
+          retry_path = ROOT / 'tests/worker_agent3_retry.py'
+          retry_text = retry_path.read_text(encoding='utf-8')
+          old_retry = '''retry = client.post(
+              "/experimental/agent3/runs",
+              json={
+                  "message": "maliciously changed",
+                  "mode": "rig",
+                  "tools": False,
+                  "rag": False,
+                  "cloud_ready": True,
+                  "retry_of_run_id": original["id"],
+                  "plan": [{"tool": "does_not_exist", "args": {}}],
+              },
+          )
+          assert retry.status_code == 200, retry.text
+          '''
+          new_retry = '''rejected = client.post(
+              f"/experimental/agent3/runs/{original['id']}/retry",
+              json={
+                  "cloud_ready": True,
+                  "message": "maliciously changed",
+                  "plan": [{"tool": "does_not_exist", "args": {}}],
+              },
+          )
+          assert rejected.status_code == 422, rejected.text
+
+          retry = client.post(
+              f"/experimental/agent3/runs/{original['id']}/retry",
+              json={"cloud_ready": True},
+          )
+          assert retry.status_code == 200, retry.text
+          '''
+          if retry_text.count(old_retry) != 1:
+              raise SystemExit('worker_agent3_retry.py retry block drifted')
+          retry_path.write_text(
+              retry_text.replace(old_retry, new_retry, 1).replace(
+                  'print("6 passed, 0 failed")',
+                  'print("7 passed, 0 failed")',
+                  1,
+              ),
+              encoding='utf-8',
+          )
+
+          # Dedicated production-surface test: no POST collection route, strict
+          # retry body, stored request/route/plan cloned server-side.
+          authority_test = ROOT / 'tests/worker_agent3_plan_authority_api.py'
+          if authority_test.exists():
+              raise SystemExit('authority test already exists unexpectedly')
+          authority_test.write_text(textwrap.dedent('''\
+              from __future__ import annotations
+
+              import os
+              import tempfile
+              from types import SimpleNamespace
+
+              from fastapi import FastAPI
+              from fastapi.testclient import TestClient
+
+              from app.agent3.api import StartReq, build_router
+              from app.agent3.core import Agent3Orchestrator, AgentRunStore, CapabilitySnapshot, TurnRequest
+              from app.agent3.integration import PlannedToolCall, V2ToolAdapter
+              from app.agent3.routing import StrictTurnRouter
+
+
+              class Tool:
+                  name = "rig_status"
+                  risk = "read"
+
+                  @staticmethod
+                  def human_summary(args):
+                      return "Læs rigstatus"
+
+
+              class Gate:
+                  enabled = True
+                  state_error = None
+
+                  @staticmethod
+                  def propose(name, args, conversation_id=None, origin="local"):
+                      return {"status": "executed", "result": f"{origin}:{name}"}
+
+
+              fake = SimpleNamespace(REGISTRY={"rig_status": Tool()}, GATE=Gate())
+              adapter = V2ToolAdapter(fake)
+              store = AgentRunStore(os.path.join(tempfile.mkdtemp(prefix="agent3-authority-"), "runs.db"))
+              orchestrator = Agent3Orchestrator(store, adapter.execute)
+              caps = CapabilitySnapshot(True, True, True, True, True, True)
+
+              request = TurnRequest("brug RAG og tools", mode="cloud", tools=True, rag=True, allow_rag_cloud=True)
+              route = StrictTurnRouter().route(request, caps)
+              steps = adapter.build_steps([PlannedToolCall("rig_status", {})], route, None)
+              original = orchestrator.start_with_steps(request, caps, steps, allow_private_cloud=True)
+
+              app = FastAPI()
+              app.include_router(build_router(orchestrator, adapter, lambda req, _adapter: caps))
+              client = TestClient(app)
+
+              assert "plan" not in StartReq.model_fields
+              blocked = client.post(
+                  "/experimental/agent3/runs",
+                  json={"message": "status", "plan": [{"tool": "rig_status", "args": {}}]},
+              )
+              assert blocked.status_code == 405, blocked.text
+
+              rejected = client.post(
+                  f"/experimental/agent3/runs/{original.id}/retry",
+                  json={"cloud_ready": True, "plan": [{"tool": "does_not_exist", "args": {}}]},
+              )
+              assert rejected.status_code == 422, rejected.text
+
+              retried_response = client.post(
+                  f"/experimental/agent3/runs/{original.id}/retry",
+                  json={"cloud_ready": True},
+              )
+              assert retried_response.status_code == 200, retried_response.text
+              retried = retried_response.json()["run"]
+              assert retried["id"] != original.id
+              assert retried["request"]["message"] == request.message
+              assert retried["request"]["mode"] == request.mode
+              assert retried["route"]["kind"] == original.route.kind.value
+              assert [step["tool"] for step in retried["steps"]] == ["rig_status"]
+              print("8 passed, 0 failed")
+          '''), encoding='utf-8')
+
+          # --- computed readiness now clears plan authority ------------------
+          readiness = ROOT / 'scripts/activation_readiness.py'
+          readiness_text = readiness.read_text(encoding='utf-8')
+          if 'import inspect\n' not in readiness_text:
+              readiness_text = readiness_text.replace('import hashlib\n', 'import hashlib\nimport inspect\n', 1)
+          start = readiness_text.index('def plan_authority() -> tuple[bool, str]:\n')
+          stop = readiness_text.index('\ndef dormancy() -> tuple[bool, str]:\n', start)
+          new_detector = '''def plan_authority() -> tuple[bool, str]:
+              """Prove production run creation cannot accept a client-authored plan."""
+              try:
+                  sys.path.insert(0, str(ROOT / "worker"))
+                  from app.agent3.api import StartReq, build_router  # noqa: PLC0415
+                  from app.agent3.planner import build_planner_router  # noqa: PLC0415, F401
+
+                  client_plan = "plan" in getattr(StartReq, "model_fields", {})
+                  fixture_default = inspect.signature(build_router).parameters[
+                      "allow_client_plans"
+                  ].default
+                  if client_plan:
+                      return False, "run-requesten accepterer stadig en plan fra klienten"
+                  if fixture_default is not False:
+                      return False, "test-fixturen for klientplaner er aktiv som standard"
+                  return True, (
+                      "planen bygges og gemmes på serveren; klienten kan kun starte den "
+                      "via et kortlivet single-use plan-id, mens retry kloner den gemte plan"
+                  )
+              except Exception as exc:  # noqa: BLE001
+                  return False, f"kunne ikke læse plan-autoriteten: {exc}"
+
+          '''
+          readiness.write_text(readiness_text[:start] + new_detector + readiness_text[stop + 1:], encoding='utf-8')
+
+          readiness_test = ROOT / 'tests/workflow_activation_readiness.py'
+          rt = readiness_test.read_text(encoding='utf-8')
+          block_start = rt.index('# --- the blocker that would otherwise be forgotten (F-310)')
+          block_end = rt.index('print(f"\\n===== ACTIVATION READINESS:', block_start)
+          new_block = '''# --- server plan authority (F-310 closed) -------------------------------------
+          import sys as _sys  # noqa: E402
+          _sys.path.insert(0, str(ROOT / "scripts"))
+          import activation_readiness as AR  # noqa: E402
+
+          server_plans, note = AR.plan_authority()
+          check(server_plans is True,
+                "production run creation is server-authoritative")
+          check("serveren" in note and "plan-id" in note,
+                "the readiness explanation names the server-owned single-use plan")
+          check("Serverbygget plan:** ja" in text,
+                "the generated page records that the client-plan blocker is closed")
+          check(note in text, "the computed authority result reaches the rendered page")
+
+          # Drive the detector in the unsafe direction: reintroducing a plan field must
+          # fail closed instead of silently keeping the green verdict.
+          from app.agent3 import api as _api  # noqa: E402
+          _saved = _api.StartReq.model_fields
+          try:
+              _api.StartReq.model_fields = {**_saved, "plan": object()}
+              ok, unsafe_note = AR.plan_authority()
+              check(ok is False and "klienten" in unsafe_note,
+                    "self-test: a reintroduced client plan field restores the blocker")
+          finally:
+              _api.StartReq.model_fields = _saved
+
+          '''
+          readiness_test.write_text(rt[:block_start] + new_block + rt[block_end:], encoding='utf-8')
+
+          replace_once(
+              'AGENT_3_INTEGRATION_DRAFT.md',
+              'POST   /api/v1/experimental/agent3/runs\n'
+              'GET    /api/v1/experimental/agent3/runs/{id}',
+              'GET    /api/v1/experimental/agent3/runs/{id}\n'
+              'POST   /api/v1/experimental/agent3/runs/{id}/retry',
+          )
+          replace_once(
+              'AGENT_3_INTEGRATION_DRAFT.md',
+              '- Serverautoritativ retry genbruger original besked, route-flags og valideret plan.',
+              '- Serverautoritativ retry har sin egen route og genbruger original besked, route-flags og valideret plan.',
+          )
+
+          # Release version is lockstep across worker/backend/Android/desktop.
+          gradle = ROOT / 'android/app/build.gradle.kts'
+          gradle_text = gradle.read_text(encoding='utf-8')
+          if gradle_text.count('versionCode = 208') != 1:
+              raise SystemExit('Android versionCode 208 anchor drifted')
+          gradle.write_text(gradle_text.replace('versionCode = 208', 'versionCode = 209', 1), encoding='utf-8')
+          PY
+      - name: Set 1.58.78 and regenerate authoritative documents
+        run: |
+          set -euo pipefail
+          python3 scripts/version_tool.py set 1.58.78
+          python3 scripts/current_state.py
+          python3 scripts/activation_readiness.py
+          python3 scripts/version_tool.py check
+          python3 scripts/current_state.py --check
+          python3 scripts/activation_readiness.py --check
+          git diff --check -- . ':(exclude)ACTIVATION_READINESS.md'
+      - name: Run focused authority tests
+        run: |
+          set -euo pipefail
+          PYTHONPATH=worker python3 tests/worker_agent3_plan_authority_api.py
+          PYTHONPATH=worker python3 tests/worker_agent3_retry.py
+          PYTHONPATH=worker python3 tests/workflow_activation_readiness.py
+          (cd backend && go test ./internal/httpapi)
+      - name: Commit product diff onto exact main and push clean branch
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          test -n "$(git status --porcelain)"
+          git commit -m 'fix(agent3): require server-authored run plans'
+          clean_sha=$(git rev-parse HEAD)
+          git push --force origin HEAD:refs/heads/agent/agent3-plan-authority-1-58-78
+          printf 'commit=%s\nbase=%s\nversion=1.58.78\n' "$clean_sha" '7ef5444213a360d3342bc21d576eeff61211b10d' > agent3-plan-authority-result.txt
+          git diff --stat 7ef5444213a360d3342bc21d576eeff61211b10d..HEAD >> agent3-plan-authority-result.txt
+          cat agent3-plan-authority-result.txt
+      - name: Upload clean commit identity
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent3-plan-authority-result
+          path: agent3-plan-authority-result.txt
+          if-no-files-found: error
+          retention-days: 3
+      - name: Remove builder branch
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/agent/agent3-plan-authority-builder-1-58-78" || true
