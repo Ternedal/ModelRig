@@ -12,9 +12,11 @@ import java.util.concurrent.TimeUnit
  * Authenticated client for the human-only scheduler administration surface.
  *
  * It never calls the worker directly. The paired-device token goes only to the
- * Go backend, which authenticates it and proxies to the loopback worker. Create
- * and renewal are deliberately two-step: the UI must preview the complete
- * standing grant, then return the opaque approval fingerprint unchanged.
+ * Go backend, which authenticates the operator session. Scheduled writes are a
+ * three-step flow: preview the complete standing grant, let the user confirm the
+ * card, then ask the backend for a short-lived single-use approval token and use
+ * it immediately for create/renew. The predictable preview fingerprint is never
+ * accepted by the worker as evidence of consent.
  */
 class ScheduleClient(baseUrl: String, private val token: String) {
     private val base = baseUrl.trimEnd('/')
@@ -54,7 +56,7 @@ class ScheduleClient(baseUrl: String, private val token: String) {
             .put("cadence", preview.cadence)
             .put("ttl_days", preview.ttlDays)
             .put("max_runs", preview.maxRuns)
-        preview.approvalFingerprint?.let { body.put("approved_fingerprint", it) }
+        approvalTokenForCreate(preview)?.let { body.put("approval_token", it) }
         return parseItem(post("/api/v1/schedules", body).getJSONObject("schedule"))
     }
 
@@ -89,11 +91,38 @@ class ScheduleClient(baseUrl: String, private val token: String) {
             .put("ttl_days", preview.ttlDays)
             .put("max_runs", preview.maxRuns)
         if (preview.enable != null) body.put("enable", preview.enable)
-        preview.approvalFingerprint?.let { body.put("approved_fingerprint", it) }
+        approvalTokenForRenewal(preview, scheduleId)?.let { body.put("approval_token", it) }
         return parseItem(
             post("/api/v1/schedules/$scheduleId/renew", body)
                 .getJSONObject("schedule"),
         )
+    }
+
+    private fun approvalTokenForCreate(preview: SchedulePreview): String? {
+        if (!preview.requiresApproval) return null
+        val fingerprint = preview.approvalFingerprint
+            ?: throw ModelRigException("write preview mangler serverens preview-fingerprint")
+        val body = JSONObject()
+            .put("tool", preview.tool)
+            .put("args", JSONObject(preview.argsJson))
+            .put("cadence", preview.cadence)
+            .put("ttl_days", preview.ttlDays)
+            .put("max_runs", preview.maxRuns)
+            .put("preview_fingerprint", fingerprint)
+        return post("/api/v1/schedules/approve", body).getString("approval_token")
+    }
+
+    private fun approvalTokenForRenewal(preview: SchedulePreview, scheduleId: String): String? {
+        if (!preview.requiresApproval) return null
+        val fingerprint = preview.approvalFingerprint
+            ?: throw ModelRigException("renewal preview mangler serverens preview-fingerprint")
+        val body = JSONObject()
+            .put("ttl_days", preview.ttlDays)
+            .put("max_runs", preview.maxRuns)
+            .put("preview_fingerprint", fingerprint)
+        if (preview.enable != null) body.put("enable", preview.enable)
+        return post("/api/v1/schedules/$scheduleId/renew/approve", body)
+            .getString("approval_token")
     }
 
     private fun get(path: String): JSONObject = execute(
