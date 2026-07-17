@@ -11,10 +11,11 @@ fun main(args: Array<String>) = application {
     val agent3Memory = args.contains("--agent3-memory")
     val agent3Validation = args.contains("--agent3-validation")
     val agent3Capabilities = args.contains("--agent3-capabilities")
+    val agent3RoutingPreview = args.contains("--agent3-routing-preview")
     val agent3Replan = args.contains("--agent3-replan")
     val agent3Review = args.contains("--agent3-review")
     val experimental = agent3 || agent3Memory || agent3Validation ||
-        agent3Capabilities || agent3Replan || agent3Review
+        agent3Capabilities || agent3RoutingPreview || agent3Replan || agent3Review
     val state = rememberWindowState(
         width = if (experimental) 900.dp else 1000.dp,
         height = 820.dp,
@@ -23,6 +24,7 @@ fun main(args: Array<String>) = application {
         onCloseRequest = ::exitApplication,
         state = state,
         title = when {
+            agent3RoutingPreview -> "Kaliv · Agent 3.0 Routing Preview"
             agent3Capabilities -> "Kaliv · Agent 3.0 Capability Graph"
             agent3Review -> "Kaliv · Agent 3.0 Read Review"
             agent3Replan -> "Kaliv · Agent 3.0 Read Replanner"
@@ -34,6 +36,7 @@ fun main(args: Array<String>) = application {
         icon = painterResource("icon.png"),
     ) {
         when {
+            agent3RoutingPreview -> Agent3RoutingPreviewDevApp()
             agent3Capabilities -> Agent3CapabilityDevApp()
             agent3Review -> Agent3ReviewDevApp()
             agent3Replan -> Agent3ReplanDevApp()

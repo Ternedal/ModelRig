@@ -48,6 +48,12 @@ func (s *server) handleAgent3Capabilities(w http.ResponseWriter, r *http.Request
 	s.Worker.Forward(w, r, agent3Target(r, "/experimental/agent3/capabilities"))
 }
 
+func (s *server) handleAgent3RoutingPreview(w http.ResponseWriter, r *http.Request) {
+	// Routing preview is observational only. It hashes the message and reports the
+	// server-owned candidate route, but never plans, executes or changes the actual surface.
+	s.Worker.Forward(w, r, agent3Target(r, "/experimental/agent3/routing-preview"))
+}
+
 func (s *server) handleAgent3Plan(w http.ResponseWriter, r *http.Request) {
 	// Planning invokes the local LLM but never executes a tool.
 	s.WorkerSlow.Forward(w, r, agent3Target(r, "/experimental/agent3/plan"))
