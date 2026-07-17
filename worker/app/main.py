@@ -34,7 +34,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.58.79"
+VERSION = "1.58.80"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 
@@ -164,6 +164,15 @@ def healthz() -> dict:
     }
 
 
+def _build_identity() -> dict:
+    """Which code is running here (F-508). A validation report that says only
+    "1.58.78" proves the rig agreed about a number; two trees can carry the same
+    semver, and every commit that does not bump makes another one."""
+    from . import build_identity
+
+    return build_identity.describe()
+
+
 def _capabilities() -> dict:
     """What this worker can actually do, by whether each optional dependency is
     installed. The published core worker ships WITHOUT ASR/TTS/PDF/DOCX, so this
@@ -290,7 +299,8 @@ async def health_full(deep: bool = False) -> dict:
     # reported in checks (with a reason) for diagnosis; they just don't count
     # against `ok`. (An installed-but-broken one is a richer-model problem.)
     faults = [k for k in ("worker", "ollama", "disk", "tools") if not checks[k]["ok"]]
-    return {"ok": not faults, "faults": faults, "capabilities": _capabilities(), "checks": checks}
+    return {"ok": not faults, "faults": faults, "capabilities": _capabilities(),
+            "build": _build_identity(), "checks": checks}
 
 
 @app.post("/rag/ingest")

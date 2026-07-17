@@ -42,6 +42,7 @@ class EvidenceError(RuntimeError):
 class VersionBinding:
     modelrig_version: str
     worker_version: str
+    code_sha256: str
 
 
 RunValidation = Callable[..., dict[str, Any]]
@@ -66,13 +67,20 @@ def preflight_versions(client: validation.Client) -> VersionBinding:
     if agent_status.get("production_activation") is not False:
         raise EvidenceError("Agent 3.0 status must keep production_activation=false")
     worker_version = _required_version(agent_status, "worker_version", "Agent 3.0 status")
+    # A rig that cannot say which code it runs cannot produce evidence about
+    # code (F-508). Refused here rather than recorded as null, because a report
+    # with a null identity is a report that proves a version string matched a
+    # version string.
+    code_sha256 = _required_version(agent_status, "code_sha256", "Agent 3.0 status")
+    if len(code_sha256) != 64:
+        raise EvidenceError(f"code_sha256 is not a sha256 digest: {code_sha256!r}")
 
     if modelrig_version != worker_version:
         raise EvidenceError(
             "backend and worker versions differ: "
             f"backend={modelrig_version!r}, worker={worker_version!r}"
         )
-    return VersionBinding(modelrig_version, worker_version)
+    return VersionBinding(modelrig_version, worker_version, code_sha256)
 
 
 def _load_report(path: Path) -> dict[str, Any]:
@@ -133,6 +141,7 @@ def produce_evidence(
     if not isinstance(target, dict):
         raise EvidenceError("validation report is missing target metadata")
     target["modelrig_version"] = binding.modelrig_version
+    target["code_sha256"] = binding.code_sha256
     target["worker_version"] = binding.worker_version
     target["planner_model"] = model
 
@@ -147,9 +156,16 @@ def produce_evidence(
     _write_report(report_path, persisted)
 
     raw = report_path.read_bytes()
+    # The collector's job is to collect. It passes the rig's own identity here
+    # because at THIS moment the tree under test IS the rig -- comparing it to
+    # itself would be theatre. The comparison that matters happens later, when
+    # ACTIVATION_READINESS checks the stored report against the code on main:
+    # that is where "did this evidence describe the software we are about to
+    # switch on" is a real question with a real chance of answering no.
     assessment = assess_report(
         persisted,
         current_version=binding.worker_version,
+        current_code=binding.code_sha256,
         report_sha256=hashlib.sha256(raw).hexdigest(),
     )
     if assessment.get("eligible_for_developer_preview") is not True:

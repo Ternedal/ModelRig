@@ -8,6 +8,13 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import capability_probe
+
+
+def _build_code_identity() -> str:
+    from ..build_identity import code_fingerprint
+
+    return code_fingerprint()
+
 from .core import (
     Agent3Orchestrator,
     AgentRun,
@@ -156,7 +163,8 @@ def build_router(
     router = APIRouter(prefix="/experimental/agent3", tags=["experimental-agent3"])
     orchestrator.router = StrictTurnRouter()
     validation_provider = validation_provider or (
-        lambda: evaluate_configured_report(current_version=worker_version)
+        lambda: evaluate_configured_report(
+            current_version=worker_version, current_code=_build_code_identity())
     )
     reviewing = isinstance(orchestrator, ReviewingAgent3Orchestrator)
 
@@ -220,6 +228,11 @@ def build_router(
             "production_tools_path_untouched": True,
             "max_steps": orchestrator.max_steps,
             "worker_version": worker_version,
+            # What this worker RAN, not what it calls itself (F-508). The
+            # harness is on the other end of an HTTP connection and cannot hash
+            # the rig's files, so the rig has to say. Two trees can carry the
+            # same semver; every commit that does not bump makes another one.
+            "code_sha256": _build_code_identity(),
             "rig_validation": validation,
             # Promotion evidence is advisory in this draft. Even a valid report
             # cannot activate production routing or tool execution by itself.

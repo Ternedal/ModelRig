@@ -23,7 +23,12 @@ def check(condition, name):
         print(f"  FAIL: {name}")
 
 
-def make_report(now: float, *, decision: str = "deny", version: str = "1.58.38") -> dict:
+CODE = "d" * 64  # what the rig said it was running
+
+
+def make_report(now: float, *, decision: str = "deny", version: str = "1.58.38",
+                code: str | None = CODE) -> dict:
+    """code=None omits the field entirely -- an older rig that cannot say."""
     context_sha = "a" * 64
     memory_ids = ["memory/private-id"]
     read_receipt = {
@@ -71,6 +76,9 @@ def make_report(now: float, *, decision: str = "deny", version: str = "1.58.38")
             "write_decision": decision,
             "modelrig_version": version,
             "worker_version": version,
+            # A report now says which CODE the rig ran, not only what it called
+            # itself (F-508). Two trees can carry the same semver.
+            **({} if code is None else {"code_sha256": code}),
         },
         "validation": {
             "id": "private-validation-id",
@@ -150,6 +158,7 @@ now = 1_800_000_000.0
 deny = assess_report(
     make_report(now, decision="deny"),
     current_version="1.58.38",
+    current_code=CODE,
     now=now,
     report_sha256="d" * 64,
 )
@@ -164,6 +173,7 @@ check(deny["proofs"]["write_execution"] is False, "deny path does not pretend to
 approved = assess_report(
     make_report(now, decision="approve"),
     current_version="1.58.38",
+    current_code=CODE,
     now=now,
 )
 check(approved["eligible_for_developer_preview"] is True, "approved report retains developer eligibility")
@@ -172,34 +182,40 @@ check(approved["proofs"]["write_execution"] is True, "approved event chain prove
 
 stale_report = make_report(now)
 stale_report["finished_at"] = datetime.fromtimestamp(now - 8 * 24 * 3600, timezone.utc).isoformat()
-stale = assess_report(stale_report, current_version="1.58.38", now=now)
+stale = assess_report(stale_report, current_version="1.58.38",
+    current_code=CODE, now=now)
 check(stale["fresh"] is False, "eight-day report is stale under seven-day default")
 check("report_stale" in stale["reasons"], "stale report fails closed with explicit reason")
 
-mismatch = assess_report(make_report(now), current_version="1.58.39", now=now)
+mismatch = assess_report(make_report(now), current_version="1.58.39",
+    current_code=CODE, now=now)
 check(mismatch["version_match"] is False, "old build evidence does not match current worker")
 check("validated_version_mismatch" in mismatch["reasons"], "version mismatch blocks promotion")
 
 receipt_tamper = make_report(now)
 receipt_tamper["checks"]["write_preview"]["receipt"]["sha256"] = "e" * 64
-receipt_result = assess_report(receipt_tamper, current_version="1.58.38", now=now)
+receipt_result = assess_report(receipt_tamper, current_version="1.58.38",
+    current_code=CODE, now=now)
 check(receipt_result["proofs"]["memory_binding"] is False, "receipt SHA tampering is detected")
 check("memory_binding_not_proven" in receipt_result["reasons"], "tampered memory binding blocks promotion")
 
 pre_execution = make_report(now)
 pre_execution["checks"]["confirmation_card"]["pre_confirmation_events"].append("step_started")
-pre_result = assess_report(pre_execution, current_version="1.58.38", now=now)
+pre_result = assess_report(pre_execution, current_version="1.58.38",
+    current_code=CODE, now=now)
 check(pre_result["proofs"]["confirmation_path"] is False, "pre-confirmation execution is rejected")
 
 outcome_mismatch = make_report(now, decision="deny")
 outcome_mismatch["target"]["write_decision"] = "approve"
-outcome_result = assess_report(outcome_mismatch, current_version="1.58.38", now=now)
+outcome_result = assess_report(outcome_mismatch, current_version="1.58.38",
+    current_code=CODE, now=now)
 check(outcome_result["eligible_for_developer_preview"] is False, "declared and actual write decisions must match")
 check("write_decision_mismatch" in outcome_result["reasons"], "decision mismatch has explicit reason")
 
 missing_model = make_report(now)
 missing_model["target"]["planner_model"] = None
-model_result = assess_report(missing_model, current_version="1.58.38", now=now)
+model_result = assess_report(missing_model, current_version="1.58.38",
+    current_code=CODE, now=now)
 check(model_result["eligible_for_developer_preview"] is False, "unidentified planner model cannot promote")
 check("planner_model_missing" in model_result["reasons"], "missing planner model is explicit")
 
@@ -209,6 +225,7 @@ report = make_report(now)
 report_path.write_text(json.dumps(report), encoding="utf-8")
 from_file = evaluate_configured_report(
     current_version="1.58.38",
+    current_code=CODE,
     environ={"KALIV_AGENT3_VALIDATION_REPORT": str(report_path)},
     now=now,
 )
@@ -227,7 +244,8 @@ for private_value in (
     check(private_value not in serialized, f"assessment redacts {private_value}")
 
 not_configured = evaluate_configured_report(
-    current_version="1.58.38", environ={}, now=now
+    current_version="1.58.38",
+    current_code=CODE, environ={}, now=now
 )
 check(not_configured["configured"] is False, "no implicit report file is trusted")
 check(not_configured["reasons"] == ["report_path_not_configured"], "missing config fails closed")
@@ -236,6 +254,7 @@ bad_json = root / "bad.json"
 bad_json.write_text("{broken", encoding="utf-8")
 bad_result = evaluate_configured_report(
     current_version="1.58.38",
+    current_code=CODE,
     environ={"KALIV_AGENT3_VALIDATION_REPORT": str(bad_json)},
     now=now,
 )
@@ -244,6 +263,7 @@ check(isinstance(bad_result["report_sha256"], str), "malformed report still gets
 
 invalid_age = evaluate_configured_report(
     current_version="1.58.38",
+    current_code=CODE,
     environ={
         "KALIV_AGENT3_VALIDATION_REPORT": str(report_path),
         "KALIV_AGENT3_VALIDATION_MAX_AGE_HOURS": "never",
@@ -260,10 +280,55 @@ except (OSError, NotImplementedError):
 else:
     symlink_result = evaluate_configured_report(
         current_version="1.58.38",
+    current_code=CODE,
         environ={"KALIV_AGENT3_VALIDATION_REPORT": str(symlink_path)},
         now=now,
     )
     check(symlink_result["reasons"] == ["report_symlink_not_allowed"], "symlink evidence is rejected")
+
+# --- a report must say which CODE it tested, not which label (F-508) --------
+# The gate compared validated_version to current_version and called it evidence.
+# Two trees can carry the same semver -- every commit that does not bump makes
+# another one -- so the check proved the rig agreed about a NUMBER. This report
+# is the gate to everything else; a gate that checks a label is a gate.
+
+no_code = assess_report(
+    make_report(now, code=None),
+    current_version="1.58.38",
+    current_code=CODE,
+    now=now,
+)
+check("validated_code_identity_missing" in no_code["reasons"],
+      "a report that cannot say which code it tested is refused -- not weaker "
+      "evidence, no evidence")
+check(no_code["eligible_for_developer_preview"] is False,
+      "and it opens nothing")
+
+other_code = assess_report(
+    make_report(now, code="e" * 64),
+    current_version="1.58.38",
+    current_code=CODE,
+    now=now,
+)
+check("validated_code_mismatch" in other_code["reasons"],
+      "a rig that ran DIFFERENT code from the tree being blessed is refused, "
+      "even though the version string matches perfectly")
+check(other_code["code_match"] is False, "and code_match says so plainly")
+
+blind = assess_report(
+    make_report(now),
+    current_version="1.58.38",
+    current_code=None,
+    now=now,
+)
+check("current_code_identity_unavailable" in blind["reasons"],
+      "a caller who cannot state the tree's identity gets a refusal, not a pass "
+      "-- fail closed is the whole point of this file")
+
+good = assess_report(make_report(now), current_version="1.58.38",
+                     current_code=CODE, now=now)
+check(good["code_match"] is True,
+      "and a report from the same code on the same version matches")
 
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)

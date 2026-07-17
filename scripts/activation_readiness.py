@@ -79,6 +79,7 @@ def validation() -> dict:
     import os
 
     sys.path.insert(0, str(ROOT / "worker"))
+    from app.build_identity import code_fingerprint  # noqa: PLC0415
     from app.agent3.validation_gate import assess_report  # noqa: PLC0415
 
     # Relative, because an absolute path bakes THIS machine into a file that is
@@ -94,7 +95,13 @@ def validation() -> dict:
     except json.JSONDecodeError as e:
         return {"present": True, "path": path, "ready": False,
                 "reason": f"rapporten kan ikke læses: {e}"}
+    # THE comparison that matters (F-508). The collector compares the rig to
+    # itself, which is theatre by construction. Here the question is real and
+    # can answer no: did the evidence describe the software we are about to
+    # switch on? A report from a rig running different code is not stale
+    # evidence, it is evidence about something else.
     a = assess_report(report, current_version=version(),
+                      current_code=code_fingerprint(),
                       report_sha256=hashlib.sha256(raw).hexdigest())
     a["present"] = True
     a["path"] = path

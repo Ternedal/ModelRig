@@ -35,9 +35,11 @@ def check(condition, name):
 
 
 class FakeClient:
-    def __init__(self, backend_version="1.58.38", worker_version="1.58.38"):
+    def __init__(self, backend_version="1.58.38", worker_version="1.58.38",
+                 code_sha256="d" * 64):
         self.backend_version = backend_version
         self.worker_version = worker_version
+        self.code_sha256 = code_sha256
         self.calls = []
 
     def request(self, method, path, payload=None):
@@ -49,6 +51,9 @@ class FakeClient:
                 "enabled": True,
                 "experimental": True,
                 "worker_version": self.worker_version,
+                # A rig that cannot say which code it runs cannot produce
+                # evidence about code (F-508).
+                "code_sha256": self.code_sha256,
                 "production_activation": False,
             }
         raise AssertionError(f"unexpected request: {method} {path}")

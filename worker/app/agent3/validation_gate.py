@@ -68,6 +68,7 @@ def _base_assessment(max_age_hours: float) -> dict[str, Any]:
         "structurally_valid": False,
         "fresh": False,
         "version_match": False,
+        "code_match": False,
         "eligible_for_developer_preview": False,
         "eligible_for_write_pilot": False,
         # Evidence is advisory only in this draft. It never toggles routes,
@@ -109,6 +110,7 @@ def assess_report(
     now: float | None = None,
     max_age_hours: float = DEFAULT_MAX_AGE_HOURS,
     report_sha256: str | None = None,
+    current_code: str | None = None,
 ) -> dict[str, Any]:
     """Evaluate one already-parsed on-rig validation report.
 
@@ -120,6 +122,7 @@ def assess_report(
     assessment["configured"] = True
     assessment["present"] = True
     assessment["current_version"] = current_version
+    assessment["current_code_sha256"] = current_code
     assessment["report_sha256"] = report_sha256
 
     if not isinstance(report, dict):
@@ -132,6 +135,16 @@ def assess_report(
     checks = _object(report.get("checks"))
     cleanup = _object(report.get("cleanup"))
 
+    # F-508: a report bound to semver proves the rig agreed about a NUMBER.
+    # Two trees can carry the same version -- every commit that does not bump
+    # makes another one -- so the label cannot say which software was tested.
+    # code_sha256 comes from the rig's own /health and identifies what actually
+    # ran there. Missing is BLOCKING, not tolerated: a report that cannot say
+    # which code it tested is not weaker evidence, it is not evidence.
+    validated_code = target.get("code_sha256")
+    assessment["validated_code_sha256"] = (
+        validated_code if isinstance(validated_code, str) else None
+    )
     validated_version = target.get("modelrig_version")
     worker_version = target.get("worker_version")
     planner_model = target.get("planner_model")
@@ -155,6 +168,8 @@ def assess_report(
         structural_reasons.append("report_not_successful")
     if not isinstance(validated_version, str) or not validated_version.strip():
         structural_reasons.append("validated_version_missing")
+    if not isinstance(validated_code, str) or len(validated_code.strip()) != 64:
+        structural_reasons.append("validated_code_identity_missing")
     if not isinstance(worker_version, str) or not worker_version.strip():
         structural_reasons.append("worker_version_missing")
     elif isinstance(validated_version, str) and worker_version != validated_version:
@@ -185,6 +200,17 @@ def assess_report(
         assessment["version_match"] = True
     else:
         structural_reasons.append("validated_version_mismatch")
+
+    # The version says what the rig CALLED itself. This says what it RAN.
+    if current_code is None:
+        structural_reasons.append("current_code_identity_unavailable")
+    elif isinstance(validated_code, str) and validated_code == current_code:
+        assessment["code_match"] = True
+    elif isinstance(validated_code, str):
+        # The honest and unpopular case: the rig ran different code from the
+        # tree being blessed. It is not "close enough" -- physical evidence is
+        # the one thing that cannot be reasoned forward onto a diff.
+        structural_reasons.append("validated_code_mismatch")
 
     status = _object(checks.get("status"))
     status_proven = (
@@ -351,6 +377,7 @@ def evaluate_configured_report(
     current_version: str | None,
     environ: Mapping[str, str] | None = None,
     now: float | None = None,
+    current_code: str | None = None,
 ) -> dict[str, Any]:
     """Read and assess the explicitly configured validation report.
 
@@ -403,4 +430,5 @@ def evaluate_configured_report(
         now=now,
         max_age_hours=max_age_hours or DEFAULT_MAX_AGE_HOURS,
         report_sha256=digest,
+        current_code=current_code,
     )
