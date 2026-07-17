@@ -43,11 +43,12 @@ Promotion-wrapperen tilføjer desuden:
 
 15. Læsning af backend-versionen fra den beskyttede `/api/v1/status`.
 16. Læsning af worker-versionen fra Agent 3.0-status.
-17. Afvisning før testen, hvis backend- og worker-version ikke matcher.
-18. Krav om en eksplicit navngivet lokal planner-model.
-19. Atomisk versionsbinding af den persistente rapport.
-20. Evaluering af freshness, versionsmatch, receipt-binding, events, single-use og cleanup.
-21. Permanent `production_activation=false`, uanset rapportens resultat.
+17. Binding til workerens konkrete code-fingerprint, ikke kun versionsnavnet.
+18. Afvisning før testen, hvis backend- og worker-version ikke matcher.
+19. Krav om en eksplicit navngivet lokal planner-model.
+20. Atomisk versions- og kodebinding af den persistente rapport.
+21. Evaluering af freshness, versionsmatch, kode-match, receipt-binding, events, single-use og cleanup.
+22. Permanent `production_activation=false`, uanset rapportens resultat.
 
 ## Promotionsniveauer
 
@@ -91,8 +92,8 @@ ikke normal chat-routing, automatiske writes eller produktion.
 
 Kør fra repository-roden på ModelRig-maskinen.
 
-- Branchen `agent/agent3-integration-draft-v2` er checket ud.
-- Go-backend og worker kører fra samme build/version.
+- `main` eller det konkrete release-tag, der skal valideres, er checket ud.
+- Go-backend og worker kører fra samme commit, version og code-fingerprint.
 - `KALIV_AGENT3_ENABLED=1` var sat ved processtart.
 - `KALIV_TOOLS_ENABLED=1` var sat ved processtart.
 - Ollama kører, og den valgte planner-model er installeret.
@@ -116,6 +117,24 @@ evidence-wrapperen har skrevet filen. Evaluatoren læser filen ved hvert statusk
 vellykket kørsel bliver synlig uden endnu en genstart, når stien allerede fandtes i miljøet.
 
 Token skal ligge i miljøet og må ikke skrives direkte på kommandolinjen eller i rapporten.
+
+## Anbefalet one-command-kørsel
+
+Fra repository-roden på ModelRig-maskinen:
+
+```powershell
+.\scripts\run-agent3-rig-validation.ps1 `
+  -BaseUrl http://127.0.0.1:8080 `
+  -PlannerModel qwen3:8b
+```
+
+Kommandoen bruger kun tokenet fra `MODELRIG_TOKEN`, skriver den flydende rapport til den
+fælles standardsti, kører promotion-wrapperen, henter workerens redigerede status bagefter
+og regenererer den lokale `ACTIVATION_READINESS.md` fra præcis samme rapport. Den fejler
+lukket, hvis workeren ikke blev startet med samme `KALIV_AGENT3_VALIDATION_REPORT`.
+
+Scriptet genstarter ikke services, ændrer ingen runtime-flags og aktiverer aldrig produktion.
+En write-pilot kræver fortsat det eksplicitte flag `-ApproveWrite`.
 
 ## Sikker standardkørsel — developer-preview-evidens
 
