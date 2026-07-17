@@ -90,9 +90,17 @@ def next_run(cadence: Cadence, after: float) -> float:
 
 
 def catch_up(cadence: Cadence, due_at: float, now: float) -> tuple[int, float]:
-    """Return ``(missed, next_due)``; missed runs are reported, never replayed."""
+    """Return ``(missed, next_due)``; missed runs are reported, never replayed.
+
+    Intervals use arithmetic rather than one loop per missed minute. A rig that
+    was offline for a year must not spend startup replaying half a million
+    timestamps merely to decide that it will execute once now.
+    """
     if now < due_at:
         return 0, due_at
+    if cadence.kind == "every":
+        occurrences = int((now - due_at) // cadence.seconds) + 1
+        return max(0, occurrences - 1), due_at + occurrences * cadence.seconds
     missed = 0
     due = due_at
     while due <= now:
