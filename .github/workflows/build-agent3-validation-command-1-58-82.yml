@@ -20,7 +20,6 @@ jobs:
         run: |
           cp .github/agent3_validation_command_patch.py /tmp/agent3-validation-command-patch.py
           cp .github/agent3_validation_command_postpatch.py /tmp/agent3-validation-command-postpatch.py
-          cp .github/create_detached_product_commit.py /tmp/create-detached-product-commit.py
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
@@ -139,33 +138,23 @@ jobs:
             [void][scriptblock]::Create((Get-Content -LiteralPath $_.FullName -Raw))
             Write-Host "parsed $($_.FullName)"
           }
-      - name: Create detached clean product commit
-        id: detached
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Package validated product tree
         run: |
-          set +e
-          python3 /tmp/create-detached-product-commit.py > /tmp/agent3-validation-command-detached.log 2>&1
-          rc=$?
-          cat /tmp/agent3-validation-command-detached.log
-          echo "status=$rc" >> "$GITHUB_OUTPUT"
-          exit 0
-      - name: Upload detached commit diagnostics
-        if: always()
+          set -euo pipefail
+          parent=2225ff371c764451499613a94d3540dfe1f0b742
+          mkdir -p /tmp/agent3-validation-command-tree
+          git diff --name-status "$parent" > /tmp/agent3-validation-command-tree/MANIFEST.txt
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            mkdir -p "/tmp/agent3-validation-command-tree/$(dirname "$path")"
+            cp "$path" "/tmp/agent3-validation-command-tree/$path"
+          done < <(git diff --name-only --diff-filter=ACMRT "$parent")
+          printf 'base=%s\nversion=1.58.83\n' "$parent" > /tmp/agent3-validation-command-tree/BUILD_IDENTITY.txt
+          cat /tmp/agent3-validation-command-tree/MANIFEST.txt
+      - name: Upload validated product tree
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: agent3-validation-command-detached-log
-          path: /tmp/agent3-validation-command-detached.log
-          if-no-files-found: error
-          retention-days: 3
-      - name: Fail when detached commit creation failed
-        if: steps.detached.outputs.status != '0'
-        run: exit 1
-      - name: Upload clean commit identity
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: agent3-validation-command-result
-          path: /tmp/agent3-validation-command-result.txt
+          name: agent3-validation-command-product-tree
+          path: /tmp/agent3-validation-command-tree
           if-no-files-found: error
           retention-days: 3
