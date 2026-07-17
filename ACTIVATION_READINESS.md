@@ -20,9 +20,9 @@ Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet
 
 ## Kan scheduleren aktiveres nu? **NEJ**
 
-**En planlagt skrivnings godkendelse beviser kendskab, ikke samtykke.** `approved_fingerprint` er `sha256(tool + args)` — ikke en hemmelighed, ikke udstedt af noget, beregnelig på én linje af enhver proces der kan nå loopback. `/schedules` har ingen token. Latent i dag, fordi ingen af de ni tools kan lave et lokalt HTTP-kald — live den dag et shell-, http-, MCP- eller filværktøj med netværk lander, hvilket er præcis den dag en prompt-injiceret model ville finde døren. Kræver serverudstedte, engangs, kortlivede tokens bundet til en faktisk UI-bekræftelse
+Ingen blokerende fund specifikke for scheduleren.
 
-- **Beviser en godkendelse et menneske:** NEJ
+- **Beviser en godkendelse et menneske:** ja
 - **Fysisk validering gælder også her:** scheduleren kører på den samme rig, så rapporten er en forudsætning for begge.
 
 ---

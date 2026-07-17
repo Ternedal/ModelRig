@@ -2,19 +2,20 @@
 
 There is intentionally no model-visible tool here. Schedule administration is
 loopback-only even when ``KALIV_WORKER_ALLOW_LAN=1`` deliberately exposes other
-worker routes: this is an unauthenticated control surface and must not become a
-LAN write API by inheritance. A backend/client may later expose a human UI
-through its authenticated boundary.
+worker routes: this is a standing-grant control surface and must not become a LAN
+write API by inheritance. The authenticated Go backend is the remote boundary.
 
-Writes use preview -> matching fingerprint -> create/renew; no endpoint accepts
-changed arguments or standing-grant terms under an old approval.
+Writes use preview -> human confirmation -> backend-issued approval token ->
+create/renew. The worker verifies the signed token against its own canonical
+preview and durably consumes its random nonce before persisting the grant. A
+fingerprint computed by the caller is never accepted as evidence of consent.
 """
 from __future__ import annotations
 
 from typing import Any, Callable
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .netguard import is_loopback
 from .schedule_admin import (
@@ -24,6 +25,11 @@ from .schedule_admin import (
     ScheduleAdminConflict,
     ScheduleAdminError,
     ScheduleAdminNotFound,
+)
+from .schedule_approval import (
+    ScheduleApprovalError,
+    consume_schedule_approval,
+    verify_schedule_approval,
 )
 from .scheduler import DEFAULT_MAX_RUNS, DEFAULT_TTL_DAYS, ScheduleError, enabled
 
@@ -37,9 +43,12 @@ class PreviewScheduleReq(BaseModel):
 
 
 class CreateScheduleReq(PreviewScheduleReq):
-    approved_fingerprint: str | None = Field(
-        default=None, pattern="^[0-9a-f]{32}$"
-    )
+    model_config = ConfigDict(extra="forbid")
+    approval_token: str | None = Field(default=None, min_length=40, max_length=60000)
+    # Readiness deliberately probes the retired bypass end to end. Keeping this
+    # tombstone in the schema makes that probe run; any non-null legacy value is
+    # rejected by validation and never reaches administration.
+    approved_fingerprint: None = Field(default=None, exclude=True)
 
 
 class SetScheduleEnabledReq(BaseModel):
@@ -55,15 +64,15 @@ class RenewPreviewReq(BaseModel):
 
 
 class RenewScheduleReq(RenewPreviewReq):
-    approved_fingerprint: str | None = Field(
-        default=None, pattern="^[0-9a-f]{32}$"
-    )
+    model_config = ConfigDict(extra="forbid")
+    approval_token: str | None = Field(default=None, min_length=40, max_length=60000)
+    approved_fingerprint: None = Field(default=None, exclude=True)
 
 
 def _raise(exc: Exception) -> None:
     if isinstance(exc, ScheduleAdminNotFound):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if isinstance(exc, ScheduleAdminConflict):
+    if isinstance(exc, (ScheduleAdminConflict, ScheduleApprovalError)):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if isinstance(exc, (ScheduleAdminError, ScheduleError)):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -132,6 +141,17 @@ def _preview_payload(preview) -> dict[str, Any]:
     }
 
 
+def _approval_for(preview, token: str | None) -> str | None:
+    """Verify and consume a write approval; reads deliberately need none."""
+    if not preview.requires_approval:
+        return None
+    verified = verify_schedule_approval(token, preview)
+    # Consume before persistence. A downstream failure burns the token rather
+    # than making a failed write approval reusable; the user must confirm again.
+    consume_schedule_approval(verified.nonce)
+    return preview.approval_fingerprint
+
+
 def build_schedule_router(
     admin: ScheduleAdmin | None = None,
     *,
@@ -180,15 +200,27 @@ def build_schedule_router(
     ) -> dict[str, Any]:
         _require_operator(request, operator_allowed)
         try:
+            preview = service.preview(
+                req.tool,
+                req.args,
+                req.cadence,
+                ttl_days=req.ttl_days,
+                max_runs=req.max_runs,
+            )
+            approved_fingerprint = _approval_for(preview, req.approval_token)
             schedule = service.create(
                 req.tool,
                 req.args,
                 req.cadence,
                 ttl_days=req.ttl_days,
                 max_runs=req.max_runs,
-                approved_fingerprint=req.approved_fingerprint,
+                approved_fingerprint=approved_fingerprint,
             )
-        except (ScheduleAdminError, ScheduleError) as exc:
+        except (
+            ScheduleAdminError,
+            ScheduleApprovalError,
+            ScheduleError,
+        ) as exc:
             _raise(exc)
         return {"schedule": schedule, "executed": False}
 
@@ -234,14 +266,25 @@ def build_schedule_router(
     ) -> dict[str, Any]:
         _require_operator(request, operator_allowed)
         try:
+            preview = service.preview_renew(
+                schedule_id,
+                ttl_days=req.ttl_days,
+                max_runs=req.max_runs,
+                enable=req.enable,
+            )
+            approved_fingerprint = _approval_for(preview, req.approval_token)
             schedule = service.renew(
                 schedule_id,
                 ttl_days=req.ttl_days,
                 max_runs=req.max_runs,
-                approved_fingerprint=req.approved_fingerprint,
+                approved_fingerprint=approved_fingerprint,
                 enable=req.enable,
             )
-        except (ScheduleAdminError, ScheduleError) as exc:
+        except (
+            ScheduleAdminError,
+            ScheduleApprovalError,
+            ScheduleError,
+        ) as exc:
             _raise(exc)
         return {"schedule": schedule, "executed": False}
 

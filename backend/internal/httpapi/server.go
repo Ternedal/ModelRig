@@ -87,14 +87,17 @@ func (s *server) routes() {
 	if os.Getenv("KALIV_SCHEDULER_API") == "1" {
 		// Human schedule administration. The Bearer-authenticated backend is the
 		// remote boundary; schedules.go additionally refuses a non-loopback worker
-		// upstream before forwarding any body.
+		// upstream before forwarding any body. Write approvals use a separate
+		// confirm endpoint that mints a short-lived, device-bound, single-use token.
 		s.mux.Handle("GET /api/v1/schedules/status", s.authMW(http.HandlerFunc(s.handleSchedulesStatus)))
 		s.mux.Handle("POST /api/v1/schedules/preview", s.authMW(http.HandlerFunc(s.handleSchedulesPreview)))
+		s.mux.Handle("POST /api/v1/schedules/approve", s.authMW(http.HandlerFunc(s.handleScheduleApproval)))
 		s.mux.Handle("GET /api/v1/schedules", s.authMW(http.HandlerFunc(s.handleSchedulesCollection)))
 		s.mux.Handle("POST /api/v1/schedules", s.authMW(http.HandlerFunc(s.handleSchedulesCollection)))
 		s.mux.Handle("GET /api/v1/schedules/{id}", s.authMW(http.HandlerFunc(s.handleScheduleGet)))
 		s.mux.Handle("POST /api/v1/schedules/{id}/enabled", s.authMW(http.HandlerFunc(s.handleScheduleEnabled)))
 		s.mux.Handle("POST /api/v1/schedules/{id}/renew/preview", s.authMW(http.HandlerFunc(s.handleScheduleRenewPreview)))
+		s.mux.Handle("POST /api/v1/schedules/{id}/renew/approve", s.authMW(http.HandlerFunc(s.handleScheduleRenewApproval)))
 		s.mux.Handle("POST /api/v1/schedules/{id}/renew", s.authMW(http.HandlerFunc(s.handleScheduleRenew)))
 	}
 
