@@ -64,7 +64,22 @@ class ToolCapability:
     def risk(self) -> RiskClass:
         if self.name in _RISK_OVERRIDES:
             return _RISK_OVERRIDES[self.name]
-        return RiskClass.WRITE if self.declared_risk == "write" else RiskClass.READ
+        # The same downgrade I removed from integration.py in 1.58.66 lived here
+        # untouched, because I fixed the file I was looking at and called the
+        # finding closed. "WRITE if it says write, else READ" turns a desktop
+        # tool into a READ -- in the CAPABILITY GRAPH, which is the thing that
+        # tells a planner and a human what an action is. One mapping table, and
+        # a class we do not understand stops the graph rather than being guessed
+        # into the safest box we have.
+        from .integration import _V2_RISK
+
+        risk = _V2_RISK.get(self.declared_risk)
+        if risk is None:
+            raise ValueError(
+                f"ukendt risikoklasse {self.declared_risk!r} for {self.name}: "
+                "kapabilitetsgrafen gætter ikke på risiko"
+            )
+        return risk
 
 
 def runtime_tool_capabilities(adapter) -> list[ToolCapability]:

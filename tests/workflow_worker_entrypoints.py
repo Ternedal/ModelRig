@@ -90,7 +90,16 @@ for path in LAUNCHERS:
 # document.
 RUN_RAW = _re.compile(r"uvicorn\s+app\.main:app")
 teaching = []
-for doc in list(ROOT.glob("*.md")) + list((ROOT / "worker").rglob("*.py")):
+# Scope was root *.md plus worker/**/*.py -- the places I happened to think of.
+# A docs/ page or a .ps1 could teach the unguarded start and this would have
+# said PASS, which is the same shape as fixing two files out of three and
+# calling it done. Scan the repo.
+_SKIP = {".git", "node_modules", "build", ".gradle", "__pycache__", "_sums"}
+_SELF = Path(__file__).resolve()
+_docs = [p for ext in ("*.md", "*.py", "*.ps1", "*.bat", "*.txt", "*.yml", "*.yaml")
+         for p in ROOT.rglob(ext)
+         if not any(part in _SKIP for part in p.parts) and p.resolve() != _SELF]
+for doc in _docs:
     for i, line in enumerate(doc.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
         if not RUN_RAW.search(line):
             continue

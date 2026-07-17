@@ -96,5 +96,41 @@ check(carded, "a DESKTOP step requires a confirmation card, like a write")
 check(step.risk != RiskClass.READ,
       "a DESKTOP step is refused in a proactive run (that check refuses non-READ)")
 
+# --- every classifier, not just the one I edited ---------------------------
+# The 1.58.66 fix changed integration.py and declared F-303 closed.
+# capability_graph.py carried the identical downgrade, untouched, because this
+# test had exactly the same blind spot as the fix: it read one table. The graph
+# is what tells a planner and a human what an action IS, so a desktop tool
+# reading as a READ there is the same bug in a more visible place.
+
+from app.agent3.capability_graph import ToolCapability  # noqa: E402
+
+for declared, expected in (("read", RiskClass.READ), ("write", RiskClass.WRITE),
+                           ("desktop", RiskClass.DESKTOP)):
+    cap = ToolCapability(name=f"probe_{declared}", enabled=True,
+                         declared_risk=declared, description="")
+    check(cap.risk == expected,
+          f"capability graph: a {declared!r} tool is {expected.value}"
+          if cap.risk == expected
+          else f"capability graph DOWNGRADES {declared!r} to {cap.risk.value}")
+
+try:
+    ToolCapability(name="p", enabled=True, declared_risk="teleport", description="").risk
+    check(False, "the graph must refuse a class it does not know, not guess")
+except ValueError as exc:
+    check("gætter ikke" in str(exc),
+          "an unknown risk class STOPS the graph rather than becoming a READ")
+
+# One table, not one per file.
+import inspect  # noqa: E402
+
+from app.agent3 import capability_graph as _cg  # noqa: E402
+
+src = inspect.getsource(_cg)
+check("_V2_RISK" in src,
+      "the graph reads the shared mapping instead of keeping its own opinion")
+check("if self.declared_risk ==" not in src,
+      "and the inline 'write else read' guess is gone from the graph")
+
 print(f"\n===== AGENT3 RISK PARITY: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
