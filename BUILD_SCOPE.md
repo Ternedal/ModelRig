@@ -1,0 +1,1 @@
+The builder checks out exact main commit 64224996c905267a55f9b6694780599b97fe891b, applies the reviewed product patch, runs focused gates, and pushes a separate clean branch. None of these builder files belong in the product PR.
