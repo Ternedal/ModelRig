@@ -54,6 +54,10 @@ class ToolCapability:
     enabled: bool
     declared_risk: str
     description: str = ""
+    # What pressing stop actually does to this tool (F-610). Default "none",
+    # because that is the truth for a plain function call and the optimistic
+    # default is the one that lies to the person holding the button.
+    cancellation: str = "none"
 
     @property
     def risk(self) -> RiskClass:
@@ -101,6 +105,7 @@ def runtime_tool_capabilities(adapter) -> list[ToolCapability]:
                 # graph stops instead of guessing.
                 declared_risk=str(getattr(tool, "impact", None)
                                   or getattr(tool, "risk", None) or ""),
+                cancellation=str(getattr(tool, "cancellation", "none")),
                 description=str(getattr(tool, "description", ""))[:300],
             )
         )
@@ -231,6 +236,9 @@ def build_capability_graph(
                 "enabled by existing V2 ToolGate" if tool.enabled else "disabled by existing V2 ToolGate",
                 {
                     "risk": tool.risk.value,
+                    # The graph is what tells a planner and a person what an
+                    # action IS. "Can this be stopped" is part of what it is.
+                    "cancellation": tool.cancellation,
                     "description": tool.description,
                 },
             )

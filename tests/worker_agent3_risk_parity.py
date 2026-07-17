@@ -293,5 +293,45 @@ for _n, _t in REGISTRY.items():
         check(bool(_t.unschedulable_because),
               f"{_n}: says WHY it cannot be scheduled, so the refusal is actionable")
 
+
+# --- what pressing stop actually does (F-610, F-614 cancellation axis) -------
+#
+# Agent 3 has COMPLETED_AFTER_CANCEL because a step can finish after a cancel
+# and the journal must not pretend otherwise. That is honest about the past. It
+# said nothing about the future: the person pressing stop had no way to know
+# whether the write they are stopping can be stopped, and the answer differs per
+# tool.
+
+_CANCELLATION = {t.cancellation for t in V2.REGISTRY.values()}
+check(_CANCELLATION <= {"none", "cooperative", "forceable"},
+      f"every tool declares a cancellation this system understands ({_CANCELLATION})")
+
+check(V2.REGISTRY["pull_model"].cancellation == "cooperative",
+      "pull_model says stop works on it -- it polls a cancel flag while streaming")
+
+# The declaration must match the code, or it is decoration. pull_model is the
+# only tool that watches for cancellation, and the only one allowed to claim it.
+import pathlib as _p2  # noqa: E402
+
+_tools_src = (_p2.Path(__file__).resolve().parents[1] / "worker" / "app" / "tools.py").read_text(
+    encoding="utf-8")
+check("cancelled.is_set()" in _tools_src,
+      "the cooperative claim is backed by a real cancel check in tools.py")
+
+for _n, _t in sorted(V2.REGISTRY.items()):
+    if _t.cancellation == "none":
+        continue
+    check(_t.cancellation == "cooperative" and _n == "pull_model",
+          f"{_n} claims cancellation={_t.cancellation}; only pull_model implements one"
+          if _n == "pull_model"
+          else f"{_n} claims stop works on it, and nothing in the executor stops it")
+
+# Synchronous tools must not claim otherwise. note_append writing a line cannot
+# be interrupted, and telling the user it can is worse than telling them it
+# cannot.
+check(V2.REGISTRY["note_append"].cancellation == "none",
+      "note_append admits stop does not stop it -- an in-process write runs to "
+      "completion, and the optimistic default is the one that lies")
+
 print(f"\n===== AGENT3 RISK PARITY: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

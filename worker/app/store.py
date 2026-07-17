@@ -20,9 +20,19 @@ DB_PATH = _paths.resolve("./modelrig-rag.db", env="MODELRIG_DB")
 
 
 class DocStore:
+    """A SQLite-backed document store.
+
+    Owns a connection, so it owns closing it (F-620). CPython usually collects a
+    transient store the moment the caller drops it, and "usually" is not a
+    lifecycle: on Windows an unclosed handle keeps the file locked, which is the
+    platform this actually runs on, and PyPy or a future runtime need not
+    collect at all. Use it as a context manager when it is transient.
+    """
+
     def __init__(self, path: str = DB_PATH):
         self.path = path
         self._lock = threading.Lock()
+        self._closed = False
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.execute(
             """
@@ -100,3 +110,16 @@ class DocStore:
                 "SELECT COUNT(DISTINCT COALESCE(source, '(none)')) FROM documents"
             ).fetchone()[0])
         return {"sources": srcs, "chunks": chunks}
+
+    def close(self) -> None:
+        """Release the connection. Idempotent, so a double close is not a crash."""
+        with self._lock:
+            if not self._closed:
+                self._conn.close()
+                self._closed = True
+
+    def __enter__(self) -> "DocStore":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()

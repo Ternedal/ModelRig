@@ -67,6 +67,24 @@ Risk = Literal["read", "write", "desktop"]
 #
 # So it lives here, on the tool, once.
 Impact = Literal["read", "write", "desktop", "destructive", "admin"]
+# What actually happens when the user presses stop (F-610, F-614).
+#
+# Agent 3 has COMPLETED_AFTER_CANCEL because a step can finish after a cancel
+# and the journal must not pretend otherwise. That is honest about the past. It
+# says nothing about the future: the person pressing stop has no idea whether
+# the write they are trying to stop can be stopped, and today the answer differs
+# per tool with nothing declaring which.
+#
+#   "none"        - synchronous; it runs to completion. Stop marks the run, not
+#                   the work. Everything in-process is this today.
+#   "cooperative" - the tool polls for cancellation and unwinds itself, so stop
+#                   actually stops it (pull_model watches a flag while streaming).
+#   "forceable"   - the runtime can kill it from outside. Nothing is, yet; an
+#                   isolated child process would be (ISOLATION_DESIGN I0).
+#
+# Default "none" because that is the truth for a plain function call, and the
+# optimistic default is the one that lies to the person holding the stop button.
+Cancellation = Literal["none", "cooperative", "forceable"]
 
 # WHAT A TOOL'S RESULT IS, as opposed to what it does (analysis F-208). Risk
 # gates the ACTION; sensitivity gates where the ANSWER may travel. They are
@@ -279,6 +297,7 @@ class Tool:
     # destructive, admin -- must be stated, because a tool does not become
     # dangerous by accident.
     impact: Impact | None = None
+    cancellation: Cancellation = "none"
     schedulable: bool = False
     # Why not, in words a human can act on. Shown instead of a bare refusal.
     unschedulable_because: str = ""
@@ -770,6 +789,7 @@ REGISTRY: dict[str, Tool] = {
     ),
     "pull_model": Tool(
         name="pull_model",
+        cancellation="cooperative",
         schedulable=False,
         impact="admin",
         unschedulable_because="modelhentning er en administrativ handling der bruger båndbredde og disk uden opsyn", risk="write",

@@ -102,7 +102,10 @@ def _rag_has_documents() -> bool:
     from ..store import DocStore
 
     try:
-        return DocStore().count() > 0
+        # Transient: opened to answer one question, so it closes itself. An
+        # unclosed handle on Windows keeps the file locked (F-620).
+        with DocStore() as store:
+            return store.count() > 0
     except sqlite3.Error:
         return False
 
