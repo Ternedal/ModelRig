@@ -29,7 +29,8 @@ jobs:
       - name: Checkout exact main
         run: |
           set -euo pipefail
-          git checkout --detach 7ef5444213a360d3342bc21d576eeff61211b10d
+          git fetch --no-tags --depth=1 origin 7ef5444213a360d3342bc21d576eeff61211b10d
+          git checkout --detach FETCH_HEAD
           test "$(git rev-parse HEAD)" = "7ef5444213a360d3342bc21d576eeff61211b10d"
           test "$(cat VERSION)" = "1.58.77"
       - name: Extract reviewed patch program
