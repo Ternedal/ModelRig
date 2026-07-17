@@ -119,7 +119,7 @@ check(service.stop(timeout=0.5), "restarted service also shuts down cleanly")
 # --- one runner exception is visible but does not kill the service -----------
 
 recovering_runner = FakeRunner(actions=[RuntimeError("database busy"), OK])
-recovering = SchedulerService(recovering_runner, poll_s=0.01)
+recovering = SchedulerService(recovering_runner, poll_s=0.1)
 check(recovering.start(), "recovering service starts")
 check(wait_until(lambda: recovering.status().failures == 1), "a runner exception is counted and surfaced")
 first = recovering.status()
