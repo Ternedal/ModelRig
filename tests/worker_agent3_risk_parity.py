@@ -149,5 +149,42 @@ check("_V2_RISK" in src,
 check("if self.declared_risk ==" not in src,
       "and the inline 'write else read' guess is gone from the graph")
 
+# --- the two tables must agree about what may run unattended (F-604) --------
+# Agent 3's graph knew delete_model is DESTRUCTIVE and pull_model is ADMIN. The
+# tool gate, which is what actually decides at 03:00, only ever asked about
+# desktop -- so a recurring model deletion would have fired on schedule with
+# nobody awake. The knowledge existed; the code that needed it never asked.
+#
+# The registry now owns schedulability, and merging the two tables outright is a
+# bigger job (F-614). Until then they must at least not contradict each other,
+# and that is checkable rather than rememberable.
+
+from app.agent3.capability_graph import _RISK_OVERRIDES  # noqa: E402
+from app.tools import REGISTRY  # noqa: E402
+
+for _name, _override in sorted(_RISK_OVERRIDES.items()):
+    _tool = REGISTRY.get(_name)
+    if _tool is None:
+        continue
+    if _override in (RiskClass.DESTRUCTIVE, RiskClass.ADMIN):
+        check(_tool.schedulable is False,
+              f"{_name}: Agent 3 calls it {_override.value}, so the registry must "
+              "not let it run unattended"
+              if _tool.schedulable is False
+              else f"CONTRADICTION: Agent 3 calls {_name} {_override.value} and the "
+                   "registry marks it schedulable -- it would fire at 03:00")
+
+check(REGISTRY["note_append"].schedulable is True,
+      "the tool the scheduler exists FOR is still schedulable -- a policy that "
+      "blocks everything is not a policy")
+check(REGISTRY["delete_model"].schedulable is False, "delete_model cannot be scheduled")
+check(REGISTRY["pull_model"].schedulable is False, "pull_model cannot be scheduled")
+check(REGISTRY["cancel_job"].schedulable is False, "cancel_job cannot be scheduled")
+
+for _n, _t in REGISTRY.items():
+    if not _t.schedulable:
+        check(bool(_t.unschedulable_because),
+              f"{_n}: says WHY it cannot be scheduled, so the refusal is actionable")
+
 print(f"\n===== AGENT3 RISK PARITY: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

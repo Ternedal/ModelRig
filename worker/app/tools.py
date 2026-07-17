@@ -243,6 +243,23 @@ class Tool:
     # documents root or a DB path names it here; nothing is inherited by
     # prefix, so a future COOKIE/SESSION/AUTH cannot ride along unnoticed.
     env_allow: tuple = ()
+    # May this action ever run with nobody watching? (F-604)
+    #
+    # `risk` is too coarse to answer that: note_append and delete_model are both
+    # "write", and one of them appends a line while the other destroys a model
+    # that took twenty minutes to pull. Agent 3's capability graph already knew
+    # the difference -- it carried a private table saying delete_model is
+    # DESTRUCTIVE and pull_model is ADMIN -- and the tool gate, which is what
+    # actually decides at 03:00, never asked it. Two owners, one of them silent
+    # at the moment it counts. That is the same shape as desktop reading as a
+    # READ, and it lives in the scheduler's blind spot.
+    #
+    # So the registry owns it, because the registry is where the tool is
+    # defined. Default False: unattended execution is the exception a tool must
+    # argue for, not a property it inherits by being harmless-looking today.
+    schedulable: bool = False
+    # Why not, in words a human can act on. Shown instead of a bare refusal.
+    unschedulable_because: str = ""
 
     def human_summary(self, args: dict) -> str:
         """What the confirmation card shows. Action, target, consequence --
@@ -632,14 +649,16 @@ def _run_cancel_job(args: dict) -> str:
 
 REGISTRY: dict[str, Tool] = {
     "rig_status": Tool(
-        name="rig_status", risk="read",
+        name="rig_status",
+        schedulable=True, risk="read",
         sensitivity="operational",  # GPU, VRAM, uptime -- a description of your machine
         description="Læs riggens tilstand: GPU, VRAM, disk, ASR/TTS-status.",
         params={"type": "object", "properties": {}},
         run=_run_rig_status,
     ),
     "note_append": Tool(
-        name="note_append", risk="write",
+        name="note_append",
+        schedulable=True, risk="write",
         sensitivity="private",  # your own text, written back to you
         description="Tilføj tekst til Kalivs notesfil. Kan kun appende.",
         params={
@@ -650,28 +669,33 @@ REGISTRY: dict[str, Tool] = {
         run=_run_note_append,
     ),
     "list_models": Tool(
-        name="list_models", risk="read",
+        name="list_models",
+        schedulable=True, risk="read",
         sensitivity="operational",  # which models you run says something about you, but not much
         description="Vis hvilke Ollama-modeller der er installeret på riggen (navne + størrelse).",
         params={"type": "object", "properties": {}},
         run=_run_list_models,
     ),
     "current_datetime": Tool(
-        name="current_datetime", risk="read",
+        name="current_datetime",
+        schedulable=True, risk="read",
         sensitivity="public",  # the clock is not yours; it is everyone's
         description="Hent den aktuelle dato og klokkeslæt på riggen.",
         params={"type": "object", "properties": {}},
         run=_run_current_datetime,
     ),
     "job_status": Tool(
-        name="job_status", risk="read",
+        name="job_status",
+        schedulable=True, risk="read",
         sensitivity="operational",  # job state and progress
         description="Status på baggrundsjobs (fx modeldownloads): fremdrift, terminal status og årsag. Uden job_id vises de seneste.",
         params={"type": "object", "properties": {"job_id": {"type": "string"}}},
         run=_run_job_status,
     ),
     "cancel_job": Tool(
-        name="cancel_job", risk="write",
+        name="cancel_job",
+        schedulable=False,
+        unschedulable_because="et job-id er flygtigt; en plan om at annullere det rammer noget andet i morgen", risk="write",
         sensitivity="operational",  # acts on the rig, returns rig state
         description="Annullér et kørende baggrundsjob (fx en modeldownload).",
         params={
@@ -682,14 +706,17 @@ REGISTRY: dict[str, Tool] = {
         run=_run_cancel_job,
     ),
     "list_documents": Tool(
-        name="list_documents", risk="read",
+        name="list_documents",
+        schedulable=True, risk="read",
         sensitivity="private",  # YOUR document names -- the F-208 case in one line
         description="Vis hvilke dokumenter der er ingested til RAG (navne + antal chunks).",
         params={"type": "object", "properties": {}},
         run=_run_list_documents,
     ),
     "delete_model": Tool(
-        name="delete_model", risk="write",
+        name="delete_model",
+        schedulable=False,
+        unschedulable_because="sletning af en model er uigenkaldelig og kan ikke fortrydes kl. 03:00", risk="write",
         sensitivity="operational",  # acts on the rig, returns rig state
         description="Slet en Ollama-model fra riggen. Kræver bekræftelse.",
         params={
@@ -700,7 +727,9 @@ REGISTRY: dict[str, Tool] = {
         run=_run_delete_model,
     ),
     "pull_model": Tool(
-        name="pull_model", risk="write",
+        name="pull_model",
+        schedulable=False,
+        unschedulable_because="modelhentning er en administrativ handling der bruger båndbredde og disk uden opsyn", risk="write",
         sensitivity="operational",  # acts on the rig, returns rig state
         description="Hent (download) en Ollama-model til riggen. Kræver bekræftelse.",
         params={
@@ -914,6 +943,21 @@ class ToolGate:
                 raise ToolDenied("forhåndsgodkendelse gælder kun planlagte kørsler")
             if tool.risk == "desktop":
                 raise ToolDenied("skrivebordshandlinger kan ikke forhåndsgodkendes")
+            # `risk` cannot answer "may this run with nobody watching" (F-604):
+            # note_append and delete_model are both "write". This gate is what
+            # actually decides at 03:00, and it only ever asked about desktop --
+            # so a recurring model deletion would have fired, on schedule, with
+            # no card and nobody awake. The registry now says, per tool, and it
+            # says no by default.
+            if not tool.schedulable:
+                self.audit.record(tool=name, args=args, risk=tool.risk,
+                                  outcome="blocked", conversation_id=conversation_id,
+                                  result_summary="tool is not schedulable",
+                                  origin=origin)
+                raise ToolDenied(
+                    f"{name} kan ikke køre planlagt: "
+                    + (tool.unschedulable_because or "handlingen kræver et menneske til stede")
+                )
             from .scheduler import fingerprint as _fp
             if pre_approved != _fp(name, args):
                 self.audit.record(tool=name, args=args, risk=tool.risk,

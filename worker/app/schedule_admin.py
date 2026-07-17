@@ -429,6 +429,18 @@ class ScheduleAdmin:
             )
         if risk not in ("read", "write"):
             raise ScheduleAdminError(f"ukendt tool-risk {risk!r}; afvist fail-closed")
+        # `risk` cannot answer this: note_append and delete_model are both
+        # "write" (F-604). The registry says per tool, and the tool gate enforces
+        # it at 03:00 regardless -- but refusing only there means the UI offers
+        # the plan, the user believes it exists, and it fails months later at
+        # three in the morning. A refusal is worth most where the decision is
+        # made.
+        if not getattr(spec, "schedulable", False):
+            raise ScheduleAdminError(
+                f"{tool} kan ikke planlægges: "
+                + (getattr(spec, "unschedulable_because", "")
+                   or "handlingen kræver et menneske til stede")
+            )
 
         self._validate_tool_args(spec, args)
         cad = parse_cadence(cadence)
