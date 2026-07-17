@@ -80,6 +80,24 @@ if ($rig.present -ne $true) {
         "Forventet lokal rapport: $ReportPath. Blockers: $reasons"
     )
 }
+
+# `configured` + `present` only proves that the worker can see a report. Bind
+# its assessment to the exact bytes produced above, so another valid or stale
+# report on a different configured path cannot satisfy this command.
+$remoteShaProperty = $rig.PSObject.Properties["report_sha256"]
+if ($null -eq $remoteShaProperty -or [string]::IsNullOrWhiteSpace([string]$remoteShaProperty.Value)) {
+    throw "Worker-status mangler report_sha256; samme-rapport-binding kan ikke bevises."
+}
+$localSha = (Get-FileHash -LiteralPath $ReportPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$remoteSha = ([string]$remoteShaProperty.Value).ToLowerInvariant()
+if ($remoteSha -ne $localSha) {
+    throw (
+        "Workeren vurderer en anden rapport end den netop producerede. " +
+        "Lokal SHA-256: $localSha. Worker SHA-256: $remoteSha. " +
+        "Kontroller KALIV_AGENT3_VALIDATION_REPORT og genstart workeren."
+    )
+}
+
 if ($rig.eligible_for_developer_preview -ne $true) {
     $reasons = @($rig.reasons) -join ", "
     throw "Rapporten blev fundet, men promotion-gaten afviste den: $reasons"
@@ -101,3 +119,4 @@ if (-not $SkipReadinessRegeneration) {
 $level = if ($rig.eligible_for_write_pilot -eq $true) { "write-pilot" } else { "developer-preview" }
 Write-Host "PASS: fysisk Agent3-evidens er synlig for workeren ($level, production_activation=false)"
 Write-Host "Rapport: $ReportPath"
+Write-Host "SHA-256: $localSha"
