@@ -63,7 +63,14 @@ class SchedulerRuntime:
         with self._lock:
             if self._started:
                 return True
-            if not self._configured():
+            try:
+                configured = bool(self._enabled_fn())
+            except Exception as exc:
+                self._last_error = (
+                    f"feature flag check failed: {type(exc).__name__}: {exc}"[:500]
+                )
+                return False
+            if not configured:
                 self._last_error = None
                 return False
 
@@ -106,34 +113,48 @@ class SchedulerRuntime:
                 try:
                     stopped = bool(self._service.stop(timeout=timeout))
                 except Exception as exc:
-                    self._last_error = f"scheduler stop failed: {type(exc).__name__}: {exc}"[:500]
+                    self._last_error = (
+                        f"scheduler stop failed: {type(exc).__name__}: {exc}"[:500]
+                    )
                     return False
                 if not stopped:
                     # Never close SQLite underneath a thread that may still use it.
                     self._last_error = "scheduler thread did not stop before timeout"
                     return False
+                self._service = None
+                self._started = False
 
             errors: list[str] = []
-            for name, resource in (("jobs", self._jobs), ("schedules", self._schedules)):
+            for name, attr in (("jobs", "_jobs"), ("schedules", "_schedules")):
+                resource = getattr(self, attr)
                 if resource is None:
                     continue
                 close = getattr(resource, "close", None)
                 if close is None:
+                    setattr(self, attr, None)
                     continue
                 try:
                     close()
                 except Exception as exc:
+                    # Keep the failing resource referenced so shutdown can be
+                    # retried and status cannot claim everything is closed.
                     errors.append(f"{name}: {type(exc).__name__}: {exc}")
+                else:
+                    setattr(self, attr, None)
 
-            self._service = None
-            self._jobs = None
-            self._schedules = None
-            self._started = False
             self._last_error = "; ".join(errors)[:500] or None
             return not errors
 
     def status(self) -> RuntimeStatus:
         with self._lock:
+            try:
+                configured = bool(self._enabled_fn())
+            except Exception as exc:
+                configured = False
+                self._last_error = (
+                    f"feature flag check failed: {type(exc).__name__}: {exc}"[:500]
+                )
+
             running = self._started
             if self._service is not None:
                 try:
@@ -141,7 +162,7 @@ class SchedulerRuntime:
                 except Exception:
                     running = self._started
             return RuntimeStatus(
-                configured=self._configured(),
+                configured=configured,
                 running=running,
                 resources_open=any(
                     resource is not None
@@ -149,13 +170,6 @@ class SchedulerRuntime:
                 ),
                 last_error=self._last_error,
             )
-
-    def _configured(self) -> bool:
-        try:
-            return bool(self._enabled_fn())
-        except Exception as exc:
-            self._last_error = f"feature flag check failed: {type(exc).__name__}: {exc}"[:500]
-            return False
 
     def _factories(self):
         if all(
