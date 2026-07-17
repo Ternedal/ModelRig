@@ -97,7 +97,11 @@ class SchedulerRunner:
         tool = self.registry.get(s.tool)
         if tool is None:
             self._finish_blocked(
-                s, job_id, f"ukendt tool {s.tool!r}; planen er slået fra", permanent=True,
+                s,
+                job_id,
+                f"ukendt tool {s.tool!r}; planen er slået fra",
+                risk="unknown",
+                permanent=True,
                 now=now,
             )
             return "blocked"
@@ -116,7 +120,14 @@ class SchedulerRunner:
         )
         if why:
             permanent = self._permanent_refusal(s, tool, current, now)
-            self._finish_blocked(s, job_id, why, permanent=permanent, now=now)
+            self._finish_blocked(
+                s,
+                job_id,
+                why,
+                risk=tool.risk,
+                permanent=permanent,
+                now=now,
+            )
             return "blocked"
 
         try:
@@ -134,6 +145,7 @@ class SchedulerRunner:
                     s,
                     job_id,
                     "scheduled action unexpectedly requested confirmation; plan disabled",
+                    risk=tool.risk,
                     permanent=True,
                     now=now,
                 )
@@ -181,10 +193,25 @@ class SchedulerRunner:
         job_id: str,
         reason: str,
         *,
+        risk: str,
         permanent: bool,
         now: float,
     ) -> None:
         self.schedules.record_claim_result(schedule.schedule_id, ran=False)
+        approval = (
+            f"schedule:{schedule.approved_fingerprint[:12]}"
+            if schedule.approved_fingerprint else None
+        )
+        self.gate.audit.record(
+            tool=schedule.tool,
+            args=schedule.args,
+            risk=risk,
+            outcome="blocked",
+            conversation_id=f"schedule:{schedule.schedule_id}",
+            confirmation_id=approval,
+            origin="schedule",
+            result_summary=self._bounded(reason),
+        )
         if permanent:
             self.schedules.set_enabled(schedule.schedule_id, False, now=now)
             status = "failed"
