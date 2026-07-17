@@ -6,7 +6,7 @@
 > code, so it cannot quietly become untrue. If a fact belongs here, teach
 > the generator to read it -- do not type it in.
 
-**Version:** 1.58.61
+**Version:** 1.58.62
 
 ## Tools the model can see
 
@@ -110,6 +110,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_hardening.py`
 - `tests/worker_jobs.py`
 - `tests/worker_migrate.py`
+- `tests/worker_netguard.py`
 - `tests/worker_paths.py`
 - `tests/worker_rag.py`
 - `tests/worker_rag_cloud.py`
@@ -125,6 +126,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_action_pins.py`
 - `tests/workflow_agent3_dormant.py`
 - `tests/workflow_current_state.py`
+- `tests/workflow_dep_pins.py`
 - `tests/workflow_release.py`
 - `tests/workflow_test_coverage.py`
 - `tests/workflow_worker_entrypoints.py`

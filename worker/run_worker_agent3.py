@@ -34,25 +34,16 @@ from app.agent3.replan_preview_api import (
 # hardened wrapper around it. entrypoint.py says so in its own docstring --
 # "process launchers must use this module" -- and this launcher was born after
 # that rule was written and never heard about it, because nothing enforced it.
+from app.netguard import enforce_loopback
 from app.entrypoint import app as guarded_app
 from app.main import app
 
 
-def _is_loopback(host: str) -> bool:
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return host == "localhost"
 
 
 if __name__ == "__main__":
     host = os.getenv("MODELRIG_WORKER_HOST", "127.0.0.1")
-    if not _is_loopback(host) and os.getenv("KALIV_WORKER_ALLOW_LAN", "0") != "1":
-        sys.stderr.write(
-            f"refusing to bind worker to non-loopback host {host!r}: the worker has "
-            "no auth of its own. Set KALIV_WORKER_ALLOW_LAN=1 to override.\n"
-        )
-        sys.exit(1)
+    enforce_loopback(host)
     if mount_agent3(app):
         adapter = V2ToolAdapter()
         worker_version = getattr(app, "version", None)

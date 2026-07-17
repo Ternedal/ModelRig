@@ -20,14 +20,10 @@ import uvicorn
 # before FastAPI parses them and removes voice temp data after the final stream
 # frame. Optional Agent 3.0 routes are mounted on the wrapped FastAPI instance,
 # while uvicorn continues to serve this hardened outer app.
+from app.netguard import enforce_loopback
 from app.entrypoint import app
 
 
-def _is_loopback(host: str) -> bool:
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return host == "localhost"
 
 
 def _routing_app():
@@ -134,13 +130,7 @@ if __name__ == "__main__":
         raise SystemExit(_child_main())
 
     host = os.getenv("MODELRIG_WORKER_HOST", "127.0.0.1")
-    if not _is_loopback(host) and os.getenv("KALIV_WORKER_ALLOW_LAN", "0") != "1":
-        sys.stderr.write(
-            f"refusing to bind worker to non-loopback host {host!r}: the worker has "
-            "no auth of its own and should only be reached by the backend on the "
-            "same machine. Set KALIV_WORKER_ALLOW_LAN=1 to override.\n"
-        )
-        sys.exit(1)
+    enforce_loopback(host)
     _mount_optional_agent3()
     uvicorn.run(
         app,

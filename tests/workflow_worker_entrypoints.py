@@ -60,6 +60,28 @@ for path in LAUNCHERS:
               else f"{path.name}: uvicorn.run({name}) serves an UNGUARDED app -- "
                    f"guarded names here are {sorted(guarded_names) or 'NONE'}")
 
+# One predicate, not three. Both launchers and the request middleware ask about
+# loopback; each used to answer for itself.
+import re as _re  # noqa: E402
+from pathlib import Path as _P  # noqa: E402
+
+private = []
+for py in sorted((ROOT / "worker").rglob("*.py")):
+    if py.name == "netguard.py":
+        continue
+    for i, line in enumerate(py.read_text(encoding="utf-8").splitlines(), 1):
+        if _re.match(r"\s*def _?is_loopback\(", line):
+            private.append(f"{py.relative_to(ROOT)}:{i}")
+check(not private,
+      "loopback is defined in exactly ONE place (app/netguard.py)"
+      if not private
+      else f"a private loopback copy is back: {', '.join(private)}")
+
+for path in LAUNCHERS:
+    t = path.read_text(encoding="utf-8")
+    check("enforce_loopback(" in t,
+          f"{path.name}: refuses a non-loopback bind through the shared guard")
+
 # The detector must be able to fail, or it is decoration.
 sample = "from app.main import app\nuvicorn.run(app, host=h)\n"
 names = {m.group(1) or "app" for m in re.finditer(r"from app\.entrypoint import app(?: as (\w+))?", sample)}

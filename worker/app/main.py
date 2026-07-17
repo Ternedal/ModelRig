@@ -23,16 +23,15 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.58.61"
+VERSION = "1.58.62"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 
 
-def _is_loopback(host: str) -> bool:
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return host == "localhost"
+# The bind guard and the request guard ask different questions -- "may we
+# listen here" vs "may this peer talk to us" -- but they share one predicate,
+# and two copies of a safety check are a race to see which gets the next fix.
+from .netguard import is_loopback as _is_loopback  # noqa: E402
 
 
 @app.middleware("http")
