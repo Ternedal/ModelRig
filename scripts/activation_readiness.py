@@ -31,6 +31,8 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from agent3_validation_paths import DEFAULT_REPORT_TEXT
+
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "ACTIVATION_READINESS.md"
 REPORT_ENV = "KALIV_AGENT3_VALIDATION_REPORT"
@@ -84,7 +86,7 @@ def validation() -> dict:
 
     # Relative, because an absolute path bakes THIS machine into a file that is
     # committed and compared byte-for-byte on someone else's.
-    path = os.getenv(REPORT_ENV) or "agent3-validation-latest.json"
+    path = os.getenv(REPORT_ENV) or DEFAULT_REPORT_TEXT
     p = Path(path) if Path(path).is_absolute() else (ROOT / path)
     if not p.exists():
         return {"present": False, "path": path, "ready": False,

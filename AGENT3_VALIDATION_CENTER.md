@@ -24,7 +24,7 @@ Begge klienter afviser statusresponsen som ugyldig, hvis enten topniveauet eller
 - Agent 3.0-worker-endpointet er startet med `KALIV_AGENT3_ENABLED=1`.
 - Go-gatewayen kan nå worker-processen.
 - Et gyldigt paired device-token er gemt i klienten eller sat i `MODELRIG_TOKEN`.
-- Promotion-evidens produceres separat med `scripts/agent3_rig_evidence.py`.
+- Promotion-evidens produceres med `scripts/run-agent3-rig-validation.ps1` (eller den underliggende `scripts/agent3_rig_evidence.py`).
 - Worker-processen kender rapportstien gennem `KALIV_AGENT3_VALIDATION_REPORT`, hvis en
   konkret rapport skal vurderes.
 

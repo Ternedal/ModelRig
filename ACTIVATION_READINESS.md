@@ -3,8 +3,8 @@
 > **Genereret af `scripts/activation_readiness.py`. Ret ikke i hånden.**
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
-**Version på main:** `1.58.81`  
-**Genereret:** 2026-07-17 16:19 UTC
+**Version på main:** `1.58.82`  
+**Genereret:** 2026-07-17 16:32 UTC
 
 ---
 
@@ -37,7 +37,7 @@ Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet
 ## Fysisk validering
 
 - **Rapport til stede:** NEJ
-- **Sti:** `agent3-validation-latest.json`
+- **Sti:** `validation/agent3-rig-validation-latest.json`
 - **Hvorfor ikke klar:** ingen rapport på disken — fysisk validering er ikke kørt
 
 Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
