@@ -69,7 +69,7 @@ def caps(_req, _adapter):
 
 
 app = FastAPI()
-app.include_router(build_router(orchestrator, adapter, capability_provider=caps))
+app.include_router(build_router(orchestrator, adapter, capability_provider=caps, allow_client_plans = True))
 client = TestClient(app)
 
 response = client.post(

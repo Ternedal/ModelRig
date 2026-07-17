@@ -180,6 +180,12 @@ class Agent3Client(baseUrl: String, private val token: String) {
         }
     }
 
+    fun retry(runId: String, cloudReady: Boolean = false): Run {
+        val payload = JSONObject().put("cloud_ready", cloudReady)
+        val root = post("/api/v1/experimental/agent3/runs/$runId/retry", payload)
+        return parseRun(root.requireObject("run"))
+    }
+
     fun confirm(runId: String, stepId: String, digest: String, approve: Boolean): Run {
         val payload = JSONObject()
             .put("step_id", stepId)

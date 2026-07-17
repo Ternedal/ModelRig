@@ -67,10 +67,10 @@ func (s *server) handleAgent3RunsList(w http.ResponseWriter, r *http.Request) {
 	s.Worker.Forward(w, r, agent3Target(r, "/experimental/agent3/runs"))
 }
 
-func (s *server) handleAgent3RunsStart(w http.ResponseWriter, r *http.Request) {
-	// A run may execute several read steps or wait on a model-backed adapter in a
-	// later phase, so use the long-lived worker proxy just like /tools/chat.
-	s.WorkerSlow.Forward(w, r, agent3Target(r, "/experimental/agent3/runs"))
+func (s *server) handleAgent3RunRetry(w http.ResponseWriter, r *http.Request) {
+	// Retry clones the stored request, route and validated plan. The body may
+	// report cloud-key readiness only; it cannot replace any executable step.
+	s.WorkerSlow.Forward(w, r, agent3RunTarget(r, "/retry"))
 }
 
 func (s *server) handleAgent3RunGet(w http.ResponseWriter, r *http.Request) {

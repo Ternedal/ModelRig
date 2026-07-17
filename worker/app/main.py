@@ -34,7 +34,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.58.77"
+VERSION = "1.58.78"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 

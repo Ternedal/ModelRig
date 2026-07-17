@@ -190,7 +190,7 @@ check(crash.state == RunState.BLOCKED and crash.steps[0].state == StepState.BLOC
 
 # API substrate: explicit plan only, no hidden LLM planner.
 app = FastAPI()
-app.include_router(build_router(orch, adapter, lambda req, _adapter: caps))
+app.include_router(build_router(orch, adapter, lambda req, _adapter: caps, allow_client_plans = True))
 client = TestClient(app)
 check(client.get("/experimental/agent3/status").status_code == 200, "experimental status endpoint is mounted")
 check(client.post("/experimental/agent3/runs", json={"message": "hej", "tools": True}).status_code == 422, "empty implicit plan is refused")

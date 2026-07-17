@@ -3,8 +3,8 @@
 > **Genereret af `scripts/activation_readiness.py`. Ret ikke i hånden.**
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
-**Version på main:** `1.58.77`  
-**Genereret:** 2026-07-17 13:42 UTC
+**Version på main:** `1.58.78`  
+**Genereret:** 2026-07-17 15:00 UTC
 
 ---
 
@@ -13,7 +13,6 @@
 Blokerende:
 
 - **Fysisk rig-validering:** ingen rapport på disken — fysisk validering er ikke kørt
-- **To veje ind, og kun den ene er serverens løfte.** `/experimental/agent3/plans/{plan_id}/start` er serverautoritativ: `/plan` bygger planen ud fra et mål via modellen, gemmer den, og `start` tager kun id'et — klienten kan ikke røre det der køres. Men `/experimental/agent3/runs` tager stadig en `plan` i request-body ved siden af. Gaten afviser alt klienten ikke selv måtte bede om, så det er ikke en rettighedseskalering — men så længe den dør står åben, er "serverautoritativ" en egenskab ved den vej du valgte, ikke ved systemet
 
 Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet uden evidens. Koden kan være korrekt i tests og fejle på Windows, Ollama, Tailscale eller en Pixel 6a — det er dét fysisk validering er til for, og det er ikke noget CI kan gøre for dig.
 
@@ -21,8 +20,8 @@ Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet
 
 ## Planautoritet
 
-- **Serverbygget plan:** NEJ
-- **Detalje:** **To veje ind, og kun den ene er serverens løfte.** `/experimental/agent3/plans/{plan_id}/start` er serverautoritativ: `/plan` bygger planen ud fra et mål via modellen, gemmer den, og `start` tager kun id'et — klienten kan ikke røre det der køres. Men `/experimental/agent3/runs` tager stadig en `plan` i request-body ved siden af. Gaten afviser alt klienten ikke selv måtte bede om, så det er ikke en rettighedseskalering — men så længe den dør står åben, er "serverautoritativ" en egenskab ved den vej du valgte, ikke ved systemet
+- **Serverbygget plan:** ja
+- **Detalje:** planen bygges og gemmes på serveren; klienten kan kun starte den via et kortlivet single-use plan-id, mens retry kloner den gemte plan
 
 ---
 

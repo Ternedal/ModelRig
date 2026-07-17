@@ -113,7 +113,7 @@ app.include_router(
         validation_provider=lambda: {"eligible_for_developer_preview": False},
         worker_version="test",
         replan_service=persistent,
-    )
+    allow_client_plans = True)
 )
 app.include_router(
     build_replan_preview_router(preview_service, review_store=review_store)

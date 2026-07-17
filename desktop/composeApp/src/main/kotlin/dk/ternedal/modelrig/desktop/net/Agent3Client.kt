@@ -140,6 +140,11 @@ private data class ConfirmRequest(
 )
 
 @Serializable
+private data class RetryRequest(
+    @SerialName("cloud_ready") val cloudReady: Boolean = false,
+)
+
+@Serializable
 data class Agent3RunEnvelope(
     val run: Agent3Run = Agent3Run(),
     @SerialName("review_reads") val reviewReads: Boolean = false,
@@ -222,6 +227,14 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
 
     fun events(runId: String): List<Agent3Event> =
         decode<EventsEnvelope>(get("/api/v1/experimental/agent3/runs/$runId/events")).events
+
+    fun retry(runId: String, cloudReady: Boolean = false): Agent3Run =
+        decode<Agent3RunEnvelope>(
+            post(
+                "/api/v1/experimental/agent3/runs/$runId/retry",
+                json.encodeToString(RetryRequest(cloudReady)),
+            )
+        ).run
 
     fun confirm(runId: String, stepId: String, digest: String, approve: Boolean): Agent3Run {
         val body = json.encodeToString(
