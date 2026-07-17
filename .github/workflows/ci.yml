@@ -1,8 +1,8 @@
 name: ci
 
 # Runs the shared test suite (_tests.yml) on every push to main and on pull
-# requests. The temporary materializer job below exists only on PR #36 and is
-# removed before the scheduler product commit is created.
+# requests. The temporary materializer job exists only on PR #36 and restores
+# this file from main before it creates the scheduler product commit.
 on:
   push:
     branches: [main]
@@ -14,7 +14,20 @@ permissions:
 jobs:
   materialize-scheduler:
     if: github.head_ref == 'build/scheduler-approval-token-inspect'
-    uses: ./.github/workflows/scheduler-ed25519-self-build.yml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: feature/scheduler-ed25519-approval-15890
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.23"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Build and test clean scheduler candidate
+        run: bash .github/scheduler-build/materialize.sh
 
   test:
     uses: ./.github/workflows/_tests.yml
