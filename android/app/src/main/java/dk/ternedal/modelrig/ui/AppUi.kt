@@ -57,7 +57,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, CloudPicker, VoiceCloudPicker }
+private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, CloudPicker, VoiceCloudPicker }
 
 @Composable
 fun AppUi() {
@@ -92,6 +92,7 @@ fun AppUi() {
                     onOpenConversations = { screen = Screen.Convos },
                     onOpenModels = { screen = Screen.Models },
                     onOpenKnowledge = { screen = Screen.Knowledge },
+                    onOpenSchedules = { screen = Screen.Schedules },
                     onOpenCloudPicker = { screen = Screen.CloudPicker },
                     onOpenVoiceCloudPicker = { screen = Screen.VoiceCloudPicker },
                     onConvChanged = { openConvId = it },
@@ -106,6 +107,7 @@ fun AppUi() {
                 )
                 Screen.Models -> ModelsScreen(store, onBack = { screen = Screen.Chat })
                 Screen.Knowledge -> KnowledgeScreen(store, onBack = { screen = Screen.Chat })
+                Screen.Schedules -> ScheduleScreen(store = store, onClose = { screen = Screen.Chat })
                 Screen.VoiceCloudPicker -> CloudModelPickerScreen(
                     store,
                     forVoice = true,
@@ -619,6 +621,7 @@ private fun ChatScreen(
     onOpenConversations: () -> Unit,
     onOpenModels: () -> Unit,
     onOpenKnowledge: () -> Unit,
+    onOpenSchedules: () -> Unit,
     onOpenCloudPicker: () -> Unit,
     onOpenVoiceCloudPicker: () -> Unit,
     onConvChanged: (Long?) -> Unit,
@@ -1647,6 +1650,7 @@ private fun ChatScreen(
                         DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
                         DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
                         DropdownMenuItem(text = { Text("Viden") }, onClick = { overflow = false; onOpenKnowledge() })
+                        DropdownMenuItem(text = { Text("Planer") }, onClick = { overflow = false; onOpenSchedules() })
                         DropdownMenuItem(text = { Text("Indstillinger") }, onClick = { overflow = false; onOpenSettings() })
                         HorizontalDivider(color = KalivTheme.colors.hairline)
                         // Light / dark. A manual choice (TokenStore.darkMode), so it
