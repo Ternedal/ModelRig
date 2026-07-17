@@ -149,30 +149,76 @@ check("_V2_RISK" in src,
 check("if self.declared_risk ==" not in src,
       "and the inline 'write else read' guess is gone from the graph")
 
-# --- the two tables must agree about what may run unattended (F-604) --------
-# Agent 3's graph knew delete_model is DESTRUCTIVE and pull_model is ADMIN. The
-# tool gate, which is what actually decides at 03:00, only ever asked about
-# desktop -- so a recurring model deletion would have fired on schedule with
-# nobody awake. The knowledge existed; the code that needed it never asked.
+# --- there is one owner, and no second table may appear (F-614) ------------
+# Three hours ago this block required two tables to agree. That was a bandage:
+# the truth about delete_model lived in tools.py (coarse), in integration.py
+# (a name-keyed table), and in capability_graph.py (a byte-identical copy of the
+# same name-keyed table) -- and the gate that decides at 03:00 consulted none of
+# them, which is how a model deletion became schedulable (F-604).
 #
-# The registry now owns schedulability, and merging the two tables outright is a
-# bigger job (F-614). Until then they must at least not contradict each other,
-# and that is checkable rather than rememberable.
+# Now the tool declares it. The copies are gone. So this test no longer checks
+# agreement -- it checks that there is nothing left to agree WITH, because the
+# next name-keyed table will be added by someone who has a good reason and does
+# not know this history.
 
-from app.agent3.capability_graph import _RISK_OVERRIDES  # noqa: E402
+import pathlib as _pl  # noqa: E402
+
 from app.tools import REGISTRY  # noqa: E402
 
-for _name, _override in sorted(_RISK_OVERRIDES.items()):
-    _tool = REGISTRY.get(_name)
-    if _tool is None:
-        continue
-    if _override in (RiskClass.DESTRUCTIVE, RiskClass.ADMIN):
-        check(_tool.schedulable is False,
-              f"{_name}: Agent 3 calls it {_override.value}, so the registry must "
-              "not let it run unattended"
-              if _tool.schedulable is False
-              else f"CONTRADICTION: Agent 3 calls {_name} {_override.value} and the "
-                   "registry marks it schedulable -- it would fire at 03:00")
+_AGENT3 = _pl.Path(__file__).resolve().parents[1] / "worker" / "app" / "agent3"
+for _src in sorted(_AGENT3.rglob("*.py")):
+    _text = _src.read_text(encoding="utf-8")
+    check("_RISK_OVERRIDES" not in _text,
+          f"{_src.name}: no name-keyed risk table -- the tool declares what it does"
+          if "_RISK_OVERRIDES" not in _text
+          else f"{_src.name} has grown a second owner for tool risk; that is how "
+               "delete_model became schedulable")
+
+# The registry's vocabulary and Agent 3's must stay in step: every Impact value
+# must map, or a class the registry grows becomes unclassifiable at runtime
+# rather than at import.
+import typing as _ty  # noqa: E402
+
+from app.agent3.integration import _V2_RISK  # noqa: E402
+from app.tools import Impact as _Impact  # noqa: E402
+
+for _member in _ty.get_args(_Impact):
+    check(_member in _V2_RISK,
+          f"Agent 3 can name the registry's '{_member}'"
+          if _member in _V2_RISK
+          else f"the registry declares '{_member}' and Agent 3 cannot name it -- "
+               "a plan using it would stop at runtime")
+
+# What each dangerous tool IS, asserted here and nowhere else.
+#
+# The version of this block I wrote three hours ago iterated _RISK_OVERRIDES and
+# therefore asserted, as a side effect, that delete_model is destructive. When I
+# deleted that table I replaced the loop with "no second table exists" and
+# dropped the claim about CONTENT without noticing. A mutation caught it:
+# removing impact="destructive" from the registry failed zero tests, and
+# delete_model quietly became a plain write.
+#
+# That is the same move as fixing one file of three and calling the finding
+# closed, performed on a test whose entire job is to catch that move. Hence:
+# state the facts, not the shape of the code that holds them.
+for _name, _want in (("delete_model", "destructive"), ("pull_model", "admin")):
+    _t = REGISTRY[_name]
+    check(_t.impact == _want,
+          f"{_name} declares impact={_want}"
+          if _t.impact == _want
+          else f"{_name} declares impact={_t.impact!r}, not {_want!r} -- Agent 3 "
+               "would classify it as an ordinary write")
+
+# The contradiction must be unrepresentable, not merely absent.
+from app.tools import Tool as _Tool  # noqa: E402
+
+try:
+    _Tool(name="probe", risk="write", description="x",
+          impact="destructive", schedulable=True)
+    check(False, "a destructive schedulable tool could be CONSTRUCTED")
+except ValueError:
+    check(True, "a destructive tool cannot be constructed schedulable -- the "
+                "policy is not a check someone remembers to run")
 
 check(REGISTRY["note_append"].schedulable is True,
       "the tool the scheduler exists FOR is still schedulable -- a policy that "

@@ -50,6 +50,23 @@ from typing import Any, Callable, Literal, Optional
 # target allowlist, a rate limit, and local-model-only planning. No tool
 # declares it yet -- the rules land before the plumbing (ISOLATION_DESIGN I3/I4).
 Risk = Literal["read", "write", "desktop"]
+# What this action DOES, as opposed to whether it needs a card (F-614).
+#
+# `risk` answers V2's question: does a human have to confirm this? `impact`
+# answers Agent 3's: how bad is it if it goes wrong? They are different
+# questions, and note_append and delete_model prove it -- both are risk=write,
+# and one appends a line while the other destroys a model that took twenty
+# minutes to pull.
+#
+# Agent 3 knew the difference. It kept the knowledge in TWO byte-identical
+# tables (integration.py and capability_graph.py), keyed by tool name, four
+# hundred lines from where the tools are defined. The tool gate -- the code that
+# actually decides at 03:00 -- never consulted either, and F-604 was the result:
+# a schedulable model deletion. Knowledge that lives away from the thing it
+# describes gets out of sync with it, and the sync failure is silent.
+#
+# So it lives here, on the tool, once.
+Impact = Literal["read", "write", "desktop", "destructive", "admin"]
 
 # WHAT A TOOL'S RESULT IS, as opposed to what it does (analysis F-208). Risk
 # gates the ACTION; sensitivity gates where the ANSWER may travel. They are
@@ -257,9 +274,33 @@ class Tool:
     # So the registry owns it, because the registry is where the tool is
     # defined. Default False: unattended execution is the exception a tool must
     # argue for, not a property it inherits by being harmless-looking today.
+    # Defaults to `risk`, so a tool that has nothing finer to say cannot end up
+    # with an impact that contradicts its own risk class. Anything sharper --
+    # destructive, admin -- must be stated, because a tool does not become
+    # dangerous by accident.
+    impact: Impact | None = None
     schedulable: bool = False
     # Why not, in words a human can act on. Shown instead of a bare refusal.
     unschedulable_because: str = ""
+
+    def __post_init__(self) -> None:
+        if self.impact is None:
+            object.__setattr__(self, "impact", self.risk)
+        # A destructive or administrative action cannot be scheduled. This is
+        # not a policy check that someone remembers to run -- it is impossible
+        # to construct the contradiction, so a future tool cannot be added
+        # wrong. tests/worker_agent3_risk_parity.py used to assert the two
+        # tables agreed; agreeing is now the only representable state.
+        if self.impact in ("destructive", "admin") and self.schedulable:
+            raise ValueError(
+                f"{self.name}: {self.impact} kan ikke være planlægbar — "
+                "en uigenkaldelig handling kl. 03:00 har ingen at spørge"
+            )
+        if self.impact in ("destructive", "admin") and self.risk == "read":
+            raise ValueError(
+                f"{self.name}: impact={self.impact} men risk=read — "
+                "en destruktiv handling kan ikke slippe uden bekræftelseskort"
+            )
 
     def human_summary(self, args: dict) -> str:
         """What the confirmation card shows. Action, target, consequence --
@@ -716,6 +757,7 @@ REGISTRY: dict[str, Tool] = {
     "delete_model": Tool(
         name="delete_model",
         schedulable=False,
+        impact="destructive",
         unschedulable_because="sletning af en model er uigenkaldelig og kan ikke fortrydes kl. 03:00", risk="write",
         sensitivity="operational",  # acts on the rig, returns rig state
         description="Slet en Ollama-model fra riggen. Kræver bekræftelse.",
@@ -729,6 +771,7 @@ REGISTRY: dict[str, Tool] = {
     "pull_model": Tool(
         name="pull_model",
         schedulable=False,
+        impact="admin",
         unschedulable_because="modelhentning er en administrativ handling der bruger båndbredde og disk uden opsyn", risk="write",
         sensitivity="operational",  # acts on the rig, returns rig state
         description="Hent (download) en Ollama-model til riggen. Kræver bekræftelse.",

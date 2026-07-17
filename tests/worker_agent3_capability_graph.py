@@ -13,9 +13,16 @@ from app.agent3.integration import V2ToolAdapter
 
 
 class Tool:
-    def __init__(self, name, risk, description):
+    # impact is what the tool DOES; risk is whether it needs a card (F-614).
+    # This double used to declare delete_model as risk="read" and the graph
+    # called it DESTRUCTIVE anyway, because a table keyed by tool NAME said so.
+    # Right answer, wrong reason -- and the mirror image is the dangerous one: a
+    # destructive tool called anything else stayed a read. The name confers
+    # nothing now. The declaration does.
+    def __init__(self, name, risk, description, impact=None):
         self.name = name
         self.risk = risk
+        self.impact = impact or risk
         self.description = description
         self.params = {"type": "object", "properties": {}}
 
@@ -34,8 +41,9 @@ adapter = V2ToolAdapter(
         REGISTRY={
             "rig_status": Tool("rig_status", "read", "Rig status"),
             "note_append": Tool("note_append", "write", "Append note"),
-            "delete_model": Tool("delete_model", "read", "Delete model"),
-            "pull_model": Tool("pull_model", "write", "Pull model"),
+            "delete_model": Tool("delete_model", "write", "Delete model",
+                                 impact="destructive"),
+            "pull_model": Tool("pull_model", "write", "Pull model", impact="admin"),
         },
         GATE=Gate(),
     )

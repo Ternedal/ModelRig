@@ -17,18 +17,45 @@ class Agent3PlanError(RuntimeError):
 
 
 # Risk/sensitivity are code-owned. The model or client supplies only tool + args.
-_RISK_OVERRIDES: dict[str, RiskClass] = {
-    "delete_model": RiskClass.DESTRUCTIVE,
-    "pull_model": RiskClass.ADMIN,
-}
-
 # The V2 registry is the source of truth for what a tool IS; this maps its
 # vocabulary onto Agent 3's finer one. Every V2 class must appear here --
 # tests/worker_agent3_risk_parity.py fails if V2 grows one that does not.
+def _impact_of(name: str, tool: object) -> str:
+    """What the registry says this tool DOES (F-614).
+
+    The same rule Tool.__post_init__ applies -- impact, or risk if the tool has
+    nothing sharper to say -- applied here at the V2/Agent-3 boundary, because
+    this is where objects arrive that are not real Tools: adapters, doubles, and
+    whatever the registry grows into next.
+
+    It is not a fallback that guesses. A real Tool always has impact, because
+    the dataclass sets it. A double that cares about being destructive declares
+    it. A tool that declares NEITHER cannot be classified, and an unclassifiable
+    action stops the plan -- the last time this layer had a fallback, "WRITE if
+    it says write, else READ" turned a screenshot into a read.
+    """
+    impact = getattr(tool, "impact", None)
+    if impact:
+        return str(impact)
+    risk = getattr(tool, "risk", None)
+    if risk:
+        return str(risk)
+    raise Agent3PlanError(
+        f"{name} erklærer hverken impact eller risk: Agent 3 planlægger ikke "
+        "noget den ikke kan klassificere"
+    )
+
+
+# The registry's vocabulary, mapped onto Agent 3's. Every member of tools.Impact
+# must appear: worker_agent3_risk_parity.py fails if the registry grows a class
+# this layer cannot name, because the alternative is a fallback quietly choosing
+# one -- and the last fallback turned a screenshot into a READ.
 _V2_RISK: dict[str, RiskClass] = {
     "read": RiskClass.READ,
     "write": RiskClass.WRITE,
     "desktop": RiskClass.DESKTOP,
+    "destructive": RiskClass.DESTRUCTIVE,
+    "admin": RiskClass.ADMIN,
 }
 
 # V2's vocabulary for where an answer may travel, mapped onto Agent 3's.
@@ -114,10 +141,15 @@ class V2ToolAdapter:
             # tool says write, else READ", which silently downgraded every risk
             # class V2 might grow later -- desktop became a read. A class this
             # layer does not understand must stop the plan, not be guessed at.
-            risk = _RISK_OVERRIDES.get(call.tool) or _V2_RISK.get(tool.risk)
+            # Read from the tool, not from a table over here keyed by its name
+            # (F-614). The name-keyed table lived four hundred lines from the
+            # definition, in TWO byte-identical copies, and the gate that
+            # decides at 03:00 consulted neither -- which is how a model
+            # deletion became schedulable (F-604).
+            risk = _V2_RISK.get(_impact_of(call.tool, tool))
             if risk is None:
                 raise Agent3PlanError(
-                    f"ukendt risikoklasse {tool.risk!r} for {call.tool}: "
+                    f"ukendt risikoklasse {tool.impact!r} for {call.tool}: "
                     "Agent 3 planlægger ikke noget den ikke kan klassificere"
                 )
             # Sensitivity was the same disease as risk, one axis over (F-511):

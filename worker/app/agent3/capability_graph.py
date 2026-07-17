@@ -7,11 +7,6 @@ from .core import CapabilitySnapshot, RiskClass
 
 
 _ALLOWED_STATES = {"ready", "degraded", "disabled", "unavailable", "blocked"}
-_RISK_OVERRIDES = {
-    "delete_model": RiskClass.DESTRUCTIVE,
-    "pull_model": RiskClass.ADMIN,
-}
-
 
 @dataclass(frozen=True)
 class CapabilityNode:
@@ -62,8 +57,12 @@ class ToolCapability:
 
     @property
     def risk(self) -> RiskClass:
-        if self.name in _RISK_OVERRIDES:
-            return _RISK_OVERRIDES[self.name]
+        # The name-keyed override table that used to sit here is gone (F-614):
+        # the node now carries what the tool declared, so there is nothing to
+        # look up. Two byte-identical copies of that table existed, in this file
+        # and in integration.py, and in 1.58.66 I fixed one of them and called
+        # the finding closed.
+        #
         # The same downgrade I removed from integration.py in 1.58.66 lived here
         # untouched, because I fixed the file I was looking at and called the
         # finding closed. "WRITE if it says write, else READ" turns a desktop
@@ -90,7 +89,18 @@ def runtime_tool_capabilities(adapter) -> list[ToolCapability]:
             ToolCapability(
                 name=name,
                 enabled=adapter.is_enabled(name),
-                declared_risk=str(getattr(tool, "risk", "read")),
+                # The canonical value, from the tool (F-614). This used to take
+                # `risk` -- V2's coarse card-logic class -- which threw away the
+                # difference between appending a line and destroying a model,
+                # and then a name-keyed table over here tried to recover it.
+                # Recovering information you just discarded is not a design.
+                #
+                # The old default was "read": a tool that declared nothing
+                # became the safest class in the system. Now a tool that
+                # declares nothing produces a class no mapping knows, and the
+                # graph stops instead of guessing.
+                declared_risk=str(getattr(tool, "impact", None)
+                                  or getattr(tool, "risk", None) or ""),
                 description=str(getattr(tool, "description", ""))[:300],
             )
         )
