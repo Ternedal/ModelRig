@@ -102,6 +102,8 @@ def next_run(cadence: Cadence, after: float) -> float:
     """The next moment this should fire, strictly after `after`."""
     if cadence.kind == "every":
         return after + cadence.seconds
+    if cadence.kind != "daily":
+        raise ScheduleError(f"ukendt cadence-kind {cadence.kind!r}")
     lt = time.localtime(after)
     candidate = time.mktime((
         lt.tm_year, lt.tm_mon, lt.tm_mday,
@@ -120,12 +122,17 @@ def catch_up(cadence: Cadence, due_at: float, now: float) -> tuple[int, float]:
 
     Returns (missed, next_due). The count is reported, never executed: a rig
     that was off for a week must not wake up and run seven days of work at
-    once, and it must not pretend nothing was skipped either. The JobStore
-    learned the same lesson the hard way -- an interrupted job says
-    "interrupted", it does not quietly claim success.
+    once, and it must not pretend nothing was skipped either. Intervals use
+    arithmetic rather than replaying one timestamp per minute: a year offline
+    is still constant-time work at startup.
     """
     if now < due_at:
         return 0, due_at
+    if cadence.kind == "every":
+        occurrences = int((now - due_at) // cadence.seconds) + 1
+        return max(0, occurrences - 1), due_at + occurrences * cadence.seconds
+    if cadence.kind != "daily":
+        raise ScheduleError(f"ukendt cadence-kind {cadence.kind!r}")
     missed = 0
     due = due_at
     while due <= now:
@@ -174,6 +181,8 @@ def refusal(tool_risk: str, approved_fingerprint: str | None,
         )
     if tool_risk == "read":
         return None
+    if tool_risk != "write":
+        return f"ukendt tool-risk {tool_risk!r}; planen er afvist fail-closed"
     if not approved_fingerprint:
         return (
             "planlagte skrivninger kræver at du godkendte dem da du oprettede "
@@ -202,6 +211,20 @@ class Schedule:
     due_at: float
     missed: int
     enabled: bool
+
+
+@dataclass(frozen=True)
+class ScheduleClaim:
+    """One due occurrence consumed atomically before execution.
+
+    Consuming first gives scheduled writes at-most-once semantics: if the worker
+    dies after the claim, the occurrence is skipped rather than potentially
+    repeated after a restart. Duplicate writes are worse than a visible miss.
+    """
+
+    schedule: Schedule
+    occurrence_due_at: float
+    missed_this_claim: int
 
 
 class ScheduleStore:
@@ -240,6 +263,10 @@ class ScheduleStore:
                        created REAL NOT NULL)"""
             )
             self._conn.commit()
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
 
     def create(self, tool: str, args: dict, cadence: str, *,
                approve_write: bool = False, ttl_days: int = DEFAULT_TTL_DAYS,
@@ -288,32 +315,149 @@ class ScheduleStore:
                 "SELECT * FROM schedules ORDER BY due_at").fetchall()
         return [self._row(r) for r in rows]
 
-    def due(self, now: float | None = None) -> list[Schedule]:
+    def due(self, now: float | None = None, limit: int = 100) -> list[Schedule]:
+        """Read-only preview. Runners must use :meth:`claim_due`, not this."""
         now = time.time() if now is None else now
-        return [s for s in self.list_all() if s.enabled and s.due_at <= now]
-
-    def record_run(self, schedule_id: str, *, ran: bool, now: float | None = None) -> Schedule | None:
-        """Advance the schedule. `ran=False` still moves it on -- a refused run
-        is not a run, but it is also not a reason to fire again immediately."""
-        now = time.time() if now is None else now
-        s = self.get(schedule_id)
-        if s is None:
-            return None
-        cad = parse_cadence(s.cadence)
-        missed, due = catch_up(cad, s.due_at, now)
+        n = max(1, min(int(limit), 500))
         with self._lock:
-            self._conn.execute(
-                "UPDATE schedules SET runs_used=runs_used+?, missed=missed+?, due_at=? WHERE id=?",
-                (1 if ran else 0, missed, due, schedule_id),
+            rows = self._conn.execute(
+                "SELECT * FROM schedules WHERE enabled=1 AND due_at<=? "
+                "ORDER BY due_at LIMIT ?", (now, n),
+            ).fetchall()
+        return [self._row(r) for r in rows]
+
+    def claim_due(self, now: float | None = None, limit: int = 20) -> list[ScheduleClaim]:
+        """Consume due occurrences exactly once across competing worker processes.
+
+        ``BEGIN IMMEDIATE`` serialises claimers. ``due_at`` is advanced in the
+        same transaction that returns each claim, so another process sees the
+        future occurrence, not the one already taken. A malformed on-disk
+        cadence disables only that schedule fail-closed; it cannot block the
+        healthy schedules behind it.
+        """
+        now = time.time() if now is None else now
+        n = max(1, min(int(limit), 100))
+        claims: list[ScheduleClaim] = []
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                rows = self._conn.execute(
+                    "SELECT * FROM schedules WHERE enabled=1 AND due_at<=? "
+                    "ORDER BY due_at LIMIT ?", (now, n),
+                ).fetchall()
+                for row in rows:
+                    schedule = self._row(row)
+                    try:
+                        cadence = parse_cadence(schedule.cadence)
+                        missed, next_due = catch_up(cadence, schedule.due_at, now)
+                    except ScheduleError:
+                        self._conn.execute(
+                            "UPDATE schedules SET enabled=0 WHERE id=?",
+                            (schedule.schedule_id,),
+                        )
+                        continue
+                    cur = self._conn.execute(
+                        "UPDATE schedules SET due_at=?, missed=missed+? "
+                        "WHERE id=? AND enabled=1 AND due_at=?",
+                        (next_due, missed, schedule.schedule_id, schedule.due_at),
+                    )
+                    if cur.rowcount != 1:
+                        continue
+                    claimed = Schedule(
+                        schedule_id=schedule.schedule_id,
+                        tool=schedule.tool,
+                        args=schedule.args,
+                        cadence=schedule.cadence,
+                        approved_fingerprint=schedule.approved_fingerprint,
+                        expires_at=schedule.expires_at,
+                        max_runs=schedule.max_runs,
+                        runs_used=schedule.runs_used,
+                        due_at=next_due,
+                        missed=schedule.missed + missed,
+                        enabled=True,
+                    )
+                    claims.append(ScheduleClaim(
+                        schedule=claimed,
+                        occurrence_due_at=schedule.due_at,
+                        missed_this_claim=missed,
+                    ))
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return claims
+
+    def record_claim_result(self, schedule_id: str, *, ran: bool) -> Schedule | None:
+        """Record whether an already-consumed claim actually executed."""
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE schedules SET runs_used=runs_used+? WHERE id=?",
+                (1 if ran else 0, schedule_id),
             )
             self._conn.commit()
+            if cur.rowcount != 1:
+                return None
         return self.get(schedule_id)
 
-    def set_enabled(self, schedule_id: str, enabled: bool) -> None:
+    def record_run(self, schedule_id: str, *, ran: bool,
+                   now: float | None = None) -> Schedule | None:
+        """Atomically advance one known schedule and record the outcome.
+
+        Kept for direct/manual callers. A ticking runner that enumerates all due
+        work must use ``claim_due`` plus ``record_claim_result`` so two worker
+        processes cannot both execute the same occurrence.
+        """
+        now = time.time() if now is None else now
         with self._lock:
-            self._conn.execute("UPDATE schedules SET enabled=? WHERE id=?",
-                               (1 if enabled else 0, schedule_id))
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                row = self._conn.execute(
+                    "SELECT * FROM schedules WHERE id=?", (schedule_id,),
+                ).fetchone()
+                if row is None:
+                    self._conn.rollback()
+                    return None
+                schedule = self._row(row)
+                cadence = parse_cadence(schedule.cadence)
+                missed, due = catch_up(cadence, schedule.due_at, now)
+                self._conn.execute(
+                    "UPDATE schedules SET runs_used=runs_used+?, "
+                    "missed=missed+?, due_at=? WHERE id=?",
+                    (1 if ran else 0, missed, due, schedule_id),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return self.get(schedule_id)
+
+    def set_enabled(self, schedule_id: str, enabled: bool,
+                    now: float | None = None) -> bool:
+        """Persist pause/resume; resume starts at a fresh future occurrence."""
+        now = time.time() if now is None else now
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT enabled, cadence FROM schedules WHERE id=?",
+                (schedule_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            current = bool(row["enabled"])
+            if current == enabled:
+                return True
+            if enabled:
+                due = next_run(parse_cadence(row["cadence"]), now)
+                self._conn.execute(
+                    "UPDATE schedules SET enabled=1, due_at=? WHERE id=?",
+                    (due, schedule_id),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE schedules SET enabled=0 WHERE id=?",
+                    (schedule_id,),
+                )
             self._conn.commit()
+        return True
 
     def delete(self, schedule_id: str) -> bool:
         with self._lock:
