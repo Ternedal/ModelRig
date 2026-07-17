@@ -7,7 +7,7 @@ from .capability_graph import (
     build_capability_graph,
     runtime_tool_capabilities,
 )
-from .core import CapabilitySnapshot
+from .core import CapabilitySnapshot, TurnRequest
 from .integration import V2ToolAdapter
 from .validation_gate import evaluate_configured_report
 
@@ -72,7 +72,11 @@ def build_capability_graph_router(
     replanner_mounted: bool = True,
     review_mounted: bool = True,
 ) -> APIRouter:
-    """Expose a read-only runtime graph; it never routes or activates anything."""
+    """Expose read-only capability and routing observations.
+
+    Both endpoints are observational only. They never plan, execute, create runs,
+    read memory or change the selected production surface.
+    """
 
     router = APIRouter(prefix="/experimental/agent3", tags=["experimental-agent3-capabilities"])
 
@@ -86,5 +90,37 @@ def build_capability_graph_router(
             replanner_mounted=replanner_mounted,
             review_mounted=review_mounted,
         ).to_dict()
+
+    # Import lazily after this module is initialized. routing_preview_api reuses
+    # build_runtime_capability_graph for standalone/custom-provider tests.
+    from .routing_preview import evaluate_routing_preview
+    from .routing_preview_api import RoutingPreviewReq, build_runtime_routing_snapshot
+
+    @router.post("/routing-preview")
+    def routing_preview(req: RoutingPreviewReq) -> dict:
+        snapshot = build_runtime_routing_snapshot(adapter)
+        graph = build_runtime_capability_graph(
+            adapter,
+            worker_version=worker_version,
+            planner_mounted=planner_mounted,
+            memory_mounted=memory_mounted,
+            replanner_mounted=replanner_mounted,
+            review_mounted=review_mounted,
+            capabilities=snapshot,
+        )
+        request = TurnRequest(
+            message=req.message,
+            mode=req.mode,
+            tools=req.tools,
+            rag=req.rag,
+            has_image=req.has_image,
+            voice=req.voice,
+            allow_rag_cloud=req.allow_rag_cloud,
+            auto_cloud_fallback=req.auto_cloud_fallback,
+        )
+        payload = evaluate_routing_preview(request, snapshot, graph).to_dict()
+        payload["executed"] = False
+        payload["planned"] = False
+        return payload
 
     return router
