@@ -69,6 +69,8 @@ early = time.mktime((2026, 7, 17, 1, 0, 0, 0, 0, -1))
 nxt2 = S.next_run(S.Cadence("daily", hour=3, minute=0), early)
 check(time.localtime(nxt2).tm_mday == 17 and nxt2 - early == 7200,
       "daily:03:00 from 01:00 fires the SAME day, two hours later")
+check(raises(S.next_run, S.Cadence("mystery"), base) is not None,
+      "an unknown cadence kind fails closed instead of being treated as daily")
 
 # --- the rig was off: missed runs are reported, never replayed --------------
 
@@ -86,6 +88,15 @@ check(next_due > now, "the next due time is in the future, not backfilled")
 
 missed0, due0 = S.catch_up(cad, now + 3600, now)
 check(missed0 == 0 and due0 == now + 3600, "a task that is not due yet is left alone")
+
+year = 365 * 24 * 3600
+long_missed, long_due = S.catch_up(
+    S.Cadence("every", seconds=60), base + 60, base + year,
+)
+check(long_missed == year // 60 - 1,
+      "a one-minute schedule offline for a year reports the exact missed count")
+check(long_due == base + year + 60,
+      "long interval catch-up lands one cadence in the future without replaying timestamps")
 
 # --- the 03:00 question: what may actually run ------------------------------
 
@@ -111,6 +122,8 @@ check(why is not None and "03:00" in why,
       "a desktop action can NEVER be scheduled, approval or not")
 check("screenshot-bindingen" in (why or ""),
       "and the refusal explains why binding cannot save it: that screen is gone")
+check(S.refusal("mystery", None, fp) is not None,
+      "an unknown risk class fails closed")
 
 # --- the fingerprint is about meaning, not spelling -------------------------
 
@@ -206,6 +219,57 @@ due_ids = [d.schedule_id for d in store.due(now=NOW + 10**6)]
 check(sched.schedule_id not in due_ids, "a disabled schedule is never due")
 check(w.schedule_id in due_ids, "...and disabling one does not disable the others")
 check(store.delete(w.schedule_id) and store.get(w.schedule_id) is None, "a schedule can be deleted")
+store.close()
+reopened.close()
+
+# --- cross-process claiming: one occurrence, one owner ----------------------
+
+claim_path = os.path.join(tempfile.mkdtemp(), "claim.db")
+owner = S.ScheduleStore(claim_path)
+peer = S.ScheduleStore(claim_path)
+claim_sched = owner.create("rig_status", {}, "every:900", now=NOW)
+
+claims = owner.claim_due(now=NOW + 901)
+check(len(claims) == 1 and claims[0].schedule.schedule_id == claim_sched.schedule_id,
+      "the first worker atomically claims the due occurrence")
+check(claims[0].occurrence_due_at == NOW + 900,
+      "the claim preserves which occurrence it consumed")
+check(claims[0].schedule.due_at == NOW + 1800,
+      "the same transaction advances the schedule into the future")
+check(peer.claim_due(now=NOW + 901) == [],
+      "a second worker cannot claim the occurrence already consumed")
+
+recorded = owner.record_claim_result(claim_sched.schedule_id, ran=True)
+check(recorded is not None and recorded.runs_used == 1,
+      "successful execution is recorded after the claim without advancing twice")
+
+owner.set_enabled(claim_sched.schedule_id, False, now=NOW + 2000)
+check(not owner.get(claim_sched.schedule_id).enabled,
+      "a claimed schedule can still be paused")
+resume_at = NOW + 100_000
+check(owner.set_enabled(claim_sched.schedule_id, True, now=resume_at),
+      "resume is an explicit persisted decision")
+resumed = owner.get(claim_sched.schedule_id)
+check(resumed.due_at == resume_at + 900,
+      "resume starts from a fresh future occurrence instead of replaying backlog")
+owner.set_enabled(claim_sched.schedule_id, True, now=resume_at + 100)
+check(owner.get(claim_sched.schedule_id).due_at == resumed.due_at,
+      "repeating an already-enabled toggle does not silently move the schedule")
+
+# A corrupt manual cadence disables itself and does not poison the claim batch.
+bad = owner.create("rig_status", {}, "every:900", now=NOW)
+good = owner.create("rig_status", {}, "every:900", now=NOW)
+with owner._lock:
+    owner._conn.execute("UPDATE schedules SET cadence='broken' WHERE id=?", (bad.schedule_id,))
+    owner._conn.commit()
+batch = owner.claim_due(now=NOW + 901)
+check(good.schedule_id in [c.schedule.schedule_id for c in batch],
+      "a malformed schedule does not block healthy due work")
+check(not owner.get(bad.schedule_id).enabled,
+      "the malformed schedule is disabled fail-closed")
+
+owner.close()
+peer.close()
 
 print(f"\n===== SCHEDULER: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
