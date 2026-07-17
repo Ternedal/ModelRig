@@ -39,6 +39,7 @@ travel. They are orthogonal.
 | `KALIV_MAX_UPLOAD_MB` | `25` |
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` |
 | `KALIV_SCHEDULER` | `` |
+| `KALIV_SCHEDULER_POLL_S` | `` |
 | `KALIV_TOOLS_DIR` | `(unset)` |
 | `KALIV_TOOLS_ENABLED` | `0` |
 | `KALIV_TOOL_ISOLATION` | `` |
@@ -121,6 +122,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_rag_cloud.py`
 - `tests/worker_read_scope.py`
 - `tests/worker_schedule_runner.py`
+- `tests/worker_schedule_service.py`
 - `tests/worker_scheduler.py`
 - `tests/worker_toolhost.py`
 - `tests/worker_tools.py`
