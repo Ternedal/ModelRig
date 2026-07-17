@@ -145,6 +145,40 @@ check(
 # /schedules and mint a standing write grant. The readiness gate must drive that
 # exact attack and see it fail. Merely spotting a field or a comment is not proof.
 
+# The probe returned False, which is the answer we want, and False is also what
+# a probe returns when it is aiming at a door that no longer exists. Anders
+# replaced the forgeable fingerprint with backend-issued single-use tokens while
+# this gate was still pointed at the old field; a probe that only knows
+# yesterday's attack reports safety forever. So require it to still be able to
+# REACH a create attempt -- if it cannot, every False it has returned means
+# "I could not find the door", which reads identically to safety.
+def _probe_can_still_reach_the_door() -> bool:
+    import tempfile as _tf
+
+    tmp = _tf.mkdtemp()
+    for var, name in (("KALIV_SCHEDULE_DB", "s.db"), ("KALIV_AUDIT_DB", "a.db"),
+                      ("KALIV_TOOLS_STATE", "st.json"), ("MODELRIG_DB", "r.db")):
+        os.environ.setdefault(var, os.path.join(tmp, name))
+    os.environ.setdefault("KALIV_TOOLS_DIR", tmp)
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app import schedule_api as _sapi
+
+    app = FastAPI()
+    app.include_router(_sapi.build_schedule_router())
+    client = TestClient(app, client=("127.0.0.1", 51234))
+    pv = client.post("/schedules/preview",
+                     json={"tool": "note_append", "args": {"text": "probe"},
+                           "cadence": "daily:03:00"})
+    return (pv.status_code == 200
+            and pv.json().get("preview", {}).get("approval_fingerprint") is not None)
+
+
+check(_probe_can_still_reach_the_door(),
+      "the bypass probe can still get a preview and a fingerprint, so its False "
+      "means 'refused' and not 'I could not find the way in'")
+
 approval_ok, approval_note = AR.schedule_approval_authority()
 check(
     approval_ok is True,

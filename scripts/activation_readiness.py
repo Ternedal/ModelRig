@@ -180,8 +180,28 @@ def _try_to_mint_a_standing_grant() -> bool | None:
         fp = preview.get("approval_fingerprint")
         if not fp:
             return None
-        created = client.post("/schedules", json={**body, "approved_fingerprint": fp})
-        return created.status_code in (200, 201)
+
+        # Three doors, because the one I knew about got closed and a probe that
+        # only knows yesterday's attack reports safety forever (F-608's lesson,
+        # applied to this gate). Any of them working is a standing grant minted
+        # without a human.
+        attempts = [
+            # 1. The retired bypass: a fingerprint anyone can compute. A
+            #    tombstone in the schema keeps this reachable on purpose.
+            {**body, "approved_fingerprint": fp},
+            # 2. No approval at all.
+            dict(body),
+            # 3. A token this process made up. The worker verifies a
+            #    backend-issued signature; a local caller has to be unable to
+            #    forge one, and "unable" is a claim worth testing rather than
+            #    reading.
+            {**body, "approval_token": "A" * 64},
+        ]
+        for payload in attempts:
+            created = client.post("/schedules", json=payload)
+            if created.status_code in (200, 201):
+                return True
+        return False
     except Exception as exc:  # noqa: BLE001
         # Say WHY. A probe that answers "could not test" without saying what
         # stopped it is the same bare except that hid F-501 for eight releases,
