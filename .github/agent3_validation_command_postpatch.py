@@ -96,4 +96,33 @@ replace_once(
       "committed file")''',
 )
 
+# PR and release use the same reusable test workflow. Parse every committed
+# PowerShell script there, so this operator command cannot regress into a file
+# that looks plausible in review but PowerShell refuses to load on the rig.
+tests_workflow = ROOT / ".github" / "workflows" / "_tests.yml"
+replace_once(
+    tests_workflow,
+    '''      - name: Python lint gate (syntax + undefined names)
+        run: |
+          pip install --quiet ruff
+          ruff check --select E9,F63,F7,F82 worker/ tests/
+
+      # Every integration + worker test, globbed so a new tests/*.py is included''',
+    '''      - name: Python lint gate (syntax + undefined names)
+        run: |
+          pip install --quiet ruff
+          ruff check --select E9,F63,F7,F82 worker/ tests/
+
+      - name: PowerShell syntax gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Get-ChildItem -Path . -Recurse -File -Filter *.ps1 | ForEach-Object {
+            [void][scriptblock]::Create((Get-Content -LiteralPath $_.FullName -Raw))
+            Write-Host "parsed $($_.FullName)"
+          }
+
+      # Every integration + worker test, globbed so a new tests/*.py is included''',
+)
+
 print("Agent3 validation command integration normalized")
