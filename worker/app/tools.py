@@ -204,8 +204,14 @@ class AuditLog:
     def recent(self, limit: int = 50) -> list[dict]:
         with self._lock:
             cur = self._conn.execute(
+                # confirmation_id was written but never SELECTed: the trail
+                # recorded WHICH approval authorised a write and then never
+                # showed it to anyone. For a scheduled write it carries the
+                # approval's fingerprint, which is the only way to answer "who
+                # allowed this at 03:00" without opening the database by hand.
                 "SELECT ts, conversation_id, tool, args_json, risk, outcome,"
-                " origin, result_summary, duration_ms FROM audit ORDER BY id DESC LIMIT ?",
+                " confirmation_id, origin, result_summary, duration_ms"
+                " FROM audit ORDER BY id DESC LIMIT ?",
                 (max(1, min(limit, 500)),),
             )
             cols = [c[0] for c in cur.description]
@@ -844,9 +850,19 @@ class ToolGate:
 
     def propose(self, name: str, args: dict, conversation_id: Optional[str] = None,
                 messages: Optional[list] = None, model: Optional[str] = None,
-                origin: str = "local") -> dict:
+                origin: str = "local", pre_approved: Optional[str] = None) -> dict:
         """A read tool runs now. A write tool returns a confirmation_id and
-        runs NOTHING until a human approves it."""
+        runs NOTHING until a human approves it.
+
+        `pre_approved` is the ONE exception, and it exists so the scheduler can
+        keep the gate's promise instead of routing around it. A scheduled write
+        cannot park for a card -- there is nobody awake to answer, and it would
+        expire before morning -- so Anders approves it when he CREATES the
+        schedule and that approval travels as a fingerprint of (tool, args).
+        Everything above still applies: kill-switch, disabled tools, audit. The
+        fingerprint must match the arguments being run right now, or the
+        approval is not for this action.
+        """
         # Sweep first, whatever this proposal turns out to be. Putting this in
         # the write branch meant a rig only ever asked for reads never cleaned
         # up at all -- T26 caught that, the code review did not.
@@ -888,6 +904,30 @@ class ToolGate:
                                       result_summary=f"egress: {tool.sensitivity}",
                                       origin=origin)
                     raise ToolDenied(why)
+
+        # A pre-approved scheduled write. Narrow on purpose: only from the
+        # scheduler, only when the fingerprint matches THESE arguments, and
+        # never for a desktop action -- a click at 03:00 cannot be approved in
+        # advance because the screen it would land on does not exist yet.
+        if pre_approved and requires_confirmation(tool, origin):
+            if origin != "schedule":
+                raise ToolDenied("forhåndsgodkendelse gælder kun planlagte kørsler")
+            if tool.risk == "desktop":
+                raise ToolDenied("skrivebordshandlinger kan ikke forhåndsgodkendes")
+            from .scheduler import fingerprint as _fp
+            if pre_approved != _fp(name, args):
+                self.audit.record(tool=name, args=args, risk=tool.risk,
+                                  outcome="blocked", conversation_id=conversation_id,
+                                  result_summary="pre-approval does not match args",
+                                  origin=origin)
+                raise ToolDenied(
+                    "godkendelsen gjaldt en anden handling end den der køres nu"
+                )
+            # The approval's fingerprint rides in the confirmation_id column, so
+            # the audit answers "who allowed this write at 03:00" with the exact
+            # approval it ran under -- not just "a schedule did it".
+            return self._execute(tool, args, conversation_id,
+                                 f"schedule:{pre_approved[:12]}", origin=origin)
 
         if not requires_confirmation(tool, origin):
             return {"status": "executed",
