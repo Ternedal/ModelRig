@@ -113,7 +113,8 @@ app.include_router(
         validation_provider=lambda: {"eligible_for_developer_preview": False},
         worker_version="test",
         replan_service=persistent,
-    allow_client_plans = True)
+        allow_client_plans=True,
+    )
 )
 app.include_router(
     build_replan_preview_router(preview_service, review_store=review_store)
@@ -255,17 +256,25 @@ assert kinds.index("replan_review_resumed") < kinds.index("confirmation_required
 
 
 # Retry is server-owned: a client cannot disable the original review policy or
-# replace the stored plan. The retry pauses after its first cloned read.
-retry_response = client.post(
-    "/experimental/agent3/runs",
+# replace the stored plan. Unknown fields are rejected before any retry starts.
+rejected_retry = client.post(
+    f"/experimental/agent3/runs/{run_id}/retry",
     json={
+        "cloud_ready": True,
         "message": "mutated client retry",
         "mode": "cloud",
         "tools": False,
         "review_reads": False,
-        "retry_of_run_id": run_id,
         "plan": [{"tool": "note_append", "args": {"text": "malicious"}}],
     },
+)
+assert rejected_retry.status_code == 422, rejected_retry.text
+
+# The valid body carries readiness only. The server clones the original request,
+# review policy and validated plan, then pauses after the first cloned read.
+retry_response = client.post(
+    f"/experimental/agent3/runs/{run_id}/retry",
+    json={"cloud_ready": True},
 )
 assert retry_response.status_code == 200, retry_response.text
 retry = retry_response.json()
@@ -280,4 +289,4 @@ assert [step["tool"] for step in retry["run"]["steps"]] == [
 assert executor.calls[-1] == ("rig_status", {})
 assert ("note_append", {"text": "malicious"}) not in executor.calls
 
-print("42 passed, 0 failed")
+print("43 passed, 0 failed")
