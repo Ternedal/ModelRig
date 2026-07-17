@@ -1,0 +1,109 @@
+name: one-shot-release-1-58-76
+
+on:
+  push:
+    branches: [ops/release-1-58-76]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: c30e4ac7373b329cc36c35680733906ca6a46090
+          fetch-depth: 1
+      - name: Verify target release identity
+        run: |
+          test "$(cat VERSION)" = "1.58.76"
+          test "$(git rev-parse HEAD)" = "c30e4ac7373b329cc36c35680733906ca6a46090"
+          python3 scripts/version_tool.py check
+      - name: Create draft release and tag exactly on main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v1.58.76
+          TARGET: c30e4ac7373b329cc36c35680733906ca6a46090
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists; verifying target"
+          else
+            gh release create "$TAG" \
+              --target "$TARGET" \
+              --draft \
+              --title "$TAG" \
+              --notes "Kaliv Planer is now available from the ordinary in-app overflow menu while retaining the launcher shortcut."
+          fi
+          tag_sha=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/$TAG" --jq '.object.sha')
+          test "$tag_sha" = "$TARGET" || { echo "tag target $tag_sha != $TARGET"; exit 1; }
+      - name: Find and follow atomic release workflow
+        id: release_run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v1.58.76
+          TARGET: c30e4ac7373b329cc36c35680733906ca6a46090
+        run: |
+          set -euo pipefail
+          run_id=""
+          for _ in $(seq 1 90); do
+            run_id=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-and-release.yml/runs?event=push&per_page=50" \
+              --jq ".workflow_runs[] | select(.head_branch == \"$TAG\" and .head_sha == \"$TARGET\") | .id" | head -n1)
+            [ -n "$run_id" ] && break
+            sleep 10
+          done
+          [ -n "$run_id" ] || { echo "build-and-release run never appeared"; exit 1; }
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          gh run watch "$run_id" --exit-status --interval 15
+      - name: Verify published assets and state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v1.58.76
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --json tagName,isDraft,url,assets > release.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path('release.json').read_text())
+          names = {asset['name'] for asset in data['assets']}
+          required = {
+              'modelrig-v1.58.76.apk',
+              'kaliv-latest.apk',
+              'modelrig-v1.58.76.zip',
+              'modelrig-server-windows-x64.exe',
+              'modelrig-worker-windows-x64.exe',
+              'modelrig-supervisor-windows-x64.exe',
+              'modelrig-updater-windows-x64.exe',
+              'SHA256SUMS.txt',
+          }
+          missing = sorted(required - names)
+          if missing:
+              raise SystemExit(f'missing release assets: {missing}; got {sorted(names)}')
+          if not any(name.endswith('.jar') for name in names):
+              raise SystemExit(f'missing desktop jar; got {sorted(names)}')
+          if data['isDraft']:
+              raise SystemExit('release is still draft after successful build workflow')
+          Path('release-verification.txt').write_text(
+              f"tag={data['tagName']}\nurl={data['url']}\nassets={len(names)}\n" +
+              "\n".join(sorted(names)) + "\n",
+              encoding='utf-8',
+          )
+          PY
+          cat release-verification.txt
+      - name: Upload release verification
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-1-58-76-verification
+          path: release-verification.txt
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove temporary release branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/ops/release-1-58-76"
