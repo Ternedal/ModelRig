@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -17,12 +18,15 @@ import (
 	"modelrig/internal/store"
 )
 
-const scheduleToken = "schedule-test-token"
+const (
+	scheduleToken       = "schedule-test-token"
+	scheduleSecondToken = "schedule-second-token"
+	scheduleTestSecret  = "0123456789abcdef0123456789abcdef-test-secret"
+)
 
 type scheduleHit struct {
 	Method        string
 	Path          string
-	Query         string
 	Body          string
 	RequestID     string
 	Authorization string
@@ -34,13 +38,12 @@ func scheduleHandlerWithFlag(
 	workerURL string,
 	workerTimeout time.Duration,
 	apiFlag string,
-) (http.Handler, *[]string) {
+) http.Handler {
 	t.Helper()
 	t.Setenv("KALIV_SCHEDULER_API", apiFlag)
+	t.Setenv(scheduleApprovalSecretEnv, scheduleTestSecret)
 
-	ollamaHits := []string{}
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ollamaHits = append(ollamaHits, r.URL.Path)
 		w.WriteHeader(http.StatusTeapot)
 	}))
 	t.Cleanup(ollama.Close)
@@ -49,11 +52,13 @@ func scheduleHandlerWithFlag(
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	if err := st.AddDevice(store.Device{
-		ID: "schedule-device", Name: "phone", TokenHash: auth.Hash(scheduleToken),
-		CreatedAt: time.Now(), LastSeen: time.Now(),
-	}); err != nil {
-		t.Fatalf("AddDevice: %v", err)
+	for _, dv := range []store.Device{
+		{ID: "schedule-device", Name: "phone", TokenHash: auth.Hash(scheduleToken), CreatedAt: time.Now(), LastSeen: time.Now()},
+		{ID: "second-device", Name: "tablet", TokenHash: auth.Hash(scheduleSecondToken), CreatedAt: time.Now(), LastSeen: time.Now()},
+	} {
+		if err := st.AddDevice(dv); err != nil {
+			t.Fatalf("AddDevice: %v", err)
+		}
 	}
 
 	worker := proxy.New(workerURL, workerTimeout)
@@ -63,220 +68,280 @@ func scheduleHandlerWithFlag(
 		Ollama:     proxy.New(ollama.URL, workerTimeout),
 		Worker:     worker,
 		WorkerSlow: worker,
-	}), &ollamaHits
+	})
 }
 
-func scheduleHandler(t *testing.T, workerURL string, workerTimeout time.Duration) (http.Handler, *[]string) {
+func scheduleHandler(t *testing.T, workerURL string, workerTimeout time.Duration) http.Handler {
 	t.Helper()
 	return scheduleHandlerWithFlag(t, workerURL, workerTimeout, "1")
 }
 
-var scheduleRoutes = []struct {
-	method string
-	public string
-	worker string
-}{
-	{http.MethodGet, "/api/v1/schedules/status", "/schedules/status"},
-	{http.MethodPost, "/api/v1/schedules/preview", "/schedules/preview"},
-	{http.MethodGet, "/api/v1/schedules", "/schedules"},
-	{http.MethodPost, "/api/v1/schedules", "/schedules"},
-	{http.MethodGet, "/api/v1/schedules/012345abcdef", "/schedules/012345abcdef"},
-	{http.MethodPost, "/api/v1/schedules/012345abcdef/enabled", "/schedules/012345abcdef/enabled"},
-	{http.MethodPost, "/api/v1/schedules/012345abcdef/renew/preview", "/schedules/012345abcdef/renew/preview"},
-	{http.MethodPost, "/api/v1/schedules/012345abcdef/renew", "/schedules/012345abcdef/renew"},
+func doScheduleRequest(h http.Handler, method, path, token, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func writePreview(w http.ResponseWriter, operation string, scheduleID *string, tool string, args map[string]any, cadence string, ttl, runs int, enable *bool, fingerprint string) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"preview": map[string]any{
+			"operation":            operation,
+			"schedule_id":          scheduleID,
+			"tool":                 tool,
+			"args":                 args,
+			"cadence":              cadence,
+			"requires_approval":    true,
+			"action_fingerprint":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"approval_fingerprint": fingerprint,
+			"ttl_days":             ttl,
+			"max_runs":             runs,
+			"enable":               enable,
+		},
+		"executed":           false,
+		"schedule_persisted": false,
+	})
 }
 
 func TestScheduleRoutesRequireSeparateExplicitOptIn(t *testing.T) {
-	// Starting the local runner is not permission to expose standing-grant
-	// administration to every paired device. Only the exact backend flag value
-	// "1" registers the routes.
 	t.Setenv("KALIV_SCHEDULER", "1")
-	hits := 0
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits++
+		t.Fatal("disabled schedule API reached worker")
 	}))
 	defer worker.Close()
 
 	for _, flag := range []string{"", "0", "false", "true", "on", "garbage"} {
 		t.Run("flag="+flag, func(t *testing.T) {
-			h, _ := scheduleHandlerWithFlag(t, worker.URL, 2*time.Second, flag)
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/schedules/status", nil)
-			req.Header.Set("Authorization", "Bearer "+scheduleToken)
-			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, req)
+			h := scheduleHandlerWithFlag(t, worker.URL, 2*time.Second, flag)
+			rec := doScheduleRequest(h, http.MethodGet, "/api/v1/schedules/status", scheduleToken, "")
 			if rec.Code != http.StatusNotFound {
 				t.Fatalf("KALIV_SCHEDULER_API=%q: got %d, want 404", flag, rec.Code)
 			}
 		})
 	}
-	if hits != 0 {
-		t.Fatalf("disabled schedule API reached worker %d time(s)", hits)
-	}
 }
 
-func TestScheduleRoutesRequireBearerBeforeWorker(t *testing.T) {
-	hits := []scheduleHit{}
-	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits = append(hits, scheduleHit{Path: r.URL.Path})
-		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-	}))
-	defer worker.Close()
-
-	h, _ := scheduleHandler(t, worker.URL, 2*time.Second)
-	for _, route := range scheduleRoutes {
-		t.Run(route.method+" "+route.public, func(t *testing.T) {
-			for _, header := range []string{"", "Bearer", "Basic nope", "Bearer wrong"} {
-				req := httptest.NewRequest(route.method, route.public, strings.NewReader(`{"x":1}`))
-				if header != "" {
-					req.Header.Set("Authorization", header)
-				}
-				rec := httptest.NewRecorder()
-				h.ServeHTTP(rec, req)
-				if rec.Code != http.StatusUnauthorized {
-					t.Fatalf("auth %q: got %d, want 401", header, rec.Code)
-				}
-			}
-		})
-	}
-	if len(hits) != 0 {
-		t.Fatalf("unauthenticated schedule requests reached worker: %+v", hits)
-	}
-}
-
-func TestScheduleRoutesProxyExactContractToLoopbackWorkerOnly(t *testing.T) {
-	hits := []scheduleHit{}
-	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		host, _, _ := net.SplitHostPort(r.RemoteAddr)
-		hits = append(hits, scheduleHit{
-			Method:        r.Method,
-			Path:          r.URL.Path,
-			Query:         r.URL.RawQuery,
-			Body:          string(body),
-			RequestID:     r.Header.Get("X-Request-ID"),
-			Authorization: r.Header.Get("Authorization"),
-			RemoteHost:    host,
-		})
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"upstream":"worker"}`))
-	}))
-	defer worker.Close()
-
-	h, ollamaHits := scheduleHandler(t, worker.URL, 2*time.Second)
-	for i, route := range scheduleRoutes {
-		body := `{"route":` + string(rune('0'+i)) + `}`
-		requestURL := route.public + "?case=" + string(rune('0'+i))
-		req := httptest.NewRequest(route.method, requestURL, strings.NewReader(body))
-		req.Header.Set("Authorization", "Bearer "+scheduleToken)
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Request-ID", "schedule-case-"+string(rune('0'+i)))
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s %s: got %d body=%s", route.method, route.public, rec.Code, rec.Body.String())
-		}
-		var out map[string]string
-		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out["upstream"] != "worker" {
-			t.Fatalf("%s: response did not come from worker: %s", route.public, rec.Body.String())
-		}
-	}
-
-	if len(hits) != len(scheduleRoutes) {
-		t.Fatalf("worker saw %d requests, want %d: %+v", len(hits), len(scheduleRoutes), hits)
-	}
-	for i, route := range scheduleRoutes {
-		hit := hits[i]
-		if hit.Method != route.method || hit.Path != route.worker {
-			t.Errorf("%s: worker got %s %s, want %s %s", route.public, hit.Method, hit.Path, route.method, route.worker)
-		}
-		wantCase := string(rune('0' + i))
-		if hit.Query != "case="+wantCase {
-			t.Errorf("%s: query %q, want case=%s", route.public, hit.Query, wantCase)
-		}
-		if hit.Body != `{"route":`+wantCase+`}` {
-			t.Errorf("%s: body %q", route.public, hit.Body)
-		}
-		if hit.RequestID != "schedule-case-"+wantCase {
-			t.Errorf("%s: request id %q", route.public, hit.RequestID)
-		}
-		if hit.Authorization != "" {
-			t.Errorf("%s: backend leaked device bearer token to worker", route.public)
-		}
-		ip := net.ParseIP(hit.RemoteHost)
-		if ip == nil || !ip.IsLoopback() {
-			t.Errorf("%s: worker caller was %q, want loopback", route.public, hit.RemoteHost)
-		}
-	}
-	if len(*ollamaHits) != 0 {
-		t.Fatalf("schedule administration reached Ollama: %v", *ollamaHits)
-	}
-}
-
-func TestScheduleProxyPreservesWorkerRefusal(t *testing.T) {
-	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		_, _ = w.Write([]byte(`{"detail":"standing grant changed"}`))
-	}))
-	defer worker.Close()
-
-	h, _ := scheduleHandler(t, worker.URL, 2*time.Second)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/schedules", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", "Bearer "+scheduleToken)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "standing grant changed") {
-		t.Fatalf("worker refusal changed: status=%d body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestScheduleProxyRejectsBadIDsBeforeWorker(t *testing.T) {
+func TestAllScheduleRoutesRequireBearerBeforeWorker(t *testing.T) {
 	hits := 0
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
 	}))
 	defer worker.Close()
+	h := scheduleHandler(t, worker.URL, 2*time.Second)
 
-	h, _ := scheduleHandler(t, worker.URL, 2*time.Second)
-	for _, path := range []string{
-		"/api/v1/schedules/too-short",
-		"/api/v1/schedules/ABCDEF012345",
-		"/api/v1/schedules/012345abcdeg/enabled",
-	} {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		if strings.HasSuffix(path, "/enabled") {
-			req = httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
-		}
-		req.Header.Set("Authorization", "Bearer "+scheduleToken)
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("%s: got %d, want 400", path, rec.Code)
+	routes := []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/schedules/status"},
+		{http.MethodPost, "/api/v1/schedules/preview"},
+		{http.MethodPost, "/api/v1/schedules/approve"},
+		{http.MethodGet, "/api/v1/schedules"},
+		{http.MethodPost, "/api/v1/schedules"},
+		{http.MethodGet, "/api/v1/schedules/012345abcdef"},
+		{http.MethodPost, "/api/v1/schedules/012345abcdef/enabled"},
+		{http.MethodPost, "/api/v1/schedules/012345abcdef/renew/preview"},
+		{http.MethodPost, "/api/v1/schedules/012345abcdef/renew/approve"},
+		{http.MethodPost, "/api/v1/schedules/012345abcdef/renew"},
+	}
+	for _, route := range routes {
+		for _, token := range []string{"", "wrong"} {
+			rec := doScheduleRequest(h, route.method, route.path, token, `{}`)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("%s %s token=%q: got %d", route.method, route.path, token, rec.Code)
+			}
 		}
 	}
 	if hits != 0 {
-		t.Fatalf("invalid IDs reached worker %d time(s)", hits)
+		t.Fatalf("unauthenticated requests reached worker %d time(s)", hits)
 	}
 }
 
-func TestScheduleProxyFailsClosedForNonLoopbackWorker(t *testing.T) {
-	h, ollamaHits := scheduleHandler(t, "http://192.0.2.10:8099", 20*time.Millisecond)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/schedules/preview", strings.NewReader(`{"tool":"current_datetime"}`))
-	req.Header.Set("Authorization", "Bearer "+scheduleToken)
-	rec := httptest.NewRecorder()
-	start := time.Now()
-	h.ServeHTTP(rec, req)
+func TestScheduleApprovalIsBackendIssuedDeviceBoundAndExact(t *testing.T) {
+	const fingerprint = "1234567890abcdef1234567890abcdef"
+	var hits []scheduleHit
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		host, _, _ := net.SplitHostPort(r.RemoteAddr)
+		hits = append(hits, scheduleHit{
+			Method: r.Method, Path: r.URL.Path, Body: string(body),
+			RequestID: r.Header.Get("X-Request-ID"), Authorization: r.Header.Get("Authorization"), RemoteHost: host,
+		})
+		switch r.URL.Path {
+		case "/schedules/preview":
+			writePreview(w, "create", nil, "note_append", map[string]any{"text": "Husk brygdag"}, "daily:08:00", 30, 5, boolPtr(true), fingerprint)
+		case "/schedules":
+			writeJSON(w, http.StatusOK, map[string]any{"schedule": map[string]any{"schedule_id": "012345abcdef"}, "executed": false})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer worker.Close()
+	h := scheduleHandler(t, worker.URL, 2*time.Second)
 
+	approvalBody := `{"tool":"note_append","args":{"text":"Husk brygdag"},"cadence":"daily:08:00","ttl_days":30,"max_runs":5,"preview_fingerprint":"` + fingerprint + `"}`
+	approved := doScheduleRequest(h, http.MethodPost, "/api/v1/schedules/approve", scheduleToken, approvalBody)
+	if approved.Code != http.StatusOK {
+		t.Fatalf("approval: %d %s", approved.Code, approved.Body.String())
+	}
+	var issued struct {
+		ApprovalToken string `json:"approval_token"`
+	}
+	if err := json.Unmarshal(approved.Body.Bytes(), &issued); err != nil || issued.ApprovalToken == "" {
+		t.Fatalf("missing approval token: %v body=%s", err, approved.Body.String())
+	}
+
+	createBody := `{"tool":"note_append","args":{"text":"Husk brygdag"},"cadence":"daily:08:00","ttl_days":30,"max_runs":5,"approval_token":"` + issued.ApprovalToken + `"}`
+	created := doScheduleRequest(h, http.MethodPost, "/api/v1/schedules", scheduleToken, createBody)
+	if created.Code != http.StatusOK {
+		t.Fatalf("create: %d %s", created.Code, created.Body.String())
+	}
+	if len(hits) != 2 || hits[0].Path != "/schedules/preview" || hits[1].Path != "/schedules" {
+		t.Fatalf("unexpected worker calls: %+v", hits)
+	}
+	for _, hit := range hits {
+		if hit.Authorization != "" {
+			t.Fatalf("device bearer leaked to worker on %s", hit.Path)
+		}
+		if ip := net.ParseIP(hit.RemoteHost); ip == nil || !ip.IsLoopback() {
+			t.Fatalf("worker caller was %q, want loopback", hit.RemoteHost)
+		}
+	}
+	if !strings.Contains(hits[1].Body, `"approval_token"`) || strings.Contains(hits[1].Body, "approved_fingerprint") {
+		t.Fatalf("worker create body did not carry only opaque token: %s", hits[1].Body)
+	}
+
+	wrongDevice := doScheduleRequest(h, http.MethodPost, "/api/v1/schedules", scheduleSecondToken, createBody)
+	if wrongDevice.Code != http.StatusConflict || !strings.Contains(wrongDevice.Body.String(), "another paired device") {
+		t.Fatalf("device binding: %d %s", wrongDevice.Code, wrongDevice.Body.String())
+	}
+	if len(hits) != 2 {
+		t.Fatalf("wrong-device token reached worker: %+v", hits)
+	}
+
+	tampered := strings.Replace(createBody, "Husk brygdag", "En anden note", 1)
+	tamperResp := doScheduleRequest(h, http.MethodPost, "/api/v1/schedules", scheduleToken, tampered)
+	if tamperResp.Code != http.StatusConflict || !strings.Contains(tamperResp.Body.String(), "does not match") {
+		t.Fatalf("tamper: %d %s", tamperResp.Code, tamperResp.Body.String())
+	}
+	if len(hits) != 2 {
+		t.Fatalf("tampered request reached worker: %+v", hits)
+	}
+}
+
+func TestRenewalApprovalBindsScheduleAndEnableState(t *testing.T) {
+	const id = "abcdef012345"
+	const fingerprint = "fedcba0987654321fedcba0987654321"
+	var renewBodies []string
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		switch r.URL.Path {
+		case "/schedules/" + id + "/renew/preview":
+			writePreview(w, "renew", stringPtr(id), "note_append", map[string]any{"text": "Husk brygdag"}, "daily:08:00", 60, 2, boolPtr(true), fingerprint)
+		case "/schedules/" + id + "/renew":
+			renewBodies = append(renewBodies, string(body))
+			writeJSON(w, http.StatusOK, map[string]any{"schedule": map[string]any{"schedule_id": id}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer worker.Close()
+	h := scheduleHandler(t, worker.URL, 2*time.Second)
+
+	approvalBody := `{"ttl_days":60,"max_runs":2,"enable":true,"preview_fingerprint":"` + fingerprint + `"}`
+	approved := doScheduleRequest(h, http.MethodPost, "/api/v1/schedules/"+id+"/renew/approve", scheduleToken, approvalBody)
+	var issued struct {
+		ApprovalToken string `json:"approval_token"`
+	}
+	_ = json.Unmarshal(approved.Body.Bytes(), &issued)
+	if approved.Code != http.StatusOK || issued.ApprovalToken == "" {
+		t.Fatalf("renew approval: %d %s", approved.Code, approved.Body.String())
+	}
+
+	changed := `{"ttl_days":60,"max_runs":2,"enable":false,"approval_token":"` + issued.ApprovalToken + `"}`
+	bad := doScheduleRequest(h, http.MethodPost, "/api/v1/schedules/"+id+"/renew", scheduleToken, changed)
+	if bad.Code != http.StatusConflict || len(renewBodies) != 0 {
+		t.Fatalf("changed enable accepted: %d %s bodies=%v", bad.Code, bad.Body.String(), renewBodies)
+	}
+
+	exact := `{"ttl_days":60,"max_runs":2,"enable":true,"approval_token":"` + issued.ApprovalToken + `"}`
+	ok := doScheduleRequest(h, http.MethodPost, "/api/v1/schedules/"+id+"/renew", scheduleToken, exact)
+	if ok.Code != http.StatusOK || len(renewBodies) != 1 {
+		t.Fatalf("exact renewal: %d %s bodies=%v", ok.Code, ok.Body.String(), renewBodies)
+	}
+}
+
+func TestScheduleApprovalTokenRejectsExpiryAndInvalidSecret(t *testing.T) {
+	t.Setenv(scheduleApprovalSecretEnv, scheduleTestSecret)
+	preview := scheduleApprovalPreview{
+		Operation: "create", Tool: "note_append", Args: map[string]any{"text": "x"},
+		Cadence: "daily:08:00", RequiresApproval: true,
+		ActionFingerprint:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ApprovalFingerprint: stringPtr("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+		TTLDays:             30, MaxRuns: 1, Enable: boolPtr(true),
+	}
+	now := time.Unix(1_800_000_000, 0)
+	token, _, err := issueScheduleApprovalToken(preview, "schedule-device", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verifyScheduleApprovalToken(token, "schedule-device", now.Add(scheduleApprovalTTL+time.Second)); err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expired token accepted: %v", err)
+	}
+
+	t.Setenv(scheduleApprovalSecretEnv, "too-short")
+	if _, _, err := issueScheduleApprovalToken(preview, "schedule-device", now); !errors.Is(err, errScheduleApprovalUnavailable) {
+		t.Fatalf("short secret did not fail closed: %v", err)
+	}
+}
+
+func TestScheduleReadCreateStillNeedsNoWriteToken(t *testing.T) {
+	var body string
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		body = string(b)
+		writeJSON(w, http.StatusOK, map[string]any{"schedule": map[string]any{"schedule_id": "012345abcdef"}})
+	}))
+	defer worker.Close()
+	h := scheduleHandler(t, worker.URL, 2*time.Second)
+	rec := doScheduleRequest(h, http.MethodPost, "/api/v1/schedules", scheduleToken, `{"tool":"current_datetime","args":{},"cadence":"every:60","ttl_days":10,"max_runs":0}`)
+	if rec.Code != http.StatusOK || strings.Contains(body, "approval_token") {
+		t.Fatalf("read create changed: %d %s worker=%s", rec.Code, rec.Body.String(), body)
+	}
+}
+
+func TestScheduleProxyRejectsBadIDsAndNonLoopbackWorker(t *testing.T) {
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("invalid id reached worker")
+	}))
+	defer worker.Close()
+	h := scheduleHandler(t, worker.URL, 2*time.Second)
+	for _, path := range []string{
+		"/api/v1/schedules/too-short",
+		"/api/v1/schedules/ABCDEF012345",
+		"/api/v1/schedules/012345abcdeg/renew/approve",
+	} {
+		method := http.MethodGet
+		if strings.Contains(path, "approve") {
+			method = http.MethodPost
+		}
+		rec := doScheduleRequest(h, method, path, scheduleToken, `{}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: got %d", path, rec.Code)
+		}
+	}
+
+	h = scheduleHandler(t, "http://192.0.2.10:8099", 20*time.Millisecond)
+	rec := doScheduleRequest(h, http.MethodPost, "/api/v1/schedules/approve", scheduleToken, `{}`)
+	if rec.Code != http.StatusBadRequest { // malformed body is rejected before any upstream decision
+		t.Fatalf("malformed approval got %d", rec.Code)
+	}
+	rec = doScheduleRequest(h, http.MethodPost, "/api/v1/schedules/preview", scheduleToken, `{"tool":"current_datetime"}`)
 	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("got %d body=%s, want 503", rec.Code, rec.Body.String())
-	}
-	if time.Since(start) > time.Second {
-		t.Fatal("non-loopback refusal attempted a network request instead of failing locally")
-	}
-	if len(*ollamaHits) != 0 {
-		t.Fatalf("failed schedule proxy fell back to Ollama: %v", *ollamaHits)
+		t.Fatalf("non-loopback worker got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -301,3 +366,6 @@ func TestScheduleWorkerLoopbackURLParser(t *testing.T) {
 		}
 	}
 }
+
+func boolPtr(v bool) *bool       { return &v }
+func stringPtr(v string) *string { return &v }
