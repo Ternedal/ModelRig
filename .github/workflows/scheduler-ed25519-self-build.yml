@@ -1,15 +1,13 @@
 name: scheduler-ed25519-self-build
 
 on:
-  pull_request:
-    branches: [main]
+  workflow_call:
 
 permissions:
   contents: write
 
 jobs:
   build:
-    if: github.actor != 'github-actions[bot]' && github.head_ref == 'build/scheduler-approval-token-inspect'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -110,6 +108,7 @@ jobs:
           set -euo pipefail
           rm -rf .github/scheduler-build
           rm .github/workflows/scheduler-ed25519-self-build.yml
+          git checkout origin/main -- .github/workflows/ci.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
