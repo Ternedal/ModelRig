@@ -36,3 +36,8 @@ kaliv-tools-state.json.tmp
 # Review and copy a successful run to a dated evidence filename before committing.
 /validation/agent3-rig-validation-latest.json
 /validation/agent3-rig-validation-latest.json.tmp
+
+# Written at build time by scripts/stamp_build_identity.py. Committing it would
+# freeze a fingerprint of whatever the tree looked like on someone laptop --
+# another number typed into a file that stops being true the next commit.
+worker/app/_build_stamp.py

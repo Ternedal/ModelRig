@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import logging
+import os
 import json
 import re
 import subprocess
@@ -78,8 +80,6 @@ def validation() -> dict:
     Absent is the normal case and the honest one: this repo has never had a
     physical validation run recorded for the version on main.
     """
-    import os
-
     sys.path.insert(0, str(ROOT / "worker"))
     from app.build_identity import code_fingerprint  # noqa: PLC0415
     from app.agent3.validation_gate import assess_report  # noqa: PLC0415
@@ -109,6 +109,51 @@ def validation() -> dict:
     a["path"] = path
     a["ready"] = bool(a.get("ready") or a.get("promotable"))
     return a
+
+
+def _try_to_mint_a_standing_grant() -> bool | None:
+    """Actually attempt the bypass. True = it worked, False = refused, None = could not test.
+
+    A negative end-to-end test, because the alternative -- asking the source
+    whether it looks safe -- is how a comment came to be evidence of security.
+    """
+    import os  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
+
+    try:
+        tmp = tempfile.mkdtemp()
+        os.environ.setdefault("KALIV_SCHEDULE_DB", os.path.join(tmp, "s.db"))
+        os.environ.setdefault("KALIV_AUDIT_DB", os.path.join(tmp, "a.db"))
+        os.environ.setdefault("KALIV_TOOLS_STATE", os.path.join(tmp, "st.json"))
+        os.environ.setdefault("KALIV_TOOLS_DIR", tmp)
+
+        from fastapi import FastAPI  # noqa: PLC0415
+        from fastapi.testclient import TestClient  # noqa: PLC0415
+
+        from app.schedule_api import build_schedule_router  # noqa: PLC0415
+
+        app = FastAPI()
+        app.include_router(build_schedule_router())
+        # A loopback caller: exactly what a shell/http/MCP tool would be.
+        client = TestClient(app, client=("127.0.0.1", 51234))
+
+        body = {"tool": "note_append", "args": {"text": "probe"},
+                "cadence": "daily:03:00"}
+        pv = client.post("/schedules/preview", json=body)
+        if pv.status_code != 200:
+            return None
+        preview = pv.json().get("preview") or {}
+        fp = preview.get("approval_fingerprint")
+        if not fp:
+            return None
+        created = client.post("/schedules", json={**body, "approved_fingerprint": fp})
+        return created.status_code in (200, 201)
+    except Exception as exc:  # noqa: BLE001
+        # Say WHY. A probe that answers "could not test" without saying what
+        # stopped it is the same bare except that hid F-501 for eight releases,
+        # and I wrote this one twenty minutes after fixing that.
+        logging.getLogger(__name__).warning("kunne ikke afprøve schedule-godkendelsen: %r", exc)
+        return None
 
 
 def plan_authority() -> tuple[bool, str]:
@@ -168,11 +213,25 @@ def schedule_approval_authority() -> tuple[bool, str]:
         if "approved_fingerprint" not in fields:
             return True, "godkendelsen kommer ikke fra klienten"
 
-        src = (ROOT / "worker" / "app" / "schedule_api.py").read_text(encoding="utf-8")
-        has_auth = any(t in src for t in ("Bearer", "Depends(", "operator_session",
-                                          "approval_token", "consume_approval"))
-        if has_auth:
-            return True, "schedule-administration kræver mere end loopback"
+        # This used to grep schedule_api.py for "Bearer", "Depends(" and friends
+        # (F-612). A TODO comment mentioning Bearer flipped the verdict from
+        # blocked to safe -- I verified it, and it did. A gate whose job is to
+        # stop someone activating on a false premise, defeated by a comment, is
+        # worse than no gate: it is a false premise wearing a badge.
+        #
+        # So we do not read about the door. We try it: compute the fingerprint
+        # the way any local process could, and attempt to create a standing
+        # grant over loopback with no credential. If that works, the approval
+        # proves knowledge and nothing else, whatever the source code says.
+        opened = _try_to_mint_a_standing_grant()
+        if opened is False:
+            return True, "en lokal proces uden legitimation kan ikke oprette et standing grant"
+        if opened is None:
+            return False, (
+                "**Kunne ikke afprøve godkendelsen.** Gaten nægter at gætte: den "
+                "spurgte tidligere kildekoden om der stod \"Bearer\" et sted, og "
+                "en kommentar kunne svare ja"
+            )
         return False, (
             "**En planlagt skrivnings godkendelse beviser kendskab, ikke samtykke.** "
             "`approved_fingerprint` er `sha256(tool + args)` — ikke en hemmelighed, "

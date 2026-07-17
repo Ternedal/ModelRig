@@ -282,6 +282,14 @@ jobs:
       - name: Build worker exe (PyInstaller)
         run: |
           pip install -r worker/requirements.txt pyinstaller
+          # The packed worker has no source tree to hash, and hashing its own exe
+          # answers a different question than the readiness page asks (F-607).
+          # Decide the code identity here, from the code, and pack it in -- so a
+          # frozen worker reports what it was BUILT FROM and the two sides can
+          # actually be compared. Without this the exe raises rather than
+          # guessing, which is deliberate: a worker that cannot say what it is
+          # does not get to take part in physical evidence.
+          python scripts/stamp_build_identity.py
           pyinstaller --onefile --name modelrig-worker-windows-x64 --paths worker worker/run_worker.py
       - name: Build supervisor exe
         # Keeps the worker + server alive at logon (scripts/kaliv-autostart.ps1).

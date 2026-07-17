@@ -120,5 +120,32 @@ try:
 finally:
     _CSR.model_fields = _saved
 
+# --- the gate must try the door, not read about it (F-612) -----------------
+# This check used to grep schedule_api.py for "Bearer", "Depends(" and friends.
+# A TODO comment mentioning Bearer flipped the verdict from blocked to safe --
+# verified, it did. A gate whose job is to stop someone activating on a false
+# premise, defeated by a comment, is a false premise wearing a badge.
+
+_opened = AR._try_to_mint_a_standing_grant()
+check(_opened is True,
+      "the gate PROVES the bypass rather than describing it: a loopback caller "
+      "with no credential previews, gets the fingerprint, and creates a standing "
+      "grant for a write tool"
+      if _opened is True
+      else f"the probe could not demonstrate the bypass (got {_opened!r}) -- a gate "
+           "that cannot test is back to guessing")
+
+# The comment trick must not work any more.
+_api = ROOT / "worker" / "app" / "schedule_api.py"
+_orig = _api.read_text(encoding="utf-8")
+try:
+    _api.write_text("# TODO: consider Bearer tokens and Depends() one day\n" + _orig,
+                    encoding="utf-8")
+    _ok, _ = AR.schedule_approval_authority()
+    check(_ok is False,
+          "a comment saying 'Bearer' no longer makes the approval look safe")
+finally:
+    _api.write_text(_orig, encoding="utf-8")
+
 print(f"\n===== ACTIVATION READINESS: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

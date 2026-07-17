@@ -27,6 +27,12 @@ _APP = Path(__file__).resolve().parent
 _cached: str | None = None
 
 
+# Written by scripts/stamp_build_identity.py immediately before PyInstaller
+# packs the worker, and EXCLUDED from the hash below -- otherwise stamping the
+# tree would change the tree it just measured.
+_STAMP = _APP / "_build_stamp.py"
+
+
 def _hash_source_tree() -> str:
     """Fingerprint every module this worker could import.
 
@@ -36,7 +42,7 @@ def _hash_source_tree() -> str:
     """
     h = hashlib.sha256()
     for path in sorted(_APP.rglob("*.py")):
-        if "__pycache__" in path.parts:
+        if "__pycache__" in path.parts or path.name == "_build_stamp.py":
             continue
         rel = path.relative_to(_APP).as_posix()
         h.update(rel.encode("utf-8"))
@@ -45,14 +51,35 @@ def _hash_source_tree() -> str:
     return h.hexdigest()
 
 
-def _hash_frozen_binary() -> str:
-    """A PyInstaller build has no source tree -- the exe IS the code."""
-    exe = Path(sys.executable)
-    h = hashlib.sha256()
-    with exe.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
+def _frozen_identity() -> str:
+    """What a packed worker reports (F-607).
+
+    This used to hash the exe, and that made the whole binding useless: the
+    readiness page runs from a source checkout and computes a tree hash, the
+    appliance runs frozen and computed a binary hash, and the two are hashes of
+    DIFFERENT THINGS. They can never be equal, so code_match on the real Windows
+    appliance was False forever -- physical validation, the gate everything else
+    waits behind, could not be passed. I shipped that, having written
+    `"frozen": bool` into describe() an hour earlier: I knew there were two
+    modes and never asked whether they could be compared.
+
+    The identity we want is of the CODE, not of the packaging. So the build
+    stamps the source-tree fingerprint in before packing, and a frozen worker
+    reports what it was built FROM. Same code, same answer, either side.
+
+    No stamp is fail-loud on purpose: a packed worker that cannot say what it
+    was built from cannot take part in physical evidence, and quietly falling
+    back to an exe hash is exactly how this was broken in the first place.
+    """
+    try:
+        from ._build_stamp import CODE_SHA256  # type: ignore[attr-defined]
+    except ImportError as exc:  # pragma: no cover - only on a mis-built exe
+        raise RuntimeError(
+            "denne pakkede worker har intet build-stempel: den kan ikke sige "
+            "hvilken kode den er bygget af, og kan derfor ikke indgå i fysisk "
+            "validering (kør scripts/stamp_build_identity.py før PyInstaller)"
+        ) from exc
+    return CODE_SHA256
 
 
 def code_fingerprint() -> str:
@@ -64,7 +91,7 @@ def code_fingerprint() -> str:
     """
     global _cached
     if _cached is None:
-        _cached = (_hash_frozen_binary() if getattr(sys, "frozen", False)
+        _cached = (_frozen_identity() if getattr(sys, "frozen", False)
                    else _hash_source_tree())
     return _cached
 
