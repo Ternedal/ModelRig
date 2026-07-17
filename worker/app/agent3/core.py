@@ -558,8 +558,8 @@ class Agent3Orchestrator:
                 step.error = "Execution was interrupted; verify the side effect manually before resuming"
                 run.state = RunState.BLOCKED
                 run.error = step.error
-                self.store.save(run)
-                self.store.event(run.id, "interrupted_execution", {"step_id": step.id, "tool": step.tool})
+                self.store.save_with_event(
+                    run, "interrupted_execution", {"step_id": step.id, "tool": step.tool})
                 return run
             if step.state == StepState.WAITING_CONFIRMATION:
                 run.state = RunState.WAITING_CONFIRMATION
@@ -593,9 +593,8 @@ class Agent3Orchestrator:
                 step.confirmation_digest = self._digest(step)
                 step.confirmation_expires_at = time.time() + self.confirmation_ttl_seconds
                 run.state = RunState.WAITING_CONFIRMATION
-                self.store.save(run)
-                self.store.event(
-                    run.id,
+                self.store.save_with_event(
+                    run,
                     "confirmation_required",
                     {
                         "step_id": step.id,
@@ -615,8 +614,7 @@ class Agent3Orchestrator:
 
         run.state = RunState.COMPLETED
         run.answer = self.answerer(run)
-        self.store.save(run)
-        self.store.event(run.id, "run_completed", {"steps": len(run.steps)})
+        self.store.save_with_event(run, "run_completed", {"steps": len(run.steps)})
         return run
 
     def confirm(self, run_id: str, step_id: str, decision: str, digest: str) -> AgentRun:
@@ -634,8 +632,7 @@ class Agent3Orchestrator:
             step.error = "Confirmation expired"
             run.state = RunState.CANCELLED
             run.error = step.error
-            self.store.save(run)
-            self.store.event(run.id, "confirmation_expired", {"step_id": step.id})
+            self.store.save_with_event(run, "confirmation_expired", {"step_id": step.id})
             raise ConfirmationError("confirmation expired")
         if decision not in {"approve", "deny"}:
             raise ConfirmationError("decision must be approve or deny")
@@ -645,8 +642,7 @@ class Agent3Orchestrator:
             run.state = RunState.CANCELLED
             run.error = step.error
             step.confirmation_digest = None
-            self.store.save(run)
-            self.store.event(run.id, "confirmation_denied", {"step_id": step.id})
+            self.store.save_with_event(run, "confirmation_denied", {"step_id": step.id})
             return run
 
         # Persist approval before executing. If the process dies after this write,
@@ -655,8 +651,11 @@ class Agent3Orchestrator:
         step.state = StepState.APPROVED
         step.confirmation_digest = None
         run.state = RunState.RUNNING
-        self.store.save(run)
-        self.store.event(run.id, "confirmation_approved", {"step_id": step.id, "tool": step.tool})
+        # The most consequential pair in the file: this is the record that a
+        # human said yes. State without the event is an approval nobody can
+        # attribute; the event without the state is a yes the run never heard.
+        self.store.save_with_event(
+            run, "confirmation_approved", {"step_id": step.id, "tool": step.tool})
         return self.advance(run.id)
 
     def cancel(self, run_id: str) -> AgentRun:
@@ -671,8 +670,11 @@ class Agent3Orchestrator:
 
     def _execute(self, run: AgentRun, step: AgentStep) -> None:
         step.state = StepState.EXECUTING
-        self.store.save(run)
-        self.store.event(run.id, "step_started", {"step_id": step.id, "tool": step.tool})
+        # EXECUTING is the state that makes a resume fail closed rather than
+        # replay a side effect. If it lands without its event, the timeline
+        # cannot say what the rig was doing when it died.
+        self.store.save_with_event(
+            run, "step_started", {"step_id": step.id, "tool": step.tool})
         try:
             step.result = self.executor(step)
             # The executor is synchronous and has no cancellation handle, so a
@@ -703,18 +705,23 @@ class Agent3Orchestrator:
                 return
             step.state = StepState.SUCCEEDED
             step.error = None
-            self.store.event(run.id, "step_succeeded", {"step_id": step.id, "tool": step.tool})
+            # These two had the event BEFORE the trailing save -- the opposite
+            # order from everything else in this class, and the same lie
+            # mirrored: a crash in the gap leaves "step_succeeded" in the
+            # timeline against a state still saying EXECUTING, or a run marked
+            # FAILED that the journal never explains. One commit, either way.
+            self.store.save_with_event(
+                run, "step_succeeded", {"step_id": step.id, "tool": step.tool})
         except Exception as exc:
             step.state = StepState.FAILED
             step.error = str(exc)
             run.state = RunState.FAILED
             run.error = f"{step.tool} failed: {exc}"
-            self.store.event(
-                run.id,
+            self.store.save_with_event(
+                run,
                 "step_failed",
                 {"step_id": step.id, "tool": step.tool, "error": str(exc)},
             )
-        self.store.save(run)
 
     def _cancelled_since(self, run_id: str) -> bool:
         """Did someone cancel while we were inside the executor?

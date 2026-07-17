@@ -139,5 +139,45 @@ check(store.load("r-3").state == RunState.CANCELLED
       "the two-step path CAN leave a cancelled run with no cancellation event "
       "-- which is exactly the state save_with_event makes unreachable")
 
+# --- the claim I made in 1.58.70, now enforced instead of asserted ----------
+# I wrote that the remaining save/event pairs were "progress reporting, where an
+# orphan is noise rather than a lie". I did not check. Nine of the twelve were
+# state transitions -- including confirmation_approved (the record that a human
+# said yes), run_completed, and, with some irony, interrupted_execution. Two of
+# them wrote the event BEFORE the save, which is the same lie mirrored: a
+# timeline saying step_succeeded against a state still reading EXECUTING.
+#
+# So this does not trust my reading of the file. It reads the file.
+
+import re as _re  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+
+_src = (_Path(__file__).resolve().parents[1] / "worker" / "app" / "agent3"
+        / "core.py").read_text(encoding="utf-8").splitlines()
+
+_offenders = []
+for _i, _line in enumerate(_src):
+    if not _re.search(r"self\.store\.event\(", _line):
+        continue
+    _window = "\n".join(_src[max(0, _i - 6):_i])
+    if _re.search(r"(run|step)\.state\s*=", _window):
+        _kind = _re.search(r'event\(\s*run\.id,\s*"([^"]+)"', _line)
+        _offenders.append(f"core.py:{_i + 1} ({_kind.group(1) if _kind else '?'})")
+
+check(not _offenders,
+      "every state transition writes its state and its event in one commit"
+      if not _offenders
+      else "STATE CHANGED, EVENT COMMITTED SEPARATELY -- a crash in the gap "
+           f"leaves a history that disagrees with itself: {', '.join(_offenders)}")
+
+# The detector must be able to fail, or it is decoration.
+_fake = ["        run.state = RunState.COMPLETED", '        self.store.event(run.id, "x", {})']
+_hit = _re.search(r"self\.store\.event\(", _fake[1]) and _re.search(r"(run|step)\.state\s*=", _fake[0])
+check(bool(_hit), "self-test: a two-step state transition IS detected")
+
+# save() alone remains legitimate -- not every write is a transition.
+check(any("self.store.save(run)" in ln for ln in _src),
+      "plain save() still exists: this is about transitions, not a ban on writing")
+
 print(f"\n===== AGENT3 ATOMIC JOURNAL: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
