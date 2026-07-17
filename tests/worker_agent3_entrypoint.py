@@ -55,6 +55,15 @@ os.environ["KALIV_AGENT3_ENABLED"] = "0"
 before_count = route_count()
 check(run_worker._mount_optional_agent3() is False, "feature remains off without explicit flag")
 check(status("GET", "/experimental/agent3/status") == 404, "flag-off worker exposes no Agent 3.0 API")
+check(
+    status(
+        "POST",
+        "/experimental/agent3/routing-preview",
+        {"message": "status", "tools": True},
+    )
+    == 404,
+    "flag-off worker exposes no routing preview",
+)
 check(route_count() == before_count, "flag-off mount changes no route registrations")
 
 os.environ["KALIV_AGENT3_ENABLED"] = "1"
@@ -64,6 +73,22 @@ check(status("GET", "/experimental/agent3/status") == 200, "run API is reachable
 check(status("POST", "/experimental/agent3/plan", {}) == 422, "planner API is reachable")
 # A missing single-use plan is a domain conflict, not a missing route.
 check(status("POST", "/experimental/agent3/plans/missing/start") == 409, "single-use plan start is reachable")
+check(
+    status("POST", "/experimental/agent3/routing-preview", {}) == 422,
+    "routing preview validates its request",
+)
+preview_response = asyncio.run(
+    request(
+        "POST",
+        "/experimental/agent3/routing-preview",
+        {"message": "vis rig status", "mode": "rig", "tools": True},
+    )
+)
+check(preview_response.status_code == 200, "routing preview is reachable")
+preview = preview_response.json()
+check(preview["selected_surface"] == "agent_v2", "routing preview never changes actual surface")
+check(preview["executed"] is False and preview["planned"] is False, "routing preview has no execution side effects")
+check(preview["production_activation"] is False, "routing preview cannot activate production")
 
 mounted_count = route_count()
 check(run_worker._mount_optional_agent3() is True, "second mount call is harmless")
