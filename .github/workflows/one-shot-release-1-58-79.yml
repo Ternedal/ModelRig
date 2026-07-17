@@ -45,27 +45,31 @@ jobs:
             tag_sha=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/$TAG" --jq '.object.sha')
             test "$tag_sha" = "$TARGET" || { echo "tag target $tag_sha != $TARGET"; exit 1; }
 
-            if release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$TAG" --jq '.id' 2>/dev/null); then
-              echo "release $release_id exists; forcing it back to draft"
+            release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n1)
+            if [ -n "$release_id" ]; then
+              echo "draft-capable release lookup found $release_id; forcing it back to draft"
               gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/$release_id" \
                 -f tag_name="$TAG" \
                 -f target_commitish="$TARGET" \
                 -f name="$TAG" \
                 -f body="$NOTES" \
                 -F draft=true \
-                -F prerelease=false
+                -F prerelease=false >/dev/null
             else
               echo "creating draft release for $TAG"
-              gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+              release_id=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
                 -f tag_name="$TAG" \
                 -f target_commitish="$TARGET" \
                 -f name="$TAG" \
                 -f body="$NOTES" \
                 -F draft=true \
-                -F prerelease=false
+                -F prerelease=false \
+                --jq '.id')
             fi
-            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$TAG" --jq '{id,tag_name,draft,prerelease,target_commitish}'
-            test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$TAG" --jq '.draft')" = "true"
+            gh api "repos/${GITHUB_REPOSITORY}/releases/$release_id" \
+              --jq '{id,tag_name,draft,prerelease,target_commitish}'
+            test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/$release_id" --jq '.draft')" = "true"
           ) > release-draft.log 2>&1
           rc=$?
           cat release-draft.log
