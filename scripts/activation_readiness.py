@@ -120,18 +120,32 @@ def plan_authority() -> tuple[bool, str]:
     try:
         sys.path.insert(0, str(ROOT / "worker"))
         from app.agent3.api import StartReq  # noqa: PLC0415
+        from app.agent3.planner import build_planner_router  # noqa: PLC0415, F401
 
-        fields = getattr(StartReq, "model_fields", {})
-        if "plan" in fields:
+        client_plan = "plan" in getattr(StartReq, "model_fields", {})
+        # The server-authored path: POST /plan builds the plan from a goal via
+        # the model and stores it; POST /plans/{plan_id}/start takes ONLY the
+        # id and consumes the stored plan. The client cannot touch what runs.
+        # That is a plan token, and it already exists -- I wrote a blocker in
+        # 1.58.71 saying it did not, having read one endpoint and stopped.
+        server_path = True
+
+        if client_plan and server_path:
             return False, (
-                "**Planen kommer fra klienten, ikke fra serveren** — "
-                "`/experimental/agent3/runs` tager en `plan` i request-body. "
-                "Gaten afviser stadig alt klienten ikke selv måtte bede om, så "
-                "det er ikke en rettighedseskalering; men planen er ikke "
-                "serverens løfte, og det er dét der skal holde før software må "
-                "handle selv. Forsvinder når planlæggeren kobles til en model"
+                "**To veje ind, og kun den ene er serverens løfte.** "
+                "`/experimental/agent3/plans/{plan_id}/start` er "
+                "serverautoritativ: `/plan` bygger planen ud fra et mål via "
+                "modellen, gemmer den, og `start` tager kun id'et — klienten "
+                "kan ikke røre det der køres. Men `/experimental/agent3/runs` "
+                "tager stadig en `plan` i request-body ved siden af. Gaten "
+                "afviser alt klienten ikke selv måtte bede om, så det er ikke "
+                "en rettighedseskalering — men så længe den dør står åben, er "
+                "\"serverautoritativ\" en egenskab ved den vej du valgte, ikke "
+                "ved systemet"
             )
-        return True, "planen bygges på serveren"
+        if client_plan:
+            return False, "planen kommer fra klienten, og der er ingen serverbygget vej"
+        return True, "planen bygges på serveren, og klienten kan kun starte den via id"
     except Exception as exc:  # noqa: BLE001
         # Fail closed: if we cannot read the API, we do not get to say it is fine.
         return False, f"kunne ikke læse plan-autoriteten: {exc}"

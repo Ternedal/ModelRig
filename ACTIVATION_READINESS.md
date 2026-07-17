@@ -3,8 +3,8 @@
 > **Genereret af `scripts/activation_readiness.py`. Ret ikke i hånden.**
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
-**Version på main:** `1.58.72`  
-**Genereret:** 2026-07-17 11:48 UTC
+**Version på main:** `1.58.73`  
+**Genereret:** 2026-07-17 12:07 UTC
 
 ---
 
@@ -13,7 +13,7 @@
 Blokerende:
 
 - **Fysisk rig-validering:** ingen rapport på disken — fysisk validering er ikke kørt
-- **Planen kommer fra klienten, ikke fra serveren** — `/experimental/agent3/runs` tager en `plan` i request-body. Gaten afviser stadig alt klienten ikke selv måtte bede om, så det er ikke en rettighedseskalering; men planen er ikke serverens løfte, og det er dét der skal holde før software må handle selv. Forsvinder når planlæggeren kobles til en model
+- **To veje ind, og kun den ene er serverens løfte.** `/experimental/agent3/plans/{plan_id}/start` er serverautoritativ: `/plan` bygger planen ud fra et mål via modellen, gemmer den, og `start` tager kun id'et — klienten kan ikke røre det der køres. Men `/experimental/agent3/runs` tager stadig en `plan` i request-body ved siden af. Gaten afviser alt klienten ikke selv måtte bede om, så det er ikke en rettighedseskalering — men så længe den dør står åben, er "serverautoritativ" en egenskab ved den vej du valgte, ikke ved systemet
 
 Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet uden evidens. Koden kan være korrekt i tests og fejle på Windows, Ollama, Tailscale eller en Pixel 6a — det er dét fysisk validering er til for, og det er ikke noget CI kan gøre for dig.
 
@@ -22,7 +22,7 @@ Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet
 ## Planautoritet
 
 - **Serverbygget plan:** NEJ
-- **Detalje:** **Planen kommer fra klienten, ikke fra serveren** — `/experimental/agent3/runs` tager en `plan` i request-body. Gaten afviser stadig alt klienten ikke selv måtte bede om, så det er ikke en rettighedseskalering; men planen er ikke serverens løfte, og det er dét der skal holde før software må handle selv. Forsvinder når planlæggeren kobles til en model
+- **Detalje:** **To veje ind, og kun den ene er serverens løfte.** `/experimental/agent3/plans/{plan_id}/start` er serverautoritativ: `/plan` bygger planen ud fra et mål via modellen, gemmer den, og `start` tager kun id'et — klienten kan ikke røre det der køres. Men `/experimental/agent3/runs` tager stadig en `plan` i request-body ved siden af. Gaten afviser alt klienten ikke selv måtte bede om, så det er ikke en rettighedseskalering — men så længe den dør står åben, er "serverautoritativ" en egenskab ved den vej du valgte, ikke ved systemet
 
 ---
 

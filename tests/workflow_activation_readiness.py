@@ -78,8 +78,12 @@ check(server_plans is False,
       "the run API still takes a client-supplied plan, and the page says so "
       "rather than leaving physical validation as the only blocker")
 check("serveren" in note, "the blocker explains WHOSE promise the plan is")
-check("Forsvinder" in note or "planlæggeren" in note,
-      "and says what removes it, so it is a stage rather than a complaint")
+check("plans/{plan_id}/start" in note,
+      "and names the server-authored path that ALREADY exists -- my first "
+      "version of this blocker claimed there was none, having read one "
+      "endpoint and stopped reading")
+check("runs" in note,
+      "while still naming the client-plan door that is open beside it")
 check(note in text, "the computed blocker actually reaches the rendered page")
 
 # Drive the detector: if the API ever stops taking a plan, this must flip.

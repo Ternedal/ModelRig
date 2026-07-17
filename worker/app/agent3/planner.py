@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import ollama_client as oc
+from . import capability_probe
 from .capability_graph import CapabilityGraph
 from .capability_receipt import agent_run_plan_sha256, evaluate_run_capabilities
 from .core import (
@@ -221,12 +222,19 @@ def build_planner_router(
             raise HTTPException(status_code=409, detail="read review is not mounted")
 
         tools_ready = bool(adapter.tools.GATE.enabled and not adapter.tools.GATE.state_error)
+        # Measured, not assumed (F-302). I closed this in 1.58.67 and closed it
+        # in two files out of three -- this one, where a MODEL is about to be
+        # asked to plan against the snapshot, was the one that mattered most and
+        # the one I missed. A planner told the rig is reachable will happily
+        # write a plan that needs Ollama, and the first honest word about it
+        # arrives at execution.
+        rig = capability_probe.measure()
         caps = CapabilitySnapshot(
-            rig_reachable=True,
-            worker_ready=True,
+            rig_reachable=rig["rig_reachable"],
+            worker_ready=rig["worker_ready"],
             tools_ready=tools_ready,
             cloud_ready=req.cloud_ready,
-            rag_ready=True,
+            rag_ready=rig["rag_ready"],
         )
         request = TurnRequest(
             message=req.message,

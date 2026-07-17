@@ -10,6 +10,21 @@ from app.agent3.core import CapabilitySnapshot, TurnRequest
 from app.agent3.integration import Agent3PlanError, V2ToolAdapter
 from app.agent3.planner import PlannerError, TypedPlanner, build_planner_router
 from app.agent3.routing import StrictTurnRouter
+# The planner now plans against a rig it MEASURES (F-302, completed in 1.58.73:
+# the 1.58.67 fix reached api.py and capability_graph_api.py and missed this
+# one). There is no Ollama in CI, so an honest probe reports the rig
+# unreachable and the planner correctly refuses to plan rig work against it.
+# This test is about planning, not about whether Ollama is up -- so state the
+# assumption instead of inheriting it.
+from app.agent3 import capability_probe as _probe  # noqa: E402
+
+_probe.measure = lambda **kw: {  # type: ignore[assignment]
+    "worker_ready": True,
+    "rig_reachable": True,
+    "rag_ready": True,
+    "measured_at": 0.0,
+}
+
 
 passed = failed = 0
 
