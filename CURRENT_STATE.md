@@ -122,6 +122,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_rag_cloud.py`
 - `tests/worker_read_scope.py`
 - `tests/worker_schedule_runner.py`
+- `tests/worker_schedule_runtime.py`
 - `tests/worker_schedule_service.py`
 - `tests/worker_scheduler.py`
 - `tests/worker_toolhost.py`
