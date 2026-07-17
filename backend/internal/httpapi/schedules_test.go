@@ -29,8 +29,14 @@ type scheduleHit struct {
 	RemoteHost    string
 }
 
-func scheduleHandler(t *testing.T, workerURL string, workerTimeout time.Duration) (http.Handler, *[]string) {
+func scheduleHandlerWithFlag(
+	t *testing.T,
+	workerURL string,
+	workerTimeout time.Duration,
+	apiFlag string,
+) (http.Handler, *[]string) {
 	t.Helper()
+	t.Setenv("KALIV_SCHEDULER_API", apiFlag)
 
 	ollamaHits := []string{}
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +66,11 @@ func scheduleHandler(t *testing.T, workerURL string, workerTimeout time.Duration
 	}), &ollamaHits
 }
 
+func scheduleHandler(t *testing.T, workerURL string, workerTimeout time.Duration) (http.Handler, *[]string) {
+	t.Helper()
+	return scheduleHandlerWithFlag(t, workerURL, workerTimeout, "1")
+}
+
 var scheduleRoutes = []struct {
 	method string
 	public string
@@ -73,6 +84,34 @@ var scheduleRoutes = []struct {
 	{http.MethodPost, "/api/v1/schedules/012345abcdef/enabled", "/schedules/012345abcdef/enabled"},
 	{http.MethodPost, "/api/v1/schedules/012345abcdef/renew/preview", "/schedules/012345abcdef/renew/preview"},
 	{http.MethodPost, "/api/v1/schedules/012345abcdef/renew", "/schedules/012345abcdef/renew"},
+}
+
+func TestScheduleRoutesRequireSeparateExplicitOptIn(t *testing.T) {
+	// Starting the local runner is not permission to expose standing-grant
+	// administration to every paired device. Only the exact backend flag value
+	// "1" registers the routes.
+	t.Setenv("KALIV_SCHEDULER", "1")
+	hits := 0
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+	}))
+	defer worker.Close()
+
+	for _, flag := range []string{"", "0", "false", "true", "on", "garbage"} {
+		t.Run("flag="+flag, func(t *testing.T) {
+			h, _ := scheduleHandlerWithFlag(t, worker.URL, 2*time.Second, flag)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/schedules/status", nil)
+			req.Header.Set("Authorization", "Bearer "+scheduleToken)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("KALIV_SCHEDULER_API=%q: got %d, want 404", flag, rec.Code)
+			}
+		})
+	}
+	if hits != 0 {
+		t.Fatalf("disabled schedule API reached worker %d time(s)", hits)
+	}
 }
 
 func TestScheduleRoutesRequireBearerBeforeWorker(t *testing.T) {

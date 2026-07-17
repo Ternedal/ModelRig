@@ -81,17 +81,22 @@ func (s *server) routes() {
 	s.mux.Handle("GET /api/v1/tools/audit", s.authMW(http.HandlerFunc(s.handleToolsAudit)))
 	s.mux.Handle("POST /api/v1/tools/enabled", s.authMW(http.HandlerFunc(s.handleToolsEnabled)))
 
-	// Human schedule administration. The Bearer-authenticated backend is the
-	// remote boundary; schedules.go additionally refuses a non-loopback worker
-	// upstream before forwarding any body.
-	s.mux.Handle("GET /api/v1/schedules/status", s.authMW(http.HandlerFunc(s.handleSchedulesStatus)))
-	s.mux.Handle("POST /api/v1/schedules/preview", s.authMW(http.HandlerFunc(s.handleSchedulesPreview)))
-	s.mux.Handle("GET /api/v1/schedules", s.authMW(http.HandlerFunc(s.handleSchedulesCollection)))
-	s.mux.Handle("POST /api/v1/schedules", s.authMW(http.HandlerFunc(s.handleSchedulesCollection)))
-	s.mux.Handle("GET /api/v1/schedules/{id}", s.authMW(http.HandlerFunc(s.handleScheduleGet)))
-	s.mux.Handle("POST /api/v1/schedules/{id}/enabled", s.authMW(http.HandlerFunc(s.handleScheduleEnabled)))
-	s.mux.Handle("POST /api/v1/schedules/{id}/renew/preview", s.authMW(http.HandlerFunc(s.handleScheduleRenewPreview)))
-	s.mux.Handle("POST /api/v1/schedules/{id}/renew", s.authMW(http.HandlerFunc(s.handleScheduleRenew)))
+	// Standing grants are a stronger capability than one-shot tool calls. Starting
+	// the local scheduler therefore does not automatically expose administration
+	// to every paired device; the backend boundary has its own explicit opt-in.
+	if os.Getenv("KALIV_SCHEDULER_API") == "1" {
+		// Human schedule administration. The Bearer-authenticated backend is the
+		// remote boundary; schedules.go additionally refuses a non-loopback worker
+		// upstream before forwarding any body.
+		s.mux.Handle("GET /api/v1/schedules/status", s.authMW(http.HandlerFunc(s.handleSchedulesStatus)))
+		s.mux.Handle("POST /api/v1/schedules/preview", s.authMW(http.HandlerFunc(s.handleSchedulesPreview)))
+		s.mux.Handle("GET /api/v1/schedules", s.authMW(http.HandlerFunc(s.handleSchedulesCollection)))
+		s.mux.Handle("POST /api/v1/schedules", s.authMW(http.HandlerFunc(s.handleSchedulesCollection)))
+		s.mux.Handle("GET /api/v1/schedules/{id}", s.authMW(http.HandlerFunc(s.handleScheduleGet)))
+		s.mux.Handle("POST /api/v1/schedules/{id}/enabled", s.authMW(http.HandlerFunc(s.handleScheduleEnabled)))
+		s.mux.Handle("POST /api/v1/schedules/{id}/renew/preview", s.authMW(http.HandlerFunc(s.handleScheduleRenewPreview)))
+		s.mux.Handle("POST /api/v1/schedules/{id}/renew", s.authMW(http.HandlerFunc(s.handleScheduleRenew)))
+	}
 
 	s.mux.Handle("POST /api/v1/rag/ingest/pptx", s.authMW(http.HandlerFunc(s.handleRagIngestPptx)))
 	s.mux.Handle("POST /api/v1/rag/ingest/html", s.authMW(http.HandlerFunc(s.handleRagIngestHtml)))
