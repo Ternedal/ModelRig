@@ -1,0 +1,260 @@
+            if len(raw) != 32:
+                return None
+            return Ed25519PublicKey.from_public_bytes(raw)
+        except (ValueError, binascii.Error):
+            return None
+
+    def approval_verifier_configured(self) -> bool:
+        return self._approval_public_key is not None
+
+    @contextmanager
+    def _store(self) -> Iterator[ScheduleAdminStore]:
+        store = self._store_factory()
+        try:
+            yield store
+        finally:
+            store.close()
+
+    def preview(
+        self,
+        tool: str,
+        args: dict[str, Any],
+        cadence: str,
+        *,
+        ttl_days: int = DEFAULT_TTL_DAYS,
+        max_runs: int = DEFAULT_MAX_RUNS,
+    ) -> SchedulePreview:
+        """Preview a new standing grant; execute and persist nothing."""
+        return self._preview(
+            operation="create",
+            schedule_id=None,
+            tool=tool,
+            args=args,
+            cadence=cadence,
+            ttl_days=ttl_days,
+            max_runs=max_runs,
+            enable=True,
+        )
+
+    def preview_renew(
+        self,
+        schedule_id: str,
+        *,
+        ttl_days: int = DEFAULT_TTL_DAYS,
+        max_runs: int = DEFAULT_MAX_RUNS,
+        enable: bool | None = None,
+    ) -> SchedulePreview:
+        """Preview renewal of the existing immutable action and cadence."""
+        with self._store() as store:
+            current = store.get(schedule_id)
+        if current is None:
+            raise ScheduleAdminNotFound(f"unknown schedule: {schedule_id}")
+        return self._preview(
+            operation="renew",
+            schedule_id=schedule_id,
+            tool=current.tool,
+            args=current.args,
+            cadence=current.cadence,
+            ttl_days=ttl_days,
+            max_runs=max_runs,
+            enable=enable,
+        )
+
+    def create(
+        self,
+        tool: str,
+        args: dict[str, Any],
+        cadence: str,
+        *,
+        ttl_days: int = DEFAULT_TTL_DAYS,
+        max_runs: int = DEFAULT_MAX_RUNS,
+        approval_token: str | None = None,
+    ) -> dict[str, Any]:
+        preview = self.preview(
+            tool, args, cadence, ttl_days=ttl_days, max_runs=max_runs
+        )
+        with self._store() as store:
+            self._consume_approval(preview, approval_token, store)
+            schedule = store.create(
+                tool,
+                args,
+                cadence,
+                approve_write=preview.requires_approval,
+                ttl_days=ttl_days,
+                max_runs=max_runs,
+                now=self._clock(),
+            )
+        return self.describe(schedule)
+
+    def list_all(self) -> list[dict[str, Any]]:
+        with self._store() as store:
+            schedules = store.list_all()
+        registry = self._registry_factory()
+        now = self._clock()
+        return [
+            self.describe(item, registry=registry, now=now) for item in schedules
+        ]
+
+    def get(self, schedule_id: str) -> dict[str, Any]:
+        with self._store() as store:
+            schedule = store.get(schedule_id)
+        if schedule is None:
+            raise ScheduleAdminNotFound(f"unknown schedule: {schedule_id}")
+        return self.describe(schedule)
+
+    def set_enabled(self, schedule_id: str, enabled: bool) -> dict[str, Any]:
+        with self._store() as store:
+            schedule = store.get(schedule_id)
+            if schedule is None:
+                raise ScheduleAdminNotFound(f"unknown schedule: {schedule_id}")
+            if enabled:
+                state = self.describe(schedule)
+                if state["blocked_reason"]:
+                    raise ScheduleAdminConflict(
+                        f"planen kan ikke aktiveres: {state['blocked_reason']}"
+                    )
+            store.set_enabled(schedule_id, enabled, now=self._clock())
+            updated = store.get(schedule_id)
+        assert updated is not None
+        return self.describe(updated)
+
+    def renew(
+        self,
+        schedule_id: str,
+        *,
+        ttl_days: int = DEFAULT_TTL_DAYS,
+        max_runs: int = DEFAULT_MAX_RUNS,
+        approval_token: str | None = None,
+        enable: bool | None = None,
+    ) -> dict[str, Any]:
+        with self._store() as store:
+            current = store.get(schedule_id)
+            if current is None:
+                raise ScheduleAdminNotFound(f"unknown schedule: {schedule_id}")
+            preview = self._preview(
+                operation="renew",
+                schedule_id=schedule_id,
+                tool=current.tool,
+                args=current.args,
+                cadence=current.cadence,
+                ttl_days=ttl_days,
+                max_runs=max_runs,
+                enable=enable,
+            )
+            self._consume_approval(preview, approval_token, store)
+            updated = store.renew(
+                schedule_id,
+                # The persisted standing grant only needs the exact action
+                # fingerprint. The opaque approval token was consumed above and
+                # is never used for execution.
+                approved_fingerprint=(
+                    preview.action_fingerprint if preview.requires_approval else None
+                ),
+                ttl_days=ttl_days,
+                max_runs=max_runs,
+                enabled=enable,
+                now=self._clock(),
+            )
+        assert updated is not None
+        return self.describe(updated)
+
+    def describe(
+        self,
+        schedule: Schedule,
+        *,
+        registry: Mapping[str, Any] | None = None,
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        registry = self._registry_factory() if registry is None else registry
+        now = self._clock() if now is None else now
+        spec = registry.get(schedule.tool)
+        current_action = fingerprint(schedule.tool, schedule.args)
+        if spec is None:
+            risk = "unknown"
+            blocked = f"ukendt tool {schedule.tool!r}; planen kan ikke køre"
+            sensitivity = "unknown"
+        else:
+            risk = str(getattr(spec, "risk", "unknown"))
+            sensitivity = str(getattr(spec, "sensitivity", "operational"))
+            blocked = refusal(
+                risk,
+                schedule.approved_fingerprint,
+                current_action,
+                now=now,
+                expires_at=schedule.expires_at,
+                runs_used=schedule.runs_used,
+                max_runs=schedule.max_runs,
+                # This is standing-grant validity, not the live kill-switch.
+                # SchedulerRunner checks ToolGate again immediately before claim.
+                tools_enabled=True,
+                tool_disabled=False,
+            )
+
+        approval_valid = (
+            risk == "read"
+            or (
+                risk == "write"
+                and schedule.approved_fingerprint == current_action
+            )
+        )
+        expired = now >= schedule.expires_at
+        budget_exhausted = bool(
+            schedule.max_runs and schedule.runs_used >= schedule.max_runs
+        )
+        return {
+            "schedule_id": schedule.schedule_id,
+            "tool": schedule.tool,
+            "args": schedule.args,
+            "cadence": schedule.cadence,
+            "risk": risk,
+            "sensitivity": sensitivity,
+            "action_fingerprint": current_action,
+            "approved_fingerprint": schedule.approved_fingerprint,
+            "approval_valid": bool(approval_valid),
+            "expires_at": schedule.expires_at,
+            "expired": expired,
+            "max_runs": schedule.max_runs,
+            "runs_used": schedule.runs_used,
+            "budget_exhausted": budget_exhausted,
+            "due_at": schedule.due_at,
+            "missed": schedule.missed,
+            "enabled": schedule.enabled,
+            # Structural only: live ToolGate state is checked by the runner and
+            # surfaced separately by /tools and /schedules/status.
+            "structurally_eligible": bool(schedule.enabled and blocked is None),
+            "runtime_gate_checked": False,
+            "blocked_reason": blocked,
+        }
+
+    def _preview(
+        self,
+        *,
+        operation: str,
+        schedule_id: str | None,
+        tool: str,
+        args: dict[str, Any],
+        cadence: str,
+        ttl_days: int,
+        max_runs: int,
+        enable: bool | None,
+    ) -> SchedulePreview:
+        if operation not in ("create", "renew"):
+            raise ScheduleAdminError(f"unknown schedule operation: {operation}")
+        self._validate_bounds(ttl_days, max_runs)
+        self._validate_args(args)
+        registry = self._registry_factory()
+        spec = registry.get(tool)
+        if spec is None:
+            raise ScheduleAdminNotFound(f"unknown tool: {tool}")
+
+        risk = str(getattr(spec, "risk", "unknown"))
+        if risk == "desktop":
+            raise ScheduleAdminError(
+                "desktop-handlinger kan ikke planlægges; skærmen ved kørsel er ikke den skærm der blev godkendt"
+            )
+        if risk not in ("read", "write"):
+            raise ScheduleAdminError(f"ukendt tool-risk {risk!r}; afvist fail-closed")
+        # `risk` cannot answer this: note_append and delete_model are both
+        # "write" (F-604). The registry says per tool, and the tool gate enforces
+        # it at 03:00 regardless -- but refusing only there means the UI offers
+        # the plan, the user believes it exists, and it fails months later at
