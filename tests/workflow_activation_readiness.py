@@ -20,6 +20,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DOC = ROOT / "ACTIVATION_READINESS.md"
 GEN = ROOT / "scripts" / "activation_readiness.py"
+sys.path.insert(0, str(ROOT / "scripts"))
+from agent3_validation_paths import DEFAULT_REPORT_RELATIVE, DEFAULT_REPORT_TEXT  # noqa: E402
 
 passed = failed = 0
 
@@ -52,14 +54,14 @@ check((ROOT / "VERSION").read_text().strip() in text,
 # It must fail closed. Today there is no physical validation report for main,
 # so the only honest answer is NO -- and if this ever flips to JA without a
 # report appearing, the generator has stopped being fail-closed.
-has_report = (ROOT / "agent3-validation-latest.json").exists()
+has_report = (ROOT / DEFAULT_REPORT_RELATIVE).exists()
 if not has_report:
     check("aktiveres nu? **NEJ**" in text,
           "with no validation report on disk, the answer is NO -- fail closed")
     check("fysisk validering er ikke kørt" in text,
           "and it says exactly what is missing, not just that something is")
 
-check("agent3-validation-latest.json" in text and "/home/" not in text,
+check(DEFAULT_REPORT_TEXT in text and "/home/" not in text,
       "the report path is relative -- an absolute one bakes one machine into a "
       "committed file")
 

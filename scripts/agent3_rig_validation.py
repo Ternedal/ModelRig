@@ -37,6 +37,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+SCRIPTS_ROOT = Path(__file__).resolve().parent
+if str(SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_ROOT))
+
+from agent3_validation_paths import DEFAULT_REPORT_TEXT
+
 
 class ValidationError(RuntimeError):
     pass
@@ -664,7 +670,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--report",
         default=os.getenv(
             "KALIV_AGENT3_VALIDATION_REPORT",
-            "validation/agent3-rig-validation-latest.json",
+            DEFAULT_REPORT_TEXT,
         ),
         help="JSON report path; token and memory value are never written",
     )
