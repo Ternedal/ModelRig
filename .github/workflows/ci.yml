@@ -1,28 +1,24 @@
 name: ci
 
 # Runs the shared test suite (_tests.yml) on every push to main and on pull
-# requests, so a regression or version drift is caught before a release tag is
-# cut. The test list lives in _tests.yml, shared with build-and-release.yml --
-# no duplication, the two gates can't drift apart.
+# requests. The temporary materializer job below exists only on PR #36 and is
+# removed before the scheduler product commit is created.
 on:
   push:
     branches: [main]
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  materialize-scheduler:
+    if: github.head_ref == 'build/scheduler-approval-token-inspect'
+    uses: ./.github/workflows/scheduler-ed25519-self-build.yml
+
   test:
     uses: ./.github/workflows/_tests.yml
 
-  # Compile the clients on every push/PR. The release workflow builds full
-  # APK/jar artifacts, but only at tag time -- so a client that stops compiling
-  # (like a bad refactor) used to reach main and only fail at release. These
-  # catch it before merge. Compile-only (fast) and on Linux (Kotlin compiles
-  # cross-platform; the packaging OS doesn't matter for catching compile errors).
-  # NOTE: this catches compile errors, not runtime/logic bugs -- a change that
-  # compiles but is logically wrong still needs on-device verification.
   android-compile:
     runs-on: ubuntu-latest
     steps:
