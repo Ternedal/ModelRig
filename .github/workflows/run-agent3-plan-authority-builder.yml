@@ -44,6 +44,25 @@ jobs:
           EXTRACT
       - name: Install patch and worker dependencies
         run: pip install -r worker/requirements.txt libcst --break-system-packages
+      - name: Normalize the one legacy Go handler anchor
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('backend/internal/httpapi/agent3.go')
+          text = path.read_text(encoding='utf-8')
+          old = (
+              'func (s *server) handleAgent3RunsStart(w http.ResponseWriter, r *http.Request) {\n'
+              '\t// A run may execute several read steps or wait on a model-backed adapter in a\n'
+              '\t// later phase, so use the long-lived worker proxy just like /tools/chat.\n'
+              '\ts.WorkerSlow.Forward(w, r, agent3Target(r, "/experimental/agent3/runs"))\n'
+              '}\n\n'
+          )
+          normalized = old.replace('\t', '    ')
+          if text.count(old) != 1:
+              raise SystemExit(f'legacy Go handler anchor drifted: {text.count(old)} matches')
+          path.write_text(text.replace(old, normalized, 1), encoding='utf-8')
+          PY
       - name: Apply reviewed patch program
         id: patch
         shell: bash
@@ -68,6 +87,7 @@ jobs:
       - name: Set version and regenerate truth
         run: |
           set -euo pipefail
+          gofmt -w backend/internal/httpapi/agent3.go backend/internal/httpapi/server.go backend/internal/httpapi/agent3_test.go
           python3 scripts/version_tool.py set 1.58.78
           python3 scripts/current_state.py
           python3 scripts/activation_readiness.py
