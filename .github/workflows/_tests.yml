@@ -46,6 +46,15 @@ jobs:
           pip install --quiet ruff
           ruff check --select E9,F63,F7,F82 worker/ tests/
 
+      - name: PowerShell syntax gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Get-ChildItem -Path . -Recurse -File -Filter *.ps1 | ForEach-Object {
+            [void][scriptblock]::Create((Get-Content -LiteralPath $_.FullName -Raw))
+            Write-Host "parsed $($_.FullName)"
+          }
+
       # Every integration + worker test, globbed so a new tests/*.py is included
       # with no edit here. MODELRIG_BIN is used by the backend/e2e tests; the
       # worker tests ignore it. set -e stops at the first failure. This is exactly
