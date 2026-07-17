@@ -3,17 +3,20 @@ name: scheduler-ed25519-self-build
 on:
   push:
     branches: [feature/scheduler-ed25519-approval-15890]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write
 
 jobs:
   build:
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && github.head_ref == 'feature/scheduler-ed25519-approval-15890'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
+          ref: feature/scheduler-ed25519-approval-15890
           fetch-depth: 0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
