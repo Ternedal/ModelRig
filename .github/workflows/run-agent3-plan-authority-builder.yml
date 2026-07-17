@@ -1,0 +1,85 @@
+name: run-agent3-plan-authority-builder
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  run-builder:
+    if: github.head_ref == 'agent/agent3-plan-authority-builder-1-58-78'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: agent/agent3-plan-authority-builder-1-58-78
+          fetch-depth: 8
+      - name: Preserve reviewed patch program
+        run: cp .github/workflows/one-shot-agent3-plan-authority.yml /tmp/agent3-builder.yml
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: 'stable'
+      - name: Checkout exact main and extract patch script
+        run: |
+          set -euo pipefail
+          git checkout --detach 7ef5444213a360d3342bc21d576eeff61211b10d
+          test "$(git rev-parse HEAD)" = "7ef5444213a360d3342bc21d576eeff61211b10d"
+          test "$(cat VERSION)" = "1.58.77"
+          python3 - <<'EXTRACT'
+          from pathlib import Path
+
+          source = Path('/tmp/agent3-builder.yml').read_text(encoding='utf-8')
+          marker = "          python3 - <<'PY'\n"
+          start = source.index(marker) + len(marker)
+          end = source.index("\n          PY\n", start)
+          lines = source[start:end].splitlines()
+          program = "\n".join(line[10:] if line.startswith("          ") else line for line in lines) + "\n"
+          Path('/tmp/agent3-authority-patch.py').write_text(program, encoding='utf-8')
+          compile(program, '/tmp/agent3-authority-patch.py', 'exec')
+          EXTRACT
+      - name: Install patch and worker dependencies
+        run: pip install -r worker/requirements.txt libcst --break-system-packages
+      - name: Apply reviewed patch program
+        run: python3 /tmp/agent3-authority-patch.py
+      - name: Set version and regenerate truth
+        run: |
+          set -euo pipefail
+          python3 scripts/version_tool.py set 1.58.78
+          python3 scripts/current_state.py
+          python3 scripts/activation_readiness.py
+          python3 scripts/version_tool.py check
+          python3 scripts/current_state.py --check
+          python3 scripts/activation_readiness.py --check
+          git diff --check -- . ':(exclude)ACTIVATION_READINESS.md'
+      - name: Run focused authority gates
+        run: |
+          set -euo pipefail
+          PYTHONPATH=worker python3 tests/worker_agent3_plan_authority_api.py
+          PYTHONPATH=worker python3 tests/worker_agent3_retry.py
+          PYTHONPATH=worker python3 tests/workflow_activation_readiness.py
+          (cd backend && go test ./internal/httpapi)
+      - name: Push one clean product commit
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          test -n "$(git status --porcelain)"
+          git commit -m 'fix(agent3): require server-authored run plans'
+          clean_sha=$(git rev-parse HEAD)
+          git push --force origin HEAD:refs/heads/agent/agent3-plan-authority-1-58-78
+          printf 'commit=%s\nbase=%s\nversion=1.58.78\n' "$clean_sha" '7ef5444213a360d3342bc21d576eeff61211b10d' > agent3-plan-authority-result.txt
+          git diff --stat 7ef5444213a360d3342bc21d576eeff61211b10d..HEAD >> agent3-plan-authority-result.txt
+          cat agent3-plan-authority-result.txt
+      - name: Upload clean commit identity
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent3-plan-authority-result
+          path: agent3-plan-authority-result.txt
+          if-no-files-found: error
+          retention-days: 3
