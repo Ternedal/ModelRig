@@ -1,14 +1,16 @@
 name: one-shot-release-1-58-76
 
 on:
-  push:
-    branches: [ops/release-1-58-76]
   pull_request:
     branches: [main]
 
 permissions:
   contents: write
-  actions: read
+  actions: write
+
+concurrency:
+  group: one-shot-release-1-58-76
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -23,24 +25,39 @@ jobs:
           test "$(cat VERSION)" = "1.58.76"
           test "$(git rev-parse HEAD)" = "c30e4ac7373b329cc36c35680733906ca6a46090"
           python3 scripts/version_tool.py check
-      - name: Create draft release and tag exactly on main
+      - name: Create exact tag and draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: v1.58.76
           TARGET: c30e4ac7373b329cc36c35680733906ca6a46090
         run: |
           set -euo pipefail
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "$TAG already exists; verifying target"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists"
           else
-            gh release create "$TAG" \
-              --target "$TARGET" \
-              --draft \
-              --title "$TAG" \
-              --notes "Kaliv Planer is now available from the ordinary in-app overflow menu while retaining the launcher shortcut."
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/$TAG" \
+              -f sha="$TARGET" >/dev/null
           fi
           tag_sha=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/$TAG" --jq '.object.sha')
           test "$tag_sha" = "$TARGET" || { echo "tag target $tag_sha != $TARGET"; exit 1; }
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            state=$(gh release view "$TAG" --json isDraft --jq '.isDraft')
+            [ "$state" = "true" ] || gh release edit "$TAG" --draft=true
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+              -f tag_name="$TAG" \
+              -f target_commitish="$TARGET" \
+              -f name="$TAG" \
+              -f body='Kaliv Planer is now available from the ordinary in-app overflow menu while retaining the launcher shortcut.' \
+              -F draft=true >/dev/null
+          fi
+      - name: Dispatch atomic release workflow on tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v1.58.76
+        run: gh workflow run build-and-release.yml --ref "$TAG" -f force_full_matrix=true
       - name: Find and follow atomic release workflow
         id: release_run
         env:
@@ -51,13 +68,14 @@ jobs:
           set -euo pipefail
           run_id=""
           for _ in $(seq 1 90); do
-            run_id=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-and-release.yml/runs?event=push&per_page=50" \
+            run_id=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-and-release.yml/runs?event=workflow_dispatch&per_page=50" \
               --jq ".workflow_runs[] | select(.head_branch == \"$TAG\" and .head_sha == \"$TARGET\") | .id" | head -n1)
             [ -n "$run_id" ] && break
             sleep 10
           done
-          [ -n "$run_id" ] || { echo "build-and-release run never appeared"; exit 1; }
+          [ -n "$run_id" ] || { echo "dispatched build-and-release run never appeared"; exit 1; }
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "following build-and-release run $run_id"
           gh run watch "$run_id" --exit-status --interval 15
       - name: Verify published assets and state
         env:
@@ -104,6 +122,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Remove temporary release branch
+        if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/ops/release-1-58-76"
+        run: gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/ops/release-1-58-76" || true
