@@ -358,6 +358,42 @@ class AgentRunStore:
             ).fetchall()
         return [AgentRun.from_json(row[0]) for row in rows]
 
+    def save_with_event(self, run: AgentRun, kind: str, payload: Any) -> None:
+        """Write the state and the event that explains it in ONE transaction.
+
+        They were two commits (F-309). A crash in the gap leaves a rig whose
+        state nothing accounts for -- a run sitting in CANCELLED with no
+        run_cancelled event, or an event saying a step started against a state
+        that never moved. Both are worse than a crash: the machine has a
+        history that disagrees with itself, and every later question ("who
+        cancelled this?", "did the tool run?") gets an answer built on that
+        disagreement.
+
+        SQLite gives this for free on one connection -- the two INSERTs simply
+        have to share a commit. It was never a hard problem; it was an unasked
+        question.
+        """
+        run.updated_at = time.time()
+        encoded = payload if isinstance(payload, str) else json.dumps(
+            payload, ensure_ascii=False, sort_keys=True)
+        with self._lock:
+            try:
+                self._conn.execute(
+                    "INSERT INTO agent_runs VALUES (?,?,?,?) "
+                    "ON CONFLICT(id) DO UPDATE SET state=excluded.state,"
+                    "payload=excluded.payload,updated_at=excluded.updated_at",
+                    (run.id, run.state.value, run.to_json(), run.updated_at),
+                )
+                self._conn.execute(
+                    "INSERT INTO agent_events(run_id,ts,kind,payload) VALUES(?,?,?,?)",
+                    (run.id, time.time(), kind, encoded[:8000]),
+                )
+                self._conn.commit()
+            except Exception:
+                # Neither half, rather than half a truth.
+                self._conn.rollback()
+                raise
+
     def event(self, run_id: str, kind: str, payload: Any) -> None:
         encoded = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, sort_keys=True)
         with self._lock:
@@ -628,8 +664,9 @@ class Agent3Orchestrator:
         if run.state not in {RunState.COMPLETED, RunState.FAILED, RunState.CANCELLED}:
             run.state = RunState.CANCELLED
             run.error = "Cancelled by user"
-            self.store.save(run)
-            self.store.event(run.id, "run_cancelled", {})
+            # Atomic (F-309): a run that is cancelled with no run_cancelled
+            # event is a stop nobody can account for.
+            self.store.save_with_event(run, "run_cancelled", {})
         return run
 
     def _execute(self, run: AgentRun, step: AgentStep) -> None:
@@ -655,9 +692,14 @@ class Agent3Orchestrator:
             if self._cancelled_since(run.id):
                 step.state = StepState.COMPLETED_AFTER_CANCEL
                 step.error = None
-                self.store.event(run.id, "step_completed_after_cancel",
-                                 {"step_id": step.id, "tool": step.tool})
-                self._preserve_cancellation(run)
+                run.state = RunState.CANCELLED
+                if not run.error:
+                    run.error = "Cancelled by user"
+                # Atomic: the side effect happened, and the record of it must
+                # not be able to survive without the state that explains it.
+                self.store.save_with_event(
+                    run, "step_completed_after_cancel",
+                    {"step_id": step.id, "tool": step.tool})
                 return
             step.state = StepState.SUCCEEDED
             step.error = None

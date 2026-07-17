@@ -6,7 +6,7 @@
 > code, so it cannot quietly become untrue. If a fact belongs here, teach
 > the generator to read it -- do not type it in.
 
-**Version:** 1.58.69
+**Version:** 1.58.70
 
 ## Tools the model can see
 
@@ -64,6 +64,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/backend_smoke.py`
 - `tests/backend_v1.py`
 - `tests/e2e.py`
+- `tests/worker_agent3_atomic_journal.py`
 - `tests/worker_agent3_capability_graph.py`
 - `tests/worker_agent3_capability_graph_api.py`
 - `tests/worker_agent3_capability_probe.py`
