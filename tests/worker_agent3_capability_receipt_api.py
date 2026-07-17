@@ -24,6 +24,21 @@ from app.agent3.core import (
 )
 from app.agent3.integration import V2ToolAdapter
 
+# The capability receipt now describes the rig it MEASURES (F-302): before
+# 1.58.67 rig_reachable/rag_ready were hardcoded True, so this test passed by
+# inheriting an assumption. There is no Ollama in CI, so a real probe correctly
+# reports the rig as unreachable and the receipt correctly refuses. State the
+# assumption instead of depending on the environment.
+from app.agent3 import capability_probe as _probe  # noqa: E402
+
+_probe.measure = lambda **kw: {  # type: ignore[assignment]
+    "worker_ready": True,
+    "rig_reachable": True,
+    "rag_ready": True,
+    "measured_at": 0.0,
+}
+
+
 
 class Tool:
     def __init__(self, name: str, risk: str):

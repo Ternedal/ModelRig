@@ -38,7 +38,7 @@ compose.desktop {
             // lets packageVersion tell the truth.
             targetFormats(TargetFormat.Deb)
             packageName = "Kaliv"
-            packageVersion = "1.58.66"
+            packageVersion = "1.58.67"
         }
     }
 }

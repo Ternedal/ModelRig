@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from . import capability_probe
 from .capability_graph import (
     CapabilityGraph,
     build_capability_graph,
@@ -31,12 +32,16 @@ def build_runtime_capability_graph(
 
     gate = adapter.tools.GATE
     tools_ready = bool(gate.enabled and not gate.state_error)
+    _probe = capability_probe.measure()
     snapshot = capabilities or CapabilitySnapshot(
-        rig_reachable=True,
-        worker_ready=True,
+        # Measured, not assumed (F-302) -- the graph describes what the rig can
+        # do, and a graph that says "reachable" about an Ollama that is down is
+        # a drawing, not a description.
+        rig_reachable=_probe["rig_reachable"],
+        worker_ready=_probe["worker_ready"],
         tools_ready=tools_ready,
         cloud_ready=False,
-        rag_ready=True,
+        rag_ready=_probe["rag_ready"],
         voice_ready=False,
     )
     # The V2 gate remains authoritative even if a custom infrastructure snapshot

@@ -7,6 +7,7 @@ from typing import Any, Callable
 from fastapi import APIRouter, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from . import capability_probe
 from .core import (
     Agent3Orchestrator,
     AgentRun,
@@ -99,13 +100,26 @@ def _clone_steps(run: AgentRun) -> list[AgentStep]:
 
 
 def _default_caps(req: StartReq, adapter: V2ToolAdapter) -> CapabilitySnapshot:
+    """Measure the rig; do not describe it from memory (F-302).
+
+    rig_reachable/worker_ready/rag_ready were hardcoded True here -- three
+    facts nobody checked -- so plans were built on a rig that was assumed to
+    exist. tools_ready was always measured, which is why the fix is small: the
+    pattern was right, it just stopped after one field.
+
+    cloud_ready stays a client input because it is the one fact the client
+    genuinely owns: the cloud key lives in the client, not on the rig. It is a
+    client capability, not a measurement of this machine -- and it can only
+    make a plan FAIL later, never unlock anything the gate protects.
+    """
     tools_ready = bool(adapter.tools.GATE.enabled and not adapter.tools.GATE.state_error)
+    rig = capability_probe.measure()
     return CapabilitySnapshot(
-        rig_reachable=True,
-        worker_ready=True,
+        rig_reachable=rig["rig_reachable"],
+        worker_ready=rig["worker_ready"],
         tools_ready=tools_ready,
         cloud_ready=req.cloud_ready,
-        rag_ready=True,
+        rag_ready=rig["rag_ready"],
         voice_ready=False,
     )
 

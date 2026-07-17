@@ -6,7 +6,7 @@
 > code, so it cannot quietly become untrue. If a fact belongs here, teach
 > the generator to read it -- do not type it in.
 
-**Version:** 1.58.66
+**Version:** 1.58.67
 
 ## Tools the model can see
 
@@ -31,6 +31,8 @@ travel. They are orthogonal.
 |---|---|
 | `KALIV_AGENT3_ENABLED` | `0` |
 | `KALIV_ALLOW_RAG_CLOUD` | `` |
+| `KALIV_CAPABILITY_TIMEOUT_S` | `2` |
+| `KALIV_CAPABILITY_TTL_S` | `10` |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` |
 | `KALIV_DATA_DIR` | `(unset)` |
 | `KALIV_EGRESS_GATE` | `` |
@@ -63,6 +65,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/e2e.py`
 - `tests/worker_agent3_capability_graph.py`
 - `tests/worker_agent3_capability_graph_api.py`
+- `tests/worker_agent3_capability_probe.py`
 - `tests/worker_agent3_capability_receipt.py`
 - `tests/worker_agent3_capability_receipt_api.py`
 - `tests/worker_agent3_cloud_read_policy.py`
