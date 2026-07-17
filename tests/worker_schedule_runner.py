@@ -78,6 +78,12 @@ T.REGISTRY[read_name] = T.Tool(
     description="runner test read",
     risk="read",
     sensitivity="private",
+    # Every tool now states whether it may run with nobody watching (F-604), and
+    # the default is no. These fixtures are testing the RUNNER, so they say yes
+    # deliberately rather than inheriting it -- which is the whole point of the
+    # flag: delete_model and note_append are both "write", and only one of them
+    # should ever fire at 03:00.
+    schedulable=True,
     run=lambda args: calls.append(dict(args)) or ("PRIVATE_RESULT_" * 100),
 )
 try:
@@ -106,6 +112,7 @@ T.REGISTRY[write_name] = T.Tool(
     description="runner test write",
     risk="write",
     sensitivity="private",
+    schedulable=True,
     run=lambda args: writes.append(dict(args)) or "written",
 )
 try:

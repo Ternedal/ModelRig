@@ -32,11 +32,20 @@ def check(cond, msg):
 
 
 class FakeTool:
-    def __init__(self, name, risk, sensitivity="operational", params=None):
+    # schedulable defaults to False here for the same reason it does in the real
+    # registry (F-604): unattended execution is something a tool argues for. A
+    # fake that forgets to say so is refused, which is exactly what happened
+    # when this fixture met the new gate -- the fail-closed default worked, and
+    # the fixture was the thing that had not been told.
+    def __init__(self, name, risk, sensitivity="operational", params=None,
+                 schedulable=False, unschedulable_because=""):
         self.name = name
         self.risk = risk
         self.sensitivity = sensitivity
         self.params = params or {"type": "object", "properties": {}}
+        self.schedulable = schedulable
+        self.unschedulable_because = unschedulable_because or (
+            "" if schedulable else "denne fake erklærer sig ikke planlægbar")
 
     def human_summary(self, args):
         return f"{self.name}: {json.dumps(args, sort_keys=True, ensure_ascii=False)}"
@@ -46,11 +55,12 @@ root = tempfile.mkdtemp(prefix="kaliv-schedule-api-")
 db_path = os.path.join(root, "schedules.db")
 now = [1_800_000_000.0]
 registry = {
-    "read_clock": FakeTool("read_clock", "read", "public"),
+    "read_clock": FakeTool("read_clock", "read", "public", schedulable=True),
     "append_note": FakeTool(
         "append_note",
         "write",
         "private",
+        schedulable=True,
         params={
             "type": "object",
             "properties": {"text": {"type": "string"}},
