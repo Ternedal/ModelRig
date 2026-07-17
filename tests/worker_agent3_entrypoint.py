@@ -60,6 +60,20 @@ check(route_count() == before_count, "flag-off mount changes no route registrati
 os.environ["KALIV_AGENT3_ENABLED"] = "1"
 check(run_worker._mount_optional_agent3() is True, "feature mounts after explicit flag")
 check(status("GET", "/experimental/agent3/status") == 200, "run API is reachable")
+
+# The rig must be able to answer "which code am I running" (F-508). The evidence
+# collector REQUIRES this field: without it, physical validation raises
+# EvidenceError on Anders' machine, at the one moment the whole activation gate
+# is waiting for. In 1.58.80 I claimed the status publishes it, having checked
+# /health/full and read the line. Reading a line is not a result.
+_body = asyncio.run(request("GET", "/experimental/agent3/status")).json()
+_code = _body.get("code_sha256")
+check(isinstance(_code, str) and len(_code) == 64,
+      "the status tells the collector which code the rig is running"
+      if isinstance(_code, str) and len(_code) == 64
+      else f"NO USABLE code_sha256 ({_code!r}) -- physical validation would fail")
+check(_body.get("worker_version"),
+      "and the version binding travels the same road, so one cannot arrive alone")
 # Validation errors prove the POST route exists without calling Ollama.
 check(status("POST", "/experimental/agent3/plan", {}) == 422, "planner API is reachable")
 # A missing single-use plan is a domain conflict, not a missing route.
