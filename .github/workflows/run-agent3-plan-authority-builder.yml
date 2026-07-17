@@ -123,7 +123,8 @@ jobs:
               return response(run)
 
           '''
-          api_start = program.index("replacement = '''    def start_explicit")
+          api_scope = program.index("api_path = ROOT / 'worker/app/agent3/api.py'")
+          api_start = program.index("replacement =", api_scope)
           api_end = program.index("api_path.write_text", api_start)
           program = program[:api_start] + f"replacement = {api_replacement!r}\n" + program[api_end:]
 
