@@ -1,0 +1,79 @@
+name: one-shot-export-apk-1-58-76
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: c30e4ac7373b329cc36c35680733906ca6a46090
+          fetch-depth: 1
+      - name: Verify release identity
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v1.58.76
+          TARGET: c30e4ac7373b329cc36c35680733906ca6a46090
+        run: |
+          set -euo pipefail
+          test "$(cat VERSION)" = "1.58.76"
+          test "$(git rev-parse HEAD)" = "$TARGET"
+          tag_sha=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/$TAG" --jq '.object.sha')
+          test "$tag_sha" = "$TARGET" || { echo "tag target $tag_sha != $TARGET"; exit 1; }
+          test "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" = "false"
+      - name: Download APK and release checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p export
+          gh release download v1.58.76 --pattern kaliv-latest.apk --dir export
+          gh release download v1.58.76 --pattern SHA256SUMS.txt --dir export
+      - name: Verify APK against published SHA256SUMS
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          apk = Path('export/kaliv-latest.apk')
+          sums = Path('export/SHA256SUMS.txt')
+          assert apk.is_file() and apk.stat().st_size > 0, 'APK missing or empty'
+          lines = [line.strip() for line in sums.read_text(encoding='utf-8').splitlines() if line.strip()]
+          matches = [line for line in lines if line.split(maxsplit=1)[-1].lstrip('*').endswith('kaliv-latest.apk')]
+          if len(matches) != 1:
+              raise SystemExit(f'expected one checksum entry for kaliv-latest.apk, got {matches!r}')
+          expected = matches[0].split()[0].lower()
+          actual = hashlib.sha256(apk.read_bytes()).hexdigest().lower()
+          if actual != expected:
+              raise SystemExit(f'APK checksum mismatch: actual={actual} expected={expected}')
+          Path('export/APK-VERIFICATION.txt').write_text(
+              'release=v1.58.76\n'
+              'commit=c30e4ac7373b329cc36c35680733906ca6a46090\n'
+              f'filename={apk.name}\n'
+              f'size_bytes={apk.stat().st_size}\n'
+              f'sha256={actual}\n'
+              'checksum_source=published SHA256SUMS.txt\n',
+              encoding='utf-8',
+          )
+          print(Path('export/APK-VERIFICATION.txt').read_text())
+          PY
+      - name: Upload verified APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kaliv-1-58-76-verified-apk
+          path: |
+            export/kaliv-latest.apk
+            export/APK-VERIFICATION.txt
+            export/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove temporary export branch
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/ops/export-apk-1-58-76" || true
