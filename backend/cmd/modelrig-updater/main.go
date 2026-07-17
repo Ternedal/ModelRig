@@ -397,6 +397,7 @@ func main() {
 	checkOnly := flag.Bool("check", false, "report whether an update is available and exit")
 	recoverOnly := flag.Bool("recover", false, "repair a crashed prior swap (offline, no network) and exit")
 	skipVerify := flag.Bool("insecure-skip-verify", false, "install without checking SHA256SUMS.txt (only for a release predating checksums)")
+	skipAttestation := flag.Bool("skip-attestation", false, "install without checking GitHub build provenance (only for a release predating v1.58.72, which is when signing started)")
 	flag.Parse()
 	if *heartbeatPath == "" {
 		*heartbeatPath = filepath.Join(*root, "logs", "supervisor-heartbeat")
@@ -556,6 +557,32 @@ func main() {
 			}
 		}
 		log.Printf("checksums verified for %d exe(s)", len(targets))
+
+		// Checksums prove the download was not corrupted. Provenance proves the
+		// release was not rewritten. Only the second one survives a stolen
+		// token, so it is the one that decides whether we swap a live binary.
+		if !*skipAttestation {
+			for _, t := range targets {
+				got, err := fileSHA256(filepath.Join(staged, t.asset))
+				if err != nil {
+					die("hash %s: %v", t.asset, err)
+				}
+				n, err := attestedBy(*repo, got)
+				if err != nil {
+					// Unreachable is not the same as unattested, and neither is
+					// a reason to install. We cannot verify, so we do not swap.
+					die("cannot check provenance for %s: %v -- refusing to install "+
+						"(pass -skip-attestation for a release predating signing)", t.asset, err)
+				}
+				if n == 0 {
+					die("NO BUILD PROVENANCE for %s (sha256 %s) -- this artifact was not "+
+						"produced by %s's release workflow. Refusing to install.", t.asset, got[:16], *repo)
+				}
+			}
+			log.Printf("build provenance verified for %d exe(s)", len(targets))
+		} else {
+			log.Printf("WARNING: installing WITHOUT provenance verification (-skip-attestation)")
+		}
 	} else {
 		log.Printf("WARNING: installing WITHOUT integrity verification (-insecure-skip-verify)")
 	}
@@ -694,6 +721,49 @@ func httpGet(url string) ([]byte, error) {
 		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
 	}
 	return io.ReadAll(resp.Body)
+}
+
+// attestedBy asks GitHub whether it holds a build-provenance attestation for
+// this exact artifact digest, produced by this repo's workflow (F-523).
+//
+// Why this exists: SHA256SUMS.txt cannot prove itself. It lives in the same
+// release, behind the same credential, as the asset it vouches for -- whoever
+// can replace the exe rewrites the hashes in the same breath, and every check
+// above this one passes. That is not hypothetical here: the release PAT has
+// contents:write and lives in a note. It cannot push code and never needed to.
+//
+// A tampered artifact has a different digest, and no attestation exists for it.
+// The signature was minted with the Actions runner's OIDC identity, which a PAT
+// cannot produce.
+//
+// HONEST SCOPE, so nobody reads more into this than it does: this trusts
+// GitHub's answer over TLS. It does NOT verify the Sigstore bundle offline --
+// that needs a verification stack this updater has no business carrying yet.
+// The trust added is zero: we already trust this same TLS connection to hand us
+// the binary we are about to run as a service. What changes is that the proof
+// is no longer stored next to the thing it proves.
+func attestedBy(repo, digest string) (int, error) {
+	return attestationsAt(fmt.Sprintf(
+		"https://api.github.com/repos/%s/attestations/sha256:%s", repo, digest))
+}
+
+// Split from attestedBy so the check can be driven against a fake GitHub. A
+// verification step that silently no-ops looks exactly like one that works, and
+// the only way to tell them apart is to make it answer both ways.
+func attestationsAt(url string) (int, error) {
+	body, err := httpGet(url)
+	if err != nil {
+		return 0, err
+	}
+	var payload struct {
+		Attestations []struct {
+			Bundle json.RawMessage `json:"bundle"`
+		} `json:"attestations"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return 0, fmt.Errorf("parse attestations from %s: %w", url, err)
+	}
+	return len(payload.Attestations), nil
 }
 
 func readRunningVersion(healthURL string) string {

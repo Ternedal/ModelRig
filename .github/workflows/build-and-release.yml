@@ -401,12 +401,15 @@ jobs:
       # runner's OIDC identity, which a PAT cannot mint -- so the signature is the
       # one artifact a leaked token cannot produce.
       #
-      # HONEST SCOPE: this makes tampering PROVABLE, not impossible. The updater
-      # does not verify attestations yet, so today this is evidence a human can
-      # check (`gh attestation verify <file> --repo Ternedal/ModelRig`), not a
-      # gate that stops an install. That is still worth having: you cannot verify
-      # what was never signed. Teaching the updater to check it is a separate,
-      # larger job.
+      # SCOPE, as of 1.58.81: the updater now REFUSES to swap a binary that has
+      # no attestation from this repo (F-523), so this is a gate and not only a
+      # receipt. A human can still check by hand:
+      #   gh attestation verify <file> --repo Ternedal/ModelRig
+      # What the updater does NOT do is verify the Sigstore bundle offline -- it
+      # asks GitHub over TLS whether an attestation exists for the digest. That
+      # adds no trust it did not already place in this same connection to hand it
+      # the binary, and it moves the proof out from beside the thing it proves.
+      # Offline bundle verification is a real upgrade, and a later one.
       - name: Attest the assets (SHA256SUMS alone cannot prove itself)
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
