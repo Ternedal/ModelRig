@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+from pydantic import BaseModel, ConfigDict, Field
 
 from .capability_graph import (
     CapabilityGraph,
@@ -10,6 +11,21 @@ from .capability_graph import (
 from .core import CapabilitySnapshot, TurnRequest
 from .integration import V2ToolAdapter
 from .validation_gate import evaluate_configured_report
+
+
+class RoutingPreviewReq(BaseModel):
+    """Client-declared turn facts only; readiness and promotion stay server-owned."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message: str = Field(min_length=1, max_length=20_000)
+    mode: str = Field(default="rig", pattern="^(rig|cloud)$")
+    tools: bool = False
+    rag: bool = False
+    has_image: bool = False
+    voice: bool = False
+    allow_rag_cloud: bool = False
+    auto_cloud_fallback: bool = False
 
 
 def build_runtime_capability_graph(
@@ -94,7 +110,7 @@ def build_capability_graph_router(
     # Import lazily after this module is initialized. routing_preview_api reuses
     # build_runtime_capability_graph for standalone/custom-provider tests.
     from .routing_preview import evaluate_routing_preview
-    from .routing_preview_api import RoutingPreviewReq, build_runtime_routing_snapshot
+    from .routing_preview_api import build_runtime_routing_snapshot
 
     @router.post("/routing-preview")
     def routing_preview(req: RoutingPreviewReq) -> dict:
