@@ -142,13 +142,14 @@ jobs:
         run: |
           set -euo pipefail
           parent=2225ff371c764451499613a94d3540dfe1f0b742
+          git add -A
           mkdir -p /tmp/agent3-validation-command-tree
-          git diff --name-status "$parent" > /tmp/agent3-validation-command-tree/MANIFEST.txt
+          git diff --cached --name-status "$parent" > /tmp/agent3-validation-command-tree/MANIFEST.txt
           while IFS= read -r path; do
             [ -n "$path" ] || continue
             mkdir -p "/tmp/agent3-validation-command-tree/$(dirname "$path")"
-            cp "$path" "/tmp/agent3-validation-command-tree/$path"
-          done < <(git diff --name-only --diff-filter=ACMRT "$parent")
+            git show ":$path" > "/tmp/agent3-validation-command-tree/$path"
+          done < <(git diff --cached --name-only --diff-filter=ACMRT "$parent")
           printf 'base=%s\nversion=1.58.83\n' "$parent" > /tmp/agent3-validation-command-tree/BUILD_IDENTITY.txt
           cat /tmp/agent3-validation-command-tree/MANIFEST.txt
       - name: Upload validated product tree
