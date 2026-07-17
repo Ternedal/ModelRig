@@ -64,6 +64,9 @@ dependencies {
     // every call. StreamContract parses real NDJSON, so the tests need a real
     // implementation on the JVM test classpath.
     testImplementation("org.json:json:20240303")
+    // Scheduler client contracts need a real HTTP boundary without relying on
+    // JDK-only com.sun.net.httpserver, which is absent from AGP's test compiler.
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     val composeBom = platform("androidx.compose:compose-bom:2024.09.03")
     implementation(composeBom)
     implementation("androidx.compose.material3:material3")

@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Kaliv</string>
+    <string name="shortcut_schedules_short">Planer</string>
+    <string name="shortcut_schedules_long">Administrér Kaliv-planer</string>
 </resources>
