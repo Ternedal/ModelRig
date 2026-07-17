@@ -179,6 +179,40 @@ try:
         and not os.path.exists(db_path),
         "preview executes and persists nothing",
     )
+    check(
+        "Husk brygdag" in preview["human_summary"],
+        "preview exposes the exact human-readable action",
+    )
+
+    # Validation remains fail-closed independently of the approval ceremony.
+    too_fast = client.post(
+        "/schedules/preview",
+        json={"tool": "read_clock", "args": {}, "cadence": "every:5"},
+    )
+    too_large = client.post(
+        "/schedules/preview",
+        json={
+            "tool": "append_note",
+            "args": {"text": "x" * 21_000},
+            "cadence": "every:60",
+        },
+    )
+    wrong_type = client.post(
+        "/schedules/preview",
+        json={"tool": "append_note", "args": {"text": 42}, "cadence": "every:60"},
+    )
+    unknown_arg = client.post(
+        "/schedules/preview",
+        json={
+            "tool": "append_note",
+            "args": {"text": "ok", "path": "/tmp/escape"},
+            "cadence": "every:60",
+        },
+    )
+    check(too_fast.status_code == 422, "busy-loop cadences remain rejected")
+    check(too_large.status_code == 422, "oversized arguments remain bounded")
+    check(wrong_type.status_code == 422, "tool argument types remain validated")
+    check(unknown_arg.status_code == 422, "unknown tool arguments remain rejected")
 
     missing = client.post("/schedules", json=create_body(preview))
     check(missing.status_code == 409, "write cannot persist without an issued token")
@@ -197,7 +231,22 @@ try:
         "/schedules",
         json=create_body(preview, tamper_token, args={"text": "En anden handling"}),
     )
+    changed_cadence = client.post(
+        "/schedules",
+        json=create_body(preview, tamper_token, cadence="every:3600"),
+    )
+    changed_horizon = client.post(
+        "/schedules",
+        json=create_body(preview, tamper_token, ttl_days=31),
+    )
+    changed_budget = client.post(
+        "/schedules",
+        json=create_body(preview, tamper_token, max_runs=2),
+    )
     check(changed_args.status_code == 409, "changed arguments invalidate the token")
+    check(changed_cadence.status_code == 409, "changed cadence invalidates the token")
+    check(changed_horizon.status_code == 409, "changed expiry horizon invalidates the token")
+    check(changed_budget.status_code == 409, "changed run budget invalidates the token")
     exact_after_tamper = client.post(
         "/schedules", json=create_body(preview, tamper_token)
     )
@@ -212,6 +261,13 @@ try:
         and write_schedule["approval_valid"],
         "persisted execution grant remains bound only to immutable action args",
     )
+    check(
+        exact_after_tamper.json()["executed"] is False
+        and write_schedule["structurally_eligible"]
+        and write_schedule["runtime_gate_checked"] is False,
+        "create persists no execution and reports structural validity honestly",
+    )
+    check(os.path.exists(db_path), "explicit create persists the schedule DB")
 
     replay = client.post("/schedules", json=create_body(preview, tamper_token))
     check(replay.status_code == 409, "approval token is durably single-use")
@@ -264,6 +320,19 @@ try:
         "read schedule stores no fake write approval",
     )
 
+    listed = client.get("/schedules").json()["schedules"]
+    check(
+        {item["schedule_id"] for item in listed}
+        == {write_id, read_schedule["schedule_id"]},
+        "list exposes every persisted schedule",
+    )
+    check(
+        client.get(f"/schedules/{write_id}").json()["schedule"]["args"]
+        == {"text": "Husk brygdag"},
+        "get returns immutable approved arguments",
+    )
+    check(client.get("/schedules/missing").status_code == 404, "missing schedule is 404")
+
     desktop = client.post(
         "/schedules/preview",
         json={"tool": "click_screen", "args": {"x": 10}, "cadence": "every:60"},
@@ -278,7 +347,29 @@ try:
     )
     check(desktop.status_code == 422, "desktop actions remain unschedulable")
     check(unknown.status_code == 404, "unknown tools remain rejected")
-    check(malformed.status_code == 422, "tool arguments remain validated")
+    check(malformed.status_code == 422, "required tool arguments remain validated")
+
+    original_due = write_schedule["due_at"]
+    paused = client.post(f"/schedules/{write_id}/enabled", json={"enabled": False})
+    check(paused.status_code == 200 and not paused.json()["schedule"]["enabled"], "operator can pause a schedule")
+    now[0] += 3600
+    resumed = client.post(f"/schedules/{write_id}/enabled", json={"enabled": True})
+    resumed_schedule = resumed.json()["schedule"]
+    check(resumed.status_code == 200 and resumed_schedule["enabled"], "operator can resume a valid schedule")
+    check(
+        resumed_schedule["due_at"] == now[0] + 60
+        and resumed_schedule["due_at"] != original_due,
+        "resume starts at a fresh future occurrence",
+    )
+    store = ScheduleAdminStore(db_path)
+    store.record_claim_result(write_id, ran=True)
+    store.set_enabled(write_id, False, now=now[0])
+    store.close()
+    exhausted = client.post(f"/schedules/{write_id}/enabled", json={"enabled": True})
+    check(
+        exhausted.status_code == 409 and "budget" in exhausted.json()["detail"],
+        "exhausted run budget cannot be silently re-enabled",
+    )
 
     renew_preview_resp = client.post(
         f"/schedules/{write_id}/renew/preview",
@@ -293,6 +384,21 @@ try:
         "renewal gets a separately bound preview",
     )
 
+    missing_renewal = client.post(
+        f"/schedules/{write_id}/renew",
+        json={"ttl_days": 60, "max_runs": 2, "enable": True},
+    )
+    check(missing_renewal.status_code == 409, "write renewal requires an issued token")
+    create_token_reuse = client.post(
+        f"/schedules/{write_id}/renew",
+        json={
+            "ttl_days": 60,
+            "max_runs": 2,
+            "enable": True,
+            "approval_token": token_for(preview),
+        },
+    )
+    check(create_token_reuse.status_code == 409, "a create token cannot authorize renewal")
     changed_enable = client.post(
         f"/schedules/{write_id}/renew",
         json={
@@ -302,7 +408,17 @@ try:
             "approval_token": renew_token,
         },
     )
+    changed_renew_budget = client.post(
+        f"/schedules/{write_id}/renew",
+        json={
+            "ttl_days": 60,
+            "max_runs": 3,
+            "enable": True,
+            "approval_token": renew_token,
+        },
+    )
     check(changed_enable.status_code == 409, "changed renewal state invalidates token")
+    check(changed_renew_budget.status_code == 409, "changed renewal budget invalidates token")
 
     now[0] += 120
     renewed_resp = client.post(
@@ -322,6 +438,11 @@ try:
         and renewed["enabled"]
         and renewed["due_at"] == now[0] + 60,
         "renewal resets budget and starts at a fresh future occurrence",
+    )
+    check(
+        renewed["approved_fingerprint"] == preview["action_fingerprint"]
+        and renewed["approval_valid"],
+        "renewal preserves the immutable action approval",
     )
     renew_replay = client.post(
         f"/schedules/{write_id}/renew",
