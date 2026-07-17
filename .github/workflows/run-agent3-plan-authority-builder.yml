@@ -145,6 +145,7 @@ jobs:
       - name: Push one clean product commit
         run: |
           set -euo pipefail
+          rm -f agent3-authority-tests.log agent3-extract-console.log agent3-extract.log agent3-patch.log
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
