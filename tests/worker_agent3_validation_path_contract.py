@@ -66,6 +66,12 @@ check(
     "the operator command verifies worker visibility and the fail-closed promotion result",
 )
 check(
+    "Get-FileHash" in wrapper
+    and "report_sha256" in wrapper
+    and "$remoteSha -ne $localSha" in wrapper,
+    "the operator command binds worker assessment to the exact report bytes it produced",
+)
+check(
     "--token" not in wrapper and "MODELRIG_TOKEN" in wrapper,
     "the operator command keeps the paired token out of command history",
 )
