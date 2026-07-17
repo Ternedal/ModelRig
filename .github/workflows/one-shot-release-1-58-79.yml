@@ -28,6 +28,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: v1.58.79
           TARGET: ad9a10f7ff2b78cb0c354a211b9c332fb2498835
+          NOTES: Agent3 run plans are now server-authored; retry clones the stored plan and rejects client mutation. Agent3 remains dormant pending physical rig validation.
         run: |
           set -euo pipefail
           if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/$TAG" >/dev/null 2>&1; then
@@ -39,13 +40,28 @@ jobs:
           fi
           tag_sha=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/$TAG" --jq '.object.sha')
           test "$tag_sha" = "$TARGET" || { echo "tag target $tag_sha != $TARGET"; exit 1; }
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --draft=true --title "$TAG" \
-              --notes "Agent3 run plans are now server-authored; retry clones the stored plan and rejects client mutation. Agent3 remains dormant pending physical rig validation."
+
+          if release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$TAG" --jq '.id' 2>/dev/null); then
+            echo "release $release_id exists; forcing it back to draft"
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/$release_id" \
+              -f tag_name="$TAG" \
+              -f target_commitish="$TARGET" \
+              -f name="$TAG" \
+              -f body="$NOTES" \
+              -F draft=true \
+              -F prerelease=false \
+              -F make_latest=false >/dev/null
           else
-            gh release create "$TAG" --verify-tag --draft --title "$TAG" \
-              --notes "Agent3 run plans are now server-authored; retry clones the stored plan and rejects client mutation. Agent3 remains dormant pending physical rig validation."
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+              -f tag_name="$TAG" \
+              -f target_commitish="$TARGET" \
+              -f name="$TAG" \
+              -f body="$NOTES" \
+              -F draft=true \
+              -F prerelease=false \
+              -F make_latest=false >/dev/null
           fi
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$TAG" --jq '.draft')" = "true"
       - name: Dispatch atomic release workflow on tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
