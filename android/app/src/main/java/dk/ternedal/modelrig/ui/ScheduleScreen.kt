@@ -262,6 +262,13 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
                     color = KalivTheme.colors.textMuted,
                     fontSize = 11.sp,
                 )
+                if (state != null && !state.approvalVerifierConfigured) {
+                    Text(
+                        "Skriveplaner er låst: generér Ed25519-nøglerne og sæt KALIV_SCHEDULER_APPROVAL_PRIVATE_KEY på backend samt KALIV_SCHEDULER_APPROVAL_PUBLIC_KEY på worker.",
+                        color = KalivTheme.colors.danger,
+                        fontSize = 11.sp,
+                    )
+                }
                 state?.lastError?.let { Text(it, color = KalivTheme.colors.danger, fontSize = 11.sp) }
                 Spacer(Modifier.height(6.dp))
                 OutlinedButton(enabled = !busy, onClick = ::load) { Text("Genindlæs") }

@@ -26,6 +26,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -87,13 +88,14 @@ func superviseOnce(children []child, fails map[string]int, maxFails int, restart
 // --- real child: an exe with a /healthz, output to a rotating log ------------
 
 type procChild struct {
-	label     string
-	exePath   string
-	workDir   string
-	healthURL string
-	logPath   string
-	logMaxMB  int64
-	extraEnv  []string
+	label         string
+	exePath       string
+	workDir       string
+	healthURL     string
+	logPath       string
+	logMaxMB      int64
+	extraEnv      []string
+	removeEnvKeys []string
 
 	mu  sync.Mutex
 	cmd *exec.Cmd
@@ -137,8 +139,8 @@ func (p *procChild) restart() error {
 	}
 	cmd := exec.Command(p.exePath)
 	cmd.Dir = p.workDir
-	if len(p.extraEnv) > 0 {
-		cmd.Env = append(os.Environ(), p.extraEnv...)
+	if len(p.extraEnv) > 0 || len(p.removeEnvKeys) > 0 {
+		cmd.Env = childProcessEnv(os.Environ(), p.extraEnv, p.removeEnvKeys)
 	}
 	cmd.Stdout = f
 	cmd.Stderr = f
@@ -151,6 +153,26 @@ func (p *procChild) restart() error {
 	// close this run's log handle when the process ends.
 	go func() { _ = cmd.Wait(); f.Close() }()
 	return nil
+}
+
+func childProcessEnv(base, extra, removeKeys []string) []string {
+	removed := make(map[string]bool, len(removeKeys))
+	for _, key := range removeKeys {
+		removed[strings.ToUpper(strings.TrimSpace(key))] = true
+	}
+	combined := append(append([]string{}, base...), extra...)
+	out := make([]string, 0, len(combined))
+	for _, entry := range combined {
+		key := entry
+		if i := strings.IndexByte(entry, '='); i >= 0 {
+			key = entry[:i]
+		}
+		if removed[strings.ToUpper(key)] {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 // rotateLog renames path -> path.1 when it exceeds maxBytes, so an always-on
@@ -217,6 +239,10 @@ func main() {
 		label: "worker", exePath: *workerExe, workDir: filepath.Dir(*workerExe),
 		healthURL: *workerHealth, logPath: filepath.Join(*logDir, "worker.log"), logMaxMB: *logMB,
 		extraEnv: childEnv,
+		// The worker verifies Ed25519 approvals with the PUBLIC key. A future
+		// shell/http tool runs inside this process, so the backend-only private seed
+		// must be physically absent rather than merely "not used" by Python code.
+		removeEnvKeys: []string{"KALIV_SCHEDULER_APPROVAL_PRIVATE_KEY"},
 	}
 	server := &procChild{
 		label: "server", exePath: *serverExe, workDir: filepath.Dir(*serverExe),
@@ -262,7 +288,7 @@ func main() {
 			return
 		case <-ticker.C:
 			fails = superviseOnce(children, fails, *maxFails, nil)
-			res.run(time.Now()) // off the watchdog path; can't block health/restart
+			res.run(time.Now())         // off the watchdog path; can't block health/restart
 			_ = heartbeat.Write(hbPath) // liveness signal the updater checks after an update
 		}
 	}

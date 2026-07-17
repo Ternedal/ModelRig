@@ -6,8 +6,9 @@ worker routes: this is an unauthenticated control surface and must not become a
 LAN write API by inheritance. A backend/client may later expose a human UI
 through its authenticated boundary.
 
-Writes use preview -> matching fingerprint -> create/renew; no endpoint accepts
-changed arguments or standing-grant terms under an old approval.
+Writes use preview -> authenticated backend approval -> signed single-use token ->
+create/renew; no endpoint accepts changed arguments or standing-grant terms under
+an old approval token.
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ from .schedule_admin import (
     ScheduleAdminConflict,
     ScheduleAdminError,
     ScheduleAdminNotFound,
+    ScheduleAdminUnavailable,
 )
 from .scheduler import DEFAULT_MAX_RUNS, DEFAULT_TTL_DAYS, ScheduleError, enabled
 
@@ -37,9 +39,7 @@ class PreviewScheduleReq(BaseModel):
 
 
 class CreateScheduleReq(PreviewScheduleReq):
-    approved_fingerprint: str | None = Field(
-        default=None, pattern="^[0-9a-f]{32}$"
-    )
+    approval_token: str | None = Field(default=None, min_length=32, max_length=4096)
 
 
 class SetScheduleEnabledReq(BaseModel):
@@ -55,9 +55,7 @@ class RenewPreviewReq(BaseModel):
 
 
 class RenewScheduleReq(RenewPreviewReq):
-    approved_fingerprint: str | None = Field(
-        default=None, pattern="^[0-9a-f]{32}$"
-    )
+    approval_token: str | None = Field(default=None, min_length=32, max_length=4096)
 
 
 def _raise(exc: Exception) -> None:
@@ -65,6 +63,8 @@ def _raise(exc: Exception) -> None:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if isinstance(exc, ScheduleAdminConflict):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(exc, ScheduleAdminUnavailable):
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if isinstance(exc, (ScheduleAdminError, ScheduleError)):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     raise exc
@@ -95,13 +95,14 @@ def _require_operator(
         )
 
 
-def _runtime_status(request: Request) -> dict[str, Any]:
+def _runtime_status(request: Request, service: ScheduleAdmin) -> dict[str, Any]:
     runtime = getattr(request.app.state, "scheduler_runtime", None)
     if runtime is None:
         return {
             "configured": enabled(),
             "running": False,
             "resources_open": False,
+            "approval_verifier_configured": service.approval_verifier_configured(),
             "last_error": None,
         }
     try:
@@ -111,12 +112,14 @@ def _runtime_status(request: Request) -> dict[str, Any]:
             "configured": enabled(),
             "running": False,
             "resources_open": True,
+            "approval_verifier_configured": service.approval_verifier_configured(),
             "last_error": f"{type(exc).__name__}: {exc}"[:500],
         }
     return {
         "configured": bool(state.configured),
         "running": bool(state.running),
         "resources_open": bool(state.resources_open),
+        "approval_verifier_configured": service.approval_verifier_configured(),
         "last_error": state.last_error,
     }
 
@@ -146,7 +149,7 @@ def build_schedule_router(
     def schedule_status(request: Request) -> dict[str, Any]:
         _require_operator(request, operator_allowed)
         # Status does not open the schedule DB or import ToolGate.
-        return _runtime_status(request)
+        return _runtime_status(request, service)
 
     @router.post("/preview")
     def preview_schedule(
@@ -186,7 +189,7 @@ def build_schedule_router(
                 req.cadence,
                 ttl_days=req.ttl_days,
                 max_runs=req.max_runs,
-                approved_fingerprint=req.approved_fingerprint,
+                approval_token=req.approval_token,
             )
         except (ScheduleAdminError, ScheduleError) as exc:
             _raise(exc)
@@ -238,7 +241,7 @@ def build_schedule_router(
                 schedule_id,
                 ttl_days=req.ttl_days,
                 max_runs=req.max_runs,
-                approved_fingerprint=req.approved_fingerprint,
+                approval_token=req.approval_token,
                 enable=req.enable,
             )
         except (ScheduleAdminError, ScheduleError) as exc:

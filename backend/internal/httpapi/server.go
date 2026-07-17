@@ -90,11 +90,13 @@ func (s *server) routes() {
 		// upstream before forwarding any body.
 		s.mux.Handle("GET /api/v1/schedules/status", s.authMW(http.HandlerFunc(s.handleSchedulesStatus)))
 		s.mux.Handle("POST /api/v1/schedules/preview", s.authMW(http.HandlerFunc(s.handleSchedulesPreview)))
+		s.mux.Handle("POST /api/v1/schedules/approve", s.authMW(http.HandlerFunc(s.handleSchedulesApprove)))
 		s.mux.Handle("GET /api/v1/schedules", s.authMW(http.HandlerFunc(s.handleSchedulesCollection)))
 		s.mux.Handle("POST /api/v1/schedules", s.authMW(http.HandlerFunc(s.handleSchedulesCollection)))
 		s.mux.Handle("GET /api/v1/schedules/{id}", s.authMW(http.HandlerFunc(s.handleScheduleGet)))
 		s.mux.Handle("POST /api/v1/schedules/{id}/enabled", s.authMW(http.HandlerFunc(s.handleScheduleEnabled)))
 		s.mux.Handle("POST /api/v1/schedules/{id}/renew/preview", s.authMW(http.HandlerFunc(s.handleScheduleRenewPreview)))
+		s.mux.Handle("POST /api/v1/schedules/{id}/renew/approve", s.authMW(http.HandlerFunc(s.handleScheduleRenewApprove)))
 		s.mux.Handle("POST /api/v1/schedules/{id}/renew", s.authMW(http.HandlerFunc(s.handleScheduleRenew)))
 	}
 

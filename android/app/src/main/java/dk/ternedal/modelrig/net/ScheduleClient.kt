@@ -13,8 +13,10 @@ import java.util.concurrent.TimeUnit
  *
  * It never calls the worker directly. The paired-device token goes only to the
  * Go backend, which authenticates it and proxies to the loopback worker. Create
- * and renewal are deliberately two-step: the UI must preview the complete
- * standing grant, then return the opaque approval fingerprint unchanged.
+ * and renewal are deliberately explicit: the UI previews the complete standing
+ * grant, and only the user's confirm action calls the backend approval route.
+ * The backend returns a short-lived signed token which this client forwards
+ * unchanged; the app never computes or signs approval material.
  */
 class ScheduleClient(baseUrl: String, private val token: String) {
     private val base = baseUrl.trimEnd('/')
@@ -54,7 +56,9 @@ class ScheduleClient(baseUrl: String, private val token: String) {
             .put("cadence", preview.cadence)
             .put("ttl_days", preview.ttlDays)
             .put("max_runs", preview.maxRuns)
-        preview.approvalFingerprint?.let { body.put("approved_fingerprint", it) }
+        if (preview.requiresApproval) {
+            body.put("approval_token", approve(preview, "/api/v1/schedules/approve", body))
+        }
         return parseItem(post("/api/v1/schedules", body).getJSONObject("schedule"))
     }
 
@@ -89,11 +93,31 @@ class ScheduleClient(baseUrl: String, private val token: String) {
             .put("ttl_days", preview.ttlDays)
             .put("max_runs", preview.maxRuns)
         if (preview.enable != null) body.put("enable", preview.enable)
-        preview.approvalFingerprint?.let { body.put("approved_fingerprint", it) }
+        if (preview.requiresApproval) {
+            body.put(
+                "approval_token",
+                approve(preview, "/api/v1/schedules/$scheduleId/renew/approve", body),
+            )
+        }
         return parseItem(
             post("/api/v1/schedules/$scheduleId/renew", body)
                 .getJSONObject("schedule"),
         )
+    }
+
+    private fun approve(
+        original: SchedulePreview,
+        path: String,
+        payload: JSONObject,
+    ): String {
+        val approved = parsePreview(post(path, JSONObject(payload.toString())).getJSONObject("preview"))
+        if (approved.approvalBinding.isNullOrBlank() ||
+            approved.approvalBinding != original.approvalBinding
+        ) {
+            throw ModelRigException("scheduler approval changed after preview; preview again")
+        }
+        return approved.approvalToken
+            ?: throw ModelRigException("backend returned no signed scheduler approval token")
     }
 
     private fun get(path: String): JSONObject = execute(
@@ -133,6 +157,7 @@ class ScheduleClient(baseUrl: String, private val token: String) {
         configured = o.optBoolean("configured"),
         running = o.optBoolean("running"),
         resourcesOpen = o.optBoolean("resources_open"),
+        approvalVerifierConfigured = o.optBoolean("approval_verifier_configured"),
         lastError = o.optString("last_error").takeUnless { it.isBlank() || it == "null" },
     )
 
@@ -146,8 +171,12 @@ class ScheduleClient(baseUrl: String, private val token: String) {
         sensitivity = o.optString("sensitivity"),
         humanSummary = o.optString("human_summary"),
         requiresApproval = o.optBoolean("requires_approval"),
-        approvalFingerprint = o.optString("approval_fingerprint")
+        approvalBinding = o.optString("approval_binding")
             .takeUnless { it.isBlank() || it == "null" },
+        approvalToken = o.optString("approval_token")
+            .takeUnless { it.isBlank() || it == "null" },
+        approvalTokenExpiresAt = if (o.has("approval_token_expires_at"))
+            o.optDouble("approval_token_expires_at") else null,
         dueAt = o.optDouble("due_at"),
         expiresAt = o.optDouble("expires_at"),
         ttlDays = o.optInt("ttl_days"),
@@ -182,6 +211,7 @@ data class ScheduleRuntimeStatus(
     val configured: Boolean,
     val running: Boolean,
     val resourcesOpen: Boolean,
+    val approvalVerifierConfigured: Boolean,
     val lastError: String?,
 )
 
@@ -195,7 +225,9 @@ data class SchedulePreview(
     val sensitivity: String,
     val humanSummary: String,
     val requiresApproval: Boolean,
-    val approvalFingerprint: String?,
+    val approvalBinding: String?,
+    val approvalToken: String?,
+    val approvalTokenExpiresAt: Double?,
     val dueAt: Double,
     val expiresAt: Double,
     val ttlDays: Int,

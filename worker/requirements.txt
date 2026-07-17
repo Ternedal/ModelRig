@@ -20,3 +20,6 @@ pydantic==2.13.4
 # Optional -- RAG DOCX ingest only. NOT installed by default. Extracts text from
 # uploaded .docx (python-docx, paragraphs + tables). pip install python-docx
 # python-docx>=1.1
+# Scheduler approval verification. The backend owns the Ed25519 private key;
+# the worker receives only the public key and cannot mint standing-grant consent.
+cryptography==49.0.0

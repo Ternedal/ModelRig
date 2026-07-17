@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -14,7 +15,7 @@ type fakeChild struct {
 	restarts  int
 }
 
-func (f *fakeChild) name() string { return f.nm }
+func (f *fakeChild) name() string  { return f.nm }
 func (f *fakeChild) running() bool { return f.run }
 func (f *fakeChild) healthy() bool { return f.hlth }
 func (f *fakeChild) restart() error {
@@ -91,5 +92,27 @@ func TestRotateLog(t *testing.T) {
 	}
 	if _, err := os.Stat(p); !os.IsNotExist(err) {
 		t.Fatalf("original log should be moved after rotation")
+	}
+}
+
+func TestChildProcessEnvRemovesSchedulerPrivateKeyFromWorker(t *testing.T) {
+	got := childProcessEnv(
+		[]string{"PATH=C:\\bin", "KALIV_SCHEDULER_APPROVAL_PRIVATE_KEY=parent-secret"},
+		[]string{
+			"KALIV_SCHEDULER_APPROVAL_PRIVATE_KEY=file-secret",
+			"KALIV_SCHEDULER_APPROVAL_PUBLIC_KEY=public-key",
+			"KALIV_SCHEDULER=1",
+		},
+		[]string{"kaliv_scheduler_approval_private_key"},
+	)
+	joined := strings.Join(got, "\n")
+	if strings.Contains(joined, "PRIVATE_KEY") || strings.Contains(joined, "secret") {
+		t.Fatalf("worker inherited the backend signing seed: %q", joined)
+	}
+	if !strings.Contains(joined, "KALIV_SCHEDULER_APPROVAL_PUBLIC_KEY=public-key") {
+		t.Fatalf("worker lost the verification key: %q", joined)
+	}
+	if !strings.Contains(joined, "KALIV_SCHEDULER=1") || !strings.Contains(joined, "PATH=C:\\bin") {
+		t.Fatalf("worker lost unrelated environment: %q", joined)
 	}
 }

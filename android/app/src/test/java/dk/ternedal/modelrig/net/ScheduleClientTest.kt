@@ -10,16 +10,13 @@ import org.junit.Test
 
 class ScheduleClientTest {
     @Test
-    fun createUsesOpaquePreviewApprovalWithoutRecomputingIt() {
-        val approval = "1234567890abcdef1234567890abcdef"
+    fun createGetsSignedApprovalOnlyAfterExplicitConfirmAndForwardsItOpaque() {
+        val binding = "a".repeat(64)
+        val token = "kav1.opaque-payload.opaque-signature"
         val server = MockWebServer()
-        server.enqueue(jsonResponse("""{"configured":true,"running":false,"resources_open":false,"last_error":null}"""))
-        server.enqueue(jsonResponse(previewJson(
-            operation = "create",
-            scheduleId = null,
-            approval = approval,
-            enable = null,
-        )))
+        server.enqueue(jsonResponse("""{"configured":true,"running":false,"resources_open":false,"approval_verifier_configured":true,"last_error":null}"""))
+        server.enqueue(jsonResponse(previewJson("create", null, binding, null, null)))
+        server.enqueue(jsonResponse(previewJson("create", null, binding, token, null)))
         server.enqueue(jsonResponse(scheduleEnvelope("012345abcdef")))
         server.start()
         try {
@@ -27,6 +24,7 @@ class ScheduleClientTest {
             val status = client.status()
             assertTrue(status.configured)
             assertFalse(status.running)
+            assertTrue(status.approvalVerifierConfigured)
 
             val preview = client.preview(
                 tool = "note_append",
@@ -35,7 +33,8 @@ class ScheduleClientTest {
                 ttlDays = 30,
                 maxRuns = 5,
             )
-            assertEquals(approval, preview.approvalFingerprint)
+            assertEquals(binding, preview.approvalBinding)
+            assertTrue(preview.approvalToken == null)
             val created = client.create(preview)
             assertEquals("012345abcdef", created.id)
 
@@ -45,36 +44,39 @@ class ScheduleClientTest {
             assertEquals("Bearer device-token", statusRequest.getHeader("Authorization"))
 
             val previewRequest = server.takeRequest()
-            assertEquals("POST", previewRequest.method)
             assertEquals("/api/v1/schedules/preview", previewRequest.path)
             assertEquals("Bearer device-token", previewRequest.getHeader("Authorization"))
             val previewBody = JSONObject(previewRequest.body.readUtf8())
             assertEquals("daily:08:00", previewBody.getString("cadence"))
+            assertFalse(previewBody.has("approval_token"))
             assertFalse(previewBody.has("approved_fingerprint"))
 
+            val approvalRequest = server.takeRequest()
+            assertEquals("/api/v1/schedules/approve", approvalRequest.path)
+            assertEquals("Bearer device-token", approvalRequest.getHeader("Authorization"))
+            val approvalBody = JSONObject(approvalRequest.body.readUtf8())
+            assertEquals("Husk brygdag", approvalBody.getJSONObject("args").getString("text"))
+            assertFalse(approvalBody.has("approval_token"))
+
             val createRequest = server.takeRequest()
-            assertEquals("POST", createRequest.method)
             assertEquals("/api/v1/schedules", createRequest.path)
             assertEquals("Bearer device-token", createRequest.getHeader("Authorization"))
             val createBody = JSONObject(createRequest.body.readUtf8())
-            assertEquals(approval, createBody.getString("approved_fingerprint"))
-            assertEquals("Husk brygdag", createBody.getJSONObject("args").getString("text"))
+            assertEquals(token, createBody.getString("approval_token"))
+            assertFalse(createBody.has("approved_fingerprint"))
         } finally {
             server.shutdown()
         }
     }
 
     @Test
-    fun renewalUsesItsOwnPreviewAndPreservesExplicitEnableState() {
-        val approval = "fedcba0987654321fedcba0987654321"
+    fun renewalUsesItsOwnApprovalRouteAndPreservesExplicitEnableState() {
+        val binding = "b".repeat(64)
+        val token = "kav1.renew-payload.renew-signature"
         val id = "abcdef012345"
         val server = MockWebServer()
-        server.enqueue(jsonResponse(previewJson(
-            operation = "renew",
-            scheduleId = id,
-            approval = approval,
-            enable = true,
-        )))
+        server.enqueue(jsonResponse(previewJson("renew", id, binding, null, true)))
+        server.enqueue(jsonResponse(previewJson("renew", id, binding, token, true)))
         server.enqueue(jsonResponse(scheduleEnvelope(id)))
         server.start()
         try {
@@ -87,16 +89,35 @@ class ScheduleClientTest {
 
             val previewRequest = server.takeRequest()
             assertEquals("/api/v1/schedules/$id/renew/preview", previewRequest.path)
-            assertEquals("Bearer token", previewRequest.getHeader("Authorization"))
             val previewBody = JSONObject(previewRequest.body.readUtf8())
             assertTrue(previewBody.getBoolean("enable"))
-            assertFalse(previewBody.has("approved_fingerprint"))
+
+            val approvalRequest = server.takeRequest()
+            assertEquals("/api/v1/schedules/$id/renew/approve", approvalRequest.path)
+            assertTrue(JSONObject(approvalRequest.body.readUtf8()).getBoolean("enable"))
 
             val renewRequest = server.takeRequest()
             assertEquals("/api/v1/schedules/$id/renew", renewRequest.path)
             val renewBody = JSONObject(renewRequest.body.readUtf8())
-            assertEquals(approval, renewBody.getString("approved_fingerprint"))
+            assertEquals(token, renewBody.getString("approval_token"))
             assertTrue(renewBody.getBoolean("enable"))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun changedBackendApprovalBindingIsRefusedBeforeCreate() {
+        val server = MockWebServer()
+        server.enqueue(jsonResponse(previewJson("create", null, "c".repeat(64), "kav1.x.y", null)))
+        server.start()
+        try {
+            val client = ScheduleClient(server.url("/").toString(), "token")
+            val preview = writePreview(binding = "d".repeat(64))
+            val error = runCatching { client.create(preview) }.exceptionOrNull()
+            assertTrue(error is ModelRigException)
+            assertTrue(error?.message.orEmpty().contains("changed after preview"))
+            assertEquals(1, server.requestCount)
         } finally {
             server.shutdown()
         }
@@ -114,24 +135,7 @@ class ScheduleClientTest {
         server.start()
         try {
             val client = ScheduleClient(server.url("/").toString(), "token")
-            val preview = SchedulePreview(
-                operation = "create",
-                scheduleId = null,
-                tool = "note_append",
-                argsJson = "{}",
-                cadence = "daily:08:00",
-                risk = "write",
-                sensitivity = "private",
-                humanSummary = "append note",
-                requiresApproval = true,
-                approvalFingerprint = "1234567890abcdef1234567890abcdef",
-                dueAt = 1.0,
-                expiresAt = 2.0,
-                ttlDays = 30,
-                maxRuns = 1,
-                enable = null,
-            )
-            val error = runCatching { client.create(preview) }.exceptionOrNull()
+            val error = runCatching { client.create(writePreview("e".repeat(64))) }.exceptionOrNull()
             assertTrue(error is ModelRigException)
             assertTrue(error?.message.orEmpty().contains("(409)"))
             assertTrue(error?.message.orEmpty().contains("standing grant changed"))
@@ -139,6 +143,26 @@ class ScheduleClientTest {
             server.shutdown()
         }
     }
+
+    private fun writePreview(binding: String) = SchedulePreview(
+        operation = "create",
+        scheduleId = null,
+        tool = "note_append",
+        argsJson = "{}",
+        cadence = "daily:08:00",
+        risk = "write",
+        sensitivity = "private",
+        humanSummary = "append note",
+        requiresApproval = true,
+        approvalBinding = binding,
+        approvalToken = null,
+        approvalTokenExpiresAt = null,
+        dueAt = 1.0,
+        expiresAt = 2.0,
+        ttlDays = 30,
+        maxRuns = 1,
+        enable = null,
+    )
 
     private fun jsonResponse(body: String) = MockResponse()
         .setResponseCode(200)
@@ -148,7 +172,8 @@ class ScheduleClientTest {
     private fun previewJson(
         operation: String,
         scheduleId: String?,
-        approval: String,
+        binding: String,
+        token: String?,
         enable: Boolean?,
     ): String {
         val preview = JSONObject()
@@ -161,13 +186,17 @@ class ScheduleClientTest {
             .put("sensitivity", "private")
             .put("human_summary", "Tilføj noten Husk brygdag")
             .put("requires_approval", true)
-            .put("action_fingerprint", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-            .put("approval_fingerprint", approval)
+            .put("action_fingerprint", "f".repeat(32))
+            .put("approval_binding", binding)
             .put("due_at", 1_800_000_000.0)
             .put("expires_at", 1_802_592_000.0)
             .put("ttl_days", if (operation == "renew") 60 else 30)
             .put("max_runs", if (operation == "renew") 2 else 5)
             .put("enable", enable ?: JSONObject.NULL)
+        if (token != null) {
+            preview.put("approval_token", token)
+            preview.put("approval_token_expires_at", 1_900_000_300.0)
+        }
         return JSONObject()
             .put("preview", preview)
             .put("executed", false)
@@ -183,7 +212,7 @@ class ScheduleClientTest {
             .put("cadence", "daily:08:00")
             .put("risk", "write")
             .put("sensitivity", "private")
-            .put("approved_fingerprint", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .put("approved_fingerprint", "a".repeat(32))
             .put("approval_valid", true)
             .put("expires_at", 1_802_592_000.0)
             .put("expired", false)

@@ -34,6 +34,13 @@ if (-not (Test-Path $backendExe)) {
 }
 
 Write-Host "Starting RAG worker on 127.0.0.1:8099 ..." -ForegroundColor Cyan
+# The backend owns the Ed25519 private seed. Remove it before spawning the
+# worker, then restore it for the backend; Start-Process snapshots the current
+# environment when the child is created. The public verification key remains.
+$schedulerApprovalPrivate = [Environment]::GetEnvironmentVariable("KALIV_SCHEDULER_APPROVAL_PRIVATE_KEY")
+if (-not [string]::IsNullOrEmpty($schedulerApprovalPrivate)) {
+    Remove-Item Env:KALIV_SCHEDULER_APPROVAL_PRIVATE_KEY -ErrorAction SilentlyContinue
+}
 $workerExe = Get-ChildItem -Path $workerDir -Filter "modelrig-worker*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($workerExe) {
     # Prebuilt exe from the GitHub release (no Python needed on the rig)
@@ -46,6 +53,10 @@ if ($workerExe) {
     $worker = Start-Process -FilePath "python" `
         -ArgumentList "-m","uvicorn","app.entrypoint:app","--host","127.0.0.1","--port","8099" `
         -WorkingDirectory $workerDir -PassThru -NoNewWindow
+}
+
+if (-not [string]::IsNullOrEmpty($schedulerApprovalPrivate)) {
+    $env:KALIV_SCHEDULER_APPROVAL_PRIVATE_KEY = $schedulerApprovalPrivate
 }
 
 try {

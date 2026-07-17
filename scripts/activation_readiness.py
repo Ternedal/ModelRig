@@ -146,29 +146,63 @@ def validation() -> dict:
 
 
 def _try_to_mint_a_standing_grant() -> bool | None:
-    """Actually attempt the bypass. True = it worked, False = refused, None = could not test.
+    """Try the loopback bypass against a worker that has only a public key.
 
-    A negative end-to-end test, because the alternative -- asking the source
-    whether it looks safe -- is how a comment came to be evidence of security.
+    True means an unauthenticated local caller minted a standing write. False
+    means a forged token was refused, a real backend-signed token worked once,
+    and replay was refused. None means the probe itself could not establish the
+    contract, which remains a blocker rather than a guessed pass.
     """
-    import os  # noqa: PLC0415
+    import base64  # noqa: PLC0415
     import tempfile  # noqa: PLC0415
 
     try:
-        tmp = tempfile.mkdtemp()
-        os.environ.setdefault("KALIV_SCHEDULE_DB", os.path.join(tmp, "s.db"))
-        os.environ.setdefault("KALIV_AUDIT_DB", os.path.join(tmp, "a.db"))
-        os.environ.setdefault("KALIV_TOOLS_STATE", os.path.join(tmp, "st.json"))
-        os.environ.setdefault("KALIV_TOOLS_DIR", tmp)
-
+        from cryptography.hazmat.primitives import serialization  # noqa: PLC0415
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: PLC0415
         from fastapi import FastAPI  # noqa: PLC0415
         from fastapi.testclient import TestClient  # noqa: PLC0415
 
+        from app.schedule_admin import (  # noqa: PLC0415
+            APPROVAL_TOKEN_AUDIENCE,
+            APPROVAL_TOKEN_PREFIX,
+            APPROVAL_TOKEN_VERSION,
+            ScheduleAdmin,
+            ScheduleAdminStore,
+        )
         from app.schedule_api import build_schedule_router  # noqa: PLC0415
 
+        tmp = tempfile.mkdtemp()
+        os.environ.setdefault("KALIV_AUDIT_DB", os.path.join(tmp, "a.db"))
+        os.environ.setdefault("KALIV_TOOLS_STATE", os.path.join(tmp, "st.json"))
+        os.environ.setdefault("KALIV_TOOLS_DIR", tmp)
+        db = os.path.join(tmp, "s.db")
+        now = 1_900_000_000.0
+        legitimate = Ed25519PrivateKey.generate()
+        public = legitimate.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        )
+        class ProbeTool:
+            risk = "write"
+            sensitivity = "private"
+            schedulable = True
+            params = {
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+            }
+
+            @staticmethod
+            def human_summary(args):
+                return "append note: " + str(args.get("text", ""))
+
+        admin = ScheduleAdmin(
+            store_factory=lambda: ScheduleAdminStore(db),
+            registry_factory=lambda: {"note_append": ProbeTool()},
+            clock=lambda: now,
+            approval_public_key=base64.b64encode(public).decode("ascii"),
+        )
         app = FastAPI()
-        app.include_router(build_schedule_router())
-        # A loopback caller: exactly what a shell/http/MCP tool would be.
+        app.include_router(build_schedule_router(admin))
         client = TestClient(app, client=("127.0.0.1", 51234))
 
         body = {"tool": "note_append", "args": {"text": "probe"},
@@ -176,17 +210,36 @@ def _try_to_mint_a_standing_grant() -> bool | None:
         pv = client.post("/schedules/preview", json=body)
         if pv.status_code != 200:
             return None
-        preview = pv.json().get("preview") or {}
-        fp = preview.get("approval_fingerprint")
-        if not fp:
+        binding = (pv.json().get("preview") or {}).get("approval_binding")
+        if not isinstance(binding, str):
             return None
-        created = client.post("/schedules", json={**body, "approved_fingerprint": fp})
-        return created.status_code in (200, 201)
+
+        def token(key, nonce):
+            claims = {"v": APPROVAL_TOKEN_VERSION,
+                      "aud": APPROVAL_TOKEN_AUDIENCE,
+                      "binding": binding, "exp": int(now + 300),
+                      "nonce": nonce}
+            raw = json.dumps(claims, separators=(",", ":")).encode()
+            enc = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+            return f"{APPROVAL_TOKEN_PREFIX}.{enc(raw)}.{enc(key.sign(raw))}"
+
+        forged = token(Ed25519PrivateKey.generate(), "forged-readiness-012345")
+        refused = client.post("/schedules", json={**body, "approval_token": forged})
+        if refused.status_code in (200, 201):
+            return True
+        if refused.status_code != 409:
+            return None
+
+        valid = token(legitimate, "valid-readiness-0123456")
+        created = client.post("/schedules", json={**body, "approval_token": valid})
+        replay = client.post("/schedules", json={**body, "approval_token": valid})
+        if created.status_code not in (200, 201) or replay.status_code != 409:
+            return None
+        return False
     except Exception as exc:  # noqa: BLE001
-        # Say WHY. A probe that answers "could not test" without saying what
-        # stopped it is the same bare except that hid F-501 for eight releases,
-        # and I wrote this one twenty minutes after fixing that.
-        logging.getLogger(__name__).warning("kunne ikke afprøve schedule-godkendelsen: %r", exc)
+        logging.getLogger(__name__).warning(
+            "kunne ikke afprøve schedule-godkendelsen: %r", exc
+        )
         return None
 
 
@@ -213,68 +266,32 @@ def plan_authority() -> tuple[bool, str]:
         return False, f"kunne ikke læse plan-autoriteten: {exc}"
 
 def schedule_approval_authority() -> tuple[bool, str]:
-    """Does a scheduled write's approval prove a human, or just knowledge? (F-503/F-504)
-
-    The scheduler's whole premise is that Anders approves a standing grant ONCE,
-    at creation, and the tool gate later honours it without a card because there
-    is nobody awake at 03:00 to show one to. That trade is only sound if the
-    approval is evidence that a human decided.
-
-    It is not. The approval travelling to the gate is fingerprint(tool, args) --
-    a SHA-256 of two things the caller already knows. It is not a secret, it is
-    not issued by anything, and it can be computed in one line by any process
-    that can reach loopback. /schedules is loopback-checked and holds no token,
-    so "Anders approved this write" currently means "someone knew the tool name
-    and the arguments".
-
-    Latent today: none of the nine tools can make a local HTTP request, so
-    nothing on the rig can walk through this door. It becomes live the day a
-    shell, http, MCP or file-with-network tool lands -- which is exactly the day
-    a prompt-injected model would find it. Same shape as a desktop action
-    classified as a READ: harmless until the capability it waits for arrives.
-
-    Deliberately computed here rather than patched in the API: Anders owns
-    schedule_api.py and is building the human control surface right now, and the
-    real fix -- server-issued, single-use, expiring tokens bound to a UI
-    confirmation behind an authenticated operator session -- belongs with that
-    work, not bolted on underneath it by someone else at the same time.
-    """
+    """Prove a scheduled write needs backend-held consent, not a known digest."""
     try:
         sys.path.insert(0, str(ROOT / "worker"))
         from app.schedule_api import CreateScheduleReq  # noqa: PLC0415
 
         fields = getattr(CreateScheduleReq, "model_fields", {})
-        if "approved_fingerprint" not in fields:
-            return True, "godkendelsen kommer ikke fra klienten"
-
-        # This used to grep schedule_api.py for "Bearer", "Depends(" and friends
-        # (F-612). A TODO comment mentioning Bearer flipped the verdict from
-        # blocked to safe -- I verified it, and it did. A gate whose job is to
-        # stop someone activating on a false premise, defeated by a comment, is
-        # worse than no gate: it is a false premise wearing a badge.
-        #
-        # So we do not read about the door. We try it: compute the fingerprint
-        # the way any local process could, and attempt to create a standing
-        # grant over loopback with no credential. If that works, the approval
-        # proves knowledge and nothing else, whatever the source code says.
+        if "approved_fingerprint" in fields or "approval_token" not in fields:
+            return False, (
+                "schedule-API'et accepterer stadig en klientberegnelig "
+                "godkendelse i stedet for et udstedt token"
+            )
         opened = _try_to_mint_a_standing_grant()
-        if opened is False:
-            return True, "en lokal proces uden legitimation kan ikke oprette et standing grant"
+        if opened is True:
+            return False, (
+                "en lokal proces uden backendens private nøgle kunne stadig "
+                "oprette et standing grant"
+            )
         if opened is None:
             return False, (
-                "**Kunne ikke afprøve godkendelsen.** Gaten nægter at gætte: den "
-                "spurgte tidligere kildekoden om der stod \"Bearer\" et sted, og "
-                "en kommentar kunne svare ja"
+                "**Kunne ikke afprøve scheduler-godkendelsen.** Gaten nægter at "
+                "gætte, når den ikke kan bevise både gyldig signatur og replay-stop"
             )
-        return False, (
-            "**En planlagt skrivnings godkendelse beviser kendskab, ikke samtykke.** "
-            "`approved_fingerprint` er `sha256(tool + args)` — ikke en hemmelighed, "
-            "ikke udstedt af noget, beregnelig på én linje af enhver proces der kan "
-            "nå loopback. `/schedules` har ingen token. Latent i dag, fordi ingen af "
-            "de ni tools kan lave et lokalt HTTP-kald — live den dag et shell-, "
-            "http-, MCP- eller filværktøj med netværk lander, hvilket er præcis den "
-            "dag en prompt-injiceret model ville finde døren. Kræver serverudstedte, "
-            "engangs, kortlivede tokens bundet til en faktisk UI-bekræftelse"
+        return True, (
+            "godkendelsen udstedes først efter paired bearer-auth af backendens "
+            "Ed25519-private nøgle; workeren har kun public key, tokenet er "
+            "kortlivet, bundet til hele standing grantet og kan kun bruges én gang"
         )
     except Exception as exc:  # noqa: BLE001
         return False, f"kunne ikke læse schedule-godkendelsen: {exc}"
@@ -355,8 +372,7 @@ def render() -> str:
         # different reasons, and a page that pools their blockers tells a reader
         # that Agent 3 is held up by something that has nothing to do with it --
         # which is how a page earns the right to be skimmed.
-        (approval_note if not approval_ok
-         else "Ingen blokerende fund specifikke for scheduleren."),
+        f"- **Godkendelsesbevis:** {approval_note}",
         "",
         f"- **Beviser en godkendelse et menneske:** {'ja' if approval_ok else 'NEJ'}",
         "- **Fysisk validering gælder også her:** scheduleren kører på den samme "

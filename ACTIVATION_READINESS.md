@@ -3,8 +3,8 @@
 > **Genereret af `scripts/activation_readiness.py`. Ret ikke i hånden.**
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
-**Version på main:** `1.58.89`  
-**Genereret:** 2026-07-17 19:09 UTC
+**Version på main:** `1.58.90`  
+**Genereret:** 2026-07-17 20:38 UTC
 
 ---
 
@@ -20,9 +20,9 @@ Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet
 
 ## Kan scheduleren aktiveres nu? **NEJ**
 
-**En planlagt skrivnings godkendelse beviser kendskab, ikke samtykke.** `approved_fingerprint` er `sha256(tool + args)` — ikke en hemmelighed, ikke udstedt af noget, beregnelig på én linje af enhver proces der kan nå loopback. `/schedules` har ingen token. Latent i dag, fordi ingen af de ni tools kan lave et lokalt HTTP-kald — live den dag et shell-, http-, MCP- eller filværktøj med netværk lander, hvilket er præcis den dag en prompt-injiceret model ville finde døren. Kræver serverudstedte, engangs, kortlivede tokens bundet til en faktisk UI-bekræftelse
+- **Godkendelsesbevis:** godkendelsen udstedes først efter paired bearer-auth af backendens Ed25519-private nøgle; workeren har kun public key, tokenet er kortlivet, bundet til hele standing grantet og kan kun bruges én gang
 
-- **Beviser en godkendelse et menneske:** NEJ
+- **Beviser en godkendelse et menneske:** ja
 - **Fysisk validering gælder også her:** scheduleren kører på den samme rig, så rapporten er en forudsætning for begge.
 
 ---
@@ -53,7 +53,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 13 feature-switches er tændt som default.** (12 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 13 feature-switches er tændt som default.** (13 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -66,6 +66,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` | indstilling |
 | `KALIV_SCHEDULER` | `(tom)` | slukket |
 | `KALIV_SCHEDULER_API` | `0` | slukket |
+| `KALIV_SCHEDULER_APPROVAL_PRIVATE_KEY` | `(unset)` | indstilling |
 | `KALIV_SCHEDULER_POLL_S` | `(tom)` | slukket |
 | `KALIV_TOOLS_DIR` | `(unset)` | slukket |
 | `KALIV_TOOLS_ENABLED` | `0` | slukket |

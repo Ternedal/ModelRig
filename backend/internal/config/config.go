@@ -1,28 +1,29 @@
 package config
 
 import (
-	"path/filepath"
-	"strings"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
 // Version is the ModelRig backend version.
-const Version = "1.58.89"
+const Version = "1.58.90"
 
 // Config holds the effective runtime configuration.
 type Config struct {
-	ServerHost     string
-	ServerPort     int
-	OllamaBaseURL  string
-	OllamaKey      string // Ollama API key; set for Ollama Cloud, empty for local
-	WorkerBaseURL  string
-	PairingTTL     time.Duration
-	DataPath       string
-	RequestTimeout time.Duration
-	ClaimMax       int // max pairing-claim attempts per IP per 5 min
+	ServerHost                  string
+	ServerPort                  int
+	OllamaBaseURL               string
+	OllamaKey                   string // Ollama API key; set for Ollama Cloud, empty for local
+	WorkerBaseURL               string
+	SchedulerApprovalPrivateKey string // base64 Ed25519 seed; backend-only
+	PairingTTL                  time.Duration
+	DataPath                    string
+	RequestTimeout              time.Duration
+	ClaimMax                    int // max pairing-claim attempts per IP per 5 min
 }
 
 type fileConfig struct {
@@ -127,6 +128,9 @@ func applyEnv(c *Config) {
 	}
 	if v := strings.TrimSpace(os.Getenv("MODELRIG_WORKER_URL")); v != "" {
 		c.WorkerBaseURL = v
+	}
+	if v := strings.TrimSpace(os.Getenv("KALIV_SCHEDULER_APPROVAL_PRIVATE_KEY")); v != "" {
+		c.SchedulerApprovalPrivateKey = v
 	}
 	if v := strings.TrimSpace(os.Getenv("MODELRIG_DATA")); v != "" {
 		c.DataPath = v

@@ -4,26 +4,33 @@ This module is deliberately not a model tool. It validates and persists the
 operator's exact request for a local API, while the runner remains behind
 ``KALIV_SCHEDULER`` and every execution still goes through ToolGate.
 
-A scheduled write has two different fingerprints, because they answer different
-questions:
+A scheduled write has two separate proofs:
 
-* ``action_fingerprint`` binds what will execute later: exactly ``(tool, args)``.
-  That is what SchedulerRunner carries into ToolGate on every occurrence.
-* ``approval_fingerprint`` binds what the human approved now: operation,
-  schedule id, action, cadence, expiry, run budget and requested enable state.
+* ``action_fingerprint`` stays inside the persisted schedule and binds exactly
+  ``(tool, args)`` for ToolGate on every future occurrence.
+* a short-lived opaque approval token is signed with an Ed25519 private key
+  held only by the authenticated backend. The worker has only the public key,
+  so even a future shell tool in the worker cannot mint consent.
 
-Without the second binding, a client could preview "once" and persist "hourly"
-under the same action approval. Change any part of the standing grant and the
-preview approval no longer matches.
+The signed binding covers operation, schedule id, action, cadence, expiry, run
+budget and enable state. Tokens are stored only as consumed hashes, expire
+quickly and are accepted once.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
+import os
+import sqlite3
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Iterator, Mapping
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from .scheduler import (
     DEFAULT_MAX_RUNS,
@@ -40,7 +47,13 @@ from .scheduler import (
 MAX_TTL_DAYS = 365
 MAX_RUN_BUDGET = 100_000
 MAX_ARGS_JSON_BYTES = 20_000
-_APPROVAL_VERSION = 1
+APPROVAL_BINDING_VERSION = 2
+APPROVAL_TOKEN_VERSION = 1
+APPROVAL_TOKEN_TTL_SECONDS = 300
+APPROVAL_TOKEN_CLOCK_SKEW_SECONDS = 5
+APPROVAL_TOKEN_AUDIENCE = "kaliv-scheduler"
+APPROVAL_PUBLIC_KEY_ENV = "KALIV_SCHEDULER_APPROVAL_PUBLIC_KEY"
+APPROVAL_TOKEN_PREFIX = "kav1"
 
 
 class ScheduleAdminError(ValueError):
@@ -55,6 +68,10 @@ class ScheduleAdminConflict(ScheduleAdminError):
     """The request conflicts with the schedule's immutable approval."""
 
 
+class ScheduleAdminUnavailable(ScheduleAdminError):
+    """Required approval verification is not configured safely."""
+
+
 @dataclass(frozen=True)
 class SchedulePreview:
     operation: str
@@ -67,7 +84,7 @@ class SchedulePreview:
     human_summary: str
     requires_approval: bool
     action_fingerprint: str
-    approval_fingerprint: str | None
+    approval_binding: str | None
     due_at: float
     expires_at: float
     ttl_days: int
@@ -86,7 +103,8 @@ class SchedulePreview:
             "human_summary": self.human_summary,
             "requires_approval": self.requires_approval,
             "action_fingerprint": self.action_fingerprint,
-            "approval_fingerprint": self.approval_fingerprint,
+            # Public and non-authorising: useful for support correlation only.
+            "approval_binding": self.approval_binding,
             "due_at": self.due_at,
             "expires_at": self.expires_at,
             "ttl_days": self.ttl_days,
@@ -100,8 +118,51 @@ class ScheduleAdminStore(ScheduleStore):
 
     Renewal is one atomic update: approval horizon and run budget move together,
     and an explicit re-enable starts at a fresh future occurrence instead of
-    replaying missed work.
+    replaying missed work. Approval tokens live in the same SQLite file so a
+    restart cannot make an already-used token reusable.
     """
+
+    def __init__(self, path: str | None = None) -> None:
+        super().__init__(path)
+        with self._lock:
+            self._conn.execute(
+                """CREATE TABLE IF NOT EXISTS schedule_consumed_approval_tokens (
+                       token_hash TEXT PRIMARY KEY,
+                       expires_at REAL NOT NULL,
+                       consumed REAL NOT NULL)"""
+            )
+            self._conn.commit()
+
+    @staticmethod
+    def _token_hash(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    def consume_verified_approval_token(
+        self, token: str, *, expires_at: float, now: float
+    ) -> None:
+        """Record one verified token exactly once across threads and restarts."""
+        token_hash = self._token_hash(token)
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                self._conn.execute(
+                    "DELETE FROM schedule_consumed_approval_tokens WHERE expires_at<?",
+                    (now - APPROVAL_TOKEN_CLOCK_SKEW_SECONDS,),
+                )
+                self._conn.execute(
+                    "INSERT INTO schedule_consumed_approval_tokens "
+                    "(token_hash, expires_at, consumed) VALUES (?,?,?)",
+                    (token_hash, expires_at, now),
+                )
+                self._conn.commit()
+            except sqlite3.IntegrityError as exc:
+                self._conn.rollback()
+                raise ScheduleAdminConflict(
+                    "approval token is missing, expired, already used or bound to another standing grant"
+                ) from exc
+            except Exception:
+                self._conn.rollback()
+                raise
 
     def renew(
         self,
@@ -177,10 +238,32 @@ class ScheduleAdmin:
         store_factory: Callable[[], ScheduleAdminStore] = _default_store,
         registry_factory: Callable[[], Mapping[str, Any]] = _default_registry,
         clock: Callable[[], float] = time.time,
+        approval_public_key: str | None = None,
     ) -> None:
         self._store_factory = store_factory
         self._registry_factory = registry_factory
         self._clock = clock
+        key_text = (
+            os.environ.get(APPROVAL_PUBLIC_KEY_ENV, "")
+            if approval_public_key is None
+            else approval_public_key
+        ).strip()
+        self._approval_public_key = self._load_public_key(key_text)
+
+    @staticmethod
+    def _load_public_key(encoded: str) -> Ed25519PublicKey | None:
+        if not encoded:
+            return None
+        try:
+            raw = base64.b64decode(encoded, validate=True)
+            if len(raw) != 32:
+                return None
+            return Ed25519PublicKey.from_public_bytes(raw)
+        except (ValueError, binascii.Error):
+            return None
+
+    def approval_verifier_configured(self) -> bool:
+        return self._approval_public_key is not None
 
     @contextmanager
     def _store(self) -> Iterator[ScheduleAdminStore]:
@@ -243,13 +326,18 @@ class ScheduleAdmin:
         *,
         ttl_days: int = DEFAULT_TTL_DAYS,
         max_runs: int = DEFAULT_MAX_RUNS,
-        approved_fingerprint: str | None = None,
+        approval_token: str | None = None,
     ) -> dict[str, Any]:
         preview = self.preview(
             tool, args, cadence, ttl_days=ttl_days, max_runs=max_runs
         )
-        self._require_approval(preview, approved_fingerprint)
+        verified = self._verify_approval(preview, approval_token)
         with self._store() as store:
+            if verified is not None:
+                expires_at, verified_at = verified
+                store.consume_verified_approval_token(
+                    approval_token or "", expires_at=expires_at, now=verified_at
+                )
             schedule = store.create(
                 tool,
                 args,
@@ -299,7 +387,7 @@ class ScheduleAdmin:
         *,
         ttl_days: int = DEFAULT_TTL_DAYS,
         max_runs: int = DEFAULT_MAX_RUNS,
-        approved_fingerprint: str | None = None,
+        approval_token: str | None = None,
         enable: bool | None = None,
     ) -> dict[str, Any]:
         with self._store() as store:
@@ -316,12 +404,17 @@ class ScheduleAdmin:
                 max_runs=max_runs,
                 enable=enable,
             )
-            self._require_approval(preview, approved_fingerprint)
+            verified = self._verify_approval(preview, approval_token)
+            if verified is not None:
+                expires_at, verified_at = verified
+                store.consume_verified_approval_token(
+                    approval_token or "", expires_at=expires_at, now=verified_at
+                )
             updated = store.renew(
                 schedule_id,
                 # The persisted standing grant only needs the exact action
-                # fingerprint. The broader approval fingerprint is consumed by
-                # this administration boundary and is never used for execution.
+                # fingerprint. The opaque approval token was consumed above and
+                # is never used for execution.
                 approved_fingerprint=(
                     preview.action_fingerprint if preview.requires_approval else None
                 ),
@@ -457,9 +550,13 @@ class ScheduleAdmin:
             )
 
         action_fp = fingerprint(tool, args)
-        approval_fp = None
+        approval_binding = None
         if risk == "write":
-            approval_fp = self._grant_fingerprint(
+            if self._approval_public_key is None:
+                raise ScheduleAdminUnavailable(
+                    f"scheduled writes require {APPROVAL_PUBLIC_KEY_ENV}"
+                )
+            approval_binding = self._grant_binding(
                 operation=operation,
                 schedule_id=schedule_id,
                 tool=tool,
@@ -480,7 +577,7 @@ class ScheduleAdmin:
             human_summary=summary,
             requires_approval=risk == "write",
             action_fingerprint=action_fp,
-            approval_fingerprint=approval_fp,
+            approval_binding=approval_binding,
             due_at=next_run(cad, now),
             expires_at=now + ttl_days * 86400,
             ttl_days=ttl_days,
@@ -489,7 +586,7 @@ class ScheduleAdmin:
         )
 
     @staticmethod
-    def _grant_fingerprint(
+    def _grant_binding(
         *,
         operation: str,
         schedule_id: str | None,
@@ -501,7 +598,7 @@ class ScheduleAdmin:
         enable: bool | None,
     ) -> str:
         payload = {
-            "version": _APPROVAL_VERSION,
+            "version": APPROVAL_BINDING_VERSION,
             "operation": operation,
             "schedule_id": schedule_id,
             "tool": tool,
@@ -514,18 +611,66 @@ class ScheduleAdmin:
         raw = json.dumps(
             payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")
         ).encode("utf-8")
-        return hashlib.sha256(raw).hexdigest()[:32]
+        return hashlib.sha256(raw).hexdigest()
 
     @staticmethod
-    def _require_approval(
-        preview: SchedulePreview, approved_fingerprint: str | None
-    ) -> None:
+    def _b64url_decode(value: str) -> bytes:
+        padding = "=" * ((4 - len(value) % 4) % 4)
+        return base64.urlsafe_b64decode((value + padding).encode("ascii"))
+
+    def _verify_approval(
+        self,
+        preview: SchedulePreview,
+        approval_token: str | None,
+    ) -> tuple[float, float] | None:
         if not preview.requires_approval:
-            return
-        if approved_fingerprint != preview.approval_fingerprint:
-            raise ScheduleAdminConflict(
-                "scheduled write approval does not match the previewed action, cadence, expiry, budget and enable state"
+            return None
+        if self._approval_public_key is None:
+            raise ScheduleAdminUnavailable(
+                f"scheduled writes require {APPROVAL_PUBLIC_KEY_ENV}"
             )
+        generic = (
+            "approval token is missing, expired, already used or bound to another standing grant"
+        )
+        if not approval_token or len(approval_token) > 4096:
+            raise ScheduleAdminConflict(generic)
+        try:
+            prefix, payload_text, signature_text = approval_token.split(".")
+            if prefix != APPROVAL_TOKEN_PREFIX:
+                raise ValueError("wrong prefix")
+            payload_raw = self._b64url_decode(payload_text)
+            signature = self._b64url_decode(signature_text)
+            if len(signature) != 64:
+                raise ValueError("wrong signature length")
+            self._approval_public_key.verify(signature, payload_raw)
+            claims = json.loads(payload_raw)
+            if not isinstance(claims, dict):
+                raise ValueError("claims are not an object")
+            now = self._clock()
+            expires_at = float(claims.get("exp"))
+            if claims.get("v") != APPROVAL_TOKEN_VERSION:
+                raise ValueError("wrong token version")
+            if claims.get("aud") != APPROVAL_TOKEN_AUDIENCE:
+                raise ValueError("wrong audience")
+            if claims.get("binding") != preview.approval_binding:
+                raise ValueError("wrong grant binding")
+            nonce = claims.get("nonce")
+            if not isinstance(nonce, str) or len(nonce) < 16 or len(nonce) > 128:
+                raise ValueError("bad nonce")
+            if expires_at < now - APPROVAL_TOKEN_CLOCK_SKEW_SECONDS:
+                raise ValueError("expired")
+            if expires_at > now + APPROVAL_TOKEN_TTL_SECONDS + APPROVAL_TOKEN_CLOCK_SKEW_SECONDS:
+                raise ValueError("expiry is not short-lived")
+        except (
+            ValueError,
+            TypeError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            binascii.Error,
+            InvalidSignature,
+        ) as exc:
+            raise ScheduleAdminConflict(generic) from exc
+        return expires_at, now
 
     @staticmethod
     def _validate_bounds(ttl_days: int, max_runs: int) -> None:
