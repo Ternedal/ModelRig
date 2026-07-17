@@ -20,6 +20,29 @@ class Agent3PlanError(RuntimeError):
 # The V2 registry is the source of truth for what a tool IS; this maps its
 # vocabulary onto Agent 3's finer one. Every V2 class must appear here --
 # tests/worker_agent3_risk_parity.py fails if V2 grows one that does not.
+def _sensitivity_of(name: str, tool: object) -> str:
+    """Where this tool's RESULT may travel, as the registry declares it.
+
+    Same shape as _impact_of, and the same reason: this is the V2/Agent-3
+    boundary, so objects arrive here that are not real Tools. A tool that
+    declares nothing cannot be classified, and Agent 3 does not guess where an
+    answer may go.
+    """
+    declared = getattr(tool, "sensitivity", None)
+    if declared:
+        return str(declared)
+    # The registry's own default, applied at the boundary for objects that are
+    # not real Tools -- the same move _impact_of makes. Tool.sensitivity is a
+    # dataclass field defaulting to "operational" on purpose: the conservative
+    # middle, which a tool argues its way OUT of in either direction. So this is
+    # not a new guess; it is the same rule, one layer out.
+    #
+    # The bug was never the default. It was that a name-keyed table BEAT the
+    # declaration: a tool declaring itself secret came out private, because a
+    # dict four hundred lines away said so. That table is gone.
+    return "operational"
+
+
 def _impact_of(name: str, tool: object) -> str:
     """What the registry says this tool DOES (F-614).
 
@@ -66,16 +89,6 @@ _V2_SENSITIVITY: dict[str, Sensitivity] = {
     "operational": Sensitivity.OPERATIONAL,
     "private": Sensitivity.PRIVATE,
     "secret": Sensitivity.SECRET,
-}
-
-_SENSITIVITY: dict[str, Sensitivity] = {
-    "current_datetime": Sensitivity.PUBLIC,
-    "rig_status": Sensitivity.OPERATIONAL,
-    "list_models": Sensitivity.OPERATIONAL,
-    "list_documents": Sensitivity.PRIVATE,
-    "note_append": Sensitivity.PRIVATE,
-    "delete_model": Sensitivity.OPERATIONAL,
-    "pull_model": Sensitivity.OPERATIONAL,
 }
 
 
@@ -160,8 +173,17 @@ class V2ToolAdapter:
             # machine once the egress gate is on. Same shape as desktop reading
             # as READ: the fallback picks a plausible box, and plausible is not
             # the same as true.
-            sensitivity = _SENSITIVITY.get(call.tool) or _V2_SENSITIVITY.get(
-                tool.sensitivity)
+            # From the tool, not from a table over here keyed by its name
+            # (F-614, second axis). The name-keyed table WON over the
+            # declaration: a tool declaring itself secret was classified
+            # private, because a dict four hundred lines from the definition
+            # said so. Verified before deleting it -- it did.
+            #
+            # secret is blocked from cloud; private is merely gated. That is the
+            # F-511 downgrade wearing a different hat, and I left it standing
+            # this afternoon while removing the identical table for risk, twenty
+            # lines up. I fixed the axis I was looking at.
+            sensitivity = _V2_SENSITIVITY.get(_sensitivity_of(call.tool, tool))
             if sensitivity is None:
                 raise Agent3PlanError(
                     f"ukendt følsomhedsklasse {tool.sensitivity!r} for {call.tool}: "

@@ -75,9 +75,16 @@ check(
 
 
 class FakeTool:
-    def __init__(self, name, risk):
+    # A tool says where its result may travel; a table keyed by its NAME used to
+    # say it instead, and beat the declaration (F-614, second axis). This double
+    # got PRIVATE for free by being called list_documents, so the test below
+    # proved the table worked, not the tool. Right answer, wrong reason -- and
+    # the mirror image is the one that matters: a private tool named anything
+    # else came out operational.
+    def __init__(self, name, risk, sensitivity="operational"):
         self.name = name
         self.risk = risk
+        self.sensitivity = sensitivity
 
     def human_summary(self, args):
         return f"{self.name}: {args}"
@@ -113,7 +120,7 @@ fake_gate = FakeGate()
 fake_tools = SimpleNamespace(
     REGISTRY={
         "rig_status": FakeTool("rig_status", "read"),
-        "list_documents": FakeTool("list_documents", "read"),
+        "list_documents": FakeTool("list_documents", "read", sensitivity="private"),
         "note_append": FakeTool("note_append", "write"),
         "delete_model": FakeTool("delete_model", "write"),
     },

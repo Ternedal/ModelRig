@@ -18,13 +18,26 @@ create a PDF, extract, ingest, query. See tools/rag_pdf_test.py.
 """
 from __future__ import annotations
 
+import logging
+
 
 def is_available() -> bool:
     """True if PyMuPDF (fitz) can be imported (installed)."""
     try:
         import fitz  # noqa: F401  (PyMuPDF)
         return True
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        # Fail-closed is right: no PyMuPDF, no PDF-indlæsning. Silence is not.
+        #
+        # This swallows more than ImportError, and on the rig it will: a broken
+        # PyMuPDF wheel, a missing DLL, a CUDA mismatch. All of them arrive here
+        # as "unavailable" with no reason, and the person reading the
+        # capability list has to guess. F-501 was this exact shape -- an
+        # `except Exception` hid an ImportError from a wrong class name for
+        # eight releases, and the test passed because it asserted the failing
+        # value and got it.
+        logging.getLogger(__name__).info(
+            "PyMuPDF er ikke tilgængelig (PDF-indlæsning slået fra): %r", exc)
         return False
 
 

@@ -23,6 +23,8 @@ error. Fully testable without special hardware.
 """
 from __future__ import annotations
 
+import logging
+
 import io
 
 
@@ -31,7 +33,18 @@ def is_available() -> bool:
     try:
         import pptx  # noqa: F401  (python-pptx)
         return True
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        # Fail-closed is right: no python-pptx, no PPTX-indlæsning. Silence is not.
+        #
+        # This swallows more than ImportError, and on the rig it will: a broken
+        # python-pptx wheel, a missing DLL, a CUDA mismatch. All of them arrive here
+        # as "unavailable" with no reason, and the person reading the
+        # capability list has to guess. F-501 was this exact shape -- an
+        # `except Exception` hid an ImportError from a wrong class name for
+        # eight releases, and the test passed because it asserted the failing
+        # value and got it.
+        logging.getLogger(__name__).info(
+            "python-pptx er ikke tilgængelig (PPTX-indlæsning slået fra): %r", exc)
         return False
 
 

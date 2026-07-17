@@ -350,7 +350,13 @@ class ScheduleAdmin:
             sensitivity = "unknown"
         else:
             risk = str(getattr(spec, "risk", "unknown"))
-            sensitivity = str(getattr(spec, "sensitivity", "operational"))
+            # "operational" is not the conservative answer -- the scale runs
+            # public < operational < private < secret, so a tool that declares
+            # nothing was quietly treated as less sensitive than most of the
+            # registry. That is F-511 exactly: a default that LOOKS careful.
+            # Unknown is unknown, and the refusal ladder below already knows
+            # what to do with it.
+            sensitivity = str(getattr(spec, "sensitivity", None) or "unknown")
             blocked = refusal(
                 risk,
                 schedule.approved_fingerprint,
@@ -476,7 +482,7 @@ class ScheduleAdmin:
             args=dict(args),
             cadence=cadence,
             risk=risk,
-            sensitivity=str(getattr(spec, "sensitivity", "operational")),
+            sensitivity=str(getattr(spec, "sensitivity", None) or "unknown"),
             human_summary=summary,
             requires_approval=risk == "write",
             action_fingerprint=action_fp,

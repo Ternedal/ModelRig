@@ -40,9 +40,14 @@ def check(cond, name):
 
 
 class Tool:
-    def __init__(self, name, risk, description="tool"):
+    # "sensitivity is added from code, not model output" is the property this
+    # suite checks -- and it used to be satisfied by a table keyed by tool name
+    # (F-614, second axis), not by code the tool owns. The declaration is the
+    # code now.
+    def __init__(self, name, risk, description="tool", sensitivity="operational"):
         self.name = name
         self.risk = risk
+        self.sensitivity = sensitivity
         self.description = description
         self.params = {"type": "object", "properties": {}}
 
@@ -70,7 +75,7 @@ gate = Gate()
 fake = SimpleNamespace(
     REGISTRY={
         "rig_status": Tool("rig_status", "read", "Læs rigstatus"),
-        "note_append": Tool("note_append", "write", "Skriv note"),
+        "note_append": Tool("note_append", "write", "Skriv note", sensitivity="private"),
     },
     GATE=gate,
 )

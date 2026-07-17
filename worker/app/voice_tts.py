@@ -25,6 +25,8 @@ confirmed on Anders' machine.
 """
 from __future__ import annotations
 
+import logging
+
 import os
 import threading
 import wave
@@ -63,7 +65,18 @@ def is_available() -> bool:
     try:
         import piper  # noqa: F401  (the piper-tts package)
         return True
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        # Fail-closed is right: no piper-tts, no tale-syntese. Silence is not.
+        #
+        # This swallows more than ImportError, and on the rig it will: a broken
+        # piper-tts wheel, a missing DLL, a CUDA mismatch. All of them arrive here
+        # as "unavailable" with no reason, and the person reading the
+        # capability list has to guess. F-501 was this exact shape -- an
+        # `except Exception` hid an ImportError from a wrong class name for
+        # eight releases, and the test passed because it asserted the failing
+        # value and got it.
+        logging.getLogger(__name__).info(
+            "piper-tts er ikke tilgængelig (tale-syntese slået fra): %r", exc)
         return False
 
 

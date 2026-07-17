@@ -20,6 +20,8 @@ special hardware (create a docx, extract, ingest, query).
 """
 from __future__ import annotations
 
+import logging
+
 import io
 
 
@@ -28,7 +30,18 @@ def is_available() -> bool:
     try:
         import docx  # noqa: F401  (python-docx)
         return True
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        # Fail-closed is right: no python-docx, no DOCX-indlæsning. Silence is not.
+        #
+        # This swallows more than ImportError, and on the rig it will: a broken
+        # python-docx wheel, a missing DLL, a CUDA mismatch. All of them arrive here
+        # as "unavailable" with no reason, and the person reading the
+        # capability list has to guess. F-501 was this exact shape -- an
+        # `except Exception` hid an ImportError from a wrong class name for
+        # eight releases, and the test passed because it asserted the failing
+        # value and got it.
+        logging.getLogger(__name__).info(
+            "python-docx er ikke tilgængelig (DOCX-indlæsning slået fra): %r", exc)
         return False
 
 

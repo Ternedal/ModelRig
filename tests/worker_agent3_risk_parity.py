@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 
 from app import tools as V2  # noqa: E402
 from app.agent3.core import RiskClass, Sensitivity  # noqa: E402
-from app.agent3.integration import _SENSITIVITY, _V2_RISK  # noqa: E402
+from app.agent3.integration import _V2_RISK  # noqa: E402
 
 passed = failed = 0
 
@@ -93,13 +93,44 @@ check(_V2_RISK["write"] == RiskClass.WRITE, "write maps to WRITE")
 check(_V2_RISK["desktop"] == RiskClass.DESKTOP,
       "desktop maps to DESKTOP -- not to READ, which is what it did")
 
-# --- and the classification must not contradict the registry ----------------
+# --- what the tool declares is what Agent 3 classifies ----------------------
+#
+# This used to compare two tables and check they agreed. There is one source
+# now, so agreement is not the question -- the question is whether the path from
+# the declaration to the classification actually carries the value. Driven
+# through the real adapter, because the last thing that "obviously" carried it
+# turned out to be overridden by a dict keyed on the tool's name.
 
-for name, tool in sorted(V2.REGISTRY.items()):
-    declared = _SENSITIVITY.get(name)
-    if declared is not None:
-        check(declared.value == tool.sensitivity,
-              f"{name}: Agent 3 and the registry agree it is {tool.sensitivity}")
+import dataclasses as _dc  # noqa: E402
+
+from app.agent3.core import RoutePlan, RouteKind  # noqa: E402
+from app.agent3.integration import PlannedToolCall, V2ToolAdapter  # noqa: E402
+
+_route = RoutePlan(kind=list(RouteKind)[0], reason="parity", uses_cloud=False,
+                   uses_rig=True, uses_tools=True, uses_rag=False)
+V2.GATE.enabled = True
+_adapter = V2ToolAdapter()
+
+for _name in ("list_documents", "note_append", "current_datetime"):
+    _step = _adapter.build_steps([PlannedToolCall(_name, {"text": "x"})], _route, "parity")[0]
+    check(_step.sensitivity.value == V2.REGISTRY[_name].sensitivity,
+          f"{_name}: declared {V2.REGISTRY[_name].sensitivity}, classified "
+          f"{_step.sensitivity.value}")
+
+# The one that was broken: a tool declaring itself secret must not come out
+# private. secret is blocked from cloud; private is merely gated.
+_saved = V2.REGISTRY["note_append"]
+try:
+    V2.REGISTRY["note_append"] = _dc.replace(_saved, sensitivity="secret")
+    _step = _adapter.build_steps([PlannedToolCall("note_append", {"text": "x"})],
+                                 _route, "parity")[0]
+    check(_step.sensitivity == Sensitivity.SECRET,
+          "a tool declaring itself secret is classified secret"
+          if _step.sensitivity == Sensitivity.SECRET
+          else f"DOWNGRADED to {_step.sensitivity.value}: something is overriding "
+               "the declaration by name again")
+finally:
+    V2.REGISTRY["note_append"] = _saved
 
 # --- the consequences, driven directly --------------------------------------
 
@@ -149,6 +180,24 @@ check("_V2_RISK" in src,
 check("if self.declared_risk ==" not in src,
       "and the inline 'write else read' guess is gone from the graph")
 
+# --- every real tool DECLARES its sensitivity (F-614, second axis) ---------
+#
+# _SENSITIVITY was a table keyed by tool name that BEAT the declaration: a tool
+# declaring itself secret came out private, verified before deletion. It was
+# also load-bearing for the test doubles, which is why it survived -- doubles
+# named after real tools got their sensitivity for free, so the suites passed
+# because of the very table that caused the bug.
+#
+# The registry's default is "operational" on purpose (the conservative middle a
+# tool argues out of). That default must never be what a REAL tool relies on:
+# silence is how a private tool becomes shareable.
+check(V2.REGISTRY["list_documents"].sensitivity == "private",
+      "list_documents declares private -- the document list is not operational trivia")
+check(V2.REGISTRY["note_append"].sensitivity == "private",
+      "note_append declares private")
+check(V2.REGISTRY["current_datetime"].sensitivity == "public",
+      "current_datetime declares public -- and had to argue for it")
+
 # --- there is one owner, and no second table may appear (F-614) ------------
 # Three hours ago this block required two tables to agree. That was a bandage:
 # the truth about delete_model lived in tools.py (coarse), in integration.py
@@ -166,13 +215,25 @@ import pathlib as _pl  # noqa: E402
 from app.tools import REGISTRY  # noqa: E402
 
 _AGENT3 = _pl.Path(__file__).resolve().parents[1] / "worker" / "app" / "agent3"
+# Word boundaries, because `_V2_SENSITIVITY` CONTAINS `_SENSITIVITY` and a
+# substring match flagged the legitimate vocabulary mapping. That is the same
+# trick that let a comment saying "Bearer" convince the readiness gate the
+# scheduler was safe (F-612) -- searching for text finds text, not meaning. The
+# vocabulary maps a CLASS to a class; the deleted tables mapped a NAME to a
+# class. Only the second kind is a second owner.
+import re as _re  # noqa: E402
+
 for _src in sorted(_AGENT3.rglob("*.py")):
     _text = _src.read_text(encoding="utf-8")
-    check("_RISK_OVERRIDES" not in _text,
-          f"{_src.name}: no name-keyed risk table -- the tool declares what it does"
-          if "_RISK_OVERRIDES" not in _text
-          else f"{_src.name} has grown a second owner for tool risk; that is how "
-               "delete_model became schedulable")
+    for _table in ("_RISK_OVERRIDES", "_SENSITIVITY"):
+        _hit = _re.search(r"(?<![A-Z0-9_])" + _table + r"\s*[:=]", _text)
+        check(_hit is None,
+              f"{_src.name}: no `{_table}` -- the tool declares, nothing "
+              "overrides it by name"
+              if _hit is None
+              else f"{_src.name} has grown a second owner keyed by tool name; that "
+                   "is how delete_model became schedulable and how a secret tool "
+                   "came out private")
 
 # The registry's vocabulary and Agent 3's must stay in step: every Impact value
 # must map, or a class the registry grows becomes unclassifiable at runtime

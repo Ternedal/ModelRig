@@ -24,6 +24,8 @@ ASR quality and VRAM headroom can only be confirmed there.
 """
 from __future__ import annotations
 
+import logging
+
 import os
 import threading
 
@@ -74,7 +76,13 @@ def _add_cuda_dll_dirs() -> list[str]:
     added: list[str] = []
     try:
         import nvidia  # the namespace package created by nvidia-* wheels
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        # No nvidia-* wheels means no CUDA DLL directories to register, which is
+        # a legitimate CPU-only setup -- but it is also what a half-installed
+        # CUDA stack looks like, and the difference decides whether Whisper runs
+        # on the 3060 or crawls on the CPU.
+        logging.getLogger(__name__).debug(
+            "ingen nvidia-wheels fundet; springer CUDA DLL-registrering over: %r", exc)
         _dll_dirs_added = True
         return []
     for root in getattr(nvidia, "__path__", []):
@@ -128,7 +136,14 @@ def is_available() -> bool:
     try:
         import faster_whisper  # noqa: F401
         return True
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        # Fail-closed is right: no faster-whisper, no speech recognition.
+        # Silence is not. On the rig this catches CUDA/cuDNN mismatches and
+        # broken wheels, and reports all of them as "unavailable" with no
+        # reason -- which is the one failure mode most likely to cost an
+        # evening, because ASR is the capability with the deepest native stack.
+        logging.getLogger(__name__).info(
+            "faster-whisper er ikke tilgængelig (tale-genkendelse slået fra): %r", exc)
         return False
 
 

@@ -6,7 +6,7 @@
 > code, so it cannot quietly become untrue. If a fact belongs here, teach
 > the generator to read it -- do not type it in.
 
-**Version:** 1.58.91
+**Version:** 1.58.92
 
 ## Tools the model can see
 
@@ -107,6 +107,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_risk_parity.py`
 - `tests/worker_agent3_routing_preview.py`
 - `tests/worker_agent3_smoke_cli.py`
+- `tests/worker_agent3_unattended_execution.py`
 - `tests/worker_agent3_validation_gate.py`
 - `tests/worker_agent3_validation_path_contract.py`
 - `tests/worker_agent3_validation_status.py`
