@@ -7,7 +7,7 @@ Status: eksperimentelt, feature-flagged og ikke koblet til den normale chat-rout
 ### Execution og planner
 
 - Persistent `AgentRun`/`AgentStep` state-machine i SQLite.
-- Serverautoritativ retry genbruger original besked, route-flags og valideret plan.
+- Serverautoritativ retry har sin egen route og genbruger original besked, route-flags og valideret plan.
 - Deterministisk policy for writes, destructive/admin, cloud-egress og proaktivitet.
 - Hvert write/destructive/admin-step kræver sin egen immutable confirmation med TTL.
 - Alle cloud-initierede tools, også reads, kræver et konkret confirmation-kort.
@@ -29,8 +29,8 @@ POST   /api/v1/experimental/agent3/plan
 POST   /api/v1/experimental/agent3/plans/{plan_id}/start
 GET    /api/v1/experimental/agent3/status
 GET    /api/v1/experimental/agent3/runs
-POST   /api/v1/experimental/agent3/runs
 GET    /api/v1/experimental/agent3/runs/{id}
+POST   /api/v1/experimental/agent3/runs/{id}/retry
 GET    /api/v1/experimental/agent3/runs/{id}/events
 POST   /api/v1/experimental/agent3/runs/{id}/confirm
 POST   /api/v1/experimental/agent3/runs/{id}/resume

@@ -22,6 +22,7 @@ Run: python3 scripts/activation_readiness.py [--check]
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import re
 import subprocess
@@ -102,54 +103,26 @@ def validation() -> dict:
 
 
 def plan_authority() -> tuple[bool, str]:
-    """Does the run API let a CLIENT hand the server a plan? (F-310)
-
-    Computed, because this is the blocker most likely to be forgotten: it is
-    invisible from the outside, it is nobody's bug, and it disappears on its own
-    the day the planner is wired up. Which is exactly why a human reading this
-    page after a clean rig validation would flip the flag without ever hearing
-    about it.
-
-    Agent 3's plan is currently supplied by the caller -- deliberately, since
-    the planner is not connected to a model yet and the V2 adapter remains the
-    security boundary. The gate still refuses anything the client could not
-    have asked for through /tools/chat, so this is not an escalation. It does
-    mean the plan is not the SERVER's promise, and "server-authoritative" is
-    the property that has to hold before software is allowed to act on its own.
-    """
+    """Prove production run creation cannot accept a client-authored plan."""
     try:
         sys.path.insert(0, str(ROOT / "worker"))
-        from app.agent3.api import StartReq  # noqa: PLC0415
+        from app.agent3.api import StartReq, build_router  # noqa: PLC0415
         from app.agent3.planner import build_planner_router  # noqa: PLC0415, F401
 
         client_plan = "plan" in getattr(StartReq, "model_fields", {})
-        # The server-authored path: POST /plan builds the plan from a goal via
-        # the model and stores it; POST /plans/{plan_id}/start takes ONLY the
-        # id and consumes the stored plan. The client cannot touch what runs.
-        # That is a plan token, and it already exists -- I wrote a blocker in
-        # 1.58.71 saying it did not, having read one endpoint and stopped.
-        server_path = True
-
-        if client_plan and server_path:
-            return False, (
-                "**To veje ind, og kun den ene er serverens løfte.** "
-                "`/experimental/agent3/plans/{plan_id}/start` er "
-                "serverautoritativ: `/plan` bygger planen ud fra et mål via "
-                "modellen, gemmer den, og `start` tager kun id'et — klienten "
-                "kan ikke røre det der køres. Men `/experimental/agent3/runs` "
-                "tager stadig en `plan` i request-body ved siden af. Gaten "
-                "afviser alt klienten ikke selv måtte bede om, så det er ikke "
-                "en rettighedseskalering — men så længe den dør står åben, er "
-                "\"serverautoritativ\" en egenskab ved den vej du valgte, ikke "
-                "ved systemet"
-            )
+        fixture_default = inspect.signature(build_router).parameters[
+            "allow_client_plans"
+        ].default
         if client_plan:
-            return False, "planen kommer fra klienten, og der er ingen serverbygget vej"
-        return True, "planen bygges på serveren, og klienten kan kun starte den via id"
+            return False, "run-requesten accepterer stadig en plan fra klienten"
+        if fixture_default is not False:
+            return False, "test-fixturen for klientplaner er aktiv som standard"
+        return True, (
+            "planen bygges og gemmes på serveren; klienten kan kun starte den "
+            "via et kortlivet single-use plan-id, mens retry kloner den gemte plan"
+        )
     except Exception as exc:  # noqa: BLE001
-        # Fail closed: if we cannot read the API, we do not get to say it is fine.
         return False, f"kunne ikke læse plan-autoriteten: {exc}"
-
 
 def schedule_approval_authority() -> tuple[bool, str]:
     """Does a scheduled write's approval prove a human, or just knowledge? (F-503/F-504)

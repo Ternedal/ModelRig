@@ -36,7 +36,7 @@ store = AgentRunStore(os.path.join(tempfile.mkdtemp(prefix="agent3-retry-"), "ru
 orch = Agent3Orchestrator(store, adapter.execute)
 caps = CapabilitySnapshot(True, True, True, True, True, True)
 app = FastAPI()
-app.include_router(build_router(orch, adapter, lambda req, _adapter: caps))
+app.include_router(build_router(orch, adapter, lambda req, _adapter: caps, allow_client_plans = True))
 client = TestClient(app)
 
 first = client.post(
@@ -57,17 +57,19 @@ original = first.json()["run"]
 assert original["route"]["uses_tools"] is True
 assert original["route"]["uses_rag"] is True
 
-retry = client.post(
-    "/experimental/agent3/runs",
+rejected = client.post(
+    f"/experimental/agent3/runs/{original['id']}/retry",
     json={
-        "message": "maliciously changed",
-        "mode": "rig",
-        "tools": False,
-        "rag": False,
         "cloud_ready": True,
-        "retry_of_run_id": original["id"],
+        "message": "maliciously changed",
         "plan": [{"tool": "does_not_exist", "args": {}}],
     },
+)
+assert rejected.status_code == 422, rejected.text
+
+retry = client.post(
+    f"/experimental/agent3/runs/{original['id']}/retry",
+    json={"cloud_ready": True},
 )
 assert retry.status_code == 200, retry.text
 retried = retry.json()["run"]
@@ -76,4 +78,4 @@ assert retried["request"]["mode"] == "cloud"
 assert retried["route"]["uses_tools"] is True
 assert retried["route"]["uses_rag"] is True
 assert retried["steps"][0]["tool"] == "rig_status"
-print("6 passed, 0 failed")
+print("7 passed, 0 failed")

@@ -63,38 +63,29 @@ check("agent3-validation-latest.json" in text and "/home/" not in text,
       "the report path is relative -- an absolute one bakes one machine into a "
       "committed file")
 
-# --- the blocker that would otherwise be forgotten (F-310) ------------------
-# Physical validation is the blocker everyone knows about. This is the one that
-# is invisible from the outside, is nobody's bug, and disappears on its own when
-# the planner lands -- which is exactly why a human reading this page after a
-# clean rig run would flip the flag without ever hearing about it.
-
+# --- server plan authority (F-310 closed) -------------------------------------
 import sys as _sys  # noqa: E402
 _sys.path.insert(0, str(ROOT / "scripts"))
 import activation_readiness as AR  # noqa: E402
 
 server_plans, note = AR.plan_authority()
-check(server_plans is False,
-      "the run API still takes a client-supplied plan, and the page says so "
-      "rather than leaving physical validation as the only blocker")
-check("serveren" in note, "the blocker explains WHOSE promise the plan is")
-check("plans/{plan_id}/start" in note,
-      "and names the server-authored path that ALREADY exists -- my first "
-      "version of this blocker claimed there was none, having read one "
-      "endpoint and stopped reading")
-check("runs" in note,
-      "while still naming the client-plan door that is open beside it")
-check(note in text, "the computed blocker actually reaches the rendered page")
+check(server_plans is True,
+      "production run creation is server-authoritative")
+check("serveren" in note and "plan-id" in note,
+      "the readiness explanation names the server-owned single-use plan")
+check("Serverbygget plan:** ja" in text,
+      "the generated page records that the client-plan blocker is closed")
+check(note in text, "the computed authority result reaches the rendered page")
 
-# Drive the detector: if the API ever stops taking a plan, this must flip.
+# Drive the detector in the unsafe direction: reintroducing a plan field must
+# fail closed instead of silently keeping the green verdict.
 from app.agent3 import api as _api  # noqa: E402
 _saved = _api.StartReq.model_fields
 try:
-    _api.StartReq.model_fields = {k: v for k, v in _saved.items() if k != "plan"}
-    ok, _ = AR.plan_authority()
-    check(ok is True,
-          "self-test: with no client plan field, the blocker clears -- a check "
-          "that can only fail is as useless as one that can only pass")
+    _api.StartReq.model_fields = {**_saved, "plan": object()}
+    ok, unsafe_note = AR.plan_authority()
+    check(ok is False and "klienten" in unsafe_note,
+          "self-test: a reintroduced client plan field restores the blocker")
 finally:
     _api.StartReq.model_fields = _saved
 
