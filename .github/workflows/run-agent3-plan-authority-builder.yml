@@ -16,192 +16,46 @@ jobs:
         with:
           ref: agent/agent3-plan-authority-builder-1-58-78
           fetch-depth: 8
-      - name: Preserve reviewed patch program
-        run: cp .github/workflows/one-shot-agent3-plan-authority.yml /tmp/agent3-builder.yml
+      - name: Preserve reviewed builder inputs
+        run: |
+          cp .github/workflows/one-shot-agent3-plan-authority.yml /tmp/agent3-builder.yml
+          cp .github/agent3_authority_extract.py /tmp/agent3-authority-extract.py
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: 'stable'
-      - name: Checkout exact main and extract patch script
+      - name: Checkout exact main
         run: |
           set -euo pipefail
           git checkout --detach 7ef5444213a360d3342bc21d576eeff61211b10d
           test "$(git rev-parse HEAD)" = "7ef5444213a360d3342bc21d576eeff61211b10d"
           test "$(cat VERSION)" = "1.58.77"
-          python3 - <<'EXTRACT'
-          from pathlib import Path
-
-          source = Path('/tmp/agent3-builder.yml').read_text(encoding='utf-8')
-          marker = "          python3 - <<'PY'\n"
-          start = source.index(marker) + len(marker)
-          end = source.index("\n          PY\n", start)
-          lines = source[start:end].splitlines()
-          program = "\n".join(line[10:] if line.startswith("          ") else line for line in lines) + "\n"
-
-          api_replacement = '''    def start_explicit(req: ExplicitStartReq) -> dict[str, Any]:
-              """Exercise the low-level adapter in tests without exposing it in production."""
-              caps = capability_provider(req, adapter)
-              if not req.plan:
-                  raise HTTPException(status_code=422, detail="the test fixture requires a plan")
-              if not req.tools:
-                  raise HTTPException(status_code=400, detail="an explicit tool plan requires tools=true")
-              request = TurnRequest(
-                  message=req.message,
-                  mode=req.mode,
-                  tools=req.tools,
-                  rag=req.rag,
-                  has_image=req.has_image,
-                  voice=req.voice,
-                  allow_rag_cloud=req.allow_rag_cloud,
-                  auto_cloud_fallback=req.auto_cloud_fallback,
-                  conversation_id=req.conversation_id,
-              )
-              route = orchestrator.router.route(request, caps)
-              if route.kind in {RouteKind.UNAVAILABLE, RouteKind.ASK_BEFORE_DOWNGRADE}:
-                  run = start_steps(
-                      request,
-                      caps,
-                      [],
-                      proactive=req.proactive,
-                      allow_private_cloud=req.allow_private_cloud,
-                      review_reads=req.review_reads,
-                  )
-                  return response(run)
-              try:
-                  calls = [PlannedToolCall(step.tool, step.args) for step in req.plan]
-                  steps = adapter.build_steps(calls, route, req.conversation_id)
-                  run = start_steps(
-                      request,
-                      caps,
-                      steps,
-                      proactive=req.proactive,
-                      allow_private_cloud=req.allow_private_cloud,
-                      review_reads=req.review_reads,
-                  )
-              except Agent3PlanError as exc:
-                  raise HTTPException(status_code=400, detail=str(exc)) from exc
-              return response(run)
-
-          if allow_client_plans:
-              router.add_api_route(
-                  "/runs",
-                  start_explicit,
-                  methods=["POST"],
-                  include_in_schema=False,
-              )
-
-          @router.post("/runs/{run_id}/retry")
-          def retry(run_id: str, req: RetryReq) -> dict[str, Any]:
-              original = orchestrator.store.load(run_id)
-              if original is None:
-                  raise HTTPException(status_code=404, detail="original run not found")
-              caps = capability_provider(req, adapter)
-              request = TurnRequest(
-                  message=original.request.message,
-                  mode=original.request.mode,
-                  tools=original.request.tools,
-                  rag=original.request.rag,
-                  has_image=original.request.has_image,
-                  voice=original.request.voice,
-                  allow_rag_cloud=original.request.allow_rag_cloud,
-                  auto_cloud_fallback=original.request.auto_cloud_fallback,
-                  retry_of_run_id=original.id,
-                  original_route=original.route.kind,
-                  conversation_id=original.request.conversation_id,
-              )
-              original_review = read_review(original.id)["enabled"]
-              run = start_steps(
-                  request,
-                  caps,
-                  _clone_steps(original),
-                  proactive=original.proactive,
-                  allow_private_cloud=original.allow_private_cloud,
-                  review_reads=bool(original_review),
-              )
-              return response(run)
-
-          '''
-          api_scope = program.index("api_path = ROOT / 'worker/app/agent3/api.py'")
-          api_start = program.index("replacement =", api_scope)
-          api_end = program.index("api_path.write_text", api_start)
-          program = program[:api_start] + f"replacement = {api_replacement!r}\n" + program[api_end:]
-
-          android_anchor = '''    fun events(runId: String): List<Event> {
-                  val arr = get("/api/v1/experimental/agent3/runs/$runId/events")
-                      .optJSONArray("events") ?: JSONArray()
-                  return buildList {
-                      for (i in 0 until arr.length()) {
-                          val e = arr.optJSONObject(i) ?: continue
-                          add(Event(e.optDouble("ts"), e.optString("kind"), e.opt("payload")?.toString().orEmpty()))
-                      }
-                  }
-              }
-
-          '''
-          android_retry = '''    fun retry(runId: String, cloudReady: Boolean = false): Run {
-                  val payload = JSONObject().put("cloud_ready", cloudReady)
-                  val root = post("/api/v1/experimental/agent3/runs/$runId/retry", payload)
-                  return parseRun(root.requireObject("run"))
-              }
-
-          '''
-          android_start = program.index("android_anchor = '''")
-          android_end = program.index("replace_once(\n    'android/app/src/main/java/dk/ternedal/modelrig/net/Agent3Client.kt'", android_start)
-          android_source = (
-              f"android_anchor = {android_anchor!r}\n"
-              f"android_retry = android_anchor + {android_retry!r}\n"
-          )
-          program = program[:android_start] + android_source + program[android_end:]
-
-          desktop_path = 'desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/Agent3Client.kt'
-          desktop_models_old = '''@Serializable
-          private data class ConfirmRequest(
-              @SerialName("step_id") val stepId: String,
-              val decision: String,
-              val digest: String,
-          )
-          '''
-          desktop_models_new = '''@Serializable
-          private data class ConfirmRequest(
-              @SerialName("step_id") val stepId: String,
-              val decision: String,
-              val digest: String,
-          )
-
-          @Serializable
-          private data class RetryRequest(
-              @SerialName("cloud_ready") val cloudReady: Boolean = false,
-          )
-          '''
-          desktop_events_old = '''    fun events(runId: String): List<Agent3Event> =
-                  decode<EventsEnvelope>(get("/api/v1/experimental/agent3/runs/$runId/events")).events
-
-          '''
-          desktop_events_new = '''    fun events(runId: String): List<Agent3Event> =
-                  decode<EventsEnvelope>(get("/api/v1/experimental/agent3/runs/$runId/events")).events
-
-              fun retry(runId: String, cloudReady: Boolean = false): Agent3Run =
-                  decode<Agent3RunEnvelope>(
-                      post(
-                          "/api/v1/experimental/agent3/runs/$runId/retry",
-                          json.encodeToString(RetryRequest(cloudReady)),
-                      )
-                  ).run
-
-          '''
-          desktop_start = program.index("replace_once(\n    'desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/Agent3Client.kt'", android_end)
-          desktop_end = program.index("# --- test-only explicit route opt-in", desktop_start)
-          desktop_source = (
-              f"replace_once({desktop_path!r}, {desktop_models_old!r}, {desktop_models_new!r})\n"
-              f"replace_once({desktop_path!r}, {desktop_events_old!r}, {desktop_events_new!r})\n\n"
-          )
-          program = program[:desktop_start] + desktop_source + program[desktop_end:]
-
-          Path('/tmp/agent3-authority-patch.py').write_text(program, encoding='utf-8')
-          compile(program, '/tmp/agent3-authority-patch.py', 'exec')
-          EXTRACT
+      - name: Extract reviewed patch program
+        id: extract
+        shell: bash
+        run: |
+          set +e
+          python3 /tmp/agent3-authority-extract.py > agent3-extract-console.log 2>&1
+          rc=$?
+          cat agent3-extract-console.log
+          test -f /tmp/agent3-extract.log && cp /tmp/agent3-extract.log agent3-extract.log
+          echo "status=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload extractor diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent3-plan-authority-extract-log
+          path: |
+            agent3-extract-console.log
+            agent3-extract.log
+          if-no-files-found: error
+          retention-days: 3
+      - name: Fail when extraction failed
+        if: steps.extract.outputs.status != '0'
+        run: exit 1
       - name: Install patch and worker dependencies
         run: pip install -r worker/requirements.txt libcst --break-system-packages
       - name: Normalize the one legacy Go handler anchor
