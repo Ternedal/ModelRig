@@ -53,6 +53,13 @@ class RiskClass(StrEnum):
     WRITE = "write"
     DESTRUCTIVE = "destructive"
     ADMIN = "admin"
+    # Added when this branch merged into a main that had grown a desktop class
+    # (1.58.52). Without it, integration.py's fallback -- "WRITE if the V2 tool
+    # says write, else READ" -- turned a screenshot/click into a READ: no
+    # confirmation card, and allowed inside a proactive background run. The most
+    # dangerous class in the system became the safest one. Latent only because
+    # no tool declares desktop yet.
+    DESKTOP = "desktop"
 
 
 class Sensitivity(StrEnum):
@@ -300,7 +307,8 @@ class PolicyEngine:
                 return PolicyDecision("block", "Secret data may never leave the rig")
             if step.sensitivity == Sensitivity.PRIVATE and not allow_private_cloud:
                 return PolicyDecision("block", "Private data needs explicit cloud consent")
-        if step.risk in {RiskClass.WRITE, RiskClass.DESTRUCTIVE, RiskClass.ADMIN}:
+        if step.risk in {RiskClass.WRITE, RiskClass.DESTRUCTIVE, RiskClass.ADMIN,
+                         RiskClass.DESKTOP}:
             return PolicyDecision("confirm", f"{step.risk.value} requires a fresh confirmation")
         return PolicyDecision("execute", "Read-only step allowed")
 

@@ -82,6 +82,27 @@ for path in LAUNCHERS:
     check("enforce_loopback(" in t,
           f"{path.name}: refuses a non-loopback bind through the shared guard")
 
+# Docs are a runtime instruction, not decoration (F-305). main.py's OWN
+# docstring said "uvicorn app.main:app --host 0.0.0.0" -- the unguarded app,
+# offered to the network, in one copy-pasteable line, in the file the rule is
+# about. DEVICE_TEST.md said it too, and that is the page Anders follows with
+# the rig in front of him. A launcher test cannot catch a human following a
+# document.
+RUN_RAW = _re.compile(r"uvicorn\s+app\.main:app")
+teaching = []
+for doc in list(ROOT.glob("*.md")) + list((ROOT / "worker").rglob("*.py")):
+    for i, line in enumerate(doc.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+        if not RUN_RAW.search(line):
+            continue
+        # Naming it in order to forbid it is the opposite of teaching it.
+        if any(w in line for w in ("NOT ", "ikke ", "IKKE ", "UDEN", "without")):
+            continue
+        teaching.append(f"{doc.relative_to(ROOT)}:{i}")
+check(not teaching,
+      "no document or docstring teaches the unguarded start command"
+      if not teaching
+      else f"TEACHES THE UNGUARDED WORKER: {', '.join(teaching)}")
+
 # The detector must be able to fail, or it is decoration.
 sample = "from app.main import app\nuvicorn.run(app, host=h)\n"
 names = {m.group(1) or "app" for m in re.finditer(r"from app\.entrypoint import app(?: as (\w+))?", sample)}

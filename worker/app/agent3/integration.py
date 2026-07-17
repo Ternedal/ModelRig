@@ -22,6 +22,15 @@ _RISK_OVERRIDES: dict[str, RiskClass] = {
     "pull_model": RiskClass.ADMIN,
 }
 
+# The V2 registry is the source of truth for what a tool IS; this maps its
+# vocabulary onto Agent 3's finer one. Every V2 class must appear here --
+# tests/worker_agent3_risk_parity.py fails if V2 grows one that does not.
+_V2_RISK: dict[str, RiskClass] = {
+    "read": RiskClass.READ,
+    "write": RiskClass.WRITE,
+    "desktop": RiskClass.DESKTOP,
+}
+
 _SENSITIVITY: dict[str, Sensitivity] = {
     "current_datetime": Sensitivity.PUBLIC,
     "rig_status": Sensitivity.OPERATIONAL,
@@ -91,10 +100,16 @@ class V2ToolAdapter:
                 raise Agent3PlanError(f"tool disabled: {call.tool}")
             if not isinstance(call.args, dict):
                 raise Agent3PlanError(f"arguments for {call.tool} must be an object")
-            risk = _RISK_OVERRIDES.get(
-                call.tool,
-                RiskClass.WRITE if tool.risk == "write" else RiskClass.READ,
-            )
+            # Explicit, and fail-closed. The old fallback was "WRITE if the V2
+            # tool says write, else READ", which silently downgraded every risk
+            # class V2 might grow later -- desktop became a read. A class this
+            # layer does not understand must stop the plan, not be guessed at.
+            risk = _RISK_OVERRIDES.get(call.tool) or _V2_RISK.get(tool.risk)
+            if risk is None:
+                raise Agent3PlanError(
+                    f"ukendt risikoklasse {tool.risk!r} for {call.tool}: "
+                    "Agent 3 planlægger ikke noget den ikke kan klassificere"
+                )
             sensitivity = _SENSITIVITY.get(call.tool, Sensitivity.PRIVATE)
             summary = tool.human_summary(call.args)
             steps.append(

@@ -30,7 +30,7 @@ ollama serve
 :: Vindue 2 — worker, fra repo-mappen. INGEN manuel PATH-mutation.
 cd /d "%USERPROFILE%\Desktop\modelrig-new"
 set PYTHONPATH=%CD%\worker
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8099
+python -m uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099
 
 :: Vindue 3 — server
 cd /d "%USERPROFILE%\Desktop"

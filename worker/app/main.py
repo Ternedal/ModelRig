@@ -1,6 +1,17 @@
 """ModelRig RAG worker — FastAPI.
 
-Run:  uvicorn app.main:app --host 0.0.0.0 --port 8099
+Run:  uvicorn app.entrypoint:app --port 8099
+
+NOT ``uvicorn app.main:app``, and never ``--host 0.0.0.0``. This file's own
+docstring used to say exactly that, which is two of the worst ideas in the
+system on one copy-pasteable line: app.main is the RAW app, so the outer ASGI
+guard is gone and a chunked upload that never declares a Content-Length walks
+straight past the body limit (the hole 1.58.46 closed); and 0.0.0.0 offers the
+worker -- which has no auth of its own -- to the network. The request
+middleware still refuses non-loopback peers, so the second one fails safe, but
+a docstring that teaches the unguarded start is how the first one comes back.
+
+Importing ``app.main`` in a TEST is fine: tests want routes, not a socket.
 The backend proxies /api/v1/rag/* here; clients never call it directly.
 """
 from __future__ import annotations
@@ -23,7 +34,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.58.65"
+VERSION = "1.58.66"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 
