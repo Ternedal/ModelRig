@@ -14,6 +14,7 @@ import dk.ternedal.modelrig.ui.Agent3ReviewScreen
 import dk.ternedal.modelrig.ui.Agent3Screen
 import dk.ternedal.modelrig.ui.Agent3ValidationScreen
 import dk.ternedal.modelrig.ui.AppUi
+import dk.ternedal.modelrig.ui.ScheduleScreen
 import dk.ternedal.modelrig.ui.theme.ModelRigTheme
 
 class MainActivity : ComponentActivity() {
@@ -25,27 +26,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Developer-only Agent 3.0 entries. The launcher sends none of these
-        // extras, so normal users always get AppUi exactly as before. ADB can
-        // open each draft explicitly without exporting another activity:
-        //
-        // adb shell am start -S -n dk.ternedal.modelrig/.MainActivity \
-        //   --ez dk.ternedal.modelrig.extra.AGENT3 true
-        //
-        // adb shell am start -S -n dk.ternedal.modelrig/.MainActivity \
-        //   --ez dk.ternedal.modelrig.extra.AGENT3_MEMORY true
-        //
-        // adb shell am start -S -n dk.ternedal.modelrig/.MainActivity \
-        //   --ez dk.ternedal.modelrig.extra.AGENT3_VALIDATION true
-        //
-        // adb shell am start -S -n dk.ternedal.modelrig/.MainActivity \
-        //   --ez dk.ternedal.modelrig.extra.AGENT3_CAPABILITIES true
-        //
-        // adb shell am start -S -n dk.ternedal.modelrig/.MainActivity \
-        //   --ez dk.ternedal.modelrig.extra.AGENT3_REPLAN true
-        //
-        // adb shell am start -S -n dk.ternedal.modelrig/.MainActivity \
-        //   --ez dk.ternedal.modelrig.extra.AGENT3_REVIEW true
+        // Explicit control-surface entries. The normal launcher sends none of
+        // these extras, so ordinary launch still gets AppUi. Scheduler is a
+        // human-facing app shortcut; Agent 3 entries remain developer-only ADB
+        // surfaces until their own readiness gates say otherwise.
+        val openSchedules =
+            intent?.getBooleanExtra(EXTRA_SCHEDULES, false) == true ||
+                (intent?.data?.scheme == "kaliv" && intent?.data?.host == "schedules")
         val openAgent3 = intent?.getBooleanExtra(EXTRA_AGENT3, false) == true
         val openAgent3Memory = intent?.getBooleanExtra(EXTRA_AGENT3_MEMORY, false) == true
         val openAgent3Validation = intent?.getBooleanExtra(EXTRA_AGENT3_VALIDATION, false) == true
@@ -54,6 +41,12 @@ class MainActivity : ComponentActivity() {
         val openAgent3Review = intent?.getBooleanExtra(EXTRA_AGENT3_REVIEW, false) == true
         setContent {
             when {
+                openSchedules -> {
+                    val store = remember { TokenStore(this) }
+                    ModelRigTheme(dark = store.darkMode) {
+                        ScheduleScreen(store = store, onClose = { finish() })
+                    }
+                }
                 openAgent3Capabilities -> {
                     val store = remember { TokenStore(this) }
                     ModelRigTheme(dark = store.darkMode) {
@@ -96,6 +89,7 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        const val EXTRA_SCHEDULES = "dk.ternedal.modelrig.extra.SCHEDULES"
         const val EXTRA_AGENT3 = "dk.ternedal.modelrig.extra.AGENT3"
         const val EXTRA_AGENT3_MEMORY = "dk.ternedal.modelrig.extra.AGENT3_MEMORY"
         const val EXTRA_AGENT3_VALIDATION = "dk.ternedal.modelrig.extra.AGENT3_VALIDATION"
