@@ -26,13 +26,13 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: 'stable'
-      - name: Checkout exact main
+      - name: Checkout exact current main
         run: |
           set -euo pipefail
-          git fetch --no-tags --depth=1 origin 7ef5444213a360d3342bc21d576eeff61211b10d
+          git fetch --no-tags --depth=1 origin 9ee88fdd55082ef582920a31130546818890c69a
           git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD)" = "7ef5444213a360d3342bc21d576eeff61211b10d"
-          test "$(cat VERSION)" = "1.58.77"
+          test "$(git rev-parse HEAD)" = "9ee88fdd55082ef582920a31130546818890c69a"
+          test "$(cat VERSION)" = "1.58.78"
       - name: Extract reviewed patch program
         id: extract
         shell: bash
@@ -57,6 +57,25 @@ jobs:
       - name: Fail when extraction failed
         if: steps.extract.outputs.status != '0'
         run: exit 1
+      - name: Retarget release anchor to 1.58.79
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('/tmp/agent3-authority-patch.py')
+          text = path.read_text(encoding='utf-8')
+          replacements = [
+              ("gradle_text.count('versionCode = 208')", "gradle_text.count('versionCode = 209')"),
+              ("versionCode 208 anchor drifted", "versionCode 209 anchor drifted"),
+              ("replace('versionCode = 208', 'versionCode = 209', 1)", "replace('versionCode = 209', 'versionCode = 210', 1)"),
+          ]
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f'release retarget anchor drifted: {old!r} -> {text.count(old)} matches')
+              text = text.replace(old, new, 1)
+          compile(text, str(path), 'exec')
+          path.write_text(text, encoding='utf-8')
+          PY
       - name: Install patch and worker dependencies
         run: pip install -r worker/requirements.txt libcst --break-system-packages
       - name: Normalize the one legacy Go handler anchor
@@ -99,11 +118,11 @@ jobs:
       - name: Fail when patch program failed
         if: steps.patch.outputs.status != '0'
         run: exit 1
-      - name: Set version and regenerate truth
+      - name: Set version and regenerate combined truth
         run: |
           set -euo pipefail
           gofmt -w backend/internal/httpapi/agent3.go backend/internal/httpapi/server.go backend/internal/httpapi/agent3_test.go
-          python3 scripts/version_tool.py set 1.58.78
+          python3 scripts/version_tool.py set 1.58.79
           python3 scripts/current_state.py
           python3 scripts/activation_readiness.py
           python3 scripts/version_tool.py check
@@ -152,9 +171,9 @@ jobs:
           test -n "$(git status --porcelain)"
           git commit -m 'fix(agent3): require server-authored run plans'
           clean_sha=$(git rev-parse HEAD)
-          git push --force origin HEAD:refs/heads/agent/agent3-plan-authority-1-58-78
-          printf 'commit=%s\nbase=%s\nversion=1.58.78\n' "$clean_sha" '7ef5444213a360d3342bc21d576eeff61211b10d' > agent3-plan-authority-result.txt
-          git diff --stat 7ef5444213a360d3342bc21d576eeff61211b10d..HEAD >> agent3-plan-authority-result.txt
+          git push --force origin HEAD:refs/heads/agent/agent3-plan-authority-1-58-79
+          printf 'commit=%s\nbase=%s\nversion=1.58.79\n' "$clean_sha" '9ee88fdd55082ef582920a31130546818890c69a' > agent3-plan-authority-result.txt
+          git diff --stat 9ee88fdd55082ef582920a31130546818890c69a..HEAD >> agent3-plan-authority-result.txt
           cat agent3-plan-authority-result.txt
       - name: Upload clean commit identity
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
