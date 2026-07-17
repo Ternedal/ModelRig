@@ -39,6 +39,78 @@ jobs:
           end = source.index("\n          PY\n", start)
           lines = source[start:end].splitlines()
           program = "\n".join(line[10:] if line.startswith("          ") else line for line in lines) + "\n"
+
+          android_anchor = '''    fun events(runId: String): List<Event> {
+                  val arr = get("/api/v1/experimental/agent3/runs/$runId/events")
+                      .optJSONArray("events") ?: JSONArray()
+                  return buildList {
+                      for (i in 0 until arr.length()) {
+                          val e = arr.optJSONObject(i) ?: continue
+                          add(Event(e.optDouble("ts"), e.optString("kind"), e.opt("payload")?.toString().orEmpty()))
+                      }
+                  }
+              }
+
+          '''
+          android_retry = '''    fun retry(runId: String, cloudReady: Boolean = false): Run {
+                  val payload = JSONObject().put("cloud_ready", cloudReady)
+                  val root = post("/api/v1/experimental/agent3/runs/$runId/retry", payload)
+                  return parseRun(root.requireObject("run"))
+              }
+
+          '''
+          android_start = program.index("android_anchor = '''")
+          android_end = program.index("replace_once(\n    'android/app/src/main/java/dk/ternedal/modelrig/net/Agent3Client.kt'", android_start)
+          android_source = (
+              f"android_anchor = {android_anchor!r}\n"
+              f"android_retry = android_anchor + {android_retry!r}\n"
+          )
+          program = program[:android_start] + android_source + program[android_end:]
+
+          desktop_path = 'desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/Agent3Client.kt'
+          desktop_models_old = '''@Serializable
+          private data class ConfirmRequest(
+              @SerialName("step_id") val stepId: String,
+              val decision: String,
+              val digest: String,
+          )
+          '''
+          desktop_models_new = '''@Serializable
+          private data class ConfirmRequest(
+              @SerialName("step_id") val stepId: String,
+              val decision: String,
+              val digest: String,
+          )
+
+          @Serializable
+          private data class RetryRequest(
+              @SerialName("cloud_ready") val cloudReady: Boolean = false,
+          )
+          '''
+          desktop_events_old = '''    fun events(runId: String): List<Agent3Event> =
+                  decode<EventsEnvelope>(get("/api/v1/experimental/agent3/runs/$runId/events")).events
+
+          '''
+          desktop_events_new = '''    fun events(runId: String): List<Agent3Event> =
+                  decode<EventsEnvelope>(get("/api/v1/experimental/agent3/runs/$runId/events")).events
+
+              fun retry(runId: String, cloudReady: Boolean = false): Agent3Run =
+                  decode<Agent3RunEnvelope>(
+                      post(
+                          "/api/v1/experimental/agent3/runs/$runId/retry",
+                          json.encodeToString(RetryRequest(cloudReady)),
+                      )
+                  ).run
+
+          '''
+          desktop_start = program.index("replace_once(\n    'desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/Agent3Client.kt'", android_end)
+          desktop_end = program.index("# --- test-only explicit route opt-in", desktop_start)
+          desktop_source = (
+              f"replace_once({desktop_path!r}, {desktop_models_old!r}, {desktop_models_new!r})\n"
+              f"replace_once({desktop_path!r}, {desktop_events_old!r}, {desktop_events_new!r})\n\n"
+          )
+          program = program[:desktop_start] + desktop_source + program[desktop_end:]
+
           Path('/tmp/agent3-authority-patch.py').write_text(program, encoding='utf-8')
           compile(program, '/tmp/agent3-authority-patch.py', 'exec')
           EXTRACT
