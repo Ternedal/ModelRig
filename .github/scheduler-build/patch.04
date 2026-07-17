@@ -1,0 +1,193 @@
+.Read(nonceRaw); err != nil {
++		return "", 0, errors.New("could not generate approval nonce")
++	}
++	expires := now.Add(scheduleApprovalTokenTTL).Unix()
++	claims := scheduleApprovalClaims{
++		Version:  1,
++		Audience: scheduleApprovalAudience,
++		Binding:  binding,
++		Expires:  expires,
++		Nonce:    base64.RawURLEncoding.EncodeToString(nonceRaw),
++	}
++	payload, err := json.Marshal(claims)
++	if err != nil {
++		return "", 0, err
++	}
++	signature := ed25519.Sign(privateKey, payload)
++	return scheduleApprovalTokenPrefix + "." +
++		base64.RawURLEncoding.EncodeToString(payload) + "." +
++		base64.RawURLEncoding.EncodeToString(signature), expires, nil
++}
++
++// approveSchedule asks the worker to re-preview the exact grant after bearer
++// authentication, then signs only the binding returned by that loopback worker.
++// The ordinary preview endpoint never mints a token: issuance happens only on
++// the explicit UI confirmation call.
++func (s *server) approveSchedule(w http.ResponseWriter, r *http.Request, workerPath string) {
++	if s.Worker == nil || !scheduleWorkerIsLoopback(s.Worker.BaseURL) {
++		writeErr(w, http.StatusServiceUnavailable,
++			"schedule approval requires a loopback worker upstream")
++		return
++	}
++	body, err := io.ReadAll(io.LimitReader(r.Body, scheduleApprovalBodyMax+1))
++	if err != nil {
++		writeErr(w, http.StatusBadRequest, "could not read schedule approval request")
++		return
++	}
++	if len(body) > scheduleApprovalBodyMax {
++		writeErr(w, http.StatusRequestEntityTooLarge, "schedule approval request is too large")
++		return
++	}
++	target := strings.TrimRight(s.Worker.BaseURL, "/") + workerPath
++	if r.URL.RawQuery != "" {
++		target += "?" + r.URL.RawQuery
++	}
++	upstream, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, strings.NewReader(string(body)))
++	if err != nil {
++		writeErr(w, http.StatusInternalServerError, "bad schedule approval request")
++		return
++	}
++	upstream.ContentLength = int64(len(body))
++	upstream.Header.Set("Content-Type", "application/json")
++	upstream.Header.Set("Accept", "application/json")
++	if rid := r.Header.Get("X-Request-ID"); rid != "" {
++		upstream.Header.Set("X-Request-ID", rid)
++	}
++	client := &http.Client{Timeout: s.Cfg.RequestTimeout}
++	resp, err := client.Do(upstream)
++	if err != nil {
++		writeErr(w, http.StatusBadGateway, "schedule worker unreachable: "+err.Error())
++		return
++	}
++	defer resp.Body.Close()
++	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, scheduleApprovalBodyMax+1))
++	if err != nil || len(responseBody) > scheduleApprovalBodyMax {
++		writeErr(w, http.StatusBadGateway, "schedule worker returned an invalid response")
++		return
++	}
++	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
++		if ct := resp.Header.Get("Content-Type"); ct != "" {
++			w.Header().Set("Content-Type", ct)
++		}
++		w.WriteHeader(resp.StatusCode)
++		_, _ = w.Write(responseBody)
++		return
++	}
++	var document map[string]any
++	if err := json.Unmarshal(responseBody, &document); err != nil {
++		writeErr(w, http.StatusBadGateway, "schedule worker returned invalid JSON")
++		return
++	}
++	preview, ok := document["preview"].(map[string]any)
++	if !ok || preview["requires_approval"] != true {
++		writeErr(w, http.StatusUnprocessableEntity,
++			"only scheduled writes require an approval token")
++		return
++	}
++	binding, _ := preview["approval_binding"].(string)
++	token, expires, err := issueScheduleApprovalToken(
++		s.Cfg.SchedulerApprovalPrivateKey, binding, time.Now().UTC(),
++	)
++	if err != nil {
++		writeErr(w, http.StatusServiceUnavailable,
++			"schedule approval signing is not configured safely")
++		return
++	}
++	preview["approval_token"] = token
++	preview["approval_token_expires_at"] = expires
++	w.Header().Set("Content-Type", "application/json")
++	w.WriteHeader(resp.StatusCode)
++	_ = json.NewEncoder(w).Encode(document)
++}
++
+ func (s *server) handleSchedulesStatus(w http.ResponseWriter, r *http.Request) {
+ 	s.forwardSchedule(w, r, "/schedules/status")
+ }
+@@ -65,6 +219,10 @@ func (s *server) handleSchedulesPreview(w http.ResponseWriter, r *http.Request)
+ 	s.forwardSchedule(w, r, "/schedules/preview")
+ }
+ 
++func (s *server) handleSchedulesApprove(w http.ResponseWriter, r *http.Request) {
++	s.approveSchedule(w, r, "/schedules/preview")
++}
++
+ func (s *server) handleSchedulesCollection(w http.ResponseWriter, r *http.Request) {
+ 	s.forwardSchedule(w, r, "/schedules")
+ }
+@@ -96,6 +254,15 @@ func (s *server) handleScheduleRenewPreview(w http.ResponseWriter, r *http.Reque
+ 	s.forwardSchedule(w, r, path)
+ }
+ 
++func (s *server) handleScheduleRenewApprove(w http.ResponseWriter, r *http.Request) {
++	path, ok := scheduleIDPath(r, "/renew/preview")
++	if !ok {
++		writeErr(w, http.StatusBadRequest, "invalid schedule id")
++		return
++	}
++	s.approveSchedule(w, r, path)
++}
++
+ func (s *server) handleScheduleRenew(w http.ResponseWriter, r *http.Request) {
+ 	path, ok := scheduleIDPath(r, "/renew")
+ 	if !ok {
+diff --git a/backend/internal/httpapi/schedules_test.go b/backend/internal/httpapi/schedules_test.go
+index 52f625d..bed2030 100644
+--- a/backend/internal/httpapi/schedules_test.go
++++ b/backend/internal/httpapi/schedules_test.go
+@@ -1,11 +1,14 @@
+ package httpapi
+ 
+ import (
++	"crypto/ed25519"
++	"encoding/base64"
+ 	"encoding/json"
+ 	"io"
+ 	"net"
+ 	"net/http"
+ 	"net/http/httptest"
++	"os"
+ 	"path/filepath"
+ 	"strings"
+ 	"testing"
+@@ -58,7 +61,10 @@ func scheduleHandlerWithFlag(
+ 
+ 	worker := proxy.New(workerURL, workerTimeout)
+ 	return New(Deps{
+-		Cfg:        config.Config{ClaimMax: 5, RequestTimeout: workerTimeout},
++		Cfg: config.Config{
++			ClaimMax: 5, RequestTimeout: workerTimeout,
++			SchedulerApprovalPrivateKey: os.Getenv("KALIV_SCHEDULER_APPROVAL_PRIVATE_KEY"),
++		},
+ 		Store:      st,
+ 		Ollama:     proxy.New(ollama.URL, workerTimeout),
+ 		Worker:     worker,
+@@ -86,6 +92,14 @@ var scheduleRoutes = []struct {
+ 	{http.MethodPost, "/api/v1/schedules/012345abcdef/renew", "/schedules/012345abcdef/renew"},
+ }
+ 
++var scheduleApprovalRoutes = []struct {
++	method string
++	public string
++}{
++	{http.MethodPost, "/api/v1/schedules/approve"},
++	{http.MethodPost, "/api/v1/schedules/012345abcdef/renew/approve"},
++}
++
+ func TestScheduleRoutesRequireSeparateExplicitOptIn(t *testing.T) {
+ 	// Starting the local runner is not permission to expose standing-grant
+ 	// administration to every paired device. Only the exact backend flag value
+@@ -138,6 +152,21 @@ func TestScheduleRoutesRequireBearerBeforeWorker(t *testing.T) {
+ 			}
+ 		})
+ 	}
++	for _, route := range scheduleApprovalRoutes {
++		t.Run(route.method+" "+route.public, func(t *testing.T) {
++			for _, header := range []string{"", "Bearer", "Basic nope", "Bearer wrong"} {
++				req := httptest.NewRequest(route.method, route.public, strings.NewReader(`{"x":1}`))
++				if header != "" {
++					req.Header.Set("Authorization", header)
++				}
++				rec := httptest.NewRecorder()
++				h.ServeHTTP(rec, req)
++				if rec.Code != http.StatusUnauthorized {
++					t.Fatalf("auth %q: got %d, want 401", header, rec.Code)

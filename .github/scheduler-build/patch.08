@@ -1,0 +1,191 @@
+el ville finde døren. Kræver serverudstedte, "
+-            "engangs, kortlivede tokens bundet til en faktisk UI-bekræftelse"
++        return True, (
++            "godkendelsen udstedes først efter paired bearer-auth af backendens "
++            "Ed25519-private nøgle; workeren har kun public key, tokenet er "
++            "kortlivet, bundet til hele standing grantet og kan kun bruges én gang"
+         )
+     except Exception as exc:  # noqa: BLE001
+         return False, f"kunne ikke læse schedule-godkendelsen: {exc}"
+diff --git a/scripts/generate_scheduler_approval_keys.py b/scripts/generate_scheduler_approval_keys.py
+new file mode 100755
+index 0000000..c421170
+--- /dev/null
++++ b/scripts/generate_scheduler_approval_keys.py
+@@ -0,0 +1,33 @@
++#!/usr/bin/env python3
++"""Generate the Ed25519 keypair used for human scheduler approvals.
++
++Prints two modelrig.env-compatible lines. The private seed belongs to the Go
++backend only. The worker receives only the public key and can verify tokens but
++cannot create them.
++"""
++from __future__ import annotations
++
++import base64
++
++from cryptography.hazmat.primitives import serialization
++from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
++
++
++def main() -> int:
++    private = Ed25519PrivateKey.generate()
++    seed = private.private_bytes(
++        serialization.Encoding.Raw,
++        serialization.PrivateFormat.Raw,
++        serialization.NoEncryption(),
++    )
++    public = private.public_key().public_bytes(
++        serialization.Encoding.Raw,
++        serialization.PublicFormat.Raw,
++    )
++    print("KALIV_SCHEDULER_APPROVAL_PRIVATE_KEY=" + base64.b64encode(seed).decode("ascii"))
++    print("KALIV_SCHEDULER_APPROVAL_PUBLIC_KEY=" + base64.b64encode(public).decode("ascii"))
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/tests/worker_schedule_api.py b/tests/worker_schedule_api.py
+index 9b3f0ce..d512078 100644
+--- a/tests/worker_schedule_api.py
++++ b/tests/worker_schedule_api.py
+@@ -4,18 +4,28 @@ Run: PYTHONPATH=worker python3 tests/worker_schedule_api.py
+ """
+ from __future__ import annotations
+ 
++import base64
+ import json
+ import os
+ import sys
+ import tempfile
+ from types import SimpleNamespace
+ 
++from cryptography.hazmat.primitives import serialization
++from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
++
+ from fastapi import FastAPI
+ from fastapi.testclient import TestClient
+ 
+ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
+ 
+-from app.schedule_admin import ScheduleAdmin, ScheduleAdminStore  # noqa: E402
++from app.schedule_admin import (  # noqa: E402
++    APPROVAL_TOKEN_AUDIENCE,
++    APPROVAL_TOKEN_PREFIX,
++    APPROVAL_TOKEN_VERSION,
++    ScheduleAdmin,
++    ScheduleAdminStore,
++)
+ from app.schedule_api import build_schedule_router  # noqa: E402
+ 
+ passed = failed = 0
+@@ -51,6 +61,28 @@ class FakeTool:
+         return f"{self.name}: {json.dumps(args, sort_keys=True, ensure_ascii=False)}"
+ 
+ 
++def approval_token(binding, *, private_key, now, expires_in=300, nonce="test-nonce-0123456789"):
++    claims = {
++        "v": APPROVAL_TOKEN_VERSION,
++        "aud": APPROVAL_TOKEN_AUDIENCE,
++        "binding": binding,
++        "exp": int(now + expires_in),
++        "nonce": nonce,
++    }
++    payload = json.dumps(claims, separators=(",", ":")).encode("utf-8")
++    signature = private_key.sign(payload)
++    enc = lambda raw: base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
++    return f"{APPROVAL_TOKEN_PREFIX}.{enc(payload)}.{enc(signature)}"
++
++
++private_key = Ed25519PrivateKey.generate()
++public_key_b64 = base64.b64encode(
++    private_key.public_key().public_bytes(
++        serialization.Encoding.Raw, serialization.PublicFormat.Raw
++    )
++).decode("ascii")
++
++
+ root = tempfile.mkdtemp(prefix="kaliv-schedule-api-")
+ db_path = os.path.join(root, "schedules.db")
+ now = [1_800_000_000.0]
+@@ -81,6 +113,7 @@ admin = ScheduleAdmin(
+     store_factory=lambda: ScheduleAdminStore(db_path),
+     registry_factory=lambda: registry,
+     clock=lambda: now[0],
++    approval_public_key=public_key_b64,
+ )
+ app = FastAPI()
+ app.include_router(build_schedule_router(admin))
+@@ -97,12 +130,49 @@ try:
+             "configured": False,
+             "running": False,
+             "resources_open": False,
++            "approval_verifier_configured": True,
+             "last_error": None,
+         },
+         "status tells the truth when lifespan is absent and flag is off",
+     )
+     check(not os.path.exists(db_path), "status does not create the schedule DB")
+ 
++    no_key_db = os.path.join(root, "no-key-schedules.db")
++    no_key_admin = ScheduleAdmin(
++        store_factory=lambda: ScheduleAdminStore(no_key_db),
++        registry_factory=lambda: registry,
++        clock=lambda: now[0],
++        approval_public_key="",
++    )
++    no_key_app = FastAPI()
++    no_key_app.include_router(build_schedule_router(no_key_admin))
++    no_key_client = TestClient(no_key_app)
++    no_key_write = no_key_client.post(
++        "/schedules/preview",
++        json={
++            "tool": "append_note",
++            "args": {"text": "Husk brygdag"},
++            "cadence": "every:60",
++        },
++    )
++    check(
++        no_key_write.status_code == 503,
++        "scheduled writes fail closed when the worker has no Ed25519 public key",
++    )
++    no_key_read = no_key_client.post(
++        "/schedules/preview",
++        json={"tool": "read_clock", "args": {}, "cadence": "every:60"},
++    )
++    check(
++        no_key_read.status_code == 200,
++        "missing approval keys do not invent a requirement for read-only schedules",
++    )
++    check(
++        no_key_client.get("/schedules/status").json()["approval_verifier_configured"] is False,
++        "status exposes the missing verifier without opening the database",
++    )
++    check(not os.path.exists(no_key_db), "missing-key previews create no schedule database")
++
+     preview_resp = client.post(
+         "/schedules/preview",
+         json={
+@@ -115,15 +185,17 @@ try:
+     )
+     check(preview_resp.status_code == 200, "write schedule can be previewed")
+     preview = preview_resp.json()["preview"]
+-    approval = preview["approval_fingerprint"]
++    approval_binding = preview["approval_binding"]
++    approval = approval_token(approval_binding, private_key=private_key, now=now[0])
+     action_approval = preview["action_fingerprint"]
+     check(
+         preview["operation"] == "create"
+         and preview["enable"] is True
+         and preview["requires_approval"]
+-        and len(approval) == 32
+-        and len(action_approval) == 32,
+-        "preview separates standing-grant approval from execution approval",
++        and len(approval_binding) == 64
++        and len(action_approval) == 32
++        and approval.startswith(APPROVAL_TOKEN_PREFIX + "."),
++        "preview exposes a non-authorising binding; the signed token is separate",
+     )
+     check(
+         preview_re

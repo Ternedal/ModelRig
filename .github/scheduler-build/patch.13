@@ -1,0 +1,64 @@
+status(request: Request, service: ScheduleAdmin) -> dict[str, Any]:
+     runtime = getattr(request.app.state, "scheduler_runtime", None)
+     if runtime is None:
+         return {
+             "configured": enabled(),
+             "running": False,
+             "resources_open": False,
++            "approval_verifier_configured": service.approval_verifier_configured(),
+             "last_error": None,
+         }
+     try:
+@@ -111,12 +112,14 @@ def _runtime_status(request: Request) -> dict[str, Any]:
+             "configured": enabled(),
+             "running": False,
+             "resources_open": True,
++            "approval_verifier_configured": service.approval_verifier_configured(),
+             "last_error": f"{type(exc).__name__}: {exc}"[:500],
+         }
+     return {
+         "configured": bool(state.configured),
+         "running": bool(state.running),
+         "resources_open": bool(state.resources_open),
++        "approval_verifier_configured": service.approval_verifier_configured(),
+         "last_error": state.last_error,
+     }
+ 
+@@ -146,7 +149,7 @@ def build_schedule_router(
+     def schedule_status(request: Request) -> dict[str, Any]:
+         _require_operator(request, operator_allowed)
+         # Status does not open the schedule DB or import ToolGate.
+-        return _runtime_status(request)
++        return _runtime_status(request, service)
+ 
+     @router.post("/preview")
+     def preview_schedule(
+@@ -186,7 +189,7 @@ def build_schedule_router(
+                 req.cadence,
+                 ttl_days=req.ttl_days,
+                 max_runs=req.max_runs,
+-                approved_fingerprint=req.approved_fingerprint,
++                approval_token=req.approval_token,
+             )
+         except (ScheduleAdminError, ScheduleError) as exc:
+             _raise(exc)
+@@ -238,7 +241,7 @@ def build_schedule_router(
+                 schedule_id,
+                 ttl_days=req.ttl_days,
+                 max_runs=req.max_runs,
+-                approved_fingerprint=req.approved_fingerprint,
++                approval_token=req.approval_token,
+                 enable=req.enable,
+             )
+         except (ScheduleAdminError, ScheduleError) as exc:
+diff --git a/worker/requirements.txt b/worker/requirements.txt
+index d3e7134..4049b90 100644
+--- a/worker/requirements.txt
++++ b/worker/requirements.txt
+@@ -20,3 +20,6 @@ pydantic==2.13.4
+ # Optional -- RAG DOCX ingest only. NOT installed by default. Extracts text from
+ # uploaded .docx (python-docx, paragraphs + tables). pip install python-docx
+ # python-docx>=1.1
++# Scheduler approval verification. The backend owns the Ed25519 private key;
++# the worker receives only the public key and cannot mint standing-grant consent.
++cryptography==49.0.0

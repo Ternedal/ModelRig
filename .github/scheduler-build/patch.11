@@ -1,0 +1,175 @@
+approval."""
+ 
+ 
++class ScheduleAdminUnavailable(ScheduleAdminError):
++    """Required approval verification is not configured safely."""
++
++
+ @dataclass(frozen=True)
+ class SchedulePreview:
+     operation: str
+@@ -67,7 +84,7 @@ class SchedulePreview:
+     human_summary: str
+     requires_approval: bool
+     action_fingerprint: str
+-    approval_fingerprint: str | None
++    approval_binding: str | None
+     due_at: float
+     expires_at: float
+     ttl_days: int
+@@ -86,7 +103,8 @@ class SchedulePreview:
+             "human_summary": self.human_summary,
+             "requires_approval": self.requires_approval,
+             "action_fingerprint": self.action_fingerprint,
+-            "approval_fingerprint": self.approval_fingerprint,
++            # Public and non-authorising: useful for support correlation only.
++            "approval_binding": self.approval_binding,
+             "due_at": self.due_at,
+             "expires_at": self.expires_at,
+             "ttl_days": self.ttl_days,
+@@ -100,9 +118,52 @@ class ScheduleAdminStore(ScheduleStore):
+ 
+     Renewal is one atomic update: approval horizon and run budget move together,
+     and an explicit re-enable starts at a fresh future occurrence instead of
+-    replaying missed work.
++    replaying missed work. Approval tokens live in the same SQLite file so a
++    restart cannot make an already-used token reusable.
+     """
+ 
++    def __init__(self, path: str | None = None) -> None:
++        super().__init__(path)
++        with self._lock:
++            self._conn.execute(
++                """CREATE TABLE IF NOT EXISTS schedule_consumed_approval_tokens (
++                       token_hash TEXT PRIMARY KEY,
++                       expires_at REAL NOT NULL,
++                       consumed REAL NOT NULL)"""
++            )
++            self._conn.commit()
++
++    @staticmethod
++    def _token_hash(token: str) -> str:
++        return hashlib.sha256(token.encode("utf-8")).hexdigest()
++
++    def consume_verified_approval_token(
++        self, token: str, *, expires_at: float, now: float
++    ) -> None:
++        """Record one verified token exactly once across threads and restarts."""
++        token_hash = self._token_hash(token)
++        with self._lock:
++            try:
++                self._conn.execute("BEGIN IMMEDIATE")
++                self._conn.execute(
++                    "DELETE FROM schedule_consumed_approval_tokens WHERE expires_at<?",
++                    (now - APPROVAL_TOKEN_CLOCK_SKEW_SECONDS,),
++                )
++                self._conn.execute(
++                    "INSERT INTO schedule_consumed_approval_tokens "
++                    "(token_hash, expires_at, consumed) VALUES (?,?,?)",
++                    (token_hash, expires_at, now),
++                )
++                self._conn.commit()
++            except sqlite3.IntegrityError as exc:
++                self._conn.rollback()
++                raise ScheduleAdminConflict(
++                    "approval token is missing, expired, already used or bound to another standing grant"
++                ) from exc
++            except Exception:
++                self._conn.rollback()
++                raise
++
+     def renew(
+         self,
+         schedule_id: str,
+@@ -177,10 +238,32 @@ class ScheduleAdmin:
+         store_factory: Callable[[], ScheduleAdminStore] = _default_store,
+         registry_factory: Callable[[], Mapping[str, Any]] = _default_registry,
+         clock: Callable[[], float] = time.time,
++        approval_public_key: str | None = None,
+     ) -> None:
+         self._store_factory = store_factory
+         self._registry_factory = registry_factory
+         self._clock = clock
++        key_text = (
++            os.environ.get(APPROVAL_PUBLIC_KEY_ENV, "")
++            if approval_public_key is None
++            else approval_public_key
++        ).strip()
++        self._approval_public_key = self._load_public_key(key_text)
++
++    @staticmethod
++    def _load_public_key(encoded: str) -> Ed25519PublicKey | None:
++        if not encoded:
++            return None
++        try:
++            raw = base64.b64decode(encoded, validate=True)
++            if len(raw) != 32:
++                return None
++            return Ed25519PublicKey.from_public_bytes(raw)
++        except (ValueError, binascii.Error):
++            return None
++
++    def approval_verifier_configured(self) -> bool:
++        return self._approval_public_key is not None
+ 
+     @contextmanager
+     def _store(self) -> Iterator[ScheduleAdminStore]:
+@@ -243,13 +326,18 @@ class ScheduleAdmin:
+         *,
+         ttl_days: int = DEFAULT_TTL_DAYS,
+         max_runs: int = DEFAULT_MAX_RUNS,
+-        approved_fingerprint: str | None = None,
++        approval_token: str | None = None,
+     ) -> dict[str, Any]:
+         preview = self.preview(
+             tool, args, cadence, ttl_days=ttl_days, max_runs=max_runs
+         )
+-        self._require_approval(preview, approved_fingerprint)
++        verified = self._verify_approval(preview, approval_token)
+         with self._store() as store:
++            if verified is not None:
++                expires_at, verified_at = verified
++                store.consume_verified_approval_token(
++                    approval_token or "", expires_at=expires_at, now=verified_at
++                )
+             schedule = store.create(
+                 tool,
+                 args,
+@@ -299,7 +387,7 @@ class ScheduleAdmin:
+         *,
+         ttl_days: int = DEFAULT_TTL_DAYS,
+         max_runs: int = DEFAULT_MAX_RUNS,
+-        approved_fingerprint: str | None = None,
++        approval_token: str | None = None,
+         enable: bool | None = None,
+     ) -> dict[str, Any]:
+         with self._store() as store:
+@@ -316,12 +404,17 @@ class ScheduleAdmin:
+                 max_runs=max_runs,
+                 enable=enable,
+             )
+-            self._require_approval(preview, approved_fingerprint)
++            verified = self._verify_approval(preview, approval_token)
++            if verified is not None:
++                expires_at, verified_at = verified
++                store.consume_verified_approval_token(
++                    approval_token or "", expires_at=expires_at, now=verified_at
++                )
+             updated = store.renew(
+                 schedule_id,
+                 # The persisted standing grant only needs the exact action
+-                # fingerprint. The broader approval fingerprint is consumed by
+-                # this administration boundary and is never used for execution.
++                # fingerprint. The opaque approval token was consumed above and
++                # is never used for execution.
+                 approved_fingerprint=(
+                     preview.action_fingerprint if preview.requires_approval else None
+                 ),
+@@ -457,9 +550,13 @@ class ScheduleAdmin:
+             )
+ 
+         action_fp = fingerprint(tool, args)
+-        approval_fp = None
++        approval_binding = None
+         if risk == "write":
+-

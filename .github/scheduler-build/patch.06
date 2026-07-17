@@ -1,0 +1,143 @@
+andle("POST /api/v1/schedules", s.authMW(http.HandlerFunc(s.handleSchedulesCollection)))
+ 		s.mux.Handle("GET /api/v1/schedules/{id}", s.authMW(http.HandlerFunc(s.handleScheduleGet)))
+ 		s.mux.Handle("POST /api/v1/schedules/{id}/enabled", s.authMW(http.HandlerFunc(s.handleScheduleEnabled)))
+ 		s.mux.Handle("POST /api/v1/schedules/{id}/renew/preview", s.authMW(http.HandlerFunc(s.handleScheduleRenewPreview)))
++		s.mux.Handle("POST /api/v1/schedules/{id}/renew/approve", s.authMW(http.HandlerFunc(s.handleScheduleRenewApprove)))
+ 		s.mux.Handle("POST /api/v1/schedules/{id}/renew", s.authMW(http.HandlerFunc(s.handleScheduleRenew)))
+ 	}
+ 
+diff --git a/deploy/modelrig.env.example b/deploy/modelrig.env.example
+index c7f5d1e..602c3fe 100644
+--- a/deploy/modelrig.env.example
++++ b/deploy/modelrig.env.example
+@@ -13,6 +13,11 @@ MODELRIG_CLAIM_MAX=10                       # max pair/claim attempts per IP / 5
+ # MODELRIG_ADMIN_KEY=change-me             # if set, pair/start requires X-Admin-Key
+ # MODELRIG_CONFIG=./config.json            # optional JSON config file
+ KALIV_SCHEDULER_API=0                       # 1 = expose authenticated /api/v1/schedules routes to paired devices
++# Generate this Ed25519 pair once with: python scripts/generate_scheduler_approval_keys.py
++# The private seed is backend-only. The supervisor and run-windows.ps1 remove it before starting the worker.
++# KALIV_SCHEDULER_APPROVAL_PRIVATE_KEY=<base64 Ed25519 private seed>
++# The worker receives only this public verification key and therefore cannot mint human consent.
++# KALIV_SCHEDULER_APPROVAL_PUBLIC_KEY=<base64 Ed25519 public key>
+ 
+ # ---- worker (Python) ----
+ MODELRIG_OLLAMA_URL=http://127.0.0.1:11434 # (worker reads the same var)
+diff --git a/deploy/run-windows.ps1 b/deploy/run-windows.ps1
+index d415341..c1801c9 100644
+--- a/deploy/run-windows.ps1
++++ b/deploy/run-windows.ps1
+@@ -34,6 +34,13 @@ if (-not (Test-Path $backendExe)) {
+ }
+ 
+ Write-Host "Starting RAG worker on 127.0.0.1:8099 ..." -ForegroundColor Cyan
++# The backend owns the Ed25519 private seed. Remove it before spawning the
++# worker, then restore it for the backend; Start-Process snapshots the current
++# environment when the child is created. The public verification key remains.
++$schedulerApprovalPrivate = [Environment]::GetEnvironmentVariable("KALIV_SCHEDULER_APPROVAL_PRIVATE_KEY")
++if (-not [string]::IsNullOrEmpty($schedulerApprovalPrivate)) {
++    Remove-Item Env:KALIV_SCHEDULER_APPROVAL_PRIVATE_KEY -ErrorAction SilentlyContinue
++}
+ $workerExe = Get-ChildItem -Path $workerDir -Filter "modelrig-worker*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+ if ($workerExe) {
+     # Prebuilt exe from the GitHub release (no Python needed on the rig)
+@@ -48,6 +55,10 @@ if ($workerExe) {
+         -WorkingDirectory $workerDir -PassThru -NoNewWindow
+ }
+ 
++if (-not [string]::IsNullOrEmpty($schedulerApprovalPrivate)) {
++    $env:KALIV_SCHEDULER_APPROVAL_PRIVATE_KEY = $schedulerApprovalPrivate
++}
++
+ try {
+     Start-Sleep -Seconds 2
+     Write-Host "Starting backend on $($env:MODELRIG_HOST):$($env:MODELRIG_PORT) ..." -ForegroundColor Cyan
+diff --git a/desktop/composeApp/build.gradle.kts b/desktop/composeApp/build.gradle.kts
+index 245c5ac..afa64ab 100644
+--- a/desktop/composeApp/build.gradle.kts
++++ b/desktop/composeApp/build.gradle.kts
+@@ -38,7 +38,7 @@ compose.desktop {
+             // lets packageVersion tell the truth.
+             targetFormats(TargetFormat.Deb)
+             packageName = "Kaliv"
+-            packageVersion = "1.58.89"
++            packageVersion = "1.58.90"
+         }
+     }
+ }
+diff --git a/scripts/activation_readiness.py b/scripts/activation_readiness.py
+index 9d85dc8..b0f712e 100644
+--- a/scripts/activation_readiness.py
++++ b/scripts/activation_readiness.py
+@@ -146,29 +146,63 @@ def validation() -> dict:
+ 
+ 
+ def _try_to_mint_a_standing_grant() -> bool | None:
+-    """Actually attempt the bypass. True = it worked, False = refused, None = could not test.
++    """Try the loopback bypass against a worker that has only a public key.
+ 
+-    A negative end-to-end test, because the alternative -- asking the source
+-    whether it looks safe -- is how a comment came to be evidence of security.
++    True means an unauthenticated local caller minted a standing write. False
++    means a forged token was refused, a real backend-signed token worked once,
++    and replay was refused. None means the probe itself could not establish the
++    contract, which remains a blocker rather than a guessed pass.
+     """
+-    import os  # noqa: PLC0415
++    import base64  # noqa: PLC0415
+     import tempfile  # noqa: PLC0415
+ 
+     try:
+-        tmp = tempfile.mkdtemp()
+-        os.environ.setdefault("KALIV_SCHEDULE_DB", os.path.join(tmp, "s.db"))
+-        os.environ.setdefault("KALIV_AUDIT_DB", os.path.join(tmp, "a.db"))
+-        os.environ.setdefault("KALIV_TOOLS_STATE", os.path.join(tmp, "st.json"))
+-        os.environ.setdefault("KALIV_TOOLS_DIR", tmp)
+-
++        from cryptography.hazmat.primitives import serialization  # noqa: PLC0415
++        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: PLC0415
+         from fastapi import FastAPI  # noqa: PLC0415
+         from fastapi.testclient import TestClient  # noqa: PLC0415
+ 
++        from app.schedule_admin import (  # noqa: PLC0415
++            APPROVAL_TOKEN_AUDIENCE,
++            APPROVAL_TOKEN_PREFIX,
++            APPROVAL_TOKEN_VERSION,
++            ScheduleAdmin,
++            ScheduleAdminStore,
++        )
+         from app.schedule_api import build_schedule_router  # noqa: PLC0415
+ 
++        tmp = tempfile.mkdtemp()
++        os.environ.setdefault("KALIV_AUDIT_DB", os.path.join(tmp, "a.db"))
++        os.environ.setdefault("KALIV_TOOLS_STATE", os.path.join(tmp, "st.json"))
++        os.environ.setdefault("KALIV_TOOLS_DIR", tmp)
++        db = os.path.join(tmp, "s.db")
++        now = 1_900_000_000.0
++        legitimate = Ed25519PrivateKey.generate()
++        public = legitimate.public_key().public_bytes(
++            serialization.Encoding.Raw, serialization.PublicFormat.Raw
++        )
++        class ProbeTool:
++            risk = "write"
++            sensitivity = "private"
++            schedulable = True
++            params = {
++                "type": "object",
++                "properties": {"text": {"type": "string"}},
++                "required": ["text"],
++            }
++
++            @staticmethod
++            def human_summary(args):
++                return "append note: " + str(args.get("text", ""))
++
++        admin = ScheduleAdmin(
++            store_factory=lambda: ScheduleAdminStore(db),
++            registry_factory=lambda: {"note_append": ProbeTool()},
++            clock=lambda: now,
++            approval_public_key=base64.b64encode(public).decode("ascii"),
++        )
+         app = FastAPI()
+-        app.include_router(build_schedule_router())
+-        # A loopback caller: exactly what a shell/http/MCP tool would be.
++        app.inclu
