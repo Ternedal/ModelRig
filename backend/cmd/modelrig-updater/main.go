@@ -562,22 +562,8 @@ func main() {
 		// release was not rewritten. Only the second one survives a stolen
 		// token, so it is the one that decides whether we swap a live binary.
 		if !*skipAttestation {
-			for _, t := range targets {
-				got, err := fileSHA256(filepath.Join(staged, t.asset))
-				if err != nil {
-					die("hash %s: %v", t.asset, err)
-				}
-				n, err := attestedBy(*repo, got)
-				if err != nil {
-					// Unreachable is not the same as unattested, and neither is
-					// a reason to install. We cannot verify, so we do not swap.
-					die("cannot check provenance for %s: %v -- refusing to install "+
-						"(pass -skip-attestation for a release predating signing)", t.asset, err)
-				}
-				if n == 0 {
-					die("NO BUILD PROVENANCE for %s (sha256 %s) -- this artifact was not "+
-						"produced by %s's release workflow. Refusing to install.", t.asset, got[:16], *repo)
-				}
+			if err := verifyProvenance(targets, staged, *repo, attestedBy); err != nil {
+				die("%v", err)
 			}
 			log.Printf("build provenance verified for %d exe(s)", len(targets))
 		} else {
@@ -721,6 +707,40 @@ func httpGet(url string) ([]byte, error) {
 		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
 	}
 	return io.ReadAll(resp.Body)
+}
+
+// verifyProvenance is the refusal itself, lifted out of main() so it can be
+// driven (F-523 follow-up).
+//
+// It was inline, calling die(), which meant the only machine that could ever
+// find out whether it refuses correctly was Anders' rig, at the exact moment it
+// mattered least -- mid-update, against a tampered binary. I had tested the
+// LOOKUP and written "the updater refuses" in a release note. Testing the
+// helper and describing the behaviour is the same move as fixing one file of
+// three and calling the finding closed.
+//
+// `lookup` is injected so a test can hand it an artifact GitHub never signed
+// without needing a tampered release to exist.
+func verifyProvenance(targets []target, stagedDir, repo string,
+	lookup func(repo, digest string) (int, error)) error {
+	for _, t := range targets {
+		got, err := fileSHA256(filepath.Join(stagedDir, t.asset))
+		if err != nil {
+			return fmt.Errorf("hash %s: %w", t.asset, err)
+		}
+		n, err := lookup(repo, got)
+		if err != nil {
+			// Unreachable is not the same as unattested, and neither is a
+			// reason to install. We cannot verify, so we do not swap.
+			return fmt.Errorf("cannot check provenance for %s: %w -- refusing to install "+
+				"(pass -skip-attestation for a release predating signing)", t.asset, err)
+		}
+		if n == 0 {
+			return fmt.Errorf("NO BUILD PROVENANCE for %s (sha256 %s) -- this artifact was "+
+				"not produced by %s's release workflow. Refusing to install", t.asset, got[:16], repo)
+		}
+	}
+	return nil
 }
 
 // attestedBy asks GitHub whether it holds a build-provenance attestation for
