@@ -1,15 +1,32 @@
-> ⚠️ **Aktuel autoritativ tilstand: `VERSION` (bump'es hver release — se filen), `ROADMAP.md`, `SECURITY.md`.**
-> Denne fil er en historisk log — ældre datoer/versioner nedenfor er ikke nødvendigvis aktuelle.
+> ## Tilstand står IKKE her
+>
+> **Aktuel tilstand: [`CURRENT_STATE.md`](CURRENT_STATE.md) og
+> [`ACTIVATION_READINESS.md`](ACTIVATION_READINESS.md).** De genereres fra koden
+> ved hver release og kan ikke tage fejl om hvad der er på main, fordi de ikke
+> husker — de regner efter.
+>
+> Den her fil er **beslutninger og historie**. Datoer og versioner i den er
+> historiske og skal læses sådan. Hvis den modsiger de genererede sider om hvad
+> systemet ER, så tager den fejl; det er ikke et spørgsmål der skal afvejes.
+>
+> (Denne header pegede på `ROADMAP.md` og `SECURITY.md` som autoritet. Begge var
+> selv driftet — ROADMAP siden før Agent 3 og scheduleren overhovedet fandtes.
+> Dokumentet der skulle afgøre tvivl, henviste til dokumenter der tog fejl.)
 > 13/7-2026: audit-P0/P1 lukket (1.58.1/1.58.2); VERSION-kilde + CI-gate indført; roadmap fornyet.
 
 # ModelRig / Kaliv — komplet handoff til ny chat
 
-**Dato:** 2026-07-16 · **Version:** v1.58.52 · **Repo:** `github.com/Ternedal/ModelRig` (**PUBLIC** — gratis CI)
+**Repo:** `github.com/Ternedal/ModelRig` (**PUBLIC** — gratis CI) · **Version:** se `VERSION` eller `CURRENT_STATE.md`
+
+*(Her stod "Version: v1.58.52" i et hjørne hvor ingen kigger. Et versionsnummer
+skrevet i hånden i en header er ikke information — det er en tidsindstillet
+usandhed, og den her var 29 releases gammel.)*
 
 Copy/paste dette som første besked i en ny chat. Dokumentet er selvbærende:
 det dækker beslutninger, tilstand, arbejdsform, release-flow, toolchain,
-arkitektur og lektier. Ved tvivl: dette dokument + `STATUS.md` linje 3 vinder
-over hukommelse og antagelser.
+arkitektur og lektier. Ved tvivl om **beslutninger**: dette dokument vinder over
+hukommelse og antagelser. Ved tvivl om **tilstand**: de genererede sider vinder
+over dette dokument.
 
 ---
 

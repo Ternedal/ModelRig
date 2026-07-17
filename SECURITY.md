@@ -1,8 +1,20 @@
 # SECURITY.md — ModelRig / Kaliv
 
-> Sikkerhedsbaseline pr. **13/7-2026** (kode: se `VERSION`). Dette er en *aktuel* trusselsmodel og
-> risikooversigt, ikke en absolut garanti. Absolutte udsagn ("eneste sikkerhedspunkt")
-> undgås bevidst — se "Kendte, accepterede risici".
+> ## Denne fil er IKKE en aktuel trusselsmodel
+>
+> Den påstod at være det. Den var dateret **13/7-2026** og beskrev systemet som
+> det så ud dengang. Siden er der landet attestation-håndhævelse i updateren, én
+> loopback-guard, fail-closed risiko- og sensitivity-klassificering, og et
+> godkendelses-hul i scheduleren som ingen af siderne her nævner.
+>
+> **En sikkerhedsmodel der selvsikkert beskriver et system der ikke findes
+> længere, er farligere end ingen model** — den fortæller dig hvad du er beskyttet
+> imod, og du tror på den.
+>
+> Aktuel sikkerhedstilstand: [`CURRENT_STATE.md`](CURRENT_STATE.md) og
+> [`ACTIVATION_READINESS.md`](ACTIVATION_READINESS.md), som regnes ud fra koden.
+> Det nedenfor er **accepterede risici og trufne beslutninger** — de driver ikke,
+> fordi de er historik.
 
 ## Hvad beskyttes (assets)
 

@@ -6,7 +6,7 @@
 > code, so it cannot quietly become untrue. If a fact belongs here, teach
 > the generator to read it -- do not type it in.
 
-**Version:** 1.58.81
+**Version:** 1.58.82
 
 ## Tools the model can see
 
@@ -141,6 +141,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_agent3_dormant.py`
 - `tests/workflow_current_state.py`
 - `tests/workflow_dep_pins.py`
+- `tests/workflow_doc_authority.py`
 - `tests/workflow_release.py`
 - `tests/workflow_test_coverage.py`
 - `tests/workflow_worker_entrypoints.py`

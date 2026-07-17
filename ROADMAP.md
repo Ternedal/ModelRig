@@ -1,6 +1,20 @@
 # ModelRig / Kaliv — Roadmap
 
-> **Gældende version:** se `VERSION` · **Dato:** 2026-07-13 · **Ejer:** Anders
+> ## Tilstand står IKKE her
+>
+> **Aktuel tilstand: [`CURRENT_STATE.md`](CURRENT_STATE.md) og
+> [`ACTIVATION_READINESS.md`](ACTIVATION_READINESS.md).** De genereres fra koden
+> ved hver release og kan ikke tage fejl om hvad der er på main, fordi de ikke
+> husker — de regner efter.
+>
+> Den her fil er **beslutninger og historie**. Datoer og versioner i den er
+> historiske og skal læses sådan. Hvis den modsiger de genererede sider om hvad
+> systemet ER, så tager den fejl; det er ikke et spørgsmål der skal afvejes.
+>
+> **Ejer:** Anders · **Retningen nedenfor er fra 2026-07-13** — før Agent 3 og
+> scheduleren fandtes. Læs den som "hvad vi ville dengang", ikke som en plan der
+> gælder.
+
 > **Status:** Gul. Backend er sikkerhedshærdet, versionsdrift mekanisk lukket, og
 > **apparatdriften er bygget** (supervisor med autostart + crash-restart, updater med
 > rollback, ressource-varsling — 1.58.8–1.58.14). Fokus nu er **integration + hardening**,

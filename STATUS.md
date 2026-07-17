@@ -1,5 +1,12 @@
-> ⚠️ **Aktuel autoritativ tilstand: `VERSION` (bump'es hver release — se filen), `ROADMAP.md`, `SECURITY.md`.**
-> Denne fil er en historisk log — ældre datoer/versioner nedenfor er ikke nødvendigvis aktuelle.
+> ## Tilstand står IKKE her
+>
+> **Aktuel tilstand: [`CURRENT_STATE.md`](CURRENT_STATE.md) og
+> [`ACTIVATION_READINESS.md`](ACTIVATION_READINESS.md).** De genereres fra koden
+> og kan ikke tage fejl om hvad der er på main, fordi de ikke husker — de regner
+> efter.
+>
+> Den her fil er **beslutninger og historie**. Den pegede før på `ROADMAP.md` og
+> `SECURITY.md` som autoritet; begge var selv driftet.
 > 13/7-2026: audit-P0/P1 lukket (1.58.1/1.58.2); VERSION-kilde + CI-gate indført; roadmap fornyet.
 
 # ModelRig — STATUS (honest build report)
