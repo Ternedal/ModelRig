@@ -59,6 +59,11 @@ class JobStore:
             )
             self._conn.commit()
 
+    def close(self) -> None:
+        """Close an explicitly owned store after its background users stop."""
+        with self._lock:
+            self._conn.close()
+
     def create(self, kind: str, detail: str = "") -> str:
         job_id = uuid.uuid4().hex[:12]
         now = time.time()
