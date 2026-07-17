@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="schedules"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_schedules_short"
+        android:shortcutLongLabel="@string/shortcut_schedules_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="kaliv://schedules"
+            android:targetPackage="dk.ternedal.modelrig"
+            android:targetClass="dk.ternedal.modelrig.MainActivity" />
+    </shortcut>
+</shortcuts>
