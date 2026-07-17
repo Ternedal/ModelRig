@@ -24,44 +24,64 @@ jobs:
           test "$(git rev-parse HEAD)" = "ad9a10f7ff2b78cb0c354a211b9c332fb2498835"
           python3 scripts/version_tool.py check
       - name: Create exact tag and draft release
+        id: draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: v1.58.79
           TARGET: ad9a10f7ff2b78cb0c354a211b9c332fb2498835
           NOTES: Agent3 run plans are now server-authored; retry clones the stored plan and rejects client mutation. Agent3 remains dormant pending physical rig validation.
+        shell: bash
         run: |
-          set -euo pipefail
-          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/$TAG" >/dev/null 2>&1; then
-            echo "$TAG already exists; verifying target"
-          else
-            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-              -f ref="refs/tags/$TAG" \
-              -f sha="$TARGET"
-          fi
-          tag_sha=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/$TAG" --jq '.object.sha')
-          test "$tag_sha" = "$TARGET" || { echo "tag target $tag_sha != $TARGET"; exit 1; }
+          set +e
+          (
+            set -euo pipefail
+            if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/$TAG" >/dev/null 2>&1; then
+              echo "$TAG already exists; verifying target"
+            else
+              gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+                -f ref="refs/tags/$TAG" \
+                -f sha="$TARGET"
+            fi
+            tag_sha=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/$TAG" --jq '.object.sha')
+            test "$tag_sha" = "$TARGET" || { echo "tag target $tag_sha != $TARGET"; exit 1; }
 
-          if release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$TAG" --jq '.id' 2>/dev/null); then
-            echo "release $release_id exists; forcing it back to draft"
-            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/$release_id" \
-              -f tag_name="$TAG" \
-              -f target_commitish="$TARGET" \
-              -f name="$TAG" \
-              -f body="$NOTES" \
-              -F draft=true \
-              -F prerelease=false \
-              -F make_latest=false >/dev/null
-          else
-            gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
-              -f tag_name="$TAG" \
-              -f target_commitish="$TARGET" \
-              -f name="$TAG" \
-              -f body="$NOTES" \
-              -F draft=true \
-              -F prerelease=false \
-              -F make_latest=false >/dev/null
-          fi
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$TAG" --jq '.draft')" = "true"
+            if release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$TAG" --jq '.id' 2>/dev/null); then
+              echo "release $release_id exists; forcing it back to draft"
+              gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/$release_id" \
+                -f tag_name="$TAG" \
+                -f target_commitish="$TARGET" \
+                -f name="$TAG" \
+                -f body="$NOTES" \
+                -F draft=true \
+                -F prerelease=false
+            else
+              echo "creating draft release for $TAG"
+              gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+                -f tag_name="$TAG" \
+                -f target_commitish="$TARGET" \
+                -f name="$TAG" \
+                -f body="$NOTES" \
+                -F draft=true \
+                -F prerelease=false
+            fi
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$TAG" --jq '{id,tag_name,draft,prerelease,target_commitish}'
+            test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$TAG" --jq '.draft')" = "true"
+          ) > release-draft.log 2>&1
+          rc=$?
+          cat release-draft.log
+          echo "status=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload draft release diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-1-58-79-draft-log
+          path: release-draft.log
+          if-no-files-found: error
+          retention-days: 3
+      - name: Fail when draft release creation failed
+        if: steps.draft.outputs.status != '0'
+        run: exit 1
       - name: Dispatch atomic release workflow on tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
