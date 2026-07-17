@@ -66,6 +66,23 @@ check(not missing_s,
       if not missing_s
       else f"UNKNOWN TO AGENT 3: {missing_s}")
 
+# Sensitivity was the same disease as risk, one axis over (F-511). It fell back
+# to PRIVATE, which LOOKS conservative: secret is stricter, so a tool declared
+# secret in V2 and unknown to Agent 3's table would be downgraded to private --
+# and private can leave the machine once the egress gate is on.
+from app.agent3.integration import _V2_SENSITIVITY  # noqa: E402
+
+unmapped_s = sorted(v2_sens - set(_V2_SENSITIVITY))
+check(not unmapped_s,
+      "every V2 sensitivity class maps into Agent 3"
+      if not unmapped_s
+      else f"UNMAPPED -- a fallback would pick one: {unmapped_s}")
+check(_V2_SENSITIVITY["secret"] == Sensitivity.SECRET,
+      "secret maps to SECRET -- not to PRIVATE, which is what a fallback gave it")
+for _name, _s in (("public", Sensitivity.PUBLIC), ("operational", Sensitivity.OPERATIONAL),
+                  ("private", Sensitivity.PRIVATE)):
+    check(_V2_SENSITIVITY[_name] == _s, f"{_name} maps to {_s.value}")
+
 check(RiskClass.DESKTOP.value == "desktop",
       "Agent 3 knows the desktop class -- it did not, and a click read as a READ")
 

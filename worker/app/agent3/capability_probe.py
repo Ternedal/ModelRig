@@ -24,7 +24,9 @@ Two rules:
 """
 from __future__ import annotations
 
+import logging
 import os
+import sqlite3
 import threading
 import time
 import urllib.error
@@ -32,8 +34,38 @@ import urllib.request
 
 # A probe that costs a network round-trip must not run on every plan step, and
 # a cache that outlives the truth is its own bug. Seconds, not minutes.
-PROBE_TTL_S = float(os.getenv("KALIV_CAPABILITY_TTL_S", "10"))
-PROBE_TIMEOUT_S = float(os.getenv("KALIV_CAPABILITY_TIMEOUT_S", "2"))
+def _bounded(env: str, default: float, lo: float, hi: float) -> float:
+    """Read a number from the environment without letting a typo brick the rig.
+
+    Raw float(os.getenv(...)) at import time means KALIV_CAPABILITY_TTL_S=abc
+    raises ValueError while the module is loading -- the worker does not start,
+    and the traceback points at a constant rather than at the typo (F-522). A
+    misconfigured number is a bad value, not an emergency: clamp it, keep going,
+    and say so.
+    """
+    raw = os.getenv(env)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        logging.getLogger(__name__).warning(
+            "%s=%r er ikke et tal — bruger %s", env, raw, default)
+        return default
+    if value != value or value in (float("inf"), float("-inf")):  # NaN / inf
+        logging.getLogger(__name__).warning(
+            "%s=%r er ikke endeligt — bruger %s", env, raw, default)
+        return default
+    if not (lo <= value <= hi):
+        clamped = min(max(value, lo), hi)
+        logging.getLogger(__name__).warning(
+            "%s=%s er uden for [%s, %s] — bruger %s", env, value, lo, hi, clamped)
+        return clamped
+    return value
+
+
+PROBE_TTL_S = _bounded("KALIV_CAPABILITY_TTL_S", 10.0, lo=0.0, hi=300.0)
+PROBE_TIMEOUT_S = _bounded("KALIV_CAPABILITY_TIMEOUT_S", 2.0, lo=0.1, hi=30.0)
 
 _lock = threading.RLock()
 _cache: dict = {"at": 0.0, "value": None}
@@ -53,12 +85,25 @@ def _ollama_reachable(timeout_s: float) -> bool:
 
 def _rag_has_documents() -> bool:
     """rag_ready meant 'the RAG store will answer', and answering with nothing
-    indexed is not answering. An empty store is not ready -- it is empty."""
-    try:
-        from ..store import Store
+    indexed is not answering. An empty store is not ready -- it is empty.
 
-        return Store().count() > 0
-    except Exception:
+    This was broken from the day it was written (F-501): it imported `Store`,
+    the class is `DocStore`, and `except Exception` swallowed the ImportError
+    and returned False. rag_ready could never be True, on any rig, with any
+    number of documents indexed. My own test asserted False on an empty store
+    and passed -- for the wrong reason, unable to tell "empty" from "this code
+    does not run".
+
+    So the import is OUTSIDE the try now. A wrong class name is a bug and must
+    be loud; a database that will not open is a condition and answers False.
+    An except broad enough to catch both is how a bug spends eight releases
+    disguised as a fact.
+    """
+    from ..store import DocStore
+
+    try:
+        return DocStore().count() > 0
+    except sqlite3.Error:
         return False
 
 

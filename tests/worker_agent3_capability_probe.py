@@ -20,6 +20,10 @@ os.environ.setdefault("KALIV_AUDIT_DB", os.path.join(_tmp, "a.db"))
 os.environ.setdefault("KALIV_TOOLS_STATE", os.path.join(_tmp, "s.json"))
 os.environ.setdefault("KALIV_JOBS_DB", os.path.join(_tmp, "j.db"))
 os.environ.setdefault("KALIV_TOOLS_DIR", _tmp)
+# MODELRIG_DB, not a name I invented -- store.py resolves DB_PATH from this at
+# import time, so a test that guesses the variable silently shares the real rig's
+# RAG database and reads whatever happens to be in it.
+os.environ["MODELRIG_DB"] = os.path.join(_tmp, "rag.db")
 os.environ["MODELRIG_OLLAMA_URL"] = "http://127.0.0.1:1"  # nothing listens here
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 
@@ -83,6 +87,21 @@ try:
     check(caps["rag_ready"] is False,
           "rag_ready is still False on an EMPTY store -- answering with nothing "
           "indexed is not answering")
+
+    # The test that had to exist (F-501). The old suite only ever asserted
+    # False, so it could not tell "the store is empty" from "this function
+    # cannot run": the probe imported `Store`, the class is `DocStore`, and a
+    # bare `except Exception` turned the ImportError into a tidy False.
+    # rag_ready was unreachable on every rig for eight releases and every test
+    # agreed with it. An assertion that only ever expects the failing value
+    # cannot detect permanent failure.
+    from app.store import DocStore  # noqa: E402
+
+    DocStore().add("et dokument om noget", [0.1] * 8, source="probe.txt")
+    P.invalidate()
+    caps = P.measure(now=4100.0)
+    check(caps["rag_ready"] is True,
+          "a POPULATED store with a reachable Ollama reports rag_ready=True")
 finally:
     P._ollama_reachable = real
     P.invalidate()

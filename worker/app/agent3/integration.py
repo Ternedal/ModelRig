@@ -31,6 +31,16 @@ _V2_RISK: dict[str, RiskClass] = {
     "desktop": RiskClass.DESKTOP,
 }
 
+# V2's vocabulary for where an answer may travel, mapped onto Agent 3's.
+# tests/worker_agent3_risk_parity.py fails if V2 grows a class not listed here,
+# because the alternative is a fallback quietly choosing one.
+_V2_SENSITIVITY: dict[str, Sensitivity] = {
+    "public": Sensitivity.PUBLIC,
+    "operational": Sensitivity.OPERATIONAL,
+    "private": Sensitivity.PRIVATE,
+    "secret": Sensitivity.SECRET,
+}
+
 _SENSITIVITY: dict[str, Sensitivity] = {
     "current_datetime": Sensitivity.PUBLIC,
     "rig_status": Sensitivity.OPERATIONAL,
@@ -110,7 +120,21 @@ class V2ToolAdapter:
                     f"ukendt risikoklasse {tool.risk!r} for {call.tool}: "
                     "Agent 3 planlægger ikke noget den ikke kan klassificere"
                 )
-            sensitivity = _SENSITIVITY.get(call.tool, Sensitivity.PRIVATE)
+            # Sensitivity was the same disease as risk, one axis over (F-511):
+            # a table here, a declaration in the V2 registry, and a fallback to
+            # PRIVATE. PRIVATE looks conservative and is not -- `secret` is
+            # stricter, so a tool declared secret in V2 that this table has not
+            # heard of would be DOWNGRADED to private, and private can leave the
+            # machine once the egress gate is on. Same shape as desktop reading
+            # as READ: the fallback picks a plausible box, and plausible is not
+            # the same as true.
+            sensitivity = _SENSITIVITY.get(call.tool) or _V2_SENSITIVITY.get(
+                tool.sensitivity)
+            if sensitivity is None:
+                raise Agent3PlanError(
+                    f"ukendt følsomhedsklasse {tool.sensitivity!r} for {call.tool}: "
+                    "Agent 3 gætter ikke på hvor et svar må rejse hen"
+                )
             summary = tool.human_summary(call.args)
             steps.append(
                 AgentStep(

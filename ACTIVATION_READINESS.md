@@ -3,8 +3,8 @@
 > **Genereret af `scripts/activation_readiness.py`. Ret ikke i hånden.**
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
-**Version på main:** `1.58.76`  
-**Genereret:** 2026-07-17 13:31 UTC
+**Version på main:** `1.58.77`  
+**Genereret:** 2026-07-17 13:42 UTC
 
 ---
 
@@ -45,14 +45,12 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 12 feature-switches er tændt som default.** (4 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 12 feature-switches er tændt som default.** (2 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
 | `KALIV_AGENT3_ENABLED` | `0` | slukket |
 | `KALIV_ALLOW_RAG_CLOUD` | `(tom)` | slukket |
-| `KALIV_CAPABILITY_TIMEOUT_S` | `2` | indstilling |
-| `KALIV_CAPABILITY_TTL_S` | `10` | indstilling |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` | slukket |
 | `KALIV_DATA_DIR` | `(unset)` | slukket |
 | `KALIV_EGRESS_GATE` | `(tom)` | slukket |
