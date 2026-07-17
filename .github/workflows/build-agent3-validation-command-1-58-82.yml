@@ -28,6 +28,22 @@ jobs:
           git checkout --detach FETCH_HEAD
           test "$(git rev-parse HEAD)" = "64224996c905267a55f9b6694780599b97fe891b"
           test "$(cat VERSION)" = "1.58.81"
+      - name: Retarget harness import anchor
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('/tmp/agent3-validation-command-patch.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''    "import agent3_rig_validation as validation\\n",
+              "import agent3_rig_validation as validation\\nfrom agent3_validation_paths import DEFAULT_REPORT_TEXT\\n",'''
+          new = '''    "from typing import Any\\n",
+              "from typing import Any\\n\\nfrom agent3_validation_paths import DEFAULT_REPORT_TEXT\\n",'''
+          if text.count(old) != 1:
+              raise SystemExit(f'import retarget anchor drifted: {text.count(old)} matches')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          compile(path.read_text(encoding='utf-8'), str(path), 'exec')
+          PY
       - name: Apply reviewed product patch
         id: patch
         shell: bash
