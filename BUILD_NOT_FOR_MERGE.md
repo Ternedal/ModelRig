@@ -1,0 +1,1 @@
+This temporary builder branch is intentionally reviewable but must never be merged. Its output is the separate clean feature branch.
