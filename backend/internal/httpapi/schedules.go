@@ -66,6 +66,10 @@ func (s *server) handleSchedulesPreview(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *server) handleSchedulesCollection(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		s.handleScheduleCreate(w, r)
+		return
+	}
 	s.forwardSchedule(w, r, "/schedules")
 }
 
@@ -102,5 +106,5 @@ func (s *server) handleScheduleRenew(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid schedule id")
 		return
 	}
-	s.forwardSchedule(w, r, path)
+	s.handleScheduleRenewCommit(w, r, path)
 }
