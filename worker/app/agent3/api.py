@@ -5,7 +5,7 @@ import os
 from typing import Any, Callable
 
 from fastapi import APIRouter, FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from . import capability_probe
 from .core import (
@@ -40,6 +40,12 @@ class PlanStepReq(BaseModel):
 
 
 class StartReq(BaseModel):
+    """Shared request facts for the test-only explicit-plan fixture.
+
+    Production run creation is server-authored through /plan followed by the
+    single-use /plans/{plan_id}/start endpoint. Deliberately no plan field.
+    """
+
     message: str = Field(min_length=1, max_length=20_000)
     mode: str = Field(default="rig", pattern="^(rig|cloud)$")
     tools: bool = True
@@ -51,11 +57,21 @@ class StartReq(BaseModel):
     auto_cloud_fallback: bool = False
     cloud_ready: bool = False
     conversation_id: str | None = None
-    retry_of_run_id: str | None = None
-    original_route: RouteKind | None = None
     proactive: bool = False
     review_reads: bool = False
+
+
+class ExplicitStartReq(StartReq):
+    """Test fixture only; never mounted by the production entrypoint."""
+
     plan: list[PlanStepReq] = Field(default_factory=list, max_length=12)
+
+
+class RetryReq(BaseModel):
+    """The only client-owned retry fact is whether its cloud key is ready."""
+
+    model_config = ConfigDict(extra="forbid")
+    cloud_ready: bool = False
 
 
 class ConfirmReq(BaseModel):
@@ -99,7 +115,7 @@ def _clone_steps(run: AgentRun) -> list[AgentStep]:
     ]
 
 
-def _default_caps(req: StartReq, adapter: V2ToolAdapter) -> CapabilitySnapshot:
+def _default_caps(req: StartReq | RetryReq, adapter: V2ToolAdapter) -> CapabilitySnapshot:
     """Measure the rig; do not describe it from memory (F-302).
 
     rig_reachable/worker_ready/rag_ready were hardcoded True here -- three
@@ -130,10 +146,12 @@ ValidationProvider = Callable[[], dict[str, Any]]
 def build_router(
     orchestrator: Agent3Orchestrator,
     adapter: V2ToolAdapter,
-    capability_provider: Callable[[StartReq, V2ToolAdapter], CapabilitySnapshot] = _default_caps,
+    capability_provider: Callable[[StartReq | RetryReq, V2ToolAdapter], CapabilitySnapshot] = _default_caps,
     validation_provider: ValidationProvider | None = None,
     worker_version: str | None = None,
     replan_service: PersistentReadReplanner | None = None,
+    *,
+    allow_client_plans: bool = False,
 ) -> APIRouter:
     router = APIRouter(prefix="/experimental/agent3", tags=["experimental-agent3"])
     orchestrator.router = StrictTurnRouter()
@@ -193,7 +211,8 @@ def build_router(
         return {
             "enabled": True,
             "experimental": True,
-            "planner": "explicit-plan-only",
+            "planner": "server-authored-plan-token",
+            "client_plan_route": allow_client_plans,
             "replanner": (
                 "explicit-pending-read-window" if replan_service is not None else "disabled"
             ),
@@ -207,48 +226,11 @@ def build_router(
             "production_activation": False,
         }
 
-    @router.post("/runs")
-    def start(req: StartReq) -> dict[str, Any]:
+    def start_explicit(req: ExplicitStartReq) -> dict[str, Any]:
+        """Exercise the low-level adapter in tests without exposing it in production."""
         caps = capability_provider(req, adapter)
-
-        if req.retry_of_run_id:
-            original = orchestrator.store.load(req.retry_of_run_id)
-            if original is None:
-                raise HTTPException(status_code=404, detail="original run not found")
-            # Retry semantics are server-owned: ignore mutable current UI state and
-            # client plan fields. Reuse the stored message, route flags and plan.
-            request = TurnRequest(
-                message=original.request.message,
-                mode=original.request.mode,
-                tools=original.request.tools,
-                rag=original.request.rag,
-                has_image=original.request.has_image,
-                voice=original.request.voice,
-                allow_rag_cloud=original.request.allow_rag_cloud,
-                auto_cloud_fallback=original.request.auto_cloud_fallback,
-                retry_of_run_id=original.id,
-                original_route=original.route.kind,
-                conversation_id=original.request.conversation_id,
-            )
-            original_review = read_review(original.id)["enabled"]
-            run = start_steps(
-                request,
-                caps,
-                _clone_steps(original),
-                proactive=original.proactive,
-                allow_private_cloud=original.allow_private_cloud,
-                review_reads=bool(original_review),
-            )
-            return response(run)
-
         if not req.plan:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "Agent 3.0 draft currently requires an explicit validated plan; "
-                    "LLM planning is deliberately not enabled yet"
-                ),
-            )
+            raise HTTPException(status_code=422, detail="the test fixture requires a plan")
         if not req.tools:
             raise HTTPException(status_code=400, detail="an explicit tool plan requires tools=true")
         request = TurnRequest(
@@ -286,6 +268,44 @@ def build_router(
             )
         except Agent3PlanError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return response(run)
+
+    if allow_client_plans:
+        router.add_api_route(
+            "/runs",
+            start_explicit,
+            methods=["POST"],
+            include_in_schema=False,
+        )
+
+    @router.post("/runs/{run_id}/retry")
+    def retry(run_id: str, req: RetryReq) -> dict[str, Any]:
+        original = orchestrator.store.load(run_id)
+        if original is None:
+            raise HTTPException(status_code=404, detail="original run not found")
+        caps = capability_provider(req, adapter)
+        request = TurnRequest(
+            message=original.request.message,
+            mode=original.request.mode,
+            tools=original.request.tools,
+            rag=original.request.rag,
+            has_image=original.request.has_image,
+            voice=original.request.voice,
+            allow_rag_cloud=original.request.allow_rag_cloud,
+            auto_cloud_fallback=original.request.auto_cloud_fallback,
+            retry_of_run_id=original.id,
+            original_route=original.route.kind,
+            conversation_id=original.request.conversation_id,
+        )
+        original_review = read_review(original.id)["enabled"]
+        run = start_steps(
+            request,
+            caps,
+            _clone_steps(original),
+            proactive=original.proactive,
+            allow_private_cloud=original.allow_private_cloud,
+            review_reads=bool(original_review),
+        )
         return response(run)
 
     @router.get("/runs")

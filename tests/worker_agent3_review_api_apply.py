@@ -108,7 +108,7 @@ app.include_router(
         adapter,
         capability_provider=caps,
         replan_service=persistent,
-    )
+    allow_client_plans = True)
 )
 app.include_router(build_replan_preview_router(service, review_store=review_store))
 client = TestClient(app)
