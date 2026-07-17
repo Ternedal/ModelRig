@@ -1,0 +1,52 @@
+name: agent3-sync-scheduler
+
+on:
+  push:
+    branches:
+      - agent/agent3-integration-draft-v2
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Copy isolated scheduler commit files from main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout origin/main -- \
+            CURRENT_STATE.md \
+            VERSION \
+            android/app/build.gradle.kts \
+            backend/internal/config/config.go \
+            desktop/composeApp/build.gradle.kts \
+            tests/worker_scheduler.py \
+            worker/app/main.py \
+            worker/app/scheduler.py
+          git diff --check
+          if git diff --quiet; then
+            echo "scheduler files already synchronized"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            CURRENT_STATE.md \
+            VERSION \
+            android/app/build.gradle.kts \
+            backend/internal/config/config.go \
+            desktop/composeApp/build.gradle.kts \
+            tests/worker_scheduler.py \
+            worker/app/main.py \
+            worker/app/scheduler.py
+          git commit -m "chore: sync scheduler policy from main [skip ci]"
+          git push origin HEAD:agent/agent3-integration-draft-v2
