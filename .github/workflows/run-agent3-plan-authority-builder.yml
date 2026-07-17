@@ -119,16 +119,41 @@ jobs:
         if: steps.patch.outputs.status != '0'
         run: exit 1
       - name: Set version and regenerate combined truth
+        id: combined
+        shell: bash
         run: |
-          set -euo pipefail
-          gofmt -w backend/internal/httpapi/agent3.go backend/internal/httpapi/server.go backend/internal/httpapi/agent3_test.go
-          python3 scripts/version_tool.py set 1.58.79
-          python3 scripts/current_state.py
-          python3 scripts/activation_readiness.py
-          python3 scripts/version_tool.py check
-          python3 scripts/current_state.py --check
-          python3 scripts/activation_readiness.py --check
-          git diff --check -- . ':(exclude)ACTIVATION_READINESS.md'
+          set +e
+          : > agent3-combined-truth.log
+          status=0
+          run_cmd() {
+            echo ">>> $*" | tee -a agent3-combined-truth.log
+            "$@" >> agent3-combined-truth.log 2>&1
+            rc=$?
+            echo "<<< rc=$rc" | tee -a agent3-combined-truth.log
+            if [ $rc -ne 0 ] && [ $status -eq 0 ]; then status=$rc; fi
+          }
+          run_cmd gofmt -w backend/internal/httpapi/agent3.go backend/internal/httpapi/server.go backend/internal/httpapi/agent3_test.go
+          run_cmd python3 scripts/version_tool.py set 1.58.79
+          run_cmd python3 scripts/current_state.py
+          run_cmd python3 scripts/activation_readiness.py
+          run_cmd python3 scripts/version_tool.py check
+          run_cmd python3 scripts/current_state.py --check
+          run_cmd python3 scripts/activation_readiness.py --check
+          run_cmd git diff --check -- . ':(exclude)ACTIVATION_READINESS.md'
+          cat agent3-combined-truth.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload combined truth diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent3-plan-authority-combined-truth-log
+          path: agent3-combined-truth.log
+          if-no-files-found: error
+          retention-days: 3
+      - name: Fail when combined truth failed
+        if: steps.combined.outputs.status != '0'
+        run: exit 1
       - name: Run focused authority gates
         id: focused
         shell: bash
@@ -151,7 +176,7 @@ jobs:
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit 0
       - name: Upload focused authority diagnostics
-        if: always()
+        if: ${{ always() && steps.combined.outputs.status == '0' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: agent3-plan-authority-tests-log
@@ -164,7 +189,7 @@ jobs:
       - name: Push one clean product commit
         run: |
           set -euo pipefail
-          rm -f agent3-authority-tests.log agent3-extract-console.log agent3-extract.log agent3-patch.log
+          rm -f agent3-authority-tests.log agent3-combined-truth.log agent3-extract-console.log agent3-extract.log agent3-patch.log
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
