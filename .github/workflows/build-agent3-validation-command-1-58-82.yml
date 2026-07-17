@@ -1,4 +1,4 @@
-name: build-agent3-validation-command-1-58-82
+name: build-agent3-validation-command-1-58-83
 
 on:
   pull_request:
@@ -23,28 +23,36 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
-      - name: Checkout exact main parent
+      - name: Checkout exact current main
         run: |
           set -euo pipefail
-          git fetch --no-tags --depth=1 origin 64224996c905267a55f9b6694780599b97fe891b
+          git fetch --no-tags --depth=1 origin 2225ff371c764451499613a94d3540dfe1f0b742
           git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD)" = "64224996c905267a55f9b6694780599b97fe891b"
-          test "$(cat VERSION)" = "1.58.81"
-      - name: Retarget harness import anchor
+          test "$(git rev-parse HEAD)" = "2225ff371c764451499613a94d3540dfe1f0b742"
+          test "$(cat VERSION)" = "1.58.82"
+      - name: Retarget harness and release anchors
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
           path = Path('/tmp/agent3-validation-command-patch.py')
           text = path.read_text(encoding='utf-8')
-          old = '''    "import agent3_rig_validation as validation\\n",
-              "import agent3_rig_validation as validation\\nfrom agent3_validation_paths import DEFAULT_REPORT_TEXT\\n",'''
-          new = '''    "from typing import Any\\n",
-              "from typing import Any\\n\\nfrom agent3_validation_paths import DEFAULT_REPORT_TEXT\\n",'''
-          if text.count(old) != 1:
-              raise SystemExit(f'import retarget anchor drifted: {text.count(old)} matches')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
-          compile(path.read_text(encoding='utf-8'), str(path), 'exec')
+          replacements = [
+              ('''    "import agent3_rig_validation as validation\\n",
+              "import agent3_rig_validation as validation\\nfrom agent3_validation_paths import DEFAULT_REPORT_TEXT\\n",''',
+               '''    "from typing import Any\\n",
+              "from typing import Any\\n\\nfrom agent3_validation_paths import DEFAULT_REPORT_TEXT\\n",'''),
+              ('''    "versionCode = 213",
+              "versionCode = 214",''',
+               '''    "versionCode = 214",
+              "versionCode = 215",'''),
+          ]
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f'retarget anchor drifted: {old!r} -> {text.count(old)} matches')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          compile(text, str(path), 'exec')
           PY
       - name: Apply reviewed product patch
         id: patch
@@ -82,7 +90,7 @@ jobs:
       - name: Set version and regenerate repository truth
         run: |
           set -euo pipefail
-          python3 scripts/version_tool.py set 1.58.82
+          python3 scripts/version_tool.py set 1.58.83
           python3 scripts/current_state.py
           python3 scripts/activation_readiness.py
           python3 scripts/version_tool.py check
@@ -107,6 +115,7 @@ jobs:
           run_cmd env PYTHONPATH=worker python3 tests/worker_agent3_rig_validation_cli.py
           run_cmd env PYTHONPATH=worker python3 tests/worker_agent3_rig_evidence.py
           run_cmd env PYTHONPATH=worker python3 tests/workflow_activation_readiness.py
+          run_cmd python3 tests/workflow_doc_authority.py
           cat /tmp/agent3-validation-command-tests.log
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit 0
@@ -130,9 +139,9 @@ jobs:
           test -n "$(git status --porcelain)"
           git commit -m 'feat(agent3): add one-command physical validation'
           clean_sha=$(git rev-parse HEAD)
-          git push --force origin HEAD:refs/heads/feature/agent3-validation-command-1-58-82
-          printf 'commit=%s\nbase=%s\nversion=1.58.82\n' "$clean_sha" '64224996c905267a55f9b6694780599b97fe891b' > /tmp/agent3-validation-command-result.txt
-          git diff --stat 64224996c905267a55f9b6694780599b97fe891b..HEAD >> /tmp/agent3-validation-command-result.txt
+          git push --force origin HEAD:refs/heads/feature/agent3-validation-command-1-58-83
+          printf 'commit=%s\nbase=%s\nversion=1.58.83\n' "$clean_sha" '2225ff371c764451499613a94d3540dfe1f0b742' > /tmp/agent3-validation-command-result.txt
+          git diff --stat 2225ff371c764451499613a94d3540dfe1f0b742..HEAD >> /tmp/agent3-validation-command-result.txt
           cat /tmp/agent3-validation-command-result.txt
       - name: Upload clean commit identity
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
