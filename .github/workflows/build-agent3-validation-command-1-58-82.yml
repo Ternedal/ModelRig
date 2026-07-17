@@ -16,10 +16,11 @@ jobs:
         with:
           ref: build/agent3-validation-command-1-58-82
           fetch-depth: 4
-      - name: Preserve reviewed patch programs
+      - name: Preserve reviewed builder programs
         run: |
           cp .github/agent3_validation_command_patch.py /tmp/agent3-validation-command-patch.py
           cp .github/agent3_validation_command_postpatch.py /tmp/agent3-validation-command-postpatch.py
+          cp .github/create_detached_product_commit.py /tmp/create-detached-product-commit.py
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
@@ -138,19 +139,10 @@ jobs:
             [void][scriptblock]::Create((Get-Content -LiteralPath $_.FullName -Raw))
             Write-Host "parsed $($_.FullName)"
           }
-      - name: Push one clean product commit
-        run: |
-          set -euo pipefail
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          test -n "$(git status --porcelain)"
-          git commit -m 'feat(agent3): add one-command physical validation'
-          clean_sha=$(git rev-parse HEAD)
-          git push --force origin HEAD:refs/heads/feature/agent3-validation-command-1-58-83
-          printf 'commit=%s\nbase=%s\nversion=1.58.83\n' "$clean_sha" '2225ff371c764451499613a94d3540dfe1f0b742' > /tmp/agent3-validation-command-result.txt
-          git diff --stat 2225ff371c764451499613a94d3540dfe1f0b742..HEAD >> /tmp/agent3-validation-command-result.txt
-          cat /tmp/agent3-validation-command-result.txt
+      - name: Create detached clean product commit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 /tmp/create-detached-product-commit.py
       - name: Upload clean commit identity
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
