@@ -57,7 +57,7 @@ jobs:
       - name: Fail when extraction failed
         if: steps.extract.outputs.status != '0'
         run: exit 1
-      - name: Retarget release anchor to 1.58.79
+      - name: Retarget release and combined readiness anchors
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -68,10 +68,18 @@ jobs:
               ("gradle_text.count('versionCode = 208')", "gradle_text.count('versionCode = 209')"),
               ("versionCode 208 anchor drifted", "versionCode 209 anchor drifted"),
               ("replace('versionCode = 208', 'versionCode = 209', 1)", "replace('versionCode = 209', 'versionCode = 210', 1)"),
+              (
+                  "stop = readiness_text.index('\\ndef dormancy() -> tuple[bool, str]:\\n', start)",
+                  "stop = readiness_text.index('\\ndef schedule_approval_authority() -> tuple[bool, str]:\\n', start)",
+              ),
+              (
+                  "block_end = rt.index('print(f\"\\\\n===== ACTIVATION READINESS:', block_start)",
+                  "block_end = rt.index(\"# --- the scheduler's approval proves knowledge, not consent (F-503/F-504) ---\", block_start)",
+              ),
           ]
           for old, new in replacements:
               if text.count(old) != 1:
-                  raise SystemExit(f'release retarget anchor drifted: {old!r} -> {text.count(old)} matches')
+                  raise SystemExit(f'retarget anchor drifted: {old!r} -> {text.count(old)} matches')
               text = text.replace(old, new, 1)
           compile(text, str(path), 'exec')
           path.write_text(text, encoding='utf-8')
