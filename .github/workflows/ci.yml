@@ -1,33 +1,36 @@
 name: ci
 
-# Runs the shared test suite (_tests.yml) on every push to main and on pull
-# requests. The temporary materializer job exists only on PR #36 and restores
-# this file from main before it creates the scheduler product commit.
+# Standard CI plus one temporary snapshot job on PR #36. The product branch
+# never receives this file; it exists only to export the current main tree for a
+# conflict-safe 1.58.91 rebase.
 on:
   push:
     branches: [main]
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  materialize-scheduler:
+  snapshot-current-main:
     if: github.head_ref == 'build/scheduler-approval-token-inspect'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          ref: feature/scheduler-ed25519-approval-15890
-          fetch-depth: 0
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+          ref: af38f9821f97ede5cbd39f8c22a6f996af3f9027
+          fetch-depth: 1
+      - name: Record exact snapshot identity
+        run: |
+          test "$(git rev-parse HEAD)" = "af38f9821f97ede5cbd39f8c22a6f996af3f9027"
+          test "$(cat VERSION)" = "1.58.90"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          go-version: "1.23"
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.12"
-      - name: Build and test clean scheduler candidate
-        run: bash .github/scheduler-build/materialize.sh
+          name: modelrig-main-1-58-90-source
+          path: .
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
 
   test:
     uses: ./.github/workflows/_tests.yml
