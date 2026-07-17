@@ -45,7 +45,26 @@ jobs:
       - name: Install patch and worker dependencies
         run: pip install -r worker/requirements.txt libcst --break-system-packages
       - name: Apply reviewed patch program
-        run: python3 /tmp/agent3-authority-patch.py
+        id: patch
+        shell: bash
+        run: |
+          set +e
+          python3 /tmp/agent3-authority-patch.py > agent3-patch.log 2>&1
+          rc=$?
+          cat agent3-patch.log
+          echo "status=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload patch diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent3-plan-authority-patch-log
+          path: agent3-patch.log
+          if-no-files-found: error
+          retention-days: 3
+      - name: Fail when patch program failed
+        if: steps.patch.outputs.status != '0'
+        run: exit 1
       - name: Set version and regenerate truth
         run: |
           set -euo pipefail
