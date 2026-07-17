@@ -140,9 +140,28 @@ jobs:
             Write-Host "parsed $($_.FullName)"
           }
       - name: Create detached clean product commit
+        id: detached
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 /tmp/create-detached-product-commit.py
+        run: |
+          set +e
+          python3 /tmp/create-detached-product-commit.py > /tmp/agent3-validation-command-detached.log 2>&1
+          rc=$?
+          cat /tmp/agent3-validation-command-detached.log
+          echo "status=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload detached commit diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent3-validation-command-detached-log
+          path: /tmp/agent3-validation-command-detached.log
+          if-no-files-found: error
+          retention-days: 3
+      - name: Fail when detached commit creation failed
+        if: steps.detached.outputs.status != '0'
+        run: exit 1
       - name: Upload clean commit identity
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
