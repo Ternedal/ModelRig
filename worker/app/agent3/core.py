@@ -39,6 +39,12 @@ class RunState(StrEnum):
 
 class StepState(StrEnum):
     PENDING = "pending"
+    # The step finished AFTER the run was cancelled. Not a success (nobody
+    # wanted it any more) and not a failure (it worked). You cannot un-append a
+    # note or un-delete a model, so the honest record is that the side effect
+    # happened and the cancellation was late. Saying "cancelled" and nothing
+    # else would be a lie about the rig's actual state.
+    COMPLETED_AFTER_CANCEL = "completed_after_cancel"
     WAITING_CONFIRMATION = "waiting_confirmation"
     APPROVED = "approved"
     EXECUTING = "executing"
@@ -632,6 +638,27 @@ class Agent3Orchestrator:
         self.store.event(run.id, "step_started", {"step_id": step.id, "tool": step.tool})
         try:
             step.result = self.executor(step)
+            # The executor is synchronous and has no cancellation handle, so a
+            # cancel() that arrives while a slow write is in flight cannot stop
+            # it (F-308). Two things follow, and only one of them is obvious.
+            #
+            # The obvious one: the side effect happened. You cannot un-append a
+            # note. Reporting "cancelled" alone would describe a rig that does
+            # not exist.
+            #
+            # The one that actually bites: cancel() loads its OWN copy of the
+            # run, sets CANCELLED and saves it. This method is holding a copy
+            # from before that, still saying RUNNING -- so the save below used
+            # to write the cancellation straight back out of existence. The
+            # user pressed stop, the record forgot, and the step said
+            # "succeeded". Re-read the state we might be about to clobber.
+            if self._cancelled_since(run.id):
+                step.state = StepState.COMPLETED_AFTER_CANCEL
+                step.error = None
+                self.store.event(run.id, "step_completed_after_cancel",
+                                 {"step_id": step.id, "tool": step.tool})
+                self._preserve_cancellation(run)
+                return
             step.state = StepState.SUCCEEDED
             step.error = None
             self.store.event(run.id, "step_succeeded", {"step_id": step.id, "tool": step.tool})
@@ -645,6 +672,23 @@ class Agent3Orchestrator:
                 "step_failed",
                 {"step_id": step.id, "tool": step.tool, "error": str(exc)},
             )
+        self.store.save(run)
+
+    def _cancelled_since(self, run_id: str) -> bool:
+        """Did someone cancel while we were inside the executor?
+
+        Reads the STORE, not our in-memory copy: the whole problem is that the
+        copy in hand is stale by definition -- it was loaded before the call
+        that just took several seconds.
+        """
+        fresh = self.store.load(run_id)
+        return fresh is not None and fresh.state == RunState.CANCELLED
+
+    def _preserve_cancellation(self, run: AgentRun) -> None:
+        """Save the step's outcome WITHOUT resurrecting a cancelled run."""
+        run.state = RunState.CANCELLED
+        if not run.error:
+            run.error = "Cancelled by user"
         self.store.save(run)
 
     def _require(self, run_id: str) -> AgentRun:
