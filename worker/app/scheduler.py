@@ -1,33 +1,8 @@
-"""Scheduled tasks, built on the JobStore (dormant behind KALIV_SCHEDULER).
+"""Scheduled tasks: cadence, approval policy, and persistent schedule truth.
 
-The benchmark's cheapest category by far -- and the hard parts were paid for
-already: the JobStore knows terminal truth, cancellation and restart honesty,
-so this file is the two things it does not know: WHEN to run, and WHETHER it is
-allowed to at all.
-
-The second one is the real design problem, and it is not cron. The tool gate's
-promise is "Anders approves anything that writes". At 03:00 there is nobody to
-approve. Three answers were possible:
-
-  * refuse every write -- honest, and turns the feature into an alarm clock
-  * park writes for confirmation -- honest, and they expire before morning, so
-    the schedule silently does nothing forever
-  * approve ONCE, at schedule time, with the arguments frozen
-
-The third is the only one that keeps the promise and does something. Anders
-approving "append this exact text every morning" IS Anders approving the write;
-what he did not approve is a DIFFERENT write appearing under that approval. So
-the approval is bound to a fingerprint of (tool, args): change an argument and
-the approval dies with it. That is the gate's immutable-argument invariant,
-extended along the time axis.
-
-Two rules follow from the same place and are absolute:
-  * `desktop` actions can never be scheduled. A click at 03:00 lands in
-    whatever window happens to be there, and screenshot binding cannot save it:
-    the screen it was planned against no longer exists.
-  * schedules are created by Anders, never by a model. There is no
-    model-visible tool here, on purpose -- a model that can create schedules
-    can launder a write past its own confirmation card by asking for it later.
+Nothing ticks merely because this module exists. ``KALIV_SCHEDULER`` remains
+OFF by default, and the store deliberately has no model-visible route. A later
+runner may claim due schedules, but only Anders-created records can exist.
 """
 from __future__ import annotations
 
@@ -35,14 +10,23 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
+import threading
 import time
+import uuid
 from dataclasses import dataclass
+
+from . import paths as _paths
+
+SCHEDULES_DB_PATH = _paths.resolve(
+    "./modelrig-schedules.db", env="KALIV_SCHEDULES_DB"
+)
 
 # "every:900" -> every 900 seconds. "daily:03:00" -> at 03:00 local time.
 _EVERY = re.compile(r"^every:(\d+)$")
 _DAILY = re.compile(r"^daily:([01]\d|2[0-3]):([0-5]\d)$")
-
 MIN_INTERVAL_S = 60
+_RESULT_LIMIT = 4000
 
 
 class ScheduleError(ValueError):
@@ -50,13 +34,16 @@ class ScheduleError(ValueError):
 
 
 def enabled() -> bool:
-    """Dormant by default. Nothing ticks until Anders says so."""
+    """Dormant by default. Nothing ticks until Anders turns it on."""
     return os.getenv("KALIV_SCHEDULER", "").strip().lower() in ("1", "true", "on")
 
 
 def fingerprint(tool: str, args: dict) -> str:
-    """What exactly was approved. Sort keys so argument order cannot change it."""
-    blob = json.dumps({"tool": tool, "args": args}, sort_keys=True, ensure_ascii=False)
+    """What exactly was approved. Argument order cannot change the identity."""
+    blob = json.dumps(
+        {"tool": tool, "args": args}, sort_keys=True, ensure_ascii=False,
+        separators=(",", ":"),
+    )
     return hashlib.sha256(blob.encode()).hexdigest()[:32]
 
 
@@ -73,11 +60,7 @@ def parse_cadence(spec: str) -> Cadence:
     if m:
         secs = int(m.group(1))
         if secs < MIN_INTERVAL_S:
-            # Not a safety rail so much as an honesty one: a 5-second schedule
-            # is a busy loop wearing a calendar's clothes.
-            raise ScheduleError(
-                f"interval {secs}s er under minimum {MIN_INTERVAL_S}s"
-            )
+            raise ScheduleError(f"interval {secs}s er under minimum {MIN_INTERVAL_S}s")
         return Cadence("every", seconds=secs)
     m = _DAILY.match(spec or "")
     if m:
@@ -88,9 +71,11 @@ def parse_cadence(spec: str) -> Cadence:
 
 
 def next_run(cadence: Cadence, after: float) -> float:
-    """The next moment this should fire, strictly after `after`."""
+    """The next moment this should fire, strictly after ``after``."""
     if cadence.kind == "every":
         return after + cadence.seconds
+    if cadence.kind != "daily":
+        raise ScheduleError(f"ukendt cadence-kind {cadence.kind!r}")
     lt = time.localtime(after)
     candidate = time.mktime((
         lt.tm_year, lt.tm_mon, lt.tm_mday,
@@ -105,14 +90,7 @@ def next_run(cadence: Cadence, after: float) -> float:
 
 
 def catch_up(cadence: Cadence, due_at: float, now: float) -> tuple[int, float]:
-    """How many runs were MISSED while the rig was off, and when to fire next.
-
-    Returns (missed, next_due). The count is reported, never executed: a rig
-    that was off for a week must not wake up and run seven days of work at
-    once, and it must not pretend nothing was skipped either. The JobStore
-    learned the same lesson the hard way -- an interrupted job says
-    "interrupted", it does not quietly claim success.
-    """
+    """Return ``(missed, next_due)``; missed runs are reported, never replayed."""
     if now < due_at:
         return 0, due_at
     missed = 0
@@ -120,17 +98,12 @@ def catch_up(cadence: Cadence, due_at: float, now: float) -> tuple[int, float]:
     while due <= now:
         due = next_run(cadence, due)
         missed += 1
-    # The one we are firing now is not a miss.
     return max(0, missed - 1), due
 
 
 def refusal(tool_risk: str, approved_fingerprint: str | None,
             current_fingerprint: str) -> str | None:
-    """Why this scheduled task must not run, or None.
-
-    Pure: the policy is a fact about (risk, approval, arguments), not about
-    whatever the caller happens to have in scope at 03:00.
-    """
+    """Why a scheduled action must not run, or ``None`` when it may."""
     if tool_risk == "desktop":
         return (
             "skrivebordshandlinger kan ikke planlægges: et klik kl. 03:00 lander "
@@ -139,6 +112,8 @@ def refusal(tool_risk: str, approved_fingerprint: str | None,
         )
     if tool_risk == "read":
         return None
+    if tool_risk != "write":
+        return f"ukendt tool-risk {tool_risk!r}; planen er afvist fail-closed"
     if not approved_fingerprint:
         return (
             "planlagte skrivninger kræver at du godkendte dem da du oprettede "
@@ -150,3 +125,207 @@ def refusal(tool_risk: str, approved_fingerprint: str | None,
             "gjaldt den handling, ikke denne"
         )
     return None
+
+
+class ScheduleStore:
+    """Persistent, local-only schedule records with atomic due claiming.
+
+    Claiming advances ``next_due`` in the same SQLite transaction that returns
+    the record. Two worker processes therefore cannot both fire the same due
+    occurrence. The claim does not execute a tool; that remains a separate,
+    gated runner concern.
+    """
+
+    def __init__(self, path: str = SCHEDULES_DB_PATH):
+        self.path = path
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(path, check_same_thread=False)
+        with self._lock:
+            self._conn.execute("PRAGMA foreign_keys=ON")
+            self._conn.execute(
+                """CREATE TABLE IF NOT EXISTS schedules (
+                       id TEXT PRIMARY KEY,
+                       tool TEXT NOT NULL,
+                       args_json TEXT NOT NULL,
+                       cadence TEXT NOT NULL,
+                       risk TEXT NOT NULL,
+                       approved_fingerprint TEXT,
+                       enabled INTEGER NOT NULL DEFAULT 1,
+                       next_due REAL NOT NULL,
+                       last_due REAL,
+                       last_result TEXT NOT NULL DEFAULT '',
+                       missed_runs INTEGER NOT NULL DEFAULT 0,
+                       created REAL NOT NULL,
+                       updated REAL NOT NULL)"""
+            )
+            self._conn.commit()
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+    def create(self, *, tool: str, args: dict, cadence: str, risk: str,
+               approved_fingerprint: str | None = None,
+               now: float | None = None) -> str:
+        """Create an Anders-approved schedule; refuse unsafe records up front."""
+        if not isinstance(tool, str) or not tool.strip():
+            raise ScheduleError("tool mangler")
+        if not isinstance(args, dict):
+            raise ScheduleError("args skal være et objekt")
+        parsed = parse_cadence(cadence)
+        current = fingerprint(tool, args)
+        why = refusal(risk, approved_fingerprint, current)
+        if why:
+            raise ScheduleError(why)
+        schedule_id = uuid.uuid4().hex[:12]
+        created = time.time() if now is None else now
+        due = next_run(parsed, created)
+        args_json = json.dumps(
+            args, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+        )
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO schedules "
+                "(id, tool, args_json, cadence, risk, approved_fingerprint, "
+                "enabled, next_due, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                (schedule_id, tool, args_json, cadence, risk,
+                 approved_fingerprint, due, created, created),
+            )
+            self._conn.commit()
+        return schedule_id
+
+    def get(self, schedule_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, tool, args_json, cadence, risk, approved_fingerprint, "
+                "enabled, next_due, last_due, last_result, missed_runs, created, updated "
+                "FROM schedules WHERE id=?", (schedule_id,),
+            ).fetchone()
+        return self._to_dict(row) if row else None
+
+    def list(self, limit: int = 100) -> list[dict]:
+        n = max(1, min(int(limit), 500))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, tool, args_json, cadence, risk, approved_fingerprint, "
+                "enabled, next_due, last_due, last_result, missed_runs, created, updated "
+                "FROM schedules ORDER BY created DESC LIMIT ?", (n,),
+            ).fetchall()
+        return [self._to_dict(row) for row in rows]
+
+    def set_enabled(self, schedule_id: str, value: bool,
+                    now: float | None = None) -> bool:
+        """Enable from a fresh future due time; disabling never deletes history."""
+        changed_at = time.time() if now is None else now
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT cadence FROM schedules WHERE id=?", (schedule_id,),
+            ).fetchone()
+            if not row:
+                return False
+            if value:
+                due = next_run(parse_cadence(row[0]), changed_at)
+                cur = self._conn.execute(
+                    "UPDATE schedules SET enabled=1, next_due=?, updated=? WHERE id=?",
+                    (due, changed_at, schedule_id),
+                )
+            else:
+                cur = self._conn.execute(
+                    "UPDATE schedules SET enabled=0, updated=? WHERE id=?",
+                    (changed_at, schedule_id),
+                )
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def delete(self, schedule_id: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM schedules WHERE id=?", (schedule_id,))
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def claim_due(self, now: float | None = None, limit: int = 20) -> list[dict]:
+        """Atomically claim due occurrences and advance them into the future.
+
+        This is intentionally independent of :func:`enabled`: a runner checks
+        the global feature flag before calling. Keeping the store deterministic
+        makes it testable without changing process environment mid-transaction.
+        """
+        claimed_at = time.time() if now is None else now
+        n = max(1, min(int(limit), 100))
+        claimed: list[dict] = []
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                rows = self._conn.execute(
+                    "SELECT id, tool, args_json, cadence, risk, approved_fingerprint, "
+                    "enabled, next_due, last_due, last_result, missed_runs, created, updated "
+                    "FROM schedules WHERE enabled=1 AND next_due<=? "
+                    "ORDER BY next_due, created LIMIT ?",
+                    (claimed_at, n),
+                ).fetchall()
+                for row in rows:
+                    item = self._to_dict(row)
+                    due_at = item["next_due"]
+                    try:
+                        cadence = parse_cadence(item["cadence"])
+                        missed, next_due = catch_up(cadence, due_at, claimed_at)
+                    except ScheduleError as exc:
+                        # On-disk corruption or a manual edit must stop the task,
+                        # not turn into guessed cadence or a tight retry loop.
+                        self._conn.execute(
+                            "UPDATE schedules SET enabled=0, last_result=?, updated=? "
+                            "WHERE id=?",
+                            (f"disabled: {exc}"[:_RESULT_LIMIT], claimed_at, item["id"]),
+                        )
+                        continue
+                    self._conn.execute(
+                        "UPDATE schedules SET next_due=?, last_due=?, "
+                        "missed_runs=missed_runs+?, updated=? WHERE id=?",
+                        (next_due, due_at, missed, claimed_at, item["id"]),
+                    )
+                    item.update({
+                        "due_at": due_at,
+                        "claimed_at": claimed_at,
+                        "next_due": next_due,
+                        "last_due": due_at,
+                        "missed_this_claim": missed,
+                        "missed_runs": item["missed_runs"] + missed,
+                    })
+                    claimed.append(item)
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return claimed
+
+    def complete(self, schedule_id: str, result: str,
+                 now: float | None = None) -> bool:
+        """Persist the latest bounded result without changing cadence state."""
+        completed_at = time.time() if now is None else now
+        text = (result or "")[:_RESULT_LIMIT]
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE schedules SET last_result=?, updated=? WHERE id=?",
+                (text, completed_at, schedule_id),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    @staticmethod
+    def _to_dict(row) -> dict:
+        return {
+            "id": row[0],
+            "tool": row[1],
+            "args": json.loads(row[2]),
+            "cadence": row[3],
+            "risk": row[4],
+            "approved_fingerprint": row[5],
+            "enabled": bool(row[6]),
+            "next_due": row[7],
+            "last_due": row[8],
+            "last_result": row[9],
+            "missed_runs": row[10],
+            "created": row[11],
+            "updated": row[12],
+        }
