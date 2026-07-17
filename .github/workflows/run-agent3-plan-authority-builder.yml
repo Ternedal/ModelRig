@@ -168,12 +168,37 @@ jobs:
           python3 scripts/activation_readiness.py --check
           git diff --check -- . ':(exclude)ACTIVATION_READINESS.md'
       - name: Run focused authority gates
+        id: focused
+        shell: bash
         run: |
-          set -euo pipefail
-          PYTHONPATH=worker python3 tests/worker_agent3_plan_authority_api.py
-          PYTHONPATH=worker python3 tests/worker_agent3_retry.py
-          PYTHONPATH=worker python3 tests/workflow_activation_readiness.py
-          (cd backend && go test ./internal/httpapi)
+          set +e
+          : > agent3-authority-tests.log
+          status=0
+          run_cmd() {
+            echo ">>> $*" | tee -a agent3-authority-tests.log
+            "$@" >> agent3-authority-tests.log 2>&1
+            rc=$?
+            echo "<<< rc=$rc" | tee -a agent3-authority-tests.log
+            if [ $rc -ne 0 ] && [ $status -eq 0 ]; then status=$rc; fi
+          }
+          run_cmd env PYTHONPATH=worker python3 tests/worker_agent3_plan_authority_api.py
+          run_cmd env PYTHONPATH=worker python3 tests/worker_agent3_retry.py
+          run_cmd env PYTHONPATH=worker python3 tests/workflow_activation_readiness.py
+          run_cmd bash -lc 'cd backend && go test ./internal/httpapi'
+          cat agent3-authority-tests.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload focused authority diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent3-plan-authority-tests-log
+          path: agent3-authority-tests.log
+          if-no-files-found: error
+          retention-days: 3
+      - name: Fail when focused authority gates failed
+        if: steps.focused.outputs.status != '0'
+        run: exit 1
       - name: Push one clean product commit
         run: |
           set -euo pipefail
