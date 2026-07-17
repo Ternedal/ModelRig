@@ -181,5 +181,54 @@ finally:
 
 check(not T.egress_gate_enabled(), "the gate is OFF by default -- #6 is Anders' call, not a quiet default")
 
+# --- pre-approved scheduled writes: the ONE way past a confirmation card ----
+# The scheduler cannot park a write for a card at 03:00 -- nobody would answer
+# and it would expire before morning. So Anders approves it when he creates the
+# schedule, and that approval travels as a fingerprint. This is the narrowest
+# door in the system and it gets pushed on from four sides.
+
+from app.scheduler import fingerprint as _fp  # noqa: E402
+
+_args = {"text": "morgenlog"}
+_ok = _fp("note_append", _args)
+
+g = gate()
+out = g.propose("note_append", _args, conversation_id="sch1", origin="schedule", pre_approved=_ok)
+check(out.get("result") is not None,
+      "a scheduled write WITH its approval runs -- no card, because there is nobody to show it to")
+row = last(g)
+check(row.get("outcome") == "executed" and row.get("origin") == "schedule",
+      "the run is audited as a scheduled execution")
+check(row.get("confirmation_id") == f"schedule:{_ok[:12]}",
+      "the audit names the APPROVAL it ran under -- 'who allowed this at 03:00' has an answer")
+
+msg = denied(g.propose, "note_append", {"text": "noget helt andet"},
+             conversation_id="sch2", origin="schedule", pre_approved=_ok)
+check(msg is not None and "anden handling" in msg,
+      "the same approval on different arguments is refused: he approved THAT action")
+check(last(g).get("outcome") == "blocked", "and the refused attempt is in the trail")
+
+msg = denied(g.propose, "note_append", _args, conversation_id="sch3",
+             origin="cloud", pre_approved=_ok)
+check(msg is not None and "planlagte" in msg,
+      "a CLOUD model cannot carry a pre-approval -- that would launder a write past its own card")
+
+probe = T.Tool(name="_audit_probe_click2", description="probe", risk="desktop",
+               run=lambda a: "clicked")
+T.REGISTRY[probe.name] = probe
+try:
+    msg = denied(g.propose, probe.name, {"x": 1}, conversation_id="sch4",
+                 origin="schedule", pre_approved=_fp(probe.name, {"x": 1}))
+    check(msg is not None and "forhåndsgodkendes" in msg,
+          "a desktop action can never be pre-approved: the screen it would land on does not exist yet")
+finally:
+    del T.REGISTRY[probe.name]
+
+g.set_enabled(False)
+msg = denied(g.propose, "note_append", _args, conversation_id="sch5",
+             origin="schedule", pre_approved=_ok)
+check(msg is not None, "the kill-switch beats a pre-approval -- schedules are what must stop first")
+g.set_enabled(True)
+
 print(f"\n===== WORKER AUDIT: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
