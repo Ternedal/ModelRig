@@ -38,6 +38,11 @@ on:
 
 permissions:
   contents: write
+  # Signing needs an OIDC identity from the Actions runner. This is the whole
+  # point: a leaked PAT can replace a release asset, but it cannot mint one of
+  # these, so it cannot forge the signature over what it replaced.
+  id-token: write
+  attestations: write
 
 jobs:
   version-check:
@@ -377,13 +382,46 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # The updater refuses to swap any exe whose SHA-256 doesn't match this
-          # file, so a tampered release asset can't be installed. Hashed here,
-          # after every build job (a `needs` of this one) has uploaded its asset.
+          # file. That stops a CORRUPTED download; it does not stop a tampered
+          # release, and the comment here used to claim it did. Whoever can
+          # replace an asset can replace this file in the same breath -- the
+          # proof lives next to the thing it proves, behind the same credential.
+          # The attestation below is what breaks that circle. Hashed here, after
+          # every build job (a `needs` of this one) has uploaded its asset.
           mkdir -p _sums && cd _sums
           gh release download "${{ github.ref_name }}" --dir . --clobber
           rm -f SHA256SUMS.txt
           sha256sum * > SHA256SUMS.txt
           gh release upload "${{ github.ref_name }}" SHA256SUMS.txt --clobber
+
+      # SHA256SUMS cannot prove itself: it is protected by exactly the credential
+      # that would be used to forge it. Anders' PAT has contents:write and lives
+      # in a note; if it ever leaks, it can swap the APK and rewrite the hashes to
+      # match, and every check we have would pass. Sigstore signs with the
+      # runner's OIDC identity, which a PAT cannot mint -- so the signature is the
+      # one artifact a leaked token cannot produce.
+      #
+      # HONEST SCOPE: this makes tampering PROVABLE, not impossible. The updater
+      # does not verify attestations yet, so today this is evidence a human can
+      # check (`gh attestation verify <file> --repo Ternedal/ModelRig`), not a
+      # gate that stops an install. That is still worth having: you cannot verify
+      # what was never signed. Teaching the updater to check it is a separate,
+      # larger job.
+      - name: Attest the assets (SHA256SUMS alone cannot prove itself)
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: "_sums/*"
+
+      - name: Prove the attestation verifies (a signature nobody checks is decoration)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd _sums
+          gh attestation verify SHA256SUMS.txt --repo "${{ github.repository }}"
+          for apk in *.apk; do
+            [ -e "$apk" ] || continue
+            gh attestation verify "$apk" --repo "${{ github.repository }}"
+          done
 
       - name: Verify the release actually has its assets
         env:
