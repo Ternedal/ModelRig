@@ -130,6 +130,14 @@ jobs:
       - name: Fail when focused validation contracts failed
         if: steps.focused.outputs.status != '0'
         run: exit 1
+      - name: Parse PowerShell scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Get-ChildItem -Path . -Recurse -File -Filter *.ps1 | ForEach-Object {
+            [void][scriptblock]::Create((Get-Content -LiteralPath $_.FullName -Raw))
+            Write-Host "parsed $($_.FullName)"
+          }
       - name: Push one clean product commit
         run: |
           set -euo pipefail
