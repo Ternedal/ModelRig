@@ -6,7 +6,7 @@
 > code, so it cannot quietly become untrue. If a fact belongs here, teach
 > the generator to read it -- do not type it in.
 
-**Version:** 1.58.88
+**Version:** 1.58.89
 
 ## Tools the model can see
 
@@ -37,6 +37,7 @@ travel. They are orthogonal.
 | `KALIV_MAX_UPLOAD_MB` | `25` |
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` |
 | `KALIV_SCHEDULER` | `` |
+| `KALIV_SCHEDULER_API` | `0` |
 | `KALIV_SCHEDULER_POLL_S` | `` |
 | `KALIV_TOOLS_DIR` | `(unset)` |
 | `KALIV_TOOLS_ENABLED` | `0` |

@@ -59,12 +59,29 @@ def _tools() -> list[tuple[str, str, str]]:
 
 
 def _switches() -> list[tuple[str, str]]:
-    """Every KALIV_* env switch the worker actually reads, with its default."""
+    """Every env switch this SYSTEM reads, with its default.
+
+    It used to say "the worker" and scan worker/**/*.py, which meant
+    KALIV_SCHEDULER_API -- the Go switch deciding whether the schedule admin
+    surface is reachable remotely at all -- was absent from the page whose
+    promise is that it cannot be wrong (F-613). The system is Go and Python; a
+    scan of one language's directory measures my search path, not the system.
+    """
     found: dict[str, str] = {}
     pat = re.compile(r'getenv\(\s*"(KALIV_[A-Z0-9_]+)"\s*(?:,\s*"([^"]*)")?')
     for py in sorted((ROOT / "worker").rglob("*.py")):
         for m in pat.finditer(py.read_text(encoding="utf-8", errors="replace")):
             found.setdefault(m.group(1), m.group(2) if m.group(2) is not None else "(unset)")
+    # os.Getenv("X") == "1" is unambiguous: off unless someone sets it to 1.
+    # Only that pattern is listed -- a key or a path read from the Go
+    # environment is a setting, and padding a switch table with settings is how
+    # a table stops being read.
+    go = re.compile(r'os\.Getenv\(\s*"((?:KALIV|MODELRIG)_[A-Z0-9_]+)"\s*\)\s*==\s*"1"')
+    for src in sorted((ROOT / "backend").rglob("*.go")):
+        if src.name.endswith("_test.go"):
+            continue
+        for m in go.finditer(src.read_text(encoding="utf-8", errors="replace")):
+            found.setdefault(m.group(1), "0")
     return sorted(found.items())
 
 

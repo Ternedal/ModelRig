@@ -68,5 +68,34 @@ try:
 finally:
     doc.write_text(backup, encoding="utf-8")
 
+# --- the page must measure the SYSTEM, not my search path (F-613) ----------
+# The scan covered worker/**/*.py, so KALIV_SCHEDULER_API -- the Go switch that
+# decides whether the schedule admin surface is reachable REMOTELY at all -- was
+# absent from the page whose whole promise is that it cannot be wrong. Not a
+# stale fact: a fact that was never in scope. Same shape as the entrypoint scan
+# that walked only the folders I thought of, and as running the test suites I
+# considered relevant instead of the glob.
+
+check("KALIV_SCHEDULER_API" in text,
+      "the Go backend's switches are on the page too -- the system is not one "
+      "language, and a scan of one directory measures the scanner")
+
+import sys as _sys  # noqa: E402
+_sys.path.insert(0, str(ROOT / "scripts"))
+import current_state as _CS  # noqa: E402
+
+_names = {n for n, _ in _CS._switches()}
+check("KALIV_SCHEDULER_API" in _names, "the generator finds it, not just the committed copy")
+check("KALIV_AGENT3_ENABLED" in _names, "and it did not lose the Python ones on the way")
+
+# Drive it: a Go switch that does not exist must not appear.
+check("KALIV_NOT_A_REAL_SWITCH" not in _names,
+      "self-test: the scanner reports what is in the code, not what it hopes")
+
+# Settings are not switches. A key read from the environment is not a decision,
+# and padding the table with them is how a table stops being read.
+check("MODELRIG_ADMIN_KEY" not in _names,
+      "a credential read from the Go environment is not listed as a switch")
+
 print(f"\n===== CURRENT STATE: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

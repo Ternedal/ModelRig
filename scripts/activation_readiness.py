@@ -58,13 +58,47 @@ def flag_defaults() -> list[tuple[str, str, str]]:
         for m in pat.finditer(py.read_text(encoding="utf-8", errors="replace")):
             name, default = m.group(1), m.group(2)
             found.setdefault(name, (default or "(unset)").strip("\"'"))
+    # The Go backend is part of this system too (F-613). Scanning only
+    # worker/**/*.py meant KALIV_SCHEDULER_API -- the switch that decides whether
+    # the schedule admin surface is reachable REMOTELY at all -- appeared nowhere
+    # on the page whose whole promise is that it cannot be wrong. A page that
+    # says "0 of 12 switches are on" after reading one language's directory is
+    # not measuring the system; it is measuring my search path. Same mistake as
+    # the entrypoint scan that only walked the folders I thought of.
+    #
+    # `os.Getenv("X") == "1"` is unambiguous: off unless someone sets it to 1.
+    # Anything else read from the Go environment is a setting, not a decision,
+    # and is reported as such rather than guessed at.
+    go_switches: set[str] = set()
+    go_settings: set[str] = set()
+    go_switch = re.compile(r'os\.Getenv\(\s*"((?:KALIV|MODELRIG)_[A-Z0-9_]+)"\s*\)\s*==\s*"1"')
+    go_any = re.compile(r'os\.Getenv\(\s*"((?:KALIV|MODELRIG)_[A-Z0-9_]+)"\s*\)')
+    for go in sorted((ROOT / "backend").rglob("*.go")):
+        if go.name.endswith("_test.go"):
+            continue
+        text = go.read_text(encoding="utf-8", errors="replace")
+        for m in go_switch.finditer(text):
+            found.setdefault(m.group(1), "0")
+            go_switches.add(m.group(1))
+        for m in go_any.finditer(text):
+            # A key, a path or a claim limit read from the environment is a
+            # SETTING. Widening the scan made eight of them appear as "switches
+            # that are off", which dilutes the count the page exists to state --
+            # the same way calling a cache TTL an ACTIVE switch would. Only the
+            # ones whose code says == "1" get to be decisions.
+            if m.group(1) not in go_switches:
+                found.setdefault(m.group(1), "(unset)")
+                go_settings.add(m.group(1))
+
     # A switch and a setting are not the same thing, and calling a 10-second
     # cache TTL an "ACTIVE switch" is how a readiness page teaches you to skim
     # it. Only booleans can be on; a number is a value, not a decision.
     BOOLISH = {"", "0", "1", "true", "false", "on", "off", "(unset)"}
     rows = []
     for name, default in sorted(found.items()):
-        if default not in BOOLISH:
+        if name in go_settings:
+            kind = "indstilling"
+        elif default not in BOOLISH:
             kind = "indstilling"
         elif default in ("1", "true", "on"):
             kind = "**AKTIV**"
