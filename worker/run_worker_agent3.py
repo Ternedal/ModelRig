@@ -30,6 +30,11 @@ from app.agent3.replan_preview_api import (
     build_default_replan_preview_service,
     build_replan_preview_router,
 )
+# Routers must attach to the FastAPI object; the process must SERVE the
+# hardened wrapper around it. entrypoint.py says so in its own docstring --
+# "process launchers must use this module" -- and this launcher was born after
+# that rule was written and never heard about it, because nothing enforced it.
+from app.entrypoint import app as guarded_app
 from app.main import app
 
 
@@ -104,4 +109,8 @@ if __name__ == "__main__":
             "Agent 3.0 was not mounted because KALIV_AGENT3_ENABLED is not 1. "
             "The ordinary worker API will still start.\n"
         )
-    uvicorn.run(app, host=host, port=int(os.getenv("MODELRIG_WORKER_PORT", "8099")))
+    # Serve the GUARDED app: same FastAPI routes, with the ASGI body-limit and
+    # temp-cleanup guard outside them. Without this, an experimental worker
+    # accepts a chunked upload that never declares a Content-Length -- exactly
+    # the hole 1.58.46 closed for the production entrypoint.
+    uvicorn.run(guarded_app, host=host, port=int(os.getenv("MODELRIG_WORKER_PORT", "8099")))
