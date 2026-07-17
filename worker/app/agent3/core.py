@@ -125,6 +125,14 @@ class AgentStep:
     sensitivity: Sensitivity = Sensitivity.OPERATIONAL
     egress: EgressClass = EgressClass.LOCAL
     origin: str = "local"
+    # Whether running this again is the same as running it once (F-614). Stamped
+    # from the registry when the step is built, exactly as risk and sensitivity
+    # are: the step is the decision's snapshot, and recovery must not have to go
+    # and ask a registry that may have changed since.
+    #
+    # False by default. A step that arrived without an answer is a step we do
+    # not replay.
+    idempotent: bool = False
     conversation_id: str | None = None
     summary: str = ""
     state: StepState = StepState.PENDING
@@ -554,6 +562,20 @@ class Agent3Orchestrator:
             if step.state == StepState.EXECUTING:
                 # We do not know whether a side effect completed before a crash.
                 # Never blindly replay a possibly non-idempotent action.
+                #
+                # This used to block EVERY interrupted step, which is safe and
+                # was also close to useless: five of nine tools are reads, and
+                # telling a person to "verify the side effect manually" for a
+                # rig_status that has no side effect is how a recovery path
+                # teaches people to click past it. The step now says whether it
+                # can be replayed, decided by the registry when it was built.
+                if step.idempotent:
+                    step.state = StepState.PENDING
+                    step.error = None
+                    self.store.save_with_event(
+                        run, "interrupted_execution_replayable",
+                        {"step_id": step.id, "tool": step.tool})
+                    continue
                 step.state = StepState.BLOCKED
                 step.error = "Execution was interrupted; verify the side effect manually before resuming"
                 run.state = RunState.BLOCKED

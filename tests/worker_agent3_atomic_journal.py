@@ -27,6 +27,7 @@ os.environ["KALIV_AGENT3_DB"] = os.path.join(_tmp, "agent3.db")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 
 from app.agent3.core import (  # noqa: E402
+    Agent3Orchestrator,
     AgentRun,
     AgentRunStore,
     AgentStep,
@@ -34,6 +35,7 @@ from app.agent3.core import (  # noqa: E402
     RouteKind,
     RoutePlan,
     RunState,
+    StepState,
     Sensitivity,
     TurnRequest,
 )
@@ -178,6 +180,58 @@ check(bool(_hit), "self-test: a two-step state transition IS detected")
 # save() alone remains legitimate -- not every write is a transition.
 check(any("self.store.save(run)" in ln for ln in _src),
       "plain save() still exists: this is about transitions, not a ban on writing")
+
+# --- recovery replays only what said it may be replayed (F-614) -------------
+#
+# A crash mid-step leaves EXECUTING in the journal and nobody knows whether the
+# side effect landed. Blocking the run and telling a person to verify by hand is
+# right for note_append and absurd for rig_status, which has no side effect to
+# verify -- and five of nine tools are reads, so the safe answer made recovery
+# useless for the case it happens in most. The step now carries the registry's
+# answer, stamped when it was built.
+
+def _interrupted(tool: str, idempotent: bool) -> tuple[Agent3Orchestrator, str]:
+    """A run whose current step was EXECUTING when the process died."""
+    st = AgentRunStore(os.path.join(_tmp, f"recover-{tool}-{idempotent}.db"))
+    executed: list[str] = []
+
+    def _executor(step):
+        executed.append(step.tool)
+        return "ok"
+
+    orch = Agent3Orchestrator(st, _executor, max_steps=4)
+    run = AgentRun(
+        request=TurnRequest("recover", mode="rig", tools=True, rag=False,
+                            voice=False, conversation_id="c"),
+        route=RoutePlan(RouteKind.RIG_TOOLS_LOCAL, "t", uses_cloud=False,
+                        uses_rig=True, uses_tools=True, uses_rag=False),
+        steps=[AgentStep(tool=tool, args={}, risk=RiskClass.READ,
+                         sensitivity=Sensitivity.OPERATIONAL,
+                         idempotent=idempotent, state=StepState.EXECUTING)],
+        state=RunState.RUNNING,
+    )
+    st.save(run)
+    return orch, run.id, executed
+
+
+_orch, _rid, _executed = _interrupted("rig_status", idempotent=True)
+_recovered = _orch.advance(_rid)
+check(_recovered.state != RunState.BLOCKED,
+      "an interrupted READ is replayed, not escalated to a human who has "
+      "nothing to verify"
+      if _recovered.state != RunState.BLOCKED
+      else f"a replayable read was blocked anyway ({_recovered.state})")
+check("rig_status" in _executed, "and it actually ran on the second pass")
+
+_orch2, _rid2, _executed2 = _interrupted("note_append", idempotent=False)
+_blocked = _orch2.advance(_rid2)
+check(_blocked.state == RunState.BLOCKED,
+      "an interrupted WRITE still blocks -- we do not know if the line landed")
+check(_executed2 == [],
+      "and it is NOT re-run: a second append is a second line, and nobody asked "
+      "for the first one twice")
+check("verify the side effect" in (_blocked.error or ""),
+      "the block says what a person has to go and check")
 
 print(f"\n===== AGENT3 ATOMIC JOURNAL: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

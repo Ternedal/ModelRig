@@ -189,6 +189,9 @@ class V2ToolAdapter:
                     f"ukendt følsomhedsklasse {tool.sensitivity!r} for {call.tool}: "
                     "Agent 3 gætter ikke på hvor et svar må rejse hen"
                 )
+            # Stamped from the registry, like risk and sensitivity: recovery
+            # reads the step, not a registry that may have moved since (F-614).
+            idempotent = bool(getattr(tool, "idempotent", False))
             summary = tool.human_summary(call.args)
             steps.append(
                 AgentStep(
@@ -198,6 +201,7 @@ class V2ToolAdapter:
                     sensitivity=sensitivity,
                     egress=egress,
                     origin=origin,
+                    idempotent=idempotent,
                     conversation_id=conversation_id,
                     summary=summary,
                 )

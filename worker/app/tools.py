@@ -298,6 +298,17 @@ class Tool:
     # dangerous by accident.
     impact: Impact | None = None
     cancellation: Cancellation = "none"
+    # Is running this twice the same as running it once? (F-614)
+    #
+    # Recovery needs this. A crash mid-step leaves EXECUTING in the journal and
+    # nobody knows whether the side effect landed, so core.py blocks the run and
+    # tells a human to go and check by hand. Correct for note_append. Absurd for
+    # rig_status, which has no side effect to verify -- and five of nine tools
+    # are reads, so the safe answer made recovery useless for the common case.
+    #
+    # Defaults to False and is set to True for reads in __post_init__, because a
+    # read has no side effect by definition. A WRITE has to argue for it.
+    idempotent: bool = False
     schedulable: bool = False
     # Why not, in words a human can act on. Shown instead of a bare refusal.
     unschedulable_because: str = ""
@@ -305,6 +316,11 @@ class Tool:
     def __post_init__(self) -> None:
         if self.impact is None:
             object.__setattr__(self, "impact", self.risk)
+        # A read has nothing to replay. Anything that changes the rig must say
+        # so itself -- inheriting "safe to run twice" is how a double write
+        # happens after a crash nobody was watching.
+        if self.impact == "read" and not self.idempotent:
+            object.__setattr__(self, "idempotent", True)
         # A destructive or administrative action cannot be scheduled. This is
         # not a policy check that someone remembers to run -- it is impossible
         # to construct the contradiction, so a future tool cannot be added
@@ -754,6 +770,9 @@ REGISTRY: dict[str, Tool] = {
     ),
     "cancel_job": Tool(
         name="cancel_job",
+        # Cancelling an already-cancelled job leaves the same state, so a
+        # crash mid-cancel can be replayed rather than escalated to a human.
+        idempotent=True,
         schedulable=False,
         unschedulable_because="et job-id er flygtigt; en plan om at annullere det rammer noget andet i morgen", risk="write",
         sensitivity="operational",  # acts on the rig, returns rig state

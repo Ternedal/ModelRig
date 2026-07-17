@@ -18,6 +18,7 @@ Run: PYTHONPATH=worker python3 tests/worker_agent3_risk_parity.py
 """
 from __future__ import annotations
 
+import dataclasses as _dataclasses
 import os
 import sys
 import tempfile
@@ -332,6 +333,63 @@ for _n, _t in sorted(V2.REGISTRY.items()):
 check(V2.REGISTRY["note_append"].cancellation == "none",
       "note_append admits stop does not stop it -- an in-process write runs to "
       "completion, and the optimistic default is the one that lies")
+
+# --- what may be replayed after a crash (F-614 idempotency axis) ------------
+#
+# Recovery reads this. A crash mid-step leaves EXECUTING and nobody knows
+# whether the side effect landed; a step that says it is replayable gets re-run
+# without asking anyone. So the declaration has to be true, and stating the
+# facts is the only way to catch a tool that quietly starts claiming it -- the
+# same hole impact had this afternoon, where deleting the declaration failed
+# zero tests.
+
+for _n, _t in sorted(V2.REGISTRY.items()):
+    if _t.impact == "read":
+        check(_t.idempotent,
+              f"{_n}: a read is replayable by construction -- there is no side "
+              "effect to have half-happened")
+
+for _n, _want in (("note_append", False), ("delete_model", False),
+                  ("pull_model", False), ("cancel_job", True)):
+    _t = V2.REGISTRY[_n]
+    check(_t.idempotent is _want,
+          f"{_n} declares idempotent={_want}"
+          if _t.idempotent is _want
+          else (f"{_n} claims re-running it is free. A second append is a second "
+                "line, and recovery would make one without asking."
+                if _want is False
+                else f"{_n} should be replayable and says it is not"))
+
+# The step must carry the answer, because recovery reads the step -- a registry
+# that moved since the run started cannot be consulted about a run in progress.
+from app.agent3.core import AgentStep as _Step  # noqa: E402
+
+check("idempotent" in {f.name for f in _dataclasses.fields(_Step)},
+      "the step carries the answer, so recovery does not have to ask a registry "
+      "that may have changed since the crash")
+check(_Step(tool="x", args={}, risk=RiskClass.WRITE).idempotent is False,
+      "a step that arrived without an answer is not replayed")
+
+# And the stamp must actually happen. If build_steps stops copying it, every
+# step defaults to False, recovery blocks everything, and the feature is dead
+# without a single test going red -- fail-closed and invisible, which is exactly
+# how rag_ready stayed broken for eight releases.
+from app.agent3.core import RouteKind as _RK, RoutePlan as _RP  # noqa: E402
+from app.agent3.integration import PlannedToolCall as _PTC, V2ToolAdapter as _Adapter  # noqa: E402
+
+V2.GATE.enabled = True
+_route = _RP(_RK.RIG_TOOLS_LOCAL, "parity", uses_cloud=False, uses_rig=True,
+             uses_tools=True, uses_rag=False)
+_adapter = _Adapter()
+for _tool, _expect in (("rig_status", True), ("note_append", False)):
+    _built = _adapter.build_steps([_PTC(_tool, {"text": "x"} if _tool == "note_append" else {})],
+                                  _route, "parity")[0]
+    check(_built.idempotent is _expect,
+          f"build_steps stamps {_tool} as idempotent={_expect} onto the step"
+          if _built.idempotent is _expect
+          else f"{_tool} declares idempotent={V2.REGISTRY[_tool].idempotent} and the "
+               f"step says {_built.idempotent} -- the registry's answer is not reaching "
+               "recovery")
 
 print(f"\n===== AGENT3 RISK PARITY: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
