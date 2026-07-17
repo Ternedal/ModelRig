@@ -61,6 +61,10 @@ func (s *server) handleSchedulesStatus(w http.ResponseWriter, r *http.Request) {
 	s.forwardSchedule(w, r, "/schedules/status")
 }
 
+func (s *server) handleSchedulesPreview(w http.ResponseWriter, r *http.Request) {
+	s.forwardSchedule(w, r, "/schedules/preview")
+}
+
 func (s *server) handleSchedulesCollection(w http.ResponseWriter, r *http.Request) {
 	s.forwardSchedule(w, r, "/schedules")
 }
