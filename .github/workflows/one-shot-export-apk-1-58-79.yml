@@ -1,38 +1,18 @@
-name: one-shot-export-apk-1-58-79
+name: cleanup-export-apk-1-58-79
 
 on:
   pull_request:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export:
+  cleanup:
     if: github.head_ref == 'ops/export-apk-1-58-79'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-        with:
-          ref: ad9a10f7ff2b78cb0c354a211b9c332fb2498835
-      - name: Download published APK and checksum
+      - name: Delete temporary export branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          mkdir export
-          gh release download v1.58.79 --pattern kaliv-latest.apk --dir export
-          gh release download v1.58.79 --pattern SHA256SUMS.txt --dir export
-      - name: Verify checksum
-        run: |
-          cd export
-          expected=$(awk '$2 ~ /kaliv-latest.apk$/ {print $1}' SHA256SUMS.txt)
-          actual=$(sha256sum kaliv-latest.apk | awk '{print $1}')
-          test -n "$expected"
-          test "$actual" = "$expected"
-          printf 'release=v1.58.79\ncommit=ad9a10f7ff2b78cb0c354a211b9c332fb2498835\nsize_bytes=%s\nsha256=%s\n' "$(stat -c %s kaliv-latest.apk)" "$actual" > APK-VERIFICATION.txt
-          cat APK-VERIFICATION.txt
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: kaliv-1-58-79-verified-apk
-          path: export
-          retention-days: 7
+        run: gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/ops/export-apk-1-58-79"
