@@ -6,7 +6,7 @@
 > code, so it cannot quietly become untrue. If a fact belongs here, teach
 > the generator to read it -- do not type it in.
 
-**Version:** 1.58.62
+**Version:** 1.58.63
 
 ## Tools the model can see
 
@@ -36,6 +36,7 @@ travel. They are orthogonal.
 | `KALIV_EGRESS_GATE` | `` |
 | `KALIV_MAX_UPLOAD_MB` | `25` |
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` |
+| `KALIV_SCHEDULER` | `` |
 | `KALIV_TOOLS_DIR` | `(unset)` |
 | `KALIV_TOOLS_ENABLED` | `0` |
 | `KALIV_TOOL_ISOLATION` | `` |
@@ -115,6 +116,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_rag.py`
 - `tests/worker_rag_cloud.py`
 - `tests/worker_read_scope.py`
+- `tests/worker_scheduler.py`
 - `tests/worker_toolhost.py`
 - `tests/worker_tools.py`
 - `tests/worker_tools_guardrail.py`
