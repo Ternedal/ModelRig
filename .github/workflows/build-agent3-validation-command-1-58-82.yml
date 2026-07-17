@@ -29,7 +29,26 @@ jobs:
           test "$(git rev-parse HEAD)" = "64224996c905267a55f9b6694780599b97fe891b"
           test "$(cat VERSION)" = "1.58.81"
       - name: Apply reviewed product patch
-        run: python3 /tmp/agent3-validation-command-patch.py
+        id: patch
+        shell: bash
+        run: |
+          set +e
+          python3 /tmp/agent3-validation-command-patch.py > /tmp/agent3-validation-command-patch.log 2>&1
+          rc=$?
+          cat /tmp/agent3-validation-command-patch.log
+          echo "status=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload patch diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent3-validation-command-patch-log
+          path: /tmp/agent3-validation-command-patch.log
+          if-no-files-found: error
+          retention-days: 3
+      - name: Fail when product patch failed
+        if: steps.patch.outputs.status != '0'
+        run: exit 1
       - name: Install worker dependencies
         run: pip install -r worker/requirements.txt --break-system-packages
       - name: Set version and regenerate repository truth
