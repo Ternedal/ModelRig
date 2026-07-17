@@ -1,0 +1,58 @@
+name: one-shot-export-apk-1-58-83
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    if: github.head_ref == 'ops/export-apk-1-58-83'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: 31788eb968dcadc5dc4e48812e035faa9c7a43c8
+          fetch-depth: 1
+      - name: Verify release identity
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v1.58.83
+          TARGET: 31788eb968dcadc5dc4e48812e035faa9c7a43c8
+        run: |
+          set -euo pipefail
+          test "$(cat VERSION)" = "1.58.83"
+          test "$(git rev-parse HEAD)" = "$TARGET"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/$TAG" --jq '.object.sha')" = "$TARGET"
+          test "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" = "false"
+      - name: Download published APK and checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir export
+          gh release download v1.58.83 --pattern kaliv-latest.apk --dir export
+          gh release download v1.58.83 --pattern SHA256SUMS.txt --dir export
+      - name: Verify exact APK checksum
+        run: |
+          set -euo pipefail
+          cd export
+          expected=$(awk '$2 ~ /kaliv-latest.apk$/ {print $1}' SHA256SUMS.txt)
+          actual=$(sha256sum kaliv-latest.apk | awk '{print $1}')
+          test -n "$expected"
+          test "$actual" = "$expected"
+          printf 'release=v1.58.83\ncommit=31788eb968dcadc5dc4e48812e035faa9c7a43c8\nfilename=kaliv-latest.apk\nsize_bytes=%s\nsha256=%s\nchecksum_source=published SHA256SUMS.txt\n' "$(stat -c %s kaliv-latest.apk)" "$actual" > APK-VERIFICATION.txt
+          cat APK-VERIFICATION.txt
+      - name: Upload verified APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kaliv-1-58-83-verified-apk
+          path: export
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove temporary export branch
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/ops/export-apk-1-58-83" || true
