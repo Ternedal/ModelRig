@@ -1,0 +1,115 @@
+name: temporary-android-source-availability
+
+on:
+  push:
+    branches:
+      - agent/android-source-availability
+
+permissions:
+  contents: write
+
+jobs:
+  patch-ui:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Patch AppUi through exact structural replacements
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('android/app/src/main/java/dk/ternedal/modelrig/ui/AppUi.kt')
+          text = path.read_text(encoding='utf-8')
+
+          def replace_once(old: str, new: str, label: str) -> None:
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              'import dk.ternedal.modelrig.logic.TurnInput\nimport dk.ternedal.modelrig.logic.TurnRouter',
+              'import dk.ternedal.modelrig.logic.AppEntryDestination\n'
+              'import dk.ternedal.modelrig.logic.SourceAvailability\n'
+              'import dk.ternedal.modelrig.logic.TurnInput\n'
+              'import dk.ternedal.modelrig.logic.TurnRouter',
+              'logic imports',
+          )
+
+          replace_once(
+              '''Screen.Splash -> SplashScreen(onDone = {
+                    screen = if (store.hasRig || store.hasCloud) Screen.Chat else Screen.Setup
+                })''',
+              '''Screen.Splash -> SplashScreen(onDone = {
+                    val sources = SourceAvailability.from(
+                        store.rigCredentialStatus,
+                        store.cloudCredentialStatus,
+                    )
+                    screen = when (sources.entryDestination) {
+                        AppEntryDestination.CHAT -> Screen.Chat
+                        AppEntryDestination.SETUP -> Screen.Setup
+                    }
+                })''',
+              'splash entry decision',
+          )
+
+          replace_once(
+              '''private fun SetupScreen(store: TokenStore, db: ChatDb, onDone: () -> Unit) {
+    var refresh by remember { mutableStateOf(0) }
+    val canChat = remember(refresh) { store.hasRig || store.hasCloud }''',
+              '''private fun SetupScreen(store: TokenStore, db: ChatDb, onDone: () -> Unit) {
+    var refresh by remember { mutableStateOf(0) }
+    val sources = remember(refresh) {
+        SourceAvailability.from(
+            store.rigCredentialStatus,
+            store.cloudCredentialStatus,
+        )
+    }''',
+              'setup availability snapshot',
+          )
+
+          replace_once(
+              '''if (canChat) TextButton(onClick = onDone) { Text("Til chat →", color = KalivTheme.colors.signal) }''',
+              '''if (sources.canChat) TextButton(onClick = onDone) { Text("Til chat →", color = KalivTheme.colors.signal) }''',
+              'setup chat button',
+          )
+
+          replace_once(
+              '''Text("Vælg mindst én kilde", fontSize = 14.sp, color = KalivTheme.colors.textMuted)
+        Spacer(Modifier.height(16.dp))''',
+              '''Text("Vælg mindst én kilde", fontSize = 14.sp, color = KalivTheme.colors.textMuted)
+        if (sources.hasInvalidCredentials) {
+            Spacer(Modifier.height(12.dp))
+            Surface(
+                color = KalivTheme.colors.danger.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(10.dp),
+            ) {
+                Text(
+                    "En gemt adgang kan ikke længere læses. Indtast API-nøglen eller parringskoden igen.",
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    color = KalivTheme.colors.danger,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                )
+            }
+        }
+        Spacer(Modifier.height(16.dp))''',
+              'invalid credential recovery notice',
+          )
+
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit UI integration
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add android/app/src/main/java/dk/ternedal/modelrig/ui/AppUi.kt
+          git commit -m 'refactor(android): centralize source availability in setup'
+          git push
