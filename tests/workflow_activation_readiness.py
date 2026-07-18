@@ -267,7 +267,7 @@ check(
     else f"client-authored plans are reachable via {_doors}",
 )
 
-print(f"\n===== ACTIVATION READINESS: {passed} passed, {failed} failed =====")
+
 # --- the durability probes are live and NOT BLIND (T-015) --------------------
 #
 # Six times this session a probe of ours was itself the broken component and
@@ -393,4 +393,5 @@ check(all(p["ok"] for p in AR.scheduler_durability_probes()),
       "with the mechanisms restored, all probes return to green -- the "
       "sabotage was the probes' doing, not lasting damage")
 
+print(f"\n===== ACTIVATION READINESS: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
