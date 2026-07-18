@@ -1,0 +1,83 @@
+name: temporary-browser-use-adapter-patch
+
+on:
+  push:
+    branches:
+      - agent/browser-use-adapter
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r worker/requirements.txt
+      - name: Expose verified entity bytes to adapters
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('worker/app/web_fetch.py')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = [
+              (
+                  'from __future__ import annotations\n\nimport ipaddress',
+                  'from __future__ import annotations\n\nimport hashlib\nimport ipaddress',
+              ),
+              (
+                  '    receipt: SourceReceipt\n\n    def to_dict(self) -> dict:',
+                  '''    receipt: SourceReceipt
+    content: bytes
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.content, bytes):
+            raise TypeError("content must be bytes")
+        if hashlib.sha256(self.content).hexdigest() != self.receipt.content_sha256:
+            raise ValueError("content does not match receipt hash")
+
+    def to_dict(self) -> dict:''',
+              ),
+              (
+                  '            "receipt": self.receipt.to_dict(),\n',
+                  '            "receipt": self.receipt.to_dict(),\n            "content_bytes": len(self.content),\n',
+              ),
+              (
+                  '                receipt=receipt,\n            )',
+                  '                receipt=receipt,\n                content=decoded,\n            )',
+              ),
+          ]
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected one web_fetch match, found {text.count(old)}: {old!r}')
+              text = text.replace(old, new)
+          path.write_text(text, encoding='utf-8')
+
+          test_path = Path('tests/worker_web_fetch_adapter.py')
+          test = test_path.read_text(encoding='utf-8')
+          old = 'check(trace.receipt.content_sha256 == hashlib.sha256(html).hexdigest(), "receipt hashes decoded entity bytes")\n'
+          new = old + 'check(trace.content == html, "trace exposes the exact decoded entity bytes")\ncheck(trace.to_dict()["content_bytes"] == len(html), "serialized trace exposes only the content length")\n'
+          if test.count(old) != 1:
+              raise SystemExit('expected web fetch receipt assertion once')
+          test = test.replace(old, new)
+          old = 'check(compressed_trace.receipt.bytes_read == len(decoded), "receipt byte count uses decoded content")\n'
+          new = old + 'check(compressed_trace.content == decoded, "trace content uses decompressed entity bytes")\n'
+          if test.count(old) != 1:
+              raise SystemExit('expected compressed receipt assertion once')
+          test_path.write_text(test.replace(old, new), encoding='utf-8')
+          PY
+      - run: PYTHONPATH=worker python tests/worker_web_fetch_adapter.py
+      - run: PYTHONPATH=worker python tests/worker_browser_use_adapter.py
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add worker/app/web_fetch.py tests/worker_web_fetch_adapter.py
+          git commit -m 'feat(research): expose verified fetch content to adapters'
+          git push
