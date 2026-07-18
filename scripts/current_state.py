@@ -85,6 +85,49 @@ def _switches() -> list[tuple[str, str]]:
     return sorted(found.items())
 
 
+def _desktop_credentials() -> list[tuple[str, str]]:
+    """Read the desktop credential contract from implementation and CI.
+
+    This deliberately does not trust SECURITY.md. If encryption, migration or
+    the Windows proof disappears from code, CURRENT_STATE changes and the
+    generated-file gate goes red.
+    """
+    data_dir = ROOT / "desktop" / "composeApp" / "src" / "main" / "kotlin" / \
+        "dk" / "ternedal" / "modelrig" / "desktop" / "data"
+    db = (data_dir / "DesktopChatDb.kt").read_text(encoding="utf-8", errors="replace")
+    protector = (data_dir / "CredentialProtector.kt").read_text(encoding="utf-8", errors="replace")
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8", errors="replace")
+
+    keys = re.search(r'CREDENTIAL_SETTING_KEYS\s*=\s*setOf\(([^)]*)\)', db)
+    key_names = sorted(re.findall(r'"([^"]+)"', keys.group(1))) if keys else []
+    dpapi = (
+        "WindowsDpapiCredentialProtector" in db
+        and "Crypt32Util.cryptProtectData" in protector
+        and "Crypt32Util.cryptUnprotectData" in protector
+        and "CRYPTPROTECT_UI_FORBIDDEN" in protector
+    )
+    migration = "putRawSetting(key, protectCredential(raw))" in db
+    fail_closed = (
+        "CREDENTIAL_ENVELOPE_FAMILY_PREFIX" in db
+        and "Unsupported desktop credential envelope" in db
+        and "Credential protector returned an invalid envelope" in db
+    )
+    windows_proof = (
+        "desktop-dpapi-windows:" in ci
+        and "WindowsDpapiCredentialProtectorTest.kt" in " ".join(
+            p.name for p in (ROOT / "desktop" / "composeApp" / "src" / "test").rglob("*.kt")
+        )
+    )
+
+    return [
+        ("Beskyttede settings", ", ".join(f"`{name}`" for name in key_names) or "ingen"),
+        ("At-rest-beskyttelse", "Windows DPAPI (current-user)" if dpapi else "INGEN"),
+        ("Legacy-klartekst migreres før udlevering", "ja" if migration else "nej"),
+        ("Korrupt/ukendt envelope fejler lukket", "ja" if fail_closed else "nej"),
+        ("Ægte DPAPI bevist på Windows-runner", "ja" if windows_proof else "nej"),
+    ]
+
+
 def _suites() -> list[str]:
     return sorted(p.name for p in (ROOT / "tests").glob("*.py"))
 
@@ -133,6 +176,13 @@ def render() -> str:
     L.append("|---|---|")
     for k, v in _switches():
         L.append(f"| `{k}` | `{v}` |")
+    L.append("")
+    L.append("## Desktop credential storage")
+    L.append("")
+    L.append("| Property | Current implementation |")
+    L.append("|---|---|")
+    for name, value in _desktop_credentials():
+        L.append(f"| {name} | {value} |")
     L.append("")
     L.append("## Design docs and what they claim about themselves")
     L.append("")

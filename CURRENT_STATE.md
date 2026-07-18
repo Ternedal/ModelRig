@@ -6,7 +6,7 @@
 > code, so it cannot quietly become untrue. If a fact belongs here, teach
 > the generator to read it -- do not type it in.
 
-**Version:** 1.58.96
+**Version:** 1.58.97
 
 ## Tools the model can see
 
@@ -44,6 +44,16 @@ travel. They are orthogonal.
 | `KALIV_TOOL_ISOLATION` | `` |
 | `KALIV_VISION_MODEL` | `(unset)` |
 | `KALIV_WORKER_ALLOW_LAN` | `0` |
+
+## Desktop credential storage
+
+| Property | Current implementation |
+|---|---|
+| Beskyttede settings | `cloudKey`, `deviceToken` |
+| At-rest-beskyttelse | Windows DPAPI (current-user) |
+| Legacy-klartekst migreres før udlevering | ja |
+| Korrupt/ukendt envelope fejler lukket | ja |
+| Ægte DPAPI bevist på Windows-runner | ja |
 
 ## Design docs and what they claim about themselves
 

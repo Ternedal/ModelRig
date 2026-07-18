@@ -30,7 +30,10 @@ import java.sql.Statement
  * per-token) -- an in-flight reply is lost on a crash; same accepted tradeoff
  * as Android.
  */
-class DesktopChatDb(dbPath: String = defaultDbPath()) {
+class DesktopChatDb(
+    dbPath: String = defaultDbPath(),
+    private val credentialProtector: CredentialProtector = WindowsDpapiCredentialProtector(),
+) : AutoCloseable {
 
     data class ConvMeta(
         val id: Long,
@@ -233,6 +236,8 @@ class DesktopChatDb(dbPath: String = defaultDbPath()) {
     }
 
     companion object {
+        private val CREDENTIAL_SETTING_KEYS = setOf("deviceToken", "cloudKey")
+
         fun defaultDbPath(): String {
             val dir = File(System.getProperty("user.home"), ".modelrig")
             if (!dir.exists()) dir.mkdirs()
@@ -240,19 +245,67 @@ class DesktopChatDb(dbPath: String = defaultDbPath()) {
         }
     }
 
-    /** Persisted UI/connection settings (v1.35.0 desktop love): the app used
-     *  to forget EVERYTHING between launches (env vars or retyping). */
-    fun getSetting(key: String): String? = conn.prepareStatement(
-        "SELECT value FROM setting WHERE key = ?").use { st ->
+    /**
+     * Persisted UI/connection settings (v1.35.0 desktop love): the app used to
+     * forget EVERYTHING between launches (env vars or retyping).
+     *
+     * `deviceToken` and `cloudKey` deliberately stay behind this same API so all
+     * existing desktop and developer surfaces are covered. For those two keys,
+     * writes are DPAPI-protected and reads decrypt. A legacy non-empty plaintext
+     * value is encrypted in-place before it is returned. An unknown/corrupt
+     * Kaliv credential envelope fails closed and is never returned as plaintext.
+     */
+    fun getSetting(key: String): String? {
+        val raw = getRawSetting(key) ?: return null
+        if (key !in CREDENTIAL_SETTING_KEYS || raw.isEmpty()) return raw
+
+        return when {
+            credentialProtector.isProtected(raw) -> credentialProtector.unprotect(raw)
+            raw.startsWith(CREDENTIAL_ENVELOPE_FAMILY_PREFIX) ->
+                throw CredentialProtectionException("Unsupported desktop credential envelope")
+            else -> {
+                // One-time migration of databases written before DPAPI support.
+                // Encryption must succeed before the plaintext is returned.
+                putRawSetting(key, protectCredential(raw))
+                raw
+            }
+        }
+    }
+
+    fun putSetting(key: String, value: String) {
+        val stored = if (key in CREDENTIAL_SETTING_KEYS && value.isNotEmpty()) {
+            protectCredential(value)
+        } else {
+            value
+        }
+        putRawSetting(key, stored)
+    }
+
+    private fun protectCredential(value: String): String {
+        val protected = credentialProtector.protect(value)
+        if (!credentialProtector.isProtected(protected)) {
+            throw CredentialProtectionException("Credential protector returned an invalid envelope")
+        }
+        return protected
+    }
+
+    private fun getRawSetting(key: String): String? = conn.prepareStatement(
+        "SELECT value FROM setting WHERE key = ?",
+    ).use { st ->
         st.setString(1, key)
         st.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
     }
 
-    fun putSetting(key: String, value: String) {
+    private fun putRawSetting(key: String, value: String) {
         conn.prepareStatement(
             "INSERT INTO setting(key, value) VALUES(?, ?) " +
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value").use { st ->
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        ).use { st ->
             st.setString(1, key); st.setString(2, value); st.executeUpdate()
         }
+    }
+
+    override fun close() {
+        conn.close()
     }
 }
