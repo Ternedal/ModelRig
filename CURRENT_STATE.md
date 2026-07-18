@@ -133,6 +133,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_backup.py`
 - `tests/worker_browser_host.py`
 - `tests/worker_browser_use_adapter.py`
+- `tests/worker_browser_use_network_guard.py`
 - `tests/worker_browser_use_runtime_guard.py`
 - `tests/worker_build_identity.py`
 - `tests/worker_desktop_policy.py`
