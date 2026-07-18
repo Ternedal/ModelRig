@@ -1,6 +1,7 @@
 package dk.ternedal.modelrig.data
 
 import android.content.Context
+import dk.ternedal.modelrig.logic.CredentialCommit
 import dk.ternedal.modelrig.logic.StoredCredentialRead
 import dk.ternedal.modelrig.logic.StoredCredentialReader
 
@@ -47,17 +48,24 @@ class TokenStore(context: Context) {
             }
         }
 
-    var token: String?
+    val token: String?
         // Encrypted at rest like the cloud key. It grants full rig access
         // (chat, RAG, model + tool operations), so a legacy plaintext "token"
         // is migrated to "token_enc" before it is returned.
         get() = (rigCredentialStatus as? StoredCredentialRead.Ready)?.value
-        set(v) {
-            val e = prefs.edit()
-            if (v.isNullOrEmpty()) e.remove("token_enc") else e.putString("token_enc", Crypto.encrypt(v))
-            e.remove("token") // drop any legacy plaintext copy
-            e.apply()
-        }
+
+    /** Persist or remove the rig credential and report whether storage committed. */
+    fun saveRigCredential(value: String?): Boolean = CredentialCommit.save(
+        value = value,
+        encrypt = Crypto::encrypt,
+        commit = { encrypted ->
+            val editor = prefs.edit()
+            if (encrypted == null) editor.remove("token_enc")
+            else editor.putString("token_enc", encrypted)
+            editor.remove("token") // drop any legacy plaintext copy
+            editor.commit()
+        },
+    )
 
     var model: String
         get() = prefs.getString("model", "qwen2.5-coder:7b") ?: "qwen2.5-coder:7b"
@@ -72,14 +80,20 @@ class TokenStore(context: Context) {
         )
 
     /** Ollama Cloud API key, stored encrypted. Returns null unless ready. */
-    var cloudKey: String?
+    val cloudKey: String?
         get() = (cloudCredentialStatus as? StoredCredentialRead.Ready)?.value
-        set(v) {
-            val e = prefs.edit()
-            if (v.isNullOrEmpty()) e.remove("cloud_key_enc")
-            else e.putString("cloud_key_enc", Crypto.encrypt(v))
-            e.apply()
-        }
+
+    /** Persist or remove the cloud credential and report whether storage committed. */
+    fun saveCloudCredential(value: String?): Boolean = CredentialCommit.save(
+        value = value,
+        encrypt = Crypto::encrypt,
+        commit = { encrypted ->
+            val editor = prefs.edit()
+            if (encrypted == null) editor.remove("cloud_key_enc")
+            else editor.putString("cloud_key_enc", encrypted)
+            editor.commit()
+        },
+    )
 
     var cloudModel: String
         get() = prefs.getString("cloud_model", "gpt-oss:120b") ?: "gpt-oss:120b"
@@ -181,9 +195,16 @@ class TokenStore(context: Context) {
     val hasRig: Boolean get() = rigCredentialStatus is StoredCredentialRead.Ready
     val hasCloud: Boolean get() = cloudCredentialStatus is StoredCredentialRead.Ready
 
-    fun clearRig() { prefs.edit().remove("token_enc").remove("token").remove("base_url").apply() }
-    fun clearCloud() { prefs.edit().remove("cloud_key_enc").apply() }
+    fun clearRig(): Boolean = CredentialCommit.clear {
+        prefs.edit().remove("token_enc").remove("token").remove("base_url").commit()
+    }
+
+    fun clearCloud(): Boolean = CredentialCommit.clear {
+        prefs.edit().remove("cloud_key_enc").commit()
+    }
+
     fun clear() { prefs.edit().clear().apply() }
+
     companion object {
         // Kaliv's default persona. Without a system prompt an untethered instruct
         // model free-associates into an eager, emoji-drenched "helpful assistant"
