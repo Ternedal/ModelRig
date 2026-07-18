@@ -62,3 +62,5 @@ jobs:
             CURRENT_STATE.md ACTIVATION_READINESS.md
           git commit -m 'chore(release): prepare pinned HTTP transport'
           git push
+
+# Trigger commit only; file is deleted after the generated release commit lands.
