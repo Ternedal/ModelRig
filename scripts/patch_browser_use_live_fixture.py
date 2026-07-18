@@ -1,18 +1,21 @@
 from pathlib import Path
 
-path = Path("worker/app/browser_use_adapter.py")
-text = path.read_text(encoding="utf-8")
+adapter = Path("worker/app/browser_use_adapter.py").read_text(encoding="utf-8")
+for required in (
+    '"accept_downloads",',
+    '"permissions",',
+    "accept_downloads=False,",
+    "permissions=[],",
+):
+    if required not in adapter:
+        raise SystemExit(f"adapter hardening missing: {required}")
 
-old_fields = '''        "downloads_path",\n        "auto_download_pdfs",\n        "captcha_solver",\n'''
-new_fields = '''        "downloads_path",\n        "accept_downloads",\n        "permissions",\n        "auto_download_pdfs",\n        "captcha_solver",\n'''
-if text.count(old_fields) != 1:
-    raise SystemExit("expected BrowserProfile field block exactly once")
-text = text.replace(old_fields, new_fields)
-
-old_profile = '''                downloads_path=None,\n                auto_download_pdfs=False,\n                captcha_solver=False,\n'''
-new_profile = '''                downloads_path=None,\n                accept_downloads=False,\n                permissions=[],\n                auto_download_pdfs=False,\n                captcha_solver=False,\n'''
-if text.count(old_profile) != 1:
-    raise SystemExit("expected BrowserProfile construction block exactly once")
-text = text.replace(old_profile, new_profile)
-
-path.write_text(text, encoding="utf-8")
+test_path = Path("tests/worker_browser_use_runtime_guard.py")
+test = test_path.read_text(encoding="utf-8")
+old = '''check(clean_runtime.profile_kwargs["user_data_dir"] is None, "Browser Use owns profile temp path creation")\ncheck(clean_runtime.profile_kwargs["auto_download_pdfs"] is False, "automatic PDF downloads are disabled")\n'''
+new = '''check(clean_runtime.profile_kwargs["user_data_dir"] is None, "Browser Use owns profile temp path creation")\ncheck(clean_runtime.profile_kwargs["accept_downloads"] is False, "adapter refuses browser downloads")\ncheck(clean_runtime.profile_kwargs["permissions"] == [], "adapter grants no browser permissions")\ncheck(clean_runtime.profile_kwargs["auto_download_pdfs"] is False, "automatic PDF downloads are disabled")\n'''
+if old in test:
+    test = test.replace(old, new)
+elif new not in test:
+    raise SystemExit("expected adapter profile assertions exactly once")
+test_path.write_text(test, encoding="utf-8")
