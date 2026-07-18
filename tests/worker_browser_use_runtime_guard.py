@@ -96,9 +96,17 @@ class Fetcher:
 
 
 class Agent:
-    def __init__(self, download_path: Path, *, write_download: bool) -> None:
+    def __init__(
+        self,
+        download_path: Path,
+        *,
+        write_download: bool,
+        fail_close: bool = False,
+    ) -> None:
         self.download_path = download_path
         self.write_download = write_download
+        self.fail_close = fail_close
+        self.browser_session = SimpleNamespace(closed=False)
         self.closed = 0
 
     async def run(self, **kwargs):
@@ -108,16 +116,60 @@ class Agent:
 
     async def close(self):
         self.closed += 1
+        if self.fail_close:
+            raise RuntimeError("simulated browser close failure")
+        self.browser_session.closed = True
+
+
+class FakeNetworkGuard:
+    def __init__(self, browser_session, allowed_domains) -> None:
+        self.browser_session = browser_session
+        self.allowed_domains = tuple(allowed_domains)
+        self.installed = 0
+        self.health_checks = 0
+        self.closed = 0
+        self.browser_was_closed_on_close = False
+
+    async def install(self) -> None:
+        self.installed += 1
+
+    async def assert_healthy(self) -> None:
+        self.health_checks += 1
+
+    async def close(self) -> None:
+        await self.assert_healthy()
+        self.closed += 1
+        self.browser_was_closed_on_close = bool(
+            getattr(self.browser_session, "closed", False)
+        )
+
+
+class GuardFactory:
+    def __init__(self) -> None:
+        self.instances: list[FakeNetworkGuard] = []
+
+    def __call__(self, browser_session, allowed_domains):
+        guard = FakeNetworkGuard(browser_session, allowed_domains)
+        self.instances.append(guard)
+        return guard
 
 
 class Runtime:
-    def __init__(self, *, write_download: bool, unsafe_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        write_download: bool,
+        unsafe_path: Path | None = None,
+        fail_close: bool = False,
+    ) -> None:
         self.write_download = write_download
         self.unsafe_path = unsafe_path
+        self.fail_close = fail_close
         self.download_path: Path | None = None
         self.user_data_path: Path | None = None
         self.agent: Agent | None = None
         self.profile_kwargs = None
+        self.profile_object = None
         self.tools_kwargs = None
 
     def profile(self, **kwargs):
@@ -130,18 +182,38 @@ class Runtime:
         user_data_path = Path(tempfile.mkdtemp(prefix="browser-use-user-data-dir-"))
         self.download_path = download_path
         self.user_data_path = user_data_path
-        return SimpleNamespace(
+        profile_fields = dict(kwargs)
+        profile_fields.update(
             downloads_path=download_path,
             user_data_dir=user_data_path,
         )
+        profile = SimpleNamespace(**profile_fields)
+        self.profile_object = profile
+        return profile
 
     def tools(self, **kwargs):
         self.tools_kwargs = kwargs
-        return object()
+        actions = {
+            "navigate": SimpleNamespace(param_model=object),
+            "go_back": SimpleNamespace(param_model=object),
+            "wait": SimpleNamespace(param_model=object),
+            "scroll": SimpleNamespace(param_model=object),
+            "extract": SimpleNamespace(param_model=object),
+            "done": SimpleNamespace(param_model=object),
+        }
+        return SimpleNamespace(
+            registry=SimpleNamespace(
+                registry=SimpleNamespace(actions=actions),
+            )
+        )
 
     def create_agent(self, **kwargs):
         assert self.download_path is not None
-        self.agent = Agent(self.download_path, write_download=self.write_download)
+        self.agent = Agent(
+            self.download_path,
+            write_download=self.write_download,
+            fail_close=self.fail_close,
+        )
         return self.agent
 
     def bindings(self):
@@ -164,18 +236,39 @@ check(
 # Clean Browser Use temp directories are accepted and removed during cleanup.
 clean_runtime = Runtime(write_download=False)
 clean_fetcher = Fetcher()
+clean_guards = GuardFactory()
 clean_backend = BrowserUseBackend(
     fetcher=clean_fetcher,
     llm_factory=lambda: object(),
     bindings_loader=clean_runtime.bindings,
+    network_guard_factory=clean_guards,
 )
 clean_result = run(clean_backend.research(REQUEST))
 clean_download_path = clean_runtime.download_path
 clean_user_data_path = clean_runtime.user_data_path
 check(clean_result.answer == "Verified [1].", "empty download quarantine permits research")
 check(clean_fetcher.calls == 1, "clean run reaches deterministic citation re-fetch")
+check(len(clean_guards.instances) == 1, "validated runtime receives one browser request guard")
+clean_guard = clean_guards.instances[0]
+check(clean_guard.browser_session is clean_runtime.agent.browser_session, "guard binds to the agent browser session")
+check(clean_guard.allowed_domains == POLICY.allowed_domains, "guard receives the exact research allowlist")
+check(clean_guard.installed == 1, "guard installs before agent execution")
+check(clean_guard.health_checks == 1, "guard health is checked after agent execution")
 check(clean_runtime.profile_kwargs["downloads_path"] is None, "Browser Use owns download temp path creation")
 check(clean_runtime.profile_kwargs["user_data_dir"] is None, "Browser Use owns profile temp path creation")
+check(clean_runtime.profile_kwargs["proxy"] is None, "Browser Use proxy handling is explicitly disabled")
+check(clean_runtime.profile_kwargs["accept_downloads"] is False, "browser context refuses downloads")
+check(clean_runtime.profile_kwargs["permissions"] == [], "validated runtime grants no browser permissions")
+check(clean_runtime.profile_kwargs["cross_origin_iframes"] is False, "cross-origin iframe traversal is disabled")
+check(clean_runtime.profile_kwargs["use_cloud"] is False, "cloud browser fallback is disabled")
+check(clean_runtime.profile_kwargs["disable_security"] is False, "browser security remains enabled")
+check(clean_runtime.profile_kwargs["record_har_path"] is None, "HAR recording is disabled")
+check(clean_runtime.profile_kwargs["record_video_dir"] is None, "video recording is disabled")
+check(clean_runtime.profile_kwargs["traces_dir"] is None, "trace recording is disabled")
+check(
+    "--disable-popup-blocking" in clean_runtime.profile_object.ignore_default_args,
+    "validated profile restores Chromium popup blocking",
+)
 check(clean_runtime.profile_kwargs["auto_download_pdfs"] is False, "automatic PDF downloads are disabled")
 check(clean_runtime.profile_kwargs["captcha_solver"] is False, "captcha side-effect service is disabled")
 excluded = set(clean_runtime.tools_kwargs["exclude_actions"])
@@ -193,14 +286,22 @@ check(
     "ephemeral browser profile is deleted during cleanup",
 )
 check(clean_runtime.agent is not None and clean_runtime.agent.closed == 1, "agent closes before quarantine cleanup")
+check(clean_guard.closed == 1, "request guard closes during cleanup")
+check(
+    clean_guard.browser_was_closed_on_close,
+    "browser closes while request interception is still active",
+)
+check(clean_guard.health_checks == 3, "guard is checked after run and around cleanup")
 
 # Any file written to the download quarantine fails before evidence is returned.
 dirty_runtime = Runtime(write_download=True)
 dirty_fetcher = Fetcher()
+dirty_guards = GuardFactory()
 dirty_backend = BrowserUseBackend(
     fetcher=dirty_fetcher,
     llm_factory=lambda: object(),
     bindings_loader=dirty_runtime.bindings,
+    network_guard_factory=dirty_guards,
 )
 try:
     run(dirty_backend.research(REQUEST))
@@ -211,7 +312,37 @@ else:
 dirty_download_path = dirty_runtime.download_path
 dirty_user_data_path = dirty_runtime.user_data_path
 check(dirty_fetcher.calls == 0, "forbidden download stops before citation re-fetch")
+check(len(dirty_guards.instances) == 1, "dirty run is still guarded at the network boundary")
+dirty_guard = dirty_guards.instances[0]
+check(dirty_guard.installed == 1 and dirty_guard.health_checks == 1, "dirty run guard stays healthy")
 run(dirty_backend.close())
+check(dirty_guard.closed == 1, "dirty run guard closes during cleanup")
+check(dirty_guard.browser_was_closed_on_close, "dirty browser closes before interception is disabled")
+
+# If browser close fails, the request interceptor must remain armed. Disabling
+# Fetch would reopen the exact cleanup race this contract is meant to close.
+failed_close_runtime = Runtime(write_download=False, fail_close=True)
+failed_close_guards = GuardFactory()
+failed_close_backend = BrowserUseBackend(
+    fetcher=Fetcher(),
+    llm_factory=lambda: object(),
+    bindings_loader=failed_close_runtime.bindings,
+    network_guard_factory=failed_close_guards,
+)
+run(failed_close_backend.research(REQUEST))
+failed_close_guard = failed_close_guards.instances[0]
+try:
+    run(failed_close_backend.close())
+except RuntimeError as exc:
+    check("simulated browser close failure" in str(exc), "browser close failure is surfaced")
+else:
+    check(False, "browser close failure is surfaced")
+check(failed_close_guard.closed == 0, "guard remains armed when browser close is unproven")
+check(
+    not failed_close_guard.browser_was_closed_on_close,
+    "cleanup never claims the failed browser close completed",
+)
+
 check(
     dirty_download_path is not None and not dirty_download_path.exists(),
     "dirty download quarantine is deleted during cleanup",
@@ -224,10 +355,12 @@ check(
 # A validated runtime may only hand the adapter Browser Use's system-temp paths.
 unsafe_root = Path.cwd() / ".unsafe-browser-downloads"
 unsafe_runtime = Runtime(write_download=False, unsafe_path=unsafe_root)
+unsafe_guards = GuardFactory()
 unsafe_backend = BrowserUseBackend(
     fetcher=Fetcher(),
     llm_factory=lambda: object(),
     bindings_loader=unsafe_runtime.bindings,
+    network_guard_factory=unsafe_guards,
 )
 try:
     run(unsafe_backend.research(REQUEST))
@@ -240,6 +373,7 @@ finally:
     if unsafe_runtime.user_data_path is not None:
         shutil.rmtree(unsafe_runtime.user_data_path, ignore_errors=True)
 run(unsafe_backend.close())
+check(not unsafe_guards.instances, "unsafe quarantine fails before a network guard is created")
 
 check("click" in READ_ONLY_EXCLUDED_ACTIONS, "generic clicking is outside read-only v1")
 check("save_as_pdf" in READ_ONLY_EXCLUDED_ACTIONS, "PDF file creation is outside read-only v1")

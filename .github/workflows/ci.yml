@@ -17,9 +17,9 @@ jobs:
     uses: ./.github/workflows/_tests.yml
 
   # The optional browser runtime stays out of worker/requirements.txt. This job
-  # installs it in isolation and validates imports, constructor fields, the
-  # concrete action registry and Browser Use's temp-download behavior without
-  # starting Chromium, creating a model client or performing network research.
+  # validates the pinned package and locked profile, then launches real Chromium
+  # against one controlled localhost fixture. It creates no model client and
+  # performs no public-site research or product activation.
   browser-use-runtime-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -37,7 +37,7 @@ jobs:
             tail -n 120 "$log"
             exit 1
           fi
-      - name: Validate Browser Use runtime contract without launching a browser
+      - name: Validate Browser Use runtime and locked profile contract
         id: runtime-contract
         shell: bash
         run: |
@@ -48,13 +48,44 @@ jobs:
           set -e
           cat "$report"
           exit "$status"
-      - name: Upload runtime-contract failure report
-        if: failure() && steps.runtime-contract.outcome == 'failure'
+      - name: Locate controlled Chromium executable
+        id: chromium
+        shell: bash
+        run: |
+          for candidate in google-chrome-stable google-chrome chromium chromium-browser; do
+            path="$(command -v "$candidate" 2>/dev/null || true)"
+            if [ -n "$path" ]; then
+              printf "path=%s\n" "$(realpath "$path")" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "No Chrome/Chromium binary is available on the runner" >&2
+          exit 1
+      - name: Launch Chromium against controlled local fixture
+        id: live-fixture
+        shell: bash
+        env:
+          MODELRIG_BROWSER_EXECUTABLE: ${{ steps.chromium.outputs.path }}
+          MODELRIG_BROWSER_FIXTURE_REPORT: ${{ runner.temp }}/browser-use-live-fixture.json
+          BROWSER_USE_LOGGING_LEVEL: warning
+        run: |
+          report="$RUNNER_TEMP/browser-use-live-fixture.txt"
+          set +e
+          PYTHONPATH=worker python scripts/browser_use_live_fixture.py >"$report" 2>&1
+          status=$?
+          set -e
+          cat "$report"
+          exit "$status"
+      - name: Upload Browser Use contract failure reports
+        if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: browser-use-runtime-contract-failure
-          path: ${{ runner.temp }}/browser-use-runtime-contract.txt
-          if-no-files-found: error
+          name: browser-use-contract-failure
+          path: |
+            ${{ runner.temp }}/browser-use-runtime-contract.txt
+            ${{ runner.temp }}/browser-use-live-fixture.txt
+            ${{ runner.temp }}/browser-use-live-fixture.json
+          if-no-files-found: warn
           retention-days: 7
 
   # Compile and unit-test the clients on every push/PR. The release workflow
