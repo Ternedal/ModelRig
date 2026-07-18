@@ -13,7 +13,7 @@ import dk.ternedal.modelrig.ui.Agent3ReplanScreen
 import dk.ternedal.modelrig.ui.Agent3ReviewScreen
 import dk.ternedal.modelrig.ui.Agent3Screen
 import dk.ternedal.modelrig.ui.Agent3ValidationScreen
-import dk.ternedal.modelrig.ui.AppUi
+import dk.ternedal.modelrig.ui.AppEntryUi
 import dk.ternedal.modelrig.ui.ScheduleScreen
 import dk.ternedal.modelrig.ui.theme.ModelRigTheme
 
@@ -27,9 +27,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         // Explicit control-surface entries. The normal launcher sends none of
-        // these extras, so ordinary launch still gets AppUi. Scheduler is a
-        // human-facing app shortcut; Agent 3 entries remain developer-only ADB
-        // surfaces until their own readiness gates say otherwise.
+        // these extras, so ordinary launch still gets AppUi through AppEntryUi.
+        // Scheduler is a human-facing app shortcut; Agent 3 entries remain
+        // developer-only ADB surfaces until their own readiness gates say otherwise.
         val openSchedules =
             intent?.getBooleanExtra(EXTRA_SCHEDULES, false) == true ||
                 (intent?.data?.scheme == "kaliv" && intent?.data?.host == "schedules")
@@ -83,7 +83,10 @@ class MainActivity : ComponentActivity() {
                         Agent3Screen(store = store, onClose = { finish() })
                     }
                 }
-                else -> AppUi()
+                else -> {
+                    val store = remember { TokenStore(this) }
+                    AppEntryUi(store)
+                }
             }
         }
     }
