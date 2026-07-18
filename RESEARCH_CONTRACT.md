@@ -62,7 +62,7 @@ The optional adapter:
 - lives in its own exact-pinned runtime environment and is never installed by the base worker requirements; Browser Use 0.13.4 and the worker intentionally pin different Pydantic versions, so combining the environments is rejected by dependency resolution;
 - loads Browser Use lazily and fails closed on a missing version, unexpected version or incompatible Agent, BrowserProfile or Tools surface;
 - disables Browser Use telemetry, cloud sync, version checks and package logging setup before importing the runtime;
-- constructs an ephemeral headless profile with explicit domains, no imported storage state, blocked direct-IP navigation, no default extensions, downloads refused at browser-context level, zero browser permissions, no automatic PDF downloads, no cross-origin iframe traversal and no captcha solver;
+- constructs an ephemeral headless profile with explicit domains, no imported storage state, no proxy or proxy credentials, blocked direct-IP navigation, no default extensions, downloads refused at browser-context level, zero browser permissions, no automatic PDF downloads, no cross-origin iframe traversal and no captcha solver;
 - restores Chromium's popup blocker, which Browser Use disables by default;
 - removes search-engine navigation, generic clicking, form input, uploads, keyboard injection, arbitrary JavaScript evaluation, dropdown selection, PDF creation, screenshots, tab switching/closing and file read/write actions from the registry;
 - replaces Browser Use's navigation model with a current-tab-only schema where `new_tab=true` is structurally invalid;
@@ -72,7 +72,7 @@ The optional adapter:
 - bounds tracked request ids, in-flight CDP responses, error codes and blocked-URL evidence so a hostile page cannot turn the guard into unbounded memory growth;
 - supplies no credentials, sensitive data or upload paths and allows one action per bounded step;
 - adopts Browser Use's generated `browser-use-downloads-*` and `browser-use-user-data-dir-*` system-temp directories as quarantines;
-- rejects any file written to the download quarantine and deletes both download and browser-profile quarantines during cleanup;
+- rejects any file written to the download quarantine, keeps request interception active while the browser closes, then disables the guard and deletes both download and browser-profile quarantines;
 - requires structured answers with numeric citations and exact supporting URLs;
 - rejects non-web, non-allowlisted, unvisited or over-budget history and citation URLs;
 - re-fetches every unique cited URL through ModelRig's deterministic pinned fetcher;
