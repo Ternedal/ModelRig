@@ -1,0 +1,46 @@
+name: temporary-android-rig-profile-patch
+
+on:
+  push:
+    branches:
+      - agent/android-rig-profile-migration
+
+permissions:
+  contents: write
+
+jobs:
+  patch-chat-db:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: agent/android-rig-profile-migration
+      - name: Make rig-profile migrations transactional
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('android/app/src/main/java/dk/ternedal/modelrig/data/ChatDb.kt')
+          text = path.read_text(encoding='utf-8')
+
+          imports = '''import android.database.sqlite.SQLiteOpenHelper\nimport dk.ternedal.modelrig.logic.RigProfileTokenResolution\nimport dk.ternedal.modelrig.logic.RigProfileTokenResolver\n'''
+          text = text.replace('import android.database.sqlite.SQLiteOpenHelper\n', imports, 1)
+
+          marker = '    data class RigProfile(val id: Long, val name: String, val serverUrl: String, val deviceToken: String)\n'
+          replacement = marker + '''\n    private data class StoredRigProfile(\n        val id: Long,\n        val name: String,\n        val serverUrl: String,\n        val rawToken: String,\n    )\n'''
+          if marker not in text:
+              raise SystemExit('RigProfile marker not found')
+          text = text.replace(marker, replacement, 1)
+
+          start = text.index('    fun listRigProfiles(): List<RigProfile> {')
+          end = text.index('    fun deleteRigProfile(id: Long) {', start)
+          new_function = '''    fun listRigProfiles(): List<RigProfile> {\n        val db = writableDatabase\n        db.beginTransaction()\n        try {\n            val stored = mutableListOf<StoredRigProfile>()\n            db.rawQuery(\n                "SELECT id, name, server_url, device_token FROM rig_profile ORDER BY created_at DESC",\n                null,\n            ).use { c ->\n                while (c.moveToNext()) {\n                    stored.add(\n                        StoredRigProfile(\n                            id = c.getLong(0),\n                            name = c.getString(1),\n                            serverUrl = c.getString(2),\n                            rawToken = c.getString(3),\n                        ),\n                    )\n                }\n            }\n\n            val out = ArrayList<RigProfile>(stored.size)\n            for (profile in stored) {\n                when (\n                    val resolved = RigProfileTokenResolver.resolve(\n                        raw = profile.rawToken,\n                        decrypt = Crypto::decrypt,\n                        encrypt = Crypto::encrypt,\n                    )\n                ) {\n                    is RigProfileTokenResolution.Ready ->\n                        out.add(RigProfile(profile.id, profile.name, profile.serverUrl, resolved.token))\n\n                    is RigProfileTokenResolution.Migration -> {\n                        // The encrypted replacement MUST be committed before the\n                        // plaintext token can leave this method. A failed Keystore\n                        // operation or a missing row aborts and rolls back the whole\n                        // read instead of quietly using a cleartext credential.\n                        val updated = db.update(\n                            "rig_profile",\n                            ContentValues().apply { put("device_token", resolved.envelope) },\n                            "id=?",\n                            arrayOf(profile.id.toString()),\n                        )\n                        check(updated == 1) {\n                            "Rig profile ${profile.id} disappeared during credential migration"\n                        }\n                        out.add(RigProfile(profile.id, profile.name, profile.serverUrl, resolved.token))\n                    }\n\n                    RigProfileTokenResolution.Invalid ->\n                        // Corrupt/current ciphertext or an old envelope whose key\n                        // was lost is never exposed as plaintext. Keep the profile\n                        // visible so the user can remove it or pair it again.\n                        out.add(RigProfile(profile.id, profile.name, profile.serverUrl, ""))\n                }\n            }\n\n            db.setTransactionSuccessful()\n            return out\n        } finally {\n            db.endTransaction()\n        }\n    }\n\n'''
+          text = text[:start] + new_function + text[end:]
+          path.write_text(text, encoding='utf-8')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android/app/src/main/java/dk/ternedal/modelrig/data/ChatDb.kt
+          git commit -m "fix(android): commit rig profile migration before use"
+          git push origin HEAD:agent/android-rig-profile-migration
