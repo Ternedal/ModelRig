@@ -17,22 +17,46 @@ jobs:
           ref: agent/browser-use-chromium-fixture
           fetch-depth: 1
           show-progress: false
-      - name: Apply exact test and CI patch
-        run: python scripts/_apply_browser_use_contract_fixture.py
-      - name: Validate patch shape
+      - name: Apply Browser Use unit contract
         shell: bash
         run: |
-          python -m py_compile scripts/browser_use_live_fixture.py tests/worker_browser_use_adapter.py
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/worker_browser_use_adapter.py')
+          text = path.read_text(encoding='utf-8')
+          old = '\n'.join([
+              'check(recorder.profile_kwargs["block_ip_addresses"] is True, "direct IP navigation is blocked")',
+              'check(recorder.profile_kwargs["downloads_path"] is None, "downloads have no destination")',
+          ])
+          new = '\n'.join([
+              'check(recorder.profile_kwargs["block_ip_addresses"] is True, "direct IP navigation is blocked")',
+              'check(recorder.profile_kwargs["downloads_path"] is None, "download quarantine remains runtime-owned")',
+              'check(recorder.profile_kwargs["accept_downloads"] is False, "browser context refuses downloads")',
+              'check(recorder.profile_kwargs["permissions"] == [], "browser context grants no permissions")',
+              'check(recorder.profile_kwargs["cross_origin_iframes"] is False, "cross-origin iframe traversal is disabled")',
+              'check(recorder.profile_kwargs["use_cloud"] is False, "cloud browser fallback is disabled")',
+              'check(recorder.profile_kwargs["disable_security"] is False, "browser security remains enabled")',
+              'check(recorder.profile_kwargs["demo_mode"] is False, "demo overlay is disabled")',
+              'check(recorder.profile_kwargs["record_har_path"] is None, "HAR recording is disabled")',
+              'check(recorder.profile_kwargs["record_video_dir"] is None, "video recording is disabled")',
+              'check(recorder.profile_kwargs["traces_dir"] is None, "trace recording is disabled")',
+          ])
+          if text.count(old) != 1:
+              raise SystemExit(f'test patch target count is {text.count(old)}')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+      - name: Validate unit contract
+        shell: bash
+        run: |
+          python -m py_compile tests/worker_browser_use_adapter.py
           git diff --check
-          grep -q 'Launch Chromium against controlled local fixture' .github/workflows/ci.yml
           grep -q 'browser context refuses downloads' tests/worker_browser_use_adapter.py
-          test ! -e .github/workflows/apply-browser-use-contract-fixture.yml
-          test ! -e scripts/_apply_browser_use_contract_fixture.py
-      - name: Commit contract and fixture gates
+      - name: Commit unit contract
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "test(research): gate Browser Use with controlled Chromium"
+          git add tests/worker_browser_use_adapter.py
+          git commit -m "test(research): lock Browser Use profile defaults"
           git push origin HEAD:agent/browser-use-chromium-fixture
