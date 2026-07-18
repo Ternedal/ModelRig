@@ -23,6 +23,11 @@ dependencies {
     // server (no network, single file, no separate process). Version verified
     // against Maven Central 2026-07-04.
     implementation("org.xerial:sqlite-jdbc:3.49.1.0")
+    // Windows DPAPI bridge. jna-platform brings the matching core JNA artifact;
+    // no secret or encryption key is implemented in application code.
+    implementation("net.java.dev.jna:jna-platform:5.19.0")
+
+    testImplementation(kotlin("test"))
 }
 
 compose.desktop {
