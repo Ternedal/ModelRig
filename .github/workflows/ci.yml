@@ -16,6 +16,47 @@ jobs:
   test:
     uses: ./.github/workflows/_tests.yml
 
+  # The optional browser runtime stays out of worker/requirements.txt. This job
+  # installs it in isolation and validates imports, constructor fields, the
+  # concrete action registry and Browser Use's temp-download behavior without
+  # starting Chromium, creating a model client or performing network research.
+  browser-use-runtime-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install exact optional Browser Use runtime
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/browser-use-install.log"
+          if ! PIP_PROGRESS_BAR=off python -m pip install --quiet --disable-pip-version-check \
+            -r worker/requirements-browser-use.txt >"$log" 2>&1; then
+            tail -n 120 "$log"
+            exit 1
+          fi
+      - name: Validate Browser Use runtime contract without launching a browser
+        id: runtime-contract
+        shell: bash
+        run: |
+          report="$RUNNER_TEMP/browser-use-runtime-contract.txt"
+          set +e
+          PYTHONPATH=worker python scripts/browser_use_runtime_contract.py >"$report" 2>&1
+          status=$?
+          set -e
+          cat "$report"
+          exit "$status"
+      - name: Upload runtime-contract failure report
+        if: failure() && steps.runtime-contract.outcome == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-use-runtime-contract-failure
+          path: ${{ runner.temp }}/browser-use-runtime-contract.txt
+          if-no-files-found: error
+          retention-days: 7
+
   # Compile and unit-test the clients on every push/PR. The release workflow
   # builds full APK/jar artifacts, but only at tag time -- so a client that stops
   # compiling used to reach main and only fail at release. Logic that can run
