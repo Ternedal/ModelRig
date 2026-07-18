@@ -220,7 +220,17 @@ private fun CloudCard(store: TokenStore, db: ChatDb, onSaved: () -> Unit) {
                 ) { Text("Gem & brug cloud") }
                 if (configured) {
                     Spacer(Modifier.width(8.dp))
-                    TextButton(onClick = { store.clearCloud(); configured = false; key = "" }) { Text("Ryd", color = KalivTheme.colors.danger) }
+                    TextButton(
+                        onClick = {
+                            if (store.clearCloud()) {
+                                configured = false
+                                key = ""
+                                msg = null
+                            } else {
+                                msg = "Cloud-adgangen kunne ikke ryddes sikkert."
+                            }
+                        },
+                    ) { Text("Ryd", color = KalivTheme.colors.danger) }
                 }
             }
             msg?.let { Spacer(Modifier.height(6.dp)); Text(it, color = KalivTheme.colors.danger, fontSize = 12.sp) }
@@ -350,7 +360,17 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
                 ) { Text(if (busy) "Forbinder…" else "Forbind") }
                 if (connected) {
                     Spacer(Modifier.width(8.dp))
-                    TextButton(onClick = { store.clearRig(); connected = false; reachable = null }) { Text("Afbryd", color = KalivTheme.colors.danger) }
+                    TextButton(
+                        onClick = {
+                            if (store.clearRig()) {
+                                connected = false
+                                reachable = null
+                                msg = null
+                            } else {
+                                msg = "Rig-adgangen kunne ikke ryddes sikkert."
+                            }
+                        },
+                    ) { Text("Afbryd", color = KalivTheme.colors.danger) }
                 }
             }
             msg?.let { Spacer(Modifier.height(6.dp)); Text(it, color = KalivTheme.colors.danger, fontSize = 12.sp) }

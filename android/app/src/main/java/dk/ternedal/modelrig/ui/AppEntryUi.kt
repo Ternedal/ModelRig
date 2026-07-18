@@ -62,9 +62,13 @@ fun AppEntryUi(store: TokenStore) {
             invalidCloud = initialSources.cloud == CredentialCondition.INVALID,
             onContinue = { continueToApp = true },
             onClear = {
-                if (initialSources.rig == CredentialCondition.INVALID) store.clearRig()
-                if (initialSources.cloud == CredentialCondition.INVALID) store.clearCloud()
-                continueToApp = true
+                val rigCleared =
+                    initialSources.rig != CredentialCondition.INVALID || store.clearRig()
+                val cloudCleared =
+                    initialSources.cloud != CredentialCondition.INVALID || store.clearCloud()
+                val cleared = rigCleared && cloudCleared
+                if (cleared) continueToApp = true
+                cleared
             },
         )
     }
@@ -75,8 +79,9 @@ private fun CredentialRecoveryScreen(
     invalidRig: Boolean,
     invalidCloud: Boolean,
     onContinue: () -> Unit,
-    onClear: () -> Unit,
+    onClear: () -> Boolean,
 ) {
+    var clearFailed by remember { mutableStateOf(false) }
     val affected = when {
         invalidRig && invalidCloud -> "rig- og cloud-adgangen"
         invalidRig -> "rig-adgangen"
@@ -122,10 +127,18 @@ private fun CredentialRecoveryScreen(
                     }
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(
-                        onClick = onClear,
+                        onClick = { clearFailed = !onClear() },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text("Ryd gamle credentials")
+                    }
+                    if (clearFailed) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "De gamle credentials kunne ikke ryddes. Prøv igen eller overskriv dem i opsætningen.",
+                            color = KalivTheme.colors.danger,
+                            fontSize = 12.sp,
+                        )
                     }
                 }
             }

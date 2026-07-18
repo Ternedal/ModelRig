@@ -251,9 +251,17 @@ class TokenStore(context: Context) {
     val hasRig: Boolean get() = rigCredentialStatus is StoredCredentialRead.Ready
     val hasCloud: Boolean get() = cloudCredentialStatus is StoredCredentialRead.Ready
 
-    fun clearRig() { prefs.edit().remove("token_enc").remove("token").remove("base_url").apply() }
-    fun clearCloud() { prefs.edit().remove("cloud_key_enc").apply() }
-    fun clear() { prefs.edit().clear().apply() }
+    fun clearRig(): Boolean = CredentialPersistence.commit {
+        prefs.edit().remove("token_enc").remove("token").remove("base_url").commit()
+    }
+
+    fun clearCloud(): Boolean = CredentialPersistence.commit {
+        prefs.edit().remove("cloud_key_enc").commit()
+    }
+
+    fun clear(): Boolean = CredentialPersistence.commit {
+        prefs.edit().clear().commit()
+    }
     companion object {
         // Kaliv's default persona. Without a system prompt an untethered instruct
         // model free-associates into an eager, emoji-drenched "helpful assistant"
