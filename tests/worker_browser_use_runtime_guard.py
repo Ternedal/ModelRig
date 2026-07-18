@@ -176,6 +176,8 @@ check(clean_result.answer == "Verified [1].", "empty download quarantine permits
 check(clean_fetcher.calls == 1, "clean run reaches deterministic citation re-fetch")
 check(clean_runtime.profile_kwargs["downloads_path"] is None, "Browser Use owns download temp path creation")
 check(clean_runtime.profile_kwargs["user_data_dir"] is None, "Browser Use owns profile temp path creation")
+check(clean_runtime.profile_kwargs["accept_downloads"] is False, "adapter refuses browser downloads")
+check(clean_runtime.profile_kwargs["permissions"] == [], "adapter grants no browser permissions")
 check(clean_runtime.profile_kwargs["auto_download_pdfs"] is False, "automatic PDF downloads are disabled")
 check(clean_runtime.profile_kwargs["captcha_solver"] is False, "captcha side-effect service is disabled")
 excluded = set(clean_runtime.tools_kwargs["exclude_actions"])
