@@ -29,7 +29,14 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install exact optional Browser Use runtime
-        run: python -m pip install --disable-pip-version-check -r worker/requirements-browser-use.txt
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/browser-use-install.log"
+          if ! PIP_PROGRESS_BAR=off python -m pip install --quiet --disable-pip-version-check \
+            -r worker/requirements-browser-use.txt >"$log" 2>&1; then
+            tail -n 120 "$log"
+            exit 1
+          fi
       - name: Validate Browser Use runtime contract without launching a browser
         run: PYTHONPATH=worker python scripts/browser_use_runtime_contract.py
 
