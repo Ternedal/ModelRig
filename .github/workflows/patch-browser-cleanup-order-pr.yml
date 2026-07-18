@@ -1,0 +1,37 @@
+name: patch-browser-cleanup-order-pr
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'agent/browser-use-chromium-fixture'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: agent/browser-use-chromium-fixture
+          fetch-depth: 1
+          show-progress: false
+      - name: Keep request interception active until browser close
+        run: python scripts/_patch_browser_cleanup_order.py
+      - name: Validate cleanup and proxy contracts
+        shell: bash
+        run: |
+          pip install -r worker/requirements.txt --break-system-packages >/dev/null
+          python -m py_compile worker/app/browser_use_adapter.py tests/worker_browser_use_runtime_guard.py scripts/browser_use_runtime_contract.py
+          PYTHONPATH=worker python tests/worker_browser_use_runtime_guard.py
+          git diff --check
+          test ! -e scripts/_patch_browser_cleanup_order.py
+      - name: Commit cleanup ordering fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add worker/app/browser_use_adapter.py tests/worker_browser_use_runtime_guard.py scripts/browser_use_runtime_contract.py scripts/_patch_browser_cleanup_order.py
+          git commit -m "fix(research): close browser before disabling request guard"
+          git push origin HEAD:agent/browser-use-chromium-fixture
