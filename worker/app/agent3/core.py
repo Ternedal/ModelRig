@@ -5,6 +5,7 @@ import json
 import sqlite3
 import threading
 import time
+import dataclasses
 import uuid
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -141,6 +142,33 @@ class AgentStep:
     error: str | None = None
     confirmation_digest: str | None = None
     confirmation_expires_at: float | None = None
+
+    def cloned_for_retry(self) -> "AgentStep":
+        """A fresh copy of this step's PLAN, carrying every declared property.
+
+        Retry rebuilt steps by hand-listing fields to copy, in two identical
+        functions (F-715). I added `idempotent` to this dataclass and updated
+        the builder and forgot both cloners, so a replayable read came back from
+        retry as non-idempotent and blocked itself after an interruption --
+        undoing the recovery feature two commits after shipping it.
+
+        The bug is hand-listing. A copy that names the fields it keeps forgets
+        the next field added. So this copies EVERYTHING via replace, then resets
+        only what a retry must reset: a new id, no result or error, back to
+        PENDING, and no stale confirmation. Properties that describe what the
+        action IS -- risk, sensitivity, egress, idempotent, and whatever axis is
+        added next -- travel automatically, because forgetting them is the
+        failure and the default should not be the failure.
+        """
+        return dataclasses.replace(
+            self,
+            id=str(uuid.uuid4()),
+            state=StepState.PENDING,
+            result=None,
+            error=None,
+            confirmation_digest=None,
+            confirmation_expires_at=None,
+        )
 
 
 @dataclass
@@ -779,6 +807,13 @@ class Agent3Orchestrator:
                 "sensitivity": step.sensitivity.value,
                 "egress": step.egress.value,
                 "origin": step.origin,
+                # What the person confirmed must include the recovery
+                # properties, or the immutable-step contract does not cover them
+                # (F-716): a confirmed step could come back from a crash with a
+                # different idempotency than the one that was approved. Same
+                # hand-listed-fields hazard as the cloners -- when a new axis is
+                # added, this dict is one of the places that has to learn it.
+                "idempotent": step.idempotent,
                 "conversation_id": step.conversation_id,
                 "summary": step.summary,
             },

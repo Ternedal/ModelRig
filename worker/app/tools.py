@@ -308,7 +308,13 @@ class Tool:
     #
     # Defaults to False and is set to True for reads in __post_init__, because a
     # read has no side effect by definition. A WRITE has to argue for it.
-    idempotent: bool = False
+    # None means "infer from impact": a read is replayable, a write is not (see
+    # __post_init__). Set it explicitly to break that inference -- a metered,
+    # cursor-consuming, or observation-logging read is impact=read but NOT
+    # replayable, and the analysis is right that future API/MCP reads will be
+    # exactly that (F-717). It is None rather than False so the inference has a
+    # value to distinguish "unset, infer" from "deliberately not replayable".
+    idempotent: bool | None = None
     schedulable: bool = False
     # Why not, in words a human can act on. Shown instead of a bare refusal.
     unschedulable_because: str = ""
@@ -316,11 +322,14 @@ class Tool:
     def __post_init__(self) -> None:
         if self.impact is None:
             object.__setattr__(self, "impact", self.risk)
-        # A read has nothing to replay. Anything that changes the rig must say
-        # so itself -- inheriting "safe to run twice" is how a double write
-        # happens after a crash nobody was watching.
-        if self.impact == "read" and not self.idempotent:
-            object.__setattr__(self, "idempotent", True)
+        # Infer replayability from impact ONLY when the tool did not decide for
+        # itself. Today's reads are pure -- rig_status, list_models -- so read
+        # implies replayable, and a write must argue for it. But the inference
+        # is not a law: a future metered or cursor-consuming read declares
+        # idempotent=False explicitly, and that declaration wins (F-717). None
+        # means "I did not say, infer for me"; a real bool means "I said".
+        if self.idempotent is None:
+            object.__setattr__(self, "idempotent", self.impact == "read")
         # A destructive or administrative action cannot be scheduled. This is
         # not a policy check that someone remembers to run -- it is impossible
         # to construct the contradiction, so a future tool cannot be added

@@ -391,5 +391,68 @@ for _tool, _expect in (("rig_status", True), ("note_append", False)):
                f"step says {_built.idempotent} -- the registry's answer is not reaching "
                "recovery")
 
+# --- retry must not drop what an action IS (F-715, F-716, F-717) ------------
+#
+# I added idempotent to AgentStep and forgot both _clone_steps functions, so a
+# replayable read came back from retry as non-idempotent and blocked itself.
+# The bug is hand-listing fields to copy: a copy that names what it keeps
+# forgets the next field added. cloned_for_retry copies everything and resets
+# only what a retry resets.
+
+from app.agent3.core import AgentStep as _AS, StepState as _SS  # noqa: E402
+
+_orig = _AS(tool="rig_status", args={"a": 1}, risk=RiskClass.READ,
+            sensitivity=Sensitivity.OPERATIONAL, idempotent=True,
+            state=_SS.SUCCEEDED, result="stale", error="old")
+_clone = _orig.cloned_for_retry()
+
+check(_clone.idempotent is True,
+      "retry keeps idempotent -- a replayable read stays replayable, instead of "
+      "blocking itself after an interruption")
+check(_clone.risk == _orig.risk and _clone.sensitivity == _orig.sensitivity,
+      "retry keeps the other declared properties too")
+check(_clone.state == _SS.PENDING and _clone.result is None and _clone.error is None,
+      "and it resets what a retry must reset: state, result, error")
+check(_clone.id != _orig.id, "with a fresh id, so the two are distinguishable")
+
+# The regression guard that actually matters: clone must survive a NEW field
+# nobody has added yet. Hand-listing passes every test until the day someone
+# adds a field and forgets this function -- which is exactly what happened. So
+# assert against the dataclass's own field list, not a fixed set.
+import dataclasses as _dc  # noqa: E402
+
+_plan_fields = {f.name for f in _dc.fields(_AS)} - {
+    # The only fields a retry is allowed to change.
+    "id", "state", "result", "error",
+    "confirmation_digest", "confirmation_expires_at",
+}
+for _name in _plan_fields:
+    check(getattr(_clone, _name) == getattr(_orig, _name),
+          f"retry preserves '{_name}' -- every plan property travels, so adding "
+          "an axis later cannot silently drop it")
+
+# F-716: the digest binds idempotency, so a confirmed step cannot come back with
+# a different one than was approved.
+from app.agent3.core import Agent3Orchestrator as _Orch, AgentRunStore as _St  # noqa: E402
+
+_st = _St(os.path.join(_tmp, "digest.db"))
+_orch = _Orch(_st, lambda step: "ok", max_steps=4)
+_d1 = _Orch._digest(_orig)
+_d2 = _Orch._digest(_dc.replace(_orig, idempotent=False))
+check(_d1 != _d2,
+      "the confirmation digest changes when idempotency changes -- what the "
+      "person approved covers whether it may be replayed")
+
+# F-717: read implies replayable, but a tool may say otherwise.
+from app.tools import Tool as _Tool  # noqa: E402
+
+_metered = _Tool(name="metered", risk="read", description="x", impact="read",
+                 idempotent=False)
+check(_metered.idempotent is False,
+      "a read can declare itself non-replayable -- the inference is a default, "
+      "not a law, so a future metered read is not silently retried")
+check(V2.REGISTRY["rig_status"].idempotent is True,
+      "and a pure read still infers replayable, so nothing regressed today")
+
 print(f"\n===== AGENT3 RISK PARITY: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

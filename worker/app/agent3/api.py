@@ -107,19 +107,10 @@ def _run_payload(run: AgentRun) -> dict[str, Any]:
 
 def _clone_steps(run: AgentRun) -> list[AgentStep]:
     """Clone the validated original plan with fresh step IDs and no old results."""
-    return [
-        AgentStep(
-            tool=step.tool,
-            args=dict(step.args),
-            risk=step.risk,
-            sensitivity=step.sensitivity,
-            egress=step.egress,
-            origin=step.origin,
-            conversation_id=step.conversation_id,
-            summary=step.summary,
-        )
-        for step in run.steps
-    ]
+    # Clone via the step itself, which keeps every declared property. Listing
+    # fields here is how retry dropped idempotent (F-715): a copy that names
+    # what it keeps forgets the next field added.
+    return [step.cloned_for_retry() for step in run.steps]
 
 
 def _default_caps(req: StartReq | RetryReq, adapter: V2ToolAdapter) -> CapabilitySnapshot:
