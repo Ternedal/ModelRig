@@ -24,6 +24,11 @@ class BrowserUseNetworkGuardError(RuntimeError):
 
 _INTERNAL_SCHEMES = frozenset({"about", "blob", "chrome", "data"})
 _LOCAL_SUFFIXES = (".localhost", ".local", ".internal", ".home.arpa")
+_MAX_TRACKED_REQUESTS = 4_096
+_MAX_IN_FLIGHT_RESPONSES = 512
+_MAX_BLOCKED_URL_EVIDENCE = 256
+_MAX_URL_EVIDENCE_CHARS = 2_048
+_MAX_ERROR_CODES = 32
 
 
 def _canonical_host(host: str) -> str:
@@ -114,14 +119,33 @@ class BrowserUseNetworkGuard:
         self.allowed_domains = domains
         self.allow_localhost = allow_localhost
         self.blocked_urls: list[str] = []
+        self.blocked_urls_truncated = False
         self._client: Any = None
         self._session_id: Any = None
         self._installed = False
         self._seen: set[tuple[str, str]] = set()
+        self._request_budget_exceeded = False
         self._tasks: set[asyncio.Task[Any]] = set()
         self._errors: list[str] = []
 
+    def _record_error(self, code: str) -> None:
+        if len(self._errors) < _MAX_ERROR_CODES:
+            self._errors.append(code)
+
+    def _record_blocked_url(self, url: Any) -> None:
+        if len(self.blocked_urls) >= _MAX_BLOCKED_URL_EVIDENCE:
+            self.blocked_urls_truncated = True
+            return
+        value = str(url)
+        self.blocked_urls.append(value[:_MAX_URL_EVIDENCE_CHARS])
+
     def _track(self, coro: Any) -> None:
+        if len(self._tasks) >= _MAX_IN_FLIGHT_RESPONSES:
+            self._record_error("response_task_budget_exceeded")
+            close = getattr(coro, "close", None)
+            if callable(close):
+                close()
+            return
         task = asyncio.create_task(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -131,21 +155,29 @@ class BrowserUseNetworkGuard:
         request = event.get("request") or {}
         url = request.get("url") or ""
         if not request_id:
-            self._errors.append("missing_request_id")
+            self._record_error("missing_request_id")
             return
 
         effective_session = session_id or self._session_id
         key = (str(effective_session or ""), str(request_id))
         if key in self._seen:
             return
-        self._seen.add(key)
-        allowed = browser_request_allowed(
-            url,
-            self.allowed_domains,
-            allow_localhost=self.allow_localhost,
+        if len(self._seen) >= _MAX_TRACKED_REQUESTS:
+            self._request_budget_exceeded = True
+            self._record_error("request_budget_exceeded")
+        else:
+            self._seen.add(key)
+
+        allowed = (
+            not self._request_budget_exceeded
+            and browser_request_allowed(
+                url,
+                self.allowed_domains,
+                allow_localhost=self.allow_localhost,
+            )
         )
         if not allowed:
-            self.blocked_urls.append(url)
+            self._record_blocked_url(url)
 
         async def respond() -> None:
             try:
@@ -162,8 +194,8 @@ class BrowserUseNetworkGuard:
                         },
                         session_id=effective_session,
                     )
-            except Exception as exc:  # fail closed: a paused request never gets a permissive fallback
-                self._errors.append(type(exc).__name__)
+            except Exception as exc:  # A paused request never gets a permissive fallback.
+                self._record_error(type(exc).__name__)
 
         self._track(respond())
 
@@ -205,21 +237,31 @@ class BrowserUseNetworkGuard:
             ) from exc
 
     async def assert_healthy(self) -> None:
+        for _ in range(4):
+            tasks = tuple(self._tasks)
+            if not tasks:
+                break
+            await asyncio.gather(*tasks, return_exceptions=True)
         if self._tasks:
-            await asyncio.gather(*tuple(self._tasks), return_exceptions=True)
+            self._record_error("response_tasks_did_not_settle")
         if self._errors:
             raise BrowserUseNetworkGuardError(
                 "browser request guard failed while handling a request"
             )
 
     async def close(self) -> None:
-        await self.assert_healthy()
-        if not self._installed:
-            return
-        self._installed = False
+        health_error: BrowserUseNetworkGuardError | None = None
         try:
-            await self._client.send.Fetch.disable(session_id=self._session_id)
-        except Exception:
-            # The browser may already be gone. Disabling is hygiene; the browser
-            # process ending is the actual security boundary.
-            return
+            await self.assert_healthy()
+        except BrowserUseNetworkGuardError as exc:
+            health_error = exc
+        if self._installed:
+            self._installed = False
+            try:
+                await self._client.send.Fetch.disable(session_id=self._session_id)
+            except Exception:
+                # The browser may already be gone. Disabling is hygiene; ending
+                # the browser process is the final security boundary.
+                pass
+        if health_error is not None:
+            raise health_error
