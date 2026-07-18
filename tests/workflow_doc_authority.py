@@ -33,7 +33,7 @@ def check(cond, name):
         print(f"  FAIL: {name}")
 
 
-HANDWRITTEN = ["HANDOFF.md", "ROADMAP.md", "SECURITY.md", "STATUS.md"]
+HANDWRITTEN = ["HANDOFF.md", "ROADMAP.md", "SECURITY.md", "STATUS.md", "BACKLOG.md"]
 GENERATED = ["CURRENT_STATE.md", "ACTIVATION_READINESS.md"]
 
 # A version claim in a header: "**Version:** v1.58.52". Distinct from history.

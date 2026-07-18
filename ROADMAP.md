@@ -29,6 +29,39 @@
 
 ---
 
+## Retning — vedtaget 18/7-2026 (afløser Now/Next/Later nedenfor)
+
+Den strategiske analyse (1.58.107) fandt kerneproblemet: en **hardening-treadmill**
+hvor evidens er code-bound, så hver mikrorelease ugyldiggør den validering ingen
+endnu har kørt. Modenheden siger det med to tal — sikkerhedsarkitektur 8.6/10,
+fysisk bevis 3.2/10. Al maskineriet er bygget omkring noget der aldrig er trykket
+på. Retningen herfra er derfor **bevis og promotion, ikke mere bred kode**, i denne
+faste rækkefølge. (Dette er en plan; hvor tingene faktisk *er*, står i
+`CURRENT_STATE.md`, ikke her.)
+
+1. **Prove** — frys en kandidat, kør preflight, kør den fulde fysiske
+   appliance-validering (Agent 3 + scheduler + Ollama + RAG + Windows + Tailscale +
+   klient), og bevis reboot/supervisor/updater/rollback. Frys lokal model-eval-,
+   voice- og RAG-baselines. **Intet promoveres før dette er grønt.** (T-004→T-007)
+2. **Scheduler** — gør execution-truth durable: occurrence-ledger, atomisk
+   claim+budget, bind job/audit/outcome/recovery, grant-revision/revoke/overlap,
+   fault-injection + readiness-gate. Så fysisk read + `note_append`-pilot.
+   (T-010→T-019)
+3. **Agent 3-pilot** — read-only developer-pilot med telemetry og instant fallback,
+   promotion-gate + normal task-UI, derefter append-only write-pilot. Mål task
+   success frem for mere dormant hardening. (T-020→T-023)
+4. **Capabilities** — canonical CapabilityDescriptor, egress-beslutning, og så
+   10–15 konkrete Anders-workflows: web/research med citations, scoped files,
+   GitHub, connectors, RigGate. Shell/computer-use sidst, efter I0b-isolation er
+   bevist. (T-030→T-038)
+5. **Product** — Kaliv Control Center: én flade for health, routing, permissions,
+   jobs, schedules og audit. Voice- og RAG-kvalitet målt og optimeret. (T-040→T-044)
+
+Målet efter sekvensen er ikke flere features, men **10–15 workflows der faktisk
+bliver afsluttet stabilt af Kaliv**. Den fulde, prioriterede nedbrydning ligger i
+[`BACKLOG.md`](BACKLOG.md).
+
+---
 ## Vision
 
 Lokal AI-platform der giver en Claude-lignende oplevelse med lokale open source-modeller
