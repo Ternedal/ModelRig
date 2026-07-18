@@ -62,6 +62,35 @@ Det er hele pointen med endpointet: du skal ikke gætte hvilken del der er nede.
 
 ---
 
+## 1.5 Preflight før den fysiske validering
+
+**Gør:** før du kører selve valideringen (som er tung og forudsætter at *hele*
+riggen er oppe korrekt), kør denne — den tjekker hvert led uafhængigt og siger
+præcis hvad der mangler, uden at ændre noget:
+
+```cmd
+python scripts\rig_preflight.py
+```
+
+**Bør se:** en linje pr. afhængighed — token, planner-model, backend på :8080,
+worker på :8099, Agent 3-status, `code_sha256`, og workerens egen rapport-view —
+og til sidst enten:
+- `READY TO VALIDATE` (evt. med et par `WARN` om at der ikke er nogen rapport
+  endnu — det er den normale tilstand *før* første kørsel), eller
+- `ALREADY VALIDATED` hvis en accepteret rapport allerede findes.
+
+**Fejler noget →** hver `FAIL` har en `->`-linje med præcis hvad du gør. Den
+hyppigste er at workeren blev startet **uden** `KALIV_AGENT3_VALIDATION_REPORT`:
+sæt variablen, genstart workeren, kør preflight igen. Pointen med preflight er at
+du bruger din rig-tid på at *køre* valideringen én gang, ikke på at fejlsøge den.
+
+Når preflight er grøn, kør den rigtige validering:
+```cmd
+powershell -File scripts\run-agent3-rig-validation.ps1
+```
+
+---
+
 ## 2. Kold-start af PATH-fixet (v1.12.3)
 
 Den fejl med længst historik i projektet: cuBLAS/CTranslate2 fandt ikke sine
