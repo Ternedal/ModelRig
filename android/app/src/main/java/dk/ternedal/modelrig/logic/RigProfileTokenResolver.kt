@@ -5,9 +5,10 @@ package dk.ternedal.modelrig.logic
  * the Android Keystore.
  *
  * A migration is deliberately returned as a separate result: the caller MUST
- * persist [Migration.envelope] successfully before exposing [Migration.token]
- * to the rest of the application. This prevents a legacy plaintext credential
- * from being used while its at-rest upgrade quietly failed.
+ * persist [RigProfileTokenResolution.Migration.envelope] successfully before
+ * exposing [RigProfileTokenResolution.Migration.token] to the rest of the
+ * application. This prevents a legacy plaintext credential from being used
+ * while its at-rest upgrade quietly failed.
  */
 sealed interface RigProfileTokenResolution {
     data class Ready(val token: String) : RigProfileTokenResolution
@@ -34,15 +35,17 @@ object RigProfileTokenResolver {
                 envelope = requireEnvelope(encrypt(raw)),
             )
 
-        StoredTokenForm.OLD_FORMAT_CIPHERTEXT -> {
-            val token = runCatching { decrypt(raw) }.getOrElse {
-                return RigProfileTokenResolution.Invalid
-            }
-            RigProfileTokenResolution.Migration(
-                token = token,
-                envelope = requireEnvelope(encrypt(token)),
-            )
-        }
+        StoredTokenForm.OLD_FORMAT_CIPHERTEXT ->
+            runCatching { decrypt(raw) }
+                .fold(
+                    onSuccess = { token ->
+                        RigProfileTokenResolution.Migration(
+                            token = token,
+                            envelope = requireEnvelope(encrypt(token)),
+                        )
+                    },
+                    onFailure = { RigProfileTokenResolution.Invalid },
+                )
     }
 
     private fun requireEnvelope(value: String): String {
