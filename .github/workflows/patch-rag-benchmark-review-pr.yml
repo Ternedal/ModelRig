@@ -20,8 +20,8 @@ jobs:
       - name: Stop on an already captured diagnostic
         shell: bash
         run: |
-          if [ -f validation/rag-review-failure.txt ]; then
-            cat validation/rag-review-failure.txt
+          if [ -f RAG_REVIEW_FAILURE.txt ]; then
+            cat RAG_REVIEW_FAILURE.txt
             exit 1
           fi
       - name: Apply final benchmark review findings
@@ -38,12 +38,11 @@ jobs:
           status=$?
           set -e
           if [ "$status" -ne 0 ]; then
-            mkdir -p validation
-            tail -n 120 "$log" > validation/rag-review-failure.txt
-            cat validation/rag-review-failure.txt
+            tail -n 120 "$log" > RAG_REVIEW_FAILURE.txt
+            cat RAG_REVIEW_FAILURE.txt
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add validation/rag-review-failure.txt
+            git add RAG_REVIEW_FAILURE.txt
             git commit -m "chore: capture RAG review test failure"
             git push origin HEAD:agent/rag-benchmark-harness
             exit "$status"
