@@ -162,5 +162,6 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_dep_pins.py`
 - `tests/workflow_doc_authority.py`
 - `tests/workflow_release.py`
+- `tests/workflow_rig_preflight.py`
 - `tests/workflow_test_coverage.py`
 - `tests/workflow_worker_entrypoints.py`
