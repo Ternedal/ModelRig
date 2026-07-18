@@ -65,6 +65,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.desktop.data.DesktopChatDb
+import dk.ternedal.modelrig.desktop.data.DesktopSettingPersistence
+import dk.ternedal.modelrig.desktop.data.DesktopSettingSaveResult
 import dk.ternedal.modelrig.desktop.net.ChatMessage
 import dk.ternedal.modelrig.desktop.net.ChatResult
 import dk.ternedal.modelrig.desktop.net.ChatRouter
@@ -145,9 +147,19 @@ fun App() {
         var auditRows by remember { mutableStateOf(listOf<AuditEntry>()) }
         var auditError by remember { mutableStateOf<String?>(null) }
         var pairStatus by remember { mutableStateOf<String?>(null) }
-        fun persist(key: String, value: String) {
-            try { db.putSetting(key, value) } catch (_: Exception) {}
-        }
+        var settingsError by remember { mutableStateOf<String?>(null) }
+        fun persist(key: String, value: String, onSaved: () -> Unit): Boolean =
+            when (val result = DesktopSettingPersistence.save(key, value, db::putSetting)) {
+                DesktopSettingSaveResult.Saved -> {
+                    settingsError = null
+                    onSaved()
+                    true
+                }
+                is DesktopSettingSaveResult.Failed -> {
+                    settingsError = result.userMessage
+                    false
+                }
+            }
 
         val messages = remember { mutableStateListOf<UiMessage>() }
         var input by remember { mutableStateOf("") }
@@ -373,7 +385,7 @@ fun App() {
                                         color = if (m == localModel) KalivTheme.colors.Signal else KalivTheme.colors.TextHigh,
                                     )
                                 },
-                                onClick = { localModel = m; persist("localModel", m); modelMenuOpen = false },
+                                onClick = { persist("localModel", m) { localModel = m }; modelMenuOpen = false },
                             )
                         }
                     }
@@ -403,17 +415,18 @@ fun App() {
                     if (toolsMode && toolsReady) "Tools: Til" else "Tools: Fra",
                     active = toolsMode && toolsReady, enabled = toolsReady, filled = false,
                 ) {
-                    toolsMode = !toolsMode; persist("toolsMode", toolsMode.toString())
+                    val next = !toolsMode; persist("toolsMode", next.toString()) { toolsMode = next }
                 }
                 Spacer(Modifier.weight(1f))
                 ToolbarChip("Handlingslog", filled = false) { showAudit = true }
                 Spacer(Modifier.width(8.dp))
                 ToolbarChip(if (darkMode) "Lys tilstand" else "M\u00f8rk tilstand", filled = false) {
-                    darkMode = !darkMode; persist("darkMode", darkMode.toString())
+                    val next = !darkMode; persist("darkMode", next.toString()) { darkMode = next }
                 }
             }
             modelError?.let { Text("Modeller: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
             ragError?.let { Text("RAG-kilder: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
+            settingsError?.let { Text("Indstillinger: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
             if (!toolsReady) {
                 Text(
                     "Tools kr\u00e6ver backend-sti (/api/v1/\u2026) og parring \u2014 se \u2699 Indstillinger",
@@ -457,15 +470,15 @@ fun App() {
                     }
                     if (showSettings) {
                         SettingsCard(
-                            localUrl, { localUrl = it; persist("localUrl", it) },
-                            localPath, { localPath = it; persist("localPath", it) },
-                            localModel, { localModel = it; persist("localModel", it) },
-                            deviceToken, { deviceToken = it; persist("deviceToken", it) },
-                            localSystem, { localSystem = it; persist("localSystem", it) },
-                            cloudKey, { cloudKey = it; persist("cloudKey", it) },
-                            cloudModel, { cloudModel = it; persist("cloudModel", it) },
-                            cloudSystem, { cloudSystem = it; persist("cloudSystem", it) },
-                            preferLocal, { preferLocal = it; persist("preferLocal", it.toString()) },
+                            localUrl, { value -> persist("localUrl", value) { localUrl = value } },
+                            localPath, { value -> persist("localPath", value) { localPath = value } },
+                            localModel, { value -> persist("localModel", value) { localModel = value } },
+                            deviceToken, { value -> persist("deviceToken", value) { deviceToken = value } },
+                            localSystem, { value -> persist("localSystem", value) { localSystem = value } },
+                            cloudKey, { value -> persist("cloudKey", value) { cloudKey = value } },
+                            cloudModel, { value -> persist("cloudModel", value) { cloudModel = value } },
+                            cloudSystem, { value -> persist("cloudSystem", value) { cloudSystem = value } },
+                            preferLocal, { value -> persist("preferLocal", value.toString()) { preferLocal = value } },
                             db,
                             onPair = {
                                 pairStatus = "parrer…"
@@ -473,9 +486,12 @@ fun App() {
                                     val res = withContext(Dispatchers.IO) {
                                         runCatching { ToolsClient(localUrl, null).pair("Kaliv Desktop") }
                                     }
-                                    res.onSuccess {
-                                        deviceToken = it; persist("deviceToken", it)
-                                        pairStatus = "Parret ✓ — token gemt"
+                                    res.onSuccess { token ->
+                                        pairStatus = if (persist("deviceToken", token) { deviceToken = token }) {
+                                            "Parret ✓ — token gemt"
+                                        } else {
+                                            "Parret, men tokenet kunne ikke gemmes sikkert"
+                                        }
                                     }.onFailure {
                                         pairStatus = "Parring fejlede: ${apiErrorHint(it.message)}"
                                     }
