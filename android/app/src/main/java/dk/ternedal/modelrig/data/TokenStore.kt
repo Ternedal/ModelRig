@@ -1,14 +1,14 @@
 package dk.ternedal.modelrig.data
 
 import android.content.Context
+import dk.ternedal.modelrig.logic.StoredCredentialRead
+import dk.ternedal.modelrig.logic.StoredCredentialReader
 
 /**
  * Local settings storage.
  *
- * - Rig token / baseUrl / model: plain SharedPreferences. Acceptable for a
- *   LAN-only device token (low value). Harden with DataStore + Keystore later.
- * - Cloud API key: encrypted at rest via the AndroidKeystore (see Crypto) — it
- *   can cost real money if leaked, so it gets stronger protection than the token.
+ * Non-secret settings live in private SharedPreferences. Rig and cloud
+ * credentials are encrypted at rest with AndroidKeyStore-backed AES-GCM.
  */
 class TokenStore(context: Context) {
     private val prefs = context.getSharedPreferences("modelrig", Context.MODE_PRIVATE)
@@ -18,15 +18,40 @@ class TokenStore(context: Context) {
         get() = prefs.getString("base_url", null)
         set(v) { prefs.edit().putString("base_url", v).apply() }
 
+    /**
+     * Explicit state for the stored rig credential.
+     *
+     * `Invalid` means ciphertext exists but cannot be decrypted with the current
+     * Keystore. That is different from not being paired and must fail closed.
+     */
+    val rigCredentialStatus: StoredCredentialRead
+        get() {
+            prefs.getString("token_enc", null)?.let { encrypted ->
+                return StoredCredentialReader.read(encrypted, Crypto::decrypt)
+            }
+
+            val legacy = prefs.getString("token", null)
+                ?: return StoredCredentialRead.Missing
+            if (legacy.isEmpty()) return StoredCredentialRead.Missing
+
+            return try {
+                val encrypted = Crypto.encrypt(legacy)
+                val saved = prefs.edit()
+                    .putString("token_enc", encrypted)
+                    .remove("token")
+                    .commit()
+                if (saved) StoredCredentialRead.Ready(legacy)
+                else StoredCredentialRead.Invalid
+            } catch (_: Exception) {
+                StoredCredentialRead.Invalid
+            }
+        }
+
     var token: String?
         // Encrypted at rest like the cloud key. It grants full rig access
-        // (chat, RAG, model + tool operations), so "low value" was wrong. A
-        // legacy plaintext "token" is migrated to "token_enc" on first read/write.
-        get() =
-            prefs.getString("token_enc", null)?.let { runCatching { Crypto.decrypt(it) }.getOrNull() }
-                ?: prefs.getString("token", null)?.also { legacy ->
-                    prefs.edit().putString("token_enc", Crypto.encrypt(legacy)).remove("token").apply()
-                }
+        // (chat, RAG, model + tool operations), so a legacy plaintext "token"
+        // is migrated to "token_enc" before it is returned.
+        get() = (rigCredentialStatus as? StoredCredentialRead.Ready)?.value
         set(v) {
             val e = prefs.edit()
             if (v.isNullOrEmpty()) e.remove("token_enc") else e.putString("token_enc", Crypto.encrypt(v))
@@ -39,9 +64,16 @@ class TokenStore(context: Context) {
         set(v) { prefs.edit().putString("model", v).apply() }
 
     // ---- cloud (Ollama Cloud, no rig needed) ----
-    /** Ollama Cloud API key, stored encrypted. Returns null if unset or undecryptable. */
+    /** Explicit state for the encrypted Ollama Cloud API key. */
+    val cloudCredentialStatus: StoredCredentialRead
+        get() = StoredCredentialReader.read(
+            prefs.getString("cloud_key_enc", null),
+            Crypto::decrypt,
+        )
+
+    /** Ollama Cloud API key, stored encrypted. Returns null unless ready. */
     var cloudKey: String?
-        get() = prefs.getString("cloud_key_enc", null)?.let { runCatching { Crypto.decrypt(it) }.getOrNull() }
+        get() = (cloudCredentialStatus as? StoredCredentialRead.Ready)?.value
         set(v) {
             val e = prefs.edit()
             if (v.isNullOrEmpty()) e.remove("cloud_key_enc")
@@ -146,8 +178,8 @@ class TokenStore(context: Context) {
         get() = prefs.getString("cloud_system", DEFAULT_SYSTEM)?.ifBlank { DEFAULT_SYSTEM } ?: DEFAULT_SYSTEM
         set(v) { prefs.edit().putString("cloud_system", v).apply() }
 
-    val hasRig: Boolean get() = prefs.getString("token_enc", null) != null || prefs.getString("token", null) != null
-    val hasCloud: Boolean get() = prefs.getString("cloud_key_enc", null) != null
+    val hasRig: Boolean get() = rigCredentialStatus is StoredCredentialRead.Ready
+    val hasCloud: Boolean get() = cloudCredentialStatus is StoredCredentialRead.Ready
 
     fun clearRig() { prefs.edit().remove("token_enc").remove("token").remove("base_url").apply() }
     fun clearCloud() { prefs.edit().remove("cloud_key_enc").apply() }
