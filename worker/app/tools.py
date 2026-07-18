@@ -962,9 +962,24 @@ class ToolGate:
         return self.enabled and name not in self.disabled_tools
 
     def list_tools(self) -> list[dict]:
+        # The registry owns the decision axes; a client that cannot see them
+        # cannot filter its own UI, so the Android schedule picker showed
+        # delete_model as pickable and offered it, hitting a safe-but-confusing
+        # preview refusal (F-823). These are the same axes CURRENT_STATE surfaces
+        # (F-718); surfacing them here lets a client mark or hide what it must
+        # not offer, instead of guessing from `risk` alone. Pure exposure of
+        # existing metadata -- no new decision is made here.
         return [
             {"name": t.name, "risk": t.risk, "description": t.description,
-             "params": t.params, "enabled": self.is_enabled(t.name)}
+             "params": t.params, "enabled": self.is_enabled(t.name),
+             "impact": t.impact,
+             "schedulable": t.schedulable,
+             # Why a client should not offer this on a schedule, in words, so the
+             # picker can show the reason rather than a bare refusal after the tap.
+             "unschedulable_reason": (
+                 "" if t.schedulable else t.unschedulable_because),
+             "cancellation": t.cancellation,
+             "idempotent": t.idempotent}
             for t in REGISTRY.values()
         ]
 

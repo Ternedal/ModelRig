@@ -731,5 +731,53 @@ check(not _ssrf_rejected("http://192.168.1.10:11434"),
       "T32: SSRF -- KALIV_CLOUD_ALLOW_PRIVATE=1 permits a private upstream")
 os.environ.pop("KALIV_CLOUD_ALLOW_PRIVATE", None)
 
+# --- /tools surfaces the axes a client needs to filter its own UI (F-823) ---
+#
+# The registry owns schedulable/impact/cancellation/idempotent; a client that
+# only sees `risk` cannot tell that delete_model must not be offered on a
+# schedule, so the Android picker showed it and offered it, hitting a
+# safe-but-confusing preview refusal. list_tools now carries the canonical axes,
+# the same ones CURRENT_STATE surfaces -- pure exposure, no new decision.
+
+_rows = {r["name"]: r for r in T.GATE.list_tools()}
+
+for _axis in ("impact", "schedulable", "cancellation", "idempotent"):
+    check(all(_axis in r for r in _rows.values()),
+          f"every tool in /tools carries `{_axis}`, so a client can filter on it")
+
+# The dangerous tools must be legible as unschedulable FROM THE PAYLOAD, with a
+# reason a picker can show instead of a bare refusal after the tap.
+check(_rows["delete_model"].get("schedulable") is False
+      and _rows["delete_model"].get("unschedulable_reason"),
+      "delete_model is marked unschedulable with a human reason, so the picker "
+      "can hide it or explain why -- not offer it and refuse after the tap")
+check(_rows["pull_model"].get("schedulable") is False
+      and _rows["pull_model"].get("unschedulable_reason"),
+      "pull_model too carries its reason")
+
+# A schedulable tool must NOT carry a spurious reason, or the picker would show
+# a reason next to something it is allowed to offer.
+check(_rows["rig_status"].get("schedulable") is True
+      and _rows["rig_status"].get("unschedulable_reason", "x") == "",
+      "a schedulable read carries no unschedulable reason -- the reason is only "
+      "present when it means something")
+
+# The axes must match the registry, not be a hand-copied second source that can
+# drift (the F-715 hazard).
+for _name, _row in _rows.items():
+    _tool = T.REGISTRY[_name]
+    # Direct [] access: a missing axis is a KeyError -> hard fail, so this also
+    # guards presence, not just agreement.
+    try:
+        _match = (_row["schedulable"] == _tool.schedulable
+                  and _row["impact"] == _tool.impact
+                  and _row["cancellation"] == _tool.cancellation
+                  and _row["idempotent"] == _tool.idempotent)
+    except KeyError as _exc:
+        _match = False
+        _name += f" (missing {_exc})"
+    check(_match,
+          f"/tools row for {_name} matches the registry -- not a copy that drifts")
+
 print(f"\n===== TOOLS: {passed} passed, {failed} failed =====")
 sys.exit(0 if failed == 0 else 1)
