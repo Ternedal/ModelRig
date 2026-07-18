@@ -17,12 +17,12 @@ jobs:
     uses: ./.github/workflows/_tests.yml
 
   # The optional browser runtime stays out of worker/requirements.txt. This job
-  # installs it in isolation and validates imports, constructor fields, the
-  # concrete action registry and Browser Use's temp-download behavior without
-  # starting Chromium, creating a model client or performing network research.
+  # installs it in isolation, validates the installed package surface, then
+  # launches the runner's local Chrome only against a loopback fixture. It does
+  # not create a model client or perform public-network research.
   browser-use-runtime-contract:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -37,7 +37,7 @@ jobs:
             tail -n 120 "$log"
             exit 1
           fi
-      - name: Validate Browser Use runtime contract without launching a browser
+      - name: Validate Browser Use installed-runtime contract
         id: runtime-contract
         shell: bash
         run: |
@@ -48,12 +48,31 @@ jobs:
           set -e
           cat "$report"
           exit "$status"
-      - name: Upload runtime-contract failure report
-        if: failure() && steps.runtime-contract.outcome == 'failure'
+      - name: Validate live BrowserSession against a local fixture
+        id: live-browser-contract
+        shell: bash
+        run: |
+          report="$RUNNER_TEMP/browser-use-live-browser-contract.txt"
+          browser="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          if [[ -z "$browser" ]]; then
+            echo "No supported Chromium executable found" | tee "$report"
+            exit 1
+          fi
+          set +e
+          MODELRIG_BROWSER_EXECUTABLE="$browser" PYTHONPATH=worker \
+            python scripts/browser_use_live_browser_contract.py >"$report" 2>&1
+          status=$?
+          set -e
+          cat "$report"
+          exit "$status"
+      - name: Upload Browser Use contract failure report
+        if: failure() && (steps.runtime-contract.outcome == 'failure' || steps.live-browser-contract.outcome == 'failure')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: browser-use-runtime-contract-failure
-          path: ${{ runner.temp }}/browser-use-runtime-contract.txt
+          name: browser-use-contract-failure
+          path: |
+            ${{ runner.temp }}/browser-use-runtime-contract.txt
+            ${{ runner.temp }}/browser-use-live-browser-contract.txt
           if-no-files-found: error
           retention-days: 7
 
