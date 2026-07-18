@@ -1,0 +1,61 @@
+name: patch-browser-fixture-request-proof
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'agent/browser-use-chromium-fixture'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: agent/browser-use-chromium-fixture
+          fetch-depth: 1
+          show-progress: false
+      - name: Patch endpoint-specific denial proof
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/browser_use_live_fixture.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''        check(
+              FixtureHandler.requests == ["/fixture"],
+              "denied numeric URL never reaches fixture",
+              results,
+          )'''
+          new = '''        check(
+              FixtureHandler.requests.count("/fixture") == 1,
+              "denied numeric URL never reaches fixture endpoint",
+              results,
+          )'''
+          if text.count(old) != 1:
+              raise SystemExit(f'denial proof target count is {text.count(old)}')
+          text = text.replace(old, new)
+          old_report = '''        "fixture_url": fixture_url,
+              "denied": denied,'''
+          new_report = '''        "fixture_url": fixture_url,
+              "served_requests": list(FixtureHandler.requests),
+              "denied": denied,'''
+          if text.count(old_report) != 1:
+              raise SystemExit(f'report target count is {text.count(old_report)}')
+          path.write_text(text.replace(old_report, new_report), encoding='utf-8')
+          PY
+      - name: Validate fixture script
+        run: |
+          python -m py_compile scripts/browser_use_live_fixture.py
+          git diff --check
+      - name: Commit fixture proof
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/browser_use_live_fixture.py
+          git commit -m "test(research): prove numeric denial at fixture endpoint"
+          git push origin HEAD:agent/browser-use-chromium-fixture
