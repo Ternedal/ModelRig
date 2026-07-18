@@ -50,6 +50,7 @@ fun AppEntryUi(store: TokenStore) {
                 !initialSources.hasInvalidCredentials,
         )
     }
+    var clearFailed by remember { mutableStateOf(false) }
 
     if (continueToApp) {
         AppUi()
@@ -60,11 +61,16 @@ fun AppEntryUi(store: TokenStore) {
         CredentialRecoveryScreen(
             invalidRig = initialSources.rig == CredentialCondition.INVALID,
             invalidCloud = initialSources.cloud == CredentialCondition.INVALID,
+            clearFailed = clearFailed,
             onContinue = { continueToApp = true },
             onClear = {
-                if (initialSources.rig == CredentialCondition.INVALID) store.clearRig()
-                if (initialSources.cloud == CredentialCondition.INVALID) store.clearCloud()
-                continueToApp = true
+                clearFailed = false
+                val rigCleared =
+                    initialSources.rig != CredentialCondition.INVALID || store.clearRig()
+                val cloudCleared =
+                    initialSources.cloud != CredentialCondition.INVALID || store.clearCloud()
+                if (rigCleared && cloudCleared) continueToApp = true
+                else clearFailed = true
             },
         )
     }
@@ -74,6 +80,7 @@ fun AppEntryUi(store: TokenStore) {
 private fun CredentialRecoveryScreen(
     invalidRig: Boolean,
     invalidCloud: Boolean,
+    clearFailed: Boolean,
     onContinue: () -> Unit,
     onClear: () -> Unit,
 ) {
@@ -113,6 +120,15 @@ private fun CredentialRecoveryScreen(
                         fontSize = 14.sp,
                         lineHeight = 20.sp,
                     )
+                    if (clearFailed) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            "De gamle credentials kunne ikke ryddes. Prøv igen, eller gå til opsætningen og gem nye adgangsoplysninger.",
+                            color = KalivTheme.colors.danger,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                        )
+                    }
                     Spacer(Modifier.height(18.dp))
                     Button(
                         onClick = onContinue,
