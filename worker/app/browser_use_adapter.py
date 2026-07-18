@@ -3,12 +3,14 @@
 The adapter deliberately keeps Browser Use optional and lazy-loaded. Browser Use
 may discover and navigate JavaScript-heavy pages, but it never creates ModelRig
 source receipts. Every cited URL is re-fetched through the deterministic pinned
-fetcher before raw bytes are handed back to BrowserHost.
+fetcher and converted into a compact verified-receipt envelope before BrowserHost
+creates the final source receipt.
 """
 from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 from dataclasses import dataclass
 from importlib import metadata
 from typing import Any, Callable, Protocol
@@ -23,10 +25,11 @@ from .browser_host import (
     BrowserCitationDraft,
     BrowserSourceArtifact,
 )
-from .research_contract import ResearchContractError, ResearchRequest
+from .research_contract import ResearchContractError, ResearchRequest, SourceReceipt
 from .web_fetch import FetchTrace, WebFetchError
 
 SUPPORTED_BROWSER_USE_VERSION = "0.13.4"
+VERIFIED_SOURCE_MEDIA_TYPE = "application/vnd.modelrig.verified-source+json"
 _READ_ONLY_EXCLUDED_ACTIONS = (
     "input",
     "upload_file",
@@ -181,6 +184,32 @@ def _build_task(request: ResearchRequest) -> str:
     )
 
 
+def _receipt_envelope(receipt: SourceReceipt) -> bytes:
+    """Bind BrowserHost evidence to the pinned fetcher's original content digest."""
+
+    payload = {
+        "schema_version": "modelrig.verified-web-source.v1",
+        "url": receipt.url,
+        "retrieved_at": receipt.retrieved_at,
+        "content_sha256": receipt.content_sha256,
+        "bytes_read": receipt.bytes_read,
+        "media_type": receipt.media_type,
+        "adapter": receipt.adapter,
+    }
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def _verified_excerpt(receipt: SourceReceipt) -> str:
+    suffix = f" Verified content SHA-256: {receipt.content_sha256}."
+    available = max(0, 2_000 - len(suffix))
+    return receipt.excerpt[:available].rstrip() + suffix
+
+
 class BrowserUseBackend:
     """Optional Browser Use backend whose evidence is independently re-fetched."""
 
@@ -264,6 +293,8 @@ class BrowserUseBackend:
             raise BrowserBackendError("cited source verification failed") from exc
         if not isinstance(trace, FetchTrace):
             raise BrowserBackendError("verified fetcher returned an invalid trace")
+        if trace.receipt.adapter != "deterministic-web-fetch":
+            raise BrowserBackendError("verified fetcher returned an untrusted receipt")
         return trace
 
     async def research(self, request: ResearchRequest) -> BrowserBackendRun:
@@ -308,6 +339,9 @@ class BrowserUseBackend:
                 visited.append(trace.final_url)
             if len(visited) > request.policy.max_pages:
                 raise BrowserBackendError("verified redirect exceeded max_pages")
+            envelope = _receipt_envelope(trace.receipt)
+            if len(envelope) > request.policy.max_source_bytes:
+                raise BrowserBackendError("verified source envelope exceeds max_source_bytes")
             index = len(sources)
             source_index[requested_url] = index
             source_index[trace.final_url] = index
@@ -315,9 +349,9 @@ class BrowserUseBackend:
                 BrowserSourceArtifact(
                     url=trace.final_url,
                     title=trace.receipt.title,
-                    content=trace.content,
-                    excerpt=trace.receipt.excerpt,
-                    media_type=trace.receipt.media_type,
+                    content=envelope,
+                    excerpt=_verified_excerpt(trace.receipt),
+                    media_type=VERIFIED_SOURCE_MEDIA_TYPE,
                 )
             )
 
