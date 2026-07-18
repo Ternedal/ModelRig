@@ -6,12 +6,16 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from app.browser_use_adapter import (
     READ_ONLY_EXCLUDED_ACTIONS,
     SUPPORTED_BROWSER_USE_VERSION,
+    BrowserUseReadOnlyNavigateAction,
     BrowserUseResearchOutput,
     build_read_only_browser_profile,
     load_browser_use_bindings,
+    lock_read_only_tools,
 )
 
 passed = failed = 0
@@ -43,6 +47,7 @@ for parameter in (
     "task",
     "llm",
     "browser_profile",
+    "browser_session",
     "tools",
     "output_model_schema",
     "use_vision",
@@ -99,9 +104,11 @@ try:
     check(next(user_data_path.iterdir(), None) is None, "profile quarantine starts empty")
     check(user_data_path != download_path, "profile and download quarantines are distinct")
 
-    tools = bindings.tools_factory(
-        exclude_actions=list(READ_ONLY_EXCLUDED_ACTIONS),
-        display_files_in_done_text=False,
+    tools = lock_read_only_tools(
+        bindings.tools_factory(
+            exclude_actions=list(READ_ONLY_EXCLUDED_ACTIONS),
+            display_files_in_done_text=False,
+        )
     )
     registry = getattr(getattr(tools, "registry", None), "registry", None)
     actions = getattr(registry, "actions", None)
@@ -111,6 +118,22 @@ try:
         check(denied not in action_names, f"action {denied} is absent")
     for required in ("navigate", "go_back", "wait", "scroll", "extract", "done"):
         check(required in action_names, f"read-only action {required} remains available")
+
+    navigate_model = actions["navigate"].param_model
+    check(
+        navigate_model is BrowserUseReadOnlyNavigateAction,
+        "navigate uses ModelRig's current-tab-only parameter model",
+    )
+    check(
+        navigate_model(url="https://example.com/").new_tab is False,
+        "navigate defaults to the current tab",
+    )
+    try:
+        navigate_model(url="https://example.com/", new_tab=True)
+    except ValidationError:
+        check(True, "navigate(new_tab=true) is structurally rejected")
+    else:
+        check(False, "navigate(new_tab=true) is structurally rejected")
 
     from browser_use.agent.views import AgentHistoryList
 
