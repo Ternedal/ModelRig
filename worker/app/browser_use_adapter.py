@@ -710,21 +710,29 @@ class BrowserUseBackend:
                     close_error = BrowserBackendError(
                         "browser request guard cleanup failed"
                     )
+            browser_closed = agent is None and guard is None
             if agent is not None:
                 close = getattr(agent, "close", None)
                 if close is None:
                     browser_session = getattr(agent, "browser_session", None)
                     close = getattr(browser_session, "close", None)
-                if close is not None:
+                if close is None:
+                    if close_error is None:
+                        close_error = BrowserBackendError(
+                            "browser runtime has no close operation"
+                        )
+                else:
                     try:
                         await _maybe_await(close())
+                        browser_closed = True
                     except Exception as exc:
                         if close_error is None:
                             close_error = exc
-            # Keep interception active until the browser is closed. Fetch.disable
-            # may release paused requests, so disabling it first creates a cleanup
-            # window where a rejected request can leave Chromium.
-            if guard is not None:
+            # Keep interception active until the browser is proven closed.
+            # Fetch.disable may release paused requests; if browser close fails,
+            # leave interception armed and let the isolated BrowserHost process
+            # boundary terminate the remaining browser tree.
+            if guard is not None and browser_closed:
                 try:
                     await guard.close()
                 except BrowserUseNetworkGuardError:

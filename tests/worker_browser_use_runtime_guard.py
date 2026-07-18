@@ -96,9 +96,16 @@ class Fetcher:
 
 
 class Agent:
-    def __init__(self, download_path: Path, *, write_download: bool) -> None:
+    def __init__(
+        self,
+        download_path: Path,
+        *,
+        write_download: bool,
+        fail_close: bool = False,
+    ) -> None:
         self.download_path = download_path
         self.write_download = write_download
+        self.fail_close = fail_close
         self.browser_session = SimpleNamespace(closed=False)
         self.closed = 0
 
@@ -109,6 +116,8 @@ class Agent:
 
     async def close(self):
         self.closed += 1
+        if self.fail_close:
+            raise RuntimeError("simulated browser close failure")
         self.browser_session.closed = True
 
 
@@ -146,9 +155,16 @@ class GuardFactory:
 
 
 class Runtime:
-    def __init__(self, *, write_download: bool, unsafe_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        write_download: bool,
+        unsafe_path: Path | None = None,
+        fail_close: bool = False,
+    ) -> None:
         self.write_download = write_download
         self.unsafe_path = unsafe_path
+        self.fail_close = fail_close
         self.download_path: Path | None = None
         self.user_data_path: Path | None = None
         self.agent: Agent | None = None
@@ -193,7 +209,11 @@ class Runtime:
 
     def create_agent(self, **kwargs):
         assert self.download_path is not None
-        self.agent = Agent(self.download_path, write_download=self.write_download)
+        self.agent = Agent(
+            self.download_path,
+            write_download=self.write_download,
+            fail_close=self.fail_close,
+        )
         return self.agent
 
     def bindings(self):
@@ -298,6 +318,31 @@ check(dirty_guard.installed == 1 and dirty_guard.health_checks == 1, "dirty run 
 run(dirty_backend.close())
 check(dirty_guard.closed == 1, "dirty run guard closes during cleanup")
 check(dirty_guard.browser_was_closed_on_close, "dirty browser closes before interception is disabled")
+
+# If browser close fails, the request interceptor must remain armed. Disabling
+# Fetch would reopen the exact cleanup race this contract is meant to close.
+failed_close_runtime = Runtime(write_download=False, fail_close=True)
+failed_close_guards = GuardFactory()
+failed_close_backend = BrowserUseBackend(
+    fetcher=Fetcher(),
+    llm_factory=lambda: object(),
+    bindings_loader=failed_close_runtime.bindings,
+    network_guard_factory=failed_close_guards,
+)
+run(failed_close_backend.research(REQUEST))
+failed_close_guard = failed_close_guards.instances[0]
+try:
+    run(failed_close_backend.close())
+except RuntimeError as exc:
+    check("simulated browser close failure" in str(exc), "browser close failure is surfaced")
+else:
+    check(False, "browser close failure is surfaced")
+check(failed_close_guard.closed == 0, "guard remains armed when browser close is unproven")
+check(
+    not failed_close_guard.browser_was_closed_on_close,
+    "cleanup never claims the failed browser close completed",
+)
+
 check(
     dirty_download_path is not None and not dirty_download_path.exists(),
     "dirty download quarantine is deleted during cleanup",
