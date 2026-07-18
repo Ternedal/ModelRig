@@ -35,13 +35,13 @@ Intet nedenfor i senere milepæle promoveres før denne er grøn. Fysisk bevis e
 | T-004 Kør `rig_preflight.py` | P0 | [RIG] | T-001 | Exit 0 eller dokumenteret blocker. |
 | T-005 Kør fuld Agent 3 appliance-validation | P0 | [RIG] | T-001, T-004 | Frisk report matcher version + code SHA. |
 | T-006 Bevis reboot, supervisor, updater, rollback | P0 | [RIG] | T-001, T-004 | reboot→ready, kill→restart, bad update→rollback. |
-| T-007 Frys lokal model-eval baseline | P1 | [RIG] (harness [ISO]) | T-001 | 30–50 tasks med success, latency, tool-discipline. |
+| T-007 Frys lokal model-eval baseline | P1 | [RIG] (harness [ISO] ✅ leveret) | T-001 | 30–50 tasks med success, latency, tool-discipline. |
 | T-040 20-turn voice-kvalitetsbaseline | P1 | [RIG] | T-001, T-004 | TTFA, WER, cold/warm, stop, barge-in målt. |
-| T-043 RAG load- og kvalitetsbenchmark | P1 | [RIG] (harness [ISO]) | T-001 | 1k/10k chunks, recall, p50/p95, RAM/VRAM. |
+| T-043 RAG load- og kvalitetsbenchmark | P1 | [RIG] (harness [ISO] ✅ leveret) | T-001 | 1k/10k chunks, recall, p50/p95, RAM/VRAM. |
 
-**Isoleret forarbejde muligt nu:** harnesset til T-007/T-043 (det frosne
-task-sæt / benchmark-scriptet) kan forberedes uden riggen; selve *målingen*
-kræver GPU. Det er den ærlige "mest isoleret"-del.
+**Isoleret forarbejde er leveret:** harnessene til T-007 og T-043 er nu
+versionsbundne, regressions-testede og klar til riggen. Kun de faktiske lokale
+model-/GPU-målinger mangler; de kan ikke bevises af CI eller en ekstern runner.
 
 ---
 
