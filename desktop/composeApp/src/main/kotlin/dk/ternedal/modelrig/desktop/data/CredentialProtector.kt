@@ -39,15 +39,16 @@ class WindowsDpapiCredentialProtector(
 
         val clear = plaintext.toByteArray(StandardCharsets.UTF_8)
         val entropy = ENTROPY.copyOf()
-        var encrypted: ByteArray? = null
+        var encryptedForWipe: ByteArray? = null
         try {
-            encrypted = Crypt32Util.cryptProtectData(
+            val encrypted = Crypt32Util.cryptProtectData(
                 clear,
                 entropy,
                 WinCrypt.CRYPTPROTECT_UI_FORBIDDEN,
                 DESCRIPTION,
                 null,
             )
+            encryptedForWipe = encrypted
             return CREDENTIAL_ENVELOPE_PREFIX + Base64.getEncoder().encodeToString(encrypted)
         } catch (e: Exception) {
             throw CredentialProtectionException("Windows could not protect the desktop credential", e)
@@ -56,7 +57,7 @@ class WindowsDpapiCredentialProtector(
         } finally {
             clear.fill(0)
             entropy.fill(0)
-            encrypted?.fill(0)
+            encryptedForWipe?.fill(0)
         }
     }
 
@@ -77,14 +78,15 @@ class WindowsDpapiCredentialProtector(
             throw CredentialProtectionException("Desktop credential envelope is corrupt", e)
         }
         val entropy = ENTROPY.copyOf()
-        var clear: ByteArray? = null
+        var clearForWipe: ByteArray? = null
         try {
-            clear = Crypt32Util.cryptUnprotectData(
+            val clear = Crypt32Util.cryptUnprotectData(
                 encrypted,
                 entropy,
                 WinCrypt.CRYPTPROTECT_UI_FORBIDDEN,
                 null,
             )
+            clearForWipe = clear
             return decodeUtf8(clear)
         } catch (e: CredentialProtectionException) {
             throw e
@@ -95,7 +97,7 @@ class WindowsDpapiCredentialProtector(
         } finally {
             encrypted.fill(0)
             entropy.fill(0)
-            clear?.fill(0)
+            clearForWipe?.fill(0)
         }
     }
 
