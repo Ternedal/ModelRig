@@ -22,8 +22,8 @@ jobs:
       - run: |
           git config user.name automation
           git config user.email automation@users.noreply.github.com
-          git add worker/app/browser_use_adapter.py
+          git add worker/app/browser_use_adapter.py tests/worker_browser_use_runtime_guard.py
           if ! git diff --cached --quiet; then
-            git commit -m "fix(research): tighten runtime profile"
+            git commit -m "test(research): assert read-only browser profile"
             git push origin HEAD:agent/browser-use-live-fixture
           fi
