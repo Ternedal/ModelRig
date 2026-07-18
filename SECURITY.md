@@ -47,14 +47,14 @@
 
 | Credential | Hvor | Note |
 |---|---|---|
-| Device-tokens | SHA-256 i store'et (backend); Android: Keystore-krypteret (`token_enc` + `rig_profile`); **desktop: klartekst i SQLite (DPAPI udestår)** | Single-use pairing-kode → token. Revokér/rotér pr. enhed. |
+| Device-tokens | SHA-256 i store'et (backend); Android: Keystore-krypteret (`token_enc` + `rig_profile`); **desktop: Windows DPAPI, current-user scope** | Desktop migrerer ældre klartekst i SQLite før første udlevering. Single-use pairing-kode → token. Revokér/rotér pr. enhed. |
 | `MODELRIG_ADMIN_KEY` | env (valgfri) | Sat → `/pair/start` kræver `X-Admin-Key`. Unset → `/pair/start` kun loopback. |
 | `KALIV_SCHEDULER_APPROVAL_SECRET` | env i **backend og worker** | Samme tilfældige værdi på mindst 32 bytes. Signerer korte scheduler-godkendelsestokens; må aldrig committes. |
 | GitHub PAT | Notion (Secrets) | Fine-grained, repo-scopet. Bruges til releases. Genbrugt på tværs — rotation er en stående todo. |
-| Ollama Cloud-nøgle | Android: Keystore-krypteret; **desktop: klartekst i SQLite (DPAPI udestår)** | Kun i Cloud-tilstand; dyreste credential (kontoforbrug). |
+| Ollama Cloud-nøgle | Android: Keystore-krypteret; **desktop: Windows DPAPI, current-user scope** | Desktop migrerer ældre klartekst i SQLite før første udlevering. Kun i Cloud-tilstand; dyreste credential (kontoforbrug). |
 | Android signeringsnøgle | **committet i repo** | Se accepteret risiko nedenfor. |
 
-## Sikkerheds-defaults (senest opdateret i 1.58.93)
+## Sikkerheds-defaults
 
 Alle nye kontroller **defaulter til sikker adfærd**; man opter ud eksplicit via env-vars.
 
@@ -67,6 +67,7 @@ Alle nye kontroller **defaulter til sikker adfærd**; man opter ud eksplicit via
 - Per-IP rate limit på pairing-claims.
 - **Agent (v2):** reads kan kæde (bounded); ethvert write kræver et menneske-godkendt kort — også i en fortsættelse efter et godkendt write. `delete_model`/`pull_model` er gated writes med navne-validering.
 - **Scheduler-writes:** `preview → approve → create/renew`; godkendelsestokenet er HMAC-signeret, device- og vilkårsbundet, udløber efter to minutter og kan kun bruges én gang. Manglende eller for kort fælles secret fejler lukket.
+- **Desktop-credentials:** `deviceToken` og `cloudKey` lagres som versionsmærkede DPAPI-envelopes. Ukendt version, korrupt ciphertext eller utilgængelig DPAPI afvises; der findes ingen klartekst-fallback.
 - **Updater:** verificerer BÅDE backend og worker `/healthz`+version efter swap; auto-rollback ellers. Supervisoren indlæser `modelrig.env` til børnene (`MODELRIG_HOST=0.0.0.0` kræves for remote).
 
 ## Kendte, accepterede risici
@@ -111,6 +112,7 @@ GitHub artifact attestation.
 ## Rotation & incident
 
 - **Device-token:** `/api/v1/token/rotate` eller CLI; revokér enhed ved tab.
+- **Desktop DPAPI-data:** efter skift af Windows-konto eller maskine kan gamle envelopes ikke låses op. Slet de berørte `deviceToken`/`cloudKey`-settings, par desktop igen og indtast cloud-nøglen på ny; appen må ikke forsøge klartekst-fallback.
 - **Admin-key:** skift `MODELRIG_ADMIN_KEY` og genstart.
 - **Scheduler approval-secret:** generér en ny tilfældig 32+ byte værdi, sæt den identisk i backend og worker, og genstart begge. Alle ikke-forbrugte godkendelsestokens bliver ugyldige.
 - **GitHub PAT:** revokér på github.com/settings/tokens, lav ny fine-grained, opdatér Notion.
