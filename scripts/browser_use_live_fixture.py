@@ -4,7 +4,8 @@
 This is deliberately not an agent or research run: no LLM is created, no
 ToolGate route is exposed and no public site is requested. It proves the real
 BrowserSession can launch, read one allowlisted localhost page, reject a public
-domain and reject the fixture's numeric loopback address, then cleanly stop.
+domain and reject the fixture's numeric loopback address at Chromium's request
+boundary, then cleanly stop.
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ from app.browser_use_adapter import (
     build_read_only_browser_profile,
     load_browser_use_bindings,
 )
+from app.browser_use_network_guard import BrowserUseNetworkGuard
 
 REPORT = Path(
     os.getenv(
@@ -113,7 +115,7 @@ async def expect_denied(session: Any, url: str) -> str:
                 event_timeout=3.0,
             ),
         )
-    except Exception as exc:  # denial type is owned by the pinned runtime
+    except Exception as exc:  # Browser Use owns the user-facing denial type.
         return type(exc).__name__
     raise AssertionError(f"navigation unexpectedly allowed: {url}")
 
@@ -139,6 +141,7 @@ async def run_fixture() -> dict[str, Any]:
     port = int(server.server_address[1])
     fixture_url = f"http://localhost:{port}/fixture"
     numeric_url = f"http://127.0.0.1:{port}/fixture"
+    public_url = "https://example.com/forbidden"
 
     bindings = load_browser_use_bindings()
     profile = build_read_only_browser_profile(bindings, ["localhost"])
@@ -146,9 +149,14 @@ async def run_fixture() -> dict[str, Any]:
     download_path = Path(profile.downloads_path).resolve(strict=True)
     user_data_path = Path(profile.user_data_dir).resolve(strict=True)
     session = BrowserSession(browser_profile=profile)
+    network_guard = BrowserUseNetworkGuard(
+        session,
+        ["localhost"],
+        allow_localhost=True,
+    )
     results: dict[str, bool] = {}
     denied: dict[str, str] = {}
-    started = False
+    guard_installed = False
 
     try:
         check(
@@ -168,8 +176,8 @@ async def run_fixture() -> dict[str, Any]:
         )
         check(profile.permissions == [], "no browser permissions are granted", results)
 
-        await asyncio.wait_for(session.start(), timeout=30)
-        started = True
+        await asyncio.wait_for(network_guard.install(), timeout=30)
+        guard_installed = True
         check(session.is_cdp_connected, "Chromium starts and CDP connects", results)
 
         await dispatch(
@@ -200,23 +208,29 @@ async def run_fixture() -> dict[str, Any]:
             results,
         )
         check(
-            FixtureHandler.requests == ["/fixture"],
-            "only one loopback request was served",
+            FixtureHandler.requests.count("/fixture") == 1,
+            "one allowlisted fixture request reaches the server",
             results,
         )
 
-        denied["public_domain"] = await expect_denied(
-            session,
-            "https://example.com/forbidden",
-        )
-        check(True, "public domain is denied before navigation", results)
+        denied["public_domain"] = await expect_denied(session, public_url)
         denied["numeric_loopback"] = await expect_denied(session, numeric_url)
-        check(True, "numeric IP navigation is denied", results)
+        await network_guard.assert_healthy()
         check(
-        FixtureHandler.requests.count("/fixture") == 1,
-        "denied numeric URL never reaches fixture endpoint",
-        results,
-    )
+            public_url in network_guard.blocked_urls,
+            "public domain is rejected at Chromium's request boundary",
+            results,
+        )
+        check(
+            numeric_url in network_guard.blocked_urls,
+            "numeric IP is rejected at Chromium's request boundary",
+            results,
+        )
+        check(
+            FixtureHandler.requests.count("/fixture") == 1,
+            "rejected numeric URL never reaches the fixture endpoint",
+            results,
+        )
         check(
             next(download_path.rglob("*"), None) is None,
             "download quarantine stays empty",
@@ -224,14 +238,18 @@ async def run_fixture() -> dict[str, Any]:
         )
     finally:
         try:
-            if started:
-                await asyncio.wait_for(session.kill(), timeout=15)
+            if guard_installed:
+                await asyncio.wait_for(network_guard.close(), timeout=10)
         finally:
-            server.shutdown()
-            server.server_close()
-            server_thread.join(timeout=5)
-            remove_quarantine(download_path)
-            remove_quarantine(user_data_path)
+            try:
+                if session.is_cdp_connected:
+                    await asyncio.wait_for(session.kill(), timeout=15)
+            finally:
+                server.shutdown()
+                server.server_close()
+                server_thread.join(timeout=5)
+                remove_quarantine(download_path)
+                remove_quarantine(user_data_path)
 
     check(not session.is_cdp_connected, "CDP is closed after kill", results)
     check(not download_path.exists(), "download quarantine is removed", results)
@@ -243,6 +261,7 @@ async def run_fixture() -> dict[str, Any]:
         "browser_executable": str(profile.executable_path),
         "fixture_url": fixture_url,
         "served_requests": list(FixtureHandler.requests),
+        "blocked_urls": list(network_guard.blocked_urls),
         "denied": denied,
         "checks": results,
         "passed": all(results.values()),
