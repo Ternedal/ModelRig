@@ -204,12 +204,18 @@ private fun CloudCard(store: TokenStore, db: ChatDb, onSaved: () -> Unit) {
                 Button(
                     enabled = configured || key.isNotBlank(),
                     onClick = {
-                        runCatching {
-                            if (key.isNotBlank()) store.cloudKey = key.trim()
-                            store.cloudModel = model.trim().ifBlank { "gpt-oss:120b" }
-                            store.chatMode = "cloud"
-                        }.onSuccess { key = ""; configured = true; msg = null; onSaved() }
-                            .onFailure { msg = "Kunne ikke gemme nøgle: ${it.message}" }
+                        val saved = store.saveCloudConfiguration(
+                            key = key.trim().takeIf { it.isNotBlank() },
+                            model = model,
+                        )
+                        if (saved) {
+                            key = ""
+                            configured = true
+                            msg = null
+                            onSaved()
+                        } else {
+                            msg = "Kunne ikke gemme cloud-adgangen sikkert. Prøv igen."
+                        }
                     },
                 ) { Text("Gem & brug cloud") }
                 if (configured) {
@@ -269,12 +275,14 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
                 currentUrl = baseUrl,
                 currentToken = store.token,
                 onApply = { profile ->
-                    store.baseUrl = profile.serverUrl
-                    store.token = profile.deviceToken
-                    store.chatMode = "rig"
-                    baseUrl = profile.serverUrl
-                    connected = true
-                    onConnected()
+                    if (store.saveRigConnection(profile.serverUrl, profile.deviceToken)) {
+                        baseUrl = profile.serverUrl
+                        connected = true
+                        msg = null
+                        onConnected()
+                    } else {
+                        msg = "Kunne ikke gemme den valgte rig sikkert."
+                    }
                 },
             )
             Spacer(Modifier.height(8.dp))
@@ -313,17 +321,28 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
                                 }
                                 busy = false
                                 if (ok) {
-                                    store.baseUrl = url; store.chatMode = "rig"
-                                    connected = true; reachable = true; onConnected()
+                                    val saved = store.saveRigConnection(url)
+                                    if (saved) {
+                                        connected = true; reachable = true; onConnected()
+                                    } else {
+                                        reachable = true
+                                        msg = "Rig'en svarer, men den nye adresse kunne ikke gemmes sikkert."
+                                    }
                                 } else {
                                     reachable = false
                                     msg = "Rig'en svarer ikke på $url. Tjek IP'en og at serveren kører."
                                 }
                             } else {
                                 val res = withContext(Dispatchers.IO) { runCatching { ModelRigClient(url).claimPairing(n, c) } }
-                                res.onSuccess {
-                                    store.baseUrl = url; store.token = it; store.chatMode = "rig"
-                                    busy = false; connected = true; reachable = true; onConnected()
+                                res.onSuccess { claimedToken ->
+                                    val saved = store.saveRigConnection(url, claimedToken)
+                                    busy = false
+                                    if (saved) {
+                                        connected = true; reachable = true; onConnected()
+                                    } else {
+                                        reachable = true
+                                        msg = "Parringen lykkedes, men credential kunne ikke gemmes sikkert. Par igen."
+                                    }
                                 }.onFailure { msg = it.message ?: "Kunne ikke forbinde"; busy = false }
                             }
                         }

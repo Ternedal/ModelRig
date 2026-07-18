@@ -1,6 +1,7 @@
 package dk.ternedal.modelrig.data
 
 import android.content.Context
+import dk.ternedal.modelrig.logic.CredentialPersistence
 import dk.ternedal.modelrig.logic.StoredCredentialRead
 import dk.ternedal.modelrig.logic.StoredCredentialReader
 
@@ -53,11 +54,49 @@ class TokenStore(context: Context) {
         // is migrated to "token_enc" before it is returned.
         get() = (rigCredentialStatus as? StoredCredentialRead.Ready)?.value
         set(v) {
-            val e = prefs.edit()
-            if (v.isNullOrEmpty()) e.remove("token_enc") else e.putString("token_enc", Crypto.encrypt(v))
-            e.remove("token") // drop any legacy plaintext copy
-            e.apply()
+            val saved = if (v.isNullOrEmpty()) {
+                CredentialPersistence.commit {
+                    prefs.edit().remove("token_enc").remove("token").commit()
+                }
+            } else {
+                CredentialPersistence.commitEncrypted(v, Crypto::encrypt) { encrypted ->
+                    prefs.edit()
+                        .putString("token_enc", encrypted)
+                        .remove("token")
+                        .commit()
+                }
+            }
+            check(saved) { "Kunne ikke gemme rig-token sikkert" }
         }
+
+    /**
+     * Persist one usable rig connection as a single synchronous transaction.
+     *
+     * A null token means reconnect with the credential already on disk. A new
+     * pairing/profile token is encrypted before the editor is committed, so URL,
+     * active source and ciphertext either all land or none of them do.
+     */
+    fun saveRigConnection(url: String, token: String? = null): Boolean {
+        val normalizedUrl = url.trim()
+        if (normalizedUrl.isEmpty()) return false
+
+        fun persist(encryptedToken: String?): Boolean {
+            val editor = prefs.edit()
+                .putString("base_url", normalizedUrl)
+                .putString("chat_mode", "rig")
+            if (encryptedToken != null) {
+                editor.putString("token_enc", encryptedToken).remove("token")
+            }
+            return editor.commit()
+        }
+
+        if (token == null) return CredentialPersistence.commit { persist(null) }
+        val normalizedToken = token.trim()
+        return CredentialPersistence.commitEncrypted(
+            normalizedToken,
+            Crypto::encrypt,
+        ) { encrypted -> persist(encrypted) }
+    }
 
     var model: String
         get() = prefs.getString("model", "qwen2.5-coder:7b") ?: "qwen2.5-coder:7b"
@@ -75,11 +114,42 @@ class TokenStore(context: Context) {
     var cloudKey: String?
         get() = (cloudCredentialStatus as? StoredCredentialRead.Ready)?.value
         set(v) {
-            val e = prefs.edit()
-            if (v.isNullOrEmpty()) e.remove("cloud_key_enc")
-            else e.putString("cloud_key_enc", Crypto.encrypt(v))
-            e.apply()
+            val saved = if (v.isNullOrEmpty()) {
+                CredentialPersistence.commit {
+                    prefs.edit().remove("cloud_key_enc").commit()
+                }
+            } else {
+                CredentialPersistence.commitEncrypted(v, Crypto::encrypt) { encrypted ->
+                    prefs.edit().putString("cloud_key_enc", encrypted).commit()
+                }
+            }
+            check(saved) { "Kunne ikke gemme cloud-nøgle sikkert" }
         }
+
+    /**
+     * Persist cloud credential, model and active source atomically.
+     *
+     * A null key deliberately keeps an already configured encrypted key while
+     * updating model/source. A supplied key is encrypted before the transaction.
+     */
+    fun saveCloudConfiguration(key: String?, model: String): Boolean {
+        val normalizedModel = model.trim().ifBlank { "gpt-oss:120b" }
+
+        fun persist(encryptedKey: String?): Boolean {
+            val editor = prefs.edit()
+                .putString("cloud_model", normalizedModel)
+                .putString("chat_mode", "cloud")
+            if (encryptedKey != null) editor.putString("cloud_key_enc", encryptedKey)
+            return editor.commit()
+        }
+
+        val normalizedKey = key?.trim()?.takeIf { it.isNotEmpty() }
+            ?: return CredentialPersistence.commit { persist(null) }
+        return CredentialPersistence.commitEncrypted(
+            normalizedKey,
+            Crypto::encrypt,
+        ) { encrypted -> persist(encrypted) }
+    }
 
     var cloudModel: String
         get() = prefs.getString("cloud_model", "gpt-oss:120b") ?: "gpt-oss:120b"
