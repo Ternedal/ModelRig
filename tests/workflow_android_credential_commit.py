@@ -15,10 +15,11 @@ checks = {
     "setup no longer assigns rig token through apply-backed property": "store.token =" not in ui,
     "setup no longer assigns cloud key through apply-backed property": "store.cloudKey =" not in ui,
     "all rig setup paths use the transactional boundary": ui.count("store.saveRigConnection(") >= 3,
+    "profile apply branches directly on persistence": "if (store.saveRigConnection(profile.serverUrl, profile.deviceToken))" in ui,
+    "reconnect and pairing branch on persistence": ui.count("val saved = store.saveRigConnection(") >= 2 and ui.count("if (saved)") >= 3,
     "cloud setup uses the transactional boundary": "store.saveCloudConfiguration(" in ui,
     "credential clears return confirmed results": "fun clearRig(): Boolean" in store and "fun clearCloud(): Boolean" in store,
     "setup clear buttons branch on commit results": "if (store.clearRig())" in ui and "if (store.clearCloud())" in ui,
-    "UI branches on confirmed persistence": ui.count("if (saved)") >= 4,
 }
 
 failed = [name for name, ok in checks.items() if not ok]
