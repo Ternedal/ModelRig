@@ -13,70 +13,82 @@ permissions:
   contents: read
 
 jobs:
-  full-test-script:
+  pdf-lifecycle-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
-      - name: Run exact globbed test file
+      - name: Run exact PDF lifecycle test
         env:
           PYTHONPATH: worker
         run: python tests/worker_rag_pdf_lifecycle.py
 
-  worker-suite-slice:
-    name: worker-suite-${{ matrix.name }}
+  backend-python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.23'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Build backend
+        run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
+      - name: Run backend integration scripts
+        env:
+          MODELRIG_BIN: /tmp/modelrig-server
+        run: |
+          set -e
+          for f in tests/backend_*.py; do
+            [ -e "$f" ] || continue
+            echo "running $f"
+            python "$f"
+          done
+
+  e2e-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.23'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Build backend
+        run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
+      - name: Run e2e
+        env:
+          MODELRIG_BIN: /tmp/modelrig-server
+        run: python tests/e2e.py
+
+  workflow-test-slice:
+    name: workflow-tests-${{ matrix.name }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: agent3-a-f
-            pattern: 'tests/worker_agent3_[a-f]*.py'
-            skip_agent: 'no'
-          - name: agent3-g-m
-            pattern: 'tests/worker_agent3_[g-m]*.py'
-            skip_agent: 'no'
-          - name: agent3-n-s
-            pattern: 'tests/worker_agent3_[n-s]*.py'
-            skip_agent: 'no'
-          - name: agent3-t-z
-            pattern: 'tests/worker_agent3_[t-z]*.py'
-            skip_agent: 'no'
-          - name: legacy-agent
-            pattern: 'tests/worker_agent_*.py'
-            skip_agent: 'no'
-          - name: other-a-m
-            pattern: 'tests/worker_[a-m]*.py'
-            skip_agent: 'yes'
-          - name: other-n-r
-            pattern: 'tests/worker_[n-r]*.py'
-            skip_agent: 'yes'
-          - name: other-s-z
-            pattern: 'tests/worker_[s-z]*.py'
-            skip_agent: 'yes'
+          - name: a-m
+            pattern: 'tests/workflow_[a-m]*.py'
+          - name: n-z
+            pattern: 'tests/workflow_[n-z]*.py'
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
-      - name: Install worker dependencies
-        run: pip install -r worker/requirements.txt --break-system-packages
-      - name: Run worker test slice
+      - name: Run workflow test slice
         env:
-          PYTHONPATH: worker
           TEST_PATTERN: ${{ matrix.pattern }}
-          SKIP_AGENT: ${{ matrix.skip_agent }}
-        shell: bash
         run: |
           set -e
           found=0
           for f in $TEST_PATTERN; do
             [ -e "$f" ] || continue
-            if [ "$SKIP_AGENT" = yes ] && [[ "$f" == tests/worker_agent* ]]; then
-              continue
-            fi
             found=1
             echo "running $f"
             python "$f"
