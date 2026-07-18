@@ -147,6 +147,7 @@ class Runtime:
         self.user_data_path: Path | None = None
         self.agent: Agent | None = None
         self.profile_kwargs = None
+        self.profile_object = None
         self.tools_kwargs = None
 
     def profile(self, **kwargs):
@@ -164,7 +165,9 @@ class Runtime:
             downloads_path=download_path,
             user_data_dir=user_data_path,
         )
-        return SimpleNamespace(**profile_fields)
+        profile = SimpleNamespace(**profile_fields)
+        self.profile_object = profile
+        return profile
 
     def tools(self, **kwargs):
         self.tools_kwargs = kwargs
@@ -235,6 +238,10 @@ check(clean_runtime.profile_kwargs["disable_security"] is False, "browser securi
 check(clean_runtime.profile_kwargs["record_har_path"] is None, "HAR recording is disabled")
 check(clean_runtime.profile_kwargs["record_video_dir"] is None, "video recording is disabled")
 check(clean_runtime.profile_kwargs["traces_dir"] is None, "trace recording is disabled")
+check(
+    "--disable-popup-blocking" in clean_runtime.profile_object.ignore_default_args,
+    "validated profile restores Chromium popup blocking",
+)
 check(clean_runtime.profile_kwargs["auto_download_pdfs"] is False, "automatic PDF downloads are disabled")
 check(clean_runtime.profile_kwargs["captcha_solver"] is False, "captcha side-effect service is disabled")
 excluded = set(clean_runtime.tools_kwargs["exclude_actions"])

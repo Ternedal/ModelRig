@@ -132,6 +132,7 @@ def _validate_runtime_surface(agent_factory: Any, profile_factory: Any, tools_fa
             "task",
             "llm",
             "browser_profile",
+            "browser_session",
             "tools",
             "output_model_schema",
             "use_vision",
@@ -158,6 +159,7 @@ def _validate_runtime_surface(agent_factory: Any, profile_factory: Any, tools_fa
         "block_ip_addresses",
         "enable_default_extensions",
         "downloads_path",
+        "ignore_default_args",
         "accept_downloads",
         "permissions",
         "auto_download_pdfs",
@@ -229,6 +231,10 @@ def build_read_only_browser_profile(
         traces_dir=None,
     )
     if bindings.runtime_validated:
+        ignored_default_args = list(getattr(profile, "ignore_default_args", ()) or ())
+        if "--disable-popup-blocking" not in ignored_default_args:
+            ignored_default_args.append("--disable-popup-blocking")
+            profile.ignore_default_args = ignored_default_args
         expected = {
             "headless": True,
             "storage_state": None,
@@ -251,6 +257,12 @@ def build_read_only_browser_profile(
                 raise BrowserBackendUnavailable(
                     f"browser-use profile did not retain locked field {name}"
                 )
+        if "--disable-popup-blocking" not in list(
+            getattr(profile, "ignore_default_args", ()) or ()
+        ):
+            raise BrowserBackendUnavailable(
+                "browser-use profile disabled Chromium popup blocking"
+            )
         if list(getattr(profile, "permissions", ())) != []:
             raise BrowserBackendUnavailable(
                 "browser-use profile retained browser permissions"
@@ -691,11 +703,10 @@ class BrowserUseBackend:
             if guard is not None:
                 try:
                     await guard.close()
-                except BrowserUseNetworkGuardError as exc:
+                except BrowserUseNetworkGuardError:
                     guard_error = BrowserBackendError(
                         "browser request guard cleanup failed"
                     )
-                    guard_error.__cause__ = exc
             if agent is not None:
                 close = getattr(agent, "close", None)
                 if close is None:
