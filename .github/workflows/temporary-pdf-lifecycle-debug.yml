@@ -13,6 +13,18 @@ permissions:
   contents: read
 
 jobs:
+  full-test-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Run exact globbed test file
+        env:
+          PYTHONPATH: worker
+        run: python tests/worker_rag_pdf_lifecycle.py
+
   success-path:
     runs-on: ubuntu-latest
     steps:
