@@ -11,8 +11,11 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import shutil
+import tempfile
 from dataclasses import dataclass
 from importlib import metadata
+from pathlib import Path
 from typing import Any, Callable, Protocol
 from urllib.parse import urlsplit
 
@@ -30,16 +33,21 @@ from .web_fetch import FetchTrace, WebFetchError
 
 SUPPORTED_BROWSER_USE_VERSION = "0.13.4"
 VERIFIED_SOURCE_MEDIA_TYPE = "application/vnd.modelrig.verified-source+json"
-_READ_ONLY_EXCLUDED_ACTIONS = (
+READ_ONLY_EXCLUDED_ACTIONS = (
+    "click",
     "input",
     "upload_file",
     "send_keys",
     "evaluate",
     "select_dropdown",
+    "save_as_pdf",
+    "download_file",
+    "screenshot",
     "write_file",
     "read_file",
     "replace_file",
 )
+_BROWSER_USE_DOWNLOAD_PREFIX = "browser-use-downloads-"
 
 
 class BrowserUseCitationOutput(BaseModel):
@@ -63,6 +71,7 @@ class BrowserUseBindings:
     profile_factory: Callable[..., Any]
     tools_factory: Callable[..., Any]
     version: str
+    runtime_validated: bool = False
 
 
 class VerifiedFetcher(Protocol):
@@ -74,8 +83,58 @@ LlmFactory = Callable[[], Any]
 BindingsLoader = Callable[[], BrowserUseBindings]
 
 
+def _require_signature_parameters(factory: Callable[..., Any], names: tuple[str, ...], label: str) -> None:
+    try:
+        parameters = inspect.signature(factory).parameters
+    except (TypeError, ValueError) as exc:
+        raise BrowserBackendUnavailable(f"{label} signature is unavailable") from exc
+    missing = tuple(name for name in names if name not in parameters)
+    if missing:
+        raise BrowserBackendUnavailable(f"{label} runtime contract is not supported")
+
+
+def _validate_runtime_surface(agent_factory: Any, profile_factory: Any, tools_factory: Any) -> None:
+    _require_signature_parameters(
+        agent_factory,
+        (
+            "task",
+            "llm",
+            "browser_profile",
+            "tools",
+            "output_model_schema",
+            "use_vision",
+            "sensitive_data",
+            "available_file_paths",
+            "max_actions_per_step",
+            "use_judge",
+            "enable_signal_handler",
+        ),
+        "browser-use Agent",
+    )
+    _require_signature_parameters(
+        tools_factory,
+        ("exclude_actions", "display_files_in_done_text"),
+        "browser-use Tools",
+    )
+    fields = getattr(profile_factory, "model_fields", None)
+    required_fields = {
+        "headless",
+        "allowed_domains",
+        "user_data_dir",
+        "storage_state",
+        "keep_alive",
+        "block_ip_addresses",
+        "enable_default_extensions",
+        "downloads_path",
+        "auto_download_pdfs",
+        "captcha_solver",
+    }
+    if not isinstance(fields, dict) or not required_fields.issubset(fields):
+        raise BrowserBackendUnavailable("browser-use BrowserProfile runtime contract is not supported")
+
+
 def load_browser_use_bindings() -> BrowserUseBindings:
-    """Load the exact optional Browser Use version without affecting base startup."""
+    """Load and validate the exact optional runtime without affecting base startup."""
 
     try:
         installed = metadata.version("browser-use")
@@ -84,11 +143,13 @@ def load_browser_use_bindings() -> BrowserUseBindings:
         raise BrowserBackendUnavailable("browser-use is not installed") from exc
     if installed != SUPPORTED_BROWSER_USE_VERSION:
         raise BrowserBackendUnavailable("browser-use version is not supported")
+    _validate_runtime_surface(Agent, BrowserProfile, Tools)
     return BrowserUseBindings(
         agent_factory=Agent,
         profile_factory=BrowserProfile,
         tools_factory=Tools,
         version=installed,
+        runtime_validated=True,
     )
 
 
@@ -175,11 +236,11 @@ def _history_has_errors(history: Any) -> bool:
 def _build_task(request: ResearchRequest) -> str:
     return (
         "Perform read-only web research for the following request. "
-        "Only navigate within the configured allowed domains. Do not type into forms, "
-        "submit forms, log in, upload, download, execute JavaScript, write files, or "
-        "change remote state. Return structured output only. Every factual claim in "
-        "the answer must use a numeric marker like [1], and every citation must include "
-        "the exact URL that supports its statement.\n\n"
+        "Only navigate within the configured allowed domains. Do not click page "
+        "elements, type into forms, submit forms, log in, upload, download, execute "
+        "arbitrary JavaScript, write files, or change remote state. Return structured "
+        "output only. Every factual claim in the answer must use a numeric marker like "
+        "[1], and every citation must include the exact URL that supports its statement.\n\n"
         f"Research request: {request.query}"
     )
 
@@ -230,9 +291,49 @@ class BrowserUseBackend:
         self._llm_factory = llm_factory
         self._bindings_loader = bindings_loader
         self._agent: Any = None
+        self._download_path: Path | None = None
         self._closed = False
 
+    def _adopt_download_quarantine(self, profile: Any, *, required: bool) -> None:
+        raw_path = getattr(profile, "downloads_path", None)
+        if raw_path is None:
+            if required:
+                raise BrowserBackendUnavailable("browser-use download quarantine is unavailable")
+            return
+        try:
+            path = Path(raw_path).expanduser().resolve(strict=True)
+            temp_root = Path(tempfile.gettempdir()).resolve(strict=True)
+        except (OSError, TypeError, ValueError) as exc:
+            raise BrowserBackendUnavailable("browser-use download quarantine is invalid") from exc
+        if path.parent != temp_root or not path.name.startswith(_BROWSER_USE_DOWNLOAD_PREFIX):
+            raise BrowserBackendUnavailable("browser-use download quarantine is outside system temp")
+        if not path.is_dir():
+            raise BrowserBackendUnavailable("browser-use download quarantine is not a directory")
+        self._download_path = path
+
+    def _assert_no_downloads(self) -> None:
+        path = self._download_path
+        if path is None:
+            return
+        try:
+            has_content = next(path.rglob("*"), None) is not None
+        except OSError as exc:
+            raise BrowserBackendError("browser download quarantine could not be inspected") from exc
+        if has_content:
+            raise BrowserBackendError("browser created a forbidden download")
+
+    def _cleanup_download_quarantine(self) -> None:
+        path = self._download_path
+        self._download_path = None
+        if path is None:
+            return
+        try:
+            shutil.rmtree(path)
+        except FileNotFoundError:
+            return
+
     def _build_agent(self, request: ResearchRequest) -> Any:
+        self._cleanup_download_quarantine()
         try:
             bindings = self._bindings_loader()
             if bindings.version != SUPPORTED_BROWSER_USE_VERSION:
@@ -249,9 +350,12 @@ class BrowserUseBackend:
                 block_ip_addresses=True,
                 enable_default_extensions=False,
                 downloads_path=None,
+                auto_download_pdfs=False,
+                captcha_solver=False,
             )
+            self._adopt_download_quarantine(profile, required=bindings.runtime_validated)
             tools = bindings.tools_factory(
-                exclude_actions=list(_READ_ONLY_EXCLUDED_ACTIONS),
+                exclude_actions=list(READ_ONLY_EXCLUDED_ACTIONS),
                 display_files_in_done_text=False,
             )
             return bindings.agent_factory(
@@ -275,8 +379,10 @@ class BrowserUseBackend:
                 include_recent_events=False,
             )
         except BrowserBackendUnavailable:
+            self._cleanup_download_quarantine()
             raise
         except Exception as exc:
+            self._cleanup_download_quarantine()
             raise BrowserBackendUnavailable("browser-use adapter could not initialize") from exc
 
     async def _verified_source(
@@ -306,6 +412,7 @@ class BrowserUseBackend:
             raise
         except Exception as exc:
             raise BrowserBackendError("browser-use execution failed") from exc
+        self._assert_no_downloads()
 
         if not _history_successful(history):
             raise BrowserBackendError("browser-use did not complete successfully")
@@ -391,11 +498,14 @@ class BrowserUseBackend:
         self._closed = True
         agent = self._agent
         self._agent = None
-        if agent is None:
-            return
-        close = getattr(agent, "close", None)
-        if close is None:
-            browser_session = getattr(agent, "browser_session", None)
-            close = getattr(browser_session, "close", None)
-        if close is not None:
-            await _maybe_await(close())
+        try:
+            if agent is None:
+                return
+            close = getattr(agent, "close", None)
+            if close is None:
+                browser_session = getattr(agent, "browser_session", None)
+                close = getattr(browser_session, "close", None)
+            if close is not None:
+                await _maybe_await(close())
+        finally:
+            self._cleanup_download_quarantine()
