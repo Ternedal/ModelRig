@@ -55,12 +55,12 @@ for ikke at kollidere.
 
 | Task | P | Ejerskab | Afhænger af | Accept |
 |---|---|---|---|---|
-| T-010 Design occurrence-ledger + migration | P0 | [KERNE] | — | Schema, migration, failure-matrix reviewet. |
-| T-011 Atomisk claim + budgetreservation | P0 | [KERNE] | T-010 | Budgetslot reserveres med claim. |
-| T-012 Bind job/audit/outcome/recovery durable | P0 | [KERNE] | T-010, T-011 | Alle crashpunkter har deterministic terminal/reconcile-state. |
-| T-013 Grant-revision, revoke, overlap-policy | P1 | [KERNE] | T-010 | Re-check før execution; UI viser in-flight. |
+| T-010 Design occurrence-ledger + migration (leveret i 1.58.116) | P0 | [KERNE] | — | Schema, migration, failure-matrix reviewet. |
+| T-011 Atomisk claim + budgetreservation (leveret i 1.58.116) | P0 | [KERNE] | T-010 | Budgetslot reserveres med claim. |
+| T-012 Bind job/audit/outcome/recovery durable (leveret i 1.58.117) | P0 | [KERNE] | T-010, T-011 | Alle crashpunkter har deterministic terminal/reconcile-state. |
+| T-013 Grant-revision, revoke, overlap-policy (leveret i 1.58.120; overlap → T-018) | P1 | [KERNE] | T-010 | Re-check før execution; UI viser in-flight. |
 | T-014 Gem approval-receipt attribution | P1 | [KERNE] (afgrænset) | — | Approval/device/tider/revision auditeres. |
-| T-015 Fault-injection suite + readiness-gate | P0 | [KERNE] | T-011, T-012, T-013 | Crash/overlap/budget/revoke/approval E2E-gates. |
+| T-015 Fault-injection suite + readiness-gate (leveret i 1.58.121) | P0 | [KERNE] | T-011, T-012, T-013 | Crash/overlap/budget/revoke/approval E2E-gates. |
 | T-016 Udvid Android ToolInfo + filtrér picker | P1 | [DEVICE] (backend ✅) | — | Unschedulable tools skjules/forklares. Backend-kontrakten findes allerede (F-823). |
 | T-017 Timezone/DST/misfire-semantik | P2 | [KERNE] | T-010 | IANA-zone + DST/misfire-tests. |
 | T-018 Bounded workers / eksplicit single-flight | P2 | [KERNE] | T-010, T-012, T-013 | Concurrency-model fault-testet. |

@@ -374,6 +374,179 @@ def schedule_approval_authority() -> tuple[bool, str]:
         return False, f"kunne ikke læse schedule-godkendelsen: {exc}"
 
 
+def scheduler_durability_probes() -> list[dict]:
+    """Run the scheduler's durability machinery live, in a sandbox (T-015).
+
+    F-904's finding: this page attested approval-bypass and the physical
+    report, but said nothing about whether the delivery model can lose or
+    repeat a write. So the page could later say JA while a crash still turned
+    a scheduled write into a silent skip or a budget overrun.
+
+    These probes do not grep for mechanisms -- greps are how a page ends up
+    attesting to the door it happened to read (F-608, F-612, F-813). Each one
+    builds the REAL components (ScheduleStore, JobStore, AuditLog, ToolGate,
+    SchedulerRunner) against throwaway databases and injects the fault: the
+    claim-time crash, the post-execution crash, the pause after claim, the
+    exhausted budget, the forged approval. What the page reports is what
+    actually happened.
+
+    Epistemic line, stated plainly: green here proves the mechanisms work
+    IN-PROCESS ON THIS TREE. It does not prove them on the rig -- that stays
+    with the physical validation, which remains a blocker of its own.
+
+    Determinism matters: this output is committed and drift-gated, so probes
+    use fixed timestamps and never emit ids or paths.
+    """
+    sys.path.insert(0, str(ROOT / "worker"))
+    import importlib
+    import tempfile
+
+    jobs_mod = importlib.import_module("app.jobs")
+    runner_mod = importlib.import_module("app.schedule_runner")
+    sched_mod = importlib.import_module("app.scheduler")
+    tools_mod = importlib.import_module("app.tools")
+
+    NOW = 1_000_000.0
+    results: list[dict] = []
+
+    def env():
+        # REAL registered tools, deliberately. A synthetic tool that exists in
+        # the runner's registry but not ToolGate's makes every denial look like
+        # the guard working -- a probe green for the wrong reason, which the
+        # non-blindness self-tests caught. rig_status is the read (harmless,
+        # proven in-process by the ledger suite); note_append is the write for
+        # the forged-approval probe, where the fingerprint mismatch denies
+        # BEFORE run() so no side effect ever happens.
+        td = tempfile.mkdtemp(prefix="readiness-sched-")
+        schedules = sched_mod.ScheduleStore(path=os.path.join(td, "s.db"))
+        jobs = jobs_mod.JobStore(os.path.join(td, "j.db"))
+        audit = tools_mod.AuditLog(os.path.join(td, "a.db"))
+        gate = tools_mod.ToolGate(audit=audit, state_file=None)
+        gate.set_enabled(True)
+        runner = runner_mod.SchedulerRunner(
+            schedules, jobs, gate,
+            registry=dict(tools_mod.REGISTRY),
+            feature_enabled=lambda: True)
+        return schedules, jobs, gate, runner, "rig_status"
+
+    def probe(name: str, fn) -> None:
+        # Fail closed: a probe that cannot run is a red probe, not a skipped one.
+        try:
+            ok, detail = fn()
+        except Exception as exc:  # noqa: BLE001
+            ok, detail = False, f"proben kunne ikke køre: {type(exc).__name__}"
+        results.append({"name": name, "ok": bool(ok), "detail": detail})
+
+    def runs_used(st, sid):
+        return st.get(sid).runs_used
+
+    def occ_status(st, cid):
+        row = st._conn.execute(
+            "SELECT status FROM occurrences WHERE claim_id=?", (cid,)).fetchone()
+        return row["status"] if row else None
+
+    def p_claim_durable():
+        st, jb, gt, rn, tool = env()
+        s = st.create(tool, {}, "every:60", now=NOW)
+        c = st.claim_due(now=NOW + 61)[0]
+        ok = (occ_status(st, c.claim_id) == "reserved"
+              and runs_used(st, s.schedule_id) == 1)
+        return ok, ("claim skriver durable occurrence og reserverer budget i "
+                    "samme transaktion" if ok else "claimet er ikke durable")
+
+    def p_exactly_once():
+        st, jb, gt, rn, tool = env()
+        st.create(tool, {}, "every:60", now=NOW)
+        first = st.claim_due(now=NOW + 61)
+        second = st.claim_due(now=NOW + 61)
+        ok = len(first) == 1 and len(second) == 0
+        return ok, ("samme occurrence kan ikke claimes to gange" if ok
+                    else "dobbelt-claim var muligt")
+
+    def p_crash_before_execution():
+        st, jb, gt, rn, tool = env()
+        s = st.create(tool, {}, "every:60", now=NOW)
+        st.claim_due(now=NOW + 61)  # claimed, then the worker "dies"
+        out = rn.recover_interrupted(now=NOW + 200)
+        ok = (len(out["abandoned"]) == 1
+              and runs_used(st, s.schedule_id) == 0)
+        return ok, ("crash før kørsel: occurrence opgives og slot refunderes"
+                    if ok else "crash før kørsel efterlader forkert tilstand")
+
+    def p_crash_after_execution():
+        st, jb, gt, rn, tool = env()
+        s = st.create(tool, {}, "every:60", now=NOW)
+        c = st.claim_due(now=NOW + 61)[0]
+        gt.audit.record(
+            tool=tool, args={}, risk="read", outcome="executed",
+            conversation_id=runner_mod._occurrence_conversation(
+                s.schedule_id, c.claim_id),
+            origin="schedule")
+        out = rn.recover_interrupted(now=NOW + 200)
+        ok = (c.claim_id in out["executed"]
+              and runs_used(st, s.schedule_id) == 1)
+        return ok, ("crash efter kørsel: audit-evidens holder budgettet brugt"
+                    if ok else "en kørsel der skete blev refunderet")
+
+    def p_revocation():
+        st, jb, gt, rn, tool = env()
+        s = st.create(tool, {}, "every:60", now=NOW)
+        c = st.claim_due(now=NOW + 61)[0]
+        st.set_enabled(s.schedule_id, False, now=NOW + 62)
+        jid = jb.create(f"schedule:{tool}", detail="probe")
+        st.bind_job(c.claim_id, jid)
+        outcome = rn._run_claim(c, jid, NOW + 63)
+        ok = (outcome == "blocked"
+              and runs_used(st, s.schedule_id) == 0
+              and occ_status(st, c.claim_id) == "released")
+        return ok, ("pause efter claim stopper in-flight occurrence og "
+                    "refunderer" if ok else "en pauset plan kørte alligevel")
+
+    def p_budget_ceiling():
+        st, jb, gt, rn, tool = env()
+        s = st.create(tool, {}, "every:60", max_runs=1, now=NOW)
+        st.claim_due(now=NOW + 61)
+        st.claim_due(now=NOW + 122)
+        ok = runs_used(st, s.schedule_id) == 1
+        return ok, ("max_runs kan ikke overskrides på tværs af claims" if ok
+                    else "budgetloftet blev overskredet")
+
+    def p_forged_approval():
+        st, jb, gt, rn, tool = env()
+        # A WRITE with a fingerprint that does not match the action must be
+        # denied BEFORE anything executes. Two independent belts do this: the
+        # runner's own refusal() compares fingerprints before it ever asks the
+        # gate, and ToolGate's pre_approved check denies a mismatch before
+        # run(). The probe drives the full runner path, so green means the
+        # OUTER belt held; the self-tests in the workflow suite neutralise it
+        # and prove the inner belt holds alone too.
+        s = st.create("note_append", {"text": "readiness-probe"},
+                      "every:60", now=NOW)
+        # Corrupt the stored approval so it cannot match the action.
+        with st._lock:
+            st._conn.execute(
+                "UPDATE schedules SET approved_fingerprint='forged' WHERE id=?",
+                (s.schedule_id,))
+            st._conn.commit()
+        tick = rn.run_once(now=NOW + 61)
+        fresh = st.get(s.schedule_id)
+        ok = (tick.completed == 0 and fresh is not None
+              and fresh.runs_used == 0)
+        return ok, ("en godkendelse der ikke matcher handlingen afvises før "
+                    "kørsel (runner-refusal + ToolGate som dobbelt bælte) og "
+                    "slotten frigives" if ok else "et forfalsket approval kørte")
+
+    probe("Claim er durable + budget reserveres atomisk", p_claim_durable)
+    probe("Samme occurrence kan ikke claimes to gange", p_exactly_once)
+    probe("Crash før kørsel: opgives og refunderes", p_crash_before_execution)
+    probe("Crash efter kørsel: evidens holder budgettet brugt",
+          p_crash_after_execution)
+    probe("Pause efter claim stopper in-flight occurrence", p_revocation)
+    probe("Budgetloft holder på tværs af claims", p_budget_ceiling)
+    probe("Forfalsket approval afvises og slot frigives", p_forged_approval)
+    return results
+
+
 def dormancy() -> tuple[bool, str]:
     """Run the CI gate that proves Agent 3 is asleep, and report what it said."""
     r = subprocess.run([sys.executable, str(ROOT / "tests" / "workflow_agent3_dormant.py")],
@@ -388,6 +561,8 @@ def render() -> str:
     dormant_ok, dormant_line = dormancy()
     server_plans, plan_note = plan_authority()
     approval_ok, approval_note = schedule_approval_authority()
+    durability = scheduler_durability_probes()
+    durability_ok = all(p["ok"] for p in durability)
     flags = flag_defaults()
     switches = [f for f in flags if f[2] != "indstilling"]
     active = [f for f in switches if f[2] == "**AKTIV**"]
@@ -443,18 +618,38 @@ def render() -> str:
         "",
         "---",
         "",
-        f"## Kan scheduleren aktiveres nu? **{'NEJ' if not approval_ok else verdict}**",
+        f"## Kan scheduleren aktiveres nu? "
+        f"**{'NEJ' if not (approval_ok and durability_ok) else verdict}**",
         "",
         # A separate verdict on purpose. The scheduler and Agent 3 fail for
         # different reasons, and a page that pools their blockers tells a reader
         # that Agent 3 is held up by something that has nothing to do with it --
         # which is how a page earns the right to be skimmed.
         (approval_note if not approval_ok
-         else "Ingen blokerende fund specifikke for scheduleren."),
+         else ("en eller flere durability-prober er RØDE — se tabellen nedenfor"
+               if not durability_ok
+               else "Ingen blokerende fund specifikke for scheduleren.")),
         "",
         f"- **Beviser en godkendelse et menneske:** {'ja' if approval_ok else 'NEJ'}",
+        f"- **Leveringsmodellen består alle durability-prober:** "
+        f"{'ja' if durability_ok else 'NEJ'}",
         "- **Fysisk validering gælder også her:** scheduleren kører på den samme "
         "rig, så rapporten er en forudsætning for begge.",
+        "",
+        "### Durability-prober (kørt live mod rigtige komponenter, T-015)",
+        "",
+        "Hver probe bygger de RIGTIGE komponenter mod engangs-databaser og "
+        "injicerer fejlen — claim-crash, post-eksekverings-crash, pause efter "
+        "claim, udtømt budget, forfalsket approval. Grønt beviser at "
+        "mekanismerne virker i processen på dette træ; det fysiske bevis på "
+        "riggen er stadig sin egen blocker.",
+        "",
+        "| Probe | Resultat | Detalje |",
+        "|---|---|---|",
+        *[
+            f"| {p['name']} | {'✅' if p['ok'] else '**RØD**'} | {p['detail']} |"
+            for p in durability
+        ],
         "",
         "---",
         "",
