@@ -10,6 +10,7 @@ from app.browser_use_adapter import (
     READ_ONLY_EXCLUDED_ACTIONS,
     SUPPORTED_BROWSER_USE_VERSION,
     BrowserUseResearchOutput,
+    build_read_only_browser_profile,
     load_browser_use_bindings,
 )
 
@@ -57,17 +58,9 @@ tools_parameters = inspect.signature(bindings.tools_factory).parameters
 check("exclude_actions" in tools_parameters, "Tools exposes exclude_actions")
 check("display_files_in_done_text" in tools_parameters, "Tools exposes display_files_in_done_text")
 
-profile = bindings.profile_factory(
-    headless=True,
-    allowed_domains=["example.com", "*.example.com"],
-    user_data_dir=None,
-    storage_state=None,
-    keep_alive=False,
-    block_ip_addresses=True,
-    enable_default_extensions=False,
-    downloads_path=None,
-    auto_download_pdfs=False,
-    captcha_solver=False,
+profile = build_read_only_browser_profile(
+    bindings,
+    ["example.com", "*.example.com"],
 )
 
 download_path = Path(profile.downloads_path).expanduser().resolve(strict=True)
@@ -80,8 +73,17 @@ try:
     check(profile.keep_alive is False, "profile is single-use")
     check(profile.block_ip_addresses is True, "profile blocks direct IP navigation")
     check(profile.enable_default_extensions is False, "default extensions are disabled")
+    check(profile.accept_downloads is False, "browser context refuses downloads")
+    check(profile.permissions == [], "browser context grants no permissions")
     check(profile.auto_download_pdfs is False, "automatic PDF downloads are disabled")
     check(profile.captcha_solver is False, "captcha side-effect service is disabled")
+    check(profile.cross_origin_iframes is False, "cross-origin iframe processing is disabled")
+    check(profile.use_cloud is False, "cloud browser fallback is disabled")
+    check(profile.disable_security is False, "Chromium security is never disabled")
+    check(profile.demo_mode is False, "browser demo overlay is disabled")
+    check(profile.record_har_path is None, "HAR recording is disabled")
+    check(profile.record_video_dir is None, "video recording is disabled")
+    check(profile.traces_dir is None, "Playwright trace recording is disabled")
 
     check(download_path.parent == temp_root, "download quarantine is directly under system temp")
     check(download_path.name.startswith("browser-use-downloads-"), "download quarantine uses Browser Use's unique prefix")
