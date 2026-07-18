@@ -1,0 +1,44 @@
+# Line endings are load-bearing here (F-726).
+#
+# The Windows appliance fingerprint hashes source files, and the code-identity
+# gate compares that hash to what a source checkout produces (F-607, F-701). If
+# Git rewrites line endings on checkout -- core.autocrlf=true turns LF into CRLF
+# on Windows -- then byte-identical logical source hashes differently on the rig
+# than on CI, and physical validation fails validated_code_mismatch for a file
+# nobody touched.
+#
+# So every text file Git manages is normalized to LF in the repo AND checked out
+# with LF everywhere. The fingerprint normalizes too, as a second line; this is
+# the first, keeping the working tree itself consistent.
+
+# Default: let Git detect text and normalize it to LF on commit.
+* text=auto eol=lf
+
+# Everything the fingerprint reads, pinned explicitly so no autocrlf setting can
+# reintroduce CRLF on a Windows checkout.
+*.py    text eol=lf
+*.go    text eol=lf
+*.kt    text eol=lf
+*.kts   text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.toml  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.cfg   text eol=lf
+*.sh    text eol=lf
+
+# Windows batch files must KEEP CRLF or cmd.exe mis-parses them. Marked -text so
+# Git stores the bytes exactly and never renormalizes them to LF at staging.
+*.bat   -text
+
+# Binary files Git must never touch.
+*.png   binary
+*.jar   binary
+*.apk   binary
+*.keystore binary
+*.jks   binary
+*.ico   binary
+*.wav   binary
+*.onnx  binary

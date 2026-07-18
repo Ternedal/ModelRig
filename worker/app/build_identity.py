@@ -33,6 +33,24 @@ _cached: str | None = None
 _STAMP = _APP / "_build_stamp.py"
 
 
+def _canonical_bytes(path: "Path") -> bytes:
+    """The bytes of a source file with line endings normalized to LF (F-726).
+
+    The fingerprint used to hash raw bytes, and Git rewrites line endings on
+    checkout: with core.autocrlf=true on Windows, a file lands as CRLF; the same
+    file on the Linux CI runner and in a plain source checkout lands as LF. Byte-
+    identical logical source, two different hashes -- so the code-identity gate
+    that stands between here and physical validation (F-607, F-701) would report
+    validated_code_mismatch on the rig for a file nobody changed.
+
+    Normalizing CRLF and lone CR to LF before hashing makes the fingerprint a
+    property of the source, not of the checkout that produced it. A committed
+    .gitattributes keeps the working tree consistent too; this is the second
+    line, so a file that slips through with the wrong ending still hashes right.
+    """
+    return path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
 def _hash_source_tree() -> str:
     """Fingerprint every module this worker could import.
 
@@ -47,7 +65,7 @@ def _hash_source_tree() -> str:
         rel = path.relative_to(_APP).as_posix()
         h.update(rel.encode("utf-8"))
         h.update(b"\0")
-        h.update(hashlib.sha256(path.read_bytes()).digest())
+        h.update(hashlib.sha256(_canonical_bytes(path)).digest())
     return h.hexdigest()
 
 
