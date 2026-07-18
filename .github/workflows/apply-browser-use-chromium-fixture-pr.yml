@@ -1,0 +1,49 @@
+name: apply-browser-use-chromium-fixture-pr
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/browser-use-chromium-fixture'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: agent/browser-use-chromium-fixture
+          fetch-depth: 0
+      - name: Apply embedded exact patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          source = Path('.github/workflows/apply-browser-use-chromium-fixture.yml').read_text(encoding='utf-8')
+          start = "          python - <<'PY'\n"
+          end = "\n          PY\n"
+          if source.count(start) != 1 or source.count(end) != 1:
+              raise SystemExit('embedded patch markers are not unique')
+          body = source.split(start, 1)[1].split(end, 1)[0]
+          exec(compile(textwrap.dedent(body), '<browser-use-patch>', 'exec'))
+          Path('.github/workflows/apply-browser-use-chromium-fixture-pr.yml').unlink()
+          PY
+      - name: Validate patch shape
+        shell: bash
+        run: |
+          python -m py_compile worker/app/browser_use_adapter.py scripts/browser_use_runtime_contract.py scripts/browser_use_live_fixture.py tests/worker_browser_use_adapter.py
+          git diff --check
+          test ! -e .github/workflows/apply-browser-use-chromium-fixture.yml
+          test ! -e .github/workflows/apply-browser-use-chromium-fixture-pr.yml
+      - name: Commit final isolated change
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(research): lock Browser Use profile and launch local Chromium fixture"
+          git push origin HEAD:agent/browser-use-chromium-fixture
