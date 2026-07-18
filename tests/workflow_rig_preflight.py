@@ -74,6 +74,19 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, {"code_sha256": code_sha,
                                     "production_activation": prod,
                                     "rig_validation": self._rig()})
+        if self.path.startswith("/api/v1/health/full"):
+            if _Handler.scenario == "ollama_down":
+                return self._send(200, {"ok": False, "faults": ["ollama"], "checks": {
+                    "ollama": {"ok": False, "detail": "connection refused"},
+                    "disk": {"ok": True, "free_gb": 120.5},
+                    "asr": {"ok": True, "device": "cuda"}}})
+            return self._send(200, {"ok": True, "faults": [], "checks": {
+                "ollama": {"ok": True, "embed_dims": 768},
+                "disk": {"ok": True, "free_gb": 120.5},
+                "asr": {"ok": True, "device": "cuda"}, "tts": {"ok": True}}})
+        if self.path == "/api/v1/models":
+            return self._send(200, {"models": [{"name": "qwen3:14b"},
+                                               {"name": "nomic-embed-text"}]})
         return self._send(404, {"error": "nope"})
 
     def _send(self, code, obj):
@@ -149,6 +162,19 @@ check(run("bad_build") == 1,
 check(not hasattr(_Handler, "do_POST"),
       "the doctor is read-only -- the fake rig served only GETs and nothing "
       "tried to POST, so preflight cannot mutate the rig")
+
+# --- the substrate the validation runs through is checked too (F-919) --------
+# Preflight must not green-light a rig where the Agent 3 handshake works but
+# Ollama is down -- the validation would fail partway. A substrate fault is a
+# blocker, and it must be legible, not a bare "run failed".
+check(run("ollama_down") == 1,
+      "Ollama down is NOT READY (exit 1) -- the substrate the validation embeds "
+      "and plans through is a hard dependency, checked before the run")
+
+# And a fully healthy substrate is still READY (the substrate checks do not
+# spuriously block a good rig).
+check(run("ready") == 0,
+      "a healthy substrate stays READY -- the new checks pass a good rig")
 
 print(f"\n===== RIG PREFLIGHT: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

@@ -30,6 +30,11 @@ import sys
 import urllib.error
 import urllib.request
 
+# The substrate-health half lives in a sibling module. Ensure this file's own
+# directory is importable whether preflight is run directly, imported by the
+# test via a spec loader, or invoked from another cwd.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 # --- tiny presentation layer, no dependencies -------------------------------
 
 _OK = "  OK   "
@@ -330,6 +335,11 @@ def main(argv: list[str] | None = None) -> int:
         status_checks, rig = check_authed_status(args.base_url, token)
         checks += status_checks
         checks += check_report_state(rig)
+        # The substrate the validation runs THROUGH -- Ollama, planner model,
+        # disk, ASR device -- not just the Agent 3 handshake (F-919 controlled run).
+        from rig_preflight_substrate import check_substrate
+        planner = os.environ.get("KALIV_AGENT3_PLANNER_MODEL", "").strip()
+        checks += check_substrate(_get, Check, args.base_url, token, planner)
     else:
         checks.append(Check("authenticated + report checks").warn(
             "skipped -- backend not reachable",
