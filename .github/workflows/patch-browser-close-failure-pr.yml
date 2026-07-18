@@ -1,0 +1,37 @@
+name: patch-browser-close-failure-pr
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'agent/browser-use-chromium-fixture'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: agent/browser-use-chromium-fixture
+          fetch-depth: 1
+          show-progress: false
+      - name: Preserve request guard when browser close fails
+        run: python scripts/_patch_browser_close_failure.py
+      - name: Validate failed-close contract
+        shell: bash
+        run: |
+          pip install -r worker/requirements.txt --break-system-packages >/dev/null
+          python -m py_compile worker/app/browser_use_adapter.py tests/worker_browser_use_runtime_guard.py
+          PYTHONPATH=worker python tests/worker_browser_use_runtime_guard.py
+          git diff --check
+          test ! -e scripts/_patch_browser_close_failure.py
+      - name: Commit failed-close contract
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add worker/app/browser_use_adapter.py tests/worker_browser_use_runtime_guard.py scripts/_patch_browser_close_failure.py
+          git commit -m "fix(research): keep request guard armed on close failure"
+          git push origin HEAD:agent/browser-use-chromium-fixture
