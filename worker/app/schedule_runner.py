@@ -48,6 +48,31 @@ class SchedulerRunner:
         self.registry = tools.REGISTRY if registry is None else registry
         self.feature_enabled = feature_enabled
 
+    def disable_unschedulable(self, *, now: float | None = None) -> list[str]:
+        """Disable standing grants for tools that may no longer run unattended.
+
+        A row created before schedulability existed -- an old delete_model or
+        pull_model grant -- would otherwise claim, be refused by ToolGate, and
+        come back every cadence forever (F-710). _permanent_refusal now stops
+        the loop per occurrence, but a disabled row does not even wake, which is
+        cheaper and legible: it shows as paused rather than as a job that blocks
+        on a schedule. Idempotent, so running it every startup is safe.
+
+        Returns the ids it disabled, so startup can log what it migrated.
+        """
+        disabled: list[str] = []
+        for s in self.schedules.list_all():
+            if not s.enabled:
+                continue
+            tool = self.registry.get(s.tool)
+            # Unknown tool or one the registry now forbids on a schedule. An
+            # unknown tool cannot run either, so it is disabled too rather than
+            # left to fail on a loop.
+            if tool is None or not getattr(tool, "schedulable", False):
+                if self.schedules.set_enabled(s.schedule_id, False, now=now):
+                    disabled.append(s.schedule_id)
+        return disabled
+
     def run_once(self, *, now: float | None = None, limit: int = 20) -> TickResult:
         """Claim and execute a bounded batch, or do absolutely nothing when off.
 
@@ -228,6 +253,13 @@ class SchedulerRunner:
         if schedule.max_runs and schedule.runs_used >= schedule.max_runs:
             return True
         if tool.risk == "desktop" or tool.risk not in ("read", "write"):
+            return True
+        # An unschedulable tool can never succeed on a schedule (F-710). ToolGate
+        # refuses it every cadence, and without this the occurrence claims,
+        # blocks, and comes back tomorrow forever -- a row from before
+        # schedulability existed (an old delete_model grant) becomes a job that
+        # fails on a loop. Refusing it permanently lets recovery stop retrying.
+        if not tool.schedulable:
             return True
         if tool.risk == "write":
             return (

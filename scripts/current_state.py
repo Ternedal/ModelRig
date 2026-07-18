@@ -42,10 +42,24 @@ def _tools() -> list[tuple[str, str, str]]:
         "KALIV_TOOLS_DIR": tmp,
         "PYTHONPATH": str(ROOT / "worker"),
     })
+    # Emit every axis the registry owns (F-718). The page showed risk,
+    # sensitivity and isolation, and hid impact, schedulable, cancellation and
+    # idempotent -- so the authoritative state could not say what may run
+    # unattended or be replayed, which is the whole point of those axes.
+    #
+    # The axis names live in ONE list, in the subprocess and in the header
+    # below, because hand-listing fields in two places is how retry dropped
+    # idempotent this morning (F-715). Add an axis to _AXES and both ends learn
+    # it.
     code = (
         "from app.tools import REGISTRY\n"
+        "_AXES = ('risk','sensitivity','isolate','impact','schedulable',"
+        "'cancellation','idempotent')\n"
+        "def _cell(v):\n"
+        "    if isinstance(v, bool): return '1' if v else '0'\n"
+        "    return str(getattr(v, 'value', v))\n"
         "for n, t in sorted(REGISTRY.items()):\n"
-        "    print(f'{n}|{t.risk}|{t.sensitivity}|{int(bool(t.isolate))}')\n"
+        "    print(n + '|' + '|'.join(_cell(getattr(t, a)) for a in _AXES))\n"
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True,
                          text=True, env=env, cwd=str(ROOT / "worker"), timeout=60)
@@ -53,8 +67,9 @@ def _tools() -> list[tuple[str, str, str]]:
         raise SystemExit(f"cannot read the tool registry:\n{out.stderr[-800:]}")
     rows = []
     for line in out.stdout.strip().splitlines():
-        name, risk, sens, iso = line.split("|")
-        rows.append((name, risk, sens, iso == "1"))
+        parts = line.split("|")
+        name, rest = parts[0], parts[1:]
+        rows.append((name, rest))
     return rows
 
 
@@ -162,13 +177,25 @@ def render() -> str:
     L.append("")
     L.append("## Tools the model can see")
     L.append("")
-    L.append("`risk` gates what a tool may DO. `sensitivity` gates where its ANSWER may")
-    L.append("travel. They are orthogonal.")
+    L.append("Every column is a registry-owned axis (F-718). `risk` gates what a tool")
+    L.append("may DO and `impact` how bad it is if it goes wrong; `sensitivity` gates")
+    L.append("where its ANSWER may travel; `sched` is whether it may run unattended;")
+    L.append("`stop` is what cancellation does; `replay` is whether running it twice is")
+    L.append("safe. Read out of the code, so the page cannot claim one thing while the")
+    L.append("gate enforces another.")
     L.append("")
-    L.append("| Tool | risk | sensitivity | isolated |")
-    L.append("|---|---|---|---|")
-    for name, risk, sens, iso in _tools():
-        L.append(f"| `{name}` | {risk} | {sens} | {'yes' if iso else 'no'} |")
+    # Same axis order as the subprocess. One list, two ends (F-715): the header
+    # and the emitter must not drift, so they share the order by construction.
+    L.append("| Tool | risk | impact | sensitivity | isolated | sched | stop | replay |")
+    L.append("|---|---|---|---|---|---|---|---|")
+    for name, axes in _tools():
+        risk, sens, iso, impact, sched, stop, replay = axes
+        L.append(
+            f"| `{name}` | {risk} | {impact} | {sens} | "
+            f"{'yes' if iso == '1' else 'no'} | "
+            f"{'yes' if sched == '1' else 'no'} | {stop} | "
+            f"{'yes' if replay == '1' else 'no'} |"
+        )
     L.append("")
     L.append("## Switches (default = what a rig does today)")
     L.append("")

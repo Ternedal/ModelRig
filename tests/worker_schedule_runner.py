@@ -194,8 +194,13 @@ finally:
 # --- transient tool pause skips one occurrence but preserves the schedule ----
 
 pause_name = "_runner_paused_tool"
+# schedulable=True because this is a read the scheduler is allowed to run, and
+# the test is about a GATE-disabled tool (a transient pause), not an
+# unschedulable one (a permanent refusal, F-710). Before schedulability existed
+# this fixture did not have to say so; now it does, exactly like the real reads.
 T.REGISTRY[pause_name] = T.Tool(
-    name=pause_name, description="paused read", risk="read", run=lambda args: "no"
+    name=pause_name, description="paused read", risk="read",
+    schedulable=True, run=lambda args: "no"
 )
 try:
     s, j, g, r = make_env()
@@ -232,6 +237,69 @@ try:
     s.close()
 finally:
     T.REGISTRY.pop(error_name, None)
+
+# --- a tool that may no longer run unattended does not loop forever (F-710) --
+#
+# ToolGate refuses an old delete_model grant every cadence. Before this, the
+# occurrence claimed, blocked, and came back tomorrow -- a row from before
+# schedulability existed becomes a job that fails on a loop. Two defences: the
+# runner refuses it permanently so recovery stops retrying, and startup disables
+# it so it does not even wake.
+
+import json as _json  # noqa: E402
+
+from app.scheduler import Schedule as _Sched, fingerprint as _fp  # noqa: E402
+
+_schedules, _jobs, _gate, _runner = make_env()
+
+# _permanent_refusal must be True for an unschedulable tool, so a claimed
+# occurrence is marked dead instead of retried next cadence.
+_dm = T.REGISTRY["delete_model"]
+_dm_fp = _fp("delete_model", {"name": "m"})
+_dm_row = _Sched("dm", "delete_model", {"name": "m"}, "daily:03:00", _dm_fp,
+                 9e18, 0, 0, 0, 0, True)
+check(SchedulerRunner._permanent_refusal(_dm_row, _dm, _dm_fp, now=1.0) is True,
+      "an unschedulable tool is a PERMANENT refusal -- the occurrence dies "
+      "instead of blocking on a loop every cadence")
+
+_rs = T.REGISTRY["rig_status"]
+_rs_row = _Sched("rs", "rig_status", {}, "daily:03:00", None, 9e18, 0, 0, 0, 0, True)
+check(SchedulerRunner._permanent_refusal(_rs_row, _rs, _fp("rig_status", {}), now=1.0) is False,
+      "and a schedulable read is not permanently refused -- the brake is "
+      "specific, not a blanket stop")
+
+# startup migration disables legacy unschedulable rows, idempotently.
+_schedules.create("rig_status", {}, "daily:03:00", now=1.0)
+_schedules._conn.execute(
+    "INSERT INTO schedules (id, tool, args, cadence, approved_fingerprint,"
+    " expires_at, max_runs, runs_used, due_at, missed, enabled, created)"
+    " VALUES (?,?,?,?,?,?,?,?,?,?,1,?)",
+    ("legacy", "delete_model", _json.dumps({"name": "m"}), "daily:03:00", _dm_fp,
+     9e18, 0, 0, 0, 0, 1.0))
+_schedules._conn.commit()
+
+_migrated = _runner.disable_unschedulable()
+check(_migrated == ["legacy"],
+      "startup disables the legacy delete_model grant so it never wakes")
+_state = {s.schedule_id: s.enabled for s in _schedules.list_all()}
+check(_state["legacy"] is False, "the legacy row is disabled")
+check(any(sid != "legacy" and en for sid, en in _state.items()),
+      "the valid rig_status grant is left enabled")
+check(_runner.disable_unschedulable() == [],
+      "running the migration again disables nothing -- it is idempotent, so "
+      "every startup is safe")
+
+# An unknown tool -- one removed from the registry entirely -- is disabled too,
+# because it cannot run either and would otherwise fail on a loop.
+_schedules._conn.execute(
+    "INSERT INTO schedules (id, tool, args, cadence, approved_fingerprint,"
+    " expires_at, max_runs, runs_used, due_at, missed, enabled, created)"
+    " VALUES (?,?,?,?,?,?,?,?,?,?,1,?)",
+    ("ghost", "tool_that_was_deleted", "{}", "daily:03:00", None,
+     9e18, 0, 0, 0, 0, 1.0))
+_schedules._conn.commit()
+check(_runner.disable_unschedulable() == ["ghost"],
+      "a grant for a tool no longer in the registry is disabled too")
 
 print(f"\n===== SCHEDULE RUNNER: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import os
+import logging
 import threading
 import time
 from dataclasses import dataclass
@@ -88,6 +89,14 @@ class SchedulerService:
                 return True
             if not self.runner.feature_enabled():
                 return False
+            # Migrate before the loop can claim anything (F-710): a grant for a
+            # tool that may no longer run unattended is disabled here, so it
+            # never wakes to be refused on every cadence. Idempotent.
+            migrated = self.runner.disable_unschedulable()
+            if migrated:
+                logging.getLogger(__name__).info(
+                    "scheduler: disabled %d unschedulable grant(s) at startup: %s",
+                    len(migrated), ", ".join(migrated))
             self._stop.clear()
             self._started_at = self.clock()
             self._stopped_at = None

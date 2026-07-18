@@ -10,20 +10,24 @@
 
 ## Tools the model can see
 
-`risk` gates what a tool may DO. `sensitivity` gates where its ANSWER may
-travel. They are orthogonal.
+Every column is a registry-owned axis (F-718). `risk` gates what a tool
+may DO and `impact` how bad it is if it goes wrong; `sensitivity` gates
+where its ANSWER may travel; `sched` is whether it may run unattended;
+`stop` is what cancellation does; `replay` is whether running it twice is
+safe. Read out of the code, so the page cannot claim one thing while the
+gate enforces another.
 
-| Tool | risk | sensitivity | isolated |
-|---|---|---|---|
-| `cancel_job` | write | operational | no |
-| `current_datetime` | read | public | no |
-| `delete_model` | write | operational | no |
-| `job_status` | read | operational | no |
-| `list_documents` | read | private | no |
-| `list_models` | read | operational | no |
-| `note_append` | write | private | no |
-| `pull_model` | write | operational | no |
-| `rig_status` | read | operational | no |
+| Tool | risk | impact | sensitivity | isolated | sched | stop | replay |
+|---|---|---|---|---|---|---|---|
+| `cancel_job` | write | write | operational | no | no | none | yes |
+| `current_datetime` | read | read | public | no | yes | none | yes |
+| `delete_model` | write | destructive | operational | no | no | none | no |
+| `job_status` | read | read | operational | no | yes | none | yes |
+| `list_documents` | read | read | private | no | yes | none | yes |
+| `list_models` | read | read | operational | no | yes | none | yes |
+| `note_append` | write | write | private | no | yes | none | no |
+| `pull_model` | write | admin | operational | no | no | cooperative | no |
+| `rig_status` | read | read | operational | no | yes | none | yes |
 
 ## Switches (default = what a rig does today)
 

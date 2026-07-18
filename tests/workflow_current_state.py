@@ -51,9 +51,10 @@ version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 check(f"**Version:** {version}" in text, f"the doc names the real version ({version})")
 check("GENERATED — do not edit" in text, "the doc says loudly that it is generated")
 
-# The two facts a reader most needs, and the two most likely to rot by hand.
-check("| `list_documents` | read | private |" in text,
-      "the tool table carries the live risk AND sensitivity, straight from the registry")
+# The facts a reader most needs, straight from the registry. list_documents is
+# the private read: risk read, impact read, sensitivity private.
+check("| `list_documents` | read | read | private |" in text,
+      "the tool table carries the live risk, impact AND sensitivity")
 check("`KALIV_EGRESS_GATE`" in text and "`KALIV_TOOL_ISOLATION`" in text,
       "the dormant switches are listed with their real defaults")
 
@@ -96,6 +97,37 @@ check("KALIV_NOT_A_REAL_SWITCH" not in _names,
 # and padding the table with them is how a table stops being read.
 check("MODELRIG_ADMIN_KEY" not in _names,
       "a credential read from the Go environment is not listed as a switch")
+
+# --- the authoritative page shows every axis the registry owns (F-718) ------
+# It showed risk, sensitivity, isolation and hid impact, schedulable,
+# cancellation, idempotent -- so it could not say what runs unattended or
+# replays, which is exactly what those axes decide. A hand-picked column set
+# hides the next axis added, so assert the table against the tools that carry
+# the decisions.
+
+for _needle in ("| impact |", "| sched |", "| stop |", "| replay |"):
+    check(_needle in text,
+          f"the tool table has a {_needle.strip(' |')} column")
+
+# The dangerous tools must be legible as dangerous FROM THIS PAGE, not just in
+# code: delete_model destructive and unschedulable, pull_model cooperative.
+import re as _re2  # noqa: E402
+_row = {}
+for _line in text.splitlines():
+    _m = _re2.match(r"\| `([a-z_]+)` \|(.+)\|", _line)
+    if _m:
+        _row[_m.group(1)] = [c.strip() for c in _m.group(2).split("|")]
+
+check("destructive" in _row.get("delete_model", []),
+      "delete_model reads as destructive on the page, not only in the registry")
+check("cooperative" in _row.get("pull_model", []),
+      "pull_model's cancellation is visible")
+# schedulable and replay are the columns a person scans before trusting a
+# schedule; they must carry the real answer.
+check(_row.get("delete_model", ["", "", "", "", "no"])[4] == "no",
+      "delete_model shows it cannot be scheduled")
+check(_row.get("note_append", ["", "", "", "", "", "", "no"])[-1] == "no",
+      "note_append shows re-running it is not free")
 
 print(f"\n===== CURRENT STATE: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

@@ -56,6 +56,12 @@ class FakeRunner:
     def feature_enabled(self):
         return self.enabled
 
+    def disable_unschedulable(self, *, now=None):
+        # start() migrates legacy unschedulable grants before the loop can claim
+        # (F-710). The fake records that it was asked and migrates nothing.
+        self.migrated = True
+        return []
+
     def run_once(self):
         with self._lock:
             self.calls += 1
@@ -99,6 +105,10 @@ check(off.stop(), "stopping a never-started service is harmless")
 runner = FakeRunner()
 service = SchedulerService(runner, poll_s=60.0)
 check(service.start(), "configured service starts")
+check(getattr(runner, "migrated", False),
+      "start() migrated legacy unschedulable grants before running the loop "
+      "(F-710) -- a grant that may no longer run unattended must not get a "
+      "chance to claim first")
 check(runner.called.wait(0.5), "the first bounded tick runs immediately")
 first_thread = service._thread
 check(service.start() and service._thread is first_thread, "start is idempotent and does not create a second thread")
