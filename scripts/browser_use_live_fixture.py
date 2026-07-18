@@ -34,7 +34,8 @@ TITLE = "ModelRig controlled browser fixture"
 BODY = (
     b"<!doctype html><html><head><title>"
     + TITLE.encode("utf-8")
-    + b"</title></head><body><main id='fixture'>loopback-only</main></body></html>"
+    + b"</title><link rel='icon' href='data:,'></head>"
+    + b"<body><main id='fixture'>loopback-only</main></body></html>"
 )
 
 
@@ -190,8 +191,14 @@ async def run_fixture() -> dict[str, Any]:
             ),
             result_required=True,
         )
+        page = await session.must_get_current_page()
+        observed_title = await page.evaluate("() => document.title")
         check(state.url == fixture_url, "allowlisted localhost page is active", results)
-        check(state.title == TITLE, "fixture title is read from real Chromium", results)
+        check(
+            observed_title == TITLE,
+            "fixture title is read through Browser Use's CDP page actor",
+            results,
+        )
         check(
             FixtureHandler.requests == ["/fixture"],
             "only one loopback request was served",
