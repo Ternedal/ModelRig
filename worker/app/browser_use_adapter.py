@@ -141,8 +141,17 @@ def _validate_runtime_surface(agent_factory: Any, profile_factory: Any, tools_fa
         "block_ip_addresses",
         "enable_default_extensions",
         "downloads_path",
+        "accept_downloads",
+        "permissions",
         "auto_download_pdfs",
         "captcha_solver",
+        "cross_origin_iframes",
+        "use_cloud",
+        "disable_security",
+        "demo_mode",
+        "record_har_path",
+        "record_video_dir",
+        "traces_dir",
     }
     if not isinstance(fields, dict) or not required_fields.issubset(fields):
         raise BrowserBackendUnavailable("browser-use BrowserProfile runtime contract is not supported")
@@ -167,6 +176,73 @@ def load_browser_use_bindings() -> BrowserUseBindings:
         version=installed,
         runtime_validated=True,
     )
+
+
+def build_read_only_browser_profile(
+    bindings: BrowserUseBindings,
+    allowed_domains: tuple[str, ...] | list[str],
+) -> Any:
+    """Construct the single Browser Use profile permitted by this adapter.
+
+    Browser Use 0.13.4 defaults to accepting downloads and grants clipboard
+    plus notification permissions. Those defaults are appropriate for general
+    automation and wrong for ModelRig research, so the adapter states every
+    security-relevant value explicitly and validates the real runtime object.
+    """
+
+    profile = bindings.profile_factory(
+        headless=True,
+        allowed_domains=list(allowed_domains),
+        user_data_dir=None,
+        storage_state=None,
+        keep_alive=False,
+        block_ip_addresses=True,
+        enable_default_extensions=False,
+        downloads_path=None,
+        accept_downloads=False,
+        permissions=[],
+        auto_download_pdfs=False,
+        captcha_solver=False,
+        cross_origin_iframes=False,
+        use_cloud=False,
+        disable_security=False,
+        demo_mode=False,
+        record_har_path=None,
+        record_video_dir=None,
+        traces_dir=None,
+    )
+    if bindings.runtime_validated:
+        expected = {
+            "headless": True,
+            "storage_state": None,
+            "keep_alive": False,
+            "block_ip_addresses": True,
+            "enable_default_extensions": False,
+            "accept_downloads": False,
+            "auto_download_pdfs": False,
+            "captcha_solver": False,
+            "cross_origin_iframes": False,
+            "use_cloud": False,
+            "disable_security": False,
+            "demo_mode": False,
+            "record_har_path": None,
+            "record_video_dir": None,
+            "traces_dir": None,
+        }
+        for name, value in expected.items():
+            if getattr(profile, name, object()) != value:
+                raise BrowserBackendUnavailable(
+                    f"browser-use profile did not retain locked field {name}"
+                )
+        if list(getattr(profile, "permissions", ())) != []:
+            raise BrowserBackendUnavailable(
+                "browser-use profile retained browser permissions"
+            )
+        if list(getattr(profile, "allowed_domains", ())) != list(allowed_domains):
+            raise BrowserBackendUnavailable(
+                "browser-use profile changed the domain allowlist"
+            )
+    return profile
 
 
 def _maybe_await(value: Any):
@@ -386,17 +462,9 @@ class BrowserUseBackend:
             llm = self._llm_factory()
             if llm is None:
                 raise BrowserBackendUnavailable("browser LLM is not configured")
-            profile = bindings.profile_factory(
-                headless=True,
-                allowed_domains=list(request.policy.allowed_domains),
-                user_data_dir=None,
-                storage_state=None,
-                keep_alive=False,
-                block_ip_addresses=True,
-                enable_default_extensions=False,
-                downloads_path=None,
-                auto_download_pdfs=False,
-                captcha_solver=False,
+            profile = build_read_only_browser_profile(
+                bindings,
+                request.policy.allowed_domains,
             )
             self._adopt_runtime_quarantines(profile, required=bindings.runtime_validated)
             tools = bindings.tools_factory(
