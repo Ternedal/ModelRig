@@ -62,11 +62,38 @@ Det er hele pointen med endpointet: du skal ikke gætte hvilken del der er nede.
 
 ---
 
+## 1.4 Frys kandidaten først
+
+**Gør:** før du overhovedet rører riggen, bekræft at det du er ved at validere er
+én sammenhængende, CI-grøn kandidat — ikke en halv tilstand eller en commit hvis
+CI fejlede. Evidensen er code-bound: validerer du én version og shipper den næste,
+er beviset ugyldigt uden at du kører noget om. Denne tjekker det, uden at ændre
+noget:
+
+```cmd
+python scripts\freeze_check.py
+```
+
+**Bør se:** `FROZEN` — ren working tree, ens versionsstempler, kandidaten er på
+`origin/main`, og (hvis `GITHUB_TOKEN`/`GH_TOKEN` er sat) `CI var GRØN på præcis
+denne commit`. Uden token tjekkes CI ikke, men resten kører offline.
+
+**Fejler noget →** hver `FAIL` har en `->`-linje. De almindelige: ucommittede
+ændringer (commit eller kassér dem), versionsdrift (kør `version_tool.py sync`),
+eller rød CI (ret den før du validerer). Pointen: du bruger ikke rig-tid på at
+validere en kandidat der flytter sig under dig.
+
+Når kandidaten er `FROZEN`: stop med at shippe, og gå videre til preflight.
+
+---
+
 ## 1.5 Preflight før den fysiske validering
 
 **Gør:** før du kører selve valideringen (som er tung og forudsætter at *hele*
 riggen er oppe korrekt), kør denne — den tjekker hvert led uafhængigt og siger
-præcis hvad der mangler, uden at ændre noget:
+præcis hvad der mangler, uden at ændre noget. Den dækker nu også *substratet*
+valideringen kører igennem — Ollama svarer, planner-modellen er pullet, disk,
+ASR-device — ikke kun Agent 3-håndtrykket:
 
 ```cmd
 python scripts\rig_preflight.py
