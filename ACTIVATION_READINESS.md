@@ -3,8 +3,8 @@
 > **Genereret af `scripts/activation_readiness.py`. Ret ikke i hånden.**
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
-**Version på main:** `1.58.120`  
-**Genereret:** 2026-07-18 17:26 UTC
+**Version på main:** `1.58.121`  
+**Genereret:** 2026-07-18 17:51 UTC
 
 ---
 
@@ -23,7 +23,22 @@ Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet
 Ingen blokerende fund specifikke for scheduleren.
 
 - **Beviser en godkendelse et menneske:** ja
+- **Leveringsmodellen består alle durability-prober:** ja
 - **Fysisk validering gælder også her:** scheduleren kører på den samme rig, så rapporten er en forudsætning for begge.
+
+### Durability-prober (kørt live mod rigtige komponenter, T-015)
+
+Hver probe bygger de RIGTIGE komponenter mod engangs-databaser og injicerer fejlen — claim-crash, post-eksekverings-crash, pause efter claim, udtømt budget, forfalsket approval. Grønt beviser at mekanismerne virker i processen på dette træ; det fysiske bevis på riggen er stadig sin egen blocker.
+
+| Probe | Resultat | Detalje |
+|---|---|---|
+| Claim er durable + budget reserveres atomisk | ✅ | claim skriver durable occurrence og reserverer budget i samme transaktion |
+| Samme occurrence kan ikke claimes to gange | ✅ | samme occurrence kan ikke claimes to gange |
+| Crash før kørsel: opgives og refunderes | ✅ | crash før kørsel: occurrence opgives og slot refunderes |
+| Crash efter kørsel: evidens holder budgettet brugt | ✅ | crash efter kørsel: audit-evidens holder budgettet brugt |
+| Pause efter claim stopper in-flight occurrence | ✅ | pause efter claim stopper in-flight occurrence og refunderer |
+| Budgetloft holder på tværs af claims | ✅ | max_runs kan ikke overskrides på tværs af claims |
+| Forfalsket approval afvises og slot frigives | ✅ | en godkendelse der ikke matcher handlingen afvises før kørsel (runner-refusal + ToolGate som dobbelt bælte) og slotten frigives |
 
 ---
 

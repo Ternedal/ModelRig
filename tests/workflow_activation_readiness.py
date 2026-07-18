@@ -267,5 +267,131 @@ check(
     else f"client-authored plans are reachable via {_doors}",
 )
 
+
+# --- the durability probes are live and NOT BLIND (T-015) --------------------
+#
+# Six times this session a probe of ours was itself the broken component and
+# reported green. So a green probe is not evidence until it is proven that the
+# probe CAN go red: break the real mechanism, run the probes, and require the
+# right one to catch it. Each break is reverted before the next.
+
+_probes = AR.scheduler_durability_probes()
+check(len(_probes) == 7 and all(p["ok"] for p in _probes),
+      "all seven durability probes are green against the real tree")
+
+import app.scheduler as _sched  # noqa: E402
+import app.schedule_runner as _srun  # noqa: E402
+
+
+def _probe(named):
+    for p in AR.scheduler_durability_probes():
+        if p["name"] == named:
+            return p
+    return None
+
+
+# 1. Break evidence-keeping in recovery -> the crash-after-execution probe reds.
+_orig_resolve = _sched.ScheduleStore.resolve_recovered
+def _blind_resolve(self, claim_id, *, executed, now=None):
+    return _orig_resolve(self, claim_id, executed=False, now=now)  # always refund
+_sched.ScheduleStore.resolve_recovered = _blind_resolve
+try:
+    _p = _probe("Crash efter kørsel: evidens holder budgettet brugt")
+    check(_p is not None and _p["ok"] is False,
+          "breaking evidence-keeping turns the crash-after-execution probe RED "
+          "-- the probe actually watches the mechanism")
+finally:
+    _sched.ScheduleStore.resolve_recovered = _orig_resolve
+
+# 2. The pre-ToolGate guard has TWO independent belts: enabled and revision.
+# First finding (kept as its own check): a guard that lies about enabled ALONE
+# is still caught, because the pause bumped the revision and the claim carries
+# the old one. Single-field sabotage does not get through -- defense in depth.
+_orig_guard = _sched.ScheduleStore.current_guard
+def _half_lying_guard(self, schedule_id):
+    g = _orig_guard(self, schedule_id)
+    if g is not None:
+        g = dict(g); g["enabled"] = True  # pretend nothing was paused
+    return g
+_sched.ScheduleStore.current_guard = _half_lying_guard
+try:
+    _p = _probe("Pause efter claim stopper in-flight occurrence")
+    check(_p is not None and _p["ok"] is True,
+          "lying about enabled ALONE is still caught by the revision belt -- "
+          "the guard is defense-in-depth, not a single check")
+finally:
+    _sched.ScheduleStore.current_guard = _orig_guard
+
+# Only a guard that lies about EVERYTHING the claim compares -- enabled,
+# revision AND approval -- lets the stale occurrence through, and THAT must
+# turn the probe red. (revision 0 matches the probe's fresh-created claim.)
+def _fully_lying_guard(self, schedule_id):
+    g = _orig_guard(self, schedule_id)
+    if g is not None:
+        g = dict(g); g["enabled"] = True; g["revision"] = 0
+    return g
+_sched.ScheduleStore.current_guard = _fully_lying_guard
+try:
+    _p = _probe("Pause efter claim stopper in-flight occurrence")
+    check(_p is not None and _p["ok"] is False,
+          "a guard that lies about the whole comparison turns the revocation "
+          "probe RED -- the probe watches the mechanism, not a shadow of it")
+finally:
+    _sched.ScheduleStore.current_guard = _orig_guard
+
+# 3. Break budget reservation -> the ceiling probe reds.
+# claim_due is one big method; the honest lever is record-side: make the claim
+# not reserve by refunding immediately after every claim via a wrapped
+# claim_due. If the ceiling probe still passes, it is not measuring.
+_orig_claim = _sched.ScheduleStore.claim_due
+def _leaky_claim(self, now=None, limit=20):
+    claims = _orig_claim(self, now=now, limit=limit)
+    for c in claims:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE schedules SET runs_used=MAX(runs_used-1,0) WHERE id=?",
+                (c.schedule.schedule_id,))
+            self._conn.commit()
+    return claims
+_sched.ScheduleStore.claim_due = _leaky_claim
+try:
+    _p = _probe("Budgetloft holder på tværs af claims")
+    check(_p is not None and _p["ok"] is False,
+          "a claim that leaks its reservation turns the budget-ceiling probe RED")
+finally:
+    _sched.ScheduleStore.claim_due = _orig_claim
+
+# 4. The forged-approval defence is ALSO two belts: the runner's refusal()
+# compares fingerprints before the gate is asked, and ToolGate's pre_approved
+# check denies a mismatch before run(). First: rubber-stamp the GATE alone --
+# the outer belt must still block, so the probe stays green (defense in depth,
+# same shape as the revocation guard). Then neutralise BOTH belts -- the probe
+# must go red. The patched propose returns success WITHOUT executing anything,
+# so the sabotage has zero side effects.
+import app.tools as _tools  # noqa: E402
+_orig_propose = _tools.ToolGate.propose
+_orig_refusal = _srun.refusal
+def _rubber_stamp(self, tool, args, **kw):
+    return {"duration_ms": 1}
+_tools.ToolGate.propose = _rubber_stamp
+try:
+    _p = _probe("Forfalsket approval afvises og slot frigives")
+    check(_p is not None and _p["ok"] is True,
+          "rubber-stamping the gate ALONE is still caught by the runner's own "
+          "fingerprint refusal -- the outer belt holds")
+    _srun.refusal = lambda *a, **kw: None
+    _p = _probe("Forfalsket approval afvises og slot frigives")
+    check(_p is not None and _p["ok"] is False,
+          "neutralising BOTH belts turns the forged-approval probe RED -- the "
+          "probe watches real denials, not the absence of a tool")
+finally:
+    _tools.ToolGate.propose = _orig_propose
+    _srun.refusal = _orig_refusal
+
+# And after all the sabotage is reverted, everything is green again.
+check(all(p["ok"] for p in AR.scheduler_durability_probes()),
+      "with the mechanisms restored, all probes return to green -- the "
+      "sabotage was the probes' doing, not lasting damage")
+
 print(f"\n===== ACTIVATION READINESS: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
