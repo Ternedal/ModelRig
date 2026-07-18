@@ -163,27 +163,6 @@ class SchedulerRunner:
                 origin="schedule",
                 pre_approved=s.approved_fingerprint,
             )
-            # A scheduled action must never park for a card. Reaching this state
-            # means the gate contract changed underneath the scheduler.
-            if result.get("status") == "confirmation_required":
-                self._finish_blocked(
-                    s,
-                    job_id,
-                    "scheduled action unexpectedly requested confirmation; plan disabled",
-                    risk=tool.risk,
-                    permanent=True,
-                    now=now,
-                )
-                return "blocked"
-
-            self.schedules.record_claim_result(s.schedule_id, ran=True)
-            duration = int(result.get("duration_ms") or 0)
-            self.jobs.update(
-                job_id,
-                status="completed",
-                detail=f"{s.tool} gennemført via ToolGate ({duration} ms)",
-            )
-            return "completed"
         except tools.ToolDenied as exc:
             # Kill-switch/tool state may change in the milliseconds after the
             # policy check. The gate is authoritative; leave the schedule alive
@@ -211,6 +190,77 @@ class SchedulerRunner:
                 detail=self._bounded(f"uventet scheduler-fejl: {type(exc).__name__}: {exc}"),
             )
             return "failed"
+
+        # A returned result means ToolGate has already executed and audited the
+        # action. Everything below is bookkeeping. A database failure here must
+        # never reinterpret a completed write as a tool failure that looks safe
+        # to retry.
+        if result.get("status") == "confirmation_required":
+            # A scheduled action must never park for a card. Reaching this state
+            # means the gate contract changed underneath the scheduler.
+            self._finish_blocked(
+                s,
+                job_id,
+                "scheduled action unexpectedly requested confirmation; plan disabled",
+                risk=tool.risk,
+                permanent=True,
+                now=now,
+            )
+            return "blocked"
+
+        duration = int(result.get("duration_ms") or 0)
+        return self._finish_executed(s, job_id, duration, now)
+
+    def _finish_executed(
+        self,
+        schedule: Schedule,
+        job_id: str,
+        duration_ms: int,
+        now: float,
+    ) -> str:
+        """Record post-execution truth without turning success into a retry.
+
+        ToolGate has already run the side effect before this method starts. The
+        schedule and job live in separate SQLite databases, so their updates
+        cannot be one transaction. If schedule accounting fails, disable the
+        standing grant when possible and still report the tool execution as
+        completed. If only JobStore fails, the run budget is already durable;
+        the audit remains the authoritative execution receipt.
+        """
+        detail = f"{schedule.tool} gennemført via ToolGate ({duration_ms} ms)"
+        try:
+            recorded = self.schedules.record_claim_result(
+                schedule.schedule_id,
+                ran=True,
+            )
+            if recorded is None:
+                raise RuntimeError("schedule disappeared after execution")
+        except Exception as exc:
+            warning = self._bounded(
+                f"{detail}; efterregistrering fejlede ({type(exc).__name__}); "
+                "planen er slået fra for at undgå en ekstra kørsel"
+            )
+            try:
+                self.schedules.set_enabled(schedule.schedule_id, False, now=now)
+            except Exception:
+                # The schedule store is already failing. The claimed occurrence
+                # was consumed before execution, and a later tick will meet the
+                # same store boundary rather than retrying inside this call.
+                pass
+            try:
+                self.jobs.update(job_id, status="completed", detail=warning)
+            except Exception:
+                # Do not let a second bookkeeping store rewrite execution truth.
+                pass
+            return "completed"
+
+        try:
+            self.jobs.update(job_id, status="completed", detail=detail)
+        except Exception:
+            # The schedule budget is durable and ToolGate already audited the
+            # execution. A JobStore outage must not turn that into "failed".
+            pass
+        return "completed"
 
     def _finish_blocked(
         self,
