@@ -38,7 +38,24 @@ jobs:
             exit 1
           fi
       - name: Validate Browser Use runtime contract without launching a browser
-        run: PYTHONPATH=worker python scripts/browser_use_runtime_contract.py
+        id: runtime-contract
+        shell: bash
+        run: |
+          report="$RUNNER_TEMP/browser-use-runtime-contract.txt"
+          set +e
+          PYTHONPATH=worker python scripts/browser_use_runtime_contract.py >"$report" 2>&1
+          status=$?
+          set -e
+          cat "$report"
+          exit "$status"
+      - name: Upload runtime-contract failure report
+        if: failure() && steps.runtime-contract.outcome == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-use-runtime-contract-failure
+          path: ${{ runner.temp }}/browser-use-runtime-contract.txt
+          if-no-files-found: error
+          retention-days: 7
 
   # Compile and unit-test the clients on every push/PR. The release workflow
   # builds full APK/jar artifacts, but only at tag time -- so a client that stops
