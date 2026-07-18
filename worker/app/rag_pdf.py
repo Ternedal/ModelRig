@@ -63,21 +63,29 @@ def extract_text(pdf_bytes: bytes) -> dict:
     except Exception as e:
         raise RuntimeError(f"could not open PDF: {e}") from e
 
-    if doc.is_encrypted:
-        # Try an empty-password unlock (common for "protected" but not truly
-        # locked PDFs); if it fails, be honest rather than returning garbage.
-        if not doc.authenticate(""):
-            doc.close()
-            raise RuntimeError("PDF is password-protected; cannot extract text")
+    # Once fitz.open succeeds, every path owns a native document handle. Keep
+    # the close in one finally block so authentication failures, malformed page
+    # trees and page.get_text exceptions cannot leak it across repeated ingests.
+    try:
+        if doc.is_encrypted:
+            # Try an empty-password unlock (common for "protected" but not truly
+            # locked PDFs); if it fails, be honest rather than returning garbage.
+            if not doc.authenticate(""):
+                raise RuntimeError("PDF is password-protected; cannot extract text")
 
-    parts: list[str] = []
-    for page in doc:
-        t = page.get_text("text") or ""
-        t = t.strip()
-        if t:
-            parts.append(t)
-    pages = doc.page_count
-    doc.close()
+        parts: list[str] = []
+        for page in doc:
+            t = page.get_text("text") or ""
+            t = t.strip()
+            if t:
+                parts.append(t)
+        pages = doc.page_count
 
-    text = "\n\n".join(parts).strip()
-    return {"text": text, "pages": pages, "chars": len(text)}
+        text = "\n\n".join(parts).strip()
+        return {"text": text, "pages": pages, "chars": len(text)}
+    except RuntimeError:
+        raise
+    except Exception as e:
+        raise RuntimeError(f"could not extract PDF text: {e}") from e
+    finally:
+        doc.close()
