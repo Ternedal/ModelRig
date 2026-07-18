@@ -17,7 +17,7 @@ import tempfile
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Literal, Protocol
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -28,6 +28,10 @@ from .browser_host import (
     BrowserBackendUnavailable,
     BrowserCitationDraft,
     BrowserSourceArtifact,
+)
+from .browser_use_network_guard import (
+    BrowserUseNetworkGuard,
+    BrowserUseNetworkGuardError,
 )
 from .research_contract import ResearchContractError, ResearchRequest, SourceReceipt
 from .web_fetch import FetchTrace, WebFetchError
@@ -47,6 +51,9 @@ READ_ONLY_EXCLUDED_ACTIONS = (
     "write_file",
     "read_file",
     "replace_file",
+    "search",
+    "switch",
+    "close_tab",
 )
 _BROWSER_USE_DOWNLOAD_PREFIX = "browser-use-downloads-"
 _BROWSER_USE_USER_DATA_PREFIX = "browser-use-user-data-dir-"
@@ -73,6 +80,15 @@ class BrowserUseResearchOutput(BaseModel):
     citations: tuple[BrowserUseCitationOutput, ...] = Field(min_length=1, max_length=100)
 
 
+class BrowserUseReadOnlyNavigateAction(BaseModel):
+    """The only navigation shape exposed to the model: current tab, always."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    url: str = Field(min_length=1, max_length=8_192)
+    new_tab: Literal[False] = False
+
+
 @dataclass(frozen=True)
 class BrowserUseBindings:
     agent_factory: Callable[..., Any]
@@ -89,6 +105,7 @@ class VerifiedFetcher(Protocol):
 
 LlmFactory = Callable[[], Any]
 BindingsLoader = Callable[[], BrowserUseBindings]
+NetworkGuardFactory = Callable[..., Any]
 
 
 def _prepare_runtime_environment() -> None:
@@ -245,6 +262,25 @@ def build_read_only_browser_profile(
     return profile
 
 
+def lock_read_only_tools(tools: Any) -> Any:
+    """Validate the real action registry and remove hidden navigation escape hatches."""
+
+    registry = getattr(getattr(tools, "registry", None), "registry", None)
+    actions = getattr(registry, "actions", None)
+    if not isinstance(actions, dict):
+        raise BrowserBackendUnavailable("browser-use action registry is unavailable")
+    navigate = actions.get("navigate")
+    if navigate is None or not hasattr(navigate, "param_model"):
+        raise BrowserBackendUnavailable("browser-use navigate action is unavailable")
+    navigate.param_model = BrowserUseReadOnlyNavigateAction
+    for forbidden in ("search", "switch", "close_tab"):
+        if forbidden in actions:
+            raise BrowserBackendUnavailable(
+                f"browser-use retained forbidden action {forbidden}"
+            )
+    return tools
+
+
 def _maybe_await(value: Any):
     if inspect.isawaitable(value):
         return value
@@ -374,15 +410,21 @@ class BrowserUseBackend:
         fetcher: VerifiedFetcher,
         llm_factory: LlmFactory,
         bindings_loader: BindingsLoader = load_browser_use_bindings,
+        network_guard_factory: NetworkGuardFactory = BrowserUseNetworkGuard,
     ) -> None:
         if not callable(llm_factory):
             raise TypeError("llm_factory must be callable")
         if not callable(bindings_loader):
             raise TypeError("bindings_loader must be callable")
+        if not callable(network_guard_factory):
+            raise TypeError("network_guard_factory must be callable")
         self._fetcher = fetcher
         self._llm_factory = llm_factory
         self._bindings_loader = bindings_loader
+        self._network_guard_factory = network_guard_factory
         self._agent: Any = None
+        self._network_guard: Any = None
+        self._runtime_validated = False
         self._download_path: Path | None = None
         self._user_data_path: Path | None = None
         self._closed = False
@@ -459,6 +501,7 @@ class BrowserUseBackend:
             bindings = self._bindings_loader()
             if bindings.version != SUPPORTED_BROWSER_USE_VERSION:
                 raise BrowserBackendUnavailable("browser-use version is not supported")
+            self._runtime_validated = bindings.runtime_validated
             llm = self._llm_factory()
             if llm is None:
                 raise BrowserBackendUnavailable("browser LLM is not configured")
@@ -471,6 +514,8 @@ class BrowserUseBackend:
                 exclude_actions=list(READ_ONLY_EXCLUDED_ACTIONS),
                 display_files_in_done_text=False,
             )
+            if bindings.runtime_validated:
+                tools = lock_read_only_tools(tools)
             return bindings.agent_factory(
                 task=_build_task(request),
                 llm=llm,
@@ -518,13 +563,41 @@ class BrowserUseBackend:
 
     async def research(self, request: ResearchRequest) -> BrowserBackendRun:
         self._closed = False
+        self._network_guard = None
         self._agent = self._build_agent(request)
+        if self._runtime_validated:
+            browser_session = getattr(self._agent, "browser_session", None)
+            if browser_session is None:
+                raise BrowserBackendUnavailable(
+                    "browser-use agent has no browser session for request guarding"
+                )
+            try:
+                self._network_guard = self._network_guard_factory(
+                    browser_session,
+                    request.policy.allowed_domains,
+                )
+                await self._network_guard.install()
+            except BrowserUseNetworkGuardError as exc:
+                raise BrowserBackendUnavailable(
+                    "browser request guard could not initialize"
+                ) from exc
+            except Exception as exc:
+                raise BrowserBackendUnavailable(
+                    "browser request guard could not initialize"
+                ) from exc
         try:
             history = await self._agent.run(max_steps=request.policy.max_steps)
         except BrowserBackendUnavailable:
             raise
         except Exception as exc:
             raise BrowserBackendError("browser-use execution failed") from exc
+        if self._network_guard is not None:
+            try:
+                await self._network_guard.assert_healthy()
+            except BrowserUseNetworkGuardError as exc:
+                raise BrowserBackendError(
+                    "browser request guard failed during execution"
+                ) from exc
         self._assert_no_downloads()
 
         if not _history_successful(history):
@@ -610,15 +683,27 @@ class BrowserUseBackend:
             return
         self._closed = True
         agent = self._agent
+        guard = self._network_guard
         self._agent = None
+        self._network_guard = None
+        guard_error: BrowserBackendError | None = None
         try:
-            if agent is None:
-                return
-            close = getattr(agent, "close", None)
-            if close is None:
-                browser_session = getattr(agent, "browser_session", None)
-                close = getattr(browser_session, "close", None)
-            if close is not None:
-                await _maybe_await(close())
+            if guard is not None:
+                try:
+                    await guard.close()
+                except BrowserUseNetworkGuardError as exc:
+                    guard_error = BrowserBackendError(
+                        "browser request guard cleanup failed"
+                    )
+                    guard_error.__cause__ = exc
+            if agent is not None:
+                close = getattr(agent, "close", None)
+                if close is None:
+                    browser_session = getattr(agent, "browser_session", None)
+                    close = getattr(browser_session, "close", None)
+                if close is not None:
+                    await _maybe_await(close())
         finally:
             self._cleanup_runtime_quarantines()
+        if guard_error is not None:
+            raise guard_error
