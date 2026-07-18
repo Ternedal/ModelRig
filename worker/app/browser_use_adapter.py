@@ -141,6 +141,8 @@ def _validate_runtime_surface(agent_factory: Any, profile_factory: Any, tools_fa
         "block_ip_addresses",
         "enable_default_extensions",
         "downloads_path",
+        "accept_downloads",
+        "permissions",
         "auto_download_pdfs",
         "captcha_solver",
     }
@@ -395,6 +397,8 @@ class BrowserUseBackend:
                 block_ip_addresses=True,
                 enable_default_extensions=False,
                 downloads_path=None,
+                accept_downloads=False,
+                permissions=[],
                 auto_download_pdfs=False,
                 captcha_solver=False,
             )
