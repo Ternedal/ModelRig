@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+from pathlib import Path
+
+
+def replace_once(path: str, old_lines: list[str], new_lines: list[str]) -> None:
+    print(f"patching {path}")
+    p = Path(path)
+    text = p.read_text(encoding="utf-8")
+    old = "\n".join(old_lines)
+    new = "\n".join(new_lines)
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{path}: exact patch target count is {count}")
+    p.write_text(text.replace(old, new), encoding="utf-8")
+
+
+replace_once(
+    "tests/worker_browser_use_adapter.py",
+    [
+        'check(recorder.profile_kwargs["block_ip_addresses"] is True, "direct IP navigation is blocked")',
+        'check(recorder.profile_kwargs["downloads_path"] is None, "downloads have no destination")',
+    ],
+    [
+        'check(recorder.profile_kwargs["block_ip_addresses"] is True, "direct IP navigation is blocked")',
+        'check(recorder.profile_kwargs["downloads_path"] is None, "download quarantine remains runtime-owned")',
+        'check(recorder.profile_kwargs["accept_downloads"] is False, "browser context refuses downloads")',
+        'check(recorder.profile_kwargs["permissions"] == [], "browser context grants no permissions")',
+        'check(recorder.profile_kwargs["cross_origin_iframes"] is False, "cross-origin iframe traversal is disabled")',
+        'check(recorder.profile_kwargs["use_cloud"] is False, "cloud browser fallback is disabled")',
+        'check(recorder.profile_kwargs["disable_security"] is False, "browser security remains enabled")',
+        'check(recorder.profile_kwargs["demo_mode"] is False, "demo overlay is disabled")',
+        'check(recorder.profile_kwargs["record_har_path"] is None, "HAR recording is disabled")',
+        'check(recorder.profile_kwargs["record_video_dir"] is None, "video recording is disabled")',
+        'check(recorder.profile_kwargs["traces_dir"] is None, "trace recording is disabled")',
+    ],
+)
+
+replace_once(
+    ".github/workflows/ci.yml",
+    [
+        "  # The optional browser runtime stays out of worker/requirements.txt. This job",
+        "  # installs it in isolation and validates imports, constructor fields, the",
+        "  # concrete action registry and Browser Use's temp-download behavior without",
+        "  # starting Chromium, creating a model client or performing network research.",
+    ],
+    [
+        "  # The optional browser runtime stays out of worker/requirements.txt. This job",
+        "  # validates the pinned package and locked profile, then launches real Chromium",
+        "  # against one controlled localhost fixture. It creates no model client and",
+        "  # performs no public-site research or product activation.",
+    ],
+)
+replace_once(
+    ".github/workflows/ci.yml",
+    ["      - name: Validate Browser Use runtime contract without launching a browser"],
+    ["      - name: Validate Browser Use runtime and locked profile contract"],
+)
+replace_once(
+    ".github/workflows/ci.yml",
+    [
+        "      - name: Upload runtime-contract failure report",
+        "        if: failure() && steps.runtime-contract.outcome == 'failure'",
+        "        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2",
+        "        with:",
+        "          name: browser-use-runtime-contract-failure",
+        "          path: ${{ runner.temp }}/browser-use-runtime-contract.txt",
+        "          if-no-files-found: error",
+        "          retention-days: 7",
+    ],
+    [
+        "      - name: Locate controlled Chromium executable",
+        "        id: chromium",
+        "        shell: bash",
+        "        run: |",
+        "          for candidate in google-chrome-stable google-chrome chromium chromium-browser; do",
+        '            path="$(command -v "$candidate" 2>/dev/null || true)"',
+        '            if [ -n "$path" ]; then',
+        '              printf "path=%s\\n" "$(realpath "$path")" >> "$GITHUB_OUTPUT"',
+        "              exit 0",
+        "            fi",
+        "          done",
+        '          echo "No Chrome/Chromium binary is available on the runner" >&2',
+        "          exit 1",
+        "      - name: Launch Chromium against controlled local fixture",
+        "        id: live-fixture",
+        "        shell: bash",
+        "        env:",
+        "          MODELRIG_BROWSER_EXECUTABLE: ${{ steps.chromium.outputs.path }}",
+        "          MODELRIG_BROWSER_FIXTURE_REPORT: ${{ runner.temp }}/browser-use-live-fixture.json",
+        "          BROWSER_USE_LOGGING_LEVEL: warning",
+        "        run: |",
+        '          report="$RUNNER_TEMP/browser-use-live-fixture.txt"',
+        "          set +e",
+        '          PYTHONPATH=worker python scripts/browser_use_live_fixture.py >"$report" 2>&1',
+        "          status=$?",
+        "          set -e",
+        '          cat "$report"',
+        '          exit "$status"',
+        "      - name: Upload Browser Use contract failure reports",
+        "        if: failure()",
+        "        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2",
+        "        with:",
+        "          name: browser-use-contract-failure",
+        "          path: |",
+        "            ${{ runner.temp }}/browser-use-runtime-contract.txt",
+        "            ${{ runner.temp }}/browser-use-live-fixture.txt",
+        "            ${{ runner.temp }}/browser-use-live-fixture.json",
+        "          if-no-files-found: warn",
+        "          retention-days: 7",
+    ],
+)
+
+Path(".github/workflows/apply-browser-use-contract-fixture.yml").unlink()
+Path("scripts/_apply_browser_use_contract_fixture.py").unlink()
+print("patch complete")
