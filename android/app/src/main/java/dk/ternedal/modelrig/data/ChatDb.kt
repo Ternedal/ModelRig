@@ -4,6 +4,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import dk.ternedal.modelrig.logic.RigProfileTokenResolution
+import dk.ternedal.modelrig.logic.RigProfileTokenResolver
 
 /**
  * Conversation persistence. Uses Android's built-in SQLite (no new dependency),
@@ -172,6 +174,13 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
 
     data class RigProfile(val id: Long, val name: String, val serverUrl: String, val deviceToken: String)
 
+    private data class StoredRigProfile(
+        val id: Long,
+        val name: String,
+        val serverUrl: String,
+        val rawToken: String,
+    )
+
     fun saveRigProfile(name: String, serverUrl: String, deviceToken: String): Long {
         return writableDatabase.insert("rig_profile", null, ContentValues().apply {
             put("name", name.take(40))
@@ -184,48 +193,68 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
     }
 
     fun listRigProfiles(): List<RigProfile> {
-        val out = mutableListOf<RigProfile>()
-        val migrate = mutableListOf<Pair<Long, String>>() // id -> legacy plaintext to re-encrypt
-        readableDatabase.rawQuery(
-            "SELECT id, name, server_url, device_token FROM rig_profile ORDER BY created_at DESC",
-            null,
-        ).use { c ->
-            while (c.moveToNext()) {
-                val id = c.getLong(0)
-                val raw = c.getString(3)
-                // Three-way, fail-closed (audit 1.58.36): an "enc:v1:" value
-                // that fails to decrypt is INVALID (corrupt, or the Keystore
-                // key was lost after restore/device move) -- never treat it as
-                // plaintext and never re-encrypt it: that launders garbage into
-                // a valid-looking secret and destroys the profile. Server
-                // tokens are lowercase hex, so true pre-encryption plaintext is
-                // recognizable; anything else prefixless is old-format
-                // ciphertext (1.58.17..36) and gets the prefix on rewrite.
-                val tok = when (dk.ternedal.modelrig.logic.TokenFormat.classify(raw)) {
-                    dk.ternedal.modelrig.logic.StoredTokenForm.ENCRYPTED_V1 ->
-                        runCatching { Crypto.decrypt(raw) }.getOrElse { "" } // invalid -> re-pair
-                    dk.ternedal.modelrig.logic.StoredTokenForm.LEGACY_PLAINTEXT ->
-                        raw.also { migrate.add(id to it) }
-                    dk.ternedal.modelrig.logic.StoredTokenForm.OLD_FORMAT_CIPHERTEXT ->
-                        runCatching { Crypto.decrypt(raw) }
-                            .getOrElse { "" } // undecryptable -> re-pair, never plaintext
-                            .also { if (it.isNotEmpty()) migrate.add(id to it) } // rewrite with prefix
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val stored = mutableListOf<StoredRigProfile>()
+            db.rawQuery(
+                "SELECT id, name, server_url, device_token FROM rig_profile ORDER BY created_at DESC",
+                null,
+            ).use { c ->
+                while (c.moveToNext()) {
+                    stored.add(
+                        StoredRigProfile(
+                            id = c.getLong(0),
+                            name = c.getString(1),
+                            serverUrl = c.getString(2),
+                            rawToken = c.getString(3),
+                        ),
+                    )
                 }
-                out.add(RigProfile(id, c.getString(1), c.getString(2), tok))
             }
-        }
-        // Re-encrypt legacy plaintext at rest, after the cursor is closed. A
-        // failure here doesn't affect the values already returned.
-        for ((id, plain) in migrate) {
-            runCatching {
-                writableDatabase.update(
-                    "rig_profile",
-                    ContentValues().apply { put("device_token", Crypto.encrypt(plain)) },
-                    "id=?", arrayOf(id.toString()),
-                )
+
+            val out = ArrayList<RigProfile>(stored.size)
+            for (profile in stored) {
+                when (
+                    val resolved = RigProfileTokenResolver.resolve(
+                        raw = profile.rawToken,
+                        decrypt = Crypto::decrypt,
+                        encrypt = Crypto::encrypt,
+                    )
+                ) {
+                    is RigProfileTokenResolution.Ready ->
+                        out.add(RigProfile(profile.id, profile.name, profile.serverUrl, resolved.token))
+
+                    is RigProfileTokenResolution.Migration -> {
+                        // The encrypted replacement MUST be committed before the
+                        // plaintext token can leave this method. A failed Keystore
+                        // operation or a missing row aborts and rolls back the whole
+                        // read instead of quietly using a cleartext credential.
+                        val updated = db.update(
+                            "rig_profile",
+                            ContentValues().apply { put("device_token", resolved.envelope) },
+                            "id=?",
+                            arrayOf(profile.id.toString()),
+                        )
+                        check(updated == 1) {
+                            "Rig profile ${profile.id} disappeared during credential migration"
+                        }
+                        out.add(RigProfile(profile.id, profile.name, profile.serverUrl, resolved.token))
+                    }
+
+                    RigProfileTokenResolution.Invalid ->
+                        // Corrupt/current ciphertext or an old envelope whose key
+                        // was lost is never exposed as plaintext. Keep the profile
+                        // visible so the user can remove it or pair it again.
+                        out.add(RigProfile(profile.id, profile.name, profile.serverUrl, ""))
+                }
             }
+
+            db.setTransactionSuccessful()
+            return out
+        } finally {
+            db.endTransaction()
         }
-        return out
     }
 
     fun deleteRigProfile(id: Long) {
