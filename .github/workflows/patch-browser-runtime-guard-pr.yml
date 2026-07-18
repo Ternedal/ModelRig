@@ -22,27 +22,26 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path('tests/worker_browser_use_runtime_guard.py')
           text = path.read_text(encoding='utf-8')
-          old = '''        return SimpleNamespace(
-              downloads_path=download_path,
-              user_data_dir=user_data_path,
-          )'''
-          new = '''        profile_fields = dict(kwargs)
-          profile_fields.update(
-              downloads_path=download_path,
-              user_data_dir=user_data_path,
+          text, profile_count = re.subn(
+              r'''        return SimpleNamespace\(\n\s+downloads_path=download_path,\n\s+user_data_dir=user_data_path,\n\s+\)''',
+              '''        profile_fields = dict(kwargs)
+                  profile_fields.update(
+                      downloads_path=download_path,
+                      user_data_dir=user_data_path,
+                  )
+                  return SimpleNamespace(**profile_fields)''',
+              text,
+              count=1,
           )
-          return SimpleNamespace(**profile_fields)'''
-          if text.count(old) != 1:
-              raise SystemExit(f'profile fixture target count is {text.count(old)}')
-          text = text.replace(old, new)
+          if profile_count != 1:
+              raise SystemExit(f'profile fixture replacement count is {profile_count}')
 
-          old_checks = '''check(clean_runtime.profile_kwargs["user_data_dir"] is None, "Browser Use owns profile temp path creation")
-          check(clean_runtime.profile_kwargs["auto_download_pdfs"] is False, "automatic PDF downloads are disabled")'''
-          new_checks = '''check(clean_runtime.profile_kwargs["user_data_dir"] is None, "Browser Use owns profile temp path creation")
-          check(clean_runtime.profile_kwargs["accept_downloads"] is False, "browser context refuses downloads")
+          anchor = 'check(clean_runtime.profile_kwargs["user_data_dir"] is None, "Browser Use owns profile temp path creation")\n'
+          additions = anchor + '''check(clean_runtime.profile_kwargs["accept_downloads"] is False, "browser context refuses downloads")
           check(clean_runtime.profile_kwargs["permissions"] == [], "validated runtime grants no browser permissions")
           check(clean_runtime.profile_kwargs["cross_origin_iframes"] is False, "cross-origin iframe traversal is disabled")
           check(clean_runtime.profile_kwargs["use_cloud"] is False, "cloud browser fallback is disabled")
@@ -50,10 +49,10 @@ jobs:
           check(clean_runtime.profile_kwargs["record_har_path"] is None, "HAR recording is disabled")
           check(clean_runtime.profile_kwargs["record_video_dir"] is None, "video recording is disabled")
           check(clean_runtime.profile_kwargs["traces_dir"] is None, "trace recording is disabled")
-          check(clean_runtime.profile_kwargs["auto_download_pdfs"] is False, "automatic PDF downloads are disabled")'''
-          if text.count(old_checks) != 1:
-              raise SystemExit(f'profile assertion target count is {text.count(old_checks)}')
-          path.write_text(text.replace(old_checks, new_checks), encoding='utf-8')
+          '''
+          if text.count(anchor) != 1:
+              raise SystemExit(f'profile assertion anchor count is {text.count(anchor)}')
+          path.write_text(text.replace(anchor, additions), encoding='utf-8')
           PY
       - name: Validate runtime guard
         shell: bash
