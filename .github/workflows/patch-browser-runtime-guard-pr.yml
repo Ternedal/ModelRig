@@ -1,0 +1,72 @@
+name: patch-browser-runtime-guard-pr
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'agent/browser-use-chromium-fixture'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: agent/browser-use-chromium-fixture
+          fetch-depth: 1
+          show-progress: false
+      - name: Update validated-runtime fixture
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/worker_browser_use_runtime_guard.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''        return SimpleNamespace(
+              downloads_path=download_path,
+              user_data_dir=user_data_path,
+          )'''
+          new = '''        profile_fields = dict(kwargs)
+          profile_fields.update(
+              downloads_path=download_path,
+              user_data_dir=user_data_path,
+          )
+          return SimpleNamespace(**profile_fields)'''
+          if text.count(old) != 1:
+              raise SystemExit(f'profile fixture target count is {text.count(old)}')
+          text = text.replace(old, new)
+
+          old_checks = '''check(clean_runtime.profile_kwargs["user_data_dir"] is None, "Browser Use owns profile temp path creation")
+          check(clean_runtime.profile_kwargs["auto_download_pdfs"] is False, "automatic PDF downloads are disabled")'''
+          new_checks = '''check(clean_runtime.profile_kwargs["user_data_dir"] is None, "Browser Use owns profile temp path creation")
+          check(clean_runtime.profile_kwargs["accept_downloads"] is False, "browser context refuses downloads")
+          check(clean_runtime.profile_kwargs["permissions"] == [], "validated runtime grants no browser permissions")
+          check(clean_runtime.profile_kwargs["cross_origin_iframes"] is False, "cross-origin iframe traversal is disabled")
+          check(clean_runtime.profile_kwargs["use_cloud"] is False, "cloud browser fallback is disabled")
+          check(clean_runtime.profile_kwargs["disable_security"] is False, "browser security remains enabled")
+          check(clean_runtime.profile_kwargs["record_har_path"] is None, "HAR recording is disabled")
+          check(clean_runtime.profile_kwargs["record_video_dir"] is None, "video recording is disabled")
+          check(clean_runtime.profile_kwargs["traces_dir"] is None, "trace recording is disabled")
+          check(clean_runtime.profile_kwargs["auto_download_pdfs"] is False, "automatic PDF downloads are disabled")'''
+          if text.count(old_checks) != 1:
+              raise SystemExit(f'profile assertion target count is {text.count(old_checks)}')
+          path.write_text(text.replace(old_checks, new_checks), encoding='utf-8')
+          PY
+      - name: Validate runtime guard
+        shell: bash
+        run: |
+          pip install -r worker/requirements.txt --break-system-packages >/dev/null
+          python -m py_compile tests/worker_browser_use_runtime_guard.py
+          PYTHONPATH=worker python tests/worker_browser_use_runtime_guard.py
+          git diff --check
+      - name: Commit runtime guard
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/worker_browser_use_runtime_guard.py
+          git commit -m "test(research): mirror locked profile in runtime guard"
+          git push origin HEAD:agent/browser-use-chromium-fixture
