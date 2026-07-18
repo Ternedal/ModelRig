@@ -97,15 +97,17 @@ class SchedulerService:
                 logging.getLogger(__name__).info(
                     "scheduler: disabled %d unschedulable grant(s) at startup: %s",
                     len(migrated), ", ".join(migrated))
-            # Resolve occurrences whose worker died mid-claim before the loop
-            # runs (F-903 recovery): a 'reserved' row with no outcome means the
-            # slot was taken and never finished. Mark it abandoned and return
-            # its budget slot, so a crash does not permanently burn a run.
-            recovered = self.runner.schedules.recover_reserved()
-            if recovered:
+            # Resolve occurrences whose worker died mid-flight before the loop
+            # runs (T-012): recovery consults the audit, so a crash AFTER the
+            # side effect keeps its budget spent (refunding a run that happened
+            # is how max_runs gets exceeded), while a crash before it refunds
+            # the slot and closes any dangling job.
+            recovered = self.runner.recover_interrupted()
+            if recovered["executed"] or recovered["abandoned"]:
                 logging.getLogger(__name__).info(
-                    "scheduler: recovered %d abandoned occurrence(s) at startup",
-                    len(recovered))
+                    "scheduler: recovered %d executed / %d abandoned "
+                    "occurrence(s) at startup",
+                    len(recovered["executed"]), len(recovered["abandoned"]))
             self._stop.clear()
             self._started_at = self.clock()
             self._stopped_at = None
