@@ -45,6 +45,16 @@ travel. They are orthogonal.
 | `KALIV_VISION_MODEL` | `(unset)` |
 | `KALIV_WORKER_ALLOW_LAN` | `0` |
 
+## Desktop credential storage
+
+| Property | Current implementation |
+|---|---|
+| Beskyttede settings | `cloudKey`, `deviceToken` |
+| At-rest-beskyttelse | Windows DPAPI (current-user) |
+| Legacy-klartekst migreres før udlevering | ja |
+| Korrupt/ukendt envelope fejler lukket | ja |
+| Ægte DPAPI bevist på Windows-runner | ja |
+
 ## Design docs and what they claim about themselves
 
 | Doc | Status |
