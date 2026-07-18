@@ -1,9 +1,13 @@
 name: temporary-pdf-lifecycle-debug
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/pdf-document-lifecycle
+      - main
+    paths:
+      - worker/app/rag_pdf.py
+      - tests/worker_rag_pdf_lifecycle.py
+      - .github/workflows/temporary-pdf-lifecycle-debug.yml
 
 permissions:
   contents: read
