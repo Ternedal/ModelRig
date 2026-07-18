@@ -4,16 +4,13 @@ on:
   push:
     branches:
       - agent/browser-use-adapter
-  pull_request:
-    branches:
-      - main
 
 permissions:
   contents: write
 
 jobs:
   patch-and-test:
-    if: github.actor != 'github-actions[bot]' && github.head_ref == 'agent/browser-use-adapter'
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
@@ -23,66 +20,189 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r worker/requirements.txt
-      - name: Expose verified entity bytes to adapters
+      - name: Add verified receipt handoff
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          path = Path('worker/app/web_fetch.py')
-          text = path.read_text(encoding='utf-8')
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, found {count}: {old[:120]!r}')
+              target.write_text(text.replace(old, new), encoding='utf-8')
 
-          replacements = [
-              (
-                  'from __future__ import annotations\n\nimport ipaddress',
-                  'from __future__ import annotations\n\nimport hashlib\nimport ipaddress',
-              ),
-              (
-                  '    receipt: SourceReceipt\n\n    def to_dict(self) -> dict:',
-                  '''    receipt: SourceReceipt
-    content: bytes
+          replace_once(
+              'worker/app/browser_host.py',
+              '@dataclass(frozen=True)\nclass BrowserCitationDraft:',
+              '''@dataclass(frozen=True)
+class VerifiedBrowserSourceArtifact:
+    """A receipt created by ModelRig's deterministic fetcher, not by the agent."""
+
+    receipt: SourceReceipt
 
     def __post_init__(self) -> None:
-        if not isinstance(self.content, bytes):
-            raise TypeError("content must be bytes")
-        if hashlib.sha256(self.content).hexdigest() != self.receipt.content_sha256:
-            raise ValueError("content does not match receipt hash")
+        if not isinstance(self.receipt, SourceReceipt):
+            raise BrowserHostContractError("verified browser source must contain a SourceReceipt")
+        if self.receipt.adapter != "deterministic-web-fetch":
+            raise BrowserHostContractError("verified browser source must come from deterministic-web-fetch")
 
-    def to_dict(self) -> dict:''',
-              ),
-              (
-                  '            "receipt": self.receipt.to_dict(),\n',
-                  '            "receipt": self.receipt.to_dict(),\n            "content_bytes": len(self.content),\n',
-              ),
-              (
-                  '                receipt=receipt,\n            )',
-                  '                receipt=receipt,\n                content=decoded,\n            )',
-              ),
-          ]
-          for old, new in replacements:
-              if text.count(old) != 1:
-                  raise SystemExit(f'expected one web_fetch match, found {text.count(old)}: {old!r}')
-              text = text.replace(old, new)
-          path.write_text(text, encoding='utf-8')
 
-          test_path = Path('tests/worker_web_fetch_adapter.py')
-          test = test_path.read_text(encoding='utf-8')
-          old = 'check(trace.receipt.content_sha256 == hashlib.sha256(html).hexdigest(), "receipt hashes decoded entity bytes")\n'
-          new = old + 'check(trace.content == html, "trace exposes the exact decoded entity bytes")\ncheck(trace.to_dict()["content_bytes"] == len(html), "serialized trace exposes only the content length")\n'
-          if test.count(old) != 1:
-              raise SystemExit('expected web fetch receipt assertion once')
-          test = test.replace(old, new)
-          old = 'check(compressed_trace.receipt.bytes_read == len(decoded), "receipt byte count uses decoded content")\n'
-          new = old + 'check(compressed_trace.content == decoded, "trace content uses decompressed entity bytes")\n'
-          if test.count(old) != 1:
-              raise SystemExit('expected compressed receipt assertion once')
-          test_path.write_text(test.replace(old, new), encoding='utf-8')
+@dataclass(frozen=True)
+class BrowserCitationDraft:''',
+          )
+          replace_once(
+              'worker/app/browser_host.py',
+              '    sources: tuple[BrowserSourceArtifact, ...]\n',
+              '    sources: tuple[BrowserSourceArtifact | VerifiedBrowserSourceArtifact, ...]\n',
+          )
+          replace_once(
+              'worker/app/browser_host.py',
+              '''    receipts: list[SourceReceipt] = []
+    for source in run.sources:
+        if not isinstance(source, BrowserSourceArtifact):
+            raise BrowserHostContractError("backend sources have an invalid type")
+        try:
+            source_url = policy.require_allowed_url(source.url)
+        except ResearchContractError as exc:
+            raise BrowserHostContractError("backend source URL is forbidden") from exc
+        if source_url not in visited_set:
+            raise BrowserHostContractError("backend source was not in the visit trace")
+        if len(source.content) > policy.max_source_bytes:
+            raise BrowserHostContractError("backend source exceeds max_source_bytes")
+        try:
+            receipt = SourceReceipt.from_content(
+                url=source_url,
+                title=source.title,
+                content=source.content,
+                excerpt=source.excerpt,
+                media_type=source.media_type,
+                adapter=adapter,
+            )
+            policy.accept_receipt(receipt)
+        except ResearchContractError as exc:
+            raise BrowserHostContractError("backend source evidence is invalid") from exc
+        receipts.append(receipt)
+''',
+              '''    receipts: list[SourceReceipt] = []
+    for source in run.sources:
+        if isinstance(source, VerifiedBrowserSourceArtifact):
+            receipt = source.receipt
+            try:
+                source_url = policy.require_allowed_url(receipt.url)
+                policy.accept_receipt(receipt)
+            except ResearchContractError as exc:
+                raise BrowserHostContractError("verified backend source evidence is invalid") from exc
+            if receipt.adapter != "deterministic-web-fetch":
+                raise BrowserHostContractError("verified backend source has an invalid adapter")
+        elif isinstance(source, BrowserSourceArtifact):
+            try:
+                source_url = policy.require_allowed_url(source.url)
+            except ResearchContractError as exc:
+                raise BrowserHostContractError("backend source URL is forbidden") from exc
+            if len(source.content) > policy.max_source_bytes:
+                raise BrowserHostContractError("backend source exceeds max_source_bytes")
+            try:
+                receipt = SourceReceipt.from_content(
+                    url=source_url,
+                    title=source.title,
+                    content=source.content,
+                    excerpt=source.excerpt,
+                    media_type=source.media_type,
+                    adapter=adapter,
+                )
+                policy.accept_receipt(receipt)
+            except ResearchContractError as exc:
+                raise BrowserHostContractError("backend source evidence is invalid") from exc
+        else:
+            raise BrowserHostContractError("backend sources have an invalid type")
+        if source_url not in visited_set:
+            raise BrowserHostContractError("backend source was not in the visit trace")
+        receipts.append(receipt)
+''',
+          )
+
+          replace_once(
+              'worker/app/browser_use_adapter.py',
+              '    BrowserCitationDraft,\n    BrowserSourceArtifact,\n)',
+              '    BrowserCitationDraft,\n    VerifiedBrowserSourceArtifact,\n)',
+          )
+          replace_once(
+              'worker/app/browser_use_adapter.py',
+              '''            sources.append(
+                BrowserSourceArtifact(
+                    url=trace.final_url,
+                    title=trace.receipt.title,
+                    content=trace.content,
+                    excerpt=trace.receipt.excerpt,
+                    media_type=trace.receipt.media_type,
+                )
+            )
+''',
+              '''            sources.append(
+                VerifiedBrowserSourceArtifact(receipt=trace.receipt)
+            )
+''',
+          )
+
+          replace_once(
+              'tests/worker_browser_use_adapter.py',
+              '    receipt=RECEIPT,\n    content=RAW,\n)',
+              '    receipt=RECEIPT,\n)',
+          )
+          replace_once(
+              'tests/worker_browser_use_adapter.py',
+              'check(result.sources[0].content == RAW, "raw bytes come from deterministic re-fetch")\ncheck(result.sources[0].url == "https://example.com/final", "source uses verified final URL")\ncheck(result.sources[0].title == "Release", "verified source metadata is preserved")\n',
+              'check(result.sources[0].receipt.content_sha256 == RECEIPT.content_sha256, "verified content hash comes from deterministic re-fetch")\ncheck(result.sources[0].receipt.url == "https://example.com/final", "source uses verified final URL")\ncheck(result.sources[0].receipt.title == "Release", "verified source metadata is preserved")\n',
+          )
+
+          replace_once(
+              'tests/worker_browser_host.py',
+              '    BrowserSourceArtifact,\n    encode_response,',
+              '    BrowserSourceArtifact,\n    VerifiedBrowserSourceArtifact,\n    encode_response,',
+          )
+          replace_once(
+              'tests/worker_browser_host.py',
+              'from app.research_contract import ReadOnlyBrowserPolicy, ResearchRequest, source_id_for\n',
+              'from app.research_contract import ReadOnlyBrowserPolicy, ResearchRequest, SourceReceipt, source_id_for\n',
+          )
+          replace_once(
+              'tests/worker_browser_host.py',
+              'check(research["warnings"] == ["fixture backend only"], "bounded warnings are preserved")\n\nrequest_dict = REQUEST.to_dict()\n',
+              '''check(research["warnings"] == ["fixture backend only"], "bounded warnings are preserved")
+
+VERIFIED_RECEIPT = SourceReceipt.from_content(
+    url="https://example.com/report",
+    title="Verified release",
+    content=CONTENT,
+    excerpt="Version 7 is live.",
+    media_type="text/html",
+    adapter="deterministic-web-fetch",
+)
+verified_run = replace(
+    VALID_RUN,
+    sources=(VerifiedBrowserSourceArtifact(receipt=VERIFIED_RECEIPT),),
+)
+verified_response = execute(FixtureBackend(run=verified_run))
+verified_source = verified_response.to_dict()["result"]["research"]["sources"][0]
+check(verified_response.ok, "deterministic fetch receipts are accepted")
+check(verified_source["source_id"] == VERIFIED_RECEIPT.source_id, "verified source id is preserved")
+check(verified_source["content_sha256"] == VERIFIED_RECEIPT.content_sha256, "verified content hash is preserved")
+check(verified_source["adapter"] == "deterministic-web-fetch", "verified adapter provenance is preserved")
+
+request_dict = REQUEST.to_dict()
+''',
+          )
           PY
       - run: PYTHONPATH=worker python tests/worker_web_fetch_adapter.py
+      - run: PYTHONPATH=worker python tests/worker_browser_host.py
       - run: PYTHONPATH=worker python tests/worker_browser_use_adapter.py
       - name: Commit patch
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add worker/app/web_fetch.py tests/worker_web_fetch_adapter.py
-          git commit -m 'feat(research): expose verified fetch content to adapters'
+          git add worker/app/browser_host.py worker/app/browser_use_adapter.py \
+            tests/worker_browser_host.py tests/worker_browser_use_adapter.py
+          git commit -m 'feat(research): preserve verified fetch receipts'
           git push origin HEAD:agent/browser-use-adapter
