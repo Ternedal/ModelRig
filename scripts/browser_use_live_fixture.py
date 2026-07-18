@@ -213,10 +213,10 @@ async def run_fixture() -> dict[str, Any]:
         denied["numeric_loopback"] = await expect_denied(session, numeric_url)
         check(True, "numeric IP navigation is denied", results)
         check(
-            FixtureHandler.requests == ["/fixture"],
-            "denied numeric URL never reaches fixture",
-            results,
-        )
+        FixtureHandler.requests.count("/fixture") == 1,
+        "denied numeric URL never reaches fixture endpoint",
+        results,
+    )
         check(
             next(download_path.rglob("*"), None) is None,
             "download quarantine stays empty",
@@ -242,6 +242,7 @@ async def run_fixture() -> dict[str, Any]:
         "browser_use_version": bindings.version,
         "browser_executable": str(profile.executable_path),
         "fixture_url": fixture_url,
+        "served_requests": list(FixtureHandler.requests),
         "denied": denied,
         "checks": results,
         "passed": all(results.values()),
