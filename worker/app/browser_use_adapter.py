@@ -155,6 +155,7 @@ def _validate_runtime_surface(agent_factory: Any, profile_factory: Any, tools_fa
         "allowed_domains",
         "user_data_dir",
         "storage_state",
+        "proxy",
         "keep_alive",
         "block_ip_addresses",
         "enable_default_extensions",
@@ -214,6 +215,7 @@ def build_read_only_browser_profile(
         allowed_domains=list(allowed_domains),
         user_data_dir=None,
         storage_state=None,
+        proxy=None,
         keep_alive=False,
         block_ip_addresses=True,
         enable_default_extensions=False,
@@ -238,6 +240,7 @@ def build_read_only_browser_profile(
         expected = {
             "headless": True,
             "storage_state": None,
+            "proxy": None,
             "keep_alive": False,
             "block_ip_addresses": True,
             "enable_default_extensions": False,
@@ -698,13 +701,13 @@ class BrowserUseBackend:
         guard = self._network_guard
         self._agent = None
         self._network_guard = None
-        guard_error: BrowserBackendError | None = None
+        close_error: Exception | None = None
         try:
             if guard is not None:
                 try:
-                    await guard.close()
+                    await guard.assert_healthy()
                 except BrowserUseNetworkGuardError:
-                    guard_error = BrowserBackendError(
+                    close_error = BrowserBackendError(
                         "browser request guard cleanup failed"
                     )
             if agent is not None:
@@ -713,8 +716,23 @@ class BrowserUseBackend:
                     browser_session = getattr(agent, "browser_session", None)
                     close = getattr(browser_session, "close", None)
                 if close is not None:
-                    await _maybe_await(close())
+                    try:
+                        await _maybe_await(close())
+                    except Exception as exc:
+                        if close_error is None:
+                            close_error = exc
+            # Keep interception active until the browser is closed. Fetch.disable
+            # may release paused requests, so disabling it first creates a cleanup
+            # window where a rejected request can leave Chromium.
+            if guard is not None:
+                try:
+                    await guard.close()
+                except BrowserUseNetworkGuardError:
+                    if close_error is None:
+                        close_error = BrowserBackendError(
+                            "browser request guard cleanup failed"
+                        )
         finally:
             self._cleanup_runtime_quarantines()
-        if guard_error is not None:
-            raise guard_error
+        if close_error is not None:
+            raise close_error

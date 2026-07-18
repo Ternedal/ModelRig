@@ -99,7 +99,7 @@ class Agent:
     def __init__(self, download_path: Path, *, write_download: bool) -> None:
         self.download_path = download_path
         self.write_download = write_download
-        self.browser_session = object()
+        self.browser_session = SimpleNamespace(closed=False)
         self.closed = 0
 
     async def run(self, **kwargs):
@@ -109,6 +109,7 @@ class Agent:
 
     async def close(self):
         self.closed += 1
+        self.browser_session.closed = True
 
 
 class FakeNetworkGuard:
@@ -118,6 +119,7 @@ class FakeNetworkGuard:
         self.installed = 0
         self.health_checks = 0
         self.closed = 0
+        self.browser_was_closed_on_close = False
 
     async def install(self) -> None:
         self.installed += 1
@@ -126,7 +128,11 @@ class FakeNetworkGuard:
         self.health_checks += 1
 
     async def close(self) -> None:
+        await self.assert_healthy()
         self.closed += 1
+        self.browser_was_closed_on_close = bool(
+            getattr(self.browser_session, "closed", False)
+        )
 
 
 class GuardFactory:
@@ -230,6 +236,7 @@ check(clean_guard.installed == 1, "guard installs before agent execution")
 check(clean_guard.health_checks == 1, "guard health is checked after agent execution")
 check(clean_runtime.profile_kwargs["downloads_path"] is None, "Browser Use owns download temp path creation")
 check(clean_runtime.profile_kwargs["user_data_dir"] is None, "Browser Use owns profile temp path creation")
+check(clean_runtime.profile_kwargs["proxy"] is None, "Browser Use proxy handling is explicitly disabled")
 check(clean_runtime.profile_kwargs["accept_downloads"] is False, "browser context refuses downloads")
 check(clean_runtime.profile_kwargs["permissions"] == [], "validated runtime grants no browser permissions")
 check(clean_runtime.profile_kwargs["cross_origin_iframes"] is False, "cross-origin iframe traversal is disabled")
@@ -259,7 +266,12 @@ check(
     "ephemeral browser profile is deleted during cleanup",
 )
 check(clean_runtime.agent is not None and clean_runtime.agent.closed == 1, "agent closes before quarantine cleanup")
-check(clean_guard.closed == 1, "request guard closes before browser cleanup")
+check(clean_guard.closed == 1, "request guard closes during cleanup")
+check(
+    clean_guard.browser_was_closed_on_close,
+    "browser closes while request interception is still active",
+)
+check(clean_guard.health_checks == 3, "guard is checked after run and around cleanup")
 
 # Any file written to the download quarantine fails before evidence is returned.
 dirty_runtime = Runtime(write_download=True)
@@ -285,6 +297,7 @@ dirty_guard = dirty_guards.instances[0]
 check(dirty_guard.installed == 1 and dirty_guard.health_checks == 1, "dirty run guard stays healthy")
 run(dirty_backend.close())
 check(dirty_guard.closed == 1, "dirty run guard closes during cleanup")
+check(dirty_guard.browser_was_closed_on_close, "dirty browser closes before interception is disabled")
 check(
     dirty_download_path is not None and not dirty_download_path.exists(),
     "dirty download quarantine is deleted during cleanup",

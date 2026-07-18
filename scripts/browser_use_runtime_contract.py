@@ -75,6 +75,7 @@ try:
     check(profile.headless is True, "profile is headless")
     check(profile.allowed_domains == ["example.com", "*.example.com"], "profile keeps the exact allowlist")
     check(profile.storage_state is None, "profile imports no cookie or storage state")
+    check(profile.proxy is None, "profile configures no proxy or proxy credentials")
     check(profile.keep_alive is False, "profile is single-use")
     check(profile.block_ip_addresses is True, "profile blocks direct IP navigation")
     check(profile.enable_default_extensions is False, "default extensions are disabled")
