@@ -17,12 +17,10 @@ jobs:
           ref: agent/browser-use-chromium-fixture
           fetch-depth: 1
           show-progress: false
-      - name: Apply embedded exact patch
-        id: apply-patch
+      - name: Apply locked Browser Use adapter patch
         shell: bash
         run: |
-          set +e
-          python - <<'PY' >"$RUNNER_TEMP/apply-browser-patch.log" 2>&1
+          python - <<'PY'
           from pathlib import Path
           import textwrap
 
@@ -31,34 +29,28 @@ jobs:
           end = "\n          PY\n"
           if source.count(start) != 1 or source.count(end) != 1:
               raise SystemExit('embedded patch markers are not unique')
-          body = source.split(start, 1)[1].split(end, 1)[0]
-          exec(compile(textwrap.dedent(body), '<browser-use-patch>', 'exec'))
+          body = textwrap.dedent(source.split(start, 1)[1].split(end, 1)[0])
+          marker = '\nruntime_contract = "scripts/browser_use_runtime_contract.py"'
+          if marker not in body:
+              raise SystemExit('adapter patch boundary is missing')
+          exec(compile(body.split(marker, 1)[0], '<browser-use-adapter-patch>', 'exec'))
+          Path('.github/workflows/apply-browser-use-chromium-fixture.yml').unlink()
           Path('.github/workflows/apply-browser-use-chromium-fixture-pr.yml').unlink()
           PY
-          status=$?
-          set -e
-          cat "$RUNNER_TEMP/apply-browser-patch.log"
-          exit "$status"
-      - name: Upload patch diagnostic
-        if: failure() && steps.apply-patch.outcome == 'failure'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: browser-use-patch-diagnostic
-          path: ${{ runner.temp }}/apply-browser-patch.log
-          if-no-files-found: error
-          retention-days: 1
-      - name: Validate patch shape
+      - name: Validate adapter patch
         shell: bash
         run: |
-          python -m py_compile worker/app/browser_use_adapter.py scripts/browser_use_runtime_contract.py scripts/browser_use_live_fixture.py tests/worker_browser_use_adapter.py
+          python -m py_compile worker/app/browser_use_adapter.py
           git diff --check
+          grep -q 'accept_downloads=False' worker/app/browser_use_adapter.py
+          grep -q 'permissions=\[\]' worker/app/browser_use_adapter.py
           test ! -e .github/workflows/apply-browser-use-chromium-fixture.yml
           test ! -e .github/workflows/apply-browser-use-chromium-fixture-pr.yml
-      - name: Commit final isolated change
+      - name: Commit locked adapter
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "fix(research): lock Browser Use profile and launch local Chromium fixture"
+          git commit -m "fix(research): lock Browser Use runtime profile"
           git push origin HEAD:agent/browser-use-chromium-fixture
