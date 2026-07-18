@@ -25,121 +25,60 @@ jobs:
           PYTHONPATH: worker
         run: python tests/worker_rag_pdf_lifecycle.py
 
-  success-path:
+  worker-suite-slice:
+    name: worker-suite-${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: agent3-a-f
+            pattern: 'tests/worker_agent3_[a-f]*.py'
+            skip_agent: 'no'
+          - name: agent3-g-m
+            pattern: 'tests/worker_agent3_[g-m]*.py'
+            skip_agent: 'no'
+          - name: agent3-n-s
+            pattern: 'tests/worker_agent3_[n-s]*.py'
+            skip_agent: 'no'
+          - name: agent3-t-z
+            pattern: 'tests/worker_agent3_[t-z]*.py'
+            skip_agent: 'no'
+          - name: legacy-agent
+            pattern: 'tests/worker_agent_*.py'
+            skip_agent: 'no'
+          - name: other-a-m
+            pattern: 'tests/worker_[a-m]*.py'
+            skip_agent: 'yes'
+          - name: other-n-r
+            pattern: 'tests/worker_[n-r]*.py'
+            skip_agent: 'yes'
+          - name: other-s-z
+            pattern: 'tests/worker_[s-z]*.py'
+            skip_agent: 'yes'
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
-      - name: Success closes once
+      - name: Install worker dependencies
+        run: pip install -r worker/requirements.txt --break-system-packages
+      - name: Run worker test slice
         env:
           PYTHONPATH: worker
+          TEST_PATTERN: ${{ matrix.pattern }}
+          SKIP_AGENT: ${{ matrix.skip_agent }}
+        shell: bash
         run: |
-          python - <<'PY'
-          import sys
-          from types import ModuleType
-          from app import rag_pdf
-
-          class Page:
-              def __init__(self, text): self.text = text
-              def get_text(self, mode):
-                  assert mode == 'text'
-                  return self.text
-
-          class Doc:
-              is_encrypted = False
-              def __init__(self):
-                  self.pages = [Page('  first  '), Page('second')]
-                  self.close_count = 0
-              def __iter__(self): return iter(self.pages)
-              @property
-              def page_count(self): return len(self.pages)
-              def close(self): self.close_count += 1
-
-          doc = Doc()
-          fitz = ModuleType('fitz')
-          fitz.open = lambda **kwargs: doc
-          sys.modules['fitz'] = fitz
-          result = rag_pdf.extract_text(b'pdf-bytes')
-          assert result == {'text': 'first\n\nsecond', 'pages': 2, 'chars': 13}, result
-          assert doc.close_count == 1, doc.close_count
-          PY
-
-  locked-path:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        with:
-          python-version: '3.12'
-      - name: Locked PDF closes once
-        env:
-          PYTHONPATH: worker
-        run: |
-          python - <<'PY'
-          import sys
-          from types import ModuleType
-          from app import rag_pdf
-
-          class Doc:
-              is_encrypted = True
-              page_count = 0
-              def __init__(self): self.close_count = 0
-              def authenticate(self, password):
-                  assert password == ''
-                  return False
-              def __iter__(self): return iter(())
-              def close(self): self.close_count += 1
-
-          doc = Doc()
-          fitz = ModuleType('fitz')
-          fitz.open = lambda **kwargs: doc
-          sys.modules['fitz'] = fitz
-          try:
-              rag_pdf.extract_text(b'pdf-bytes')
-              raise AssertionError('expected RuntimeError')
-          except RuntimeError as exc:
-              assert 'password-protected' in str(exc), exc
-          assert doc.close_count == 1, doc.close_count
-          PY
-
-  page-error-path:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        with:
-          python-version: '3.12'
-      - name: Page failure closes once
-        env:
-          PYTHONPATH: worker
-        run: |
-          python - <<'PY'
-          import sys
-          from types import ModuleType
-          from app import rag_pdf
-
-          class Page:
-              def get_text(self, mode):
-                  assert mode == 'text'
-                  raise ValueError('broken page tree')
-
-          class Doc:
-              is_encrypted = False
-              page_count = 1
-              def __init__(self): self.close_count = 0
-              def __iter__(self): return iter((Page(),))
-              def close(self): self.close_count += 1
-
-          doc = Doc()
-          fitz = ModuleType('fitz')
-          fitz.open = lambda **kwargs: doc
-          sys.modules['fitz'] = fitz
-          try:
-              rag_pdf.extract_text(b'pdf-bytes')
-              raise AssertionError('expected RuntimeError')
-          except RuntimeError as exc:
-              assert str(exc) == 'could not extract PDF text: broken page tree', exc
-          assert doc.close_count == 1, doc.close_count
-          PY
+          set -e
+          found=0
+          for f in $TEST_PATTERN; do
+            [ -e "$f" ] || continue
+            if [ "$SKIP_AGENT" = yes ] && [[ "$f" == tests/worker_agent* ]]; then
+              continue
+            fi
+            found=1
+            echo "running $f"
+            python "$f"
+          done
+          [ "$found" = 1 ] || { echo "no tests matched $TEST_PATTERN"; exit 1; }
