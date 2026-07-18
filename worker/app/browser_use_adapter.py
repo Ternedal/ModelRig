@@ -236,8 +236,8 @@ def _history_has_errors(history: Any) -> bool:
 def _build_task(request: ResearchRequest) -> str:
     return (
         "Perform read-only web research for the following request. "
-        "Only navigate within the configured allowed domains. Do not click page "
-        "elements, type into forms, submit forms, log in, upload, download, execute "
+        "Only navigate within the configured allowed domains. Do not type into forms, "
+        "click page elements, submit forms, log in, upload, download, execute "
         "arbitrary JavaScript, write files, or change remote state. Return structured "
         "output only. Every factual claim in the answer must use a numeric marker like "
         "[1], and every citation must include the exact URL that supports its statement.\n\n"
