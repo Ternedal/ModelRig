@@ -19,12 +19,30 @@ jobs:
           show-progress: false
       - name: Apply final benchmark review findings
         run: python scripts/_patch_rag_benchmark_review.py
+      - name: Install worker dependencies
+        run: pip install -r worker/requirements.txt --break-system-packages >/dev/null
       - name: Validate benchmark suite
+        id: benchmark-test
         shell: bash
         run: |
-          pip install -r worker/requirements.txt --break-system-packages >/dev/null
           python -m py_compile scripts/rag_benchmark.py tests/worker_rag_benchmark.py
-          PYTHONPATH=worker python tests/worker_rag_benchmark.py
+          log="$RUNNER_TEMP/rag-review-test.txt"
+          set +e
+          PYTHONPATH=worker python tests/worker_rag_benchmark.py >"$log" 2>&1
+          status=$?
+          set -e
+          cat "$log"
+          exit "$status"
+      - name: Upload review diagnostic
+        if: failure() && steps.benchmark-test.outcome == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rag-review-test-diagnostic
+          path: ${{ runner.temp }}/rag-review-test.txt
+          if-no-files-found: error
+          retention-days: 1
+      - name: Validate patch shape
+        run: |
           git diff --check
           test ! -e scripts/_patch_rag_benchmark_review.py
       - name: Commit final review fixes
