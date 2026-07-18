@@ -38,9 +38,16 @@ class FakeGate:
 
 
 class FailingScheduleAccounting:
-    def __init__(self, schedule: Schedule, *, fail_record: bool) -> None:
+    def __init__(
+        self,
+        schedule: Schedule,
+        *,
+        fail_record: bool,
+        disable_result: bool = True,
+    ) -> None:
         self.schedule = schedule
         self.fail_record = fail_record
+        self.disable_result = disable_result
         self.recorded: list[bool] = []
         self.disabled: list[tuple[str, bool, float]] = []
 
@@ -53,7 +60,7 @@ class FailingScheduleAccounting:
 
     def set_enabled(self, schedule_id: str, enabled: bool, *, now: float):
         self.disabled.append((schedule_id, enabled, now))
-        return True
+        return self.disable_result
 
 
 class RecordingJobs:
@@ -68,7 +75,12 @@ class RecordingJobs:
             raise OSError("job database unavailable")
 
 
-def make_case(*, fail_record: bool, fail_completed: bool = False):
+def make_case(
+    *,
+    fail_record: bool,
+    fail_completed: bool = False,
+    disable_result: bool = True,
+):
     name = "_post_execution_write"
     args = {"text": "already written"}
     schedule = Schedule(
@@ -92,7 +104,11 @@ def make_case(*, fail_record: bool, fail_completed: bool = False):
         schedulable=True,
         run=lambda _args: "unused by fake gate",
     )
-    schedules = FailingScheduleAccounting(schedule, fail_record=fail_record)
+    schedules = FailingScheduleAccounting(
+        schedule,
+        fail_record=fail_record,
+        disable_result=disable_result,
+    )
     jobs = RecordingJobs(fail_completed=fail_completed)
     gate = FakeGate()
     runner = SchedulerRunner(
@@ -130,6 +146,19 @@ check(
     "schedule database unavailable" not in jobs.updates[-1].get("detail", ""),
     "internal database error text is not exposed",
 )
+
+
+# A failed disable write must not produce the false claim that the plan is off.
+runner, claim, schedules, jobs, gate = make_case(
+    fail_record=True,
+    disable_result=False,
+)
+outcome = runner._run_claim(claim, "job-1", NOW)
+detail = jobs.updates[-1].get("detail", "")
+check(outcome == "completed", "failed disable still preserves execution truth")
+check("planen kunne ikke slås fra" in detail, "the warning admits disable was not confirmed")
+check("planen er slået fra" not in detail, "the warning never invents a successful disable")
+check(schedules.recorded == [True], "failed disable does not rewrite the run as failed")
 
 
 # If the schedule budget is durable but JobStore is down, execution truth is

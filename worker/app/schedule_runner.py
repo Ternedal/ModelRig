@@ -236,17 +236,28 @@ class SchedulerRunner:
             if recorded is None:
                 raise RuntimeError("schedule disappeared after execution")
         except Exception as exc:
-            warning = self._bounded(
-                f"{detail}; efterregistrering fejlede ({type(exc).__name__}); "
-                "planen er slået fra for at undgå en ekstra kørsel"
-            )
+            disabled = False
             try:
-                self.schedules.set_enabled(schedule.schedule_id, False, now=now)
+                disabled = self.schedules.set_enabled(
+                    schedule.schedule_id,
+                    False,
+                    now=now,
+                ) is True
             except Exception:
                 # The schedule store is already failing. The claimed occurrence
                 # was consumed before execution, and a later tick will meet the
                 # same store boundary rather than retrying inside this call.
                 pass
+
+            recovery = (
+                "planen er slået fra for at undgå en ekstra kørsel"
+                if disabled
+                else "planen kunne ikke slås fra; kontrollér den før næste kørsel"
+            )
+            warning = self._bounded(
+                f"{detail}; efterregistrering fejlede ({type(exc).__name__}); "
+                f"{recovery}"
+            )
             try:
                 self.jobs.update(job_id, status="completed", detail=warning)
             except Exception:
