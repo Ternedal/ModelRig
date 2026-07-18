@@ -1,0 +1,192 @@
+name: temporary-desktop-settings-feedback
+
+on:
+  push:
+    branches:
+      - agent/desktop-settings-write-feedback
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-release:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: agent/desktop-settings-write-feedback
+      - name: Install generator dependencies
+        run: python3 -m pip install -r worker/requirements.txt
+      - name: Make desktop setting writes honest
+        run: |
+          cat > desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/data/DesktopSettingPersistence.kt <<'EOF'
+          package dk.ternedal.modelrig.desktop.data
+
+          sealed interface DesktopSettingSaveResult {
+              data object Saved : DesktopSettingSaveResult
+              data class Failed(val userMessage: String) : DesktopSettingSaveResult
+          }
+
+          /**
+           * Small, UI-independent boundary around setting writes.
+           *
+           * A storage/DPAPI exception must never be mistaken for a successful save,
+           * and neither the attempted value nor the exception text is suitable for UI:
+           * both can contain credential material or machine-specific details.
+           */
+          object DesktopSettingPersistence {
+              private val credentialKeys = setOf("deviceToken", "cloudKey")
+
+              fun save(
+                  key: String,
+                  value: String,
+                  writer: (String, String) -> Unit,
+              ): DesktopSettingSaveResult = try {
+                  writer(key, value)
+                  DesktopSettingSaveResult.Saved
+              } catch (_: Exception) {
+                  DesktopSettingSaveResult.Failed(
+                      if (key in credentialKeys) {
+                          "Credential kunne ikke gemmes sikkert. Den tidligere værdi bruges stadig."
+                      } else {
+                          "Indstillingen kunne ikke gemmes. Den tidligere værdi bruges stadig."
+                      },
+                  )
+              }
+          }
+          EOF
+
+          cat > desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/data/DesktopSettingPersistenceTest.kt <<'EOF'
+          package dk.ternedal.modelrig.desktop.data
+
+          import kotlin.test.Test
+          import kotlin.test.assertEquals
+          import kotlin.test.assertFalse
+          import kotlin.test.assertIs
+          import kotlin.test.assertSame
+          import kotlin.test.assertTrue
+
+          class DesktopSettingPersistenceTest {
+              @Test
+              fun `successful write reports saved and forwards the exact setting once`() {
+                  val calls = mutableListOf<Pair<String, String>>()
+
+                  val result = DesktopSettingPersistence.save("localModel", "hermes3:8b") { key, value ->
+                      calls += key to value
+                  }
+
+                  assertSame(DesktopSettingSaveResult.Saved, result)
+                  assertEquals(listOf("localModel" to "hermes3:8b"), calls)
+              }
+
+              @Test
+              fun `ordinary write failure is generic and never exposes value or exception text`() {
+                  val secretLikeValue = "internal-value-that-must-not-leak"
+                  val result = DesktopSettingPersistence.save("localUrl", secretLikeValue) { _, _ ->
+                      throw IllegalStateException("sqlite path and machine detail")
+                  }
+
+                  val failed = assertIs<DesktopSettingSaveResult.Failed>(result)
+                  assertEquals(
+                      "Indstillingen kunne ikke gemmes. Den tidligere værdi bruges stadig.",
+                      failed.userMessage,
+                  )
+                  assertFalse(failed.userMessage.contains(secretLikeValue))
+                  assertFalse(failed.userMessage.contains("sqlite"))
+              }
+
+              @Test
+              fun `credential failure explicitly says secure save failed without exposing the credential`() {
+                  val credential = "super-secret-token"
+                  val result = DesktopSettingPersistence.save("deviceToken", credential) { _, _ ->
+                      throw IllegalArgumentException("DPAPI rejected super-secret-token")
+                  }
+
+                  val failed = assertIs<DesktopSettingSaveResult.Failed>(result)
+                  assertTrue(failed.userMessage.contains("sikkert"))
+                  assertTrue(failed.userMessage.contains("tidligere værdi"))
+                  assertFalse(failed.userMessage.contains(credential))
+                  assertFalse(failed.userMessage.contains("DPAPI"))
+              }
+          }
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/App.kt')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = [
+              (
+                  'import dk.ternedal.modelrig.desktop.data.DesktopChatDb\n',
+                  'import dk.ternedal.modelrig.desktop.data.DesktopChatDb\n'
+                  'import dk.ternedal.modelrig.desktop.data.DesktopSettingPersistence\n'
+                  'import dk.ternedal.modelrig.desktop.data.DesktopSettingSaveResult\n',
+              ),
+              (
+                  '''        var pairStatus by remember { mutableStateOf<String?>(null) }\n        fun persist(key: String, value: String) {\n            try { db.putSetting(key, value) } catch (_: Exception) {}\n        }\n''',
+                  '''        var pairStatus by remember { mutableStateOf<String?>(null) }\n        var settingsError by remember { mutableStateOf<String?>(null) }\n        fun persist(key: String, value: String, onSaved: () -> Unit): Boolean =\n            when (val result = DesktopSettingPersistence.save(key, value, db::putSetting)) {\n                DesktopSettingSaveResult.Saved -> {\n                    settingsError = null\n                    onSaved()\n                    true\n                }\n                is DesktopSettingSaveResult.Failed -> {\n                    settingsError = result.userMessage\n                    false\n                }\n            }\n''',
+              ),
+              (
+                  'onClick = { localModel = m; persist("localModel", m); modelMenuOpen = false },',
+                  'onClick = { persist("localModel", m) { localModel = m }; modelMenuOpen = false },',
+              ),
+              (
+                  'toolsMode = !toolsMode; persist("toolsMode", toolsMode.toString())',
+                  'val next = !toolsMode; persist("toolsMode", next.toString()) { toolsMode = next }',
+              ),
+              (
+                  'darkMode = !darkMode; persist("darkMode", darkMode.toString())',
+                  'val next = !darkMode; persist("darkMode", next.toString()) { darkMode = next }',
+              ),
+              (
+                  '            ragError?.let { Text("RAG-kilder: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }\n',
+                  '            ragError?.let { Text("RAG-kilder: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }\n'
+                  '            settingsError?.let { Text("Indstillinger: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }\n',
+              ),
+              (
+                  '''                            localUrl, { localUrl = it; persist("localUrl", it) },\n                            localPath, { localPath = it; persist("localPath", it) },\n                            localModel, { localModel = it; persist("localModel", it) },\n                            deviceToken, { deviceToken = it; persist("deviceToken", it) },\n                            localSystem, { localSystem = it; persist("localSystem", it) },\n                            cloudKey, { cloudKey = it; persist("cloudKey", it) },\n                            cloudModel, { cloudModel = it; persist("cloudModel", it) },\n                            cloudSystem, { cloudSystem = it; persist("cloudSystem", it) },\n                            preferLocal, { preferLocal = it; persist("preferLocal", it.toString()) },\n''',
+                  '''                            localUrl, { value -> persist("localUrl", value) { localUrl = value } },\n                            localPath, { value -> persist("localPath", value) { localPath = value } },\n                            localModel, { value -> persist("localModel", value) { localModel = value } },\n                            deviceToken, { value -> persist("deviceToken", value) { deviceToken = value } },\n                            localSystem, { value -> persist("localSystem", value) { localSystem = value } },\n                            cloudKey, { value -> persist("cloudKey", value) { cloudKey = value } },\n                            cloudModel, { value -> persist("cloudModel", value) { cloudModel = value } },\n                            cloudSystem, { value -> persist("cloudSystem", value) { cloudSystem = value } },\n                            preferLocal, { value -> persist("preferLocal", value.toString()) { preferLocal = value } },\n''',
+              ),
+              (
+                  '''                                    res.onSuccess {\n                                        deviceToken = it; persist("deviceToken", it)\n                                        pairStatus = "Parret ✓ — token gemt"\n                                    }.onFailure {\n''',
+                  '''                                    res.onSuccess { token ->\n                                        pairStatus = if (persist("deviceToken", token) { deviceToken = token }) {\n                                            "Parret ✓ — token gemt"\n                                        } else {\n                                            "Parret, men tokenet kunne ikke gemmes sikkert"\n                                        }\n                                    }.onFailure {\n''',
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'App patch anchor not found: {old[:100]!r}')
+              text = text.replace(old, new, 1)
+
+          if 'catch (_: Exception) {}' in text:
+              raise SystemExit('silent settings catch remains')
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          python3 scripts/version_tool.py set 1.58.101
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          path = Path('android/app/build.gradle.kts')
+          text = path.read_text(encoding='utf-8')
+          text, count = re.subn(r'versionCode = \d+', 'versionCode = 234', text, count=1)
+          if count != 1:
+              raise SystemExit('Android versionCode pattern not found')
+          path.write_text(text, encoding='utf-8')
+          PY
+          python3 scripts/current_state.py
+          python3 scripts/activation_readiness.py
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/App.kt \
+            desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/data/DesktopSettingPersistence.kt \
+            desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/data/DesktopSettingPersistenceTest.kt \
+            VERSION worker/app/main.py backend/internal/config/config.go \
+            android/app/build.gradle.kts desktop/composeApp/build.gradle.kts \
+            CURRENT_STATE.md ACTIVATION_READINESS.md
+          git commit -m "fix(desktop): surface setting persistence failures"
+          git push origin HEAD:agent/desktop-settings-write-feedback
