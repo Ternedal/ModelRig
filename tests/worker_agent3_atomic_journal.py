@@ -233,5 +233,62 @@ check(_executed2 == [],
 check("verify the side effect" in (_blocked.error or ""),
       "the block says what a person has to go and check")
 
+# --- run creation lands with its event, or not at all (F-712) ----------------
+#
+# _start_routed and _blocked_run were save-then-event: two commits, with a
+# crash-window where the run exists and the journal has nothing explaining where
+# it came from. Same disagreement F-309 closed for cancellation, at birth
+# instead of at death. They use save_with_event now. Drive the same crash the
+# cancellation test drives, at creation.
+
+class _CrashOnEvent:
+    def __init__(self, real):
+        self._real = real
+
+    def execute(self, sql, *a, **kw):
+        if "agent_events" in sql:
+            raise RuntimeError("crash between creating the run and its event")
+        return self._real.execute(sql, *a, **kw)
+
+    def commit(self):
+        return self._real.commit()
+
+    def rollback(self):
+        return self._real.rollback()
+
+
+# A fresh store so we can count from zero.
+_crun = make_run("r-create", state=RunState.RUNNING)
+_before_ids = {r.id for r in [store.load(x) for x in []] if r}  # empty; r-create is new
+
+_real = store._conn
+store._conn = _CrashOnEvent(_real)  # type: ignore[assignment]
+try:
+    store.save_with_event(_crun, "run_created", {"route": "rig", "steps": 1})
+    check(False, "creating a run whose event cannot be written must not pass silently")
+except RuntimeError:
+    check(True, "the creation failure surfaces to the caller")
+finally:
+    store._conn = _real  # type: ignore[assignment]
+
+# The run must NOT exist: no half-created run with no run_created event.
+_loaded = None
+try:
+    _loaded = store.load("r-create")
+except Exception:
+    _loaded = None
+check(_loaded is None,
+      "a run whose run_created event could not be written does not exist -- no "
+      "orphan run the journal cannot account for")
+check(len(store.events("r-create")) == 0,
+      "and no orphan run_created event was left behind either")
+
+# And the happy path still writes both.
+store.save_with_event(make_run("r-create-ok"), "run_created", {"route": "rig", "steps": 1})
+check(store.load("r-create-ok") is not None, "a clean creation persists the run")
+check(any((e.get("kind") or e.get("type")) == "run_created"
+          for e in store.events("r-create-ok")),
+      "and the run_created event that explains it")
+
 print(f"\n===== AGENT3 ATOMIC JOURNAL: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

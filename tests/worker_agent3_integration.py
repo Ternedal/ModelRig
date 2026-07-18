@@ -231,5 +231,60 @@ except ConfirmationError:
     expired = True
 check(expired and expiry_store.load(expiry.id).state == RunState.CANCELLED, "expired confirmation is a denial")
 
+# --- creation is atomic THROUGH the path, not just in the store (F-712) -------
+#
+# The store proves atomicity when called with save_with_event. That is not the
+# same as _start_routed actually using it: a test that drives the store
+# directly stays green even if the creation path reverts to save-then-event.
+# Same "tested the mechanism, not the fact" gap that bit idempotency today. So
+# drive start_with_steps and crash the event insert underneath it.
+
+class _CrashOnEventInsert:
+    def __init__(self, real):
+        self._real = real
+
+    def execute(self, sql, *a, **kw):
+        if "agent_events" in sql:
+            raise RuntimeError("crash between creating the run and its event")
+        return self._real.execute(sql, *a, **kw)
+
+    def commit(self):
+        return self._real.commit()
+
+    def rollback(self):
+        return self._real.rollback()
+
+
+_crash_store = AgentRunStore(os.path.join(_tmp, "agent3-create-crash.db"))
+_crash_orch = Agent3Orchestrator(store=_crash_store, executor=adapter.execute,
+                                 confirmation_ttl_seconds=5)
+_crash_steps = adapter.build_steps([PlannedToolCall("rig_status", {})], route, "conv-crash")
+
+_ids_before = {r.id for r in _crash_store.list_runs()} if hasattr(_crash_store, "list_runs") else None
+
+_real = _crash_store._conn
+_crash_store._conn = _CrashOnEventInsert(_real)  # type: ignore[assignment]
+_raised = False
+try:
+    _crash_orch.start_with_steps(TurnRequest("crash", mode="rig", tools=True),
+                                 caps, _crash_steps)
+except RuntimeError:
+    _raised = True
+finally:
+    _crash_store._conn = _real  # type: ignore[assignment]
+
+check(_raised,
+      "starting a run whose run_created event cannot be written surfaces the "
+      "failure -- _start_routed goes through save_with_event, not save+event")
+
+# Nothing half-created: the run must not exist with no event explaining it.
+import sqlite3 as _sqlite3  # noqa: E402
+
+_rows = _real.execute("SELECT COUNT(*) FROM agent_runs").fetchone()[0]
+_evts = _real.execute("SELECT COUNT(*) FROM agent_events").fetchone()[0]
+check(_rows == 0 and _evts == 0,
+      f"neither the run nor its event persisted ({_rows} runs, {_evts} events) "
+      "-- the creation path is atomic, not just the store method")
+
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)
