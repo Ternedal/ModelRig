@@ -81,3 +81,5 @@ jobs:
           git add worker/app/web_fetch.py tests/worker_web_fetch_adapter.py
           git commit -m 'feat(research): expose verified fetch content to adapters'
           git push
+
+# Retriggered after the workflow file became active on the branch.
