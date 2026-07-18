@@ -1,0 +1,88 @@
+name: temporary-voice-status-refactor
+
+on:
+  push:
+    branches:
+      - agent/worker-voice-status-contract
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-release:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: agent/worker-voice-status-contract
+      - name: Install generator dependencies
+        run: python3 -m pip install -r worker/requirements.txt
+      - name: Refactor public voice status contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          asr = Path('worker/app/voice_asr.py')
+          text = asr.read_text(encoding='utf-8')
+          marker = '''def cuda_available() -> bool:\n'''
+          status = '''def status() -> dict:\n    \"\"\"Cheap public health contract for the optional ASR subsystem.\n\n    The worker health endpoint must not know private configuration helpers. This\n    function owns that translation and deliberately does not load the model.\n    \"\"\"\n    available = is_available()\n    return {\n        \"ok\": available,\n        \"device\": _device() if available else None,\n        \"model\": _model_name() if available else None,\n        \"detail\": None if available else \"faster-whisper not installed\",\n    }\n\n\n'''
+          if 'def status() -> dict:' not in text:
+              if marker not in text:
+                  raise SystemExit('ASR insertion marker not found')
+              text = text.replace(marker, status + marker, 1)
+          asr.write_text(text, encoding='utf-8')
+
+          tts = Path('worker/app/voice_tts.py')
+          text = tts.read_text(encoding='utf-8')
+          marker = '''def _get_voice():\n'''
+          status = '''def status() -> dict:\n    \"\"\"Cheap public health contract for the optional TTS subsystem.\n\n    Availability and configured voice belong to this module; callers should not\n    reach through to private environment helpers. This does not load the voice.\n    \"\"\"\n    available = is_available()\n    return {\n        \"ok\": available,\n        \"voice\": _voice_name() if available else None,\n        \"detail\": None if available else \"piper not installed\",\n    }\n\n\n'''
+          if 'def status() -> dict:' not in text:
+              if marker not in text:
+                  raise SystemExit('TTS insertion marker not found')
+              text = text.replace(marker, status + marker, 1)
+          tts.write_text(text, encoding='utf-8')
+
+          main = Path('worker/app/main.py')
+          text = main.read_text(encoding='utf-8')
+          old = '''    checks[\"asr\"] = {\"ok\": voice_asr.is_available(),\n                     \"device\": voice_asr._device() if voice_asr.is_available() else None,\n                     \"model\": voice_asr._model_name() if voice_asr.is_available() else None,\n                     \"detail\": None if voice_asr.is_available()\n                               else \"faster-whisper not installed\"}\n    checks[\"tts\"] = {\"ok\": voice_tts.is_available(),\n                     \"voice\": voice_tts._voice_name() if voice_tts.is_available() else None,\n                     \"detail\": None if voice_tts.is_available() else \"piper not installed\"}\n'''
+          new = '''    checks[\"asr\"] = voice_asr.status()\n    checks[\"tts\"] = voice_tts.status()\n'''
+          if old not in text:
+              raise SystemExit('health voice block not found')
+          text = text.replace(old, new, 1)
+          main.write_text(text, encoding='utf-8')
+
+          tests = Path('tests/worker_unit.py')
+          text = tests.read_text(encoding='utf-8')
+          marker = '''# Tools state is surfaced (off by default), and does NOT count as a fault: a\n'''
+          block = '''# Health must consume the voice modules' PUBLIC status contracts. Private\n# configuration helpers are implementation details; make them explode so a\n# future reach-through fails this test immediately.\nfrom app import voice_asr as _voice_asr, voice_tts as _voice_tts  # noqa: E402\n\n_asr_status, _tts_status = _voice_asr.status, _voice_tts.status\n_asr_device, _asr_model, _tts_voice = (\n    _voice_asr._device, _voice_asr._model_name, _voice_tts._voice_name\n)\ntry:\n    _voice_asr.status = lambda: {\n        \"ok\": True, \"device\": \"contract-device\",\n        \"model\": \"contract-model\", \"detail\": None,\n    }\n    _voice_tts.status = lambda: {\n        \"ok\": True, \"voice\": \"contract-voice\", \"detail\": None,\n    }\n    def _private_reach_through():\n        raise AssertionError(\"health reached through a public voice contract\")\n    _voice_asr._device = _private_reach_through\n    _voice_asr._model_name = _private_reach_through\n    _voice_tts._voice_name = _private_reach_through\n    _contract_health = _aio.run(_M.health_full())\n    check(_contract_health[\"checks\"][\"asr\"][\"device\"] == \"contract-device\",\n          \"health_full: ASR uses public status contract\")\n    check(_contract_health[\"checks\"][\"tts\"][\"voice\"] == \"contract-voice\",\n          \"health_full: TTS uses public status contract\")\nfinally:\n    _voice_asr.status, _voice_tts.status = _asr_status, _tts_status\n    _voice_asr._device, _voice_asr._model_name, _voice_tts._voice_name = (\n        _asr_device, _asr_model, _tts_voice\n    )\n\n'''
+          if 'health_full: ASR uses public status contract' not in text:
+              if marker not in text:
+                  raise SystemExit('worker test insertion marker not found')
+              text = text.replace(marker, block + marker, 1)
+          tests.write_text(text, encoding='utf-8')
+          PY
+
+          python3 scripts/version_tool.py set 1.58.99
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          path = Path('android/app/build.gradle.kts')
+          text = path.read_text(encoding='utf-8')
+          text, count = re.subn(r'versionCode = \d+', 'versionCode = 232', text, count=1)
+          if count != 1:
+              raise SystemExit('Android versionCode pattern not found')
+          path.write_text(text, encoding='utf-8')
+          PY
+          python3 scripts/current_state.py
+          python3 scripts/activation_readiness.py
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add worker/app/voice_asr.py worker/app/voice_tts.py worker/app/main.py \
+            tests/worker_unit.py VERSION backend/internal/config/config.go \
+            android/app/build.gradle.kts desktop/composeApp/build.gradle.kts \
+            CURRENT_STATE.md ACTIVATION_READINESS.md
+          git commit -m "refactor(worker): expose public voice status contracts"
+          git push origin HEAD:agent/worker-voice-status-contract
