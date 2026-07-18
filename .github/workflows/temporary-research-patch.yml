@@ -1,0 +1,29 @@
+name: temporary-research-patch
+
+on:
+  push:
+    branches: [agent/browser-use-live-fixture]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: agent/browser-use-live-fixture
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - run: python scripts/patch_browser_use_live_fixture.py
+      - run: |
+          git config user.name automation
+          git config user.email automation@users.noreply.github.com
+          git add worker/app/browser_use_adapter.py
+          if ! git diff --cached --quiet; then
+            git commit -m "fix(research): tighten runtime profile"
+            git push origin HEAD:agent/browser-use-live-fixture
+          fi
