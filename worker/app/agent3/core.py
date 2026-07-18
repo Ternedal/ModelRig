@@ -547,8 +547,13 @@ class Agent3Orchestrator:
             proactive=proactive,
             allow_private_cloud=allow_private_cloud,
         )
-        self.store.save(run)
-        self.store.event(run.id, "run_created", {"route": route.kind.value, "steps": len(steps)})
+        # One transaction, not two (F-712). Creating the run and the
+        # run_created event as separate commits leaves a crash-window where the
+        # run exists with nothing in the journal explaining where it came from
+        # -- the same disagreement F-309 closed for cancellation, reappearing at
+        # birth. save_with_event commits before advance() reads the run back.
+        self.store.save_with_event(
+            run, "run_created", {"route": route.kind.value, "steps": len(steps)})
         return self.advance(run.id)
 
     def _blocked_run(
@@ -569,8 +574,10 @@ class Agent3Orchestrator:
             proactive=proactive,
             allow_private_cloud=allow_private_cloud,
         )
-        self.store.save(run)
-        self.store.event(run.id, "run_blocked", {"reason": reason})
+        # Atomic for the same reason as creation (F-712): a blocked run with no
+        # run_blocked event is a run that halted for a reason the journal does
+        # not record, and "why did this never execute?" then has no answer.
+        self.store.save_with_event(run, "run_blocked", {"reason": reason})
         return run
 
     def advance(self, run_id: str) -> AgentRun:
@@ -626,18 +633,31 @@ class Agent3Orchestrator:
                 proactive=run.proactive,
                 allow_private_cloud=run.allow_private_cloud,
             )
-            self.store.event(
-                run.id,
-                "policy_decision",
-                {"step_id": step.id, "tool": step.tool, "action": decision.action, "reason": decision.reason},
-            )
+            # policy_decision is an audit trace logged on every path. For the
+            # block path it is ALSO the event that explains the state change, so
+            # the state and the event must land together (F-712): otherwise a
+            # crash between them leaves a journal saying "blocked" against a run
+            # still reading RUNNING, or the reverse. For allow/confirm the trace
+            # is not state-bearing on its own -- allow proceeds to execution
+            # which saves, confirm uses save_with_event below -- so it stays a
+            # plain event there.
             if decision.action == "block":
                 step.state = StepState.BLOCKED
                 step.error = decision.reason
                 run.state = RunState.BLOCKED
                 run.error = decision.reason
-                self.store.save(run)
+                self.store.save_with_event(
+                    run,
+                    "policy_decision",
+                    {"step_id": step.id, "tool": step.tool,
+                     "action": decision.action, "reason": decision.reason},
+                )
                 return run
+            self.store.event(
+                run.id,
+                "policy_decision",
+                {"step_id": step.id, "tool": step.tool, "action": decision.action, "reason": decision.reason},
+            )
             if decision.action == "confirm" and step.state != StepState.APPROVED:
                 step.state = StepState.WAITING_CONFIRMATION
                 step.confirmation_digest = self._digest(step)
