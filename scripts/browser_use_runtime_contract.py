@@ -89,6 +89,10 @@ try:
     check(profile.record_har_path is None, "HAR recording is disabled")
     check(profile.record_video_dir is None, "video recording is disabled")
     check(profile.traces_dir is None, "Playwright trace recording is disabled")
+    check(
+        "--disable-popup-blocking" in profile.ignore_default_args,
+        "Browser Use's popup-blocking override is removed",
+    )
 
     check(download_path.parent == temp_root, "download quarantine is directly under system temp")
     check(download_path.name.startswith("browser-use-downloads-"), "download quarantine uses Browser Use's unique prefix")
