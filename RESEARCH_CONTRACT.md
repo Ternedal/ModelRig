@@ -1,6 +1,6 @@
 # Web research contract v1
 
-**Status:** contract, deterministic fetch engine, pinned transport, isolated BrowserHost, dormant Browser Use adapter and installed-runtime contract gate delivered; no ToolGate activation or live-browser validation yet.
+**Status:** contract, deterministic fetch engine, pinned transport, isolated BrowserHost, dormant Browser Use adapter, installed-runtime contract and controlled local-Chromium gate delivered; no ToolGate activation or public-network validation yet.
 
 This contract keeps Browser Use, Playwright and plain HTTP interchangeable. ModelRig owns the safety and evidence model; an adapter only performs retrieval and proposes citations.
 
@@ -62,7 +62,7 @@ The optional adapter:
 - lives in its own exact-pinned runtime environment and is never installed by the base worker requirements; Browser Use 0.13.4 and the worker intentionally pin different Pydantic versions, so combining the environments is rejected by dependency resolution;
 - loads Browser Use lazily and fails closed on a missing version, unexpected version or incompatible constructor/model surface;
 - disables Browser Use telemetry, cloud sync, version checks and package logging setup before importing the runtime;
-- constructs an ephemeral headless profile with explicit domains, no imported storage state, blocked direct-IP navigation, no default extensions, no automatic PDF downloads and no captcha solver;
+- constructs an ephemeral headless profile with explicit domains, no imported storage state, blocked direct-IP navigation, no default extensions, downloads refused at browser-context level, zero browser permissions, no automatic PDF downloads, no cross-origin iframe traversal and no captcha solver;
 - removes generic clicking, form input, uploads, keyboard injection, arbitrary JavaScript evaluation, dropdown selection, PDF creation, screenshots and file read/write actions from the registry;
 - supplies no credentials, sensitive data or upload paths and allows one action per bounded step;
 - adopts Browser Use's generated `browser-use-downloads-*` and `browser-use-user-data-dir-*` system-temp directories as quarantines;
@@ -73,13 +73,13 @@ The optional adapter:
 - converts the trusted fetch receipt into a canonical verified-source envelope containing the original content SHA-256, byte count, URL, media type, timestamp and adapter provenance;
 - never permits Browser Use to create ModelRig source hashes, source ids or final citations.
 
-The dedicated `browser-use-runtime-contract` CI job installs `browser-use[core]==0.13.4` in isolation and validates the real imports, Agent and Tools signatures, BrowserProfile fields, generated download/profile temp directories, disabled network side channels, history interface and concrete action registry. It does not create an LLM client, launch Chromium or perform network research. On failure it publishes a short seven-day diagnostic artifact; successful runs publish nothing.
+The dedicated `browser-use-runtime-contract` CI job installs `browser-use[core]==0.13.4` in isolation and validates the real imports, Agent and Tools signatures, BrowserProfile fields, generated download/profile temp directories, disabled network side channels, history interface and concrete action registry. It then launches real headless Chromium, visits one controlled `localhost` fixture, verifies its title, rejects an external domain and the same fixture through a numeric loopback address, confirms the download quarantine remains empty and proves cleanup. It creates no LLM client and performs no public-site research. On failure it publishes a short seven-day diagnostic artifact; successful runs publish nothing.
 
 ## Remaining obligations
 
 Before activation:
 
-1. run live-browser and live-network validation against controlled public fixtures;
+1. run live-network validation against controlled public fixtures; the local live-browser launch gate is delivered;
 2. add egress consent/receipt and audit integration;
 3. expose the capability through a canonical descriptor and ToolGate only after those gates are green;
 4. keep authentication, cookies, uploads and downloads outside v1.
@@ -91,7 +91,8 @@ Before activation:
 3. **T-034C2 — production pinned HTTP transport**: delivered in 1.58.114; dormant and socket/TLS-tested, not live-network validated.
 4. **T-034B — isolated BrowserHost + fixture backend**: delivered in 1.58.115.
 5. **T-034D1 — dormant Browser Use adapter**: delivered in 1.58.119; exact pin, fake-runtime tests and deterministic citation re-fetch.
-6. **T-034D2 — installed runtime contract**: this delivery; real 0.13.4 package surface, dependency isolation, runtime side-channel controls and action registry, but no browser launch.
-7. **T-034E — runtime integration**: CapabilityDescriptor, egress receipt, audit, live validation and eval gates.
+6. **T-034D2 — installed runtime contract**: delivered; real 0.13.4 package surface, dependency isolation, runtime side-channel controls and action registry.
+7. **T-034D3 — controlled Chromium launch gate**: this delivery; real browser startup, localhost navigation, domain/IP denial and cleanup without an LLM or public network.
+8. **T-034E — runtime integration**: CapabilityDescriptor, egress receipt, audit, public-network validation and eval gates.
 
 Authenticated browsing is a separate future capability, not a flag added to this contract.
