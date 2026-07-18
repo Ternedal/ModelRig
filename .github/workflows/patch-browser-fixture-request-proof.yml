@@ -22,30 +22,28 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path('scripts/browser_use_live_fixture.py')
           text = path.read_text(encoding='utf-8')
-          old = '''        check(
-              FixtureHandler.requests == ["/fixture"],
-              "denied numeric URL never reaches fixture",
-              results,
-          )'''
-          new = '''        check(
-              FixtureHandler.requests.count("/fixture") == 1,
-              "denied numeric URL never reaches fixture endpoint",
-              results,
-          )'''
-          if text.count(old) != 1:
-              raise SystemExit(f'denial proof target count is {text.count(old)}')
-          text = text.replace(old, new)
-          old_report = '''        "fixture_url": fixture_url,
-              "denied": denied,'''
-          new_report = '''        "fixture_url": fixture_url,
-              "served_requests": list(FixtureHandler.requests),
-              "denied": denied,'''
-          if text.count(old_report) != 1:
-              raise SystemExit(f'report target count is {text.count(old_report)}')
-          path.write_text(text.replace(old_report, new_report), encoding='utf-8')
+          text, proof_count = re.subn(
+              r'''        check\(\n\s+FixtureHandler\.requests == \["/fixture"\],\n\s+"denied numeric URL never reaches fixture",\n\s+results,\n\s+\)''',
+              '''        check(
+                  FixtureHandler.requests.count("/fixture") == 1,
+                  "denied numeric URL never reaches fixture endpoint",
+                  results,
+              )''',
+              text,
+              count=1,
+          )
+          if proof_count != 1:
+              raise SystemExit(f'denial proof replacement count is {proof_count}')
+
+          anchor = '        "fixture_url": fixture_url,\n'
+          addition = anchor + '        "served_requests": list(FixtureHandler.requests),\n'
+          if text.count(anchor) != 1:
+              raise SystemExit(f'report anchor count is {text.count(anchor)}')
+          path.write_text(text.replace(anchor, addition), encoding='utf-8')
           PY
       - name: Validate fixture script
         run: |
