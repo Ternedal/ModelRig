@@ -80,6 +80,20 @@ def is_available() -> bool:
         return False
 
 
+def status() -> dict:
+    """Cheap public health contract for the optional TTS subsystem.
+
+    Availability and configured voice belong to this module; callers should not
+    reach through to private environment helpers. This does not load the voice.
+    """
+    available = is_available()
+    return {
+        "ok": available,
+        "voice": _voice_name() if available else None,
+        "detail": None if available else "piper not installed",
+    }
+
+
 def _get_voice():
     """Load (once) and return the Piper voice, or raise with a clear message."""
     global _voice, _load_error

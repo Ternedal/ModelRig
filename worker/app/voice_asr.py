@@ -147,6 +147,21 @@ def is_available() -> bool:
         return False
 
 
+def status() -> dict:
+    """Cheap public health contract for the optional ASR subsystem.
+
+    The worker health endpoint must not know private configuration helpers. This
+    function owns that translation and deliberately does not load the model.
+    """
+    available = is_available()
+    return {
+        "ok": available,
+        "device": _device() if available else None,
+        "model": _model_name() if available else None,
+        "detail": None if available else "faster-whisper not installed",
+    }
+
+
 def cuda_available() -> bool:
     """True if a CUDA device is actually usable, not merely configured. Uses
     CTranslate2's device count (faster-whisper's backend) so it reflects real GPU

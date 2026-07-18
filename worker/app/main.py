@@ -34,7 +34,7 @@ from . import rag
 from .env_compat import legacy_names_in_use
 from .store import DocStore
 
-VERSION = "1.58.98"
+VERSION = "1.58.99"
 
 app = FastAPI(title="ModelRig Worker", version=VERSION)
 
@@ -249,14 +249,8 @@ async def health_full(deep: bool = False) -> dict:
 
     # ASR / TTS: available? and crucially, on what device -- the whole GPU-voice
     # saga (v1.12.3) was ASR silently falling back off CUDA.
-    checks["asr"] = {"ok": voice_asr.is_available(),
-                     "device": voice_asr._device() if voice_asr.is_available() else None,
-                     "model": voice_asr._model_name() if voice_asr.is_available() else None,
-                     "detail": None if voice_asr.is_available()
-                               else "faster-whisper not installed"}
-    checks["tts"] = {"ok": voice_tts.is_available(),
-                     "voice": voice_tts._voice_name() if voice_tts.is_available() else None,
-                     "detail": None if voice_tts.is_available() else "piper not installed"}
+    checks["asr"] = voice_asr.status()
+    checks["tts"] = voice_tts.status()
 
     # Tools: the kill-switch state, surfaced. "Why did Kaliv refuse to act" is a
     # question this answers before it gets asked.

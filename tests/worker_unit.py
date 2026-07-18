@@ -135,6 +135,39 @@ check("documents" in h["checks"]["worker"], "health_full: worker reports documen
 if not h["checks"]["asr"]["ok"]:
     check(h["checks"]["asr"]["detail"] is not None, "health_full: a down subsystem says why")
 
+# Health must consume the voice modules' PUBLIC status contracts. Private
+# configuration helpers are implementation details; make them explode so a
+# future reach-through fails this test immediately.
+from app import voice_asr as _voice_asr, voice_tts as _voice_tts  # noqa: E402
+
+_asr_status, _tts_status = _voice_asr.status, _voice_tts.status
+_asr_device, _asr_model, _tts_voice = (
+    _voice_asr._device, _voice_asr._model_name, _voice_tts._voice_name
+)
+try:
+    _voice_asr.status = lambda: {
+        "ok": True, "device": "contract-device",
+        "model": "contract-model", "detail": None,
+    }
+    _voice_tts.status = lambda: {
+        "ok": True, "voice": "contract-voice", "detail": None,
+    }
+    def _private_reach_through():
+        raise AssertionError("health reached through a public voice contract")
+    _voice_asr._device = _private_reach_through
+    _voice_asr._model_name = _private_reach_through
+    _voice_tts._voice_name = _private_reach_through
+    _contract_health = _aio.run(_M.health_full())
+    check(_contract_health["checks"]["asr"]["device"] == "contract-device",
+          "health_full: ASR uses public status contract")
+    check(_contract_health["checks"]["tts"]["voice"] == "contract-voice",
+          "health_full: TTS uses public status contract")
+finally:
+    _voice_asr.status, _voice_tts.status = _asr_status, _tts_status
+    _voice_asr._device, _voice_asr._model_name, _voice_tts._voice_name = (
+        _asr_device, _asr_model, _tts_voice
+    )
+
 # Tools state is surfaced (off by default), and does NOT count as a fault: a
 # layer off by choice must not drag the rig to unhealthy.
 check("enabled" in h["checks"]["tools"], "health_full: surfaces the tools kill-switch state")
