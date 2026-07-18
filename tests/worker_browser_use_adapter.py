@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.browser_host import BrowserBackendError, BrowserBackendUnavailable
 from app.browser_use_adapter import (
     SUPPORTED_BROWSER_USE_VERSION,
+    VERIFIED_SOURCE_MEDIA_TYPE,
     BrowserUseBackend,
     BrowserUseBindings,
     BrowserUseResearchOutput,
@@ -59,7 +61,22 @@ TRACE = FetchTrace(
     visited_urls=("https://example.com/report", "https://example.com/final"),
     resolved_addresses=(("https://example.com/report", ("1.1.1.1",)),),
     receipt=RECEIPT,
+)
+UNTRUSTED_RECEIPT = SourceReceipt.from_content(
+    url="https://example.com/final",
+    title="Release",
     content=RAW,
+    excerpt="Version 7 is live.",
+    media_type="text/html",
+    adapter="browser-use",
+    retrieved_at=datetime(2026, 7, 18, tzinfo=timezone.utc),
+)
+UNTRUSTED_TRACE = FetchTrace(
+    requested_url="https://example.com/report",
+    final_url="https://example.com/final",
+    visited_urls=("https://example.com/report", "https://example.com/final"),
+    resolved_addresses=(("https://example.com/report", ("1.1.1.1",)),),
+    receipt=UNTRUSTED_RECEIPT,
 )
 
 
@@ -181,6 +198,14 @@ def backend_with(
     return backend, agent, recorder
 
 
+optional_requirements = Path("worker/requirements-browser-use.txt").read_text(encoding="utf-8")
+base_requirements = Path("worker/requirements.txt").read_text(encoding="utf-8")
+check(
+    f"browser-use[core]=={SUPPORTED_BROWSER_USE_VERSION}" in optional_requirements.splitlines(),
+    "optional Browser Use version is pinned exactly",
+)
+check("browser-use" not in base_requirements.lower(), "base worker does not install Browser Use")
+
 backend, agent, recorder = backend_with(history=FakeHistory(has_errors=True))
 result = run(backend.research(REQUEST))
 check(result.answer == "Version 7 is live [1].", "structured answer is preserved")
@@ -192,9 +217,16 @@ check(
     ),
     "browser trace is canonicalized and verified redirect is appended",
 )
-check(result.sources[0].content == RAW, "raw bytes come from deterministic re-fetch")
+envelope = json.loads(result.sources[0].content)
+check(envelope["schema_version"] == "modelrig.verified-web-source.v1", "verified envelope schema is explicit")
+check(envelope["url"] == RECEIPT.url, "envelope keeps the pinned fetch final URL")
+check(envelope["content_sha256"] == RECEIPT.content_sha256, "original content hash comes from deterministic fetch")
+check(envelope["bytes_read"] == RECEIPT.bytes_read, "original content byte count is preserved")
+check(envelope["adapter"] == "deterministic-web-fetch", "envelope records trusted fetch provenance")
 check(result.sources[0].url == "https://example.com/final", "source uses verified final URL")
 check(result.sources[0].title == "Release", "verified source metadata is preserved")
+check(result.sources[0].media_type == VERIFIED_SOURCE_MEDIA_TYPE, "verified envelope has a dedicated media type")
+check(RECEIPT.content_sha256 in result.sources[0].excerpt, "verified digest is visible in the evidence excerpt")
 check(result.citations[0].source_indexes == (0,), "citation URLs map to verified source indexes")
 check(result.warnings == ("Browser Use reported one or more recoverable step errors.",), "raw step errors are normalized")
 check(agent.run_calls == [{"max_steps": 4}], "Browser Use receives the hard step budget")
@@ -305,6 +337,10 @@ expect_research_failure(
     "invalid deterministic fetch result is rejected",
     fetcher=FakeFetcher(result=object()),
 )
+expect_research_failure(
+    "non-deterministic receipts are rejected",
+    fetcher=FakeFetcher(result=UNTRUSTED_TRACE),
+)
 
 # More unique citations than max_sources fail before any unbounded evidence set is returned.
 limited_request = ResearchRequest(query="fixture", policy=POLICY, max_sources=1)
@@ -332,6 +368,7 @@ class SyncCloseAgent(FakeAgent):
     def close(self):
         self.close_calls += 1
 
+
 sync_agent = SyncCloseAgent()
 sync_recorder = FactoryRecorder(sync_agent)
 sync_backend = BrowserUseBackend(
@@ -351,6 +388,7 @@ class Session:
     async def close(self):
         self.calls += 1
 
+
 class SessionOnlyAgent:
     def __init__(self):
         self.browser_session = Session()
@@ -359,6 +397,7 @@ class SessionOnlyAgent:
     async def run(self, **kwargs):
         self.run_calls.append(kwargs)
         return FakeHistory()
+
 
 session_agent = SessionOnlyAgent()
 session_recorder = FactoryRecorder(session_agent)
