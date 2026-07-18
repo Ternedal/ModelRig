@@ -4,7 +4,7 @@
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
 **Version på main:** `1.58.97`  
-**Genereret:** 2026-07-18 06:58 UTC
+**Genereret:** 2026-07-18 06:59 UTC
 
 ---
 
@@ -13,7 +13,6 @@
 Blokerende:
 
 - **Fysisk rig-validering:** ingen rapport på disken — fysisk validering er ikke kørt
-- kunne ikke læse plan-autoriteten: No module named 'pydantic'
 
 Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet uden evidens. Koden kan være korrekt i tests og fejle på Windows, Ollama, Tailscale eller en Pixel 6a — det er dét fysisk validering er til for, og det er ikke noget CI kan gøre for dig.
 
@@ -21,17 +20,17 @@ Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet
 
 ## Kan scheduleren aktiveres nu? **NEJ**
 
-kunne ikke læse schedule-godkendelsen: No module named 'fastapi'
+Ingen blokerende fund specifikke for scheduleren.
 
-- **Beviser en godkendelse et menneske:** NEJ
+- **Beviser en godkendelse et menneske:** ja
 - **Fysisk validering gælder også her:** scheduleren kører på den samme rig, så rapporten er en forudsætning for begge.
 
 ---
 
 ## Planautoritet (Agent 3)
 
-- **Serverbygget plan:** NEJ
-- **Detalje:** kunne ikke læse plan-autoriteten: No module named 'pydantic'
+- **Serverbygget plan:** ja
+- **Detalje:** planen bygges og gemmes på serveren; klienten kan kun starte den via et kortlivet single-use plan-id, mens retry kloner den gemte plan
 
 ---
 
