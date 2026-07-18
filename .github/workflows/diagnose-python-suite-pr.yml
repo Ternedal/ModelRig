@@ -1,0 +1,51 @@
+name: diagnose-python-suite-pr
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'agent/browser-use-chromium-fixture'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install worker dependencies
+        run: pip install -r worker/requirements.txt --break-system-packages
+      - name: Capture first failing Python suite
+        id: diagnose
+        shell: bash
+        env:
+          MODELRIG_BIN: /bin/false
+        run: |
+          log="$RUNNER_TEMP/python-suite-diagnostic.txt"
+          : > "$log"
+          status=0
+          for f in tests/worker_*.py tests/workflow_*.py; do
+            [ -e "$f" ] || continue
+            printf '\n===== %s =====\n' "$f" | tee -a "$log"
+            set +e
+            PYTHONPATH=worker python3 "$f" 2>&1 | tee -a "$log"
+            current=${PIPESTATUS[0]}
+            set -e
+            if [ "$current" -ne 0 ]; then
+              printf '\nFAILED_FILE=%s\n' "$f" | tee -a "$log"
+              status="$current"
+              break
+            fi
+          done
+          exit "$status"
+      - name: Upload Python-suite diagnostic
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: python-suite-diagnostic
+          path: ${{ runner.temp }}/python-suite-diagnostic.txt
+          if-no-files-found: error
+          retention-days: 1
