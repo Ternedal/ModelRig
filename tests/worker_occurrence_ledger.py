@@ -110,37 +110,124 @@ check(_occ_status(store3, second.claim_id) == "reserved_noslot",
       "the over-budget claim is marked reserved_noslot, so it still reaches the "
       "runner's refusal path but recovery will not refund a slot it never took")
 
-# --- startup recovery refunds a slot whose worker died mid-claim (F-903) ----
-# Simulate the crash: claim (reserving a slot) and then never resolve it.
-store4 = _store()
-s4 = store4.create("rig_status", {}, "every:60", now=NOW)
-crashed = store4.claim_due(now=NOW + 61)[0]
-check(_occ_status(store4, crashed.claim_id) == "reserved"
-      and _runs_used(store4, s4.schedule_id) == 1,
-      "before recovery: a reserved occurrence with a spent slot")
-recovered = store4.recover_reserved(now=NOW + 200)
-check(crashed.claim_id in recovered,
-      "startup recovery finds the occurrence whose worker died mid-claim")
-check(_occ_status(store4, crashed.claim_id) == "abandoned",
-      "and marks it abandoned -- no longer an invisible skip (F-903)")
-check(_runs_used(store4, s4.schedule_id) == 0,
-      "and returns its budget slot, so a crash does not permanently burn a run")
+# --- crash recovery: three different deaths, three deterministic ends (T-012)
+# Recovery must consult EVIDENCE. A worker can die (W1) before the job exists,
+# (W2) after the job but before ToolGate ran, or (W3) AFTER ToolGate ran the
+# side effect but before the result was recorded. W1/W2: nothing ran -> refund
+# the slot, close any dangling job. W3: it RAN -> the slot must STAY SPENT,
+# because refunding a run that happened is exactly how max_runs gets exceeded
+# via crash -- and the job is reconciled to completed. The audit is the
+# evidence: ToolGate writes outcome='executed' under a conversation id carrying
+# the claim_id.
+import tempfile as _tf
 
-# --- recovery is idempotent and leaves resolved occurrences alone -----------
-again = store4.recover_reserved(now=NOW + 300)
-check(again == [] and _runs_used(store4, s4.schedule_id) == 0,
-      "a second recovery pass touches nothing -- only 'reserved' rows, refund "
-      "bounded at zero")
+from app.jobs import JobStore as _JobStore  # noqa: E402
+from app.schedule_runner import (  # noqa: E402
+    SchedulerRunner as _Runner,
+    _occurrence_conversation as _occ_conv,
+)
+from app import tools as _T  # noqa: E402
 
-# An executed occurrence must never be abandoned by recovery.
-store5 = _store()
-s5 = store5.create("rig_status", {}, "every:60", now=NOW)
-done = store5.claim_due(now=NOW + 61)[0]
-store5.record_claim_result(s5.schedule_id, ran=True, claim_id=done.claim_id)
-store5.recover_reserved(now=NOW + 500)
-check(_occ_status(store5, done.claim_id) == "executed"
-      and _runs_used(store5, s5.schedule_id) == 1,
-      "recovery leaves an executed occurrence and its spent budget untouched")
+
+def _env():
+    td = _tf.mkdtemp(prefix="occ-recover-")
+    schedules = ScheduleStore(path=os.path.join(td, "schedules.db"))
+    jobs = _JobStore(os.path.join(td, "jobs.db"))
+    audit = _T.AuditLog(os.path.join(td, "audit.db"))
+    gate = _T.ToolGate(audit=audit, state_file=None)
+    gate.set_enabled(True)
+    runner = _Runner(schedules, jobs, gate, feature_enabled=lambda: True)
+    return schedules, jobs, gate, runner
+
+
+# W1: died right after the claim -- no job, no execution.
+st, jb, gt, rn = _env()
+w1 = st.create("rig_status", {}, "every:60", now=NOW)
+c_w1 = st.claim_due(now=NOW + 61)[0]
+out = rn.recover_interrupted(now=NOW + 200)
+check(c_w1.claim_id in out["abandoned"],
+      "W1 (died before the job): recovery abandons the occurrence")
+check(_occ_status(st, c_w1.claim_id) == "abandoned"
+      and _runs_used(st, w1.schedule_id) == 0,
+      "W1: the slot is refunded -- nothing ran, the schedule is not charged")
+
+# recovery is idempotent
+again = rn.recover_interrupted(now=NOW + 300)
+check(again["abandoned"] == [] and again["executed"] == [],
+      "a second recovery pass touches nothing -- only unresolved rows")
+
+# W2: died after the job was created and bound, before ToolGate ran.
+st, jb, gt, rn = _env()
+w2 = st.create("rig_status", {}, "every:60", now=NOW)
+c_w2 = st.claim_due(now=NOW + 61)[0]
+jid_w2 = jb.create("schedule:rig_status", detail=f"occ={c_w2.claim_id}")
+jb.update(jid_w2, status="running", detail=f"occ={c_w2.claim_id}")
+st.bind_job(c_w2.claim_id, jid_w2)
+out = rn.recover_interrupted(now=NOW + 200)
+check(c_w2.claim_id in out["abandoned"]
+      and _runs_used(st, w2.schedule_id) == 0,
+      "W2 (died before execution): abandoned and refunded, same as W1")
+job_w2 = jb.get(jid_w2)
+check(job_w2 and job_w2["status"] == "failed",
+      "W2: the dangling job is closed failed-terminal -- it does not advertise "
+      "'running' forever")
+
+# W3: died AFTER ToolGate executed the side effect, before recording. Simulate
+# by writing the exact audit row ToolGate writes at execution.
+st, jb, gt, rn = _env()
+w3 = st.create("rig_status", {}, "every:60", now=NOW)
+c_w3 = st.claim_due(now=NOW + 61)[0]
+jid_w3 = jb.create("schedule:rig_status", detail=f"occ={c_w3.claim_id}")
+jb.update(jid_w3, status="running", detail=f"occ={c_w3.claim_id}")
+st.bind_job(c_w3.claim_id, jid_w3)
+gt.audit.record(
+    tool="rig_status", args={}, risk="read", outcome="executed",
+    conversation_id=_occ_conv(w3.schedule_id, c_w3.claim_id),
+    origin="schedule",
+)
+out = rn.recover_interrupted(now=NOW + 200)
+check(c_w3.claim_id in out["executed"],
+      "W3 (died AFTER the side effect): the audit is the evidence, and "
+      "recovery sees it")
+check(_occ_status(st, c_w3.claim_id) == "executed"
+      and _runs_used(st, w3.schedule_id) == 1,
+      "W3: the slot STAYS SPENT -- refunding a run that happened is how "
+      "max_runs gets exceeded via crash, and that door is closed")
+job_w3 = jb.get(jid_w3)
+check(job_w3 and job_w3["status"] == "completed",
+      "W3: the job is reconciled to completed with the degraded-bookkeeping "
+      "truth, not left running")
+
+# A refusal audit row is NOT execution evidence.
+st, jb, gt, rn = _env()
+w4 = st.create("rig_status", {}, "every:60", now=NOW)
+c_w4 = st.claim_due(now=NOW + 61)[0]
+gt.audit.record(
+    tool="rig_status", args={}, risk="read", outcome="blocked",
+    conversation_id=_occ_conv(w4.schedule_id, c_w4.claim_id),
+    origin="schedule",
+)
+out = rn.recover_interrupted(now=NOW + 200)
+check(c_w4.claim_id in out["abandoned"]
+      and _runs_used(st, w4.schedule_id) == 0,
+      "a blocked/denied audit row is a refusal, not execution -- recovery still "
+      "refunds")
+
+# The normal completed path leaves nothing for recovery, and run_once binds the
+# job so the occurrence can name it.
+st, jb, gt, rn = _env()
+w5 = st.create("rig_status", {}, "every:60", now=NOW)
+tick = rn.run_once(now=NOW + 61)
+check(tick.completed == 1, "a live tick completes normally")
+occ_rows = st._conn.execute(
+    "SELECT status, job_id FROM occurrences").fetchall()
+check(len(occ_rows) == 1 and occ_rows[0]["status"] == "executed"
+      and occ_rows[0]["job_id"],
+      "run_once binds the job to the occurrence and resolves it executed -- "
+      "job, audit, outcome and recovery all reference the same claim")
+out = rn.recover_interrupted(now=NOW + 200)
+check(out["executed"] == [] and out["abandoned"] == [],
+      "recovery finds nothing after a clean run")
 
 print(f"\n===== OCCURRENCE LEDGER: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

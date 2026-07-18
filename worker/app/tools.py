@@ -214,6 +214,22 @@ class AuditLog:
                 "ALTER TABLE audit ADD COLUMN origin TEXT NOT NULL DEFAULT 'local'")
         self._conn.commit()
 
+    def has_execution(self, conversation_id: str) -> bool:
+        """Did ToolGate actually run a side effect under this conversation id?
+
+        Scheduler crash recovery (T-012) asks this before refunding a budget
+        slot: an audit row with outcome='executed' is the earliest durable
+        evidence that the side effect happened. Blocked/denied/expired rows are
+        refusals, not executions, and must not count.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM audit WHERE conversation_id=? "
+                "AND outcome='executed' LIMIT 1",
+                (conversation_id,),
+            ).fetchone()
+        return row is not None
+
     def record(
         self, *, tool: str, args: dict, risk: str, outcome: str,
         conversation_id: Optional[str] = None,

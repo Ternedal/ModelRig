@@ -7,11 +7,22 @@ bounded tick makes every safety decision testable before anything wakes itself.
 """
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Callable, Mapping
 
 from .jobs import JobStore
+
+
+def _occurrence_conversation(schedule_id: str, claim_id: str) -> str:
+    """The audit conversation id for one scheduled occurrence (T-012).
+
+    Carries the claim_id so crash recovery can ask the audit 'did THIS
+    occurrence execute?' with one equality match. Keeps the 'schedule:' prefix
+    every existing consumer filters on.
+    """
+    return f"schedule:{schedule_id}:occ:{claim_id}"
 from .scheduler import Schedule, ScheduleClaim, ScheduleStore, fingerprint, refusal
 from . import scheduler as scheduler_policy
 from . import tools
@@ -47,6 +58,73 @@ class SchedulerRunner:
         self.gate = gate
         self.registry = tools.REGISTRY if registry is None else registry
         self.feature_enabled = feature_enabled
+
+    def recover_interrupted(self, *, now: float | None = None) -> dict:
+        """Resolve occurrences whose worker died mid-flight, with evidence (T-012).
+
+        A 'reserved' occurrence at startup means the worker took the slot and
+        never recorded an outcome. That covers three different crashes, and they
+        must not be treated the same:
+
+          * died before the job was created            -> nothing ran
+          * died after the job, before ToolGate ran    -> nothing ran
+          * died AFTER ToolGate ran the side effect,
+            before the result was recorded             -> it RAN
+
+        The audit is the earliest durable evidence of execution -- ToolGate
+        writes outcome='executed' under a conversation id that carries the
+        claim_id. So: evidence present -> the occurrence resolves 'executed',
+        the reserved slot STAYS SPENT (refunding a run that happened is how
+        max_runs gets exceeded via crash), and the job is reconciled to
+        completed with a degraded-bookkeeping note. No evidence -> 'abandoned',
+        the slot is refunded, and the job (if any) is closed failed-terminal so
+        it does not advertise 'running' forever.
+
+        The razor-thin residue is honest: the side effect and its audit row are
+        two operations, so a crash exactly between them reads as not-executed
+        and refunds a slot for a run that happened. That window is milliseconds
+        wide (versus the whole claim->record span before this), cannot cause a
+        re-run (the occurrence is resolved, never retried), and undercounting
+        is the failure direction this scheduler prefers: duplicate or excess
+        writes are worse than a miss.
+
+        Runs before the loop can claim; idempotent -- only unresolved rows.
+        """
+        now_v = time.time() if now is None else now
+        executed_ids: list[str] = []
+        abandoned_ids: list[str] = []
+        for occ in self.schedules.reserved_occurrences():
+            conv = _occurrence_conversation(occ["schedule_id"], occ["claim_id"])
+            ran = self.gate.audit.has_execution(conv)
+            prior = self.schedules.resolve_recovered(
+                occ["claim_id"], executed=ran, now=now_v)
+            if prior is None:
+                continue  # already resolved by a racing path
+            job_id = occ.get("job_id")
+            if ran:
+                executed_ids.append(occ["claim_id"])
+                if job_id:
+                    self._reconcile_job(
+                        job_id, status="completed",
+                        detail=("gennemført via ToolGate; worker døde før "
+                                "efterregistrering — genoprettet fra audit "
+                                f"(occ={occ['claim_id']})"))
+            else:
+                abandoned_ids.append(occ["claim_id"])
+                if job_id:
+                    self._reconcile_job(
+                        job_id, status="failed",
+                        detail=("worker døde før kørsel; occurrence opgivet og "
+                                f"budget-slot refunderet (occ={occ['claim_id']})"))
+        return {"executed": executed_ids, "abandoned": abandoned_ids}
+
+    def _reconcile_job(self, job_id: str, *, status: str, detail: str) -> None:
+        """Close a dangling job best-effort; recovery must not die on JobStore."""
+        try:
+            self.jobs.update(job_id, status=status, detail=detail)
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "recovery: could not reconcile job %s to %s", job_id, status)
 
     def disable_unschedulable(self, *, now: float | None = None) -> list[str]:
         """Disable standing grants for tools that may no longer run unattended.
@@ -94,6 +172,11 @@ class SchedulerRunner:
 
         for claim in claims:
             job_id = self._create_job(claim)
+            # Bind occurrence -> job (T-012) so recovery can reconcile a
+            # dangling job to a terminal state instead of leaving it 'running'
+            # forever. Separate DBs, so this cannot join the claim transaction;
+            # it runs before execution, so the unbound window is cosmetic.
+            self.schedules.bind_job(claim.claim_id, job_id)
             job_ids.append(job_id)
             outcome = self._run_claim(claim, job_id, tick_at)
             if outcome == "completed":
@@ -111,7 +194,7 @@ class SchedulerRunner:
         s = claim.schedule
         detail = (
             f"schedule={s.schedule_id}; due={claim.occurrence_due_at:.3f}; "
-            f"missed={claim.missed_this_claim}"
+            f"missed={claim.missed_this_claim}; occ={claim.claim_id}"
         )
         job_id = self.jobs.create(f"schedule:{s.tool}", detail=detail)
         self.jobs.update(job_id, status="running", detail=detail)
@@ -161,7 +244,7 @@ class SchedulerRunner:
             result = self.gate.propose(
                 s.tool,
                 s.args,
-                conversation_id=f"schedule:{s.schedule_id}",
+                conversation_id=_occurrence_conversation(s.schedule_id, claim.claim_id),
                 origin="schedule",
                 pre_approved=s.approved_fingerprint,
             )

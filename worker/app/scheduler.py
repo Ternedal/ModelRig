@@ -294,6 +294,15 @@ class ScheduleStore:
                 "CREATE INDEX IF NOT EXISTS occurrences_reserved "
                 "ON occurrences (status) WHERE status='reserved'"
             )
+            # Migration (T-012): job_id binds the occurrence to its JobStore row
+            # so recovery can reconcile a dangling job to a terminal state. The
+            # occurrences table shipped in 1.58.116; any DB created by it lacks
+            # the column.
+            cols = {r[1] for r in self._conn.execute(
+                "PRAGMA table_info(occurrences)")}
+            if "job_id" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE occurrences ADD COLUMN job_id TEXT")
             self._conn.commit()
 
     def close(self) -> None:
@@ -516,41 +525,75 @@ class ScheduleStore:
                 return None
         return self.get(schedule_id)
 
-    def recover_reserved(self, *, now: float | None = None) -> list[str]:
-        """Resolve occurrences whose worker died mid-claim (F-903 recovery).
+    def bind_job(self, claim_id: str, job_id: str) -> None:
+        """Tie a claimed occurrence to its JobStore row (T-012).
 
-        A 'reserved' occurrence with no execution outcome means the worker took
-        the slot and never finished -- the invisible-skip case. On startup each
-        such row is marked 'abandoned' and its reserved budget slot returned, so
-        a crash does not permanently burn a run. Idempotent: only reserved rows
-        are touched, and the refund is bounded at zero.
+        The job lives in a separate database, so this cannot be part of the
+        claim transaction. It runs immediately after job creation, before
+        execution; the residual window (job created, not yet bound) is cosmetic
+        -- nothing has executed yet, so recovery still resolves the occurrence
+        correctly, and the claim_id stamped in the job detail keeps the row
+        forensically traceable.
+        """
+        with self._lock:
+            self._conn.execute(
+                "UPDATE occurrences SET job_id=? "
+                "WHERE claim_id=? AND status IN ('reserved','reserved_noslot')",
+                (job_id, claim_id),
+            )
+            self._conn.commit()
+
+    def reserved_occurrences(self) -> list[dict]:
+        """Every occurrence still awaiting resolution, for recovery (T-012)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT claim_id, schedule_id, job_id, status FROM occurrences "
+                "WHERE status IN ('reserved','reserved_noslot')"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def resolve_recovered(self, claim_id: str, *, executed: bool,
+                          now: float | None = None) -> str | None:
+        """Resolve one interrupted occurrence with evidence in hand (T-012).
+
+        executed=True: the audit proves ToolGate ran the side effect before the
+        crash, so the occurrence becomes 'executed' and the reserved slot STAYS
+        SPENT -- refunding a run that happened is how max_runs gets exceeded
+        via crash. executed=False: nothing ran; 'abandoned', and the slot is
+        refunded -- but only when this claim actually reserved one ('reserved',
+        not 'reserved_noslot'), and never below zero. Returns the prior status,
+        or None if the occurrence was already resolved (idempotent).
         """
         now = time.time() if now is None else now
-        recovered: list[str] = []
         with self._lock:
             try:
                 self._conn.execute("BEGIN IMMEDIATE")
-                rows = self._conn.execute(
-                    "SELECT claim_id, schedule_id FROM occurrences "
-                    "WHERE status='reserved'"
-                ).fetchall()
-                for row in rows:
-                    self._conn.execute(
-                        "UPDATE occurrences SET status='abandoned', resolved=? "
-                        "WHERE claim_id=? AND status='reserved'",
-                        (now, row["claim_id"]),
-                    )
+                row = self._conn.execute(
+                    "SELECT schedule_id, status FROM occurrences "
+                    "WHERE claim_id=? AND status IN "
+                    "('reserved','reserved_noslot')",
+                    (claim_id,),
+                ).fetchone()
+                if row is None:
+                    self._conn.commit()
+                    return None
+                new_status = "executed" if executed else "abandoned"
+                self._conn.execute(
+                    "UPDATE occurrences SET status=?, resolved=? "
+                    "WHERE claim_id=?",
+                    (new_status, now, claim_id),
+                )
+                if not executed and row["status"] == "reserved":
                     self._conn.execute(
                         "UPDATE schedules SET runs_used=MAX(runs_used-1, 0) "
                         "WHERE id=?",
                         (row["schedule_id"],),
                     )
-                    recovered.append(row["claim_id"])
                 self._conn.commit()
             except Exception:
                 self._conn.rollback()
                 raise
-        return recovered
+        return row["status"]
 
     def record_run(self, schedule_id: str, *, ran: bool,
                    now: float | None = None) -> Schedule | None:
