@@ -1,0 +1,129 @@
+name: temporary-pdf-lifecycle-debug
+
+on:
+  push:
+    branches:
+      - agent/pdf-document-lifecycle
+
+permissions:
+  contents: read
+
+jobs:
+  success-path:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Success closes once
+        env:
+          PYTHONPATH: worker
+        run: |
+          python - <<'PY'
+          import sys
+          from types import ModuleType
+          from app import rag_pdf
+
+          class Page:
+              def __init__(self, text): self.text = text
+              def get_text(self, mode):
+                  assert mode == 'text'
+                  return self.text
+
+          class Doc:
+              is_encrypted = False
+              def __init__(self):
+                  self.pages = [Page('  first  '), Page('second')]
+                  self.close_count = 0
+              def __iter__(self): return iter(self.pages)
+              @property
+              def page_count(self): return len(self.pages)
+              def close(self): self.close_count += 1
+
+          doc = Doc()
+          fitz = ModuleType('fitz')
+          fitz.open = lambda **kwargs: doc
+          sys.modules['fitz'] = fitz
+          result = rag_pdf.extract_text(b'pdf-bytes')
+          assert result == {'text': 'first\n\nsecond', 'pages': 2, 'chars': 13}, result
+          assert doc.close_count == 1, doc.close_count
+          PY
+
+  locked-path:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Locked PDF closes once
+        env:
+          PYTHONPATH: worker
+        run: |
+          python - <<'PY'
+          import sys
+          from types import ModuleType
+          from app import rag_pdf
+
+          class Doc:
+              is_encrypted = True
+              page_count = 0
+              def __init__(self): self.close_count = 0
+              def authenticate(self, password):
+                  assert password == ''
+                  return False
+              def __iter__(self): return iter(())
+              def close(self): self.close_count += 1
+
+          doc = Doc()
+          fitz = ModuleType('fitz')
+          fitz.open = lambda **kwargs: doc
+          sys.modules['fitz'] = fitz
+          try:
+              rag_pdf.extract_text(b'pdf-bytes')
+              raise AssertionError('expected RuntimeError')
+          except RuntimeError as exc:
+              assert 'password-protected' in str(exc), exc
+          assert doc.close_count == 1, doc.close_count
+          PY
+
+  page-error-path:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Page failure closes once
+        env:
+          PYTHONPATH: worker
+        run: |
+          python - <<'PY'
+          import sys
+          from types import ModuleType
+          from app import rag_pdf
+
+          class Page:
+              def get_text(self, mode):
+                  assert mode == 'text'
+                  raise ValueError('broken page tree')
+
+          class Doc:
+              is_encrypted = False
+              page_count = 1
+              def __init__(self): self.close_count = 0
+              def __iter__(self): return iter((Page(),))
+              def close(self): self.close_count += 1
+
+          doc = Doc()
+          fitz = ModuleType('fitz')
+          fitz.open = lambda **kwargs: doc
+          sys.modules['fitz'] = fitz
+          try:
+              rag_pdf.extract_text(b'pdf-bytes')
+              raise AssertionError('expected RuntimeError')
+          except RuntimeError as exc:
+              assert str(exc) == 'could not extract PDF text: broken page tree', exc
+          assert doc.close_count == 1, doc.close_count
+          PY
