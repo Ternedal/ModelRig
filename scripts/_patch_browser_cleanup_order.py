@@ -129,6 +129,7 @@ runtime = exact(
     '''    async def close(self) -> None:
         self.closed += 1''',
     '''    async def close(self) -> None:
+        await self.assert_healthy()
         self.closed += 1
         self.browser_was_closed_on_close = bool(
             getattr(self.browser_session, "closed", False)
