@@ -18,6 +18,7 @@ jobs:
           fetch-depth: 1
           show-progress: false
       - name: Apply embedded exact patch
+        id: apply-patch
         shell: bash
         run: |
           set +e
@@ -38,6 +39,14 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/apply-browser-patch.log"
           exit "$status"
+      - name: Upload patch diagnostic
+        if: failure() && steps.apply-patch.outcome == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-use-patch-diagnostic
+          path: ${{ runner.temp }}/apply-browser-patch.log
+          if-no-files-found: error
+          retention-days: 1
       - name: Validate patch shape
         shell: bash
         run: |
