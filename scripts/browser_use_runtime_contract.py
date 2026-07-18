@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -28,6 +29,13 @@ def check(condition: bool, name: str) -> None:
 bindings = load_browser_use_bindings()
 check(bindings.version == SUPPORTED_BROWSER_USE_VERSION, "exact Browser Use version loads")
 check(bindings.runtime_validated, "real bindings are marked runtime-validated")
+for name in (
+    "ANONYMIZED_TELEMETRY",
+    "BROWSER_USE_CLOUD_SYNC",
+    "BROWSER_USE_VERSION_CHECK",
+    "BROWSER_USE_SETUP_LOGGING",
+):
+    check(os.environ.get(name) == "false", f"runtime forces {name}=false before import")
 
 agent_parameters = inspect.signature(bindings.agent_factory).parameters
 for parameter in (
@@ -63,21 +71,31 @@ profile = bindings.profile_factory(
 )
 
 download_path = Path(profile.downloads_path).expanduser().resolve(strict=True)
+user_data_path = Path(profile.user_data_dir).expanduser().resolve(strict=True)
 temp_root = Path(tempfile.gettempdir()).resolve(strict=True)
 try:
     check(profile.headless is True, "profile is headless")
     check(profile.allowed_domains == ["example.com", "*.example.com"], "profile keeps the exact allowlist")
-    check(profile.user_data_dir is None, "profile imports no persistent user data")
     check(profile.storage_state is None, "profile imports no cookie or storage state")
     check(profile.keep_alive is False, "profile is single-use")
     check(profile.block_ip_addresses is True, "profile blocks direct IP navigation")
     check(profile.enable_default_extensions is False, "default extensions are disabled")
     check(profile.auto_download_pdfs is False, "automatic PDF downloads are disabled")
     check(profile.captcha_solver is False, "captcha side-effect service is disabled")
+
     check(download_path.parent == temp_root, "download quarantine is directly under system temp")
     check(download_path.name.startswith("browser-use-downloads-"), "download quarantine uses Browser Use's unique prefix")
     check(download_path.is_dir(), "download quarantine exists before browser startup")
     check(next(download_path.iterdir(), None) is None, "download quarantine starts empty")
+
+    check(user_data_path.parent == temp_root, "profile quarantine is directly under system temp")
+    check(
+        user_data_path.name.startswith("browser-use-user-data-dir-"),
+        "profile quarantine uses Browser Use's unique prefix",
+    )
+    check(user_data_path.is_dir(), "profile quarantine exists before browser startup")
+    check(next(user_data_path.iterdir(), None) is None, "profile quarantine starts empty")
+    check(user_data_path != download_path, "profile and download quarantines are distinct")
 
     tools = bindings.tools_factory(
         exclude_actions=list(READ_ONLY_EXCLUDED_ACTIONS),
@@ -101,9 +119,11 @@ try:
         "structured output remains a Pydantic model",
     )
 finally:
-    shutil.rmtree(download_path, ignore_errors=False)
+    for path in (download_path, user_data_path):
+        shutil.rmtree(path, ignore_errors=False)
 
-check(not download_path.exists(), "runtime-contract smoke removes its quarantine")
+check(not download_path.exists(), "runtime-contract smoke removes its download quarantine")
+check(not user_data_path.exists(), "runtime-contract smoke removes its profile quarantine")
 
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)
