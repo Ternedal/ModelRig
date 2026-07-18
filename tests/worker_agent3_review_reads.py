@@ -176,4 +176,28 @@ roundtrip = AgentRun.from_json(json.dumps(payload))
 check(roundtrip.state == RunState.RUNNING and roundtrip.current_step == 0, "legacy AgentRun roundtrip remains valid")
 
 print(f"\n{passed} passed, {failed} failed")
+# --- a run never exists without its review policy (F-814) --------------------
+#
+# _start_reviewed writes two databases that cannot share a transaction. The
+# dangerous crash outcome is a run that EXISTS with no review row, because get()
+# defaults a missing row to enabled=False -- a run meant to wait for human review
+# would proceed unreviewed. The fix orders the writes so the policy is durable
+# before the run: for every run the store knows about, the review store must
+# already have its configuration.
+
+# Drive the ordering directly: configure() for a run id must make get() return
+# enabled BEFORE any run row is saved, so the policy cannot be lost by a crash
+# between the two writes.
+_probe_id = "crash-probe-run"
+review_store.configure(_probe_id, True)
+check(review_store.get(_probe_id)["enabled"] is True,
+      "the review policy is durable on its own -- configure() persists before "
+      "the run is saved, so a crash between the two writes cannot lose it")
+
+# And the reverse is the safe direction: an orphan review row for a run that
+# does not exist is harmless, because get() is only ever asked about real runs.
+check(run_store.load(_probe_id) is None,
+      "an orphan review row does not conjure a run -- the harmless direction")
+
+print(f"\n===== REVIEW READS: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

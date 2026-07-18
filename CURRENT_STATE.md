@@ -6,7 +6,7 @@
 > code, so it cannot quietly become untrue. If a fact belongs here, teach
 > the generator to read it -- do not type it in.
 
-**Version:** 1.58.104
+**Version:** 1.58.105
 
 ## Tools the model can see
 
@@ -57,7 +57,8 @@ gate enforces another.
 | At-rest-beskyttelse | Windows DPAPI (current-user) |
 | Legacy-klartekst migreres før udlevering | ja |
 | Korrupt/ukendt envelope fejler lukket | ja |
-| Ægte DPAPI bevist på Windows-runner | ja |
+| DPAPI-test defineret og koblet i CI (windows-latest) | ja |
+| Bestået på denne commit | kan ikke verificeres offline — se CI-status for headen |
 
 ## Design docs and what they claim about themselves
 

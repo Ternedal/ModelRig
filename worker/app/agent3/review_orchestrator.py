@@ -241,10 +241,22 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
             proactive=proactive,
             allow_private_cloud=allow_private_cloud,
         )
-        self.store.save(run)
+        # Two databases cannot share a transaction, so ordering carries the
+        # safety (F-814). The dangerous outcome is a run that EXISTS with no
+        # review row, because get() defaults a missing row to enabled=False: a
+        # run that was supposed to wait for human review would silently proceed
+        # unreviewed after a crash. So the review policy is made durable FIRST.
+        #
+        # If we crash after configure() but before the run is saved, the result
+        # is an orphan review row for a run that does not exist -- harmless, get()
+        # is never called for a run with no record. The reverse -- a run with no
+        # policy -- is the one that fails open, so it is the one we exclude by
+        # construction. Then run + its creation event land atomically in the run
+        # DB via save_with_event (F-712), so the run never exists without the
+        # event that explains it either.
         self.review_store.configure(run.id, review_reads)
-        self.store.event(
-            run.id,
+        self.store.save_with_event(
+            run,
             "run_created",
             {
                 "route": route.kind.value,

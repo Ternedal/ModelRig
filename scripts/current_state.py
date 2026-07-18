@@ -127,8 +127,21 @@ def _desktop_credentials() -> list[tuple[str, str]]:
         and "Unsupported desktop credential envelope" in db
         and "Credential protector returned an invalid envelope" in db
     )
-    windows_proof = (
+    # A test that is DEFINED and wired into CI is not a test that PASSED on this
+    # commit (F-813). This generator runs offline -- it reads the filesystem, not
+    # the GitHub status API -- so it can see the job in the workflow and the test
+    # file on disk, and it cannot see whether the run went green on the current
+    # head. Claiming "bevist" (proven) from a job name and a filename is the same
+    # overclaim as a readiness page attesting to the door it happened to read: a
+    # workflow can fail or never run, and the page would still say proven.
+    #
+    # So report what is actually true. The test is defined and wired; whether it
+    # passed on THIS commit is a CI-status question the offline generator cannot
+    # answer, and the honest page says so rather than asserting the stronger
+    # claim it cannot support.
+    dpapi_test_defined = (
         "desktop-dpapi-windows:" in ci
+        and "runs-on: windows-latest" in ci
         and "WindowsDpapiCredentialProtectorTest.kt" in " ".join(
             p.name for p in (ROOT / "desktop" / "composeApp" / "src" / "test").rglob("*.kt")
         )
@@ -139,7 +152,13 @@ def _desktop_credentials() -> list[tuple[str, str]]:
         ("At-rest-beskyttelse", "Windows DPAPI (current-user)" if dpapi else "INGEN"),
         ("Legacy-klartekst migreres før udlevering", "ja" if migration else "nej"),
         ("Korrupt/ukendt envelope fejler lukket", "ja" if fail_closed else "nej"),
-        ("Ægte DPAPI bevist på Windows-runner", "ja" if windows_proof else "nej"),
+        # Two separate claims, because they are two separate facts and conflating
+        # them is F-813. "Defined" is filesystem-checkable and true; "passed on
+        # this head" needs the CI status this offline generator does not have.
+        ("DPAPI-test defineret og koblet i CI (windows-latest)",
+         "ja" if dpapi_test_defined else "nej"),
+        ("Bestået på denne commit",
+         "kan ikke verificeres offline — se CI-status for headen"),
     ]
 
 

@@ -129,5 +129,23 @@ check(_row.get("delete_model", ["", "", "", "", "no"])[4] == "no",
 check(_row.get("note_append", ["", "", "", "", "", "", "no"])[-1] == "no",
       "note_append shows re-running it is not free")
 
+# --- the page must not claim physical proof it cannot see (F-813) -----------
+# CURRENT_STATE used to say "Ægte DPAPI bevist på Windows-runner: ja" because a
+# job name was in the workflow and a test file was on disk. That proves the test
+# is DEFINED, not that it PASSED on this commit -- the same overclaim as a
+# readiness page attesting to the door it read. The generator runs offline and
+# cannot see CI status, so it must not assert the stronger claim.
+
+check("bevist på Windows-runner** | ja" not in text
+      and "DPAPI bevist på Windows-runner | ja" not in text,
+      "the page no longer claims DPAPI is PROVEN from a job name and a filename")
+check("kan ikke verificeres offline" in text,
+      "and it says plainly that passed-on-this-commit needs CI status the "
+      "offline generator does not have")
+# The weaker, true claim is still made, so we did not just delete the signal.
+check("defineret og koblet i CI" in text,
+      "the true, filesystem-checkable claim -- the test is defined and wired -- "
+      "is still reported")
+
 print(f"\n===== CURRENT STATE: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
