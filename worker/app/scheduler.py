@@ -230,6 +230,10 @@ class ScheduleClaim:
     occurrence_due_at: float
     missed_this_claim: int
     claim_id: str
+    # The user-intent revision this claim was taken under (T-013). If the
+    # schedule's revision differs at execution time, the grant was paused,
+    # resumed or renewed after the claim, and the stale occurrence must not run.
+    revision: int = 0
 
 
 class ScheduleStore:
@@ -303,6 +307,17 @@ class ScheduleStore:
             if "job_id" not in cols:
                 self._conn.execute(
                     "ALTER TABLE occurrences ADD COLUMN job_id TEXT")
+            # Migration (T-013): revision counts USER-INTENT mutations -- pause,
+            # resume, renewal -- so an in-flight claim can detect that the grant
+            # it was taken under no longer exists as claimed. Runner bookkeeping
+            # (due_at advance, runs_used, refunds) deliberately does NOT bump it:
+            # the runner's own accounting must not invalidate its own claims.
+            scols = {r[1] for r in self._conn.execute(
+                "PRAGMA table_info(schedules)")}
+            if "revision" not in scols:
+                self._conn.execute(
+                    "ALTER TABLE schedules ADD COLUMN "
+                    "revision INTEGER NOT NULL DEFAULT 0")
             self._conn.commit()
 
     def close(self) -> None:
@@ -450,6 +465,7 @@ class ScheduleStore:
                         occurrence_due_at=schedule.due_at,
                         missed_this_claim=missed,
                         claim_id=claim_id,
+                        revision=row["revision"],
                     ))
                 self._conn.commit()
             except Exception:
@@ -644,16 +660,37 @@ class ScheduleStore:
             if enabled:
                 due = next_run(parse_cadence(row["cadence"]), now)
                 self._conn.execute(
-                    "UPDATE schedules SET enabled=1, due_at=? WHERE id=?",
+                    "UPDATE schedules SET enabled=1, due_at=?, "
+                    "revision=revision+1 WHERE id=?",
                     (due, schedule_id),
                 )
             else:
                 self._conn.execute(
-                    "UPDATE schedules SET enabled=0 WHERE id=?",
+                    "UPDATE schedules SET enabled=0, revision=revision+1 "
+                    "WHERE id=?",
                     (schedule_id,),
                 )
             self._conn.commit()
         return True
+
+    def current_guard(self, schedule_id: str) -> dict | None:
+        """The live facts a claimed occurrence must re-check before ToolGate (T-013).
+
+        The claim is a snapshot; the batch executes sequentially, so minutes can
+        pass between claim and execution. This one read answers: does the grant
+        still exist, is it still enabled, and is it still the SAME grant (same
+        revision, same approval) the claim was taken under? None means deleted.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT enabled, revision, approved_fingerprint "
+                "FROM schedules WHERE id=?",
+                (schedule_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {"enabled": bool(row["enabled"]), "revision": row["revision"],
+                "approved_fingerprint": row["approved_fingerprint"]}
 
     def delete(self, schedule_id: str) -> bool:
         with self._lock:

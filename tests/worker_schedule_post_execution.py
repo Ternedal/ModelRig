@@ -51,6 +51,13 @@ class FailingScheduleAccounting:
         self.recorded: list[bool] = []
         self.disabled: list[tuple[str, bool, float]] = []
 
+    def current_guard(self, schedule_id: str):
+        # The pre-ToolGate revocation re-check (T-013). These cases test what
+        # happens AFTER execution, so the guard must pass: same revision the
+        # claim carries (default 0), enabled, same approval.
+        return {"enabled": True, "revision": 0,
+                "approved_fingerprint": self.schedule.approved_fingerprint}
+
     def record_claim_result(self, schedule_id: str, *, ran: bool, claim_id=None):
         assert schedule_id == self.schedule.schedule_id
         self.recorded.append(ran)

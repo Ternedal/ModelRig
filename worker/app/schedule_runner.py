@@ -240,6 +240,31 @@ class SchedulerRunner:
             )
             return "blocked"
 
+        # T-013: the claim is a snapshot, and the batch executes sequentially --
+        # minutes can pass between the claim and this point. Re-read the LIVE
+        # grant immediately before ToolGate: deleted, paused, or a different
+        # revision/approval than the claim was taken under means the user
+        # changed the grant after the claim, and the stale occurrence must not
+        # run. Deliberately NOT permanent -- the user's change was intentional;
+        # the schedule continues under its new terms at its next due time, and
+        # the reserved budget slot is refunded by the release path.
+        guard = self.schedules.current_guard(s.schedule_id)
+        if (guard is None
+                or not guard["enabled"]
+                or guard["revision"] != claim.revision
+                or guard["approved_fingerprint"] != s.approved_fingerprint):
+            self._finish_blocked(
+                s,
+                job_id,
+                "planen blev pauset, ændret eller slettet efter claim; "
+                "occurrence annulleret og budget-slot refunderet",
+                risk=tool.risk,
+                permanent=False,
+                now=now,
+                claim_id=claim.claim_id,
+            )
+            return "blocked"
+
         try:
             result = self.gate.propose(
                 s.tool,
