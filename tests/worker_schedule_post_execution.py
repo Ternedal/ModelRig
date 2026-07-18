@@ -51,7 +51,7 @@ class FailingScheduleAccounting:
         self.recorded: list[bool] = []
         self.disabled: list[tuple[str, bool, float]] = []
 
-    def record_claim_result(self, schedule_id: str, *, ran: bool):
+    def record_claim_result(self, schedule_id: str, *, ran: bool, claim_id=None):
         assert schedule_id == self.schedule.schedule_id
         self.recorded.append(ran)
         if self.fail_record:
@@ -118,7 +118,8 @@ def make_case(
         registry={name: tool},
         feature_enabled=lambda: True,
     )
-    claim = ScheduleClaim(schedule, occurrence_due_at=NOW, missed_this_claim=0)
+    claim = ScheduleClaim(schedule, occurrence_due_at=NOW, missed_this_claim=0,
+                          claim_id="test-claim-0001")
     return runner, claim, schedules, jobs, gate
 
 

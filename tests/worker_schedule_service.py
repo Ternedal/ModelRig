@@ -45,6 +45,16 @@ def wait_until(predicate, timeout=1.0):
 OK = TickResult(True, False, 1, 1, 0, 0, ("job",))
 
 
+class _FakeSchedules:
+    """start() now runs occurrence recovery (F-903); the fake records the call."""
+    def __init__(self):
+        self.recovered = False
+
+    def recover_reserved(self, *, now=None):
+        self.recovered = True
+        return []
+
+
 class FakeRunner:
     def __init__(self, *, enabled=True, actions=None):
         self.enabled = enabled
@@ -52,6 +62,7 @@ class FakeRunner:
         self.calls = 0
         self.called = threading.Event()
         self._lock = threading.Lock()
+        self.schedules = _FakeSchedules()
 
     def feature_enabled(self):
         return self.enabled

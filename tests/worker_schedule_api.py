@@ -362,7 +362,15 @@ try:
         "resume starts at a fresh future occurrence",
     )
     store = ScheduleAdminStore(db_path)
-    store.record_claim_result(write_id, ran=True)
+    # Drive the budget to exhausted directly. Budget is now reserved at claim,
+    # not incremented on ran=True (F-902), so simulate the end-state: runs_used
+    # at max_runs. The point of this check is that an exhausted schedule cannot
+    # be silently re-enabled, regardless of how it got exhausted.
+    with store._lock:
+        store._conn.execute(
+            "UPDATE schedules SET runs_used=max_runs WHERE id=? AND max_runs>0",
+            (write_id,))
+        store._conn.commit()
     store.set_enabled(write_id, False, now=now[0])
     store.close()
     exhausted = client.post(f"/schedules/{write_id}/enabled", json={"enabled": True})

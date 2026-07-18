@@ -36,6 +36,7 @@ import json
 import os
 import re
 import time
+import uuid
 from dataclasses import dataclass
 
 # "every:900" -> every 900 seconds. "daily:03:00" -> at 03:00 local time.
@@ -220,11 +221,15 @@ class ScheduleClaim:
     Consuming first gives scheduled writes at-most-once semantics: if the worker
     dies after the claim, the occurrence is skipped rather than potentially
     repeated after a restart. Duplicate writes are worse than a visible miss.
+
+    claim_id ties this occurrence to its durable ledger row (F-902/F-903), so
+    job, audit, outcome and recovery all reference the same thing.
     """
 
     schedule: Schedule
     occurrence_due_at: float
     missed_this_claim: int
+    claim_id: str
 
 
 class ScheduleStore:
@@ -261,6 +266,33 @@ class ScheduleStore:
                        missed INTEGER NOT NULL DEFAULT 0,
                        enabled INTEGER NOT NULL DEFAULT 1,
                        created REAL NOT NULL)"""
+            )
+            # The occurrence-ledger (F-902/F-903). Before this, a claim advanced
+            # due_at and lived only in memory: a crash between the claim commit
+            # and job creation left an invisible skip -- due_at already past it,
+            # no job, no audit, no recovery -- and the run budget was only spent
+            # AFTER execution, so a long run or a restart could exceed max_runs.
+            #
+            # Now every claim writes a durable occurrence row IN THE SAME
+            # TRANSACTION that advances due_at, and reserves the budget slot
+            # there too. status moves reserved -> executed on success, or
+            # reserved -> released (slot returned) on refusal/failure, or
+            # reserved -> abandoned (slot returned) at startup recovery for a
+            # claim whose worker died in the gap. So the execution truth is
+            # durable from the instant the occurrence is taken, not from the
+            # instant it finishes.
+            self._conn.execute(
+                """CREATE TABLE IF NOT EXISTS occurrences (
+                       claim_id TEXT PRIMARY KEY,
+                       schedule_id TEXT NOT NULL,
+                       occurrence_due_at REAL NOT NULL,
+                       status TEXT NOT NULL,
+                       created REAL NOT NULL,
+                       resolved REAL)"""
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS occurrences_reserved "
+                "ON occurrences (status) WHERE status='reserved'"
             )
             self._conn.commit()
 
@@ -356,13 +388,41 @@ class ScheduleStore:
                             (schedule.schedule_id,),
                         )
                         continue
+                    # Reserve the budget slot AT CLAIM, not after execution
+                    # (F-902): the slot is spent the instant the occurrence is
+                    # taken, so a long run or a restart cannot exceed max_runs.
+                    # An already-exhausted schedule is NOT silently skipped here
+                    # -- it is claimed WITHOUT reserving a further slot, so it
+                    # still flows through the runner's refusal path, which
+                    # disables it and writes the audit the user needs to see why
+                    # it stopped. Only a schedule with budget left gets a fresh
+                    # reservation.
+                    has_budget = (not schedule.max_runs
+                                  or schedule.runs_used < schedule.max_runs)
+                    reserve = 1 if has_budget else 0
                     cur = self._conn.execute(
-                        "UPDATE schedules SET due_at=?, missed=missed+? "
+                        "UPDATE schedules SET due_at=?, missed=missed+?, "
+                        "runs_used=runs_used+? "
                         "WHERE id=? AND enabled=1 AND due_at=?",
-                        (next_due, missed, schedule.schedule_id, schedule.due_at),
+                        (next_due, missed, reserve,
+                         schedule.schedule_id, schedule.due_at),
                     )
                     if cur.rowcount != 1:
                         continue
+                    # Durable occurrence row in the SAME transaction as the
+                    # due_at advance and the reservation (F-903). A crash after
+                    # this commit leaves a row that startup recovery resolves,
+                    # instead of an invisible skip. A claim that reserved no slot
+                    # is marked 'reserved_noslot' so recovery does not refund a
+                    # slot it never took.
+                    claim_id = uuid.uuid4().hex
+                    self._conn.execute(
+                        "INSERT INTO occurrences "
+                        "(claim_id, schedule_id, occurrence_due_at, status, created) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (claim_id, schedule.schedule_id, schedule.due_at,
+                         "reserved" if reserve else "reserved_noslot", now),
+                    )
                     claimed = Schedule(
                         schedule_id=schedule.schedule_id,
                         tool=schedule.tool,
@@ -371,7 +431,7 @@ class ScheduleStore:
                         approved_fingerprint=schedule.approved_fingerprint,
                         expires_at=schedule.expires_at,
                         max_runs=schedule.max_runs,
-                        runs_used=schedule.runs_used,
+                        runs_used=schedule.runs_used + reserve,
                         due_at=next_due,
                         missed=schedule.missed + missed,
                         enabled=True,
@@ -380,6 +440,7 @@ class ScheduleStore:
                         schedule=claimed,
                         occurrence_due_at=schedule.due_at,
                         missed_this_claim=missed,
+                        claim_id=claim_id,
                     ))
                 self._conn.commit()
             except Exception:
@@ -387,17 +448,109 @@ class ScheduleStore:
                 raise
         return claims
 
-    def record_claim_result(self, schedule_id: str, *, ran: bool) -> Schedule | None:
-        """Record whether an already-consumed claim actually executed."""
+    def record_claim_result(self, schedule_id: str, *, ran: bool,
+                            claim_id: str | None = None) -> Schedule | None:
+        """Resolve a reserved occurrence after execution (F-902/F-903).
+
+        The budget slot was reserved at claim time, so success needs no further
+        increment: the occurrence is marked executed and the count stands. A run
+        that did NOT happen -- refused, failed to start, blocked -- returns the
+        slot: runs_used is decremented and the occurrence marked released, both
+        in one transaction, so a schedule is never charged for a run it did not
+        make. Without a claim_id (older callers) the budget effect is preserved
+        for compatibility but no ledger row is resolved.
+        """
         with self._lock:
-            cur = self._conn.execute(
-                "UPDATE schedules SET runs_used=runs_used+? WHERE id=?",
-                (1 if ran else 0, schedule_id),
-            )
-            self._conn.commit()
-            if cur.rowcount != 1:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                if ran:
+                    # Budget already spent at claim; just record the outcome.
+                    # Either an actual reservation or a no-slot claim (a run past
+                    # budget that still executed) is resolved to executed.
+                    if claim_id is not None:
+                        self._conn.execute(
+                            "UPDATE occurrences SET status='executed', resolved=? "
+                            "WHERE claim_id=? AND status IN "
+                            "('reserved','reserved_noslot')",
+                            (time.time(), claim_id),
+                        )
+                    cur = self._conn.execute(
+                        "SELECT 1 FROM schedules WHERE id=?", (schedule_id,))
+                    exists = cur.fetchone() is not None
+                else:
+                    # Return the reserved slot -- but only if this occurrence is
+                    # still 'reserved', so a double call cannot refund twice.
+                    released = 0
+                    if claim_id is not None:
+                        # Refund only a real reservation.
+                        c = self._conn.execute(
+                            "UPDATE occurrences SET status='released', resolved=? "
+                            "WHERE claim_id=? AND status='reserved'",
+                            (time.time(), claim_id),
+                        )
+                        released = c.rowcount
+                        # A no-slot claim that did not run: resolve it so
+                        # recovery ignores it, but there is nothing to refund.
+                        self._conn.execute(
+                            "UPDATE occurrences SET status='released', resolved=? "
+                            "WHERE claim_id=? AND status='reserved_noslot'",
+                            (time.time(), claim_id),
+                        )
+                    # Decrement only when we actually flipped a reserved row (or
+                    # when there is no ledger row to guard, for old callers),
+                    # and never below zero.
+                    if claim_id is None or released == 1:
+                        self._conn.execute(
+                            "UPDATE schedules SET runs_used=MAX(runs_used-1, 0) "
+                            "WHERE id=?",
+                            (schedule_id,),
+                        )
+                    exists = self._conn.execute(
+                        "SELECT 1 FROM schedules WHERE id=?", (schedule_id,)
+                    ).fetchone() is not None
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+            if not exists:
                 return None
         return self.get(schedule_id)
+
+    def recover_reserved(self, *, now: float | None = None) -> list[str]:
+        """Resolve occurrences whose worker died mid-claim (F-903 recovery).
+
+        A 'reserved' occurrence with no execution outcome means the worker took
+        the slot and never finished -- the invisible-skip case. On startup each
+        such row is marked 'abandoned' and its reserved budget slot returned, so
+        a crash does not permanently burn a run. Idempotent: only reserved rows
+        are touched, and the refund is bounded at zero.
+        """
+        now = time.time() if now is None else now
+        recovered: list[str] = []
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                rows = self._conn.execute(
+                    "SELECT claim_id, schedule_id FROM occurrences "
+                    "WHERE status='reserved'"
+                ).fetchall()
+                for row in rows:
+                    self._conn.execute(
+                        "UPDATE occurrences SET status='abandoned', resolved=? "
+                        "WHERE claim_id=? AND status='reserved'",
+                        (now, row["claim_id"]),
+                    )
+                    self._conn.execute(
+                        "UPDATE schedules SET runs_used=MAX(runs_used-1, 0) "
+                        "WHERE id=?",
+                        (row["schedule_id"],),
+                    )
+                    recovered.append(row["claim_id"])
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return recovered
 
     def record_run(self, schedule_id: str, *, ran: bool,
                    now: float | None = None) -> Schedule | None:

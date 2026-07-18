@@ -128,6 +128,7 @@ class SchedulerRunner:
                 risk="unknown",
                 permanent=True,
                 now=now,
+                claim_id=claim.claim_id,
             )
             return "blocked"
 
@@ -152,6 +153,7 @@ class SchedulerRunner:
                 risk=tool.risk,
                 permanent=permanent,
                 now=now,
+                claim_id=claim.claim_id,
             )
             return "blocked"
 
@@ -167,7 +169,7 @@ class SchedulerRunner:
             # Kill-switch/tool state may change in the milliseconds after the
             # policy check. The gate is authoritative; leave the schedule alive
             # so a later cadence may run after Anders re-enables it.
-            self.schedules.record_claim_result(s.schedule_id, ran=False)
+            self.schedules.record_claim_result(s.schedule_id, ran=False, claim_id=claim.claim_id)
             self.jobs.update(
                 job_id,
                 status="cancelled",
@@ -175,7 +177,7 @@ class SchedulerRunner:
             )
             return "blocked"
         except tools.ToolError as exc:
-            self.schedules.record_claim_result(s.schedule_id, ran=False)
+            self.schedules.record_claim_result(s.schedule_id, ran=False, claim_id=claim.claim_id)
             self.jobs.update(
                 job_id,
                 status="failed",
@@ -183,7 +185,7 @@ class SchedulerRunner:
             )
             return "failed"
         except Exception as exc:
-            self.schedules.record_claim_result(s.schedule_id, ran=False)
+            self.schedules.record_claim_result(s.schedule_id, ran=False, claim_id=claim.claim_id)
             self.jobs.update(
                 job_id,
                 status="failed",
@@ -205,11 +207,12 @@ class SchedulerRunner:
                 risk=tool.risk,
                 permanent=True,
                 now=now,
+                claim_id=claim.claim_id,
             )
             return "blocked"
 
         duration = int(result.get("duration_ms") or 0)
-        return self._finish_executed(s, job_id, duration, now)
+        return self._finish_executed(s, job_id, duration, now, claim.claim_id)
 
     def _finish_executed(
         self,
@@ -217,6 +220,7 @@ class SchedulerRunner:
         job_id: str,
         duration_ms: int,
         now: float,
+        claim_id: str,
     ) -> str:
         """Record post-execution truth without turning success into a retry.
 
@@ -232,6 +236,7 @@ class SchedulerRunner:
             recorded = self.schedules.record_claim_result(
                 schedule.schedule_id,
                 ran=True,
+                claim_id=claim_id,
             )
             if recorded is None:
                 raise RuntimeError("schedule disappeared after execution")
@@ -282,8 +287,11 @@ class SchedulerRunner:
         risk: str,
         permanent: bool,
         now: float,
+        claim_id: str,
     ) -> None:
-        self.schedules.record_claim_result(schedule.schedule_id, ran=False)
+        # A blocked occurrence did not run: release its reserved budget slot.
+        self.schedules.record_claim_result(
+            schedule.schedule_id, ran=False, claim_id=claim_id)
         approval = (
             f"schedule:{schedule.approved_fingerprint[:12]}"
             if schedule.approved_fingerprint else None
