@@ -23,24 +23,14 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          def replace_once(path: str, old: str, new: str) -> None:
-              target = Path(path)
-              text = target.read_text(encoding='utf-8')
-              if text.count(old) != 1:
-                  raise SystemExit(f'{path}: target count is {text.count(old)}')
-              target.write_text(text.replace(old, new), encoding='utf-8')
-
-          replace_once(
-              'scripts/rag_benchmark.py',
-              '''        except Exception as exc:
-                      report = {
-                          "schema": SCHEMA,
-                          "generated_at": datetime.now(timezone.utc).isoformat(),
-                          "error": _safe_error(exc),
-                          "summary": {"scales": 0, "errors": 1},
-                      }
-                      return report, 2''',
-              '''        except Exception as exc:
+          script_path = Path('scripts/rag_benchmark.py')
+          script = script_path.read_text(encoding='utf-8')
+          warmup_anchor = '        warmup_started = time.perf_counter()\n'
+          success_marker = '        warmup_ms = (time.perf_counter() - warmup_started) * 1000\n'
+          anchor_index = script.index(warmup_anchor)
+          except_start = script.index('        except Exception as exc:\n', anchor_index)
+          success_start = script.index(success_marker, except_start)
+          replacement = '''        except Exception as exc:
                       warmup_ms = (time.perf_counter() - warmup_started) * 1000
                       report = {
                           "schema": SCHEMA,
@@ -92,84 +82,75 @@ jobs:
                               ),
                           },
                       }
-                      return report, 2''',
+                      return report, 2
+          '''
+          script_path.write_text(
+              script[:except_start] + replacement + script[success_start:],
+              encoding='utf-8',
           )
 
-          replace_once(
-              'tests/worker_rag_benchmark.py',
-              'import tempfile\nfrom pathlib import Path',
-              'import tempfile\nfrom pathlib import Path\nfrom types import SimpleNamespace',
-          )
-          replace_once(
-              'tests/worker_rag_benchmark.py',
-              '''finally:
-                  rb._run = old_run
-                  if old_ollama_url is None:
-                      os.environ.pop("MODELRIG_OLLAMA_URL", None)
-                  else:
-                      os.environ["MODELRIG_OLLAMA_URL"] = old_ollama_url
-                  if old_embed_model is None:
-                      os.environ.pop("MODELRIG_EMBED_MODEL", None)
-                  else:
-                      os.environ["MODELRIG_EMBED_MODEL"] = old_embed_model
+          test_path = Path('tests/worker_rag_benchmark.py')
+          test = test_path.read_text(encoding='utf-8')
+          if 'from types import SimpleNamespace' not in test:
+              test = test.replace(
+                  'from pathlib import Path\n',
+                  'from pathlib import Path\nfrom types import SimpleNamespace\n',
+                  1,
+              )
+          if 'warmup failure uses reserved environment exit 2' in test:
+              raise SystemExit('warmup failure regression already exists')
+          final_marker = 'print(f"\\n===== RAG BENCHMARK: {passed} passed, {failed} failed =====")\n'
+          insertion_index = test.rfind(final_marker)
+          if insertion_index < 0:
+              raise SystemExit('final benchmark marker is missing')
+          regression = '''# Warmup/model failures are expected environment failures and must still
+          # emit the same complete evidence envelope as successful runs.
+          from app import ollama_client as warmup_oc
 
-              print(f"\\n===== RAG BENCHMARK: {passed} passed, {failed} failed =====")''',
-              '''finally:
-                  rb._run = old_run
-                  if old_ollama_url is None:
-                      os.environ.pop("MODELRIG_OLLAMA_URL", None)
-                  else:
-                      os.environ["MODELRIG_OLLAMA_URL"] = old_ollama_url
-                  if old_embed_model is None:
-                      os.environ.pop("MODELRIG_EMBED_MODEL", None)
-                  else:
-                      os.environ["MODELRIG_EMBED_MODEL"] = old_embed_model
-
-              # Warmup/model failures are expected environment failures and must still
-              # emit the same complete evidence envelope as successful runs.
-              from app import ollama_client as warmup_oc
-
-              old_warmup_embed = warmup_oc.embed
+          old_warmup_embed = warmup_oc.embed
 
 
-              async def fail_warmup(_text, model=None):
-                  raise RuntimeError("simulated missing embedding model")
+          async def fail_warmup(_text, model=None):
+              raise RuntimeError("simulated missing embedding model")
 
 
-              warmup_oc.embed = fail_warmup
-              try:
-                  warmup_report, warmup_exit = run(
-                      rb._run(
-                          SimpleNamespace(
-                              scales=[1],
-                              queries=1,
-                              repetitions=1,
-                              seed=20260718,
-                              sample_interval=0.5,
-                              fail_under_recall_at_5=0.95,
-                              max_p95_ms=0.0,
-                          )
+          warmup_oc.embed = fail_warmup
+          try:
+              warmup_report, warmup_exit = run(
+                  rb._run(
+                      SimpleNamespace(
+                          scales=[1],
+                          queries=1,
+                          repetitions=1,
+                          seed=20260718,
+                          sample_interval=0.5,
+                          fail_under_recall_at_5=0.95,
+                          max_p95_ms=0.0,
                       )
                   )
-                  check(warmup_exit == 2, "warmup failure uses reserved environment exit 2")
-                  check(warmup_report["gate"]["passed"] is False, "warmup failure explicitly fails the gate")
-                  check(warmup_report["scales"] == [], "warmup failure records that no scale ran")
-                  check(
-                      warmup_report["ollama"]["embedding_dimensions"] is None,
-                      "warmup failure keeps unknown dimensions explicit",
-                  )
-                  check(
-                      warmup_report["error"]["message"] == "simulated missing embedding model",
-                      "warmup failure remains diagnosable",
-                  )
-                  check(
-                      warmup_report["isolation"]["user_index_opened"] is False,
-                      "warmup failure still proves the user index was untouched",
-                  )
-              finally:
-                  warmup_oc.embed = old_warmup_embed
+              )
+              check(warmup_exit == 2, "warmup failure uses reserved environment exit 2")
+              check(warmup_report["gate"]["passed"] is False, "warmup failure explicitly fails the gate")
+              check(warmup_report["scales"] == [], "warmup failure records that no scale ran")
+              check(
+                  warmup_report["ollama"]["embedding_dimensions"] is None,
+                  "warmup failure keeps unknown dimensions explicit",
+              )
+              check(
+                  warmup_report["error"]["message"] == "simulated missing embedding model",
+                  "warmup failure remains diagnosable",
+              )
+              check(
+                  warmup_report["isolation"]["user_index_opened"] is False,
+                  "warmup failure still proves the user index was untouched",
+              )
+          finally:
+              warmup_oc.embed = old_warmup_embed
 
-              print(f"\\n===== RAG BENCHMARK: {passed} passed, {failed} failed =====")''',
+          '''
+          test_path.write_text(
+              test[:insertion_index] + regression + test[insertion_index:],
+              encoding='utf-8',
           )
 
           Path('.github/workflows/fix-rag-warmup-report-pr.yml').unlink()
