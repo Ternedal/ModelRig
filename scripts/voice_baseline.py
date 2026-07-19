@@ -378,7 +378,8 @@ def parse_worker_url(raw: str) -> tuple[str, int, str]:
     if base_path not in {"", "/"}:
         raise VoiceBaselineError("worker URL must not contain an API path")
     port = parsed.port or 80
-    return host, port, f"http://{host}:{port}"
+    display_host = f"[{host}]" if ":" in host else host
+    return host, port, f"http://{display_host}:{port}"
 
 
 def _connection(host: str, port: int, timeout_s: float) -> http.client.HTTPConnection:

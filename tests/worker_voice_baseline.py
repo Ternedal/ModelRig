@@ -81,6 +81,11 @@ for good in (
         accepted = True
     check(accepted, f"loopback worker URL is accepted: {good}")
 
+check(
+    vb.parse_worker_url("http://[::1]:8099")[2] == "http://[::1]:8099",
+    "IPv6 loopback remains a valid bracketed URL",
+)
+
 for bad in (
     "https://127.0.0.1:8099",
     "http://192.168.1.10:8099",
