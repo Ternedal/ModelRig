@@ -66,7 +66,7 @@ gate enforces another.
 |---|---|
 | `CLIENT_STATE_DESIGN.md` | DELVIST · trin 1-2 leveret (1.58.44/45) · trin 3-5 kræver device-test · **Ejer:** Anders |
 | `ISOLATION_DESIGN.md` | LIVE · I0a+I0c leveret (dormant) · I0b afventer rig · **Ejer:** Anders (gates) — se CURRENT_STATE.md for switches |
-| `RAG_DESIGN.md` | LIVE · replace-by-source leveret (1.58.40) · §5-kalibrering kræver rig · **Ejer:** Anders |
+| `RAG_DESIGN.md` | LIVE · replace-by-source leveret (1.58.40) · T-043 benchmark-harness leveret · måling/kalibrering kræver rig · **Ejer:** Anders |
 | `UPDATER_DESIGN.md` | LIVE · §4a self-update UDESTÅR (manuel udskiftning indtil da) · **Ejer:** Anders (rig) |
 | `VALIDATION-1.58.49.md` | AFVENTER KØRSEL · resultatfelter tomme · gælder 1.58.49+ · **Ejer:** Anders (rig + telefon) |
 
@@ -147,6 +147,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_paths.py`
 - `tests/worker_pinned_http_transport.py`
 - `tests/worker_rag.py`
+- `tests/worker_rag_benchmark.py`
 - `tests/worker_rag_cloud.py`
 - `tests/worker_rag_pdf_lifecycle.py`
 - `tests/worker_read_scope.py`
