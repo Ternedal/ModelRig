@@ -224,9 +224,40 @@ class SchedulerRuntime:
                     pass
 
 
+def _ensure_scheduler_logging() -> None:
+    """Make the scheduler's operational INFO lines actually reach the log.
+
+    The production launch configures only the request logger; the ROOT logger
+    has no handler at all, so everything below WARNING vanished (WARNINGs only
+    surfaced through Python's lastResort handler). The startup recovery
+    summary ("recovered N executed / M abandoned / K unknown") and the lease
+    lifecycle lines are exactly what the runbook tells the operator to READ --
+    found by the sandbox rehearsal, where a clean-crash recovery ran perfectly
+    and said nothing. Scoped to the two scheduler modules: level INFO plus one
+    shared stderr handler, attached only when no real root handler exists, and
+    idempotent across restarts of the lifespan.
+    """
+    root_has_handlers = bool(logging.getLogger().handlers)
+    handler: logging.Handler | None = None
+    if not root_has_handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        handler._kaliv_scheduler_handler = True  # type: ignore[attr-defined]
+    for name in ("app.schedule_service", "app.schedule_runner"):
+        lg = logging.getLogger(name)
+        lg.setLevel(logging.INFO)
+        if handler is not None and not any(
+                getattr(h, "_kaliv_scheduler_handler", False)
+                for h in lg.handlers):
+            lg.addHandler(handler)
+            lg.propagate = False
+
+
 @asynccontextmanager
 async def scheduler_lifespan(app):
     """FastAPI lifecycle integration; optional failure never exposes a route."""
+    _ensure_scheduler_logging()
     runtime = SchedulerRuntime()
     app.state.scheduler_runtime = runtime
     started = runtime.start()

@@ -154,8 +154,8 @@ dansk grund ("planen blev pauset…"), og `runs_used` refunderes. Pausen pauser
 FAKTISK — det er T-013.
 
 **Crash-recovery live:** dræb worker-processen mens et scheduled job kører
-(Task Manager → python), start den igen. **Bør se** i worker-loggen ved start:
-`scheduler: recovered N executed / M abandoned occurrence(s) at startup`.
+(Task Manager → python), start den igen. **Bør se** i worker-loggen ved start (synlig fra 1.58.130):
+`scheduler: recovered N executed / M abandoned / K unknown occurrence(s) at startup`.
 `executed` = audit-evidens fandtes, budgettet forbliver brugt; `abandoned` =
 intet nåede at køre, slotten er refunderet. Ingen usynlige skips, ingen
 budget-overskridelse — det er hele T-010→T-012-kæden fysisk.

@@ -81,7 +81,9 @@ under test. **Start altid med `/health/full`** (launcheren kører det, eller
 
 ## Worker-log ved start: "recovered N executed / M abandoned / K unknown"
 
-- **Symptom:** linjen dukker op ved worker-start.
+- **Symptom:** linjen dukker op ved worker-start. **(Synlig fra 1.58.130 —
+  før da nåede kun WARNING-niveauet loggen, så en ren-crash-recovery kørte
+  lydløst. Fundet ved generalprøven af piloten.)**
 - **Årsag:** crash-recovery (T-012/F-1002). Workeren døde midt i en occurrence.
   `executed` = audit-evidens viste at side-effekten NÅEDE at køre — budgettet
   forbliver brugt, jobbet afstemmes til completed. `abandoned` = intet nåede

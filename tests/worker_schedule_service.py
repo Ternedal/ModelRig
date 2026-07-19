@@ -157,5 +157,64 @@ check(wait_until(lambda: changing_runner.calls >= 2), "the service continues pol
 check(not changing.status().configured, "status reflects the current feature flag, not only startup state")
 check(changing.stop(timeout=0.5), "dynamic-flag service shuts down")
 
+# --- the scheduler's operational lines must actually reach a log -------------
+# Found by the sandbox rehearsal: recovery ran perfectly and said NOTHING --
+# the root logger had no handler, so everything below WARNING vanished while
+# the runbook tells the operator to READ the recovery summary.
+import logging as _lg
+
+from app.schedule_runtime import _ensure_scheduler_logging  # noqa: E402
+
+_root = _lg.getLogger()
+_saved_handlers = _root.handlers[:]
+_root.handlers = []
+_svc_lg = _lg.getLogger("app.schedule_service")
+_rt0_lg = _lg.getLogger("app.schedule_runner")
+_saved_svc = (_svc_lg.level, _svc_lg.handlers[:], _svc_lg.propagate)
+_saved_rt0 = (_rt0_lg.level, _rt0_lg.handlers[:], _rt0_lg.propagate)
+_svc_lg.handlers = []
+try:
+    _ensure_scheduler_logging()
+    _ensure_scheduler_logging()  # idempotent across lifespan restarts
+    check(_svc_lg.isEnabledFor(_lg.INFO),
+          "with no root handler, the scheduler logger is raised to INFO")
+    _marked = [h for h in _svc_lg.handlers
+               if getattr(h, "_kaliv_scheduler_handler", False)]
+    check(len(_marked) == 1,
+          "exactly one shared handler is attached -- calling twice adds "
+          "nothing")
+    check(_svc_lg.propagate is False,
+          "propagation is cut so a later root config cannot double-print")
+    import io
+    _buf = io.StringIO()
+    _marked[0].setStream(_buf)
+    _lg.getLogger("app.schedule_service").info(
+        "scheduler: recovered 1 executed / 0 abandoned / 0 unknown "
+        "occurrence(s) at startup")
+    check("recovered 1 executed" in _buf.getvalue(),
+          "an INFO recovery summary actually reaches the handler -- the "
+          "runbook line exists in reality, not only in the code")
+finally:
+    _svc_lg.level, _svc_lg.handlers, _svc_lg.propagate = _saved_svc
+    _rt0_lg.level, _rt0_lg.handlers, _rt0_lg.propagate = _saved_rt0
+    _root.handlers = _saved_handlers
+
+_rt_lg = _lg.getLogger("app.schedule_runner")
+_saved_rt = (_rt_lg.level, _rt_lg.handlers[:], _rt_lg.propagate)
+_root.handlers = [_lg.NullHandler()]
+_rt_lg.handlers = []
+_rt_lg.propagate = True
+_rt_lg.setLevel(_lg.NOTSET)
+try:
+    _ensure_scheduler_logging()
+    check(not any(getattr(h, "_kaliv_scheduler_handler", False)
+                  for h in _rt_lg.handlers)
+          and _rt_lg.propagate is True,
+          "with a REAL root handler present, nothing is attached and "
+          "propagation is untouched -- the fix defers to real logging config")
+finally:
+    _rt_lg.level, _rt_lg.handlers, _rt_lg.propagate = _saved_rt
+    _root.handlers = _saved_handlers
+
 print(f"\n===== SCHEDULE SERVICE: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
