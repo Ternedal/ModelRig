@@ -4,7 +4,7 @@
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
 **Version på main:** `1.58.124`  
-**Genereret:** 2026-07-19 05:31 UTC
+**Genereret:** 2026-07-19 05:33 UTC
 
 ---
 
