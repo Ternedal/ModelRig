@@ -33,10 +33,10 @@ jobs:
           ./gradlew :composeApp:test \
             --tests '*CapabilityDescriptorV2FixtureTest' \
             --no-daemon --console=plain
-      - name: Apply exact final T-030 API and documentation patch locally
+      - name: Apply and push exact final T-030 generated files
         if: github.head_ref == 'agent/t030-api-doc-client-fixtures'
         env:
-          T030_EXPECTED_PARENT: b0efa4a551c64bb73dfa9070b2d63d06c87c3d1d
+          T030_EXPECTED_PARENT: d88bee9efdd229c486e3d50b15f6389ca4f8f0ba
         run: |
           set -euo pipefail
           head_sha="${{ github.event.pull_request.head.sha }}"
@@ -45,19 +45,17 @@ jobs:
           test "$(git rev-parse HEAD^)" = "$T030_EXPECTED_PARENT"
           GITHUB_HEAD_REF=agent/t030-api-doc-client-fixtures \
             python3 scripts/_t030_finalize_capability_contract.py
-          test ! -e scripts/_t030_finalize_capability_contract.py
-      - name: Upload exact final T-030 source bundle
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: t030-final-source
-          path: |
-            CURRENT_STATE.md
-            worker/app/tools.py
-            scripts/current_state.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            CURRENT_STATE.md \
+            worker/app/tools.py \
+            scripts/current_state.py \
             tests/worker_capability_schema_v2.py
-            .github/workflows/agent3-full-diagnostics.yml
-          if-no-files-found: error
-          retention-days: 7
+          git diff --cached --check
+          test "$(git diff --cached --name-only | wc -l)" = "4"
+          git commit -m "feat(capabilities): expose canonical descriptors to API docs and clients"
+          git push origin HEAD:agent/t030-api-doc-client-fixtures
       # T030_FINAL_PATCH_END
 
       - name: Build backend
