@@ -248,8 +248,7 @@ def main() -> None:
     patch_current_state()
     patch_worker_contract_test()
     validate_and_generate()
-    restore_workflow_and_remove_self()
-    print("final T-030 API/doc patch applied and self-cleaned")
+    print("final T-030 API/doc patch applied; connector cleanup pending")
 
 
 if __name__ == "__main__":
