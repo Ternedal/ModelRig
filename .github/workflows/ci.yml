@@ -16,6 +16,10 @@ jobs:
   test:
     uses: ./.github/workflows/_tests.yml
 
+  # The optional browser runtime stays out of worker/requirements.txt. This job
+  # validates the pinned package and locked profile, then launches real Chromium
+  # against one controlled localhost fixture. It creates no model client and
+  # performs no public-site research or product activation.
   browser-use-runtime-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -84,6 +88,11 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  # Compile and unit-test the clients on every push/PR. The release workflow
+  # builds full APK/jar artifacts, but only at tag time -- so a client that stops
+  # compiling used to reach main and only fail at release. Logic that can run
+  # without a physical device belongs in these jobs; hardware behavior still
+  # needs the separate on-device validation matrix.
   android-compile:
     runs-on: ubuntu-latest
     steps:
@@ -97,23 +106,9 @@ jobs:
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - name: Compile Android Kotlin and run unit tests
         working-directory: android
-        shell: bash
         run: |
           echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
-          set +e
-          ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest --no-daemon --console=plain > "$RUNNER_TEMP/android-compile.log" 2>&1
-          status=$?
-          set -e
-          tail -n 200 "$RUNNER_TEMP/android-compile.log"
-          exit "$status"
-      - name: Upload Android compiler failure
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: t022-android-failure
-          path: ${{ runner.temp }}/android-compile.log
-          if-no-files-found: warn
-          retention-days: 1
+          ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest --no-daemon --console=plain
 
   desktop-compile:
     runs-on: ubuntu-latest
