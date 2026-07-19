@@ -81,12 +81,27 @@ def _switches() -> list[tuple[str, str]]:
     surface is reachable remotely at all -- was absent from the page whose
     promise is that it cannot be wrong (F-613). The system is Go and Python; a
     scan of one language's directory measures my search path, not the system.
+
+    Python configuration may be read directly from os.environ or from an
+    injected Mapping in deterministic evaluators. Both are implementation, and
+    hiding the latter would make a testable readiness switch invisible here.
     """
     found: dict[str, str] = {}
-    pat = re.compile(r'getenv\(\s*"(KALIV_[A-Z0-9_]+)"\s*(?:,\s*"([^"]*)")?')
+    python_patterns = (
+        re.compile(r'getenv\(\s*"(KALIV_[A-Z0-9_]+)"\s*(?:,\s*"([^"]*)")?'),
+        re.compile(
+            r'\b(?:env|environ)\.get\(\s*"(KALIV_[A-Z0-9_]+)"'
+            r'\s*(?:,\s*"([^"]*)")?'
+        ),
+    )
     for py in sorted((ROOT / "worker").rglob("*.py")):
-        for m in pat.finditer(py.read_text(encoding="utf-8", errors="replace")):
-            found.setdefault(m.group(1), m.group(2) if m.group(2) is not None else "(unset)")
+        text = py.read_text(encoding="utf-8", errors="replace")
+        for pattern in python_patterns:
+            for m in pattern.finditer(text):
+                found.setdefault(
+                    m.group(1),
+                    m.group(2) if m.group(2) is not None else "(unset)",
+                )
     # os.Getenv("X") == "1" is unambiguous: off unless someone sets it to 1.
     # Only that pattern is listed -- a key or a path read from the Go
     # environment is a setting, and padding a switch table with settings is how
@@ -175,7 +190,7 @@ def _designs() -> list[tuple[str, str]]:
         status = "(no status header)"
         for line in p.read_text(encoding="utf-8", errors="replace").splitlines()[:12]:
             if line.startswith("**Status:**"):
-                status = line[len("**Status:**"):].strip()
+                status = line[len("**Status:"):].strip()
                 break
         rows.append((p.name, status))
     return rows
