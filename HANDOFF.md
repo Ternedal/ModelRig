@@ -91,15 +91,42 @@ releases. Kadence: MVP → V1 → V2; roadmap er lukket-endet ved V15.
 
 ---
 
-## 2. Aktuel tilstand (v1.58.52)
+## 2. Tilstand — hvor sandheden bor
+
+Håndskrevne docs må ikke påstå aktuel tilstand (F-516) — den rådner. Den bor i:
+- `CURRENT_STATE.md` (genereret: version, hvad der er koblet)
+- `ACTIVATION_READINESS.md` (genereret: Agent 3- og scheduler-verdicts;
+  scheduler-delen kører 7 durability-prober LIVE mod rigtige komponenter ved
+  hver generering — prober der er bevist ikke-blinde via sabotage-selvtests)
+- `BACKLOG.md` (planen, med leveret-markører og versionsnumre — historik er
+  sand for evigt)
+- `tests/`-globben (kør den; skriv aldrig faste tal i docs — F-008)
 
 **Hardware-bekræftet (pr. 12/7, uændret):** PDF/DOCX→RAG · dansk TTS+ASR (CUDA
 large-v3) · voice ende-til-ende inkl. via-cloud · barge-in/tap-to-stop ·
 agent-laget (læs + skriv bag bekræftelseskort, audit) · rig-model-skifter ·
 streamende voice.
 
-**Bygget siden (CI-verificeret, IKKE hardware-bevist — det er hele pointen med
-valideringsrunden):**
+**Varige arkitektur-fakta (dyre at genopdage — alle CI-verificerede, IKKE
+hardware-beviste før valideringsrunden):**
+
+- **Scheduler-leveringsmodellen (bygget 18-19/7, 1.58.116–123):** execution-truth
+  er durable fra claim, ikke fra finish. `occurrences`-ledger: claim skriver
+  durable række + reserverer budget-slot i SAMME transaktion som due_at-advance;
+  claim_id binder job, audit, outcome og recovery. Recovery er evidensbaseret —
+  audit-conversation `schedule:<sid>:occ:<claim_id>`, outcome='executed' holder
+  slotten brugt, ellers abandon+refund; den blinde store-recovery er FJERNET (én
+  kanonisk sti). Revision-guard umiddelbart før ToolGate: `set_enabled` bumper
+  BEGGE veje, `renew` bumper også (fingerprint for samme tool+args er
+  byte-identisk efter renew — kun revisionen afslører et stale claim).
+  Approval-receipts: hver konsumeret godkendelse (create/renew) persisterer
+  device_id/nonce/issued_at/consumed_at/revision i samme tx som granten; en
+  grant med menneskelig godkendelse kan ikke eksistere uden sin receipt.
+  `GET /schedules/{id}` viser historikken. Ærligt restvindue: crash præcis
+  mellem side-effekt og audit-række læses ikke-kørt (ms-bredt, ingen re-run,
+  undertælling foretrukket).
+
+**Bygget 12-14/7 (samme forbehold):**
 - **Substrat:** JobStore (persistent, terminal sandhed, cancel, restart→
   interrupted) · ToolHost I0a (procesgrænse, timeout-kill, output-cap,
   credential-fri child-env, frozen-exe child-mode) · Tier B policy I0c
@@ -158,19 +185,29 @@ matchede nogen fil).
 tom release som CI derefter fyldte progressivt: hvis noget fejlede, stod der en
 halv release og lignede en hel. Flowet nu:
 
-1. `python3 scripts/version_tool.py set X.Y.Z` (synker alle fire sites) →
-   **bump `versionCode` manuelt** (monotont; næste er **183**) →
+1. `git fetch` FØRST og vælg version over origins `VERSION` (parallelle
+   sessioner!) → `python3 scripts/version_tool.py set X.Y.Z` (synker alle fire
+   sites) → **`versionCode` = origins + 1** (slå det op i origins
+   build.gradle.kts — skriv ALDRIG et fast tal her, F-008) →
    `python3 scripts/version_tool.py check`.
 2. Kør ALT lokalt: `(cd worker && PYTHONPATH=. python3 ../tests/worker_*.py)` ·
    `(cd backend && go build ./... && go vet ./... && go test ./...)` ·
    `python3 tests/workflow_*.py` · `ruff check --select E9,F63,F7,F82`.
    **Kotlin kan IKKE kompileres her — CI er den eneste verifikation.**
 3. `git add -A && git -c commit.gpgsign=false commit -q -F /tmp/m.txt` →
-   **`git fetch -q origin main && git rebase origin/main`** (der kan være en
-   parallel session!) → push.
+   `git fetch -q origin main && git rebase origin/main` → **STRAM PROTOKOL
+   (indført 18/7 efter to fejlplacerede tags):** tjek
+   `[ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]` — står rebasen åben,
+   abort og løs; push ALDRIG fra den tilstand ("Could not apply" efterlader
+   HEAD på origins tip, og merge-base "bekræfter" så trivielt DERES commit).
+   Efter push: `git merge-base --is-ancestor $MYSHA origin/main` OG
+   `$MYSHA != origins gamle tip` — først DA må der tagges.
 4. **Opret releasen som DRAFT via API** (`"draft": True`) — aldrig public.
-5. **Push tagget SEPARAT** (`git tag vX.Y.Z <sha>` + push). GitHub laver ikke
-   tags for drafts, og CI trigger på tagget.
+5. **Push tagget SEPARAT** (`git tag vX.Y.Z <sha>` + push) — og KUN mod din
+   egen merge-base-bekræftede sha (pkt. 3). GitHub laver ikke tags for drafts,
+   og CI trigger på tagget. Fejlplaceret tag: slet lokal+remote
+   (`:refs/tags/vX`), slet evt. release/draft via API (DELETE giver 204 = tom
+   body), ryd op, start forfra.
 6. CI's `ensure-draft-release`-job er **eneste create-autoritet** (og tvinger en
    public release tilbage til draft). Build-jobs uploader; release-jobbet
    verificerer asset-listen og publicerer **som sidste step**
@@ -179,12 +216,17 @@ halv release og lignede en hel. Flowet nu:
    `?head_sha=<full-sha>` for ci/codeql, `?branch=vX.Y.Z` for release-runnet.
    **Mellemlæsninger kan vise 5 assets — det er upload-racet, ikke en fejl.**
    Afvent `completed`. Forventet: **9 assets** (2 APK'er, JAR, 3 exe'er, zip,
-   SHA256SUMS, +1).
+   SHA256SUMS, +1). **Modstridende API-læsninger (404 på by-tag, "1 draft",
+   forkert latest) er eventual consistency i publiceringsøjeblikket — mål igen
+   før du konkluderer.** End-tjek altid: drafts == 0 (slet leftovers — CI
+   publicerer sin egen; din API-draft kan hænge).
 8. **Docs/CI-only = commit uden bump/tag/release.**
 9. **Efter hver release: post status til Notion** (side
    `389e6b11-bf7b-812f-89ba-fc17e3c2dcda`, dateret entry + Version-property).
-   Stående ordre, spørg ikke først. **Connectoren har været nede siden 16/7 —
-   se §9.7.**
+   Stående ordre, spørg ikke først. **Connectoren har været nede siden 16/7;
+   genbekræftet 19/7 (tool_search finder ingen Notion-tools i sessionen).
+   UDESTÅENDE: samlet status for 1.58.116→123 (scheduler-durability-kæden
+   T-010→T-015 + T-014) — post den som det FØRSTE når connectoren er tilbage.**
 
 ---
 

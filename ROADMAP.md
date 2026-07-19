@@ -46,7 +46,9 @@ faste rækkefølge. (Dette er en plan; hvor tingene faktisk *er*, står i
 2. **Scheduler** — gør execution-truth durable: occurrence-ledger, atomisk
    claim+budget, bind job/audit/outcome/recovery, grant-revision/revoke/overlap,
    fault-injection + readiness-gate. Så fysisk read + `note_append`-pilot.
-   (T-010→T-019)
+   (T-010→T-019; [KERNE]-delen leveret 18-19/7 i 1.58.116–123 inkl.
+   approval-receipts — tilbage: den fysiske pilot T-019 og P2-opgaverne
+   T-017/T-018, se `BACKLOG.md`)
 3. **Agent 3-pilot** — read-only developer-pilot med telemetry og instant fallback,
    promotion-gate + normal task-UI, derefter append-only write-pilot. Mål task
    success frem for mere dormant hardening. (T-020→T-023)

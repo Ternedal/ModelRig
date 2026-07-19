@@ -67,6 +67,38 @@ under test. **Start altid med `/health/full`** (launcheren kører det, eller
 - **Ægte fix:** en større / mere instruktionstro model på agent-stien, eller en
   cloud-model gennem riggen (bærer allerede bekræftelses-gaten).
 
+## Schedule-job står som "cancelled" med en dansk grund
+
+- **Symptom:** et scheduled job ender `cancelled` med "planen blev pauset,
+  ændret eller slettet efter claim; occurrence annulleret og budget-slot
+  refunderet".
+- **Årsag:** IKKE en fejl — det er revocation-guarden (T-013). Du pausede,
+  fornyede eller slettede planen EFTER at occurrencen var claimet men FØR den
+  nåede ToolGate. Den stalede occurrence annulleres, slotten refunderes, og
+  planen kører videre under sine nye vilkår ved næste due-tid.
+- **Handling:** ingen. Tjek evt. `runs_used` i `GET /schedules/{id}` — den er
+  refunderet.
+
+## Worker-log ved start: "recovered N executed / M abandoned occurrence(s)"
+
+- **Symptom:** linjen dukker op ved worker-start.
+- **Årsag:** crash-recovery (T-012). Workeren døde midt i en occurrence.
+  `executed` = audit-evidens viste at side-effekten NÅEDE at køre — budgettet
+  forbliver brugt, jobbet afstemmes til completed. `abandoned` = intet nåede
+  at køre — slotten refunderes, hængende job lukkes failed.
+- **Handling:** én gang efter et kendt crash: normalt. HVER start: workeren
+  crasher i selve tick-løkken — kig i loggen umiddelbart FØR linjen.
+
+## GET /schedules/{id}: tom `approval_receipts`
+
+- **Symptom:** ingen receipts på et schedule.
+- **Årsag:** reads har pr. design ingen (kræver ingen godkendelse). Writes
+  oprettet FØR receipts-leveringen (1.58.123) har heller ingen — historikken
+  starter der. Et NYT write-schedule uden mindst én receipt kan ikke
+  eksistere: create ruller tilbage hvis receipt-inserten fejler.
+- **Handling:** gamle writes: fornys planen (renew appender en receipt med
+  bumpet revision). Nyt write uden receipt: det er en ægte fejl — meld den.
+
 ## CI: release med 0 assets / build-jobs fejler med tomme logs
 
 - **Årsag:** GitHub Actions storage/kvota for et PRIVAT repo er opbrugt. Jobs

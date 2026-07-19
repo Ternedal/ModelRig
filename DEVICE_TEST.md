@@ -118,6 +118,48 @@ powershell -File scripts\run-agent3-rig-validation.ps1
 
 ---
 
+## 1.6 Scheduler-piloten (T-019) — read + `note_append`
+
+**Forudsætning:** åbn `ACTIVATION_READINESS.md` for den frosne kandidat og
+tjek scheduler-verdicten. Durability-tabellen ("kørt live mod rigtige
+komponenter") skal være hel grøn — den beviser mekanismerne i processen på
+træet; piloten her er det FYSISKE bevis ovenpå.
+
+**Read-halvdelen (loopback, intet token — reads kræver bevidst ingen
+godkendelse):**
+```cmd
+curl -s -X POST http://127.0.0.1:8099/schedules/preview -H "Content-Type: application/json" -d "{\"tool\":\"rig_status\",\"args\":{},\"cadence\":\"every:60\",\"ttl_days\":1,\"max_runs\":3}"
+curl -s -X POST http://127.0.0.1:8099/schedules -H "Content-Type: application/json" -d "{\"tool\":\"rig_status\",\"args\":{},\"cadence\":\"every:60\",\"ttl_days\":1,\"max_runs\":3}"
+```
+Notér `schedule_id` fra svaret. **Bør se** inden for ~2 min: et job pr.
+occurrence, og i `GET /schedules/{id}`: `runs_used` der tæller op og en tom
+`approval_receipts` (reads har ingen — det er designet, ikke en fejl).
+
+**Skriv-halvdelen (`note_append`):** writes kræver den fulde
+godkendelses-ceremoni (backend-udstedt engangs-token bundet til din parrede
+enhed). Kør den gennem appens schedule-flow; det præcise mint-kald ligger i
+`backend/internal/httpapi/schedule_approvals.go` hvis du vil curl'e det. **Bør
+se** i `GET /schedules/{id}` bagefter: `approval_receipts` med PRÆCIS din
+enheds `device_id`, `issued_at` (da du trykkede godkend) og `consumed_at` —
+det er attributionssporet, som svarer på "hvem godkendte, hvornår, hvorfra".
+
+**Revocation live:** mens et schedule har en occurrence i vente, pausér den:
+```cmd
+curl -s -X POST http://127.0.0.1:8099/schedules/SCHEDULE_ID/enabled -H "Content-Type: application/json" -d "{\"enabled\":false}"
+```
+**Bør se:** in-flight occurrence bliver til et job med status `cancelled` og
+dansk grund ("planen blev pauset…"), og `runs_used` refunderes. Pausen pauser
+FAKTISK — det er T-013.
+
+**Crash-recovery live:** dræb worker-processen mens et scheduled job kører
+(Task Manager → python), start den igen. **Bør se** i worker-loggen ved start:
+`scheduler: recovered N executed / M abandoned occurrence(s) at startup`.
+`executed` = audit-evidens fandtes, budgettet forbliver brugt; `abandoned` =
+intet nåede at køre, slotten er refunderet. Ingen usynlige skips, ingen
+budget-overskridelse — det er hele T-010→T-012-kæden fysisk.
+
+---
+
 ## 2. Kold-start af PATH-fixet (v1.12.3)
 
 Den fejl med længst historik i projektet: cuBLAS/CTranslate2 fandt ikke sine

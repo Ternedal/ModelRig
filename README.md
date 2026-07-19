@@ -104,6 +104,19 @@ Ollama Cloud (https://ollama.com, model `:cloud`) with `OLLAMA_API_KEY`.
 - **deploy/** — env reference, a Windows launcher (`run-windows.ps1`), and systemd
   units for running the worker + backend as services.
 
+## Scheduler (delivery model)
+
+Scheduled tool runs are **at-most-once by construction**: every claim writes a
+durable occurrence row and reserves its budget slot in the same transaction
+that advances the due time. Crash recovery consults the audit trail before
+refunding anything — a run that provably happened keeps its slot spent. A
+pause, renewal or deletion after a claim cancels the in-flight occurrence
+(revision guard re-checked right before execution). Every consumed write
+approval persists a receipt (device, issue time, consumption time, grant
+revision) in the same transaction as the grant — `GET /schedules/{id}` shows
+the full history. `ACTIVATION_READINESS.md` runs seven live durability probes
+against the real components on every regeneration.
+
 ## ⚠️ The one gotcha that wastes an afternoon
 The backend defaults to binding **`127.0.0.1`**. That is unreachable from your
 phone or any other machine. Before pairing Android, set:
