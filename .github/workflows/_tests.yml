@@ -69,6 +69,12 @@ jobs:
             [ -e "$f" ] || continue
             if ! PYTHONPATH=worker python3 "$f" > /tmp/modelrig-test.log 2>&1; then
               printf '%s\n' "$f" > /tmp/modelrig-failed-test.txt
+              if [ "$f" = "tests/workflow_current_state.py" ]; then
+                cp CURRENT_STATE.md /tmp/CURRENT_STATE.committed.md
+                python3 scripts/current_state.py
+                cp CURRENT_STATE.md /tmp/CURRENT_STATE.generated.md
+                diff -u /tmp/CURRENT_STATE.committed.md /tmp/CURRENT_STATE.generated.md > /tmp/CURRENT_STATE.diff || true
+              fi
               echo "FAILED_TEST=$f"
               cat /tmp/modelrig-test.log
               exit 1
@@ -83,6 +89,9 @@ jobs:
           path: |
             /tmp/modelrig-failed-test.txt
             /tmp/modelrig-test.log
+            /tmp/CURRENT_STATE.committed.md
+            /tmp/CURRENT_STATE.generated.md
+            /tmp/CURRENT_STATE.diff
           if-no-files-found: warn
           retention-days: 1
 
