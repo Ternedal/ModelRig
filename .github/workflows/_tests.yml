@@ -57,9 +57,9 @@ jobs:
 
       # Every integration + worker test, globbed so a new tests/*.py is included
       # with no edit here. MODELRIG_BIN is used by the backend/e2e tests; the
-      # worker tests ignore it. set -e stops at the first failure. This is exactly
-      # the set the release job used to list inline (backend_smoke/v1, e2e,
-      # worker_*), now in one place.
+      # worker tests ignore it. This temporary branch-only wrapper keeps the log
+      # small enough to surface the first failing test; it is reverted after the
+      # draft failure has been diagnosed.
       - name: Test suite (auto-includes new tests/*.py)
         env:
           MODELRIG_BIN: /tmp/modelrig-server
@@ -67,9 +67,11 @@ jobs:
           set -e
           for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
             [ -e "$f" ] || continue
-            echo "::group::$f"
-            PYTHONPATH=worker python3 "$f"
-            echo "::endgroup::"
+            if ! PYTHONPATH=worker python3 "$f" > /tmp/modelrig-test.log 2>&1; then
+              echo "FAILED_TEST=$f"
+              cat /tmp/modelrig-test.log
+              exit 1
+            fi
           done
 
   # The appliance code (updater swap/recovery/journal, supervisor rotation,
