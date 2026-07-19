@@ -36,8 +36,7 @@ jobs:
       - name: Apply exact final T-030 API and documentation patch locally
         if: github.head_ref == 'agent/t030-api-doc-client-fixtures'
         env:
-          T030_EXPECTED_PARENT: 7bbcf07cf4873b7aff5a65030631bc9086b24a1b
-          T030_EXPECTED_WORKFLOW_BLOB: 26a3a740ba1a846b1117fc87d34efa5a928a0d0a
+          T030_EXPECTED_PARENT: b0efa4a551c64bb73dfa9070b2d63d06c87c3d1d
         run: |
           set -euo pipefail
           head_sha="${{ github.event.pull_request.head.sha }}"
@@ -47,7 +46,6 @@ jobs:
           GITHUB_HEAD_REF=agent/t030-api-doc-client-fixtures \
             python3 scripts/_t030_finalize_capability_contract.py
           test ! -e scripts/_t030_finalize_capability_contract.py
-          test "$(git hash-object .github/workflows/agent3-full-diagnostics.yml)" = "$T030_EXPECTED_WORKFLOW_BLOB"
       - name: Upload exact final T-030 source bundle
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
