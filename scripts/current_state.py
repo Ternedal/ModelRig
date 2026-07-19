@@ -190,7 +190,7 @@ def _designs() -> list[tuple[str, str]]:
         status = "(no status header)"
         for line in p.read_text(encoding="utf-8", errors="replace").splitlines()[:12]:
             if line.startswith("**Status:**"):
-                status = line[len("**Status:"):].strip()
+                status = line[len("**Status:**"):].strip()
                 break
         rows.append((p.name, status))
     return rows
