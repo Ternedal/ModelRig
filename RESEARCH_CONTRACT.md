@@ -1,6 +1,6 @@
 # Web research contract v1
 
-**Status:** contract, deterministic fetch engine, pinned transport, isolated BrowserHost, dormant Browser Use adapter, installed-runtime contract and controlled local-Chromium gate delivered; no ToolGate activation or public-network validation yet.
+**Status:** contract, deterministic fetch engine, pinned transport, isolated BrowserHost, dormant Browser Use adapter, installed-runtime contract, controlled local-Chromium gate and dormant egress ledger delivered; no ToolGate activation or public-network validation yet.
 
 This contract keeps Browser Use, Playwright and plain HTTP interchangeable. ModelRig owns the safety and evidence model; an adapter only performs retrieval and proposes citations.
 
@@ -14,7 +14,7 @@ This contract keeps Browser Use, Playwright and plain HTTP interchangeable. Mode
 - `Citation` — one numbered answer marker tied to one or more receipts;
 - `ResearchResult` — an answer that must contain every declared citation marker and may only cite included receipts.
 
-`worker/app/web_fetch.py` implements deterministic navigation, redirect handling, content limits and receipts. `worker/app/pinned_http_transport.py` implements one dormant production transport behind the existing `FetchTransport` seam. `worker/app/browser_host.py` defines the one-request process boundary. `worker/app/browser_use_adapter.py` is an optional, lazy-loaded Browser Use backend. `worker/app/browser_use_network_guard.py` owns the Chromium request boundary. Nothing is registered in ToolGate or exposed through an API route.
+`worker/app/web_fetch.py` implements deterministic navigation, redirect handling, content limits and receipts. `worker/app/pinned_http_transport.py` implements one dormant production transport behind the existing `FetchTransport` seam. `worker/app/browser_host.py` defines the one-request process boundary. `worker/app/browser_use_adapter.py` is an optional, lazy-loaded Browser Use backend. `worker/app/browser_use_network_guard.py` owns the Chromium request boundary. `worker/app/research_egress.py` owns the dormant one-use consent, authorization receipt and hash-only audit state machine. Nothing is registered in ToolGate or exposed through an API route.
 
 ## Deterministic fetch invariants
 
@@ -81,12 +81,25 @@ The optional adapter:
 
 The dedicated `browser-use-runtime-contract` CI job installs `browser-use[core]==0.13.4` in isolation and validates the real imports, Agent and Tools signatures, locked BrowserProfile fields, current-tab-only navigation schema, generated download/profile temp directories, disabled side channels, history interface and concrete action registry. It then launches real headless Chromium, visits one controlled `localhost` fixture through the same CDP request guard used by the adapter, verifies its title, proves an external domain and numeric loopback URL are failed before either reaches the fixture server, confirms the download quarantine remains empty and proves cleanup. It creates no LLM client and performs no public-site research. On failure it publishes a short seven-day diagnostic artifact; successful runs publish nothing.
 
+## Egress authorization invariants
+
+The dormant egress ledger:
+
+- binds the exact destination, purpose digest, outbound payload digest, sensitivity, domain scope and byte ceiling into one canonical plan digest;
+- keeps the human-readable purpose in the confirmation payload but never writes raw purpose or payload content to the audit database;
+- reuses the existing sensitivity rule: public and operational plans may authorize automatically, private plans require an exact approved consent, and secret plans are always refused;
+- makes consent short-lived and one-use, so approval for one payload, purpose, domain set or byte ceiling cannot authorize another;
+- issues a separate short-lived receipt that must be atomically claimed exactly once at the eventual network boundary;
+- records completion, bounded byte count and normalized error code only after a claimed receipt is in flight;
+- persists proposals, receipts and append-only hash-only audit events in SQLite across process restarts;
+- performs no network call and is not wired to BrowserHost, ToolGate or an API route in this slice.
+
 ## Remaining obligations
 
 Before activation:
 
 1. bind Browser Use's public-domain requests to validated public DNS answers/peers and run live-network validation against controlled public fixtures; the local launch and domain/IP request-boundary gates are delivered;
-2. add egress consent/receipt and audit integration;
+2. wire the delivered egress ledger into BrowserHost confirmation, CDP request claiming/completion and the user-visible audit trail;
 3. expose the capability through a canonical descriptor and ToolGate only after those gates are green;
 4. keep authentication, cookies, uploads and downloads outside v1.
 
@@ -98,7 +111,8 @@ Before activation:
 4. **T-034B — isolated BrowserHost + fixture backend**: delivered in 1.58.115.
 5. **T-034D1 — dormant Browser Use adapter**: delivered in 1.58.119; exact pin, fake-runtime tests and deterministic citation re-fetch.
 6. **T-034D2 — installed runtime contract**: delivered; real 0.13.4 package surface, dependency isolation, locked profile, action registry and side-channel controls.
-7. **T-034D3 — controlled Chromium request-boundary gate**: this delivery; real browser startup, current-tab-only tools, CDP domain/IP denial and cleanup without an LLM or public network.
-8. **T-034E — runtime integration**: public-peer binding, CapabilityDescriptor, egress receipt, audit, public-network validation and eval gates.
+7. **T-034D3 — controlled Chromium request-boundary gate**: delivered in 1.58.123; real browser startup, current-tab-only tools, CDP domain/IP denial and cleanup without an LLM or public network.
+8. **T-034E1 — dormant egress authorization ledger**: this delivery; exact-plan consent, one-use receipts and hash-only audit without runtime wiring.
+9. **T-034E2 — runtime integration**: public-peer binding, BrowserHost consent/audit wiring, CapabilityDescriptor, public-network validation and eval gates.
 
 Authenticated browsing is a separate future capability, not a flag added to this contract.
