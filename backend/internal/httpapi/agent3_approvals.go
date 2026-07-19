@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -124,11 +125,18 @@ func decodeAgent3Confirm(body []byte) (agent3ConfirmRequest, error) {
 }
 
 func agent3ArgsSHA256(args map[string]any) (string, error) {
-	raw, err := json.Marshal(args)
-	if err != nil {
-		return "", err
+	// The dormant write pilot authorizes exactly note_append.text. Hashing generic
+	// JSON across Go and Python is not a stable contract: number rendering and
+	// escaping differ. The immutable confirmation digest already binds the whole
+	// step; this separate claim binds the exact executable UTF-8 text.
+	if len(args) != 1 {
+		return "", errors.New("note_append approval requires exactly one text argument")
 	}
-	sum := sha256.Sum256(raw)
+	text, ok := args["text"].(string)
+	if !ok || strings.TrimSpace(text) == "" || len([]rune(text)) > 10_000 {
+		return "", errors.New("note_append approval text is invalid")
+	}
+	sum := sha256.Sum256([]byte(text))
 	return hex.EncodeToString(sum[:]), nil
 }
 
@@ -178,11 +186,12 @@ func (s *server) currentAgent3ApprovalTerms(
 	if strings.TrimSpace(runID) == "" {
 		return agent3ApprovalStep{}, 0, 0, errors.New("Agent 3 run id is missing")
 	}
+	escapedRunID := url.PathEscape(runID)
 	requestID := r.Header.Get("X-Request-ID")
 	var envelope agent3RunEnvelope
 	if err := s.readAgent3WorkerJSON(
 		r.Context(), requestID,
-		"/experimental/agent3/runs/"+runID,
+		"/experimental/agent3/runs/"+escapedRunID,
 		&envelope,
 	); err != nil {
 		return agent3ApprovalStep{}, 0, 0, err
@@ -202,6 +211,9 @@ func (s *server) currentAgent3ApprovalTerms(
 	if step.Tool != "note_append" || step.Risk != "write" {
 		return agent3ApprovalStep{}, 0, 0, errors.New("Agent 3 write pilot approval is restricted to note_append")
 	}
+	if _, err := agent3ArgsSHA256(step.Args); err != nil {
+		return agent3ApprovalStep{}, 0, 0, err
+	}
 	if step.ConfirmationExpiresAt == nil {
 		return agent3ApprovalStep{}, 0, 0, errors.New("Agent 3 confirmation has no expiry")
 	}
@@ -213,7 +225,7 @@ func (s *server) currentAgent3ApprovalTerms(
 	var replans agent3ReplanState
 	if err := s.readAgent3WorkerJSON(
 		r.Context(), requestID,
-		"/experimental/agent3/runs/"+runID+"/replans",
+		"/experimental/agent3/runs/"+escapedRunID+"/replans",
 		&replans,
 	); err != nil {
 		return agent3ApprovalStep{}, 0, 0, err
@@ -294,9 +306,9 @@ func (s *server) handleAgent3ApprovalConfirm(w http.ResponseWriter, r *http.Requ
 	}
 
 	forward := agent3WorkerConfirmRequest{
-		StepID: confirm.StepID,
+		StepID:   confirm.StepID,
 		Decision: confirm.Decision,
-		Digest: confirm.Digest,
+		Digest:   confirm.Digest,
 	}
 	if confirm.Decision == "approve" {
 		secretConfigured := false
