@@ -23,20 +23,23 @@ jobs:
       - name: Apply exact T-030 network-registry patch
         if: github.head_ref == 'agent/t030-network-registry'
         env:
-          T030_EXPECTED_PARENT: 24c9b720d1dc146716e67f2e1fec59853f563f47
+          T030_EXPECTED_PARENT: 6c6787fbb7de0806c3cfd2a30d64233d4ea02130
         run: |
-          set -euo pipefail
-          head_sha="${{ github.event.pull_request.head.sha }}"
-          git fetch origin "$head_sha" --depth=2
-          git checkout -B agent/t030-network-registry "$head_sha"
-          test "$(git rev-parse HEAD^)" = "$T030_EXPECTED_PARENT"
-          GITHUB_HEAD_REF=agent/t030-network-registry python3 scripts/_t030_apply_network_registry.py
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git diff --cached --check
-          git commit -m "feat(capabilities): declare registry network requirements"
-          git push origin HEAD:agent/t030-network-registry
+          set -o pipefail
+          {
+            set -euxo pipefail
+            head_sha="${{ github.event.pull_request.head.sha }}"
+            git fetch origin "$head_sha" --depth=2
+            git checkout -B agent/t030-network-registry "$head_sha"
+            test "$(git rev-parse HEAD^)" = "$T030_EXPECTED_PARENT"
+            GITHUB_HEAD_REF=agent/t030-network-registry python3 scripts/_t030_apply_network_registry.py
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git diff --cached --check
+            git commit -m "feat(capabilities): declare registry network requirements"
+            git push origin HEAD:agent/t030-network-registry
+          } 2>&1 | tee /tmp/modelrig-full-test.log
       # T030_SELF_PATCH_END
 
       - name: Install worker deps
