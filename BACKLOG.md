@@ -39,11 +39,11 @@ nu fysisk evidens — ikke mere dormant hærdning.
 | T-005 Kør fuld Agent 3 appliance-validation | #64 | P0 | [RIG] | T-001, T-004 | Frisk report matcher version + code SHA. |
 | T-006 Bevis reboot, supervisor, updater, rollback | #65 | P0 | [RIG] | T-001, T-004 | reboot→ready, kill→restart, bad update→rollback. |
 | T-007 Frys lokal model-eval baseline | #66 | P1 | [RIG] (harness [ISO] ✅) | T-001 | 30–50 tasks med success, latency og tool-discipline. |
-| T-040 20-turn voice-kvalitetsbaseline | #67 | P1 | [RIG] | T-001, T-004 | TTFA, WER, cold/warm, stop og barge-in målt. |
+| T-040 20-turn voice-kvalitetsbaseline | #67 | P1 | [RIG] (harness [ISO] ✅) | T-001, T-004 | TTFA, WER, cold/warm, stop og barge-in målt. |
 | T-043 RAG load- og kvalitetsbenchmark | #68 | P1 | [RIG] (harness [ISO] ✅) | T-001 | 1k/10k chunks, recall, p50/p95, RAM/VRAM. |
 
-Harnessene til T-007 og T-043 er versionsbundne, regressions-testede og merged.
-Kun de faktiske lokale model-/GPU-målinger mangler.
+Harnessene til T-007, T-040 og T-043 er versionsbundne og regressions-testede.
+Kun de faktiske lokale model-, voice-, device- og GPU-målinger mangler.
 
 ---
 

@@ -1,0 +1,60 @@
+{
+  "schema": "kaliv-voice-manual-observations/v1",
+  "device": {
+    "model": "Pixel 6a",
+    "os_version": "FILL_ME",
+    "app_version": "FILL_ME"
+  },
+  "trials": [
+    {
+      "id": "manual-01",
+      "trigger": "tap stop during first audio chunk",
+      "recognized": false,
+      "playback_stopped": false,
+      "stale_audio_resumed": false,
+      "ui_terminal_state": "pending",
+      "stop_latency_ms": null,
+      "notes": "FILL_ME"
+    },
+    {
+      "id": "manual-02",
+      "trigger": "tap stop between audio chunks",
+      "recognized": false,
+      "playback_stopped": false,
+      "stale_audio_resumed": false,
+      "ui_terminal_state": "pending",
+      "stop_latency_ms": null,
+      "notes": "FILL_ME"
+    },
+    {
+      "id": "manual-03",
+      "trigger": "begin speaking during first audio chunk",
+      "recognized": false,
+      "playback_stopped": false,
+      "stale_audio_resumed": false,
+      "ui_terminal_state": "pending",
+      "stop_latency_ms": null,
+      "notes": "FILL_ME"
+    },
+    {
+      "id": "manual-04",
+      "trigger": "begin speaking between audio chunks",
+      "recognized": false,
+      "playback_stopped": false,
+      "stale_audio_resumed": false,
+      "ui_terminal_state": "pending",
+      "stop_latency_ms": null,
+      "notes": "FILL_ME"
+    },
+    {
+      "id": "manual-05",
+      "trigger": "network interruption during playback",
+      "recognized": false,
+      "playback_stopped": false,
+      "stale_audio_resumed": false,
+      "ui_terminal_state": "pending",
+      "stop_latency_ms": null,
+      "notes": "FILL_ME"
+    }
+  ]
+}

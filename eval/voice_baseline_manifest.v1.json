@@ -1,0 +1,133 @@
+{
+  "schema": "kaliv-voice-baseline-manifest/v1",
+  "dataset_version": "2026-07-19.1",
+  "language": "da",
+  "audio_contract": {
+    "sample_rate_hz": 16000,
+    "channels": 1,
+    "sample_width_bytes": 2,
+    "encoding": "PCM WAV"
+  },
+  "turns": [
+    {
+      "id": "turn-01",
+      "category": "kort spørgsmål",
+      "reference": "Hvad er klokken lige nu?",
+      "audio_path": "validation/voice-fixtures/turn-01.wav"
+    },
+    {
+      "id": "turn-02",
+      "category": "tal og tidsenhed",
+      "reference": "Sæt en timer på fem minutter.",
+      "audio_path": "validation/voice-fixtures/turn-02.wav"
+    },
+    {
+      "id": "turn-03",
+      "category": "kalenderformulering",
+      "reference": "Hvilke møder har jeg i morgen formiddag?",
+      "audio_path": "validation/voice-fixtures/turn-03.wav"
+    },
+    {
+      "id": "turn-04",
+      "category": "teknisk status",
+      "reference": "Hvor meget ledig plads er der på ModelRig?",
+      "audio_path": "validation/voice-fixtures/turn-04.wav"
+    },
+    {
+      "id": "turn-05",
+      "category": "sammensat opgave",
+      "reference": "Lav en kort opsummering af dagens vigtigste opgaver.",
+      "audio_path": "validation/voice-fixtures/turn-05.wav"
+    },
+    {
+      "id": "turn-06",
+      "category": "liste og fødevarer",
+      "reference": "Husk at jeg skal købe kaffe, mælk og rugbrød.",
+      "audio_path": "validation/voice-fixtures/turn-06.wav"
+    },
+    {
+      "id": "turn-07",
+      "category": "faglig forklaring",
+      "reference": "Hvad er forskellen på en backup og en synkronisering?",
+      "audio_path": "validation/voice-fixtures/turn-07.wav"
+    },
+    {
+      "id": "turn-08",
+      "category": "sted og ugedag",
+      "reference": "Fortæl mig vejret i København på fredag.",
+      "audio_path": "validation/voice-fixtures/turn-08.wav"
+    },
+    {
+      "id": "turn-09",
+      "category": "engelsk fagterm",
+      "reference": "Kan du finde dokumentet om schedulerens approval tokens?",
+      "audio_path": "validation/voice-fixtures/turn-09.wav"
+    },
+    {
+      "id": "turn-10",
+      "category": "tal og log",
+      "reference": "Læs de tre nyeste fejl fra workerens log.",
+      "audio_path": "validation/voice-fixtures/turn-10.wav"
+    },
+    {
+      "id": "turn-11",
+      "category": "negation og instruks",
+      "reference": "Planlæg ikke noget; forklar bare hvad du ville gøre.",
+      "audio_path": "validation/voice-fixtures/turn-11.wav"
+    },
+    {
+      "id": "turn-12",
+      "category": "følsomt begreb",
+      "reference": "Min adgangskode må aldrig stå i loggen.",
+      "audio_path": "validation/voice-fixtures/turn-12.wav"
+    },
+    {
+      "id": "turn-13",
+      "category": "dato og klokkeslæt",
+      "reference": "Næste vedligeholdelse er den enogtyvende juli klokken tretten tredive.",
+      "audio_path": "validation/voice-fixtures/turn-13.wav"
+    },
+    {
+      "id": "turn-14",
+      "category": "ciffersekvens",
+      "reference": "Serveren bruger port otte nul ni ni.",
+      "audio_path": "validation/voice-fixtures/turn-14.wav"
+    },
+    {
+      "id": "turn-15",
+      "category": "teknisk sammensætning",
+      "reference": "RAG-indekset skal testes med ti tusind tekststykker.",
+      "audio_path": "validation/voice-fixtures/turn-15.wav"
+    },
+    {
+      "id": "turn-16",
+      "category": "talminimalpar",
+      "reference": "Kan du høre forskel på fyrre og fireogfyrre?",
+      "audio_path": "validation/voice-fixtures/turn-16.wav"
+    },
+    {
+      "id": "turn-17",
+      "category": "danske stednavne",
+      "reference": "Jeg bor på Nørrebro i København.",
+      "audio_path": "validation/voice-fixtures/turn-17.wav"
+    },
+    {
+      "id": "turn-18",
+      "category": "danske særtegn",
+      "reference": "Skriv en note med ordene øl, æble og åben.",
+      "audio_path": "validation/voice-fixtures/turn-18.wav"
+    },
+    {
+      "id": "turn-19",
+      "category": "barge-in formulering",
+      "reference": "Stop svaret, hvis jeg begynder at tale igen.",
+      "audio_path": "validation/voice-fixtures/turn-19.wav"
+    },
+    {
+      "id": "turn-20",
+      "category": "afsluttende kontrol",
+      "reference": "Det her er den sidste sætning i voice-baselinen.",
+      "audio_path": "validation/voice-fixtures/turn-20.wav"
+    }
+  ]
+}
