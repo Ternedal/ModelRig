@@ -2,23 +2,27 @@ package dk.ternedal.modelrig.ui
 
 import dk.ternedal.modelrig.net.ToolInfo
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class ScheduleToolPolicyTest {
     @Test
-    fun pickerOnlySelectsExplicitlySchedulableEnabledTools() {
+    fun pickerOnlySelectsExplicitlySchedulableEnabledUniqueTools() {
         val options = scheduleToolOptions(
             listOf(
+                tool("status", schedulable = true, enabled = true),
                 tool("clock", schedulable = true, enabled = true),
                 tool("delete", schedulable = false, enabled = true, reason = "destructive"),
                 tool("disabled", schedulable = true, enabled = false),
                 tool("missing-contract", enabled = true),
-                tool("clock", schedulable = true, enabled = true),
+                tool("clock", schedulable = false, enabled = true, reason = "conflicting duplicate"),
                 tool("", schedulable = true, enabled = true),
             ),
         )
 
-        assertEquals(listOf("clock"), options.selectable.map { it.name })
+        assertEquals(listOf("status"), options.selectable.map { it.name })
+        assertFalse(options.selectable.any { it.name == "clock" })
+        assertFalse(options.blocked.any { it.name == "clock" })
         assertEquals(
             listOf("delete", "disabled", "missing-contract"),
             options.blocked.map { it.name },
