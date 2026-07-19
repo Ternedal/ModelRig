@@ -213,6 +213,81 @@ check(c_w4.claim_id in out["abandoned"]
       "a blocked/denied audit row is a refusal, not execution -- recovery still "
       "refunds")
 
+# --- F-1002: the UNKNOWN window -- attempt without executed ------------------
+# ToolGate audits 'executed' only AFTER the tool ran. The runner now writes an
+# ATTEMPT row immediately before propose, so recovery can tell three deaths
+# apart: no attempt (never ran -> refund), attempt+executed (ran -> keep),
+# attempt alone (MAY have run -> the one case that must NOT refund). Refunding
+# it is how max_runs=N produced N+1 real writes: the side effect happened, the
+# slot came back, and the next cadence spent it again.
+
+# The headline property, driven directly: a WRITE that dies in the sliver.
+st, jb, gt, rn = _env()
+w6 = st.create("note_append", {"text": "x"}, "every:60",
+               approve_write=True, max_runs=1, now=NOW)
+c_w6 = st.claim_due(now=NOW + 61)[0]
+jid_w6 = jb.create("schedule:note_append", detail=f"occ={c_w6.claim_id}")
+jb.update(jid_w6, status="running", detail=f"occ={c_w6.claim_id}")
+st.bind_job(c_w6.claim_id, jid_w6)
+gt.audit.record(
+    tool="note_append", args={"text": "x"}, risk="write", outcome="attempt",
+    conversation_id=_occ_conv(w6.schedule_id, c_w6.claim_id),
+    origin="schedule",
+)
+out = rn.recover_interrupted(now=NOW + 200)
+check(c_w6.claim_id in out["unknown"],
+      "a write that died between attempt and executed is UNKNOWN -- not "
+      "abandoned, not executed")
+check(_occ_status(st, c_w6.claim_id) == "unknown"
+      and _runs_used(st, w6.schedule_id) == 1,
+      "the budget slot STAYS SPENT -- refunding it is exactly how max_runs=N "
+      "became N+1 real writes (F-1002)")
+sched_after = st.get(w6.schedule_id)
+check(sched_after is not None and not sched_after.enabled,
+      "and the grant is PAUSED until a human settles what actually happened")
+job_w6 = jb.get(jid_w6)
+check(job_w6 and job_w6["status"] == "failed"
+      and "UKENDT" in (job_w6.get("detail") or ""),
+      "the job says plainly that the outcome is unknown and the slot was kept")
+later = st.claim_due(now=NOW + 400)
+check(all(c.schedule.schedule_id != w6.schedule_id for c in later),
+      "no later cadence can spend anything: the paused grant claims nothing "
+      "-- the N+1 door is closed from both sides")
+
+# Risk-aware: a READ in the same window has no side effect worth guarding.
+st, jb, gt, rn = _env()
+w7 = st.create("rig_status", {}, "every:60", now=NOW)
+c_w7 = st.claim_due(now=NOW + 61)[0]
+gt.audit.record(
+    tool="rig_status", args={}, risk="read", outcome="attempt",
+    conversation_id=_occ_conv(w7.schedule_id, c_w7.claim_id),
+    origin="schedule",
+)
+out = rn.recover_interrupted(now=NOW + 200)
+check(c_w7.claim_id in out["abandoned"]
+      and _runs_used(st, w7.schedule_id) == 0
+      and st.get(w7.schedule_id).enabled,
+      "a READ in the unknown window refunds like a clean death -- no side "
+      "effect to guard, availability preferred, grant stays enabled")
+
+# attempt + executed together is simply executed (the marker changes nothing).
+st, jb, gt, rn = _env()
+w8 = st.create("note_append", {"text": "x"}, "every:60",
+               approve_write=True, now=NOW)
+c_w8 = st.claim_due(now=NOW + 61)[0]
+for oc in ("attempt", "executed"):
+    gt.audit.record(
+        tool="note_append", args={"text": "x"}, risk="write", outcome=oc,
+        conversation_id=_occ_conv(w8.schedule_id, c_w8.claim_id),
+        origin="schedule",
+    )
+out = rn.recover_interrupted(now=NOW + 200)
+check(c_w8.claim_id in out["executed"]
+      and _runs_used(st, w8.schedule_id) == 1
+      and st.get(w8.schedule_id).enabled,
+      "attempt followed by executed is just executed -- slot spent, grant "
+      "untouched")
+
 # The normal completed path leaves nothing for recovery, and run_once binds the
 # job so the occurrence can name it.
 st, jb, gt, rn = _env()
@@ -225,8 +300,15 @@ check(len(occ_rows) == 1 and occ_rows[0]["status"] == "executed"
       and occ_rows[0]["job_id"],
       "run_once binds the job to the occurrence and resolves it executed -- "
       "job, audit, outcome and recovery all reference the same claim")
+conv_live = _occ_conv(w5.schedule_id,
+                      st._conn.execute(
+                          "SELECT claim_id FROM occurrences").fetchone()["claim_id"])
+check(gt.audit.has_attempt(conv_live) and gt.audit.has_execution(conv_live),
+      "a live tick leaves BOTH the attempt marker and the executed row -- the "
+      "marker is written in the real path, not only in simulations")
 out = rn.recover_interrupted(now=NOW + 200)
-check(out["executed"] == [] and out["abandoned"] == [],
+check(out["executed"] == [] and out["abandoned"] == []
+      and out["unknown"] == [],
       "recovery finds nothing after a clean run")
 
 print(f"\n===== OCCURRENCE LEDGER: {passed} passed, {failed} failed =====")

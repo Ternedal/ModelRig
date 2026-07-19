@@ -103,11 +103,18 @@ class SchedulerService:
             # is how max_runs gets exceeded), while a crash before it refunds
             # the slot and closes any dangling job.
             recovered = self.runner.recover_interrupted()
-            if recovered["executed"] or recovered["abandoned"]:
+            if (recovered["executed"] or recovered["abandoned"]
+                    or recovered.get("unknown")):
                 logging.getLogger(__name__).info(
-                    "scheduler: recovered %d executed / %d abandoned "
-                    "occurrence(s) at startup",
-                    len(recovered["executed"]), len(recovered["abandoned"]))
+                    "scheduler: recovered %d executed / %d abandoned / "
+                    "%d unknown occurrence(s) at startup",
+                    len(recovered["executed"]), len(recovered["abandoned"]),
+                    len(recovered.get("unknown", [])))
+            if recovered.get("unknown"):
+                logging.getLogger(__name__).warning(
+                    "scheduler: %d occurrence(s) med UKENDT udfald — "
+                    "budget-slot beholdt og plan(er) pauset til manuel "
+                    "afklaring", len(recovered["unknown"]))
             self._stop.clear()
             self._started_at = self.clock()
             self._stopped_at = None
@@ -121,6 +128,13 @@ class SchedulerService:
             return True
 
     def stop(self, timeout: float = 5.0) -> bool:
+        try:
+            self.runner.schedules.release_lease(self.runner.owner_id)
+        except AttributeError:
+            pass  # fakes without the lease surface
+        return self._stop_impl(timeout)
+
+    def _stop_impl(self, timeout: float = 5.0) -> bool:
         """Interrupt the wait and join the service thread.
 
         Returns True when stopped (including when it was never started). The

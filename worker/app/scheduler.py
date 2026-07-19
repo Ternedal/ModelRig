@@ -325,6 +325,19 @@ class ScheduleStore:
             # "when did I approve this, and from where?". Each consumed approval
             # -- create or renew -- persists one receipt row, in the same
             # transaction as the grant it authorises.
+            # Scheduler owner-lease (F-1003). Startup recovery treats every
+            # 'reserved' occurrence as a dead worker's -- which is only safe if
+            # there IS no other living worker. The lease makes single-flight
+            # explicit across processes: recovery and ticking require holding
+            # it, a living owner's claims can never be abandoned by a second
+            # process, and a crashed owner's lease expires so the next start
+            # takes over.
+            self._conn.execute(
+                """CREATE TABLE IF NOT EXISTS runner_lease (
+                       id INTEGER PRIMARY KEY CHECK (id = 1),
+                       owner_id TEXT NOT NULL,
+                       lease_until REAL NOT NULL)"""
+            )
             self._conn.execute(
                 """CREATE TABLE IF NOT EXISTS approval_receipts (
                        id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -715,6 +728,81 @@ class ScheduleStore:
                 )
             self._conn.commit()
         return True
+
+    def acquire_lease(self, owner_id: str, *, ttl_seconds: float,
+                      now: float | None = None) -> bool:
+        """Take (or extend) the scheduler owner-lease (F-1003).
+
+        Granted when no lease exists, the current one has expired, or the
+        caller already owns it. BEGIN IMMEDIATE serialises competing starts,
+        so exactly one process wins. A False here means another worker is
+        ALIVE: do not recover, do not claim.
+        """
+        now = time.time() if now is None else now
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                row = self._conn.execute(
+                    "SELECT owner_id, lease_until FROM runner_lease WHERE id=1"
+                ).fetchone()
+                if row is not None and row["owner_id"] != owner_id                         and row["lease_until"] > now:
+                    self._conn.commit()
+                    return False
+                self._conn.execute(
+                    "INSERT INTO runner_lease (id, owner_id, lease_until) "
+                    "VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET "
+                    "owner_id=excluded.owner_id, "
+                    "lease_until=excluded.lease_until",
+                    (owner_id, now + ttl_seconds),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return True
+
+    def release_lease(self, owner_id: str) -> None:
+        """Give the lease up on clean stop -- only the owner can."""
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM runner_lease WHERE id=1 AND owner_id=?",
+                (owner_id,),
+            )
+            self._conn.commit()
+
+    def resolve_unknown(self, claim_id: str, *,
+                        now: float | None = None) -> str | None:
+        """Resolve an occurrence whose outcome cannot be determined (F-1002).
+
+        Attempt-evidence without executed-evidence means the worker died in
+        the window where the side effect may already have happened. The ONLY
+        safe bookkeeping is to keep the reserved slot spent: refunding it lets
+        a later cadence run again, and the world can end up with more real
+        side effects than max_runs allows. Marked 'unknown' so a human (or a
+        reconcile flow) can settle it; never touched by later recovery passes.
+        """
+        now = time.time() if now is None else now
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                row = self._conn.execute(
+                    "SELECT status FROM occurrences WHERE claim_id=? "
+                    "AND status IN ('reserved','reserved_noslot')",
+                    (claim_id,),
+                ).fetchone()
+                if row is None:
+                    self._conn.commit()
+                    return None
+                self._conn.execute(
+                    "UPDATE occurrences SET status='unknown', resolved=? "
+                    "WHERE claim_id=?",
+                    (now, claim_id),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return row["status"]
 
     def approval_receipts(self, schedule_id: str) -> list[dict]:
         """Every consumed approval behind this grant, oldest first (T-014)."""

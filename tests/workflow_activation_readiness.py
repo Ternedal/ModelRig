@@ -276,8 +276,8 @@ check(
 # right one to catch it. Each break is reverted before the next.
 
 _probes = AR.scheduler_durability_probes()
-check(len(_probes) == 7 and all(p["ok"] for p in _probes),
-      "all seven durability probes are green against the real tree")
+check(len(_probes) == 9 and all(p["ok"] for p in _probes),
+      "all nine durability probes are green against the real tree")
 
 import app.scheduler as _sched  # noqa: E402
 import app.schedule_runner as _srun  # noqa: E402
@@ -387,6 +387,49 @@ try:
 finally:
     _tools.ToolGate.propose = _orig_propose
     _srun.refusal = _orig_refusal
+
+# 4. The unknown-window probe (F-1002) must watch BOTH halves of its
+# mechanism. Blind the attempt-evidence -> recovery refunds -> probe red.
+import app.tools as _tools  # noqa: E402
+
+_orig_attempt = _tools.AuditLog.has_attempt
+_tools.AuditLog.has_attempt = lambda self, conversation_id: False
+try:
+    _p = _probe("Ukendt udfald: slot beholdes og granten pauses")
+    check(_p is not None and _p["ok"] is False,
+          "blinding the attempt-evidence turns the unknown-window probe RED "
+          "-- without the marker, the N+1 refund comes back")
+finally:
+    _tools.AuditLog.has_attempt = _orig_attempt
+
+# Suppress only the pause -> the grant stays live for the next cadence ->
+# probe red. The slot-keeping alone is not enough; the probe demands both.
+_orig_set = _sched.ScheduleStore.set_enabled
+def _no_pause(self, schedule_id, enabled, *, now):
+    if not enabled:
+        return self.get(schedule_id)  # swallow the pause
+    return _orig_set(self, schedule_id, enabled, now=now)
+_sched.ScheduleStore.set_enabled = _no_pause
+try:
+    _p = _probe("Ukendt udfald: slot beholdes og granten pauses")
+    check(_p is not None and _p["ok"] is False,
+          "swallowing the pause turns the unknown-window probe RED -- the "
+          "probe requires the grant paused, not only the slot kept")
+finally:
+    _sched.ScheduleStore.set_enabled = _orig_set
+
+# 5. The lease probe must watch the actual guard: rubber-stamp acquisition
+# and recovery abandons the living owner's claim -> probe red.
+_orig_acquire = _sched.ScheduleStore.acquire_lease
+_sched.ScheduleStore.acquire_lease = (
+    lambda self, owner_id, *, ttl_seconds, now=None: True)
+try:
+    _p = _probe("Recovery respekterer en levende ejers lease")
+    check(_p is not None and _p["ok"] is False,
+          "rubber-stamping lease acquisition turns the lease probe RED -- "
+          "the probe watches the guard, not the method's existence")
+finally:
+    _sched.ScheduleStore.acquire_lease = _orig_acquire
 
 # And after all the sabotage is reverted, everything is green again.
 check(all(p["ok"] for p in AR.scheduler_durability_probes()),

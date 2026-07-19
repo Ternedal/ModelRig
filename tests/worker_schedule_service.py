@@ -55,10 +55,10 @@ class FakeRunner:
         self.recovered = False
 
     def recover_interrupted(self, *, now=None):
-        # start() runs evidence-based recovery (T-012) before the loop claims;
-        # the fake records that it was asked and recovers nothing.
+        # start() runs evidence-based recovery (T-012/F-1002) before the loop
+        # claims; the fake records that it was asked and recovers nothing.
         self.recovered = True
-        return {"executed": [], "abandoned": []}
+        return {"executed": [], "abandoned": [], "unknown": []}
 
     def feature_enabled(self):
         return self.enabled

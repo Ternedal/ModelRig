@@ -511,6 +511,51 @@ def scheduler_durability_probes() -> list[dict]:
         return ok, ("max_runs kan ikke overskrides på tværs af claims" if ok
                     else "budgetloftet blev overskredet")
 
+    def p_crash_unknown_window():
+        # F-1002: a WRITE that dies between the attempt marker and the
+        # executed row MAY have run. Refunding that slot is how max_runs=N
+        # became N+1 real writes. The probe injects exactly that death and
+        # requires: slot kept, occurrence 'unknown', grant paused.
+        st, jb, gt, rn, tool = env()
+        s = st.create("note_append", {"text": "readiness-probe"},
+                      "every:60", approve_write=True, max_runs=1, now=NOW)
+        c = st.claim_due(now=NOW + 61)[0]
+        gt.audit.record(
+            tool="note_append", args={"text": "readiness-probe"},
+            risk="write", outcome="attempt",
+            conversation_id=runner_mod._occurrence_conversation(
+                s.schedule_id, c.claim_id),
+            origin="schedule")
+        out = rn.recover_interrupted(now=NOW + 200)
+        fresh = st.get(s.schedule_id)
+        ok = (c.claim_id in out.get("unknown", [])
+              and runs_used(st, s.schedule_id) == 1
+              and fresh is not None and not fresh.enabled)
+        return ok, ("ukendt udfald: slot beholdes og granten pauses — "
+                    "max_runs kan ikke blive N+1 via crash" if ok
+                    else "et ukendt udfald blev refunderet eller planen "
+                         "forblev aktiv")
+
+    def p_recovery_respects_lease():
+        # F-1003: recovery treats 'reserved' as a dead worker's -- only safe
+        # when no OTHER worker is alive. A foreign live lease must make
+        # recovery touch NOTHING, or a second process abandons in-flight
+        # claims and refunds slots for runs happening right now.
+        st, jb, gt, rn, tool = env()
+        s = st.create(tool, {}, "every:60", now=NOW)
+        st.acquire_lease("living-foreign-owner", ttl_seconds=300, now=NOW + 60)
+        c = st.claim_due(now=NOW + 61)[0]
+        out = rn.recover_interrupted(now=NOW + 70)
+        row = st._conn.execute(
+            "SELECT status FROM occurrences WHERE claim_id=?",
+            (c.claim_id,)).fetchone()
+        ok = (out.get("skipped_no_lease") is True
+              and row is not None and row["status"] == "reserved"
+              and runs_used(st, s.schedule_id) == 1)
+        return ok, ("recovery uden lease rører intet — en levende ejers "
+                    "in-flight claims kan ikke opgives" if ok
+                    else "recovery opgav en levende ejers claim")
+
     def p_forged_approval():
         st, jb, gt, rn, tool = env()
         # A WRITE with a fingerprint that does not match the action must be
@@ -543,6 +588,10 @@ def scheduler_durability_probes() -> list[dict]:
           p_crash_after_execution)
     probe("Pause efter claim stopper in-flight occurrence", p_revocation)
     probe("Budgetloft holder på tværs af claims", p_budget_ceiling)
+    probe("Ukendt udfald: slot beholdes og granten pauses",
+          p_crash_unknown_window)
+    probe("Recovery respekterer en levende ejers lease",
+          p_recovery_respects_lease)
     probe("Forfalsket approval afvises og slot frigives", p_forged_approval)
     return results
 

@@ -32,6 +32,14 @@ class FakeGate:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict]] = []
 
+        # _run_claim writes an attempt marker before propose (F-1002); the
+        # fake absorbs it -- these cases test post-execution accounting.
+        class _AbsorbAudit:
+            def record(self, **_kw):
+                pass
+
+        self.audit = _AbsorbAudit()
+
     def propose(self, tool: str, args: dict, **_kwargs) -> dict:
         self.calls.append((tool, dict(args)))
         return {"status": "executed", "duration_ms": 17}

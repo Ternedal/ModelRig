@@ -3,8 +3,8 @@
 > **Genereret af `scripts/activation_readiness.py`. Ret ikke i hånden.**
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
-**Version på main:** `1.58.125`  
-**Genereret:** 2026-07-19 07:08 UTC
+**Version på main:** `1.58.126`  
+**Genereret:** 2026-07-19 07:29 UTC
 
 ---
 
@@ -38,6 +38,8 @@ Hver probe bygger de RIGTIGE komponenter mod engangs-databaser og injicerer fejl
 | Crash efter kørsel: evidens holder budgettet brugt | ✅ | crash efter kørsel: audit-evidens holder budgettet brugt |
 | Pause efter claim stopper in-flight occurrence | ✅ | pause efter claim stopper in-flight occurrence og refunderer |
 | Budgetloft holder på tværs af claims | ✅ | max_runs kan ikke overskrides på tværs af claims |
+| Ukendt udfald: slot beholdes og granten pauses | ✅ | ukendt udfald: slot beholdes og granten pauses — max_runs kan ikke blive N+1 via crash |
+| Recovery respekterer en levende ejers lease | ✅ | recovery uden lease rører intet — en levende ejers in-flight claims kan ikke opgives |
 | Forfalsket approval afvises og slot frigives | ✅ | en godkendelse der ikke matcher handlingen afvises før kørsel (runner-refusal + ToolGate som dobbelt bælte) og slotten frigives |
 
 ---

@@ -70,6 +70,12 @@ den fysiske pilot.
 
 ---
 
+**Analyse 1.58.123 (19/7):** de to recovery-kanter F-1002 (ukendt-vindue:
+attempt-markør, slot beholdes, plan pauses — max_runs kan ikke blive N+1 via
+crash) og F-1003 (owner-lease: en levende workers claims kan ikke opgives)
+lukket i 1.58.126; F-1004 lukket ved at gaten nu kører 9 prober inkl. begge
+kanter, bevist ikke-blinde.
+
 ## Milepæl 3 — Agent 3-pilot (mål task success) — tracker #60
 
 Agent 3 er moden i kode, men slukket i produktet. Pilotresultater og fysisk

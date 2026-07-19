@@ -79,15 +79,22 @@ under test. **Start altid med `/health/full`** (launcheren kører det, eller
 - **Handling:** ingen. Tjek evt. `runs_used` i `GET /schedules/{id}` — den er
   refunderet.
 
-## Worker-log ved start: "recovered N executed / M abandoned occurrence(s)"
+## Worker-log ved start: "recovered N executed / M abandoned / K unknown"
 
 - **Symptom:** linjen dukker op ved worker-start.
-- **Årsag:** crash-recovery (T-012). Workeren døde midt i en occurrence.
+- **Årsag:** crash-recovery (T-012/F-1002). Workeren døde midt i en occurrence.
   `executed` = audit-evidens viste at side-effekten NÅEDE at køre — budgettet
   forbliver brugt, jobbet afstemmes til completed. `abandoned` = intet nåede
-  at køre — slotten refunderes, hængende job lukkes failed.
-- **Handling:** én gang efter et kendt crash: normalt. HVER start: workeren
-  crasher i selve tick-løkken — kig i loggen umiddelbart FØR linjen.
+  at køre — slotten refunderes, hængende job lukkes failed. `unknown` = døde
+  MELLEM forsøgs-markøren og resultatet: side-effekten KAN være sket, slotten
+  BEHOLDES (refusion kunne give flere kørsler end max_runs), og planen pauses.
+- **Handling:** `executed`/`abandoned` én gang efter kendt crash: normalt.
+  `unknown` > 0: afklar manuelt om handlingen skete (fx om noten findes), og
+  genoptag planen bagefter (resume starter ved en frisk fremtidig occurrence).
+  "recovery sprunget over — en anden ejer holder lease'en": to worker-processer
+  mod samme DB — den nye venter til den gamles lease udløber (90 s) eller
+  stoppes rent. HVER start: workeren crasher i selve tick-løkken — kig i
+  loggen umiddelbart FØR linjen.
 
 ## GET /schedules/{id}: tom `approval_receipts`
 

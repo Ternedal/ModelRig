@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Callable, Mapping
 
@@ -52,11 +53,18 @@ class SchedulerRunner:
         *,
         registry: Mapping[str, tools.Tool] | None = None,
         feature_enabled: Callable[[], bool] = scheduler_policy.enabled,
+        owner_id: str | None = None,
+        lease_ttl_seconds: float = 90.0,
     ) -> None:
         self.schedules = schedules
         self.jobs = jobs
         self.gate = gate
         self.registry = tools.REGISTRY if registry is None else registry
+        # F-1003: this runner's identity for the owner-lease. Recovery and
+        # ticking both require holding it, so a second live process can
+        # neither abandon this one's in-flight claims nor double-claim.
+        self.owner_id = owner_id or uuid.uuid4().hex
+        self.lease_ttl_seconds = float(lease_ttl_seconds)
         self.feature_enabled = feature_enabled
 
     def recover_interrupted(self, *, now: float | None = None) -> dict:
@@ -91,17 +99,29 @@ class SchedulerRunner:
         Runs before the loop can claim; idempotent -- only unresolved rows.
         """
         now_v = time.time() if now is None else now
+        # F-1003: recovery treats every 'reserved' occurrence as a dead
+        # worker's. That is only true if no OTHER worker is alive -- so the
+        # lease is a precondition. Failing to get it means a living owner
+        # exists, and abandoning its in-flight claims here would refund slots
+        # for runs that are happening right now.
+        if not self.schedules.acquire_lease(
+                self.owner_id, ttl_seconds=self.lease_ttl_seconds, now=now_v):
+            logging.getLogger(__name__).warning(
+                "scheduler: recovery sprunget over — en anden ejer holder "
+                "lease'en (levende worker); ingen occurrences røres")
+            return {"executed": [], "abandoned": [], "unknown": [],
+                    "skipped_no_lease": True}
         executed_ids: list[str] = []
         abandoned_ids: list[str] = []
+        unknown_ids: list[str] = []
         for occ in self.schedules.reserved_occurrences():
             conv = _occurrence_conversation(occ["schedule_id"], occ["claim_id"])
-            ran = self.gate.audit.has_execution(conv)
-            prior = self.schedules.resolve_recovered(
-                occ["claim_id"], executed=ran, now=now_v)
-            if prior is None:
-                continue  # already resolved by a racing path
             job_id = occ.get("job_id")
-            if ran:
+            if self.gate.audit.has_execution(conv):
+                prior = self.schedules.resolve_recovered(
+                    occ["claim_id"], executed=True, now=now_v)
+                if prior is None:
+                    continue  # already resolved by a racing path
                 executed_ids.append(occ["claim_id"])
                 if job_id:
                     self._reconcile_job(
@@ -109,14 +129,62 @@ class SchedulerRunner:
                         detail=("gennemført via ToolGate; worker døde før "
                                 "efterregistrering — genoprettet fra audit "
                                 f"(occ={occ['claim_id']})"))
-            else:
-                abandoned_ids.append(occ["claim_id"])
+                continue
+            if self.gate.audit.has_attempt(conv):
+                # F-1002: the worker died AFTER the attempt marker and BEFORE
+                # the executed row -- the side effect MAY have happened.
+                # Risk-aware: a read has no side effect worth guarding, so it
+                # refunds like a clean death. Anything else keeps the slot
+                # spent (refunding is how max_runs gets exceeded) and pauses
+                # the grant so a human settles it before it runs again.
+                sched = self.schedules.get(occ["schedule_id"])
+                tool = self.registry.get(sched.tool) if sched else None
+                if tool is not None and tool.risk == "read":
+                    prior = self.schedules.resolve_recovered(
+                        occ["claim_id"], executed=False, now=now_v)
+                    if prior is None:
+                        continue
+                    abandoned_ids.append(occ["claim_id"])
+                    if job_id:
+                        self._reconcile_job(
+                            job_id, status="failed",
+                            detail=("worker døde under en read-kørsel; ingen "
+                                    "side-effekt at beskytte — occurrence "
+                                    "opgivet og budget-slot refunderet "
+                                    f"(occ={occ['claim_id']})"))
+                    continue
+                prior = self.schedules.resolve_unknown(
+                    occ["claim_id"], now=now_v)
+                if prior is None:
+                    continue
+                unknown_ids.append(occ["claim_id"])
                 if job_id:
                     self._reconcile_job(
                         job_id, status="failed",
-                        detail=("worker døde før kørsel; occurrence opgivet og "
-                                f"budget-slot refunderet (occ={occ['claim_id']})"))
-        return {"executed": executed_ids, "abandoned": abandoned_ids}
+                        detail=("udfald UKENDT: worker døde efter forsøget "
+                                "blev registreret men før resultatet — "
+                                "side-effekten kan være sket. Budget-slot "
+                                "BEHOLDT (refusion kunne give flere kørsler "
+                                "end max_runs); planen er pauset til manuel "
+                                f"afklaring (occ={occ['claim_id']})"))
+                if sched is not None:
+                    # Pause bumps the revision like any user-intent change,
+                    # so anything else in flight for the grant cancels too.
+                    self.schedules.set_enabled(
+                        occ["schedule_id"], False, now=now_v)
+                continue
+            prior = self.schedules.resolve_recovered(
+                occ["claim_id"], executed=False, now=now_v)
+            if prior is None:
+                continue
+            abandoned_ids.append(occ["claim_id"])
+            if job_id:
+                self._reconcile_job(
+                    job_id, status="failed",
+                    detail=("worker døde før kørsel; occurrence opgivet og "
+                            f"budget-slot refunderet (occ={occ['claim_id']})"))
+        return {"executed": executed_ids, "abandoned": abandoned_ids,
+                "unknown": unknown_ids}
 
     def _reconcile_job(self, job_id: str, *, status: str, detail: str) -> None:
         """Close a dangling job best-effort; recovery must not die on JobStore."""
@@ -151,6 +219,10 @@ class SchedulerRunner:
                     disabled.append(s.schedule_id)
         return disabled
 
+    def _hold_lease(self, now: float) -> bool:
+        return self.schedules.acquire_lease(
+            self.owner_id, ttl_seconds=self.lease_ttl_seconds, now=now)
+
     def run_once(self, *, now: float | None = None, limit: int = 20) -> TickResult:
         """Claim and execute a bounded batch, or do absolutely nothing when off.
 
@@ -165,6 +237,13 @@ class SchedulerRunner:
             return TickResult(False, False, 0, 0, 0, 0)
         if not self.gate.enabled:
             return TickResult(True, True, 0, 0, 0, 0)
+        # F-1003: claiming requires the owner-lease. A tick without it claims
+        # NOTHING -- another worker is alive and this one must not double-run
+        # the same schedules. Acquire doubles as renewal for the holder.
+        if not self._hold_lease(tick_at):
+            logging.getLogger(__name__).warning(
+                "scheduler: tick sprunget over — en anden ejer holder lease'en")
+            return TickResult(True, False, 0, 0, 0, 0)
 
         claims = self.schedules.claim_due(now=tick_at, limit=limit)
         completed = blocked = failed = 0
@@ -265,6 +344,21 @@ class SchedulerRunner:
             )
             return "blocked"
 
+        # F-1002: durable ATTEMPT marker before the side effect can happen.
+        # ToolGate audits 'executed' only AFTER the tool ran, so a crash in
+        # that sliver used to read as "nothing happened" and refund the slot
+        # -- letting a later cadence run again, and max_runs=N could produce
+        # N+1 real writes. With this row, recovery can tell the three cases
+        # apart: no attempt -> truly never ran (refund); attempt+executed ->
+        # ran (keep); attempt alone -> UNKNOWN (keep the slot, surface it).
+        # Placed after the revocation guard so cancelled claims leave no
+        # attempt rows.
+        self.gate.audit.record(
+            tool=s.tool, args=s.args, risk=tool.risk, outcome="attempt",
+            conversation_id=_occurrence_conversation(s.schedule_id, claim.claim_id),
+            origin="schedule",
+            result_summary="scheduler: forsøg registreret før kørsel",
+        )
         try:
             result = self.gate.propose(
                 s.tool,

@@ -214,6 +214,23 @@ class AuditLog:
                 "ALTER TABLE audit ADD COLUMN origin TEXT NOT NULL DEFAULT 'local'")
         self._conn.commit()
 
+    def has_attempt(self, conversation_id: str) -> bool:
+        """Was ToolGate ABOUT to run a side effect under this conversation id?
+
+        The scheduler writes an attempt row immediately before propose
+        (F-1002). At recovery, attempt-without-executed means the worker died
+        in the window where the side effect MAY have happened -- the one case
+        that must not be refunded, because refunding lets a later cadence
+        spend the slot again and the world ends up with max_runs+1 writes.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM audit WHERE conversation_id=? "
+                "AND outcome='attempt' LIMIT 1",
+                (conversation_id,),
+            ).fetchone()
+        return row is not None
+
     def has_execution(self, conversation_id: str) -> bool:
         """Did ToolGate actually run a side effect under this conversation id?
 
