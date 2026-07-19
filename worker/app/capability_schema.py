@@ -9,7 +9,7 @@ SCHEMA = "kaliv-capability/v2"
 
 
 class CapabilitySchemaError(ValueError):
-    pass
+    """The descriptor is malformed or contradicts its own safety metadata."""
 
 
 class StrictModel(BaseModel):
@@ -18,10 +18,10 @@ class StrictModel(BaseModel):
 
 class Isolation(StrictModel):
     mode: Literal["in_process", "process"]
-    env_allow: list[str] = Field(default_factory=list)
+    env_allow: list[str]
 
     @model_validator(mode="after")
-    def validate_env(self):
+    def validate_env(self) -> "Isolation":
         if any(not value.strip() for value in self.env_allow):
             raise ValueError("isolation.env_allow contains an empty value")
         if len(self.env_allow) != len(set(self.env_allow)):
@@ -34,9 +34,11 @@ class Scheduling(StrictModel):
     reason: str
 
     @model_validator(mode="after")
-    def validate_reason(self):
+    def validate_reason(self) -> "Scheduling":
         if self.allowed and self.reason:
-            raise ValueError("schedulable capability must not carry a refusal reason")
+            raise ValueError(
+                "schedulable capability must not carry a refusal reason"
+            )
         if not self.allowed and not self.reason.strip():
             raise ValueError("unschedulable capability requires a reason")
         return self
@@ -48,16 +50,22 @@ class Confirmation(StrictModel):
 
 class Network(StrictModel):
     mode: Literal["none", "loopback", "public", "undeclared"]
-    destinations: list[str] = Field(default_factory=list)
+    destinations: list[str]
 
     @model_validator(mode="after")
-    def validate_destinations(self):
+    def validate_destinations(self) -> "Network":
         if any(not value.strip() for value in self.destinations):
             raise ValueError("network.destinations contains an empty value")
         if len(self.destinations) != len(set(self.destinations)):
             raise ValueError("network.destinations contains duplicates")
         if self.mode in {"none", "undeclared"} and self.destinations:
-            raise ValueError("network destinations require loopback or public mode")
+            raise ValueError(
+                "network destinations require loopback or public mode"
+            )
+        if self.mode in {"loopback", "public"} and not self.destinations:
+            raise ValueError(
+                "loopback or public network mode requires a destination"
+            )
         return self
 
 
@@ -70,9 +78,9 @@ class Replay(StrictModel):
 
 
 class CapabilityDescriptorV2(StrictModel):
-    schema_id: Literal["kaliv-capability/v2"] = Field(default=SCHEMA, alias="schema")
+    schema_id: Literal["kaliv-capability/v2"] = Field(alias="schema")
     capability_id: str = Field(pattern=r"^tool:[A-Za-z0-9._:-]{1,155}$")
-    kind: Literal["tool"] = "tool"
+    kind: Literal["tool"]
     description: str = Field(min_length=1)
     access: Literal["read", "write", "desktop"]
     impact: Literal["read", "write", "desktop", "destructive", "admin"]
@@ -84,10 +92,12 @@ class CapabilityDescriptorV2(StrictModel):
     network: Network
     termination: Termination
     replay: Replay
-    production_activation: Literal[False] = False
+    production_activation: Literal[False]
 
     @model_validator(mode="after")
-    def validate_cross_fields(self):
+    def validate_cross_fields(self) -> "CapabilityDescriptorV2":
+        if not self.description.strip():
+            raise ValueError("description must contain visible text")
         expected = "required" if self.access in {"write", "desktop"} else "none"
         if self.confirmation.mode != expected:
             raise ValueError("confirmation mode contradicts access")
@@ -98,8 +108,23 @@ class CapabilityDescriptorV2(StrictModel):
 
     def canonical_json(self) -> str:
         return json.dumps(
-            self.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            self.to_dict(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
         )
+
+    @property
+    def termination_mode(self) -> str:
+        return self.termination.mode
+
+    @property
+    def network_mode(self) -> str:
+        return self.network.mode
+
+    @property
+    def idempotent(self) -> bool:
+        return self.replay.idempotent
 
 
 def parse_descriptor(payload: Mapping[str, Any]) -> CapabilityDescriptorV2:
@@ -113,32 +138,44 @@ def descriptor_from_tool(tool: object) -> CapabilityDescriptorV2:
     name = getattr(tool, "name", None)
     if not isinstance(name, str) or not name:
         raise CapabilitySchemaError("tool.name must be a non-empty string")
+
     schedulable = getattr(tool, "schedulable", None)
     isolate = getattr(tool, "isolate", None)
     if not isinstance(schedulable, bool) or not isinstance(isolate, bool):
         raise CapabilitySchemaError(f"{name}: boolean metadata is invalid")
+
     reason = getattr(tool, "unschedulable_because", "")
     env_allow = getattr(tool, "env_allow", ())
     destinations = getattr(tool, "network_destinations", ())
     if not isinstance(reason, str) or not isinstance(env_allow, tuple):
-        raise CapabilitySchemaError(f"{name}: scheduling or isolation metadata is invalid")
+        raise CapabilitySchemaError(
+            f"{name}: scheduling or isolation metadata is invalid"
+        )
     if not isinstance(destinations, tuple):
-        raise CapabilitySchemaError(f"{name}.network_destinations must be a tuple")
+        raise CapabilitySchemaError(
+            f"{name}.network_destinations must be a tuple"
+        )
+
     try:
         risk = getattr(tool, "risk")
         return CapabilityDescriptorV2(
+            schema=SCHEMA,
             capability_id=f"tool:{name}",
+            kind="tool",
             description=getattr(tool, "description"),
             access=risk,
             impact=getattr(tool, "impact"),
             data_class=getattr(tool, "sensitivity"),
             parameters=getattr(tool, "params"),
             isolation=Isolation(
-                mode="process" if isolate else "in_process", env_allow=list(env_allow)
+                mode="process" if isolate else "in_process",
+                env_allow=list(env_allow),
             ),
             scheduling=Scheduling(
                 allowed=schedulable,
-                reason="" if schedulable else (reason or "not declared schedulable"),
+                reason="" if schedulable else (
+                    reason or "not declared schedulable"
+                ),
             ),
             confirmation=Confirmation(
                 mode="required" if risk in {"write", "desktop"} else "none"
@@ -163,9 +200,11 @@ def descriptors_from_registry(
         descriptor = descriptor_from_tool(tool)
         if descriptor.capability_id != f"tool:{name}":
             raise CapabilitySchemaError(
-                f"registry key {name!r} does not match {descriptor.capability_id!r}"
+                f"registry key {name!r} does not match "
+                f"{descriptor.capability_id!r}"
             )
         descriptors.append(descriptor)
+
     ids = [item.capability_id for item in descriptors]
     if len(ids) != len(set(ids)):
         raise CapabilitySchemaError("registry produced duplicate capability ids")
