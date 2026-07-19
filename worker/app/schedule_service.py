@@ -15,7 +15,12 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
-from .schedule_runner import SchedulerRunner, TickResult
+from .schedule_runner import (
+    EXECUTION_MODEL,
+    MAX_CONCURRENCY,
+    SchedulerRunner,
+    TickResult,
+)
 
 DEFAULT_POLL_S = 15.0
 MIN_POLL_S = 5.0
@@ -53,6 +58,9 @@ class ServiceStatus:
     last_tick_at: float | None
     last_result: TickResult | None
     last_error: str | None
+    execution_model: str
+    max_concurrency: int
+    busy_ticks: int
 
 
 class SchedulerService:
@@ -81,6 +89,7 @@ class SchedulerService:
         self._last_tick_at: float | None = None
         self._last_result: TickResult | None = None
         self._last_error: str | None = None
+        self._busy_ticks = 0
 
     def start(self) -> bool:
         """Start once when configured; return False without side effects when off."""
@@ -154,13 +163,22 @@ class SchedulerService:
                 last_tick_at=self._last_tick_at,
                 last_result=self._last_result,
                 last_error=self._last_error,
+                execution_model=getattr(
+                    self.runner, "execution_model", EXECUTION_MODEL
+                ),
+                max_concurrency=getattr(
+                    self.runner, "max_concurrency", MAX_CONCURRENCY
+                ),
+                busy_ticks=self._busy_ticks,
             )
 
     def _loop(self) -> None:
         while not self._stop.is_set():
             tick_at = self.clock()
             try:
-                result = self.runner.run_once()
+                result = self.runner.run_once(
+                    should_continue=lambda: not self._stop.is_set()
+                )
             except Exception as exc:
                 with self._lock:
                     self._ticks += 1
@@ -175,6 +193,8 @@ class SchedulerService:
                     self._ticks += 1
                     self._last_tick_at = tick_at
                     self._last_result = result
+                    if result.busy:
+                        self._busy_ticks += 1
                     self._last_error = None
 
             # Event.wait(), not sleep(): shutdown must interrupt a 60-minute

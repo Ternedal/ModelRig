@@ -53,6 +53,8 @@ class FakeRunner:
         self.called = threading.Event()
         self._lock = threading.Lock()
         self.recovered = False
+        self.execution_model = "single_flight"
+        self.max_concurrency = 1
 
     def recover_interrupted(self, *, now=None):
         # start() runs evidence-based recovery (T-012) before the loop claims;
@@ -69,7 +71,9 @@ class FakeRunner:
         self.migrated = True
         return []
 
-    def run_once(self):
+    def run_once(self, *, should_continue=None):
+        if should_continue is not None and not should_continue():
+            return TickResult(True, False, 0, 0, 0, 0)
         with self._lock:
             self.calls += 1
             index = min(self.calls - 1, len(self.actions) - 1)
@@ -105,6 +109,9 @@ time.sleep(0.03)
 check(off_runner.calls == 0, "flag OFF creates no tick side effect")
 status = off.status()
 check(not status.configured and not status.running and status.ticks == 0, "flag OFF status tells the truth")
+check(status.execution_model == "single_flight" and status.max_concurrency == 1,
+      "service status publishes the explicit bounded execution model")
+check(status.busy_ticks == 0, "service status starts with no rejected competing ticks")
 check(off.stop(), "stopping a never-started service is harmless")
 
 # --- start is immediate, idempotent and restartable --------------------------
