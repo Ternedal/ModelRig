@@ -21,20 +21,30 @@ jobs:
           pip install -r worker/requirements.txt --break-system-packages >/dev/null
           python scripts/_patch_t018_single_flight.py
           python scripts/_adjust_t018_fixture.py
-      - name: Run bounded single-flight diagnosis
+      - name: Run scheduler contracts with bounded failure artifact
         env:
           PYTHONPATH: worker
         shell: bash
         run: |
-          set +e
-          python tests/worker_scheduler_single_flight.py > /tmp/t018-output.txt 2>&1
-          status=$?
-          {
-            echo "EXIT_STATUS=$status"
-            tail -n 120 /tmp/t018-output.txt
-          } > /tmp/t018-diagnosis.txt
+          set -u
+          : > /tmp/t018-diagnosis.txt
+          for f in \
+            tests/worker_scheduler_single_flight.py \
+            tests/worker_schedule_service.py \
+            tests/worker_schedule_runner.py \
+            tests/worker_schedule_revoke.py \
+            tests/worker_occurrence_ledger.py; do
+            if ! python "$f" > /tmp/t018-output.txt 2>&1; then
+              {
+                echo "FAILED_TEST=$f"
+                tail -n 140 /tmp/t018-output.txt
+              } > /tmp/t018-diagnosis.txt
+              cat /tmp/t018-diagnosis.txt
+              exit 1
+            fi
+          done
+          echo 'ALL_T018_CONTRACTS_PASSED' > /tmp/t018-diagnosis.txt
           cat /tmp/t018-diagnosis.txt
-          exit "$status"
       - name: Upload bounded diagnosis
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
