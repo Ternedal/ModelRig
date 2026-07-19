@@ -77,6 +77,55 @@ rejects(
 )
 
 
+# A well-shaped but altered receipt object cannot mint claim evidence. Each case
+# uses a fresh receipt so rejection is proven to occur before the one-use claim.
+for offset, changes, expected, name in (
+    (0, {"max_bytes": 4095}, DataSharingDenied, "forged receipt byte ceiling"),
+    (10, {"expires_at": 999}, DataSharingDenied, "forged receipt expiry"),
+    (
+        20,
+        {"authorization": "permission", "permission_id": "dsp_forged"},
+        DataSharingDenied,
+        "forged receipt authorization",
+    ),
+    (
+        30,
+        {"authorized_at": True},
+        DataSharingContractError,
+        "boolean receipt authorization timestamp",
+    ),
+):
+    forged_ledger = VerifiableDataSharingLedger(uuid_factory=UUIDs())
+    forged_boundary = VerifiableResearchSharingBoundary(
+        forged_ledger,
+        mode="enforce",
+    )
+    forged_now = 50 + offset
+    forged_lease = forged_boundary.prepare(
+        INTENT,
+        now=forged_now,
+        receipt_ttl_seconds=30,
+    )
+    forged_receipt = replace(forged_lease.receipt, **changes)
+    rejects(
+        lambda value=forged_receipt, claim_now=forged_now + 1: forged_ledger.claim(
+            value,
+            INTENT.to_request(),
+            now=claim_now,
+        ),
+        expected,
+        f"{name} is rejected before claim",
+    )
+    check(
+        not any(
+            event["event_type"] == "claimed"
+            for event in forged_ledger.recent_events(20)
+        ),
+        f"{name} leaves no claim event",
+    )
+    forged_ledger.close()
+
+
 ledger = VerifiableDataSharingLedger(uuid_factory=UUIDs())
 boundary = VerifiableResearchSharingBoundary(ledger, mode="enforce")
 lease = boundary.prepare(INTENT, now=100, receipt_ttl_seconds=30)
@@ -122,6 +171,16 @@ rejects(
     ),
     DataSharingDenied,
     "forged byte ceiling is rejected",
+)
+rejects(
+    lambda: ledger.verify_claim(
+        evidence,
+        replace(lease.receipt, expires_at=999),
+        INTENT.to_request(),
+        now=102,
+    ),
+    DataSharingDenied,
+    "forged receipt cannot verify existing evidence",
 )
 rejects(
     lambda: DataSharingClaimEvidence(
