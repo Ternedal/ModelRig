@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import sys
@@ -228,6 +229,17 @@ def valid_reports() -> dict[str, dict]:
     }
 
 
+def reports_with_artifacts(temp: Path) -> dict[str, dict]:
+    reports = valid_reports()
+    for name, trial in reports["lifecycle"]["trials"].items():
+        artifact = temp / f"{name}.log"
+        raw = f"{name} physical lifecycle evidence\n".encode("utf-8")
+        artifact.write_bytes(raw)
+        trial["evidence_path"] = str(artifact.relative_to(ROOT))
+        trial["evidence_sha256"] = hashlib.sha256(raw).hexdigest()
+    return reports
+
+
 def fake_assessor(_report, *, current_version, current_code, report_sha256):
     assert current_version == CANDIDATE["version"]
     assert current_code == CANDIDATE["code_sha256"]
@@ -260,9 +272,14 @@ old_assessor = campaign._load_agent3_assessor
 campaign.candidate_identity = lambda _root: dict(CANDIDATE)
 campaign._load_agent3_assessor = lambda _root: fake_assessor
 try:
-    with tempfile.TemporaryDirectory(dir=ROOT, prefix="campaign-test-") as temp_dir:
+    artifact_parent = ROOT / "validation" / "appliance-lifecycle-evidence"
+    artifact_parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        dir=artifact_parent,
+        prefix="campaign-test-",
+    ) as temp_dir:
         temp = Path(temp_dir)
-        for name, report in valid_reports().items():
+        for name, report in reports_with_artifacts(temp).items():
             write(temp / f"{name}.json", report)
 
         verified, verified_exit = campaign.campaign_report(args_for(temp, "verify"))
@@ -291,7 +308,7 @@ try:
         check(incomplete["gate"]["passed"] is False,
               "missing evidence fails the verify gate")
 
-        voice = valid_reports()["voice"]
+        voice = reports_with_artifacts(temp)["voice"]
         voice["build"]["git_sha"] = "e" * 40
         write(temp / "voice.json", voice)
         mismatch, mismatch_exit = campaign.campaign_report(args_for(temp, "verify"))
@@ -301,7 +318,7 @@ try:
             "mismatched phase explains the exact identity error",
         )
 
-        voice = valid_reports()["voice"]
+        voice = reports_with_artifacts(temp)["voice"]
         voice["generated_at"] = (NOW - timedelta(days=20)).isoformat()
         write(temp / "voice.json", voice)
         stale, stale_exit = campaign.campaign_report(args_for(temp, "verify"))
@@ -309,7 +326,7 @@ try:
         check(stale["evidence"]["voice"]["status"] == "fail",
               "stale phase is marked failed rather than silently ignored")
 
-        reports = valid_reports()
+        reports = reports_with_artifacts(temp)
         reports["lifecycle"]["trials"]["reboot"]["performed"] = "true"
         write(temp / "voice.json", reports["voice"])
         write(temp / "lifecycle.json", reports["lifecycle"])
@@ -320,7 +337,7 @@ try:
             "lifecycle type failure is explicit",
         )
 
-        reports = valid_reports()
+        reports = reports_with_artifacts(temp)
         reports["lifecycle"]["started_at"] = (NOW + timedelta(minutes=1)).isoformat()
         write(temp / "lifecycle.json", reports["lifecycle"])
         reversed_time, reversed_exit = campaign.campaign_report(args_for(temp, "verify"))
@@ -331,7 +348,7 @@ try:
             "lifecycle timestamp ordering failure is explicit",
         )
 
-        reports = valid_reports()
+        reports = reports_with_artifacts(temp)
         reports["lifecycle"]["host"]["windows_version"] = "   "
         reports["lifecycle"]["trials"]["good_update"]["source_version"] = CANDIDATE["version"]
         reports["lifecycle"]["trials"]["good_update"]["source_git_sha"] = CANDIDATE["git_sha"]
@@ -355,6 +372,18 @@ try:
         check(
             "bad_update.attempted_version must be a non-empty string" in metadata_errors,
             "bad update identifies the attempted build",
+        )
+
+        reports = reports_with_artifacts(temp)
+        reboot_artifact = ROOT / reports["lifecycle"]["trials"]["reboot"]["evidence_path"]
+        reboot_artifact.write_text("tampered evidence\n", encoding="utf-8")
+        write(temp / "lifecycle.json", reports["lifecycle"])
+        tampered, tampered_exit = campaign.campaign_report(args_for(temp, "verify"))
+        check(tampered_exit == 1, "tampered lifecycle artifact blocks campaign")
+        check(
+            "reboot.evidence_sha256 does not match the artifact"
+            in tampered["evidence"]["lifecycle"]["errors"],
+            "artifact hash mismatch is explicit",
         )
 finally:
     campaign.candidate_identity = old_candidate

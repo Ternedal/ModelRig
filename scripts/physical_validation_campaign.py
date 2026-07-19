@@ -266,6 +266,67 @@ def _nonempty_text(errors: list[str], label: str, value: Any) -> str | None:
     return value.strip()
 
 
+def _validate_lifecycle_artifact(
+    errors: list[str],
+    label: str,
+    root: Path,
+    path_value: Any,
+    digest_value: Any,
+) -> dict[str, Any] | None:
+    raw_path = _nonempty_text(errors, f"{label}.evidence_path", path_value)
+    if not _valid_digest(digest_value, 64):
+        errors.append(f"{label}.evidence_sha256 is not a 64-character digest")
+        expected_digest = None
+    else:
+        expected_digest = digest_value
+    if raw_path is None:
+        return None
+    relative_input = Path(raw_path)
+    if relative_input.is_absolute() or ".." in relative_input.parts:
+        errors.append(f"{label}.evidence_path must be repository-relative")
+        return None
+    unresolved = root / relative_input
+    if unresolved.is_symlink():
+        errors.append(f"{label}.evidence_path must not be a symlink")
+        return None
+    try:
+        resolved = _resolve_under(root, relative_input)
+        relative = resolved.relative_to(root.resolve())
+    except CampaignError as exc:
+        errors.append(f"{label}.evidence_path is invalid: {exc}")
+        return None
+    if relative.parts[:2] != ("validation", "appliance-lifecycle-evidence"):
+        errors.append(
+            f"{label}.evidence_path must be under "
+            "validation/appliance-lifecycle-evidence"
+        )
+        return None
+    if not resolved.exists() or not resolved.is_file():
+        errors.append(f"{label}.evidence artifact is missing")
+        return None
+    try:
+        size = resolved.stat().st_size
+        if size <= 0 or size > MAX_EVIDENCE_BYTES:
+            errors.append(
+                f"{label}.evidence artifact size is invalid: {size} bytes"
+            )
+            return None
+        raw = resolved.read_bytes()
+    except OSError as exc:
+        errors.append(
+            f"{label}.evidence artifact cannot be read: {type(exc).__name__}"
+        )
+        return None
+    actual_digest = hashlib.sha256(raw).hexdigest()
+    if expected_digest is not None and actual_digest != expected_digest:
+        errors.append(f"{label}.evidence_sha256 does not match the artifact")
+    return {
+        "path": str(relative),
+        "sha256": actual_digest,
+        "bytes": len(raw),
+    }
+
+
 def _base_result(name: str, path: Path, raw: bytes) -> dict[str, Any]:
     return {
         "name": name,
@@ -550,6 +611,22 @@ def _validate_lifecycle(
     if not isinstance(trials, dict):
         errors.append("lifecycle trials are missing")
         trials = {}
+    root = _thresholds.get("root")
+    artifacts: dict[str, Any] = {}
+    if not isinstance(root, Path):
+        errors.append("campaign root is unavailable for lifecycle artifacts")
+
+    def capture_artifact(name: str, trial: dict[str, Any]) -> None:
+        if isinstance(root, Path):
+            artifact = _validate_lifecycle_artifact(
+                errors,
+                name,
+                root,
+                trial.get("evidence_path"),
+                trial.get("evidence_sha256"),
+            )
+            if artifact is not None:
+                artifacts[name] = artifact
 
     reboot = trials.get("reboot")
     if not isinstance(reboot, dict):
@@ -561,6 +638,7 @@ def _validate_lifecycle(
         _expect_equal(errors, "reboot.backend_version", reboot.get("backend_version"), candidate["version"])
         _expect_equal(errors, "reboot.worker_version", reboot.get("worker_version"), candidate["version"])
         _expect_equal(errors, "reboot.worker_code_sha256", reboot.get("worker_code_sha256"), candidate["code_sha256"])
+        capture_artifact("reboot", reboot)
 
     for name in ("supervisor_backend", "supervisor_worker"):
         trial = trials.get(name)
@@ -573,6 +651,7 @@ def _validate_lifecycle(
         _bounded_ms(errors, f"{name}.restart_ms", trial.get("restart_ms"), 10 * 60 * 1000)
         _expect_equal(errors, f"{name}.active_version", trial.get("active_version"), candidate["version"])
         _expect_equal(errors, f"{name}.active_code_sha256", trial.get("active_code_sha256"), candidate["code_sha256"])
+        capture_artifact(name, trial)
 
     good = trials.get("good_update")
     if not isinstance(good, dict):
@@ -596,6 +675,7 @@ def _validate_lifecycle(
             errors.append("good_update.source_git_sha is not a 40-character digest")
         elif good.get("source_git_sha") == candidate["git_sha"]:
             errors.append("good_update.source_git_sha must differ from the candidate")
+        capture_artifact("good_update", good)
 
     bad = trials.get("bad_update")
     if not isinstance(bad, dict):
@@ -616,6 +696,7 @@ def _validate_lifecycle(
             errors.append("bad_update.attempted_git_sha is not a 40-character digest")
         if bad.get("attempted_git_sha") == candidate["git_sha"]:
             errors.append("bad_update attempted_git_sha must differ from the candidate")
+        capture_artifact("bad_update", bad)
 
     result["summary"] = {
         "host": report.get("host"),
@@ -630,6 +711,7 @@ def _validate_lifecycle(
         "bad_update_recovered": _nested(
             report, "trials", "bad_update", "rejected_or_rolled_back"
         ),
+        "artifacts": artifacts,
     }
 
 
@@ -719,6 +801,7 @@ def campaign_report(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     thresholds: dict[str, Any] = {
         "min_model_exact": args.min_model_exact,
         "agent3_assessor": assessor,
+        "root": root,
     }
     paths = {
         "preflight": args.preflight_report,

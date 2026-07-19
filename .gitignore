@@ -46,6 +46,7 @@ kaliv-tools-state.json.tmp
 /validation/rag-benchmark-latest.json
 /validation/rag-benchmark-latest.json.tmp
 /validation/appliance-lifecycle-observations.json
+/validation/appliance-lifecycle-evidence/
 /validation/physical-validation-campaign-latest.json
 /validation/physical-validation-campaign-latest.json.tmp
 

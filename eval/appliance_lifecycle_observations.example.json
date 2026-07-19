@@ -19,7 +19,9 @@
       "backend_version": "FILL_ME",
       "worker_version": "FILL_ME",
       "worker_code_sha256": "FILL_ME_64_HEX",
-      "notes": "FILL_ME"
+      "notes": "FILL_ME",
+      "evidence_path": "validation/appliance-lifecycle-evidence/reboot.log",
+      "evidence_sha256": "FILL_ME_64_HEX"
     },
     "supervisor_backend": {
       "performed": false,
@@ -28,7 +30,9 @@
       "restart_ms": null,
       "active_version": "FILL_ME",
       "active_code_sha256": "FILL_ME_64_HEX",
-      "notes": "FILL_ME"
+      "notes": "FILL_ME",
+      "evidence_path": "validation/appliance-lifecycle-evidence/supervisor_backend.log",
+      "evidence_sha256": "FILL_ME_64_HEX"
     },
     "supervisor_worker": {
       "performed": false,
@@ -37,7 +41,9 @@
       "restart_ms": null,
       "active_version": "FILL_ME",
       "active_code_sha256": "FILL_ME_64_HEX",
-      "notes": "FILL_ME"
+      "notes": "FILL_ME",
+      "evidence_path": "validation/appliance-lifecycle-evidence/supervisor_worker.log",
+      "evidence_sha256": "FILL_ME_64_HEX"
     },
     "good_update": {
       "performed": false,
@@ -50,7 +56,9 @@
       "rollback_observed": false,
       "data_preserved": false,
       "schedules_preserved": false,
-      "notes": "FILL_ME"
+      "notes": "FILL_ME",
+      "evidence_path": "validation/appliance-lifecycle-evidence/good_update.log",
+      "evidence_sha256": "FILL_ME_64_HEX"
     },
     "bad_update": {
       "performed": false,
@@ -63,7 +71,9 @@
       "ready": false,
       "data_preserved": false,
       "schedules_preserved": false,
-      "notes": "FILL_ME"
+      "notes": "FILL_ME",
+      "evidence_path": "validation/appliance-lifecycle-evidence/bad_update.log",
+      "evidence_sha256": "FILL_ME_64_HEX"
     }
   }
 }
