@@ -37,6 +37,15 @@ kaliv-tools-state.json.tmp
 /validation/agent3-rig-validation-latest.json
 /validation/agent3-rig-validation-latest.json.tmp
 
+# Voice baseline: raw recordings and rolling/manual work files stay on the rig.
+# Only a manually reviewed, dated evidence report may be committed.
+/validation/voice-fixtures/
+/validation/voice-baseline-latest.json
+/validation/voice-baseline-latest.json.tmp
+/validation/voice-baseline-fixture-check.json
+/validation/voice-baseline-fixture-check.json.tmp
+/validation/voice-manual-observations.json
+
 # Written at build time by scripts/stamp_build_identity.py. Committing it would
 # freeze a fingerprint of whatever the tree looked like on someone laptop --
 # another number typed into a file that stops being true the next commit.
