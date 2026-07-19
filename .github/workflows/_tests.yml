@@ -67,13 +67,16 @@ jobs:
             [ -e "$f" ] || continue
             echo "===== $f =====" >> /tmp/modelrig-ci-test.log
             echo "::group::$f"
-            if ! PYTHONPATH=worker python3 "$f" >> /tmp/modelrig-ci-test.log 2>&1; then
-              status=$?
+            set +e
+            PYTHONPATH=worker python3 "$f" >> /tmp/modelrig-ci-test.log 2>&1
+            status=$?
+            set -e
+            if [ "$status" -ne 0 ]; then
               cat /tmp/modelrig-ci-test.log
               echo "::endgroup::"
               exit "$status"
             fi
-            cat /tmp/modelrig-ci-test.log | tail -n 80
+            tail -n 80 /tmp/modelrig-ci-test.log
             echo "::endgroup::"
           done
 
