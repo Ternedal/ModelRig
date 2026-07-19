@@ -57,9 +57,9 @@ jobs:
 
       # Every integration + worker test, globbed so a new tests/*.py is included
       # with no edit here. MODELRIG_BIN is used by the backend/e2e tests; the
-      # worker tests ignore it. This temporary branch-only wrapper keeps the log
-      # small enough to surface the first failing test; it is reverted after the
-      # draft failure has been diagnosed.
+      # worker tests ignore it. set -e stops at the first failure. This is exactly
+      # the set the release job used to list inline (backend_smoke/v1, e2e,
+      # worker_*), now in one place.
       - name: Test suite (auto-includes new tests/*.py)
         env:
           MODELRIG_BIN: /tmp/modelrig-server
@@ -67,33 +67,10 @@ jobs:
           set -e
           for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
             [ -e "$f" ] || continue
-            if ! PYTHONPATH=worker python3 "$f" > /tmp/modelrig-test.log 2>&1; then
-              printf '%s\n' "$f" > /tmp/modelrig-failed-test.txt
-              if [ "$f" = "tests/workflow_current_state.py" ]; then
-                cp CURRENT_STATE.md /tmp/CURRENT_STATE.committed.md
-                python3 scripts/current_state.py
-                cp CURRENT_STATE.md /tmp/CURRENT_STATE.generated.md
-                diff -u /tmp/CURRENT_STATE.committed.md /tmp/CURRENT_STATE.generated.md > /tmp/CURRENT_STATE.diff || true
-              fi
-              echo "FAILED_TEST=$f"
-              cat /tmp/modelrig-test.log
-              exit 1
-            fi
+            echo "::group::$f"
+            PYTHONPATH=worker python3 "$f"
+            echo "::endgroup::"
           done
-
-      - name: Upload failing test evidence
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: t020-failing-test
-          path: |
-            /tmp/modelrig-failed-test.txt
-            /tmp/modelrig-test.log
-            /tmp/CURRENT_STATE.committed.md
-            /tmp/CURRENT_STATE.generated.md
-            /tmp/CURRENT_STATE.diff
-          if-no-files-found: warn
-          retention-days: 1
 
   # The appliance code (updater swap/recovery/journal, supervisor rotation,
   # heartbeat) leans on file semantics that DIFFER on Windows -- os.Rename won't
