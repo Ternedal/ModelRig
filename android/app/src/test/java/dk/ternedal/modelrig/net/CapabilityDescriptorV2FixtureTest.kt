@@ -10,11 +10,9 @@ import java.io.File
 class CapabilityDescriptorV2FixtureTest {
     private fun fixtureRoot(): JSONObject {
         val cwd = File(System.getProperty("user.dir"))
-        val candidates = listOf(
-            File(cwd, "../contracts/kaliv-capability-v2-fixtures.json"),
-            File(cwd, "contracts/kaliv-capability-v2-fixtures.json"),
-        )
-        val file = candidates.firstOrNull { it.isFile }
+        val file = generateSequence(cwd) { it.parentFile }
+            .map { File(it, "contracts/kaliv-capability-v2-fixtures.json") }
+            .firstOrNull { it.isFile }
             ?: error("shared capability fixtures not found from ${cwd.absolutePath}")
         return JSONObject(file.readText(Charsets.UTF_8))
     }
