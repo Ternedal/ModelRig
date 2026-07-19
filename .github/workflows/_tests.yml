@@ -55,22 +55,37 @@ jobs:
             Write-Host "parsed $($_.FullName)"
           }
 
-      # Every integration + worker test, globbed so a new tests/*.py is included
-      # with no edit here. MODELRIG_BIN is used by the backend/e2e tests; the
-      # worker tests ignore it. set -e stops at the first failure. This is exactly
-      # the set the release job used to list inline (backend_smoke/v1, e2e,
-      # worker_*), now in one place.
+      # T032_CI_LOG_DIAGNOSTIC_BEGIN
       - name: Test suite (auto-includes new tests/*.py)
         env:
           MODELRIG_BIN: /tmp/modelrig-server
+        shell: bash
         run: |
           set -e
+          : > /tmp/modelrig-ci-test.log
           for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
             [ -e "$f" ] || continue
+            echo "===== $f =====" >> /tmp/modelrig-ci-test.log
             echo "::group::$f"
-            PYTHONPATH=worker python3 "$f"
+            if ! PYTHONPATH=worker python3 "$f" >> /tmp/modelrig-ci-test.log 2>&1; then
+              status=$?
+              cat /tmp/modelrig-ci-test.log
+              echo "::endgroup::"
+              exit "$status"
+            fi
+            cat /tmp/modelrig-ci-test.log | tail -n 80
             echo "::endgroup::"
           done
+
+      - name: Upload CI failed test log
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: reusable-ci-test-log
+          path: /tmp/modelrig-ci-test.log
+          if-no-files-found: error
+          retention-days: 7
+      # T032_CI_LOG_DIAGNOSTIC_END
 
   # The appliance code (updater swap/recovery/journal, supervisor rotation,
   # heartbeat) leans on file semantics that DIFFER on Windows -- os.Rename won't
