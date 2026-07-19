@@ -68,11 +68,23 @@ jobs:
           for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
             [ -e "$f" ] || continue
             if ! PYTHONPATH=worker python3 "$f" > /tmp/modelrig-test.log 2>&1; then
+              printf '%s\n' "$f" > /tmp/modelrig-failed-test.txt
               echo "FAILED_TEST=$f"
               cat /tmp/modelrig-test.log
               exit 1
             fi
           done
+
+      - name: Upload failing test evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: t020-failing-test
+          path: |
+            /tmp/modelrig-failed-test.txt
+            /tmp/modelrig-test.log
+          if-no-files-found: warn
+          retention-days: 1
 
   # The appliance code (updater swap/recovery/journal, supervisor rotation,
   # heartbeat) leans on file semantics that DIFFER on Windows -- os.Rename won't
