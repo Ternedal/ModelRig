@@ -86,7 +86,7 @@ def finished(ledger: DataSharingLedger) -> dict:
     return next(event for event in ledger.recent_events(20) if event["event_type"] == "finished")
 
 
-async def run_case(operation, expected_code: str, now: int):
+async def run_case(operation, expected_code: str, expected_bytes: int, now: int):
     ledger, boundary, lease = context(now)
     try:
         await execute_research_sharing(
@@ -100,22 +100,23 @@ async def run_case(operation, expected_code: str, now: int):
     except ResearchSharingExecutionError as exc:
         check(exc.outcome == "blocked", f"{expected_code} is blocked")
         check(exc.error_code == expected_code, f"{expected_code} has stable code")
-        check(exc.bytes_sent == finished(ledger)["bytes_sent"], f"{expected_code} keeps measured bytes")
+        check(exc.bytes_sent == expected_bytes, f"{expected_code} returns exact measured bytes")
     else:
         check(False, f"{expected_code} is rejected")
     event = finished(ledger)
     check(event["outcome"] == "blocked", f"{expected_code} is terminally audited")
     check(event["error_code"] == expected_code, f"{expected_code} audit is normalized")
+    check(event["bytes_sent"] == expected_bytes, f"{expected_code} audit keeps exact measured bytes")
     ledger.close()
 
 
 async def main() -> None:
     sync_run = SyncRun()
-    await run_case(sync_run, "operation_contract_violation", 100)
+    await run_case(sync_run, "operation_contract_violation", 0, 100)
     check(sync_run.calls == ["run", "close"], "sync run still receives one cleanup attempt")
 
     sync_close = SyncClose()
-    await run_case(sync_close, "cleanup_contract_violation", 200)
+    await run_case(sync_close, "cleanup_contract_violation", 4, 200)
     check(sync_close.calls == ["run", "close"], "sync close is invoked exactly once")
 
     print(f"\n{passed} passed, {failed} failed")
