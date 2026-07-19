@@ -20,6 +20,7 @@ from .data_sharing import (
     DataSharingLedger,
     DataSharingPolicy,
     DataSharingReceipt,
+    DataSharingRequest,
     Decision,
     Outcome,
 )
@@ -86,6 +87,13 @@ class ResearchSharingLease:
                 raise ResearchSharingBoundaryContractError("enforced leases require a receipt")
             if self.receipt.request_digest != self.request_digest:
                 raise ResearchSharingBoundaryContractError("receipt does not match lease request")
+            expected_authorization = (
+                "automatic" if self.decision == "automatic" else "permission"
+            )
+            if self.receipt.authorization != expected_authorization:
+                raise ResearchSharingBoundaryContractError(
+                    "receipt authorization contradicts lease decision"
+                )
 
     @property
     def may_send(self) -> bool:
@@ -192,7 +200,7 @@ class ResearchSharingBoundary:
         self,
         lease: ResearchSharingLease,
         intent: ResearchSharingIntent,
-    ) -> tuple[DataSharingReceipt, object]:
+    ) -> tuple[DataSharingReceipt, DataSharingRequest]:
         if not isinstance(lease, ResearchSharingLease):
             raise ResearchSharingBoundaryContractError("lease must be a ResearchSharingLease")
         intent = self._intent(intent)
@@ -201,6 +209,8 @@ class ResearchSharingBoundary:
             raise ResearchSharingBoundaryDenied("observe mode cannot authorize external processing")
         if lease.policy_sha256 != self.policy_sha256:
             raise ResearchSharingBoundaryDenied("lease was created under a different policy")
+        if lease.decision != self.policy.decision(request):
+            raise ResearchSharingBoundaryDenied("lease decision contradicts the active policy")
         if lease.plan_digest != intent.plan.digest or lease.request_digest != request.digest:
             raise ResearchSharingBoundaryDenied("lease does not match the exact research intent")
         if lease.receipt is None or lease.receipt.request_digest != request.digest:
