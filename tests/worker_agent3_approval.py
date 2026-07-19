@@ -265,9 +265,11 @@ def test_only_note_append_is_eligible() -> None:
 def test_bad_signature_is_rejected() -> None:
     run, revision = waiting_run()
     token = token_for(run, revision)
+    payload_part, signature_part = token.split(".", 1)
+    corrupted_signature = ("A" if signature_part[0] != "A" else "B") + signature_part[1:]
     rejects(
         lambda: verify_agent3_approval(
-            token[:-1] + ("A" if token[-1] != "A" else "B"),
+            payload_part + "." + corrupted_signature,
             run,
             plan_revision=revision,
             now=NOW,
