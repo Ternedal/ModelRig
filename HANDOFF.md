@@ -140,6 +140,12 @@ hardware-beviste før valideringsrunden):**
   ci+codeql grønne på exact head. **Kampagnens scheduler_pilot-slot
   (v2, 1.58.129):** forensisk — pinner occurrence/job/audit-sekvens
   (claim→attempt→executed)/receipt/tidsvindue direkte fra storene.
+  **Recovery-linjen er synlig fra 1.58.130:** root-loggeren har ingen
+  handler under produktions-launchen, så alt under WARNING forsvandt —
+  scoped fix i scheduler_lifespan (fundet ved fuld sandkasse-generalprøve
+  af §1.6-kæden, hvor recovery kørte perfekt og sagde intet; token-mint
+  kræver v:1 + ALLE previewede vilkår, og aggregatorens
+  path-escape-guard beviste sig selv).
 
 **Bygget 12-14/7 (samme forbehold):**
 - **Substrat:** JobStore (persistent, terminal sandhed, cancel, restart→
@@ -241,10 +247,11 @@ halv release og lignede en hel. Flowet nu:
    Stående ordre, spørg ikke først. **Connectoren har været nede siden 16/7;
    genbekræftet 19/7 (tool_search finder ingen Notion-tools i sessionen).
    UDESTÅENDE (genbekræftet 4× d. 19/7 — tool_search finder fortsat ingen
-   Notion-tools): samlet status for 1.58.116→129 (durability-kæden
+   Notion-tools): samlet status for 1.58.116→130 (durability-kæden
    T-010→T-015 + T-014, to analyse-drops lukket samme dag inkl. Gate A
-   F-1202→F-1206, forensic pilot-slot) — post den som det FØRSTE når
-   connectoren er tilbage. Ét-tryks-artifact med den fulde tekst ligger hos
+   F-1202→F-1206, forensic pilot-slot, generalprøven af §1.6-kæden +
+   logging-fixet i 130) — post den som det FØRSTE når connectoren er
+   tilbage. Ét-tryks-artifact med den fulde tekst (→130) ligger hos
    Anders.**
 
 ---
