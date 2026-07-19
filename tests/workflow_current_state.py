@@ -88,6 +88,11 @@ import current_state as _CS  # noqa: E402
 _names = {n for n, _ in _CS._switches()}
 check("KALIV_SCHEDULER_API" in _names, "the generator finds it, not just the committed copy")
 check("KALIV_AGENT3_ENABLED" in _names, "and it did not lose the Python ones on the way")
+check("KALIV_AGENT3_TASK_UI" in _names,
+      "mapping-injected operator switches are visible, not hidden behind env.get")
+check("KALIV_AGENT3_PILOT_REPORT" in _names
+      and "KALIV_AGENT3_PILOT_MAX_AGE_HOURS" in _names,
+      "the configured pilot evidence inputs are visible in generated state")
 
 # Drive it: a Go switch that does not exist must not appear.
 check("KALIV_NOT_A_REAL_SWITCH" not in _names,
