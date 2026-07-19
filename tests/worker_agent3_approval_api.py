@@ -36,13 +36,17 @@ class DummyAdapter:
 
 
 def args_sha(args):
-    raw = json.dumps(args, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(raw).hexdigest()
+    assert set(args) == {"text"}
+    return hashlib.sha256(args["text"].encode("utf-8")).hexdigest()
 
 
 def sign(run, *, revision=0, nonce_byte=b"x", changes=None):
     step = run.steps[run.current_step]
     now = int(time.time())
+    overrides = dict(changes or {})
+    claimed_args_sha = overrides.pop("args_sha256", None)
+    if claimed_args_sha is None:
+        claimed_args_sha = args_sha(step.args)
     claims = {
         "v": 1,
         "nonce": base64.urlsafe_b64encode(nonce_byte * 32).decode().rstrip("="),
@@ -50,13 +54,13 @@ def sign(run, *, revision=0, nonce_byte=b"x", changes=None):
         "run_id": run.id,
         "step_id": step.id,
         "tool": step.tool,
-        "args_sha256": args_sha(step.args),
+        "args_sha256": claimed_args_sha,
         "confirmation_digest": step.confirmation_digest,
         "plan_revision": revision,
         "issued_at": now,
         "expires_at": min(now + 30, int(step.confirmation_expires_at)),
     }
-    claims.update(changes or {})
+    claims.update(overrides)
     payload = json.dumps(claims, separators=(",", ":")).encode()
     payload_part = base64.urlsafe_b64encode(payload).decode().rstrip("=")
     signature = hmac.new(SECRET, payload_part.encode("ascii"), hashlib.sha256).digest()
@@ -170,16 +174,17 @@ def test_deny_never_needs_or_consumes_approval() -> None:
 def test_valid_token_consumes_then_executes_once_with_redacted_receipt() -> None:
     _, orchestrator, client, executions, previous = make_env(required=True)
     try:
-        run = seed(orchestrator)
+        run = seed(orchestrator, marker="<MARKER>& æøå")
         token = sign(run)
         response = post(client, run, approve=True, token=token)
         assert response.status_code == 200, response.text
         body = response.json()
         assert body["run"]["state"] == "completed"
-        assert executions == [("note_append", {"text": "MARKER"})]
+        assert executions == [("note_append", {"text": "<MARKER>& æøå"})]
         receipt = body["approval_receipt"]
         assert receipt["device_id"] == "device-anders"
         assert receipt["plan_revision"] == 0
+        assert receipt["args_sha256"] == hashlib.sha256("<MARKER>& æøå".encode()).hexdigest()
         assert token not in json.dumps(receipt)
         events = orchestrator.store.events(run.id)
         kinds = [event["kind"] for event in events]
@@ -236,7 +241,12 @@ def test_non_note_write_token_is_rejected() -> None:
     _, orchestrator, client, executions, previous = make_env(required=True)
     try:
         run = seed(orchestrator, tool="delete_model")
-        response = post(client, run, approve=True, token=sign(run))
+        response = post(
+            client,
+            run,
+            approve=True,
+            token=sign(run, changes={"args_sha256": "a" * 64}),
+        )
         assert response.status_code == 409, response.text
         assert "restricted to note_append" in response.json()["detail"]
         assert executions == []
