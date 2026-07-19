@@ -4,6 +4,8 @@ The wrapper owns lifecycle ordering and normalized terminal audit, not networkin
 It is not imported by BrowserHost, ToolGate, an API route, or a network client.
 An injected operation must report the actual outbound bytes it has completed
 through ``OutboundByteMeter``; the wrapper never estimates payload size.
+Callable but synchronous ``run`` or ``close`` methods fail closed as contract
+violations and can never produce a successful terminal outcome.
 """
 from __future__ import annotations
 
