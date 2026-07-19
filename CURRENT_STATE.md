@@ -78,6 +78,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/backend_smoke.py`
 - `tests/backend_v1.py`
 - `tests/e2e.py`
+- `tests/scheduler_time_oracle.py`
 - `tests/worker_agent3_atomic_journal.py`
 - `tests/worker_agent3_capability_graph.py`
 - `tests/worker_agent3_capability_graph_api.py`
