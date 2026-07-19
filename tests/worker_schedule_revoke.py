@@ -142,11 +142,15 @@ try:
     a = st.create(_pause_name, {}, "every:60", now=NOW - 10)
     rn.registry = dict(T.REGISTRY)
     tick = rn.run_once(now=NOW + 61)
-    check(tick.claimed == 2 and tick.completed == 1 and tick.blocked == 1,
-          "one tick: A executes (and pauses B); B's already-claimed occurrence "
-          "is cancelled instead of running against the user's pause")
+    check(tick.claimed == 1 and tick.completed == 1 and tick.blocked == 0,
+          "one tick: A executes and pauses B before the single-flight runner "
+          "attempts another durable claim")
     check(_runs_used(st, b.schedule_id) == 0,
-          "B's reserved slot is refunded in the same tick")
+          "B is never reserved, so its budget remains untouched")
+    check(not any(
+              row["schedule_id"] == b.schedule_id
+              for row in st.reserved_occurrences()),
+          "B has no in-flight occurrence after A pauses it")
     check(st.get(b.schedule_id) is not None
           and not st.get(b.schedule_id).enabled,
           "B stays paused exactly as the user (via A's side effect) asked")

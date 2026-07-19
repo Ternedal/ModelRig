@@ -8,6 +8,7 @@ bounded tick makes every safety decision testable before anything wakes itself.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from typing import Callable, Mapping
@@ -28,6 +29,8 @@ from . import scheduler as scheduler_policy
 from . import tools
 
 _DETAIL_LIMIT = 500
+EXECUTION_MODEL = "single_flight"
+MAX_CONCURRENCY = 1
 
 
 @dataclass(frozen=True)
@@ -39,6 +42,9 @@ class TickResult:
     blocked: int
     failed: int
     job_ids: tuple[str, ...] = ()
+    busy: bool = False
+    execution_model: str = EXECUTION_MODEL
+    max_concurrency: int = MAX_CONCURRENCY
 
 
 class SchedulerRunner:
@@ -52,12 +58,21 @@ class SchedulerRunner:
         *,
         registry: Mapping[str, tools.Tool] | None = None,
         feature_enabled: Callable[[], bool] = scheduler_policy.enabled,
+        max_concurrency: int = MAX_CONCURRENCY,
     ) -> None:
+        if isinstance(max_concurrency, bool) or max_concurrency != MAX_CONCURRENCY:
+            raise ValueError(
+                "schedulerens eneste understøttede execution-model er "
+                "single_flight med max_concurrency=1"
+            )
         self.schedules = schedules
         self.jobs = jobs
         self.gate = gate
         self.registry = tools.REGISTRY if registry is None else registry
         self.feature_enabled = feature_enabled
+        self.execution_model = EXECUTION_MODEL
+        self.max_concurrency = MAX_CONCURRENCY
+        self._flight = threading.Lock()
 
     def recover_interrupted(self, *, now: float | None = None) -> dict:
         """Resolve occurrences whose worker died mid-flight, with evidence (T-012).
@@ -151,26 +166,60 @@ class SchedulerRunner:
                     disabled.append(s.schedule_id)
         return disabled
 
-    def run_once(self, *, now: float | None = None, limit: int = 20) -> TickResult:
-        """Claim and execute a bounded batch, or do absolutely nothing when off.
+    def run_once(
+        self,
+        *,
+        now: float | None = None,
+        limit: int = 20,
+        should_continue: Callable[[], bool] | None = None,
+    ) -> TickResult:
+        """Run one explicit single-flight lane with no in-memory work queue.
 
-        The global tool kill-switch pauses before claiming. This matters: a
-        disabled system must not quietly consume tomorrow's occurrence merely
-        because the scheduler woke up. A single disabled tool is checked again
-        after the atomic claim; that occurrence is skipped, but the schedule is
-        retained for later cadences.
+        A competing caller gets a typed busy result and claims nothing. Inside
+        the lane, occurrences are claimed one at a time; the remaining backlog
+        stays durable in SQLite until the active occurrence reaches a terminal
+        state. ``should_continue`` is checked before every new claim so service
+        shutdown drains the current action but never reserves the next one.
         """
         tick_at = time.time() if now is None else now
         if not self.feature_enabled():
             return TickResult(False, False, 0, 0, 0, 0)
         if not self.gate.enabled:
             return TickResult(True, True, 0, 0, 0, 0)
+        if not self._flight.acquire(blocking=False):
+            return TickResult(True, False, 0, 0, 0, 0, busy=True)
+        try:
+            return self._run_single_flight(
+                tick_at=tick_at,
+                limit=limit,
+                should_continue=should_continue or (lambda: True),
+            )
+        finally:
+            self._flight.release()
 
-        claims = self.schedules.claim_due(now=tick_at, limit=limit)
-        completed = blocked = failed = 0
+    def _run_single_flight(
+        self,
+        *,
+        tick_at: float,
+        limit: int,
+        should_continue: Callable[[], bool],
+    ) -> TickResult:
+        bounded_limit = max(1, min(int(limit), 100))
+        completed = blocked = failed = claimed = 0
+        paused = False
         job_ids: list[str] = []
 
-        for claim in claims:
+        for _ in range(bounded_limit):
+            if not should_continue() or not self.feature_enabled():
+                break
+            if not self.gate.enabled:
+                paused = True
+                break
+            claims = self.schedules.claim_due(now=tick_at, limit=1)
+            if not claims:
+                break
+            claim = claims[0]
+            claimed += 1
             job_id = self._create_job(claim)
             # Bind occurrence -> job (T-012) so recovery can reconcile a
             # dangling job to a terminal state instead of leaving it 'running'
@@ -187,7 +236,13 @@ class SchedulerRunner:
                 failed += 1
 
         return TickResult(
-            True, False, len(claims), completed, blocked, failed, tuple(job_ids)
+            True,
+            paused,
+            claimed,
+            completed,
+            blocked,
+            failed,
+            tuple(job_ids),
         )
 
     def _create_job(self, claim: ScheduleClaim) -> str:
