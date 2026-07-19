@@ -3,10 +3,12 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable
 
+from ..capability_schema import CapabilityDescriptorV2, descriptors_from_registry
 from .core import CapabilitySnapshot, RiskClass
 
 
 _ALLOWED_STATES = {"ready", "degraded", "disabled", "unavailable", "blocked"}
+
 
 @dataclass(frozen=True)
 class CapabilityNode:
@@ -49,72 +51,68 @@ class CapabilityGraph:
 
 
 @dataclass(frozen=True)
-class ToolCapability:
-    name: str
+class RuntimeToolCapability:
+    """Canonical static descriptor plus the gate's current enabled state.
+
+    `enabled` deliberately does not live in kaliv-capability/v2: it is mutable
+    runtime state, while the descriptor says what the tool *is*. This wrapper is
+    therefore not a second capability model; it adds exactly the one live value
+    the read-only graph needs to decide ready vs disabled.
+    """
+
+    descriptor: CapabilityDescriptorV2
     enabled: bool
-    declared_risk: str
-    description: str = ""
-    # What pressing stop actually does to this tool (F-610). Default "none",
-    # because that is the truth for a plain function call and the optimistic
-    # default is the one that lies to the person holding the button.
-    cancellation: str = "none"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.descriptor, CapabilityDescriptorV2):
+            raise TypeError("runtime tool capability requires a v2 descriptor")
+        if not isinstance(self.enabled, bool):
+            raise TypeError("runtime tool enabled state must be boolean")
+
+    @property
+    def name(self) -> str:
+        prefix = "tool:"
+        capability_id = self.descriptor.capability_id
+        if not capability_id.startswith(prefix):
+            raise ValueError(f"unsupported tool capability id: {capability_id!r}")
+        return capability_id[len(prefix):]
 
     @property
     def risk(self) -> RiskClass:
-        # The name-keyed override table that used to sit here is gone (F-614):
-        # the node now carries what the tool declared, so there is nothing to
-        # look up. Two byte-identical copies of that table existed, in this file
-        # and in integration.py, and in 1.58.66 I fixed one of them and called
-        # the finding closed.
-        #
-        # The same downgrade I removed from integration.py in 1.58.66 lived here
-        # untouched, because I fixed the file I was looking at and called the
-        # finding closed. "WRITE if it says write, else READ" turns a desktop
-        # tool into a READ -- in the CAPABILITY GRAPH, which is the thing that
-        # tells a planner and a human what an action is. One mapping table, and
-        # a class we do not understand stops the graph rather than being guessed
-        # into the safest box we have.
+        # Keep the existing Agent 3 vocabulary mapping authoritative. The value
+        # now comes from the canonical descriptor's impact axis instead of a
+        # parallel graph-only field.
         from .integration import _V2_RISK
 
-        risk = _V2_RISK.get(self.declared_risk)
+        risk = _V2_RISK.get(self.descriptor.impact)
         if risk is None:
             raise ValueError(
-                f"ukendt risikoklasse {self.declared_risk!r} for {self.name}: "
+                f"ukendt risikoklasse {self.descriptor.impact!r} for {self.name}: "
                 "kapabilitetsgrafen gætter ikke på risiko"
             )
         return risk
 
 
-def runtime_tool_capabilities(adapter) -> list[ToolCapability]:
-    """Read the existing V2 registry/gate without exposing params or credentials."""
-    capabilities: list[ToolCapability] = []
-    for name, tool in sorted(adapter.tools.REGISTRY.items()):
-        capabilities.append(
-            ToolCapability(
-                name=name,
-                enabled=adapter.is_enabled(name),
-                # The canonical value, from the tool (F-614). This used to take
-                # `risk` -- V2's coarse card-logic class -- which threw away the
-                # difference between appending a line and destroying a model,
-                # and then a name-keyed table over here tried to recover it.
-                # Recovering information you just discarded is not a design.
-                #
-                # The old default was "read": a tool that declared nothing
-                # became the safest class in the system. Now a tool that
-                # declares nothing produces a class no mapping knows, and the
-                # graph stops instead of guessing.
-                declared_risk=str(getattr(tool, "impact", None)
-                                  or getattr(tool, "risk", None) or ""),
-                cancellation=str(getattr(tool, "cancellation", "none")),
-                description=str(getattr(tool, "description", ""))[:300],
-            )
+def runtime_tool_capabilities(adapter) -> list[RuntimeToolCapability]:
+    """Bind canonical registry descriptors to the existing V2 gate state.
+
+    Descriptor construction is fail-closed and validates every static axis. No
+    params, destinations or credentials are copied into graph metadata here.
+    """
+
+    descriptors = descriptors_from_registry(adapter.tools.REGISTRY)
+    return [
+        RuntimeToolCapability(
+            descriptor=descriptor,
+            enabled=adapter.is_enabled(descriptor.capability_id.removeprefix("tool:")),
         )
-    return capabilities
+        for descriptor in descriptors
+    ]
 
 
 def build_capability_graph(
     caps: CapabilitySnapshot,
-    tools: Iterable[ToolCapability],
+    tools: Iterable[RuntimeToolCapability],
     *,
     planner_mounted: bool,
     memory_mounted: bool,
@@ -226,24 +224,24 @@ def build_capability_graph(
         CapabilityEdge("production_activation", "validation"),
     ]
 
-    for tool in sorted(tools, key=lambda item: item.name):
-        node_id = f"tool:{tool.name}"
+    for tool in sorted(tools, key=lambda item: item.descriptor.capability_id):
+        descriptor = tool.descriptor
         nodes.append(
             CapabilityNode(
-                node_id,
+                descriptor.capability_id,
                 "tool",
                 "ready" if tool.enabled and caps.tools_ready else "disabled",
                 "enabled by existing V2 ToolGate" if tool.enabled else "disabled by existing V2 ToolGate",
                 {
                     "risk": tool.risk.value,
-                    # The graph is what tells a planner and a person what an
-                    # action IS. "Can this be stopped" is part of what it is.
-                    "cancellation": tool.cancellation,
-                    "description": tool.description,
+                    # Preserve the graph/v1 wire contract while sourcing each
+                    # value from the canonical descriptor.
+                    "cancellation": descriptor.termination.mode,
+                    "description": descriptor.description[:300],
                 },
             )
         )
-        edges.append(CapabilityEdge(node_id, "tool_gate"))
+        edges.append(CapabilityEdge(descriptor.capability_id, "tool_gate"))
 
     node_ids = [node.id for node in nodes]
     if len(node_ids) != len(set(node_ids)):
