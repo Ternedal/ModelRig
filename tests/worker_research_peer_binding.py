@@ -70,7 +70,7 @@ RECEIPT = EgressReceipt(
 
 class Resolver:
     def __init__(self, answers=None, error=None) -> None:
-        self.answers = answers or ("2606:4700:4700::1111", "1.1.1.1", "1.1.1.1")
+        self.answers = ("2606:4700:4700::1111", "1.1.1.1", "1.1.1.1") if answers is None else answers
         self.error = error
         self.calls = []
 
