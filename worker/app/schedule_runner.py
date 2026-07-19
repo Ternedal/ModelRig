@@ -305,9 +305,11 @@ class SchedulerRunner:
             max_runs=s.max_runs,
             tools_enabled=self.gate.enabled,
             tool_disabled=s.tool in self.gate.disabled_tools,
+            claim_reserved=claim.reserved,
         )
         if why:
-            permanent = self._permanent_refusal(s, tool, current, now)
+            permanent = self._permanent_refusal(
+                s, tool, current, now, reserved=claim.reserved)
             self._finish_blocked(
                 s,
                 job_id,
@@ -517,11 +519,18 @@ class SchedulerRunner:
 
     @staticmethod
     def _permanent_refusal(
-        schedule: Schedule, tool: tools.Tool, current_fingerprint: str, now: float
+        schedule: Schedule, tool: tools.Tool, current_fingerprint: str,
+        now: float, *, reserved: bool = True
     ) -> bool:
         if now >= schedule.expires_at:
             return True
-        if schedule.max_runs and schedule.runs_used >= schedule.max_runs:
+        # Exhausted means the claim got NO slot -- the snapshot's runs_used
+        # already counts a real claim's reservation (1.58.116), so >= here
+        # refused the LAST legitimate run: max_runs=1 never ran at all, and
+        # every schedule got max_runs-1 executions. runs_used > max_runs
+        # stays as a corruption belt.
+        if not reserved or (
+                schedule.max_runs and schedule.runs_used > schedule.max_runs):
             return True
         if tool.risk == "desktop" or tool.risk not in ("read", "write"):
             return True

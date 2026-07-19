@@ -162,6 +162,24 @@ budget-overskridelse — det er hele T-010→T-012-kæden fysisk.
 
 ---
 
+## 1.7 Kampagnen samlet — én kandidat, ét bevis
+
+Den fulde fysiske kampagne (Agent 3, model-eval, lifecycle inkl.
+reboot/rollback, voice, RAG) har sin egen kanoniske runbook:
+[`PHYSICAL_VALIDATION_CAMPAIGN.md`](PHYSICAL_VALIDATION_CAMPAIGN.md) — kør
+delene dér, og saml til sidst med `scripts/physical_validation_campaign.py`
+(read-only aggregator: kræver samme VERSION, samme Git-SHA og samme worker
+`code_sha256` på tværs af alle rapporter, ellers intet samlet bevis).
+
+Rækkefølgen på dagen: **§1.4 frys → §1.5 preflight → kampagnens dele →
+§1.6 scheduler-piloten → aggregatoren**.
+
+**Kendt hul:** aggregatoren samler T-004→T-043 men endnu ikke
+scheduler-pilotens (T-019) bevis — det står ved siden af, ikke i
+kampagnerapporten, indtil aggregatoren udvides (se `BACKLOG.md`).
+
+---
+
 ## 2. Kold-start af PATH-fixet (v1.12.3)
 
 Den fejl med længst historik i projektet: cuBLAS/CTranslate2 fandt ikke sine

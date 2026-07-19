@@ -79,6 +79,17 @@ lukket 19/7 som docs-commit: SECURITY.md er nu selve trusselsmodellen
 (model-output-som-angriber, stående-grant-kæden, F-1006 accepteret-med-
 begrundelse) og peger på de genererede sider for tilstand.
 
+**Valideringsplanens fault-liste (19_VALIDERINGSPLAN) foldet ind 19/7:**
+punkt 1-6 var allerede dækket af unknown-kæden og lease-suiten; #5
+(takeover + ukendt udfald) og #7 (two-process max_runs=1 over flere
+cadences) tilføjet som eksplicitte tests i 1.58.128. **#7 fandt en levende
+P1:** reserve-at-claim (1.58.116) gjorde refusal-checkets `>=` til en
+off-by-one — max_runs=1 kørte ALDRIG, alle planer fik max_runs−1 kørsler;
+rettet i 1.58.128 (budget-sandheden bæres nu af claimets
+reservations-status). **Opfølgning:** T-019-pilotens bevis skal ind i
+kampagne-aggregatoren (`scripts/physical_validation_campaign.py`) — afklar
+schema med Anders' aggregator-design før udvidelse.
+
 ## Milepæl 3 — Agent 3-pilot (mål task success) — tracker #60
 
 Agent 3 er moden i kode, men slukket i produktet. Pilotresultater og fysisk

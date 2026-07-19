@@ -147,7 +147,8 @@ def refusal(tool_risk: str, approved_fingerprint: str | None,
             current_fingerprint: str, *, now: float | None = None,
             expires_at: float | None = None, runs_used: int = 0,
             max_runs: int = DEFAULT_MAX_RUNS, tools_enabled: bool = True,
-            tool_disabled: bool = False) -> str | None:
+            tool_disabled: bool = False,
+            claim_reserved: bool | None = None) -> str | None:
     """Why this scheduled task must not run, or None.
 
     Pure: the policy is a fact about (risk, approval, arguments, time), not
@@ -168,7 +169,21 @@ def refusal(tool_risk: str, approved_fingerprint: str | None,
             "planen er udløbet: en godkendelse holder ikke evigt, og det er "
             "meningen — opret den igen hvis du stadig vil have den"
         )
-    if max_runs and runs_used >= max_runs:
+    # Two budget truths, one function. WITHOUT a claim in hand (preview,
+    # admin, direct callers: claim_reserved is None) the stored runs_used is
+    # the whole story, and >= is right. WITH a claim (the runner), the snapshot
+    # already INCLUDES this occurrence's reservation (reserve-at-claim,
+    # 1.58.116), so >= would refuse the last legitimate run -- max_runs=1
+    # never ran at all, and every schedule got max_runs-1 executions. The
+    # claim's own reservation status is the only signal that still
+    # distinguishes "last budgeted run" from "exhausted": reserved_noslot
+    # means the budget was spent before this claim, and THAT is what refuses.
+    # runs_used > max_runs stays as a corruption belt either way.
+    exhausted = (
+        (max_runs and runs_used >= max_runs) if claim_reserved is None
+        else (not claim_reserved or (max_runs and runs_used > max_runs))
+    )
+    if exhausted:
         return (
             f"planen har brugt sit budget ({runs_used}/{max_runs} kørsler) — "
             "godkend den igen hvis den skal fortsætte"
@@ -223,13 +238,17 @@ class ScheduleClaim:
     repeated after a restart. Duplicate writes are worse than a visible miss.
 
     claim_id ties this occurrence to its durable ledger row (F-902/F-903), so
-    job, audit, outcome and recovery all reference the same thing.
+    job, audit, outcome and recovery all reference the same thing. reserved
+    says whether THIS claim took a budget slot: False (reserved_noslot) is the
+    exhausted case the refusal path must catch -- the snapshot's runs_used can
+    no longer tell, because it already includes a real claim's reservation.
     """
 
     schedule: Schedule
     occurrence_due_at: float
     missed_this_claim: int
     claim_id: str
+    reserved: bool = True
     # The user-intent revision this claim was taken under (T-013). If the
     # schedule's revision differs at execution time, the grant was paused,
     # resumed or renewed after the claim, and the stale occurrence must not run.
@@ -522,6 +541,7 @@ class ScheduleStore:
                         missed_this_claim=missed,
                         claim_id=claim_id,
                         revision=row["revision"],
+                        reserved=bool(reserve),
                     ))
                 self._conn.commit()
             except Exception:

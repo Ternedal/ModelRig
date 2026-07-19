@@ -288,6 +288,42 @@ check(c_w8.claim_id in out["executed"]
       "attempt followed by executed is just executed -- slot spent, grant "
       "untouched")
 
+# --- the reserve-at-claim off-by-one (found by valideringsplan #7) -----------
+# From 1.58.116 the claimed snapshot's runs_used INCLUDES this occurrence's
+# reservation, but the refusal still compared >= max_runs on it. So max_runs=1
+# refused its own FIRST run and disabled itself having executed zero times,
+# and every schedule got max_runs-1 executions. The budget truth now rides on
+# the claim (reserved vs reserved_noslot). These pin the honest contract:
+# max_runs=N means exactly N executions, then a legible refusal.
+st, jb, gt, rn = _env()
+b1 = st.create("rig_status", {}, "every:60", max_runs=1, now=NOW)
+t = rn.run_once(now=NOW + 61)
+check(t.completed == 1 and _runs_used(st, b1.schedule_id) == 1,
+      "max_runs=1 executes its ONE run -- the last budgeted occurrence is a "
+      "legitimate run, not an exhaustion")
+t2 = rn.run_once(now=NOW + 122)
+after = st.get(b1.schedule_id)
+check(t2.blocked == 1 and after is not None and not after.enabled,
+      "the SECOND occurrence is the exhausted one: blocked and disabled "
+      "through the refusal path")
+jobs_b1 = [jb.get(r["job_id"]) for r in st._conn.execute(
+    "SELECT job_id FROM occurrences WHERE schedule_id=? AND job_id IS NOT NULL",
+    (b1.schedule_id,)).fetchall()]
+check(any(j and "budget" in (j.get("detail") or "") for j in jobs_b1),
+      "and the reason the user reads says budget, with the honest count")
+
+st, jb, gt, rn = _env()
+b2 = st.create("rig_status", {}, "every:60", max_runs=2, now=NOW)
+rn.run_once(now=NOW + 61)
+rn.run_once(now=NOW + 122)
+rn.run_once(now=NOW + 183)
+executed = st._conn.execute(
+    "SELECT COUNT(*) c FROM occurrences WHERE schedule_id=? "
+    "AND status='executed'", (b2.schedule_id,)).fetchone()["c"]
+check(executed == 2 and _runs_used(st, b2.schedule_id) == 2,
+      "max_runs=2 executes exactly TWO runs across cadences -- N means N, "
+      "not N-1")
+
 # The normal completed path leaves nothing for recovery, and run_once binds the
 # job so the occurrence can name it.
 st, jb, gt, rn = _env()

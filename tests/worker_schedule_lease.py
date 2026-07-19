@@ -133,5 +133,61 @@ tick = rn_b4.run_once(now=NOW + 201)
 check(tick.claimed in (0, 1),
       "and the successor ticks normally under its own lease")
 
+# --- valideringsplan #5: takeover + UNKNOWN outcome combined -----------------
+# A claims a WRITE, records the attempt marker, and dies. The successor must
+# apply the SAME conservative policy under a taken-over lease: no audit of
+# execution -> unknown -> slot kept, grant paused. Expiry does not soften the
+# outcome policy.
+st5, jb5, gt5, rn_a5 = make_env("worker-a")
+w5 = st5.create("note_append", {"text": "x"}, "every:60",
+                approve_write=True, max_runs=2, now=NOW)
+st5.acquire_lease("worker-a", ttl_seconds=90, now=NOW + 60)
+c5 = st5.claim_due(now=NOW + 61)[0]
+gt5.audit.record(
+    tool="note_append", args={"text": "x"}, risk="write", outcome="attempt",
+    conversation_id=__import__("app.schedule_runner", fromlist=["x"])
+    ._occurrence_conversation(w5.schedule_id, c5.claim_id),
+    origin="schedule",
+)
+rn_b5 = SchedulerRunner(st5, jb5, gt5, feature_enabled=lambda: True,
+                        owner_id="worker-b", lease_ttl_seconds=90.0)
+out = rn_b5.recover_interrupted(now=NOW + 200)
+check(c5.claim_id in out["unknown"]
+      and st5.get(w5.schedule_id).runs_used == 1
+      and not st5.get(w5.schedule_id).enabled,
+      "a taken-over lease applies the SAME conservative policy: attempt "
+      "without executed is unknown -- slot kept, grant paused -- expiry does "
+      "not soften the outcome (valideringsplan #5)")
+
+# --- valideringsplan #7: two processes, max_runs=1, several cadences ---------
+# The integration property tying budget + lease + recovery together: across a
+# worker death and a successor, the world sees EXACTLY one executed
+# occurrence, ever.
+st7, jb7, gt7, rn_a7 = make_env("worker-a")
+s7 = st7.create("rig_status", {}, "every:60", max_runs=1, now=NOW)
+t1 = rn_a7.run_once(now=NOW + 61)
+check(t1.completed == 1 and st7.get(s7.schedule_id).runs_used == 1,
+      "process A runs the single budgeted occurrence under its lease")
+# A dies. B ticks the NEXT cadence while A's lease is still alive:
+rn_b7 = SchedulerRunner(st7, jb7, gt7, feature_enabled=lambda: True,
+                        owner_id="worker-b", lease_ttl_seconds=90.0)
+t2 = rn_b7.run_once(now=NOW + 122)
+check(t2.claimed == 0,
+      "process B claims nothing while A's lease lives -- no double-run window")
+# After expiry B recovers (nothing reserved) and ticks further cadences:
+rn_b7.recover_interrupted(now=NOW + 200)
+t3 = rn_b7.run_once(now=NOW + 250)
+executed_total = st7._conn.execute(
+    "SELECT COUNT(*) c FROM occurrences WHERE status='executed'"
+).fetchone()["c"]
+check(executed_total == 1 and st7.get(s7.schedule_id).runs_used == 1,
+      "across A's death and B's takeover, exactly ONE executed occurrence "
+      "exists -- max_runs=1 holds over multiple cadences and two processes "
+      "(valideringsplan #7)")
+check(st7.get(s7.schedule_id) is not None
+      and not st7.get(s7.schedule_id).enabled,
+      "and the exhausted grant is disabled through the refusal path, with the "
+      "audit trail a user can read")
+
 print(f"\n===== SCHEDULE LEASE: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
