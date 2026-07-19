@@ -54,6 +54,14 @@ class ToolRegistryContractTest {
                           "description": "disabled",
                           "enabled": false,
                           "schedulable": true
+                        },
+                        {
+                          "name": "string_flags",
+                          "risk": "read",
+                          "description": "malformed",
+                          "enabled": "true",
+                          "schedulable": "true",
+                          "idempotent": "true"
                         }
                       ]
                     }""".trimIndent(),
@@ -91,6 +99,16 @@ class ToolRegistryContractTest {
             val disabled = tools.getValue("disabled_read")
             assertFalse(disabled.canSchedule)
             assertEquals("Værktøjet er slået fra på riggen.", disabled.scheduleBlockReason)
+
+            val stringFlags = tools.getValue("string_flags")
+            assertFalse(stringFlags.enabled)
+            assertFalse(stringFlags.schedulable)
+            assertFalse(stringFlags.canSchedule)
+            assertNull(stringFlags.idempotent)
+            assertEquals(
+                "Riggen har ikke markeret værktøjet som planlægbart.",
+                stringFlags.scheduleBlockReason,
+            )
 
             val request = server.takeRequest()
             assertEquals("/api/v1/tools", request.path)

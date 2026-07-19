@@ -686,18 +686,16 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
                 name = t.optString("name"),
                 risk = t.optString("risk"),
                 description = t.optString("description"),
-                enabled = t.optBoolean("enabled", false),
+                // These contract fields are type-strict. Only an actual
+                // JSON boolean is accepted; strings and numbers use the default.
+                enabled = t.opt("enabled") == true,
                 impact = t.optString("impact").takeUnless { it.isBlank() || it == "null" },
-                schedulable = t.optBoolean("schedulable", false),
+                schedulable = t.opt("schedulable") == true,
                 unschedulableReason = t.optString("unschedulable_reason")
                     .takeUnless { it.isBlank() || it == "null" },
                 cancellation = t.optString("cancellation")
                     .takeUnless { it.isBlank() || it == "null" },
-                idempotent = if (t.has("idempotent") && !t.isNull("idempotent")) {
-                    t.getBoolean("idempotent")
-                } else {
-                    null
-                },
+                idempotent = t.opt("idempotent") as? Boolean,
             )
         }
         return ToolRegistry(
