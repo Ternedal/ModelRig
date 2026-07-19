@@ -117,10 +117,32 @@ def test_registry_owns_network_metadata_and_api_preserves_it() -> None:
     assert actual == expected
     assert all(mode != "undeclared" for mode, _ in actual.values())
 
+    descriptors = {
+        item.capability_id.removeprefix("tool:"): item
+        for item in descriptors_from_registry(tools.REGISTRY)
+    }
     listed = {item["name"]: item for item in tools.GATE.list_tools()}
+    expected_legacy_keys = {
+        "name", "risk", "description", "params", "enabled", "impact",
+        "schedulable", "unschedulable_reason", "cancellation", "network",
+        "network_destinations", "idempotent", "descriptor",
+    }
     for name, (mode, destinations) in expected.items():
-        assert listed[name]["network"] == mode
-        assert listed[name]["network_destinations"] == list(destinations)
+        item = listed[name]
+        descriptor = descriptors[name]
+        assert set(item) == expected_legacy_keys
+        assert parse_descriptor(item["descriptor"]) == descriptor
+        assert "enabled" not in item["descriptor"]
+        assert item["risk"] == descriptor.access
+        assert item["description"] == descriptor.description
+        assert item["params"] == descriptor.parameters
+        assert item["impact"] == descriptor.impact
+        assert item["schedulable"] is descriptor.scheduling.allowed
+        assert item["unschedulable_reason"] == descriptor.scheduling.reason
+        assert item["cancellation"] == descriptor.termination.mode
+        assert item["network"] == mode == descriptor.network.mode
+        assert item["network_destinations"] == list(destinations)
+        assert item["idempotent"] is descriptor.replay.idempotent
 
 
 def test_tool_network_metadata_fails_closed() -> None:

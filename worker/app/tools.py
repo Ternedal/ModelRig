@@ -1054,21 +1054,33 @@ class ToolGate:
         # (F-718); surfacing them here lets a client mark or hide what it must
         # not offer, instead of guessing from `risk` alone. Pure exposure of
         # existing metadata -- no new decision is made here.
-        return [
-            {"name": t.name, "risk": t.risk, "description": t.description,
-             "params": t.params, "enabled": self.is_enabled(t.name),
-             "impact": t.impact,
-             "schedulable": t.schedulable,
-             # Why a client should not offer this on a schedule, in words, so the
-             # picker can show the reason rather than a bare refusal after the tap.
-             "unschedulable_reason": (
-                 "" if t.schedulable else t.unschedulable_because),
-             "cancellation": t.cancellation,
-             "network": t.network,
-             "network_destinations": list(t.network_destinations),
-             "idempotent": t.idempotent}
-            for t in REGISTRY.values()
-        ]
+        from .capability_schema import descriptor_from_tool
+
+        result: list[dict] = []
+        for tool in REGISTRY.values():
+            descriptor = descriptor_from_tool(tool)
+            name = descriptor.capability_id.removeprefix("tool:")
+            # Preserve every legacy field and value for existing clients. The
+            # nested descriptor is additive and is the one versioned static
+            # representation new API/client code validates.
+            result.append(
+                {
+                    "name": name,
+                    "risk": descriptor.access,
+                    "description": descriptor.description,
+                    "params": descriptor.parameters,
+                    "enabled": self.is_enabled(name),
+                    "impact": descriptor.impact,
+                    "schedulable": descriptor.scheduling.allowed,
+                    "unschedulable_reason": descriptor.scheduling.reason,
+                    "cancellation": descriptor.termination.mode,
+                    "network": descriptor.network.mode,
+                    "network_destinations": list(descriptor.network.destinations),
+                    "idempotent": descriptor.replay.idempotent,
+                    "descriptor": descriptor.to_dict(),
+                }
+            )
+        return result
 
     def propose(self, name: str, args: dict, conversation_id: Optional[str] = None,
                 messages: Optional[list] = None, model: Optional[str] = None,

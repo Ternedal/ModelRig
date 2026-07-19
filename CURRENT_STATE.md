@@ -10,24 +10,23 @@
 
 ## Tools the model can see
 
-Every column is a registry-owned axis (F-718). `risk` gates what a tool
-may DO and `impact` how bad it is if it goes wrong; `sensitivity` gates
-where its ANSWER may travel; `sched` is whether it may run unattended;
-`stop` is what cancellation does; `replay` is whether running it twice is
-safe. Read out of the code, so the page cannot claim one thing while the
-gate enforces another.
+Every row is generated from the strict `kaliv-capability/v2` descriptor,
+not from a parallel documentation projection. `access` gates what a tool
+may do; `impact` describes the consequence; `data class` governs where
+results may travel; scheduling, network, termination and replay semantics
+are the same versioned values validated by worker, backend and clients.
 
-| Tool | risk | impact | sensitivity | isolated | sched | stop | replay |
-|---|---|---|---|---|---|---|---|
-| `cancel_job` | write | write | operational | no | no | none | yes |
-| `current_datetime` | read | read | public | no | yes | none | yes |
-| `delete_model` | write | destructive | operational | no | no | none | no |
-| `job_status` | read | read | operational | no | yes | none | yes |
-| `list_documents` | read | read | private | no | yes | none | yes |
-| `list_models` | read | read | operational | no | yes | none | yes |
-| `note_append` | write | write | private | no | yes | none | no |
-| `pull_model` | write | admin | operational | no | no | cooperative | no |
-| `rig_status` | read | read | operational | no | yes | none | yes |
+| Capability | schema | access | impact | data class | isolated | sched | network | stop | replay |
+|---|---|---|---|---|---|---|---|---|---|
+| `tool:cancel_job` | `kaliv-capability/v2` | write | write | operational | no | no | none | none | yes |
+| `tool:current_datetime` | `kaliv-capability/v2` | read | read | public | no | yes | none | none | yes |
+| `tool:delete_model` | `kaliv-capability/v2` | write | destructive | operational | no | no | configured_service | none | no |
+| `tool:job_status` | `kaliv-capability/v2` | read | read | operational | no | yes | none | none | yes |
+| `tool:list_documents` | `kaliv-capability/v2` | read | read | private | no | yes | none | none | yes |
+| `tool:list_models` | `kaliv-capability/v2` | read | read | operational | no | yes | configured_service | none | yes |
+| `tool:note_append` | `kaliv-capability/v2` | write | write | private | no | yes | none | none | no |
+| `tool:pull_model` | `kaliv-capability/v2` | write | admin | operational | no | no | configured_service | cooperative | no |
+| `tool:rig_status` | `kaliv-capability/v2` | read | read | operational | no | yes | none | none | yes |
 
 ## Switches (default = what a rig does today)
 

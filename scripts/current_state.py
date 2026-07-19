@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "CURRENT_STATE.md"
 
 
-def _tools() -> list[tuple[str, str, str]]:
+def _tools() -> list[tuple[str, list[str]]]:
     """Ask the registry itself. A doc that lists tools by hand lists them wrong."""
     tmp = tempfile.mkdtemp(prefix="kaliv-state-")
     env = dict(os.environ)
@@ -52,14 +52,16 @@ def _tools() -> list[tuple[str, str, str]]:
     # idempotent this morning (F-715). Add an axis to _AXES and both ends learn
     # it.
     code = (
+        "from app.capability_schema import descriptors_from_registry\n"
         "from app.tools import REGISTRY\n"
-        "_AXES = ('risk','sensitivity','isolate','impact','schedulable',"
-        "'cancellation','idempotent')\n"
         "def _cell(v):\n"
         "    if isinstance(v, bool): return '1' if v else '0'\n"
         "    return str(getattr(v, 'value', v))\n"
-        "for n, t in sorted(REGISTRY.items()):\n"
-        "    print(n + '|' + '|'.join(_cell(getattr(t, a)) for a in _AXES))\n"
+        "for d in descriptors_from_registry(REGISTRY):\n"
+        "    values = (d.schema_id, d.access, d.impact, d.data_class, "
+        "d.isolation.mode == 'process', d.scheduling.allowed, d.network.mode, "
+        "d.termination.mode, d.replay.idempotent)\n"
+        "    print(d.capability_id + '|' + '|'.join(_cell(v) for v in values))\n"
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True,
                          text=True, env=env, cwd=str(ROOT / "worker"), timeout=60)
@@ -211,23 +213,20 @@ def render() -> str:
     L.append("")
     L.append("## Tools the model can see")
     L.append("")
-    L.append("Every column is a registry-owned axis (F-718). `risk` gates what a tool")
-    L.append("may DO and `impact` how bad it is if it goes wrong; `sensitivity` gates")
-    L.append("where its ANSWER may travel; `sched` is whether it may run unattended;")
-    L.append("`stop` is what cancellation does; `replay` is whether running it twice is")
-    L.append("safe. Read out of the code, so the page cannot claim one thing while the")
-    L.append("gate enforces another.")
+    L.append("Every row is generated from the strict `kaliv-capability/v2` descriptor,")
+    L.append("not from a parallel documentation projection. `access` gates what a tool")
+    L.append("may do; `impact` describes the consequence; `data class` governs where")
+    L.append("results may travel; scheduling, network, termination and replay semantics")
+    L.append("are the same versioned values validated by worker, backend and clients.")
     L.append("")
-    # Same axis order as the subprocess. One list, two ends (F-715): the header
-    # and the emitter must not drift, so they share the order by construction.
-    L.append("| Tool | risk | impact | sensitivity | isolated | sched | stop | replay |")
-    L.append("|---|---|---|---|---|---|---|---|")
-    for name, axes in _tools():
-        risk, sens, iso, impact, sched, stop, replay = axes
+    L.append("| Capability | schema | access | impact | data class | isolated | sched | network | stop | replay |")
+    L.append("|---|---|---|---|---|---|---|---|---|---|")
+    for capability_id, axes in _tools():
+        schema, access, impact, data_class, iso, sched, network, stop, replay = axes
         L.append(
-            f"| `{name}` | {risk} | {impact} | {sens} | "
+            f"| `{capability_id}` | `{schema}` | {access} | {impact} | {data_class} | "
             f"{'yes' if iso == '1' else 'no'} | "
-            f"{'yes' if sched == '1' else 'no'} | {stop} | "
+            f"{'yes' if sched == '1' else 'no'} | {network} | {stop} | "
             f"{'yes' if replay == '1' else 'no'} |"
         )
     L.append("")
