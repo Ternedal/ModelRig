@@ -1,0 +1,63 @@
+name: finalize-scheduler-pilot-contract
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.head_ref == 'agent/scheduler-pilot-evidence'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: agent/scheduler-pilot-evidence
+          fetch-depth: 1
+          show-progress: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install validation dependencies
+        run: |
+          pip install -r worker/requirements.txt --break-system-packages >/dev/null
+          pip install --quiet ruff
+      - name: Apply final pilot invariants
+        run: python scripts/_finalize_scheduler_pilot_contract.py
+      - name: Validate complete evidence matrix
+        env:
+          PYTHONPATH: worker
+        run: |
+          ruff check scripts/scheduler_pilot_evidence.py \
+            tests/workflow_scheduler_pilot_evidence.py --select E9,F63,F7,F82
+          python tests/workflow_scheduler_pilot_evidence.py
+          python scripts/current_state.py
+          python tests/workflow_test_coverage.py
+          python tests/workflow_current_state.py
+      - name: Remove temporary patch files and validate clean scope
+        shell: bash
+        run: |
+          rm .github/workflows/finalize-scheduler-pilot-contract.yml
+          rm scripts/_finalize_scheduler_pilot_contract.py
+          git diff --check
+          test ! -e .github/workflows/finalize-scheduler-pilot-contract.yml
+          test ! -e scripts/_finalize_scheduler_pilot_contract.py
+          grep -q 'MAX_PILOT_WINDOW_SECONDS' scripts/scheduler_pilot_evidence.py
+          grep -q 'claim_bound": False' scripts/scheduler_pilot_evidence.py
+          grep -q 'tests/workflow_scheduler_pilot_evidence.py' CURRENT_STATE.md
+      - name: Commit final clean collector
+        shell: bash
+        run: |
+          git config user.name 'ModelRig automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add \
+            scripts/scheduler_pilot_evidence.py \
+            tests/workflow_scheduler_pilot_evidence.py \
+            SCHEDULER_PILOT_EVIDENCE.md \
+            CURRENT_STATE.md \
+            .github/workflows/finalize-scheduler-pilot-contract.yml \
+            scripts/_finalize_scheduler_pilot_contract.py
+          git commit -m 'test(eval): close scheduler pilot evidence gaps'
+          git push origin HEAD:agent/scheduler-pilot-evidence
