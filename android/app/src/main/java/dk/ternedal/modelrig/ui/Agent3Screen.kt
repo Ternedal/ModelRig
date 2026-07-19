@@ -135,7 +135,7 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
         }
     }
 
-    fun cancelRun() {
+    fun stopPlan() {
         val id = run?.id ?: return
         if (busy) return
         busy = true
@@ -146,7 +146,7 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
             }
             busy = false
             result.onSuccess { run = it }
-                .onFailure { error = it.message ?: "Kunne ikke annullere run" }
+                .onFailure { error = it.message ?: "Kunne ikke stoppe planen" }
         }
     }
 
@@ -258,7 +258,7 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
                     onRefresh = { refreshRun() },
                     onApprove = { decide(true) },
                     onDeny = { decide(false) },
-                    onCancel = { cancelRun() },
+                    onStopPlan = { stopPlan() },
                 )
             }
 
@@ -353,10 +353,12 @@ private fun Agent3RunCard(
     onRefresh: () -> Unit,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
-    onCancel: () -> Unit,
+    onStopPlan: () -> Unit,
 ) {
     val current = run.steps.getOrNull(run.currentStep)
     val waiting = run.state == "waiting_confirmation" && current?.confirmationDigest != null && current.id != null
+    val termination = run.termination
+    val canStopPlan = termination?.plan?.canRequest == true
 
     Surface(color = KalivTheme.colors.surface, shape = RoundedCornerShape(14.dp)) {
         Column(Modifier.fillMaxWidth().padding(14.dp)) {
@@ -398,18 +400,70 @@ private fun Agent3RunCard(
                 }
             }
 
+            Spacer(Modifier.height(10.dp))
+            Agent3TerminationCard(termination, run.state)
+
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(enabled = !busy, onClick = onRefresh) { Text("Opdatér") }
-                if (run.state !in setOf("completed", "failed", "cancelled")) {
+                if (canStopPlan) {
                     Button(
                         enabled = !busy,
-                        onClick = onCancel,
+                        onClick = onStopPlan,
                         colors = ButtonDefaults.buttonColors(containerColor = KalivTheme.colors.danger),
                     ) {
-                        Text("Annullér")
+                        Text("Stop plan")
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Agent3TerminationCard(
+    receipt: Agent3Client.TerminationReceipt?,
+    runState: String,
+) {
+    Surface(color = KalivTheme.colors.surfaceHigh, shape = RoundedCornerShape(10.dp)) {
+        Column(Modifier.fillMaxWidth().padding(10.dp)) {
+            Text("Stopstatus", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.SemiBold)
+            if (receipt == null) {
+                Text(
+                    if (runState in setOf("completed", "failed", "cancelled")) {
+                        "Run er afsluttet."
+                    } else {
+                        "Serveren sendte ingen verificeret stopstatus. Ingen stopkontrol vises."
+                    },
+                    color = KalivTheme.colors.textMuted,
+                    fontSize = 11.sp,
+                )
+                return@Column
+            }
+            Text(
+                when (receipt.plan.effect) {
+                    "prevent_future_steps_active_tool_continues" ->
+                        "Stop plan forhindrer kommende trin. Det aktive tool fortsætter uden et bundet stop-handle."
+                    else -> "Stop plan forhindrer kommende trin."
+                },
+                color = KalivTheme.colors.textMuted,
+                fontSize = 11.sp,
+            )
+            receipt.activeTool?.let { active ->
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (active.canRequest && active.handlePresent) {
+                        "Aktivt tool: ${active.tool} · direkte stop er tilgængeligt."
+                    } else {
+                        "Aktivt tool: ${active.tool} · direkte tool-stop er ikke tilgængeligt (${active.reason})."
+                    },
+                    color = if (active.canRequest && active.handlePresent) {
+                        KalivTheme.colors.amber
+                    } else {
+                        KalivTheme.colors.textMuted
+                    },
+                    fontSize = 10.sp,
+                )
             }
         }
     }
