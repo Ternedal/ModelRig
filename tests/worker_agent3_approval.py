@@ -65,6 +65,10 @@ def args_sha(args):
 
 def token_for(run, revision, **changes):
     step = run.steps[run.current_step]
+    overrides = dict(changes)
+    claimed_args_sha = overrides.pop("args_sha256", None)
+    if claimed_args_sha is None:
+        claimed_args_sha = args_sha(step.args)
     claims = {
         "v": 1,
         "nonce": base64.urlsafe_b64encode(b"n" * 32).decode().rstrip("="),
@@ -72,13 +76,13 @@ def token_for(run, revision, **changes):
         "run_id": run.id,
         "step_id": step.id,
         "tool": step.tool,
-        "args_sha256": args_sha(step.args),
+        "args_sha256": claimed_args_sha,
         "confirmation_digest": step.confirmation_digest,
         "plan_revision": revision,
         "issued_at": NOW,
         "expires_at": NOW + 60,
     }
-    claims.update(changes)
+    claims.update(overrides)
     payload = json.dumps(claims, separators=(",", ":")).encode()
     payload_part = base64.urlsafe_b64encode(payload).decode().rstrip("=")
     signature = hmac.new(SECRET, payload_part.encode("ascii"), hashlib.sha256).digest()
@@ -133,13 +137,10 @@ def test_utf8_append_text_has_runtime_independent_hash() -> None:
 
 def test_broader_or_invalid_argument_shape_is_rejected() -> None:
     run, revision = waiting_run(args={"text": "MARKER", "extra": 1})
-    rejects(lambda: token_for(run, revision), "") if False else None
     claims_token = token_for(
-        waiting_run()[0],
+        run,
         revision,
-        run_id=run.id,
-        step_id=run.steps[0].id,
-        confirmation_digest=run.steps[0].confirmation_digest,
+        args_sha256=hashlib.sha256(b"MARKER").hexdigest(),
     )
     rejects(
         lambda: verify_agent3_approval(
@@ -248,16 +249,7 @@ def test_token_cannot_outlive_confirmation() -> None:
 
 def test_only_note_append_is_eligible() -> None:
     run, revision = waiting_run(tool="delete_model", args={"name": "qwen"})
-    # Use a syntactically valid hash claim; tool eligibility must fail first.
-    normal, _ = waiting_run()
-    token = token_for(
-        normal,
-        revision,
-        run_id=run.id,
-        step_id=run.steps[0].id,
-        tool=run.steps[0].tool,
-        confirmation_digest=run.steps[0].confirmation_digest,
-    )
+    token = token_for(run, revision, args_sha256="a" * 64)
     rejects(
         lambda: verify_agent3_approval(
             token,
