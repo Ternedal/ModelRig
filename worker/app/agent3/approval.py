@@ -3,7 +3,8 @@
 The worker never mints approval. A paired client asks the authenticated Go
 backend to sign the exact waiting confirmation. The worker verifies the HMAC,
 current immutable step, current replan revision and expiry, then durably
-consumes the random nonce before the orchestrator may execute the write.
+consumes both the random nonce and the immutable action before the orchestrator
+may execute the write.
 """
 from __future__ import annotations
 
@@ -36,6 +37,7 @@ class Agent3ApprovalError(ValueError):
 @dataclass(frozen=True)
 class VerifiedAgent3Approval:
     nonce_sha256: str
+    action_sha256: str
     token_sha256: str
     device_id: str
     run_id: str
@@ -56,6 +58,7 @@ class VerifiedAgent3Approval:
             "plan_revision": self.plan_revision,
             "args_sha256": self.args_sha256,
             "confirmation_digest": self.confirmation_digest,
+            "approval_action_sha256": self.action_sha256,
             "approval_nonce_sha256": self.nonce_sha256,
             "approval_token_sha256": self.token_sha256,
         }
@@ -63,7 +66,7 @@ class VerifiedAgent3Approval:
 
 def approval_required(environ: dict[str, str] | None = None) -> bool:
     env = os.environ if environ is None else environ
-    return (env.get(APPROVAL_REQUIRED_ENV) or "").strip() == "1"
+    return (env.get("KALIV_AGENT3_APPROVAL_REQUIRED") or "").strip() == "1"
 
 
 def _secret() -> bytes:
@@ -89,6 +92,20 @@ def _args_sha256(args: Any) -> str:
     raw = json.dumps(
         args,
         ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _action_sha256(run_id: str, step_id: str, digest: str, revision: int) -> str:
+    raw = json.dumps(
+        {
+            "run_id": run_id,
+            "step_id": step_id,
+            "confirmation_digest": digest,
+            "plan_revision": revision,
+        },
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
@@ -185,6 +202,12 @@ def verify_agent3_approval(
 
     return VerifiedAgent3Approval(
         nonce_sha256=hashlib.sha256(nonce.encode("ascii")).hexdigest(),
+        action_sha256=_action_sha256(
+            run.id,
+            step.id,
+            step.confirmation_digest,
+            plan_revision,
+        ),
         token_sha256=hashlib.sha256(token.encode("ascii")).hexdigest(),
         device_id=device_id.strip(),
         run_id=run.id,
@@ -204,7 +227,7 @@ def consume_agent3_approval(
     db_path: str | None = None,
     now: float | None = None,
 ) -> None:
-    """Durably consume an approval once before a non-idempotent write starts."""
+    """Durably consume one nonce AND one immutable action before write starts."""
     path = db_path or _paths.resolve(
         "./kaliv-agent3-approvals.db", env="KALIV_AGENT3_APPROVAL_DB"
     )
@@ -214,6 +237,7 @@ def consume_agent3_approval(
         conn.execute(
             """CREATE TABLE IF NOT EXISTS agent3_approval_uses (
                    nonce_sha256 TEXT PRIMARY KEY,
+                   action_sha256 TEXT NOT NULL UNIQUE,
                    used_at REAL NOT NULL,
                    run_id TEXT NOT NULL,
                    step_id TEXT NOT NULL,
@@ -229,11 +253,12 @@ def consume_agent3_approval(
         try:
             conn.execute(
                 """INSERT INTO agent3_approval_uses
-                   (nonce_sha256, used_at, run_id, step_id, device_id,
-                    plan_revision, token_sha256)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (nonce_sha256, action_sha256, used_at, run_id, step_id,
+                    device_id, plan_revision, token_sha256)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     approval.nonce_sha256,
+                    approval.action_sha256,
                     current,
                     approval.run_id,
                     approval.step_id,
@@ -246,7 +271,7 @@ def consume_agent3_approval(
         except sqlite3.IntegrityError as exc:
             conn.rollback()
             raise Agent3ApprovalError(
-                "Agent 3 approval token was already used; confirm the action again"
+                "Agent 3 approval or immutable action was already used; confirm the action again"
             ) from exc
     finally:
         conn.close()
