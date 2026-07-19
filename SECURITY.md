@@ -1,21 +1,22 @@
 # SECURITY.md — ModelRig / Kaliv
 
-> ## Denne fil er IKKE en aktuel trusselsmodel
+> ## Model her — tilstand dér
 >
-> Den påstod at være det. Den var dateret **13/7-2026** og beskrev systemet som
-> det så ud dengang. Siden er der landet attestation-håndhævelse i updateren, én
-> loopback-guard, fail-closed risiko- og sensitivity-klassificering, og
-> schedulerens tidligere deterministiske godkendelses-fingerprint er i **1.58.93**
-> erstattet af korte, device-bundne engangstokens.
+> Dette ER trusselsmodellen (F-1019): den varige arkitektur-ræsonnering — hvem
+> angriberen er, hvor grænserne går, hvilke lag der står imellem, og hvilke
+> risici der er accepteret med begrundelse. Den slags rådner langsomt, fordi
+> den handler om design, ikke om øjebliksbilleder.
 >
-> **En sikkerhedsmodel der selvsikkert beskriver et system der ikke findes
-> længere, er farligere end ingen model** — den fortæller dig hvad du er beskyttet
-> imod, og du tror på den.
+> Hvad den bevidst IKKE er: en påstand om aktuel tilstand. Om kontrollerne
+> faktisk er koblet og grønne på netop denne commit regnes ud fra koden i
+> [`CURRENT_STATE.md`](CURRENT_STATE.md) og
+> [`ACTIVATION_READINESS.md`](ACTIVATION_READINESS.md) — sidstnævnte kører
+> durability-proberne live ved hver generering. Versionsnumre nedenfor er
+> historik ("indført i 1.58.x") og forbliver sande for evigt.
 >
-> Aktuel sikkerhedstilstand: [`CURRENT_STATE.md`](CURRENT_STATE.md) og
-> [`ACTIVATION_READINESS.md`](ACTIVATION_READINESS.md), som regnes ud fra koden.
-> Det nedenfor er **accepterede risici og trufne beslutninger** — de driver ikke,
-> fordi de er historik.
+> **Og én ærlig grænse:** alt her er arkitektur-niveau. Intet i denne fil
+> erstatter den fysiske valideringskampagne (F-1001) — papir og CI beviser
+> ikke en appliance.
 
 ## Hvad beskyttes (assets)
 
@@ -36,12 +37,53 @@
 
 ## Trusselsaktører (realistisk for et solo-hjemmesetup)
 
-1. Nogen på tailnettet/LAN (P0'en i 1.58.2 lukkede anonym remote kode-minting via `/pair/start`).
-2. Et ondsindet dokument ved RAG-ingest (upload-limits + decoded-size-cap i 1.58.1).
-3. Et ondsindet **cloud-model-svar** der forsøger at trigge tools (worker confirmation gate + SSRF-guard).
-4. En tabt/stjålet telefon (device-token → revokér via CLI/`/api/v1/token/rotate`).
+1. **Modellens eget output** — lokal eller cloud, direkte eller via et
+   forgiftet dokument. Det er den definerende trussel for et agentisk system
+   og har sit eget afsnit nedenfor.
+2. Nogen på tailnettet/LAN (P0'en i 1.58.2 lukkede anonym remote kode-minting via `/pair/start`).
+3. Et ondsindet dokument ved RAG-ingest (upload-limits + decoded-size-cap i
+   1.58.1) — bemærk at dokumentets *indhold* derefter er aktør #1's kanal.
+4. En tabt/stjålet telefon (device-token → revokér via CLI/`/api/v1/token/rotate`;
+   scheduler-godkendelser er device-bundne, så en fremmed enhed kan ikke minte dem).
+5. **Supply chain på kode-siden:** Python-deps pinnet `==`, GitHub Actions
+   SHA-pinnet, Dependabot + CodeQL på main, release-assets SHA-256-verificeret
+   af updateren (1.58.15; ærlig grænse: manifestet er selv usigneret — se
+   accepteret risiko #4).
 
-*Uden for model:* nation-state, fysisk adgang til riggen, supply-chain på Ollama-modeller.
+*Uden for model:* nation-state, fysisk adgang til riggen (single-user-appliance;
+lokal adgang = game over by design, med DPAPI-at-rest som åbent punkt, T-033),
+supply-chain på selve Ollama-modelvægtene.
+
+## Den definerende trussel: modellens output som angriber
+
+En LLM der kan kalde værktøjer, er et system hvor *svaret* er en potentiel
+angriber — prompt injection via chat, et hentet dokument eller et cloud-svar.
+Forsvaret er lagdelt, og hvert lag er arkitektur (dateret historik, ikke
+tilstandspåstand):
+
+- **Prosa eksekverer aldrig.** Workeren udfører kun strukturerede
+  `tool_calls`; "jeg har oprettet noten" i løbende tekst gør ingenting.
+- **ToolGate:** risikoklasser (read/write), hvert write bag et
+  menneske-godkendt kort med fingerprint bundet til de *præcise* argumenter,
+  engangs-bekræftelser, origin-tagget audit, global kill-switch der pauser før
+  claim. `sensitivity`-klassen styrer ortogonalt hvor et *resultat* må rejse
+  (se cloud-read-egress under åbne beslutninger).
+- **Stående grants (scheduleren) er den farligste flade** — en godkendelse der
+  virker uden et menneske i loopet — og fik derfor sin egen kæde (18-19/7,
+  1.58.116–127): device-bundne engangs-tokens (1.58.93) med persisterede
+  approval-receipts (hvem/hvornår/hvorfra, atomisk med granten);
+  occurrence-ledger med budget reserveret ved claim, så `max_runs` holder
+  under crash og genstart; evidensbaseret recovery med attempt-markør — et
+  ukendt udfald *beholder* sin slot og pauser granten frem for at muliggøre
+  en ekstra kørsel; revision-guard umiddelbart før eksekvering, så pause,
+  fornyelse eller sletning faktisk stopper in-flight arbejde; owner-lease, så
+  en levende workers claims ikke kan opgives af en anden proces; og en
+  freeze-gate der kun siger FROZEN med exact-head CI-bevis. Readiness-siden
+  kører disse egenskaber som live-prober, bevist ikke-blinde.
+- **Dormant by design:** ToolHost-procesgrænsen og Tier B-policy findes i
+  koden men er bevidst inaktive indtil I0b-isolationen er fysisk bevist —
+  udvidelse af den agentiske flade er gated på bevis, ikke på at koden
+  eksisterer.
 
 ## Credentials-oversigt
 
@@ -109,6 +151,17 @@ SHA-256 mod den **før** supervisoren stoppes — mismatch eller manglende entry
 ikke en angriber med release-write (som kunne erstatte begge). Næste niveau: signeret manifest /
 GitHub artifact attestation.
 
+### 5. Nonce forbruges FØR granten persisteres — **ACCEPTERET (F-1006)**
+
+Scheduler-godkendelsens engangs-nonce konsumeres, og *derefter* skrives
+granten. Et crash imellem brænder tokenet uden at der findes en grant.
+**Fejlretningen er den sikre:** der kan aldrig opstå en grant uden forbrugt
+token, kun et forbrugt token uden grant — og prisen er at brugeren bekræfter
+igen. At vende rækkefølgen ville åbne det modsatte (en grant hvis token kan
+genbruges), og en distribueret transaktion over to processer er ikke
+kompleksiteten værd for et to-minutters engangstoken. Receipt og grant er til
+gengæld atomiske i samme transaktion (T-014).
+
 ## Rotation & incident
 
 - **Device-token:** `/api/v1/token/rotate` eller CLI; revokér enhed ved tab.
@@ -143,6 +196,14 @@ GitHub artifact attestation.
   som før, så dette lukker ikke #6 — det gør beslutningen konkret og prøvbar: sæt
   `KALIV_EGRESS_GATE=1` på workeren og se hvad gating af reads faktisk koster i praksis, før du
   vælger.
+
+- **Øvrige åbne sikkerhedspunkter ejes af backloggen** — ikke gentaget her:
+  cloud-read-egress-beslutningen (T-032, gjort prøvbar via
+  `KALIV_EGRESS_GATE` ovenfor), at-rest-beskyttelse af følsomme
+  Agent3-memoryværdier (T-033, kræver riggen), fysisk bevis af
+  I0b-procesisolering før den agentiske flade udvides, og
+  concurrency-modellen ud over single-flight (T-018). Se
+  [`BACKLOG.md`](BACKLOG.md).
 
 ## Kontrakt: writes (præcisering, 1.58.37)
 

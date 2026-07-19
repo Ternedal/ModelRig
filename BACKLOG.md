@@ -74,7 +74,10 @@ den fysiske pilot.
 attempt-markør, slot beholdes, plan pauses — max_runs kan ikke blive N+1 via
 crash) og F-1003 (owner-lease: en levende workers claims kan ikke opgives)
 lukket i 1.58.126; F-1004 lukket ved at gaten nu kører 9 prober inkl. begge
-kanter, bevist ikke-blinde.
+kanter, bevist ikke-blinde. F-1005 (hul FROZEN) lukket i 1.58.127. F-1019
+lukket 19/7 som docs-commit: SECURITY.md er nu selve trusselsmodellen
+(model-output-som-angriber, stående-grant-kæden, F-1006 accepteret-med-
+begrundelse) og peger på de genererede sider for tilstand.
 
 ## Milepæl 3 — Agent 3-pilot (mål task success) — tracker #60
 
