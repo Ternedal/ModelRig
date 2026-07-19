@@ -89,13 +89,20 @@ def _b64decode(value: str) -> bytes:
 
 
 def _args_sha256(args: Any) -> str:
-    raw = json.dumps(
-        args,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()
+    """Hash the only approved write payload identically in Go and Python.
+
+    Generic JSON canonicalization differs across runtimes for number rendering
+    and escaping. This approval is intentionally restricted to note_append,
+    whose executable payload is one bounded UTF-8 string. Bind exactly that
+    string and reject every broader argument shape. The immutable confirmation
+    digest independently binds the complete step object too.
+    """
+    if not isinstance(args, dict) or set(args) != {"text"}:
+        raise Agent3ApprovalError("note_append approval requires exactly one text argument")
+    text = args.get("text")
+    if not isinstance(text, str) or not text.strip() or len(text) > 10_000:
+        raise Agent3ApprovalError("note_append approval text is invalid")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _action_sha256(run_id: str, step_id: str, digest: str, revision: int) -> str:
