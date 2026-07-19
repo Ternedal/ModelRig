@@ -150,6 +150,7 @@ class Agent3ReplanClient(baseUrl: String, private val token: String) {
         steps = parseSteps(o.optJSONArray("steps") ?: JSONArray()),
         answer = o.nullableString("answer"),
         error = o.nullableString("error"),
+        termination = null,
     )
 
     private fun parseSteps(arr: JSONArray): List<Agent3Client.Step> = buildList {
