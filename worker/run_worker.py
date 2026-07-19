@@ -62,6 +62,11 @@ def _mount_optional_agent3() -> bool:
         build_default_replan_preview_service,
         build_replan_preview_router,
     )
+    from app.agent3.task_readiness import (
+        build_task_readiness_router,
+        evaluate_configured_task_readiness,
+    )
+    from app.build_identity import code_fingerprint
 
     if not mount_agent3(routing_app):
         return False
@@ -79,6 +84,12 @@ def _mount_optional_agent3() -> bool:
         return build_runtime_capability_graph(
             adapter,
             worker_version=worker_version,
+        )
+
+    def readiness_provider():
+        return evaluate_configured_task_readiness(
+            current_version=worker_version,
+            current_code=code_fingerprint(),
         )
 
     routing_app.include_router(
@@ -112,11 +123,13 @@ def _mount_optional_agent3() -> bool:
             graph_provider,
         )
     )
+    routing_app.include_router(build_task_readiness_router(readiness_provider))
     routing_app.state.agent3_memory_store = memory_store
     routing_app.state.agent3_replan_preview_service = replan_preview_service
     routing_app.state.agent3_outcome_answer_mounted = True
     routing_app.state.agent3_capability_graph_mounted = True
     routing_app.state.agent3_capability_receipt_mounted = True
+    routing_app.state.agent3_task_readiness_mounted = True
     routing_app.state.agent3_planner_mounted = True
     return True
 
