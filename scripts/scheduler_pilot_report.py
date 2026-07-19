@@ -31,6 +31,8 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
+import sqlite3
 import sys
 import urllib.error
 import urllib.request
@@ -38,7 +40,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "kaliv-scheduler-pilot/v1"
+SCHEMA = "kaliv-scheduler-pilot/v2"
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -51,6 +53,62 @@ def _load_campaign():
     return module
 
 
+def _ro(path: str) -> sqlite3.Connection:
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def read_forensics(schedules_db: str, jobs_db: str, audit_db: str,
+                   schedule_id: str) -> dict[str, Any]:
+    """The durable rows behind ONE schedule's pilot run, read straight from
+    the stores (read-only URIs). Aggregate counters prove that SOMETHING ran;
+    a promotion proof must pin the exact occurrences, their jobs, their audit
+    sequence and the receipt -- this is that pin (F-1206)."""
+    sc = _ro(schedules_db)
+    row = sc.execute(
+        "SELECT tool, args, cadence, max_runs, runs_used, revision, enabled, "
+        "approved_fingerprint FROM schedules WHERE id=?",
+        (schedule_id,)).fetchone()
+    schedule = dict(row) if row else None
+    occs = [dict(r) for r in sc.execute(
+        "SELECT claim_id, status, occurrence_due_at, created, resolved, "
+        "job_id FROM occurrences WHERE schedule_id=? ORDER BY created",
+        (schedule_id,))]
+    receipts = [dict(r) for r in sc.execute(
+        "SELECT kind, device_id, nonce, issued_at, consumed_at, revision, "
+        "fingerprint FROM approval_receipts WHERE schedule_id=? ORDER BY id",
+        (schedule_id,))]
+    sc.close()
+
+    jb = _ro(jobs_db)
+    au = _ro(audit_db)
+    for occ in occs:
+        if occ.get("job_id"):
+            j = jb.execute("SELECT status, detail FROM jobs WHERE id=?",
+                           (occ["job_id"],)).fetchone()
+            occ["job"] = dict(j) if j else None
+        conv = f"schedule:{schedule_id}:occ:{occ['claim_id']}"
+        occ["audit_outcomes"] = [
+            r["outcome"] for r in au.execute(
+                "SELECT outcome FROM audit WHERE conversation_id=? "
+                "ORDER BY id", (conv,))]
+    jb.close()
+    au.close()
+
+    created = [o["created"] for o in occs]
+    resolved = [o["resolved"] for o in occs if o.get("resolved")]
+    return {
+        "schedule": schedule,
+        "occurrences": occs,
+        "receipts": receipts,
+        "window": {
+            "first_created": min(created) if created else None,
+            "last_resolved": max(resolved) if resolved else None,
+        },
+    }
+
+
 def fetch_json(url: str, *, timeout: float = 10.0) -> dict[str, Any]:
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -58,9 +116,42 @@ def fetch_json(url: str, *, timeout: float = 10.0) -> dict[str, Any]:
 
 
 def judge(read_detail: dict[str, Any], write_detail: dict[str, Any],
-          manual: dict[str, Any]) -> list[str]:
+          manual: dict[str, Any],
+          read_forensics_data: dict[str, Any] | None = None,
+          write_forensics_data: dict[str, Any] | None = None) -> list[str]:
     """Every reason the pilot does NOT hold. Empty list == the pilot holds."""
     problems: list[str] = []
+
+    if read_forensics_data is not None:
+        r_occs = read_forensics_data.get("occurrences") or []
+        if not any(o.get("status") == "executed" for o in r_occs):
+            problems.append(
+                "forensik: read-planen har ingen 'executed' occurrence -- "
+                "aggregatet kan ikke pege på et bestemt forloeb")
+        if not any(o.get("status") == "released"
+                   and (o.get("job") or {}).get("status") == "cancelled"
+                   for o in r_occs):
+            problems.append(
+                "forensik: pausens bevis mangler -- ingen released "
+                "occurrence med et cancelled job paa read-planen")
+    if write_forensics_data is not None:
+        w_occs = write_forensics_data.get("occurrences") or []
+        good = [o for o in w_occs if o.get("status") == "executed"
+                and "attempt" in (o.get("audit_outcomes") or [])
+                and "executed" in (o.get("audit_outcomes") or [])]
+        if not good:
+            problems.append(
+                "forensik: ingen write-occurrence med baade attempt- og "
+                "executed-audit -- kaeden claim->attempt->executed er ikke "
+                "bevist for et konkret forloeb")
+        elif not any((o.get("job") or {}).get("status") == "completed"
+                     for o in good):
+            problems.append(
+                "forensik: den beviste write-occurrence er ikke bundet til "
+                "et completed job")
+        if not (write_forensics_data.get("receipts") or []):
+            problems.append(
+                "forensik: ingen receipt-raekke i storen for write-planen")
 
     r_sched = read_detail.get("schedule") or {}
     r_receipts = read_detail.get("approval_receipts")
@@ -107,8 +198,12 @@ def judge(read_detail: dict[str, Any], write_detail: dict[str, Any],
 def build_report(candidate: dict[str, Any], worker_url: str,
                  read_id: str, write_id: str,
                  read_detail: dict[str, Any], write_detail: dict[str, Any],
-                 manual: dict[str, Any], now_iso: str) -> dict[str, Any]:
-    problems = judge(read_detail, write_detail, manual)
+                 manual: dict[str, Any], now_iso: str,
+                 read_forensics_data: dict[str, Any] | None = None,
+                 write_forensics_data: dict[str, Any] | None = None
+                 ) -> dict[str, Any]:
+    problems = judge(read_detail, write_detail, manual,
+                     read_forensics_data, write_forensics_data)
     r_sched = read_detail.get("schedule") or {}
     w_sched = write_detail.get("schedule") or {}
     w_receipts = write_detail.get("approval_receipts") or []
@@ -138,6 +233,10 @@ def build_report(candidate: dict[str, Any], worker_url: str,
                 "consumed_at": first.get("consumed_at"),
             },
         },
+        "forensics": {
+            "read": read_forensics_data,
+            "write": write_forensics_data,
+        },
         "manual": {
             "revocation_confirmed": manual.get("revocation_confirmed"),
             "recovery_line": manual.get("recovery_line"),
@@ -153,6 +252,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--read-schedule-id", required=True)
     parser.add_argument("--write-schedule-id", required=True)
     parser.add_argument("--manual-observations", type=Path, required=True)
+    parser.add_argument(
+        "--schedules-db",
+        default=os.environ.get("KALIV_SCHEDULES_DB", "./kaliv-schedules.db"))
+    parser.add_argument(
+        "--jobs-db",
+        default=os.environ.get("MODELRIG_JOBS_DB", "./modelrig-jobs.db"))
+    parser.add_argument(
+        "--audit-db",
+        default=os.environ.get("KALIV_AUDIT_DB", "./kaliv-audit.db"))
     parser.add_argument(
         "--report", type=Path,
         default=Path("validation/scheduler-pilot-latest.json"))
@@ -181,10 +289,24 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  FAIL  kunne ikke læse {label}-planen fra workeren: {exc}")
             return 1
 
+    forensics: dict[str, dict[str, Any] | None] = {"read": None, "write": None}
+    for label, sid in (("read", args.read_schedule_id),
+                       ("write", args.write_schedule_id)):
+        try:
+            forensics[label] = read_forensics(
+                args.schedules_db, args.jobs_db, args.audit_db, sid)
+        except sqlite3.Error as exc:
+            print(f"  FAIL  forensik for {label}-planen kunne ikke laeses "
+                  f"fra storene: {exc}")
+            print("         -> peg --schedules-db/--jobs-db/--audit-db paa "
+                  "workerens filer (eller koer fra dens arbejdsmappe)")
+            return 1
+
     now_iso = datetime.now(timezone.utc).isoformat()
     report = build_report(candidate, base, args.read_schedule_id,
                           args.write_schedule_id, details["read"],
-                          details["write"], manual, now_iso)
+                          details["write"], manual, now_iso,
+                          forensics["read"], forensics["write"])
 
     args.report.parent.mkdir(parents=True, exist_ok=True)
     tmp = args.report.with_suffix(args.report.suffix + ".tmp")

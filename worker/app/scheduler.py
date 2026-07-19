@@ -749,6 +749,46 @@ class ScheduleStore:
             self._conn.commit()
         return True
 
+    def resolve_unknown_and_pause(self, claim_id: str, schedule_id: str, *,
+                                  now: float | None = None) -> str | None:
+        """Unknown-resolution and grant-pause as ONE transaction (F-1204).
+
+        The policy is a pair: the slot stays spent AND the grant stops until a
+        human settles what happened. Done as two transactions, a crash between
+        them left a grant running with an unresolved unknown behind it -- the
+        budget was safe, but the pause the policy promised was not. Both
+        updates live in this store, so atomicity is one BEGIN IMMEDIATE, not a
+        distributed problem. The revision bump matches set_enabled: any claim
+        in flight for the grant cancels too.
+        """
+        now = time.time() if now is None else now
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                row = self._conn.execute(
+                    "SELECT status FROM occurrences WHERE claim_id=? "
+                    "AND status IN ('reserved','reserved_noslot')",
+                    (claim_id,),
+                ).fetchone()
+                if row is None:
+                    self._conn.commit()
+                    return None
+                self._conn.execute(
+                    "UPDATE occurrences SET status='unknown', resolved=? "
+                    "WHERE claim_id=?",
+                    (now, claim_id),
+                )
+                self._conn.execute(
+                    "UPDATE schedules SET enabled=0, revision=revision+1 "
+                    "WHERE id=?",
+                    (schedule_id,),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return row["status"]
+
     def acquire_lease(self, owner_id: str, *, ttl_seconds: float,
                       now: float | None = None) -> bool:
         """Take (or extend) the scheduler owner-lease (F-1003).

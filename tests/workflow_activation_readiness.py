@@ -404,19 +404,20 @@ finally:
 
 # Suppress only the pause -> the grant stays live for the next cadence ->
 # probe red. The slot-keeping alone is not enough; the probe demands both.
-_orig_set = _sched.ScheduleStore.set_enabled
-def _no_pause(self, schedule_id, enabled, *, now):
-    if not enabled:
-        return self.get(schedule_id)  # swallow the pause
-    return _orig_set(self, schedule_id, enabled, now=now)
-_sched.ScheduleStore.set_enabled = _no_pause
+# Since F-1204 the pause lives INSIDE the atomic resolve_unknown_and_pause,
+# so the sabotage targets that method: resolve without pausing.
+_orig_rup = _sched.ScheduleStore.resolve_unknown_and_pause
+def _no_pause(self, claim_id, schedule_id, *, now=None):
+    return self.resolve_unknown(claim_id, now=now)  # swallow the pause half
+_sched.ScheduleStore.resolve_unknown_and_pause = _no_pause
 try:
     _p = _probe("Ukendt udfald: slot beholdes og granten pauses")
     check(_p is not None and _p["ok"] is False,
-          "swallowing the pause turns the unknown-window probe RED -- the "
-          "probe requires the grant paused, not only the slot kept")
+          "swallowing the pause half of the atomic call turns the "
+          "unknown-window probe RED -- the probe requires the grant paused, "
+          "not only the slot kept")
 finally:
-    _sched.ScheduleStore.set_enabled = _orig_set
+    _sched.ScheduleStore.resolve_unknown_and_pause = _orig_rup
 
 # 5. The lease probe must watch the actual guard: rubber-stamp acquisition
 # and recovery abandons the living owner's claim -> probe red.

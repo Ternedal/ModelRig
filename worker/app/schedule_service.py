@@ -74,6 +74,7 @@ class SchedulerService:
         self._stop = threading.Event()
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
+        self._heartbeat_thread: threading.Thread | None = None
         self._ticks = 0
         self._failures = 0
         self._started_at: float | None = None
@@ -125,14 +126,62 @@ class SchedulerService:
             )
             self._thread = thread
             thread.start()
+            # F-1203: the lease must outlive a long ToolGate run. The tick
+            # renews at claim time, but a single tool can run past the TTL --
+            # and an expired lease invites a second process to take over while
+            # the tool is STILL executing. The heartbeat renews at ttl/3 for
+            # as long as the service lives; losing a renewal is logged, and
+            # the next tick's own acquire will then refuse to claim.
+            if hasattr(self.runner, "owner_id") and hasattr(
+                    getattr(self.runner, "schedules", None), "acquire_lease"):
+                hb = threading.Thread(
+                    target=self._heartbeat,
+                    name="kaliv-scheduler-lease",
+                    daemon=True,
+                )
+                self._heartbeat_thread = hb
+                hb.start()
             return True
 
+    def _heartbeat(self) -> None:
+        ttl = float(getattr(self.runner, "lease_ttl_seconds", 90.0))
+        step = max(0.05, ttl / 3.0)
+        while not self._stop.wait(step):
+            try:
+                ok = self.runner.schedules.acquire_lease(
+                    self.runner.owner_id, ttl_seconds=ttl)
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "scheduler: lease-heartbeat fejlede")
+                continue
+            if not ok:
+                logging.getLogger(__name__).warning(
+                    "scheduler: lease MISTET til en anden ejer — denne "
+                    "proces claimer intet før den er alene igen")
+
     def stop(self, timeout: float = 5.0) -> bool:
-        try:
-            self.runner.schedules.release_lease(self.runner.owner_id)
-        except AttributeError:
-            pass  # fakes without the lease surface
-        return self._stop_impl(timeout)
+        # F-1202: order matters. Releasing the lease FIRST hands the
+        # scheduler to a successor while this process' thread may still be
+        # mid-tool -- two live owners, the exact thing the lease exists to
+        # prevent. So: drain first; release only after the thread is
+        # confirmed gone. If the join times out, the lease is deliberately
+        # NOT released -- the TTL is the honest fallback for a thread that
+        # would not die.
+        stopped = self._stop_impl(timeout)
+        hb = getattr(self, "_heartbeat_thread", None)
+        if hb is not None:
+            hb.join(max(0.0, min(timeout, 1.0)))
+        if stopped:
+            try:
+                self.runner.schedules.release_lease(self.runner.owner_id)
+            except AttributeError:
+                pass  # fakes without the lease surface
+        else:
+            logging.getLogger(__name__).warning(
+                "scheduler: stop nåede ikke at draine tråden — lease "
+                "frigives IKKE (TTL er fallback), så en efterfølger ikke "
+                "starter oveni en levende kørsel")
+        return stopped
 
     def _stop_impl(self, timeout: float = 5.0) -> bool:
         """Interrupt the wait and join the service thread.

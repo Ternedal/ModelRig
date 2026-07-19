@@ -153,8 +153,8 @@ class SchedulerRunner:
                                     "opgivet og budget-slot refunderet "
                                     f"(occ={occ['claim_id']})"))
                     continue
-                prior = self.schedules.resolve_unknown(
-                    occ["claim_id"], now=now_v)
+                prior = self.schedules.resolve_unknown_and_pause(
+                    occ["claim_id"], occ["schedule_id"], now=now_v)
                 if prior is None:
                     continue
                 unknown_ids.append(occ["claim_id"])
@@ -167,11 +167,6 @@ class SchedulerRunner:
                                 "BEHOLDT (refusion kunne give flere kørsler "
                                 "end max_runs); planen er pauset til manuel "
                                 f"afklaring (occ={occ['claim_id']})"))
-                if sched is not None:
-                    # Pause bumps the revision like any user-intent change,
-                    # so anything else in flight for the grant cancels too.
-                    self.schedules.set_enabled(
-                        occ["schedule_id"], False, now=now_v)
                 continue
             prior = self.schedules.resolve_recovered(
                 occ["claim_id"], executed=False, now=now_v)

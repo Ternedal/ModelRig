@@ -34,7 +34,7 @@ from typing import Any, Callable
 SCHEMA = "kaliv-physical-validation-campaign/v1"
 LIFECYCLE_SCHEMA = "kaliv-appliance-lifecycle-observations/v1"
 PREFLIGHT_SCHEMA = "kaliv-rig-preflight/v1"
-SCHEDULER_PILOT_SCHEMA = "kaliv-scheduler-pilot/v1"
+SCHEDULER_PILOT_SCHEMA = "kaliv-scheduler-pilot/v2"
 MAX_EVIDENCE_BYTES = 32 * 1024 * 1024
 DEFAULT_REPORT = Path("validation/physical-validation-campaign-latest.json")
 
@@ -83,7 +83,9 @@ COMMANDS = {
         "python scripts\\scheduler_pilot_report.py "
         "--read-schedule-id <ID> --write-schedule-id <ID> "
         "--manual-observations validation\\scheduler-manual-observations.json "
-        "--report validation\\scheduler-pilot-latest.json"
+        "--report validation\\scheduler-pilot-latest.json "
+        "(koer fra workerens arbejdsmappe, eller peg --schedules-db/"
+        "--jobs-db/--audit-db paa dens filer)"
     ),
     "verify": (
         "python scripts\\physical_validation_campaign.py --mode verify "
@@ -775,6 +777,33 @@ def _validate_scheduler_pilot(
     if not (isinstance(line, str) and "recovered" in line):
         errors.append("manual.recovery_line must contain the startup "
                       "recovery line ('recovered ...')")
+    w_for = _nested(report, "forensics", "write") or {}
+    w_occs = w_for.get("occurrences") or []
+    pinned = [o for o in w_occs if o.get("status") == "executed"
+              and "attempt" in (o.get("audit_outcomes") or [])
+              and "executed" in (o.get("audit_outcomes") or [])]
+    if not pinned:
+        errors.append("forensics.write must pin at least one executed "
+                      "occurrence whose audit sequence contains attempt AND "
+                      "executed -- aggregate counters are not a promotion "
+                      "proof (F-1206)")
+    elif not any((o.get("job") or {}).get("status") == "completed"
+                 for o in pinned):
+        errors.append("the pinned write occurrence must be bound to a "
+                      "completed job")
+    if not (w_for.get("receipts") or []):
+        errors.append("forensics.write.receipts must contain the stored "
+                      "receipt row")
+    r_for = _nested(report, "forensics", "read") or {}
+    r_occs = r_for.get("occurrences") or []
+    if not any(o.get("status") == "released"
+               and (o.get("job") or {}).get("status") == "cancelled"
+               for o in r_occs):
+        errors.append("forensics.read must contain the pause proof: a "
+                      "released occurrence bound to a cancelled job")
+    if not isinstance(_nested(report, "forensics", "read", "window",
+                              "first_created"), (int, float)):
+        errors.append("forensics.read.window must anchor the pilot in time")
     if _nested(report, "pilot", "passed") is not True:
         errors.append("pilot.passed must be true -- the producer itself "
                       "judged the pilot as not holding")

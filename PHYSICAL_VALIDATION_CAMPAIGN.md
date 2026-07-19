@@ -208,6 +208,14 @@ python scripts\scheduler_pilot_report.py --read-schedule-id <ID> --write-schedul
 Produceren fælder selv dom (`pilot.passed`) og skriver rapporten uanset —
 aggregatoren genvaliderer alt mod den frosne kandidat.
 
+**Forensik (v2):** rapporten pinner det *konkrete* forløb direkte fra storene
+(read-only): schedule-rækken (tool/args/cadence/budget), hver occurrence med
+claim_id, status, job og audit-sekvens (`attempt` → `executed`), receipt-rækken
+og tidsvinduet. Pausens bevis er en `released`-occurrence bundet til et
+`cancelled` job. Kør produceren fra workerens arbejdsmappe, eller peg
+`--schedules-db`/`--jobs-db`/`--audit-db` på dens filer — aggregater tæller,
+forensikken beviser.
+
 ## 8. Verificér hele kampagnen
 
 ```powershell

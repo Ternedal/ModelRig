@@ -189,5 +189,102 @@ check(st7.get(s7.schedule_id) is not None
       "and the exhausted grant is disabled through the refusal path, with the "
       "audit trail a user can read")
 
+# --- F-1202/F-1203/F-1204: the three interleavings the gap analysis named ---
+import threading
+import time as _time
+
+from app.schedule_runner import TickResult  # noqa: E402
+from app.schedule_service import SchedulerService  # noqa: E402
+
+
+class BlockingRunner:
+    """A runner whose single tick blocks like a long ToolGate run."""
+
+    def __init__(self, store, *, owner_id, ttl):
+        self.schedules = store
+        self.owner_id = owner_id
+        self.lease_ttl_seconds = ttl
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def feature_enabled(self):
+        return True
+
+    def disable_unschedulable(self):
+        return []
+
+    def recover_interrupted(self, *, now=None):
+        # The real runner's recovery acquires the lease before touching
+        # anything; the harness mirrors that so the service holds it from
+        # startup, exactly like production.
+        self.schedules.acquire_lease(
+            self.owner_id, ttl_seconds=self.lease_ttl_seconds)
+        return {"executed": [], "abandoned": [], "unknown": []}
+
+    def run_once(self):
+        self.entered.set()
+        self.release.wait(10.0)
+        return TickResult(True, False, 0, 0, 0, 0)
+
+
+# F-1202: stop drains FIRST; a live thread's lease is never handed away.
+st5, _, _, _ = make_env("worker-a")
+br = BlockingRunner(st5, owner_id="worker-a", ttl=90.0)
+svc = SchedulerService(br, poll_s=0.01)
+svc.start()
+check(br.entered.wait(5.0), "the long tick is running (harness sanity)")
+early_stop = svc.stop(timeout=0.3)
+check(early_stop is False,
+      "stop cannot claim success while the thread is still inside a tool")
+check(not st5.acquire_lease("worker-b", ttl_seconds=90,
+                            now=_time.time()),
+      "and the lease is NOT released -- a successor must not start on top "
+      "of a living run (F-1202)")
+br.release.set()
+check(svc.stop(timeout=5.0) is True, "after the tool ends, stop drains")
+check(st5.acquire_lease("worker-b", ttl_seconds=90, now=_time.time()),
+      "and only THEN is the lease available to a successor")
+
+# F-1203: the heartbeat outlives a run longer than the TTL.
+st6, _, _, _ = make_env("worker-a")
+br6 = BlockingRunner(st6, owner_id="worker-a", ttl=0.6)
+svc6 = SchedulerService(br6, poll_s=0.01)
+svc6.start()
+check(br6.entered.wait(5.0), "the long tick is running (harness sanity)")
+_time.sleep(1.4)  # well past the 0.6s TTL; only the heartbeat can save it
+check(not st6.acquire_lease("worker-b", ttl_seconds=90,
+                            now=_time.time()),
+      "a run LONGER than the TTL keeps its lease -- the heartbeat renews, "
+      "so no second process can take over mid-tool (F-1203)")
+br6.release.set()
+svc6.stop(timeout=5.0)
+check(st6.acquire_lease("worker-b", ttl_seconds=90, now=_time.time()),
+      "clean stop still hands the lease over afterwards")
+
+# F-1204: unknown + pause are one transaction -- both or neither.
+st7, jb7, gt7, rn7 = make_env("worker-a")
+s7 = st7.create("rig_status", {}, "every:60", now=NOW)
+c7 = st7.claim_due(now=NOW + 61)[0]
+def _rev(store, sid):
+    return store._conn.execute(
+        "SELECT revision FROM schedules WHERE id=?", (sid,)).fetchone()[0]
+
+before_rev = _rev(st7, s7.schedule_id)
+prior = st7.resolve_unknown_and_pause(c7.claim_id, s7.schedule_id,
+                                      now=NOW + 100)
+after = st7.get(s7.schedule_id)
+row7 = st7._conn.execute(
+    "SELECT status FROM occurrences WHERE claim_id=?",
+    (c7.claim_id,)).fetchone()
+check(prior == "reserved" and row7["status"] == "unknown"
+      and not after.enabled and _rev(st7, s7.schedule_id) == before_rev + 1,
+      "one call yields the whole policy: occurrence unknown, grant paused, "
+      "revision bumped -- atomically (F-1204)")
+check(st7.resolve_unknown_and_pause(c7.claim_id, s7.schedule_id,
+                                    now=NOW + 101) is None
+      and _rev(st7, s7.schedule_id) == before_rev + 1,
+      "a raced second call touches NOTHING -- no double pause, no double "
+      "revision bump")
+
 print(f"\n===== SCHEDULE LEASE: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

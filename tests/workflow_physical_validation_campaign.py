@@ -251,6 +251,50 @@ def valid_reports() -> dict[str, dict]:
                     "consumed_at": 1002.5,
                 },
             },
+            "forensics": {
+                "read": {
+                    "schedule": {"tool": "rig_status", "args": "{}",
+                                 "cadence": "every:60", "max_runs": 3,
+                                 "runs_used": 2, "revision": 1, "enabled": 0},
+                    "occurrences": [
+                        {"claim_id": "occ-r1", "status": "executed",
+                         "occurrence_due_at": 900.0, "created": 900.0,
+                         "resolved": 905.0, "job_id": "job-r1",
+                         "job": {"status": "completed", "detail": "occ=occ-r1"},
+                         "audit_outcomes": ["attempt", "executed"]},
+                        {"claim_id": "occ-r2", "status": "released",
+                         "occurrence_due_at": 960.0, "created": 960.0,
+                         "resolved": 962.0, "job_id": "job-r2",
+                         "job": {"status": "cancelled",
+                                 "detail": "occ=occ-r2"},
+                         "audit_outcomes": []},
+                    ],
+                    "receipts": [],
+                    "window": {"first_created": 900.0,
+                               "last_resolved": 962.0},
+                },
+                "write": {
+                    "schedule": {"tool": "note_append",
+                                 "args": "{\"text\": \"pilot\"}",
+                                 "cadence": "every:60", "max_runs": 2,
+                                 "runs_used": 1, "revision": 0, "enabled": 1},
+                    "occurrences": [
+                        {"claim_id": "occ-w1", "status": "executed",
+                         "occurrence_due_at": 1000.0, "created": 1000.0,
+                         "resolved": 1002.5, "job_id": "job-w1",
+                         "job": {"status": "completed", "detail": "occ=occ-w1"},
+                         "audit_outcomes": ["attempt", "executed"]},
+                    ],
+                    "receipts": [
+                        {"kind": "create", "device_id": "pixel-6a",
+                         "nonce": "n0", "issued_at": 1000,
+                         "consumed_at": 1002.5, "revision": 0,
+                         "fingerprint": "f" * 64},
+                    ],
+                    "window": {"first_created": 1000.0,
+                               "last_resolved": 1002.5},
+                },
+            },
             "manual": {
                 "revocation_confirmed": True,
                 "recovery_line": ("scheduler: recovered 0 executed / 1 "
@@ -511,6 +555,23 @@ with tempfile.TemporaryDirectory(dir=ROOT) as td:
           "an unconfirmed revocation observation fails the campaign -- the "
           "human half of the pilot is evidence, not decoration")
 
+# Forensics: an executed write whose audit lacks the attempt marker is not a
+# promotion proof -- the chain claim->attempt->executed must be pinned.
+with tempfile.TemporaryDirectory(dir=ROOT) as td:
+    temp = Path(td)
+    for name, report in reports_with_artifacts(temp).items():
+        write(temp / f"{name}.json", report)
+    pilot = reports_with_artifacts(temp)["scheduler_pilot"]
+    pilot["forensics"]["write"]["occurrences"][0]["audit_outcomes"] = [
+        "executed"]
+    write(temp / "scheduler_pilot.json", pilot)
+    r, code = campaign.campaign_report(args_for(temp, "verify"))
+    check(code == 1 and any(
+              "attempt" in e
+              for e in r["evidence"]["scheduler_pilot"]["errors"]),
+          "an executed write without its attempt-audit fails -- the pinned "
+          "sequence is the proof, not the counter")
+
 # The producer's own judgement, offline via its pure functions.
 pilot_mod = load_module("scheduler_pilot_report_test",
                         SCRIPTS / "scheduler_pilot_report.py")
@@ -523,6 +584,34 @@ _manual_ok = {"revocation_confirmed": True,
               "operator": "Anders"}
 check(pilot_mod.judge(_read_ok, _write_ok, _manual_ok) == [],
       "the producer judges a holding pilot as holding")
+_rf = {"occurrences": [
+    {"claim_id": "r1", "status": "executed",
+     "job": {"status": "completed"}, "audit_outcomes": ["attempt", "executed"]},
+    {"claim_id": "r2", "status": "released",
+     "job": {"status": "cancelled"}, "audit_outcomes": []}],
+    "receipts": [], "window": {"first_created": 1.0, "last_resolved": 2.0}}
+_wf = {"occurrences": [
+    {"claim_id": "w1", "status": "executed",
+     "job": {"status": "completed"}, "audit_outcomes": ["attempt", "executed"]}],
+    "receipts": [{"kind": "create", "device_id": "pixel-6a"}],
+    "window": {"first_created": 1.0, "last_resolved": 2.0}}
+check(pilot_mod.judge(_read_ok, _write_ok, _manual_ok, _rf, _wf) == [],
+      "with full forensics the pilot still holds")
+_wf_bad = {"occurrences": [
+    {"claim_id": "w1", "status": "executed",
+     "job": {"status": "completed"}, "audit_outcomes": ["executed"]}],
+    "receipts": [{"kind": "create"}],
+    "window": {"first_created": 1.0, "last_resolved": 2.0}}
+check(any("attempt" in p for p in pilot_mod.judge(
+          _read_ok, _write_ok, _manual_ok, _rf, _wf_bad)),
+      "the producer refuses a pinned write without its attempt-audit")
+_rf_bad = {"occurrences": [
+    {"claim_id": "r1", "status": "executed",
+     "job": {"status": "completed"}, "audit_outcomes": ["attempt", "executed"]}],
+    "receipts": [], "window": {"first_created": 1.0, "last_resolved": 2.0}}
+check(any("paus" in p for p in pilot_mod.judge(
+          _read_ok, _write_ok, _manual_ok, _rf_bad, _wf)),
+      "the producer refuses a pilot without the pause proof in the store")
 check(any("receipt" in p for p in pilot_mod.judge(
           _read_ok, {"schedule": {"runs_used": 1}, "approval_receipts": []},
           _manual_ok)),

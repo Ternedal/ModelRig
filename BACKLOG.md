@@ -94,6 +94,13 @@ kandidat-binding); kampagnen har nu et `scheduler_pilot`-slot med
 validator, producer (`scheduler_pilot_report.py`, maskin-halvdel læses
 live fra workeren, menneske-halvdel via manual-observations som voice)
 og cases i kampagne-suiten.
+**Gap-analysen 1.58.128 (19/7, snapshot 1c3a978):** Gate A F-1202→F-1206
+lukket i 1.58.129 — stop drainer før lease frigives (og frigiver IKKE ved
+timeout; TTL er fallback), service-heartbeat fornyer under lange kørsler,
+unknown+pause er én transaktion, de tre interleavings er testet og
+mutations-dræbt, og pilot-slottet er forensic (v2: pinner
+occurrence/job/audit-sekvens/receipt/vindue fra storene). F-1201 (kampagnen)
+er fortsat riggens.
 
 ## Milepæl 3 — Agent 3-pilot (mål task success) — tracker #60
 
