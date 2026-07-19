@@ -185,7 +185,7 @@ try:
             check(len(scale_result["query_runs"]) == 24, "repetitions multiply the query set exactly")
             check(scale_result["latency_ms"]["p50"] is not None, "query latency summary is populated")
             check(scale_result["resources"]["rss_peak_bytes"] == 1234, "resource sampler result reaches the report")
-    check(scale_result["resources"]["rss_delta_peak_bytes"] == 234, "resource delta reaches the report")
+            check(scale_result["resources"]["rss_delta_peak_bytes"] == 234, "resource delta reaches the report")
             check(scale_result["cleanup"]["removed_chunks"] == 120, "benchmark source is deleted after measurement")
             check(scale_result["cleanup"]["remaining_chunks"] == 0, "isolated store is empty after success")
             check(store.count() == 0, "no benchmark chunk survives successful cleanup")
