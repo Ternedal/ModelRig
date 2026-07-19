@@ -82,6 +82,10 @@ Fill in:
 - the paired-device id shown by the consumed approval receipt;
 - recovery's expected terminal status: `executed` or `abandoned`.
 
+The declared pilot window must be no longer than 12 hours, may not finish more
+than five minutes in the future, and must have finished within the last 24 hours.
+Those bounds prevent a manifest from sweeping old database rows into a new pilot.
+
 For the empty read args object `{}`, the canonical args hash is already present in
 the example manifest.
 
