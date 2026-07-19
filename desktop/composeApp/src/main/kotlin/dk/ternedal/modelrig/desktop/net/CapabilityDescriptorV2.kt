@@ -8,6 +8,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 
 private const val CAPABILITY_SCHEMA_V2 = "kaliv-capability/v2"
@@ -131,13 +134,44 @@ data class CapabilityDescriptorV2(
 
     companion object {
         fun parse(raw: String): CapabilityDescriptorV2 = try {
-            capabilityJson.decodeFromString(serializer(), raw).validate()
+            val element = capabilityJson.parseToJsonElement(raw)
+            validateRawBooleanTypes(element)
+            capabilityJson.decodeFromJsonElement(serializer(), element).validate()
         } catch (exc: CapabilityContractException) {
             throw exc
         } catch (exc: SerializationException) {
             throw CapabilityContractException("invalid capability descriptor JSON", exc)
         } catch (exc: IllegalArgumentException) {
             throw CapabilityContractException("invalid capability descriptor", exc)
+        }
+
+        private fun validateRawBooleanTypes(element: JsonElement) {
+            val root = element as? JsonObject
+                ?: throw CapabilityContractException("descriptor must be an object")
+            requireBooleanLiteral(root, "production_activation", "production_activation")
+            requireBooleanLiteral(
+                requireRawObject(root, "scheduling"),
+                "allowed",
+                "scheduling.allowed",
+            )
+            requireBooleanLiteral(
+                requireRawObject(root, "replay"),
+                "idempotent",
+                "replay.idempotent",
+            )
+        }
+
+        private fun requireRawObject(root: JsonObject, key: String): JsonObject =
+            root[key] as? JsonObject
+                ?: throw CapabilityContractException("$key must be an object")
+
+        private fun requireBooleanLiteral(root: JsonObject, key: String, field: String) {
+            val value = root[key] as? JsonPrimitive
+                ?: throw CapabilityContractException("$field must be boolean")
+            requireContract(
+                !value.isString && value.booleanOrNull != null,
+                "$field must be a JSON boolean literal",
+            )
         }
 
         private fun requireContract(condition: Boolean, message: String) {
