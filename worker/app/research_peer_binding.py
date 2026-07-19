@@ -92,7 +92,13 @@ def _sort_addresses(values: Sequence[str]) -> tuple[str, ...]:
     return tuple(normalized)
 
 
-def _validate_egress(plan: EgressPlan, receipt: EgressReceipt, now: int) -> None:
+def _validate_egress(
+    plan: EgressPlan,
+    receipt: EgressReceipt,
+    now: int,
+    *,
+    require_fresh: bool = True,
+) -> None:
     if not isinstance(plan, EgressPlan):
         raise PeerBindingContractError("plan must be an EgressPlan")
     if not isinstance(receipt, EgressReceipt):
@@ -101,7 +107,7 @@ def _validate_egress(plan: EgressPlan, receipt: EgressReceipt, now: int) -> None
         raise PeerBindingDenied("egress receipt does not match the plan")
     if receipt.max_bytes != plan.max_bytes:
         raise PeerBindingDenied("egress receipt byte ceiling does not match the plan")
-    if receipt.expires_at <= now:
+    if require_fresh and receipt.expires_at <= now:
         raise PeerBindingDenied("egress receipt expired")
 
 
@@ -370,7 +376,7 @@ class PublicPeerLedger:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
                 self._conn.execute(
-                    "INSERT INTO peer_bindings VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO peer_bindings VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         binding_id,
                         receipt.receipt_id,
@@ -384,7 +390,6 @@ class PublicPeerLedger:
                         timestamp,
                         expires_at,
                         "issued",
-                        None,
                         None,
                         None,
                         None,
@@ -479,7 +484,7 @@ class PublicPeerLedger:
         now: int | None = None,
     ) -> None:
         timestamp = self._now(now)
-        _validate_egress(plan, receipt, timestamp)
+        _validate_egress(plan, receipt, timestamp, require_fresh=False)
         canonical, _, _ = _validate_url(plan, url)
         if outcome not in {"connected", "failed", "blocked"}:
             raise PeerBindingContractError("outcome is invalid")
