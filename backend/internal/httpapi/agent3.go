@@ -43,6 +43,12 @@ func (s *server) handleAgent3Status(w http.ResponseWriter, r *http.Request) {
 	s.Worker.Forward(w, r, agent3Target(r, "/experimental/agent3/status"))
 }
 
+func (s *server) handleAgent3TaskReadiness(w http.ResponseWriter, r *http.Request) {
+	// Evidence-only and read-only. The worker contract always selects Agent 2 in
+	// this dormant slice; it cannot mutate routing or invoke a model/tool.
+	s.Worker.Forward(w, r, agent3Target(r, "/experimental/agent3/task-readiness"))
+}
+
 func (s *server) handleAgent3Capabilities(w http.ResponseWriter, r *http.Request) {
 	// The graph is observational only: it cannot route, enable tools or promote Agent 3.0.
 	s.Worker.Forward(w, r, agent3Target(r, "/experimental/agent3/capabilities"))
