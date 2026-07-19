@@ -16,7 +16,7 @@ jobs:
         with:
           go-version: "1.23"
 
-      - uses: actions/setup-python@a26af69be951213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
@@ -45,7 +45,7 @@ jobs:
       - name: Apply exact final T-030 API and documentation patch
         if: github.head_ref == 'agent/t030-api-doc-client-fixtures'
         env:
-          T030_EXPECTED_PARENT: dabd72ea6c787474c7a70c5676a477a7a9dbba21
+          T030_EXPECTED_PARENT: 7011d64a52d466be9201f28d0eef88a9ea1a4ad2
         run: |
           exec > >(tee /tmp/t030-finalize.log) 2>&1
           set -euo pipefail
