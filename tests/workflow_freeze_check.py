@@ -41,7 +41,7 @@ def _git(repo, *args):
     return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True)
 
 
-def _make_repo(clean=True, version="1.58.0"):
+def _make_repo(clean=True, version="1.58.0", with_origin=True):
     """A throwaway git repo with a VERSION file and a scripts/version_tool stub."""
     d = Path(tempfile.mkdtemp(prefix="freeze-"))
     _git(d, "init", "-q")
@@ -58,12 +58,29 @@ def _make_repo(clean=True, version="1.58.0"):
     (d / "freeze_check.py").write_text("# placeholder\n")
     _git(d, "add", "-A")
     _git(d, "commit", "-q", "-m", "init")
+    if with_origin:
+        # A local bare "origin" and a pushed main: the on-main blocker (F-1005
+        # upgraded it from a note) must be satisfiable in the harness, and its
+        # absence must be testable.
+        bare = Path(tempfile.mkdtemp(prefix="freeze-origin-")) / "o.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+        _git(d, "remote", "add", "origin", str(bare))
+        _git(d, "push", "-q", "origin", "HEAD:main")
+        _git(d, "fetch", "-q", "origin")
     if not clean:
         (d / "dirty.txt").write_text("uncommitted\n")
     return d
 
 
-def run_in(repo, token=None):
+def _runs(**names):
+    """A fake Actions response: names maps workflow -> (status, conclusion)."""
+    return {"workflow_runs": [
+        {"name": n, "status": st, "conclusion": co}
+        for n, (st, co) in names.items()
+    ]}
+
+
+def run_in(repo, token=None, api=None):
     """Run freeze_check.main() as if cwd were `repo`; return exit code + output."""
     import io
     import contextlib
@@ -90,24 +107,30 @@ def run_in(repo, token=None):
         os.environ.pop("GH_TOKEN", None)
         if token:
             os.environ["GITHUB_TOKEN"] = token
+        _orig_api = fc._api
+        if api is not None:
+            fc._api = api
         with contextlib.redirect_stdout(buf):
             code = fc.main()
         return code, buf.getvalue()
     finally:
+        fc._api = _orig_api
         os.path.dirname = _orig_dirname
         os.chdir(old_cwd)
         os.environ.clear()
         os.environ.update(old_env)
 
 
-# --- a clean, consistent candidate is FROZEN (offline: CI check warns) -------
+# --- F-1005: no token means NOT FROZEN -- the evidence IS the freeze ---------
 _clean = _make_repo(clean=True)
 _code, _out = run_in(_clean, token=None)
-check(_code == 0,
-      "a clean tree with consistent version stamps is FROZEN (exit 0) even "
-      "offline -- the missing CI token is a warning, not a blocker")
-check("CI status not checked" in _out,
-      "and it says plainly that CI was not verified without a token, rather "
+check(_code == 1,
+      "a coherent candidate WITHOUT a token is NOT FROZEN (exit 1) -- FROZEN "
+      "declared without exact-head CI evidence is the hollow verdict F-1005 "
+      "names")
+check("CI status cannot be verified" in _out
+      and "FROZEN requires exact-head CI evidence" in _out,
+      "and it says plainly what is missing and how to supply it, rather "
       "than silently claiming green")
 
 # --- a dirty working tree is a hard blocker ---------------------------------
@@ -141,6 +164,56 @@ run_in(_probe, token=None)
 _after = _git(_probe, "rev-parse", "HEAD").stdout.strip()
 check(_before == _after,
       "freeze_check does not move HEAD or commit anything -- it is read-only")
+
+# --- the green path: token + both workflows verified -> FROZEN ----------------
+_ok = _make_repo(clean=True)
+_code, _out = run_in(
+    _ok, token="tkn",
+    api=lambda url, token: _runs(ci=("completed", "success"),
+                                 codeql=("completed", "success")))
+check(_code == 0 and "FROZEN" in _out,
+      "with a token and ci+codeql verified green on this exact head, the "
+      "candidate is FROZEN (exit 0)")
+check("ci was GREEN" in _out and "codeql was GREEN" in _out,
+      "and BOTH workflows are named as verified -- codeql is part of the "
+      "evidence now, not just ci")
+
+# --- every degraded CI state blocks ------------------------------------------
+for name, api, needle in [
+    ("codeql missing", lambda u, t: _runs(ci=("completed", "success")),
+     "no codeql run found"),
+    ("ci still running", lambda u, t: _runs(ci=("in_progress", None),
+                                            codeql=("completed", "success")),
+     "still running"),
+    ("ci red", lambda u, t: _runs(ci=("completed", "failure"),
+                                  codeql=("completed", "success")),
+     "did not pass"),
+]:
+    _r = _make_repo(clean=True)
+    _code, _out = run_in(_r, token="tkn", api=api)
+    check(_code == 1 and needle in _out,
+          f"{name} on the exact head is NOT FROZEN -- waiting or fixing is "
+          "the only path to the verdict")
+
+def _boom(url, token):
+    import urllib.error
+    raise urllib.error.URLError("offline")
+
+_r = _make_repo(clean=True)
+_code, _out = run_in(_r, token="tkn", api=_boom)
+check(_code == 1 and "could not read CI status" in _out,
+      "an unreadable Actions API is NOT FROZEN -- fail closed, never "
+      "fail open")
+
+# --- not on origin/main is a BLOCKER now, not a note -------------------------
+_local = _make_repo(clean=True, with_origin=False)
+_code, _out = run_in(
+    _local, token="tkn",
+    api=lambda u, t: _runs(ci=("completed", "success"),
+                           codeql=("completed", "success")))
+check(_code == 1 and "FAIL  candidate commit is not on origin/main" in _out,
+      "a local-only candidate is NOT FROZEN even with green CI -- evidence "
+      "must point at code others can see (upgraded from a note, F-1005)")
 
 print(f"\n===== FREEZE CHECK: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

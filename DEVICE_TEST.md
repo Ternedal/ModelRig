@@ -75,8 +75,10 @@ python scripts\freeze_check.py
 ```
 
 **Bør se:** `FROZEN` — ren working tree, ens versionsstempler, kandidaten er på
-`origin/main`, og (hvis `GITHUB_TOKEN`/`GH_TOKEN` er sat) `CI var GRØN på præcis
-denne commit`. Uden token tjekkes CI ikke, men resten kører offline.
+`origin/main`, og både `ci` og `codeql` verificeret GRØNNE på præcis denne
+commit. **Uden `GITHUB_TOKEN`/`GH_TOKEN` er dommen IKKE FROSSET** (F-1005):
+frysens pointe ER exact-head-beviset, så sæt tokenet
+(`$env:GITHUB_TOKEN = "<token>"`) og kør igen.
 
 **Fejler noget →** hver `FAIL` har en `->`-linje. De almindelige: ucommittede
 ændringer (commit eller kassér dem), versionsdrift (kør `version_tool.py sync`),
