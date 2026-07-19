@@ -72,7 +72,7 @@ data class CapabilityDescriptorV2(
             "invalid capability_id",
         )
         requireContract(kind == "tool", "kind must be tool")
-        requireContract(description.isNotEmpty(), "description must be non-empty")
+        requireContract(description.isNotBlank(), "description must contain visible text")
         requireContract(access in setOf("read", "write", "desktop"), "unsupported access")
         requireContract(
             impact in setOf("read", "write", "desktop", "destructive", "admin"),
