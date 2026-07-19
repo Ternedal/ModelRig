@@ -103,13 +103,13 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_planner_memory.py`
 - `tests/worker_agent3_planner_review.py`
 - `tests/worker_agent3_planner_review_guard.py`
+- `tests/worker_agent3_readonly_pilot.py`
 - `tests/worker_agent3_replan_api.py`
 - `tests/worker_agent3_replan_planner.py`
 - `tests/worker_agent3_replan_preview.py`
 - `tests/worker_agent3_replan_preview_api.py`
 - `tests/worker_agent3_replan_runtime.py`
 - `tests/worker_agent3_replanner.py`
-- `tests/worker_agent3_readonly_pilot.py`
 - `tests/worker_agent3_retry.py`
 - `tests/worker_agent3_review_api_apply.py`
 - `tests/worker_agent3_review_api_approve.py`
