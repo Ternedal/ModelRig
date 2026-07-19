@@ -110,7 +110,7 @@ streamende voice.
 **Varige arkitektur-fakta (dyre at genopdage — alle CI-verificerede, IKKE
 hardware-beviste før valideringsrunden):**
 
-- **Scheduler-leveringsmodellen (bygget 18-19/7, 1.58.116–129):** execution-truth
+- **Scheduler-leveringsmodellen (bygget 18-19/7, 1.58.116–130):** execution-truth
   er durable fra claim, ikke fra finish. `occurrences`-ledger: claim skriver
   durable række + reserverer budget-slot i SAMME transaktion som due_at-advance;
   claim_id binder job, audit, outcome og recovery. Recovery er evidensbaseret —
