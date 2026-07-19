@@ -34,6 +34,7 @@ from typing import Any, Callable
 SCHEMA = "kaliv-physical-validation-campaign/v1"
 LIFECYCLE_SCHEMA = "kaliv-appliance-lifecycle-observations/v1"
 PREFLIGHT_SCHEMA = "kaliv-rig-preflight/v1"
+SCHEDULER_PILOT_SCHEMA = "kaliv-scheduler-pilot/v1"
 MAX_EVIDENCE_BYTES = 32 * 1024 * 1024
 DEFAULT_REPORT = Path("validation/physical-validation-campaign-latest.json")
 
@@ -44,6 +45,7 @@ DEFAULT_PATHS = {
     "voice": Path("validation/voice-baseline-latest.json"),
     "rag": Path("validation/rag-benchmark-latest.json"),
     "lifecycle": Path("validation/appliance-lifecycle-observations.json"),
+    "scheduler_pilot": Path("validation/scheduler-pilot-latest.json"),
 }
 
 COMMANDS = {
@@ -75,6 +77,13 @@ COMMANDS = {
     "lifecycle": (
         "Copy-Item eval\\appliance_lifecycle_observations.example.json "
         "validation\\appliance-lifecycle-observations.json"
+    ),
+    "scheduler_pilot": (
+        "Koer DEVICE_TEST.md sektion 1.6 (read + note_append), og derefter: "
+        "python scripts\\scheduler_pilot_report.py "
+        "--read-schedule-id <ID> --write-schedule-id <ID> "
+        "--manual-observations validation\\scheduler-manual-observations.json "
+        "--report validation\\scheduler-pilot-latest.json"
     ),
     "verify": (
         "python scripts\\physical_validation_campaign.py --mode verify "
@@ -715,6 +724,62 @@ def _validate_lifecycle(
     }
 
 
+def _validate_scheduler_pilot(
+    report: dict[str, Any],
+    result: dict[str, Any],
+    candidate: dict[str, Any],
+    _thresholds: dict[str, Any],
+) -> None:
+    errors = result["errors"]
+    _expect_equal(errors, "schema", report.get("schema"), SCHEDULER_PILOT_SCHEMA)
+    _expect_equal(errors, "candidate.version",
+                  _nested(report, "candidate", "version"), candidate["version"])
+    _expect_equal(errors, "candidate.git_sha",
+                  _nested(report, "candidate", "git_sha"), candidate["git_sha"])
+    _expect_equal(errors, "candidate.code_sha256",
+                  _nested(report, "candidate", "code_sha256"),
+                  candidate["code_sha256"])
+
+    read_runs = _nested(report, "read_schedule", "runs_used")
+    if not isinstance(read_runs, int) or read_runs < 1:
+        errors.append("read_schedule.runs_used must be >= 1 -- the read half "
+                      "of the pilot never ran")
+    if _nested(report, "read_schedule", "receipts_count") != 0:
+        errors.append("read_schedule.receipts_count must be 0 -- reads carry "
+                      "no approvals by design")
+
+    write_runs = _nested(report, "write_schedule", "runs_used")
+    if not isinstance(write_runs, int) or write_runs < 1:
+        errors.append("write_schedule.runs_used must be >= 1 -- the write "
+                      "half of the pilot never ran")
+    receipts = _nested(report, "write_schedule", "receipts_count")
+    if not isinstance(receipts, int) or receipts < 1:
+        errors.append("write_schedule.receipts_count must be >= 1 -- an "
+                      "approved write without its receipt must not exist")
+    device = _nested(report, "write_schedule", "first_receipt", "device_id")
+    if not (isinstance(device, str) and device):
+        errors.append("write_schedule.first_receipt.device_id must name the "
+                      "approving device")
+    issued = _nested(report, "write_schedule", "first_receipt", "issued_at")
+    consumed = _nested(report, "write_schedule", "first_receipt", "consumed_at")
+    if not isinstance(issued, (int, float)) \
+            or not isinstance(consumed, (int, float)) or consumed < issued:
+        errors.append("write_schedule.first_receipt must carry issued_at <= "
+                      "consumed_at")
+
+    if _nested(report, "manual", "revocation_confirmed") is not True:
+        errors.append("manual.revocation_confirmed must be true -- the "
+                      "operator confirms the mid-flight pause produced a "
+                      "cancelled job and a refunded slot")
+    line = _nested(report, "manual", "recovery_line")
+    if not (isinstance(line, str) and "recovered" in line):
+        errors.append("manual.recovery_line must contain the startup "
+                      "recovery line ('recovered ...')")
+    if _nested(report, "pilot", "passed") is not True:
+        errors.append("pilot.passed must be true -- the producer itself "
+                      "judged the pilot as not holding")
+
+
 VALIDATORS: dict[
     str,
     tuple[
@@ -728,6 +793,7 @@ VALIDATORS: dict[
     "voice": (_validate_voice, (("generated_at",),)),
     "rag": (_validate_rag, (("generated_at",),)),
     "lifecycle": (_validate_lifecycle, (("finished_at",),)),
+    "scheduler_pilot": (_validate_scheduler_pilot, (("generated_at",),)),
 }
 
 
@@ -810,6 +876,7 @@ def campaign_report(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         "voice": args.voice_report,
         "rag": args.rag_report,
         "lifecycle": args.lifecycle_report,
+        "scheduler_pilot": args.scheduler_pilot_report,
     }
     evidence = {
         name: validate_evidence(
@@ -885,6 +952,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--voice-report", type=Path, default=DEFAULT_PATHS["voice"])
     parser.add_argument("--rag-report", type=Path, default=DEFAULT_PATHS["rag"])
     parser.add_argument("--lifecycle-report", type=Path, default=DEFAULT_PATHS["lifecycle"])
+    parser.add_argument("--scheduler-pilot-report", type=Path, default=DEFAULT_PATHS["scheduler_pilot"])
     parser.add_argument("--max-age-hours", type=float, default=168.0)
     parser.add_argument("--min-model-exact", type=float, default=1.0)
     args = parser.parse_args(argv)

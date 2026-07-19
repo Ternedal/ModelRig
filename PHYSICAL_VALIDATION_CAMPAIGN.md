@@ -184,7 +184,31 @@ validation/rag-benchmark-latest.json
 Kampagnen kræver præcis 1.000 og 10.000 chunks, grøn benchmark-gate, 0 errors og
 clean source removal for begge skalaer.
 
-## 7. Verificér hele kampagnen
+## 7. T-019 — scheduler-pilot (read + `note_append`)
+
+Kør runbooken i `DEVICE_TEST.md` sektion 1.6 (read-plan via loopback, write-plan
+med den fulde godkendelses-ceremoni, pausen mid-flight, crash-recovery). Notér
+de to schedule-id'er, recovery-linjen fra worker-loggen, og skriv den lille
+manual-observations-fil:
+
+```json
+{"revocation_confirmed": true,
+ "recovery_line": "scheduler: recovered 0 executed / 1 abandoned / 0 unknown occurrence(s) at startup",
+ "operator": "Anders"}
+```
+
+Producér derefter evidensen (maskin-halvdelen læses live fra workeren:
+receipts, budgetter, read-uden-approval; menneske-halvdelen er dine to
+observationer):
+
+```cmd
+python scripts\scheduler_pilot_report.py --read-schedule-id <ID> --write-schedule-id <ID> --manual-observations validation\scheduler-manual-observations.json --report validation\scheduler-pilot-latest.json
+```
+
+Produceren fælder selv dom (`pilot.passed`) og skriver rapporten uanset —
+aggregatoren genvaliderer alt mod den frosne kandidat.
+
+## 8. Verificér hele kampagnen
 
 ```powershell
 python scripts\physical_validation_campaign.py `

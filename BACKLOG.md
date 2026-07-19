@@ -87,8 +87,13 @@ P1:** reserve-at-claim (1.58.116) gjorde refusal-checkets `>=` til en
 off-by-one — max_runs=1 kørte ALDRIG, alle planer fik max_runs−1 kørsler;
 rettet i 1.58.128 (budget-sandheden bæres nu af claimets
 reservations-status). **Opfølgning:** T-019-pilotens bevis skal ind i
-kampagne-aggregatoren (`scripts/physical_validation_campaign.py`) — afklar
-schema med Anders' aggregator-design før udvidelse.
+kampagne-aggregatoren (`scripts/physical_validation_campaign.py`).
+**Lukket 19/7:** skema-spørgsmålet blev besvaret ved måling af
+aggregatorens eget mønster (slot → sti → producer → validator +
+kandidat-binding); kampagnen har nu et `scheduler_pilot`-slot med
+validator, producer (`scheduler_pilot_report.py`, maskin-halvdel læses
+live fra workeren, menneske-halvdel via manual-observations som voice)
+og cases i kampagne-suiten.
 
 ## Milepæl 3 — Agent 3-pilot (mål task success) — tracker #60
 

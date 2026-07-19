@@ -226,6 +226,40 @@ def valid_reports() -> dict[str, dict]:
                 },
             },
         },
+        "scheduler_pilot": {
+            "schema": campaign.SCHEDULER_PILOT_SCHEMA,
+            "generated_at": stamp,
+            "candidate": {
+                "version": CANDIDATE["version"],
+                "git_sha": CANDIDATE["git_sha"],
+                "code_sha256": CANDIDATE["code_sha256"],
+            },
+            "worker": {"base_url": "http://127.0.0.1:8099"},
+            "read_schedule": {
+                "schedule_id": "sched-read",
+                "runs_used": 2,
+                "receipts_count": 0,
+            },
+            "write_schedule": {
+                "schedule_id": "sched-write",
+                "runs_used": 1,
+                "receipts_count": 1,
+                "first_receipt": {
+                    "kind": "create",
+                    "device_id": "pixel-6a",
+                    "issued_at": 1000.0,
+                    "consumed_at": 1002.5,
+                },
+            },
+            "manual": {
+                "revocation_confirmed": True,
+                "recovery_line": ("scheduler: recovered 0 executed / 1 "
+                                  "abandoned / 0 unknown occurrence(s) at "
+                                  "startup"),
+                "operator": "Anders",
+            },
+            "pilot": {"passed": True, "problems": []},
+        },
     }
 
 
@@ -262,6 +296,7 @@ def args_for(temp: Path, mode: str) -> argparse.Namespace:
         voice_report=temp / "voice.json",
         rag_report=temp / "rag.json",
         lifecycle_report=temp / "lifecycle.json",
+        scheduler_pilot_report=temp / "scheduler_pilot.json",
         max_age_hours=168.0,
         min_model_exact=1.0,
     )
@@ -448,6 +483,64 @@ with tempfile.TemporaryDirectory(prefix="campaign-write-") as temp_dir:
     leftovers = list(path.parent.glob(path.name + ".*.tmp"))
     check(parsed["value"] == "bevis", "campaign report writer preserves UTF-8")
     check(not leftovers, "campaign report writer leaves no partial file")
+
+# --- scheduler-pilot slot: the receipt and the operator are non-negotiable ---
+with tempfile.TemporaryDirectory(dir=ROOT) as td:
+    temp = Path(td)
+    for name, report in reports_with_artifacts(temp).items():
+        write(temp / f"{name}.json", report)
+    pilot = reports_with_artifacts(temp)["scheduler_pilot"]
+    pilot["write_schedule"]["receipts_count"] = 0
+    pilot["write_schedule"]["first_receipt"] = {}
+    write(temp / "scheduler_pilot.json", pilot)
+    r, code = campaign.campaign_report(args_for(temp, "verify"))
+    check(code == 1, "a write pilot without its receipt fails the campaign")
+    errs = r["evidence"]["scheduler_pilot"]["errors"]
+    check(any("receipt" in e for e in errs),
+          "and the error names the missing receipt")
+
+with tempfile.TemporaryDirectory(dir=ROOT) as td:
+    temp = Path(td)
+    for name, report in reports_with_artifacts(temp).items():
+        write(temp / f"{name}.json", report)
+    pilot = reports_with_artifacts(temp)["scheduler_pilot"]
+    pilot["manual"]["revocation_confirmed"] = False
+    write(temp / "scheduler_pilot.json", pilot)
+    r, code = campaign.campaign_report(args_for(temp, "verify"))
+    check(code == 1,
+          "an unconfirmed revocation observation fails the campaign -- the "
+          "human half of the pilot is evidence, not decoration")
+
+# The producer's own judgement, offline via its pure functions.
+pilot_mod = load_module("scheduler_pilot_report_test",
+                        SCRIPTS / "scheduler_pilot_report.py")
+_read_ok = {"schedule": {"runs_used": 2}, "approval_receipts": []}
+_write_ok = {"schedule": {"runs_used": 1}, "approval_receipts": [
+    {"kind": "create", "device_id": "pixel-6a",
+     "issued_at": 10.0, "consumed_at": 11.0}]}
+_manual_ok = {"revocation_confirmed": True,
+              "recovery_line": "scheduler: recovered 0 executed / 1 abandoned / 0 unknown occurrence(s) at startup",
+              "operator": "Anders"}
+check(pilot_mod.judge(_read_ok, _write_ok, _manual_ok) == [],
+      "the producer judges a holding pilot as holding")
+check(any("receipt" in p for p in pilot_mod.judge(
+          _read_ok, {"schedule": {"runs_used": 1}, "approval_receipts": []},
+          _manual_ok)),
+      "the producer refuses a write run without its receipt")
+check(any("read" in p for p in pilot_mod.judge(
+          {"schedule": {"runs_used": 0}, "approval_receipts": []},
+          _write_ok, _manual_ok)),
+      "the producer refuses a pilot whose read half never ran")
+_rep = pilot_mod.build_report(
+    {"version": CANDIDATE["version"], "git_sha": CANDIDATE["git_sha"],
+     "code_sha256": CANDIDATE["code_sha256"]},
+    "http://127.0.0.1:8099", "sched-read", "sched-write",
+    _read_ok, _write_ok, _manual_ok, "2026-07-19T12:00:00+00:00")
+check(_rep["pilot"]["passed"] is True
+      and _rep["schema"] == campaign.SCHEDULER_PILOT_SCHEMA
+      and _rep["write_schedule"]["first_receipt"]["device_id"] == "pixel-6a",
+      "the producer's report carries the schema, the receipt attribution and "
+      "its own verdict")
 
 source = (SCRIPTS / "physical_validation_campaign.py").read_text(encoding="utf-8")
 check("urllib" not in source and "http.client" not in source,

@@ -174,9 +174,11 @@ delene dér, og saml til sidst med `scripts/physical_validation_campaign.py`
 Rækkefølgen på dagen: **§1.4 frys → §1.5 preflight → kampagnens dele →
 §1.6 scheduler-piloten → aggregatoren**.
 
-**Kendt hul:** aggregatoren samler T-004→T-043 men endnu ikke
-scheduler-pilotens (T-019) bevis — det står ved siden af, ikke i
-kampagnerapporten, indtil aggregatoren udvides (se `BACKLOG.md`).
+**Hullet er lukket (19/7):** aggregatoren har nu et `scheduler_pilot`-slot.
+Efter §1.6-piloten: kør `scripts/scheduler_pilot_report.py` med de to
+schedule-id'er og en lille manual-observations-fil (se
+`PHYSICAL_VALIDATION_CAMPAIGN.md` sektion 7) — så indgår T-019-beviset i
+`--mode verify` på lige fod med de øvrige seks, bundet til samme kandidat.
 
 ---
 
