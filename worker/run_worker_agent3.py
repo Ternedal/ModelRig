@@ -15,6 +15,7 @@ import sys
 import uvicorn
 from app import paths as app_paths
 from app.agent3.api import mount_agent3
+from app.agent3.cancellation_status import install_termination_contract
 from app.agent3.capability_graph_api import (
     build_capability_graph_router,
     build_runtime_capability_graph,
@@ -45,6 +46,7 @@ if __name__ == "__main__":
     host = os.getenv("MODELRIG_WORKER_HOST", "127.0.0.1")
     enforce_loopback(host)
     if mount_agent3(app):
+        install_termination_contract(app)
         adapter = V2ToolAdapter()
         worker_version = getattr(app, "version", None)
         plan_db = app_paths.resolve("./kaliv-agent3-plans.db", env="KALIV_AGENT3_PLAN_DB")
