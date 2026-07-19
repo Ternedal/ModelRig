@@ -8,12 +8,19 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import capability_probe
+from .approval import (
+    Agent3ApprovalError,
+    approval_required,
+    consume_agent3_approval,
+    verify_agent3_approval,
+)
 
 
 def _build_code_identity() -> str:
     from ..build_identity import code_fingerprint
 
     return code_fingerprint()
+
 
 from .core import (
     Agent3Orchestrator,
@@ -82,9 +89,11 @@ class RetryReq(BaseModel):
 
 
 class ConfirmReq(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     step_id: str
     decision: str = Field(pattern="^(approve|deny)$")
     digest: str
+    approval_token: str | None = None
 
 
 class ReplanReq(BaseModel):
@@ -148,6 +157,7 @@ def build_router(
     validation_provider: ValidationProvider | None = None,
     worker_version: str | None = None,
     replan_service: PersistentReadReplanner | None = None,
+    approval_db_path: str | None = None,
     *,
     allow_client_plans: bool = False,
 ) -> APIRouter:
@@ -204,6 +214,12 @@ def build_router(
             )
         return outcomes
 
+    def current_revision(run_id: str) -> int:
+        if replan_service is None:
+            return 0
+        revision, _count = replan_service.journal.revision_state(run_id)
+        return revision
+
     @router.get("/status")
     def status() -> dict[str, Any]:
         validation = validation_provider()
@@ -216,6 +232,8 @@ def build_router(
                 "explicit-pending-read-window" if replan_service is not None else "disabled"
             ),
             "read_review": "opt-in-persistent" if reviewing else "disabled",
+            "write_approval": "backend-issued-device-bound-single-use",
+            "write_approval_required": approval_required(),
             "production_tools_path_untouched": True,
             "max_steps": orchestrator.max_steps,
             "worker_version": worker_version,
@@ -281,7 +299,6 @@ def build_router(
             methods=["POST"],
             include_in_schema=False,
         )
-
 
     @router.post("/runs/{run_id}/retry")
     def retry(run_id: str, req: RetryReq) -> dict[str, Any]:
@@ -374,13 +391,37 @@ def build_router(
     @router.post("/runs/{run_id}/confirm")
     def confirm(run_id: str, req: ConfirmReq) -> dict[str, Any]:
         recover_or_block(run_id)
+        approval_receipt: dict[str, Any] | None = None
         try:
+            pending = orchestrator.store.load(run_id)
+            if pending is None:
+                raise KeyError(run_id)
+            if req.decision == "deny":
+                if req.approval_token:
+                    raise Agent3ApprovalError("deny must not carry an approval token")
+            elif req.approval_token:
+                approval = verify_agent3_approval(
+                    req.approval_token,
+                    pending,
+                    plan_revision=current_revision(run_id),
+                )
+                consume_agent3_approval(approval, db_path=approval_db_path)
+                approval_receipt = approval.audit_payload()
+                orchestrator.store.event(
+                    run_id,
+                    "approval_consumed",
+                    {"step_id": req.step_id, "tool": approval.tool, **approval_receipt},
+                )
+            elif approval_required():
+                raise Agent3ApprovalError(
+                    "approve requires a backend-issued device-bound approval token"
+                )
             run = orchestrator.confirm(run_id, req.step_id, req.decision, req.digest)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="run not found") from exc
-        except ConfirmationError as exc:
+        except (ConfirmationError, Agent3ApprovalError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return response(run)
+        return response(run, approval_receipt=approval_receipt)
 
     @router.post("/runs/{run_id}/resume")
     def resume(run_id: str) -> dict[str, Any]:
