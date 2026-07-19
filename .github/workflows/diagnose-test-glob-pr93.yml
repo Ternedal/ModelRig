@@ -20,19 +20,32 @@ jobs:
         run: |
           pip install -r worker/requirements.txt --break-system-packages >/dev/null
           cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
-      - name: Run authoritative glob with bounded failure output
+      - name: Run authoritative glob with bounded failure artifact
         env:
           MODELRIG_BIN: /tmp/modelrig-server
         shell: bash
         run: |
           set -u
+          : > /tmp/pr93-test-failure.txt
           for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
             [ -e "$f" ] || continue
             if ! PYTHONPATH=worker python3 "$f" > /tmp/test-output.log 2>&1; then
-              echo "FAILED_TEST=$f"
-              echo "--- bounded failure tail ---"
-              tail -n 100 /tmp/test-output.log
+              {
+                echo "FAILED_TEST=$f"
+                echo "--- bounded failure tail ---"
+                tail -n 100 /tmp/test-output.log
+              } > /tmp/pr93-test-failure.txt
+              cat /tmp/pr93-test-failure.txt
               exit 1
             fi
           done
-          echo 'ALL_AUTHORITATIVE_TESTS_PASSED'
+          echo 'ALL_AUTHORITATIVE_TESTS_PASSED' > /tmp/pr93-test-failure.txt
+          cat /tmp/pr93-test-failure.txt
+      - name: Upload bounded diagnosis
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pr93-test-glob-diagnosis
+          path: /tmp/pr93-test-failure.txt
+          if-no-files-found: error
+          retention-days: 1
