@@ -1,0 +1,27 @@
+name: temporary-peer-binding-patch
+
+on:
+  push:
+    branches: [agent/research-public-peer-binding]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]' && github.event.head_commit.message == 'ci: trigger peer binding patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: agent/research-public-peer-binding
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python scripts/patch_peer_binding_state.py
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add worker/app/research_peer_binding.py
+          git commit -m 'fix(research): tighten peer binding state transitions'
+          git push origin HEAD:agent/research-public-peer-binding
