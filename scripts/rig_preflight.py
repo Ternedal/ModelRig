@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -75,7 +76,7 @@ def _candidate_identity() -> dict:
         check=False,
     )
     git_sha = proc.stdout.strip()
-    if proc.returncode != 0 or len(git_sha) != 40:
+    if proc.returncode != 0 or re.fullmatch(r"[0-9a-f]{40}", git_sha) is None:
         raise RuntimeError("git HEAD is unavailable for preflight evidence")
     worker = root / "worker"
     if str(worker) not in sys.path:

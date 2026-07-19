@@ -319,6 +319,43 @@ try:
             any("reboot.performed is not true" in error for error in typed["evidence"]["lifecycle"]["errors"]),
             "lifecycle type failure is explicit",
         )
+
+        reports = valid_reports()
+        reports["lifecycle"]["started_at"] = (NOW + timedelta(minutes=1)).isoformat()
+        write(temp / "lifecycle.json", reports["lifecycle"])
+        reversed_time, reversed_exit = campaign.campaign_report(args_for(temp, "verify"))
+        check(reversed_exit == 1, "reversed lifecycle timestamps block campaign")
+        check(
+            "lifecycle started_at is after finished_at"
+            in reversed_time["evidence"]["lifecycle"]["errors"],
+            "lifecycle timestamp ordering failure is explicit",
+        )
+
+        reports = valid_reports()
+        reports["lifecycle"]["host"]["windows_version"] = "   "
+        reports["lifecycle"]["trials"]["good_update"]["source_version"] = CANDIDATE["version"]
+        reports["lifecycle"]["trials"]["good_update"]["source_git_sha"] = CANDIDATE["git_sha"]
+        reports["lifecycle"]["trials"]["bad_update"]["attempted_version"] = ""
+        write(temp / "lifecycle.json", reports["lifecycle"])
+        metadata, metadata_exit = campaign.campaign_report(args_for(temp, "verify"))
+        check(metadata_exit == 1, "invalid lifecycle metadata blocks campaign")
+        metadata_errors = metadata["evidence"]["lifecycle"]["errors"]
+        check(
+            "host.windows_version must be a non-empty string" in metadata_errors,
+            "lifecycle host metadata is typed",
+        )
+        check(
+            "good_update.source_version must differ from the candidate" in metadata_errors,
+            "good update must prove a real version transition",
+        )
+        check(
+            "good_update.source_git_sha must differ from the candidate" in metadata_errors,
+            "good update must prove a real commit transition",
+        )
+        check(
+            "bad_update.attempted_version must be a non-empty string" in metadata_errors,
+            "bad update identifies the attempted build",
+        )
 finally:
     campaign.candidate_identity = old_candidate
     campaign._load_agent3_assessor = old_assessor

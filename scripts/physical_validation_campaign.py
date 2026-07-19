@@ -259,6 +259,13 @@ def _valid_digest(value: Any, length: int) -> bool:
     return isinstance(value, str) and re.fullmatch(rf"[0-9a-f]{{{length}}}", value) is not None
 
 
+def _nonempty_text(errors: list[str], label: str, value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"{label} must be a non-empty string")
+        return None
+    return value.strip()
+
+
 def _base_result(name: str, path: Path, raw: bytes) -> dict[str, Any]:
     return {
         "name": name,
@@ -278,7 +285,7 @@ def _validate_preflight(
     report: dict[str, Any],
     result: dict[str, Any],
     candidate: dict[str, Any],
-    _thresholds: dict[str, float],
+    _thresholds: dict[str, Any],
 ) -> None:
     errors = result["errors"]
     _expect_equal(errors, "schema", report.get("schema"), PREFLIGHT_SCHEMA)
@@ -327,7 +334,7 @@ def _validate_agent3(
     report: dict[str, Any],
     result: dict[str, Any],
     candidate: dict[str, Any],
-    thresholds: dict[str, float],
+    thresholds: dict[str, Any],
 ) -> None:
     errors = result["errors"]
     _expect_equal(
@@ -380,7 +387,7 @@ def _validate_model_eval(
     report: dict[str, Any],
     result: dict[str, Any],
     candidate: dict[str, Any],
-    thresholds: dict[str, float],
+    thresholds: dict[str, Any],
 ) -> None:
     errors = result["errors"]
     _expect_equal(errors, "schema", report.get("schema"), "kaliv-agent3-model-eval/v1")
@@ -423,7 +430,7 @@ def _validate_voice(
     report: dict[str, Any],
     result: dict[str, Any],
     candidate: dict[str, Any],
-    _thresholds: dict[str, float],
+    _thresholds: dict[str, Any],
 ) -> None:
     errors = result["errors"]
     _expect_equal(errors, "schema", report.get("schema"), "kaliv-voice-baseline/v1")
@@ -463,7 +470,7 @@ def _validate_rag(
     report: dict[str, Any],
     result: dict[str, Any],
     candidate: dict[str, Any],
-    _thresholds: dict[str, float],
+    _thresholds: dict[str, Any],
 ) -> None:
     errors = result["errors"]
     _expect_equal(errors, "schema", report.get("schema"), "kaliv-rag-benchmark/v1")
@@ -518,13 +525,27 @@ def _validate_lifecycle(
     report: dict[str, Any],
     result: dict[str, Any],
     candidate: dict[str, Any],
-    _thresholds: dict[str, float],
+    _thresholds: dict[str, Any],
 ) -> None:
     errors = result["errors"]
     _expect_equal(errors, "schema", report.get("schema"), LIFECYCLE_SCHEMA)
     _expect_equal(errors, "candidate.version", _nested(report, "candidate", "version"), candidate["version"])
     _expect_equal(errors, "candidate.git_sha", _nested(report, "candidate", "git_sha"), candidate["git_sha"])
     _expect_equal(errors, "candidate.code_sha256", _nested(report, "candidate", "code_sha256"), candidate["code_sha256"])
+    host = report.get("host")
+    if not isinstance(host, dict):
+        errors.append("lifecycle host is missing")
+    else:
+        _nonempty_text(errors, "host.hostname", host.get("hostname"))
+        _nonempty_text(errors, "host.windows_version", host.get("windows_version"))
+    started_at = _iso_datetime(report.get("started_at"))
+    finished_at = _iso_datetime(report.get("finished_at"))
+    if started_at is None:
+        errors.append("lifecycle started_at is invalid")
+    if finished_at is None:
+        errors.append("lifecycle finished_at is invalid")
+    if started_at is not None and finished_at is not None and started_at > finished_at:
+        errors.append("lifecycle started_at is after finished_at")
     trials = report.get("trials")
     if not isinstance(trials, dict):
         errors.append("lifecycle trials are missing")
@@ -566,8 +587,15 @@ def _validate_lifecycle(
         _expect_equal(errors, "good_update.target_version", good.get("target_version"), candidate["version"])
         _expect_equal(errors, "good_update.target_git_sha", good.get("target_git_sha"), candidate["git_sha"])
         _expect_equal(errors, "good_update.target_code_sha256", good.get("target_code_sha256"), candidate["code_sha256"])
+        source_version = _nonempty_text(
+            errors, "good_update.source_version", good.get("source_version")
+        )
+        if source_version == candidate["version"]:
+            errors.append("good_update.source_version must differ from the candidate")
         if not _valid_digest(good.get("source_git_sha"), 40):
             errors.append("good_update.source_git_sha is not a 40-character digest")
+        elif good.get("source_git_sha") == candidate["git_sha"]:
+            errors.append("good_update.source_git_sha must differ from the candidate")
 
     bad = trials.get("bad_update")
     if not isinstance(bad, dict):
@@ -581,6 +609,9 @@ def _validate_lifecycle(
         _expect_equal(errors, "bad_update.active_version", bad.get("active_version"), candidate["version"])
         _expect_equal(errors, "bad_update.active_git_sha", bad.get("active_git_sha"), candidate["git_sha"])
         _expect_equal(errors, "bad_update.active_code_sha256", bad.get("active_code_sha256"), candidate["code_sha256"])
+        _nonempty_text(
+            errors, "bad_update.attempted_version", bad.get("attempted_version")
+        )
         if not _valid_digest(bad.get("attempted_git_sha"), 40):
             errors.append("bad_update.attempted_git_sha is not a 40-character digest")
         if bad.get("attempted_git_sha") == candidate["git_sha"]:
@@ -688,10 +719,6 @@ def campaign_report(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     thresholds: dict[str, Any] = {
         "min_model_exact": args.min_model_exact,
         "agent3_assessor": assessor,
-    }
-    paths = {
-        key: getattr(args, key.replace("_", "") + "_report", None)
-        for key in ()
     }
     paths = {
         "preflight": args.preflight_report,
