@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import os
 import tempfile
 
@@ -77,8 +78,8 @@ def test_unknown_tool_or_semantics_fail_closed() -> None:
     assert active["can_request"] is False
     assert active["reason"] == "tool_is_not_in_registry"
 
-    original = tools.REGISTRY["rig_status"].cancellation
-    tools.REGISTRY["rig_status"].cancellation = "magic"
+    original = tools.REGISTRY["rig_status"]
+    tools.REGISTRY["rig_status"] = dataclasses.replace(original, cancellation="magic")
     try:
         odd = AgentStep("rig_status", {}, RiskClass.READ, state=StepState.EXECUTING)
         active = termination_view(run_with(odd))["active_tool"]
@@ -86,7 +87,7 @@ def test_unknown_tool_or_semantics_fail_closed() -> None:
         assert active["can_request"] is False
         assert active["reason"] == "unknown_registry_cancellation_semantics"
     finally:
-        tools.REGISTRY["rig_status"].cancellation = original
+        tools.REGISTRY["rig_status"] = original
 
 
 def test_terminal_and_late_completion_are_truthful() -> None:
