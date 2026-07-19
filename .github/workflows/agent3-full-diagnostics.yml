@@ -23,32 +23,8 @@ jobs:
       - name: Install worker deps
         run: pip install -r worker/requirements.txt --break-system-packages
 
-      # T032_CI_PARITY_DIAGNOSTIC_BEGIN
-      - name: Version sites match VERSION
-        run: python3 scripts/version_tool.py check
-
       - name: Build backend
         run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
-
-      - name: Backend vet
-        run: cd backend && go vet ./...
-
-      - name: Backend tests
-        run: cd backend && go test ./...
-
-      - name: Python lint gate
-        run: |
-          pip install --quiet ruff
-          ruff check --select E9,F63,F7,F82 worker/ tests/
-
-      - name: PowerShell syntax gate
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          Get-ChildItem -Path . -Recurse -File -Filter *.ps1 | ForEach-Object {
-            [void][scriptblock]::Create((Get-Content -LiteralPath $_.FullName -Raw))
-          }
-      # T032_CI_PARITY_DIAGNOSTIC_END
 
       - name: Generate authoritative current state
         run: python3 scripts/current_state.py
