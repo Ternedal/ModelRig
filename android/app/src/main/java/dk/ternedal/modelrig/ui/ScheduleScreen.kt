@@ -63,6 +63,7 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
     var runtime by remember { mutableStateOf<ScheduleRuntimeStatus?>(null) }
     var schedules by remember { mutableStateOf<List<ScheduleItem>>(emptyList()) }
     var tools by remember { mutableStateOf<List<ToolInfo>>(emptyList()) }
+    var toolsLoaded by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -113,9 +114,10 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
             success = {
                 runtime = it.first
                 schedules = it.second
-                tools = it.third.filter { info -> info.risk == "read" || info.risk == "write" }
-                if (tools.none { info -> info.name == tool }) {
-                    tool = tools.firstOrNull()?.name ?: tool
+                tools = it.third
+                toolsLoaded = true
+                if (tools.none { info -> info.name == tool && info.canSchedule }) {
+                    tool = scheduleToolOptions(tools).selectable.firstOrNull()?.name.orEmpty()
                 }
                 notice = "${schedules.size} planer hentet. Ingen handling er kørt."
             },
@@ -129,6 +131,12 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
     }
 
     fun previewCreate() {
+        val selected = tools.firstOrNull { it.name == tool }
+        val blocked = selected?.scheduleBlockReason
+        if (selected == null || blocked != null) {
+            error = blocked ?: "Vælg et værktøj, som riggen har markeret som planlægbart."
+            return
+        }
         val ttl = ttlDays.toIntOrNull()
         val runs = maxRuns.toIntOrNull()
         if (ttl == null || runs == null) {
@@ -276,22 +284,54 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
                     fontSize = 11.sp,
                 )
                 Spacer(Modifier.height(8.dp))
-                if (tools.isNotEmpty()) {
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                        tools.forEach { info ->
-                            FilterChip(
-                                selected = tool == info.name,
-                                onClick = { tool = info.name; clearCreatePreview() },
-                                label = { Text(info.name, fontSize = 11.sp) },
-                                modifier = Modifier.padding(end = 6.dp),
-                            )
+                val toolOptions = scheduleToolOptions(tools)
+                when {
+                    !toolsLoaded -> Text("Henter værktøjer…", color = KalivTheme.colors.textMuted)
+                    toolOptions.selectable.isEmpty() -> Text(
+                        "Ingen værktøjer er både slået til og godkendt til kørsel uden opsyn.",
+                        color = KalivTheme.colors.danger,
+                        fontSize = 11.sp,
+                    )
+                    else -> {
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                            toolOptions.selectable.forEach { info ->
+                                FilterChip(
+                                    selected = tool == info.name,
+                                    onClick = { tool = info.name; clearCreatePreview() },
+                                    label = { Text(info.name, fontSize = 11.sp) },
+                                    modifier = Modifier.padding(end = 6.dp),
+                                )
+                            }
                         }
+                        tools.firstOrNull { it.name == tool }?.let { selected ->
+                            Spacer(Modifier.height(6.dp))
+                            Text(selected.description, color = KalivTheme.colors.textMuted, fontSize = 11.sp)
+                        }
+                    }
+                }
+                if (toolOptions.blocked.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Ikke tilgængelige for planer",
+                        color = KalivTheme.colors.textHigh,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    toolOptions.blocked.forEach { info ->
+                        Text(
+                            "${info.name}: ${info.scheduleBlockReason}",
+                            color = KalivTheme.colors.textMuted,
+                            fontSize = 10.sp,
+                        )
                     }
                 }
                 OutlinedTextField(
                     value = tool,
-                    onValueChange = { tool = it; clearCreatePreview() },
-                    label = { Text("Tool") },
+                    onValueChange = {},
+                    readOnly = true,
+                    enabled = tool.isNotBlank(),
+                    label = { Text("Valgt tool") },
+                    supportingText = { Text("Valget kommer direkte fra riggens ToolInfo-kontrakt.") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -334,7 +374,7 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
                 }
                 Spacer(Modifier.height(10.dp))
                 Button(
-                    enabled = !busy && tool.isNotBlank() && cadence.isNotBlank() && ttlDays.isNotBlank() && maxRuns.isNotBlank(),
+                    enabled = !busy && tools.any { it.name == tool && it.canSchedule } && cadence.isNotBlank() && ttlDays.isNotBlank() && maxRuns.isNotBlank(),
                     onClick = ::previewCreate,
                 ) { Text(if (busy) "Arbejder…" else "Forhåndsvis") }
             }
