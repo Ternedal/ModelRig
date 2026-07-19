@@ -9,7 +9,7 @@ from app.agent3.capability_graph import (
     build_capability_graph,
     runtime_tool_capabilities,
 )
-from app.agent3.core import CapabilitySnapshot
+from app.agent3.core import CapabilitySnapshot, RiskClass
 from app.agent3.integration import V2ToolAdapter, _V2_RISK
 from app.capability_schema import CapabilityDescriptorV2
 
@@ -89,7 +89,13 @@ assert [tool.name for tool in tools] == [
 assert {tool.name: tool.enabled for tool in tools}["note_append"] is False
 assert all(isinstance(tool, RuntimeToolCapability) for tool in tools)
 assert all(isinstance(tool.descriptor, CapabilityDescriptorV2) for tool in tools)
-assert not hasattr(capability_graph_module, "ToolCapability")
+legacy_constructor = capability_graph_module.ToolCapability(
+    "legacy_read", True, "read", "legacy compatibility"
+)
+assert isinstance(legacy_constructor, RuntimeToolCapability)
+assert isinstance(legacy_constructor.descriptor, CapabilityDescriptorV2)
+assert legacy_constructor.risk == RiskClass.READ
+assert not hasattr(legacy_constructor, "declared_risk")
 assert {
     tool.name: (tool.descriptor.network.mode, tuple(tool.descriptor.network.destinations))
     for tool in tools
@@ -159,10 +165,8 @@ actual_tool_nodes = {
     node_id: node for node_id, node in nodes.items() if node_id.startswith("tool:")
 }
 assert actual_tool_nodes == legacy_tool_nodes
-assert all(
-    set(node["metadata"]) == {"risk", "cancellation", "description"}
-    for node in actual_tool_nodes.values()
-)
+assert all(set(node["metadata"]) == {"risk", "cancellation", "description"}
+           for node in actual_tool_nodes.values())
 
 node_ids = set(nodes)
 for edge in payload["edges"]:
