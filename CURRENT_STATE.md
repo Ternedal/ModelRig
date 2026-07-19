@@ -78,7 +78,6 @@ Run by glob, so a file that matches is a file that runs
 - `tests/backend_smoke.py`
 - `tests/backend_v1.py`
 - `tests/e2e.py`
-- `tests/scheduler_time_oracle.py`
 - `tests/worker_agent3_atomic_journal.py`
 - `tests/worker_agent3_capability_graph.py`
 - `tests/worker_agent3_capability_graph_api.py`
@@ -183,5 +182,6 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_physical_validation_campaign.py`
 - `tests/workflow_release.py`
 - `tests/workflow_rig_preflight.py`
+- `tests/workflow_scheduler_time_oracle.py`
 - `tests/workflow_test_coverage.py`
 - `tests/workflow_worker_entrypoints.py`
