@@ -101,6 +101,30 @@ unknown+pause er én transaktion, de tre interleavings er testet og
 mutations-dræbt, og pilot-slottet er forensic (v2: pinner
 occurrence/job/audit-sekvens/receipt/vindue fra storene). F-1201 (kampagnen)
 er fortsat riggens.
+**Gitless-rig-blockeren (19/7, fundet ved rig-flow-simulation):** hele
+kampagne-værktøjskæden antog en git-klon — freeze_check, candidate_identity
+(prepare OG verify) og rig_preflight døde alle på ZIP-workflowet. Lukket i
+1.58.131: freeze_check får API-mode + attestationsfil, preflight/aggregatoren
+arver den (kæden eksplicit, netværksfri aggregator bevaret), uverificerbar
+tree-renhed navngives i stedet for at grønnes.
+**Fund fra generalprøve 2 (19/7, sandkasse-Ollama):** (1) Produktions-
+entrypointet mountede ALDRIG agent3 — `mount_agent3` fandtes, var suite-
+testet via direkte kald, og blev kaldt af ingenting; live-probe svarede 404
+med flaget sat. Fixet + wiring-parity-suite i 1.58.131. (2) **model_eval-blockeren LUKKET — og
+diagnosen var forkert:** `/plan` → `/plans/{id}/start` ER den dokumenterede
+produktions-sti (StartReq's docstring); ruterne boede på planner-routeren,
+som `build_router` aldrig inkluderede — samme orphaned-wiring-fejl som
+mountet, ét lag nede. 404'eren var wiring, ikke flow; ordinationen
+"omlæg produceren til chat→runs" trækkes tilbage (klient-forfattede planer
+via POST /runs forbliver F-608-fixturen). Wiring-suiten vendte den
+forkerte assertion og kræver nu /plan + /plans/{id}/start til stede.
+Smoke-bevist e2e i sandkassen: pair-kode → device-token → backend-proxy →
+planner → qwen2.5:0.5b — 1/3 gyldig plan scoret; de to 422'ere
+("unsupported top-level fields") er den typede kontrakts fail-closed
+afvisning af legetøjsmodellens sjusk, dvs. præcis dét evalen måler.
+Fuld skala med qwen3:14b er riggens. (3) RAG-kæden generalprøvet grønt mod ægte
+Ollama (producer exit 0, validator-kontrakt ren — kun de forventede
+skala-afvigelser); fuld skala er riggens (~80+ min på 1 CPU her).
 
 ## Milepæl 3 — Agent 3-pilot (mål task success) — tracker #60
 

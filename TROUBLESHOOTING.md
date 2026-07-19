@@ -79,6 +79,31 @@ under test. **Start altid med `/health/full`** (launcheren kører det, eller
 - **Handling:** ingen. Tjek evt. `runs_used` i `GET /schedules/{id}` — den er
   refunderet.
 
+## Kampagne-script siger "not a git repo" / "git HEAD is unavailable"
+
+- **Symptom:** `freeze_check`/`rig_preflight`/kampagnen fejler med en
+  git-fejl på riggen.
+- **Forklaring:** riggen er gitless (ZIP-workflow). Fra 1.58.131 håndterer
+  værktøjskæden det selv: kør `python scripts\freeze_check.py` FØRST — i
+  gitless-mode løser den identiteten via GitHub-API'et (kræver
+  `GITHUB_TOKEN`) og skriver `validation\frozen-candidate.json`, som
+  preflight og aggregatoren derefter læser. Ser du fejlen alligevel, mangler
+  attestationsfilen: kør freeze_check igen og bekræft FROZEN.
+- **Før 1.58.131** antog hele kæden en git-klon og døde på operatørens
+  allerførste kommando.
+
+## /plan svarer 422: "planner response has unsupported top-level fields"
+
+- **Symptom:** model_eval (eller et manuelt /plan-kald) får 422 med denne
+  tekst, mens andre tasks lykkes.
+- **Betydning:** planner-modellens output brød den typede kontrakt (ekstra
+  felter på topniveau). Workeren afviser fail-closed frem for at gætte.
+  Det er en egenskab ved MODELLEN, ikke ved kæden — små modeller
+  (fx qwen2.5:0.5b i sandkasse-smoke) rammer den ofte; evalen tæller det
+  som request_error og exit 1.
+- **Handling:** kør med den tiltænkte planner-model (qwen3:14b på riggen).
+  Vedvarende 422 dér er et ægte eval-fund om modellens disciplin.
+
 ## Worker-log ved start: "recovered N executed / M abandoned / K unknown"
 
 - **Symptom:** linjen dukker op ved worker-start. **(Synlig fra 1.58.130 —

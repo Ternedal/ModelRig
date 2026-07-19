@@ -64,6 +64,39 @@ def _write_json_atomic(path: Path, value: dict) -> None:
     temp.replace(path)
 
 
+def _attested_sha(root, version):
+    """Gitless fallback: the sha the freeze gate verified and wrote down.
+
+    The rig has no git (sources arrive as a ZIP), so identity comes from
+    validation/frozen-candidate.json -- written by freeze_check only on a
+    FROZEN verdict after resolving the published tag via the GitHub API and
+    seeing ci+codeql green on that exact sha. Reading it here inherits that
+    verdict; nothing looser. Missing or mismatching file: refuse loudly and
+    point at the gate.
+    """
+    att = root / "validation" / "frozen-candidate.json"
+    try:
+        data = json.loads(att.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise RuntimeError(
+            "git er utilgaengelig og der findes ingen frossen-kandidat-"
+            "attestation -- koer foerst: python scripts\\freeze_check.py "
+            "(den skriver validation\\frozen-candidate.json paa FROZEN)"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "validation/frozen-candidate.json er ikke gyldig JSON -- koer "
+            "freeze_check igen") from exc
+    if data.get("version") != version:
+        raise RuntimeError(
+            f"attestationen gaelder version {data.get('version')!r}, men "
+            f"traeet er {version!r} -- koer freeze_check igen paa DETTE trae")
+    sha = data.get("git_sha") or ""
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise RuntimeError("attestationens git_sha er ikke en gyldig sha")
+    return sha
+
+
 def _candidate_identity() -> dict:
     root = Path(__file__).resolve().parents[1]
     version = (root / "VERSION").read_text(encoding="utf-8").strip()
@@ -77,7 +110,7 @@ def _candidate_identity() -> dict:
     )
     git_sha = proc.stdout.strip()
     if proc.returncode != 0 or re.fullmatch(r"[0-9a-f]{40}", git_sha) is None:
-        raise RuntimeError("git HEAD is unavailable for preflight evidence")
+        git_sha = _attested_sha(root, version)
     worker = root / "worker"
     if str(worker) not in sys.path:
         sys.path.insert(0, str(worker))

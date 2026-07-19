@@ -176,5 +176,29 @@ check(run("ollama_down") == 1,
 check(run("ready") == 0,
       "a healthy substrate stays READY -- the new checks pass a good rig")
 
+# --- gitless fallback: _attested_sha inherits the freeze gate's verdict -----
+import tempfile as _tf
+from pathlib import Path as _P
+
+_root = _P(_tf.mkdtemp(prefix="pf-gitless-"))
+(_root / "validation").mkdir()
+(_root / "validation" / "frozen-candidate.json").write_text(
+    json.dumps({"version": "1.58.131", "git_sha": "f" * 40}),
+    encoding="utf-8")
+check(preflight._attested_sha(_root, "1.58.131") == "f" * 40,
+      "preflight reads the attested sha when git is absent")
+try:
+    preflight._attested_sha(_root, "1.58.999")
+    check(False, "mismatch must refuse")
+except RuntimeError as exc:
+    check("1.58.999" in str(exc),
+          "a version-mismatched attestation refuses in preflight too")
+try:
+    preflight._attested_sha(_P(_tf.mkdtemp(prefix="pf-empty-")), "1.58.131")
+    check(False, "missing attestation must refuse")
+except RuntimeError as exc:
+    check("freeze_check" in str(exc),
+          "missing attestation points at the freeze gate by name")
+
 print(f"\n===== RIG PREFLIGHT: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

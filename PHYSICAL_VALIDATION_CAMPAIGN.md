@@ -45,6 +45,15 @@ Fra repositoryets rod:
 
 ```powershell
 python scripts\freeze_check.py
+
+**Riggen er gitless** (kilderne ankommer som ZIP): freeze_check opdager det
+selv og kører i API-mode — den slår den publicerede release `v{VERSION}` op,
+verificerer at sha'en er på main og at ci+codeql var grønne på præcis den, og
+skriver ved FROZEN `validation\frozen-candidate.json`. Preflight og
+aggregatoren læser den fil i stedet for git — kæden er eksplicit:
+freeze-gaten fældede dommen, resten arver den. Det ene der IKKE kan
+verificeres uden git er working-tree-renhed; det navngives som note
+(trust-ankeret er den officielt hentede, urørte ZIP) i stedet for at grønnes.
 python scripts\physical_validation_campaign.py `
   --mode prepare `
   --report validation\physical-validation-campaign-latest.json
@@ -183,6 +192,12 @@ validation/rag-benchmark-latest.json
 
 Kampagnen kræver præcis 1.000 og 10.000 chunks, grøn benchmark-gate, 0 errors og
 clean source removal for begge skalaer.
+
+> **KENDT BLOCKER (model_eval, fundet 19/7):** produceren kalder det
+> nedlagte `/plan`-API og vil 404'e. Kør IKKE model_eval-delen før
+> produceren er omlagt til chat→runs-flowet — fundet og planen står i
+> BACKLOG. Agent3-wiringen i entrypointet er fixet i 1.58.131
+> (KALIV_AGENT3_ENABLED=1 kræves fortsat).
 
 ## 7. T-019 — scheduler-pilot (read + `note_append`)
 

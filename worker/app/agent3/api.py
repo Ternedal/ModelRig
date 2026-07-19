@@ -495,6 +495,17 @@ def mount_agent3(app: FastAPI) -> bool:
             replan_service=replan_service,
         )
     )
+    # The planner surface (/plan -> /plans/{id}/start) is the DOCUMENTED
+    # production creation path (see StartReq's docstring), yet it lived on
+    # its own router that nothing included -- the same orphaned-wiring
+    # failure as the mount itself, one layer down. The earlier diagnosis
+    # ("rewrite the model_eval producer to a chat->runs flow") was wrong:
+    # the producer's target route was right all along; only the wiring was
+    # missing.
+    from .planner import build_planner_router  # local: avoids import cycles
+    app.include_router(
+        build_planner_router(adapter, orchestrator=orchestrator)
+    )
     app.state.agent3_mounted = True
     app.state.agent3_orchestrator = orchestrator
     app.state.agent3_replanner = replan_service

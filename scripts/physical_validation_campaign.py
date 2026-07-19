@@ -150,6 +150,39 @@ def _load_build_identity(root: Path) -> str:
     return value
 
 
+def _attested_sha(root, version):
+    """Gitless fallback: the sha the freeze gate verified and wrote down.
+
+    The rig has no git (sources arrive as a ZIP), so identity comes from
+    validation/frozen-candidate.json -- written by freeze_check only on a
+    FROZEN verdict after resolving the published tag via the GitHub API and
+    seeing ci+codeql green on that exact sha. Reading it here inherits that
+    verdict; nothing looser. Missing or mismatching file: refuse loudly and
+    point at the gate.
+    """
+    att = root / "validation" / "frozen-candidate.json"
+    try:
+        data = json.loads(att.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise CampaignError(
+            "git er utilgaengelig og der findes ingen frossen-kandidat-"
+            "attestation -- koer foerst: python scripts\\freeze_check.py "
+            "(den skriver validation\\frozen-candidate.json paa FROZEN)"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise CampaignError(
+            "validation/frozen-candidate.json er ikke gyldig JSON -- koer "
+            "freeze_check igen") from exc
+    if data.get("version") != version:
+        raise CampaignError(
+            f"attestationen gaelder version {data.get('version')!r}, men "
+            f"traeet er {version!r} -- koer freeze_check igen paa DETTE trae")
+    sha = data.get("git_sha") or ""
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise CampaignError("attestationens git_sha er ikke en gyldig sha")
+    return sha
+
+
 def candidate_identity(root: Path) -> dict[str, Any]:
     try:
         version = (root / "VERSION").read_text(encoding="utf-8").strip()
@@ -159,18 +192,24 @@ def candidate_identity(root: Path) -> dict[str, Any]:
         raise CampaignError("VERSION is empty")
 
     rc, git_sha = _run(root, "git", "rev-parse", "HEAD")
-    if rc != 0 or not re.fullmatch(r"[0-9a-f]{40}", git_sha):
-        raise CampaignError("git HEAD is unavailable or malformed")
-    _, branch = _run(root, "git", "branch", "--show-current")
-    _, dirty = _run(root, "git", "status", "--porcelain")
+    gitless = rc != 0 or not re.fullmatch(r"[0-9a-f]{40}", git_sha)
+    if gitless:
+        git_sha = _attested_sha(root, version)
+        branch, dirty = "", ""
+    else:
+        _, branch = _run(root, "git", "branch", "--show-current")
+        _, dirty = _run(root, "git", "status", "--porcelain")
     rc, version_check = _run(root, sys.executable, "scripts/version_tool.py", "check")
     return {
         "version": version,
         "git_sha": git_sha,
         "code_sha256": _load_build_identity(root),
-        "branch": branch or None,
-        "working_tree_clean": not bool(dirty),
-        "dirty_entries": len(dirty.splitlines()) if dirty else 0,
+        "branch": (branch or None) if not gitless else None,
+        "working_tree_clean": (not bool(dirty)) if not gitless else None,
+        "dirty_entries": (len(dirty.splitlines()) if dirty else 0)
+                         if not gitless else None,
+        "identity_source": ("frozen-candidate-attestation" if gitless
+                            else "git"),
         "version_stamps_consistent": rc == 0,
         "version_check_detail": None if rc == 0 else version_check[-500:],
     }
@@ -921,7 +960,7 @@ def campaign_report(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     }
 
     candidate_errors: list[str] = []
-    if not candidate["working_tree_clean"]:
+    if candidate["working_tree_clean"] is False:
         candidate_errors.append(
             f"working tree has {candidate['dirty_entries']} uncommitted change(s)"
         )

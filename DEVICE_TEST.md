@@ -72,6 +72,8 @@ noget:
 
 ```cmd
 python scripts\freeze_check.py
+# Gitless rig (ZIP): freeze_check kører selv i API-mode og skriver
+# validation\frozen-candidate.json — preflight og kampagnen arver den.
 ```
 
 **Bør se:** `FROZEN` — ren working tree, ens versionsstempler, kandidaten er på

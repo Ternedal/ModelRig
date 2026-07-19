@@ -572,6 +572,50 @@ with tempfile.TemporaryDirectory(dir=ROOT) as td:
           "an executed write without its attempt-audit fails -- the pinned "
           "sequence is the proof, not the counter")
 
+# Gitless identity: the rig unpacks a ZIP; candidate_identity must inherit
+# the freeze gate's attestation instead of dying on "git HEAD is unavailable".
+def _gitless_root(att=None, version="1.58.131"):
+    d = Path(tempfile.mkdtemp(prefix="gitless-root-"))
+    (d / "VERSION").write_text(version + "\n", encoding="utf-8")
+    (d / "scripts").mkdir()
+    (d / "scripts" / "version_tool.py").write_text(
+        "import sys\nsys.exit(0)\n", encoding="utf-8")
+    (d / "worker" / "app").mkdir(parents=True)
+    (d / "worker" / "app" / "build_identity.py").write_text(
+        "def code_fingerprint():\n    return 'a' * 64\n", encoding="utf-8")
+    if att is not None:
+        (d / "validation").mkdir()
+        (d / "validation" / "frozen-candidate.json").write_text(
+            json.dumps(att), encoding="utf-8")
+    return d
+
+
+_gr = _gitless_root(att={"schema": "kaliv-frozen-candidate/v1",
+                         "version": "1.58.131", "git_sha": "d" * 40,
+                         "mode": "gitless-api"})
+_ident = campaign.candidate_identity(_gr)
+check(_ident["git_sha"] == "d" * 40
+      and _ident["identity_source"] == "frozen-candidate-attestation"
+      and _ident["working_tree_clean"] is None,
+      "gitless identity inherits the attested sha and NAMES its source; the "
+      "unverifiable tree state is None, not a fake True")
+
+try:
+    campaign.candidate_identity(_gitless_root(att=None))
+    check(False, "missing attestation must refuse")
+except campaign.CampaignError as exc:
+    check("freeze_check" in str(exc),
+          "gitless without the attestation refuses and points at the freeze "
+          "gate by name")
+
+try:
+    campaign.candidate_identity(_gitless_root(
+        att={"version": "1.58.99", "git_sha": "e" * 40}))
+    check(False, "version-mismatched attestation must refuse")
+except campaign.CampaignError as exc:
+    check("1.58.99" in str(exc) and "1.58.131" in str(exc),
+          "an attestation for another version refuses, naming both versions")
+
 # The producer's own judgement, offline via its pure functions.
 pilot_mod = load_module("scheduler_pilot_report_test",
                         SCRIPTS / "scheduler_pilot_report.py")

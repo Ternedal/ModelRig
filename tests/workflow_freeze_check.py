@@ -215,5 +215,78 @@ check(_code == 1 and "FAIL  candidate commit is not on origin/main" in _out,
       "a local-only candidate is NOT FROZEN even with green CI -- evidence "
       "must point at code others can see (upgraded from a note, F-1005)")
 
+# --- gitless mode: the rig has no git; identity resolves via the API --------
+import json
+import shutil as _sh
+import urllib.error as _ue
+
+
+def _strip_git(repo):
+    _sh.rmtree(repo / ".git")
+    return repo
+
+
+def _gitless_api(*, release_draft=False, release_missing=False,
+                 compare_status="behind", sha="c" * 40,
+                 ci=("completed", "success"), codeql=("completed", "success")):
+    def api(url, token):
+        if "/releases/tags/" in url:
+            if release_missing:
+                raise _ue.HTTPError(url, 404, "not found", {}, None)
+            return {"draft": release_draft, "tag_name": url.rsplit("/", 1)[-1]}
+        if "/git/ref/tags/" in url:
+            return {"object": {"type": "commit", "sha": sha}}
+        if "/compare/main..." in url:
+            return {"status": compare_status}
+        if "/actions/runs" in url:
+            return {"workflow_runs": [
+                {"name": "ci", "status": ci[0], "conclusion": ci[1]},
+                {"name": "codeql", "status": codeql[0],
+                 "conclusion": codeql[1]},
+            ]}
+        raise AssertionError(f"uventet API-url i testen: {url}")
+    return api
+
+
+_g_ok = _strip_git(_make_repo(version="1.58.131"))
+_code, _out = run_in(_g_ok, token="tok", api=_gitless_api())
+check(_code == 0 and "gitless" in _out and "FROZEN" in _out,
+      "gitless tree with a published green release is FROZEN -- identity via "
+      "the API, exactly the rig's ZIP workflow")
+check("cannot be verified without git" in _out,
+      "the unverifiable working-tree check is NAMED as a note, not silently "
+      "greened")
+_att = _g_ok / "validation" / "frozen-candidate.json"
+check(_att.exists(), "FROZEN writes the attestation file the gitless "
+      "campaign toolchain consumes")
+if _att.exists():
+    _data = json.loads(_att.read_text(encoding="utf-8"))
+    check(_data.get("git_sha") == "c" * 40
+          and _data.get("version") == "1.58.131"
+          and _data.get("mode") == "gitless-api",
+          "the attestation pins exactly the API-resolved sha, version and "
+          "mode")
+
+_g_notok = _strip_git(_make_repo(version="1.58.131"))
+_code, _out = run_in(_g_notok, token=None, api=_gitless_api())
+check(_code == 1 and "GITHUB_TOKEN" in _out
+      and not (_g_notok / "validation" / "frozen-candidate.json").exists(),
+      "gitless without a token cannot establish identity at all -- refused "
+      "loudly, nothing attested")
+
+_g_norel = _strip_git(_make_repo(version="1.58.131"))
+_code, _out = run_in(_g_norel, token="tok",
+                     api=_gitless_api(release_missing=True))
+check(_code == 1 and "no published release" in _out,
+      "gitless with no published release for the tag is refused -- the "
+      "candidate must BE a release")
+
+_g_div = _strip_git(_make_repo(version="1.58.131"))
+_code, _out = run_in(_g_div, token="tok",
+                     api=_gitless_api(compare_status="diverged"))
+check(_code == 1 and "not on main" in _out
+      and not (_g_div / "validation" / "frozen-candidate.json").exists(),
+      "gitless candidate not on main is a blocker and nothing is attested")
+
 print(f"\n===== FREEZE CHECK: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
