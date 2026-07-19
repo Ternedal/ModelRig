@@ -27,6 +27,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -166,6 +167,42 @@ def _require_int(value: Any, label: str, errors: list[str], *, minimum: int = 0)
     return value
 
 
+def _iso_epoch(value: Any, label: str, errors: list[str]) -> float | None:
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"{label} must be an ISO-8601 datetime with offset")
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        errors.append(f"{label} must be an ISO-8601 datetime with offset")
+        return None
+    if parsed.tzinfo is None:
+        errors.append(f"{label} must include a timezone offset")
+        return None
+    return parsed.astimezone(timezone.utc).timestamp()
+
+
+def _audit_epoch(value: Any) -> float | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).timestamp()
+
+
+def _within_window(value: Any, window: dict[str, float]) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(float(value))
+        and window["started_epoch"] <= float(value) <= window["finished_epoch"]
+    )
+
+
 def _claim_ids(value: Any, label: str, errors: list[str]) -> list[str]:
     if not isinstance(value, list) or not value:
         errors.append(f"{label} must be a non-empty array")
@@ -191,6 +228,19 @@ def validate_manifest(value: dict[str, Any]) -> tuple[dict[str, Any], list[str]]
         item = _require_text(candidate.get(key), f"candidate.{key}", errors)
         if item is not None and pattern is not None and not pattern.fullmatch(item):
             errors.append(f"candidate.{key} has an invalid digest shape")
+
+    window_raw = value.get("window")
+    if not isinstance(window_raw, dict):
+        errors.append("manifest.window must be an object")
+        window_raw = {}
+    started_epoch = _iso_epoch(window_raw.get("started_at"), "window.started_at", errors)
+    finished_epoch = _iso_epoch(window_raw.get("finished_at"), "window.finished_at", errors)
+    if (
+        started_epoch is not None
+        and finished_epoch is not None
+        and started_epoch >= finished_epoch
+    ):
+        errors.append("window.started_at must be before window.finished_at")
 
     trials = value.get("trials")
     if not isinstance(trials, dict):
@@ -253,6 +303,12 @@ def validate_manifest(value: dict[str, Any]) -> tuple[dict[str, Any], list[str]]
     return {
         "schema": MANIFEST_SCHEMA,
         "candidate": dict(candidate),
+        "window": {
+            "started_at": window_raw.get("started_at"),
+            "finished_at": window_raw.get("finished_at"),
+            "started_epoch": started_epoch,
+            "finished_epoch": finished_epoch,
+        },
         "trials": normalized,
     }, errors
 
@@ -478,6 +534,8 @@ def _claim_evidence(
     expected_tool: str | None,
     expected_risk: str | None,
     expected_confirmation: str | None,
+    expected_args_sha256: str | None,
+    window: dict[str, float],
     errors: list[str],
 ) -> dict[str, Any]:
     occurrence = _occurrence(schedules, claim_id)
@@ -502,6 +560,10 @@ def _claim_evidence(
         errors.append(f"claim {claim_id}: expected status {expected_status!r}, got {status!r}")
     if status not in _TERMINAL_OCCURRENCES:
         errors.append(f"claim {claim_id}: occurrence is not terminal")
+    if not _within_window(occurrence.get("created"), window):
+        errors.append(f"claim {claim_id}: occurrence was not created inside the pilot window")
+    if not _within_window(occurrence.get("resolved"), window):
+        errors.append(f"claim {claim_id}: occurrence was not resolved inside the pilot window")
 
     job_id = occurrence.get("job_id")
     result["job_id"] = job_id
@@ -513,8 +575,20 @@ def _claim_evidence(
         result["job_kind"] = job.get("kind")
         if job.get("status") not in _TERMINAL_JOBS:
             errors.append(f"claim {claim_id}: job is not terminal")
-        if f"occ={claim_id}" not in str(job.get("detail") or ""):
-            errors.append(f"claim {claim_id}: job detail is not occurrence-bound")
+        expected_job_states = {
+            "executed": {"completed"},
+            "released": {"cancelled", "failed"},
+            "abandoned": {"failed", "interrupted"},
+        }[expected_status]
+        if job.get("status") not in expected_job_states:
+            errors.append(
+                f"claim {claim_id}: job status {job.get('status')!r} "
+                f"does not match occurrence status {expected_status!r}"
+            )
+        if not _within_window(job.get("created"), window):
+            errors.append(f"claim {claim_id}: job was not created inside the pilot window")
+        if not _within_window(job.get("updated"), window):
+            errors.append(f"claim {claim_id}: job was not finalized inside the pilot window")
 
     conversation_id = f"schedule:{schedule_id}:occ:{claim_id}"
     rows = _audits(audit, conversation_id)
@@ -534,6 +608,18 @@ def _claim_evidence(
                 errors.append(f"claim {claim_id}: audit origin is not schedule")
             if row.get("confirmation_id") != expected_confirmation:
                 errors.append(f"claim {claim_id}: audit confirmation binding mismatch")
+            audit_epoch = _audit_epoch(row.get("ts"))
+            if audit_epoch is None or not _within_window(audit_epoch, window):
+                errors.append(f"claim {claim_id}: audit execution is outside the pilot window")
+            try:
+                audit_args = json.loads(row.get("args_json") or "")
+            except json.JSONDecodeError:
+                audit_args = None
+            if (
+                expected_args_sha256 is not None
+                and (not isinstance(audit_args, dict) or _json_sha(audit_args) != expected_args_sha256)
+            ):
+                errors.append(f"claim {claim_id}: audit args hash mismatch")
     elif executed:
         errors.append(f"claim {claim_id}: non-executed occurrence has executed audit evidence")
     return result
@@ -549,6 +635,12 @@ def collect_evidence(
 ) -> tuple[dict[str, Any], int]:
     generated = time.time() if now is None else now
     normalized, errors = validate_manifest(manifest)
+    window = normalized["window"]
+    if not isinstance(window.get("started_epoch"), (int, float)) or not isinstance(
+        window.get("finished_epoch"), (int, float)
+    ):
+        # Keep later checks deterministic even for a malformed manifest.
+        window = {"started_epoch": math.inf, "finished_epoch": -math.inf}
     expected_candidate = normalized["candidate"]
     for key in ("version", "git_sha", "code_sha256"):
         if expected_candidate.get(key) != candidate.get(key):
@@ -559,6 +651,8 @@ def collect_evidence(
         errors.append("worker version does not match the checkout")
     if runtime.get("worker_code_sha256") != candidate["code_sha256"]:
         errors.append("worker code fingerprint does not match the checkout")
+    if runtime.get("worker_frozen") is not True:
+        errors.append("worker is not the packaged appliance build")
     if runtime.get("scheduler_configured") is not True:
         errors.append("scheduler runtime is not configured")
     if runtime.get("scheduler_running") is not True:
@@ -591,11 +685,15 @@ def collect_evidence(
                 expected_tool=read_spec["tool"],
                 expected_risk="read",
                 expected_confirmation=None,
+                expected_args_sha256=read_spec["args_sha256"],
+                window=window,
                 errors=read_errors,
             )
             for claim_id in read_spec["claim_ids"]
         ]
         if read_schedule is not None:
+            if not _within_window(read_schedule.get("created"), window):
+                read_errors.append("read schedule was not created inside the pilot window")
             if read_schedule.get("runs_used") != len(read_claims):
                 read_errors.append("read schedule run budget does not equal its executed claims")
         phases["read"] = {
@@ -626,6 +724,8 @@ def collect_evidence(
                 write_errors.append("write pilot receipt fingerprint mismatch")
             if receipt.get("device_id") != write_spec["device_id"]:
                 write_errors.append("write pilot receipt device mismatch")
+            if not _within_window(receipt.get("consumed_at"), window):
+                write_errors.append("write pilot receipt was not consumed inside the pilot window")
             nonce = receipt.get("nonce")
             if not isinstance(nonce, str) or not nonce:
                 write_errors.append("write pilot receipt nonce is missing")
@@ -664,12 +764,16 @@ def collect_evidence(
                 expected_tool=write_spec["tool"],
                 expected_risk="write",
                 expected_confirmation=confirmation,
+                expected_args_sha256=write_spec["args_sha256"],
+                window=window,
                 errors=write_errors,
             )
             for claim_id in write_spec["claim_ids"]
         ]
         marker_count: int | None = None
         if write_schedule is not None:
+            if not _within_window(write_schedule.get("created"), window):
+                write_errors.append("write schedule was not created inside the pilot window")
             args = write_schedule.get("args_value")
             marker = args.get("text") if isinstance(args, dict) else None
             if not isinstance(marker, str) or not marker.strip():
@@ -708,6 +812,8 @@ def collect_evidence(
         revoke_schedule = _schedule(schedules, revoke_spec["schedule_id"])
         if revoke_schedule is None:
             revoke_errors.append("revocation schedule does not exist")
+        elif not _within_window(revoke_schedule.get("created"), window):
+            revoke_errors.append("revocation schedule was not created inside the pilot window")
         elif bool(revoke_schedule.get("enabled")):
             revoke_errors.append("revocation schedule is still enabled")
         revoke_claim = _claim_evidence(
@@ -720,6 +826,8 @@ def collect_evidence(
             expected_tool=None,
             expected_risk=None,
             expected_confirmation=None,
+            expected_args_sha256=None,
+            window=window,
             errors=revoke_errors,
         )
         phases["revoke"] = {
@@ -734,6 +842,8 @@ def collect_evidence(
         recovery_schedule = _schedule(schedules, recovery_spec["schedule_id"])
         if recovery_schedule is None:
             recovery_errors.append("recovery schedule does not exist")
+        elif not _within_window(recovery_schedule.get("created"), window):
+            recovery_errors.append("recovery schedule was not created inside the pilot window")
         recovery_claim = _claim_evidence(
             schedules,
             jobs,
@@ -748,6 +858,12 @@ def collect_evidence(
                 if (recovery_schedule or {}).get("approved_fingerprint") is None
                 else f"schedule:{str((recovery_schedule or {}).get('approved_fingerprint'))[:12]}"
             ),
+            expected_args_sha256=(
+                _json_sha((recovery_schedule or {}).get("args_value"))
+                if isinstance((recovery_schedule or {}).get("args_value"), dict)
+                else None
+            ),
+            window=window,
             errors=recovery_errors,
         )
         phases["recovery"] = {
@@ -784,6 +900,10 @@ def collect_evidence(
         "schema": SCHEMA,
         "generated_at": generated,
         "candidate": dict(candidate),
+        "pilot_window": {
+            "started_at": normalized["window"].get("started_at"),
+            "finished_at": normalized["window"].get("finished_at"),
+        },
         "runtime": {
             "backend_version": runtime.get("backend_version"),
             "worker_version": runtime.get("worker_version"),

@@ -154,13 +154,13 @@ def create_sources(root: Path) -> pilot.DataPaths:
         audit.execute(
             "INSERT INTO audit (ts,conversation_id,tool,args_json,risk,outcome,confirmation_id,origin) "
             "VALUES (?,?,?,?,?,?,?,?)",
-            ("2026-07-19T01:00:00", f"schedule:read-schedule:occ:{claim}", "rig_status", "{}", "read", "executed", None, "schedule"),
+            ("1970-01-01T00:20:00", f"schedule:read-schedule:occ:{claim}", "rig_status", "{}", "read", "executed", None, "schedule"),
         )
     audit.execute(
         "INSERT INTO audit (ts,conversation_id,tool,args_json,risk,outcome,confirmation_id,origin) "
         "VALUES (?,?,?,?,?,?,?,?)",
         (
-            "2026-07-19T01:02:00",
+            "1970-01-01T00:22:00",
             "schedule:write-schedule:occ:write-claim-1",
             "note_append",
             json.dumps(WRITE_ARGS),
@@ -181,6 +181,10 @@ def manifest() -> dict:
     return {
         "schema": pilot.MANIFEST_SCHEMA,
         "candidate": dict(CANDIDATE),
+        "window": {
+            "started_at": "1970-01-01T00:15:00+00:00",
+            "finished_at": "1970-01-01T00:42:00+00:00",
+        },
         "trials": {
             "read": {
                 "schedule_id": "read-schedule",
@@ -235,6 +239,17 @@ with tempfile.TemporaryDirectory(prefix="scheduler-pilot-evidence-") as temp_dir
     check("single-use-nonce" not in serialized, "report hashes rather than exposes receipt nonce")
     check(str(paths.schedules.parent) not in serialized, "report excludes local database paths")
 
+    stale_manifest = manifest()
+    stale_manifest["window"]["started_at"] = "1970-01-01T00:30:00+00:00"
+    stale, stale_exit = pilot.collect_evidence(
+        stale_manifest, candidate=CANDIDATE, runtime=RUNTIME, paths=paths, now=3_000.0
+    )
+    check(stale_exit == 1, "claims outside the declared pilot window are rejected")
+    check(any(
+              "outside the pilot window" in error
+              for error in stale["phases"]["read"]["errors"]),
+          "stale claim explanation is explicit")
+
     bad_runtime = dict(RUNTIME, worker_code_sha256="d" * 64)
     mismatch, mismatch_exit = pilot.collect_evidence(
         manifest(), candidate=CANDIDATE, runtime=bad_runtime, paths=paths, now=3_000.0
@@ -242,6 +257,14 @@ with tempfile.TemporaryDirectory(prefix="scheduler-pilot-evidence-") as temp_dir
     check(mismatch_exit == 1, "runtime code mismatch blocks evidence")
     check("worker code fingerprint does not match the checkout" in mismatch["gate"]["errors"],
           "runtime mismatch reason is explicit")
+
+    source_runtime = dict(RUNTIME, worker_frozen=False)
+    source_build, source_build_exit = pilot.collect_evidence(
+        manifest(), candidate=CANDIDATE, runtime=source_runtime, paths=paths, now=3_000.0
+    )
+    check(source_build_exit == 1, "source-mode worker cannot satisfy appliance pilot evidence")
+    check("worker is not the packaged appliance build" in source_build["gate"]["errors"],
+          "packaged-worker requirement is explicit")
 
     notes_original = paths.notes.read_text(encoding="utf-8")
     paths.notes.write_text(notes_original + f"\n{MARKER}\n", encoding="utf-8")
@@ -277,7 +300,7 @@ with tempfile.TemporaryDirectory(prefix="scheduler-pilot-evidence-") as temp_dir
         "INSERT INTO audit (ts,conversation_id,tool,args_json,risk,outcome,confirmation_id,origin) "
         "VALUES (?,?,?,?,?,?,?,?)",
         (
-            "2026-07-19T01:02:01",
+            "1970-01-01T00:22:01",
             "schedule:write-schedule:occ:write-claim-1",
             "note_append",
             json.dumps(WRITE_ARGS),

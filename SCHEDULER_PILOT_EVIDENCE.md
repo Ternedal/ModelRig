@@ -70,6 +70,8 @@ Copy-Item `
 Fill in:
 
 - candidate VERSION, `git rev-parse HEAD` and worker code fingerprint;
+- the UTC pilot start/end timestamps with offsets; every named schedule, claim,
+  job, audit execution and write receipt must fall inside this window;
 - exact schedule and claim ids from the inventory;
 - read/write cadence and max-runs used in the pilot;
 - SHA-256 of the canonical args JSON;
@@ -141,7 +143,8 @@ Copy-Item `
 
 Confirm that:
 
-- candidate and runtime identities match;
+- candidate and runtime identities match and `worker_frozen=true`;
+- every evidence timestamp falls within the declared pilot window;
 - read has zero receipts;
 - write has one receipt from the expected device;
 - every named claim has one terminal occurrence and bound job;

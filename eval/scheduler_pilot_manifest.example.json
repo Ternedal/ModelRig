@@ -5,6 +5,10 @@
     "git_sha": "FILL_ME_40_LOWERCASE_HEX",
     "code_sha256": "FILL_ME_64_LOWERCASE_HEX"
   },
+  "window": {
+    "started_at": "FILL_ME_ISO_8601_WITH_OFFSET",
+    "finished_at": "FILL_ME_ISO_8601_WITH_OFFSET"
+  },
   "trials": {
     "read": {
       "schedule_id": "FILL_ME",
