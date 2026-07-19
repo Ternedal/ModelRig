@@ -1,0 +1,45 @@
+name: diagnose-t018-single-flight
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'agent/scheduler-explicit-single-flight'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: agent/scheduler-explicit-single-flight
+          show-progress: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install and apply patch
+        run: |
+          pip install -r worker/requirements.txt --break-system-packages >/dev/null
+          python scripts/_patch_t018_single_flight.py
+          python scripts/_adjust_t018_fixture.py
+      - name: Run bounded single-flight diagnosis
+        env:
+          PYTHONPATH: worker
+        shell: bash
+        run: |
+          set +e
+          python tests/worker_scheduler_single_flight.py > /tmp/t018-output.txt 2>&1
+          status=$?
+          {
+            echo "EXIT_STATUS=$status"
+            tail -n 120 /tmp/t018-output.txt
+          } > /tmp/t018-diagnosis.txt
+          cat /tmp/t018-diagnosis.txt
+          exit "$status"
+      - name: Upload bounded diagnosis
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: t018-single-flight-diagnosis
+          path: /tmp/t018-diagnosis.txt
+          if-no-files-found: error
+          retention-days: 1
