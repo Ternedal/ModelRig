@@ -57,6 +57,18 @@ check(
     all(len(item["text"]) < rb.CHUNK_SIZE for item in d1["documents"]),
     "every generated document is structurally one chunk",
 )
+check(
+    sum("Driftsaftale for Projekt" in item["text"] for item in d1["documents"]) == 40,
+    "only known-answer chunks use the target project vocabulary",
+)
+check(
+    all(
+        "Fyldsystem-" in item["text"]
+        for item in d1["documents"]
+        if item["text"].startswith("DISTRACTOR-")
+    ),
+    "10k distractors have a separate deterministic namespace",
+)
 canonical = {
     key: d1[key]
     for key in ("schema", "version", "scale", "query_count", "seed", "documents", "queries")
@@ -99,8 +111,12 @@ class NoopSampler:
         self.stopped += 1
         return {
             "samples": 2,
+            "rss_baseline_bytes": 1000,
             "rss_peak_bytes": 1234,
+            "rss_delta_peak_bytes": 234,
+            "gpu_used_baseline_bytes": None,
             "gpu_used_peak_bytes": None,
+            "gpu_used_delta_peak_bytes": None,
             "gpu_total_bytes": None,
         }
 
@@ -169,6 +185,7 @@ try:
             check(len(scale_result["query_runs"]) == 24, "repetitions multiply the query set exactly")
             check(scale_result["latency_ms"]["p50"] is not None, "query latency summary is populated")
             check(scale_result["resources"]["rss_peak_bytes"] == 1234, "resource sampler result reaches the report")
+    check(scale_result["resources"]["rss_delta_peak_bytes"] == 234, "resource delta reaches the report")
             check(scale_result["cleanup"]["removed_chunks"] == 120, "benchmark source is deleted after measurement")
             check(scale_result["cleanup"]["remaining_chunks"] == 0, "isolated store is empty after success")
             check(store.count() == 0, "no benchmark chunk survives successful cleanup")
@@ -237,6 +254,50 @@ check("Authorization" not in source_text, "harness never needs or handles a devi
 check("TemporaryDirectory" in source_text and "DocStore(str(db_path))" in source_text,
       "entrypoint structurally binds the real core to a temporary database")
 check("synthesize=False" in source_text, "production CoreEngine structurally disables synthesis")
+
+# A pre-scale harness crash must still produce a bounded machine-readable report.
+old_run = rb._run
+old_ollama_url = os.environ.get("MODELRIG_OLLAMA_URL")
+old_embed_model = os.environ.get("MODELRIG_EMBED_MODEL")
+
+
+async def explode(_args):
+    raise RuntimeError("simulated top-level harness failure")
+
+
+rb._run = explode
+try:
+    with tempfile.TemporaryDirectory(prefix="rag-main-failure-") as td:
+        failure_report = Path(td) / "failure.json"
+        exit_code = rb.main(
+            [
+                "--scales",
+                "1",
+                "--queries",
+                "1",
+                "--repetitions",
+                "1",
+                "--report",
+                str(failure_report),
+            ]
+        )
+        failure_json = json.loads(failure_report.read_text(encoding="utf-8"))
+        check(exit_code == 2, "top-level harness failure uses reserved exit 2")
+        check(failure_json["gate"]["passed"] is False, "top-level failure report fails the gate")
+        check(
+            failure_json["error"]["message"] == "simulated top-level harness failure",
+            "top-level failure remains diagnosable in the report",
+        )
+finally:
+    rb._run = old_run
+    if old_ollama_url is None:
+        os.environ.pop("MODELRIG_OLLAMA_URL", None)
+    else:
+        os.environ["MODELRIG_OLLAMA_URL"] = old_ollama_url
+    if old_embed_model is None:
+        os.environ.pop("MODELRIG_EMBED_MODEL", None)
+    else:
+        os.environ["MODELRIG_EMBED_MODEL"] = old_embed_model
 
 print(f"\n===== RAG BENCHMARK: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

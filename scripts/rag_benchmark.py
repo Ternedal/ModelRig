@@ -45,7 +45,7 @@ from typing import Any, Callable, Protocol
 
 SCHEMA = "kaliv-rag-benchmark/v1"
 DATASET_SCHEMA = "kaliv-rag-benchmark-dataset/v1"
-DATASET_VERSION = "2026-07-18.1"
+DATASET_VERSION = "2026-07-18.2"
 DEFAULT_REPORT = Path("validation/rag-benchmark-latest.json")
 MAX_TOP_K = 20
 CHUNK_SIZE = 4000
@@ -274,7 +274,11 @@ def generate_dataset(scale: int, query_count: int, seed: int) -> dict[str, Any]:
 
     for index in range(query_count, scale):
         kind, sentence_template, _ = _FACTS[index % len(_FACTS)]
-        project = _project_name(index)
+        # Filler names deliberately use a separate vocabulary. Reusing the
+        # target project's human-readable name every 440 documents would turn
+        # a 10k benchmark into a test of numeric-token discrimination rather
+        # than retrieval under corpus load.
+        project = f"Fyldsystem-{index:06d}"
         value = _fact_value(index + seed, kind)
         text = (
             f"DISTRACTOR-{index:06d}. Teknisk driftsnotat for {project}. "
@@ -419,7 +423,9 @@ class ResourceSampler:
         self.interval = max(0.1, float(interval))
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self.rss_baseline_bytes: int | None = None
         self.rss_peak_bytes: int | None = None
+        self.gpu_used_baseline_bytes: int | None = None
         self.gpu_used_peak_bytes: int | None = None
         self.gpu_total_bytes: int | None = None
         self.samples = 0
@@ -427,10 +433,14 @@ class ResourceSampler:
     def _sample(self) -> None:
         rss = process_rss_bytes()
         if rss is not None:
+            if self.rss_baseline_bytes is None:
+                self.rss_baseline_bytes = rss
             self.rss_peak_bytes = max(self.rss_peak_bytes or 0, rss)
         gpu = gpu_memory_bytes()
         if gpu is not None:
             used, total = gpu
+            if self.gpu_used_baseline_bytes is None:
+                self.gpu_used_baseline_bytes = used
             self.gpu_used_peak_bytes = max(self.gpu_used_peak_bytes or 0, used)
             self.gpu_total_bytes = total
         self.samples += 1
@@ -456,8 +466,24 @@ class ResourceSampler:
         self._sample()
         return {
             "samples": self.samples,
+            "rss_baseline_bytes": self.rss_baseline_bytes,
             "rss_peak_bytes": self.rss_peak_bytes,
+            "rss_delta_peak_bytes": (
+                self.rss_peak_bytes - self.rss_baseline_bytes
+                if self.rss_peak_bytes is not None
+                and self.rss_baseline_bytes is not None
+                else None
+            ),
+            # nvidia-smi reports total device use, not process attribution. The
+            # baseline/delta pair makes that limitation explicit and useful.
+            "gpu_used_baseline_bytes": self.gpu_used_baseline_bytes,
             "gpu_used_peak_bytes": self.gpu_used_peak_bytes,
+            "gpu_used_delta_peak_bytes": (
+                self.gpu_used_peak_bytes - self.gpu_used_baseline_bytes
+                if self.gpu_used_peak_bytes is not None
+                and self.gpu_used_baseline_bytes is not None
+                else None
+            ),
             "gpu_total_bytes": self.gpu_total_bytes,
         }
 
@@ -874,13 +900,40 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--max-p95-ms cannot be negative")
     if args.sample_interval <= 0:
         parser.error("--sample-interval must be positive")
+    if any(scale > 100_000 for scale in args.scales):
+        parser.error("scales above 100,000 require an explicit harness revision")
+    if not args.ollama_url.strip():
+        parser.error("--ollama-url cannot be empty")
 
     os.environ["MODELRIG_OLLAMA_URL"] = args.ollama_url.strip().rstrip("/")
     os.environ["MODELRIG_EMBED_MODEL"] = args.embedding_model.strip()
     if not os.environ["MODELRIG_EMBED_MODEL"]:
         parser.error("--embedding-model cannot be empty")
 
-    report, exit_code = asyncio.run(_run(args))
+    try:
+        report, exit_code = asyncio.run(_run(args))
+    except Exception as exc:
+        # A benchmark that crashes before writing its evidence is impossible to
+        # diagnose remotely. Emit the same bounded error shape as scale failures
+        # and reserve exit 2 for harness/environment failure.
+        report = {
+            "schema": SCHEMA,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "configuration": {
+                "scales": args.scales,
+                "queries": args.queries,
+                "repetitions": args.repetitions,
+                "seed": args.seed,
+            },
+            "error": _safe_error(exc),
+            "summary": {"scales": 0, "errors": 1},
+            "gate": {
+                "passed": False,
+                "fail_under_recall_at_5": args.fail_under_recall_at_5,
+                "max_p95_ms": args.max_p95_ms if args.max_p95_ms > 0 else None,
+            },
+        }
+        exit_code = 2
     _write_json_atomic(args.report, report)
     print(f"report: {args.report}")
     return exit_code
