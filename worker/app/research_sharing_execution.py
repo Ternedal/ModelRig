@@ -8,6 +8,7 @@ through ``OutboundByteMeter``; the wrapper never estimates payload size.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import re
 import threading
 from dataclasses import dataclass
@@ -150,8 +151,6 @@ async def execute_research_sharing(
             "operation must provide async run and close methods"
         )
 
-    # This is the final non-network decision. A denied, expired, revoked,
-    # mismatched, or observe-only lease cannot enter the injected operation.
     boundary.claim(lease, intent, now=now_claim)
 
     meter = OutboundByteMeter(intent.to_request().max_bytes)
@@ -161,7 +160,10 @@ async def execute_research_sharing(
     cancelled: asyncio.CancelledError | None = None
 
     try:
-        value = await asyncio.wait_for(run(meter), timeout=timeout_seconds)
+        run_result = run(meter)
+        if not inspect.isawaitable(run_result):
+            raise ResearchSharingExecutionContractError("operation.run must be async")
+        value = await asyncio.wait_for(run_result, timeout=timeout_seconds)
     except asyncio.TimeoutError:
         outcome = "failed"
         error_code = "operation_timeout"
@@ -180,7 +182,10 @@ async def execute_research_sharing(
         error_code = "operation_failed"
 
     try:
-        await asyncio.wait_for(close(), timeout=cleanup_timeout_seconds)
+        close_result = close()
+        if not inspect.isawaitable(close_result):
+            raise ResearchSharingExecutionContractError("operation.close must be async")
+        await asyncio.wait_for(close_result, timeout=cleanup_timeout_seconds)
     except asyncio.CancelledError as exc:
         outcome = "blocked"
         error_code = "cleanup_cancelled"
@@ -189,6 +194,9 @@ async def execute_research_sharing(
     except asyncio.TimeoutError:
         outcome = "blocked"
         error_code = "cleanup_timeout"
+    except ResearchSharingExecutionContractError:
+        outcome = "blocked"
+        error_code = "cleanup_contract_violation"
     except Exception:
         outcome = "blocked"
         error_code = "cleanup_failed"
