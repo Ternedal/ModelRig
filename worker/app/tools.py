@@ -86,6 +86,21 @@ Impact = Literal["read", "write", "desktop", "destructive", "admin"]
 # optimistic default is the one that lies to the person holding the stop button.
 Cancellation = Literal["none", "cooperative", "forceable"]
 
+# Which network boundary execution crosses. This is metadata, never a router.
+#
+#   "none"               - execution performs no network I/O.
+#   "loopback"           - a fixed loopback-only service/socket.
+#   "configured_service" - a named service whose URL/topology comes from trusted
+#                          operator configuration (for example Ollama). The
+#                          descriptor names the service, never its URL or token.
+#   "public"             - a deliberately public network destination.
+#   "undeclared"         - legacy/unknown. Accepted by the v2 parser so old
+#                          descriptors fail honestly, but forbidden for every
+#                          tool in the production REGISTRY by contract tests.
+NetworkMode = Literal[
+    "none", "loopback", "configured_service", "public", "undeclared"
+]
+
 # WHAT A TOOL'S RESULT IS, as opposed to what it does (analysis F-208). Risk
 # gates the ACTION; sensitivity gates where the ANSWER may travel. They are
 # orthogonal: list_documents is a harmless read that returns YOUR document
@@ -294,6 +309,13 @@ class Tool:
     # documents root or a DB path names it here; nothing is inherited by
     # prefix, so a future COOKIE/SESSION/AUTH cannot ride along unnoticed.
     env_allow: tuple = ()
+    # Network metadata belongs beside the executable tool definition. It does
+    # not grant network access and is not consulted by the executor in this
+    # slice; it makes the existing requirement visible to schema/API consumers.
+    # Default undeclared preserves compatibility for ad-hoc test tools, while
+    # the production REGISTRY contract rejects undeclared entries.
+    network: NetworkMode = "undeclared"
+    network_destinations: tuple[str, ...] = ()
     # May this action ever run with nobody watching? (F-604)
     #
     # `risk` is too coarse to answer that: note_append and delete_model are both
@@ -346,6 +368,41 @@ class Tool:
         # means "I did not say, infer for me"; a real bool means "I said".
         if self.idempotent is None:
             object.__setattr__(self, "idempotent", self.impact == "read")
+
+        allowed_network = {
+            "none", "loopback", "configured_service", "public", "undeclared"
+        }
+        if self.network not in allowed_network:
+            raise ValueError(
+                f"{self.name}: unsupported network mode {self.network!r}"
+            )
+        if not isinstance(self.network_destinations, tuple):
+            raise ValueError(
+                f"{self.name}: network_destinations must be a tuple"
+            )
+        if any(
+            not isinstance(value, str) or not value.strip()
+            for value in self.network_destinations
+        ):
+            raise ValueError(
+                f"{self.name}: network destinations must be non-empty strings"
+            )
+        if len(self.network_destinations) != len(set(self.network_destinations)):
+            raise ValueError(
+                f"{self.name}: network destinations contain duplicates"
+            )
+        if self.network in ("none", "undeclared") and self.network_destinations:
+            raise ValueError(
+                f"{self.name}: {self.network} network mode cannot name destinations"
+            )
+        if (
+            self.network in ("loopback", "configured_service", "public")
+            and not self.network_destinations
+        ):
+            raise ValueError(
+                f"{self.name}: {self.network} network mode requires a destination"
+            )
+
         # A destructive or administrative action cannot be scheduled. This is
         # not a policy check that someone remembers to run -- it is impossible
         # to construct the contradiction, so a future tool cannot be added
@@ -752,6 +809,7 @@ REGISTRY: dict[str, Tool] = {
     "rig_status": Tool(
         name="rig_status",
         schedulable=True, risk="read",
+        network="none",
         sensitivity="operational",  # GPU, VRAM, uptime -- a description of your machine
         description="Læs riggens tilstand: GPU, VRAM, disk, ASR/TTS-status.",
         params={"type": "object", "properties": {}},
@@ -760,6 +818,7 @@ REGISTRY: dict[str, Tool] = {
     "note_append": Tool(
         name="note_append",
         schedulable=True, risk="write",
+        network="none",
         sensitivity="private",  # your own text, written back to you
         description="Tilføj tekst til Kalivs notesfil. Kan kun appende.",
         params={
@@ -772,6 +831,8 @@ REGISTRY: dict[str, Tool] = {
     "list_models": Tool(
         name="list_models",
         schedulable=True, risk="read",
+        network="configured_service",
+        network_destinations=("ollama",),
         sensitivity="operational",  # which models you run says something about you, but not much
         description="Vis hvilke Ollama-modeller der er installeret på riggen (navne + størrelse).",
         params={"type": "object", "properties": {}},
@@ -780,6 +841,7 @@ REGISTRY: dict[str, Tool] = {
     "current_datetime": Tool(
         name="current_datetime",
         schedulable=True, risk="read",
+        network="none",
         sensitivity="public",  # the clock is not yours; it is everyone's
         description="Hent den aktuelle dato og klokkeslæt på riggen.",
         params={"type": "object", "properties": {}},
@@ -788,6 +850,7 @@ REGISTRY: dict[str, Tool] = {
     "job_status": Tool(
         name="job_status",
         schedulable=True, risk="read",
+        network="none",
         sensitivity="operational",  # job state and progress
         description="Status på baggrundsjobs (fx modeldownloads): fremdrift, terminal status og årsag. Uden job_id vises de seneste.",
         params={"type": "object", "properties": {"job_id": {"type": "string"}}},
@@ -800,6 +863,7 @@ REGISTRY: dict[str, Tool] = {
         idempotent=True,
         schedulable=False,
         unschedulable_because="et job-id er flygtigt; en plan om at annullere det rammer noget andet i morgen", risk="write",
+        network="none",
         sensitivity="operational",  # acts on the rig, returns rig state
         description="Annullér et kørende baggrundsjob (fx en modeldownload).",
         params={
@@ -812,6 +876,7 @@ REGISTRY: dict[str, Tool] = {
     "list_documents": Tool(
         name="list_documents",
         schedulable=True, risk="read",
+        network="none",
         sensitivity="private",  # YOUR document names -- the F-208 case in one line
         description="Vis hvilke dokumenter der er ingested til RAG (navne + antal chunks).",
         params={"type": "object", "properties": {}},
@@ -822,6 +887,8 @@ REGISTRY: dict[str, Tool] = {
         schedulable=False,
         impact="destructive",
         unschedulable_because="sletning af en model er uigenkaldelig og kan ikke fortrydes kl. 03:00", risk="write",
+        network="configured_service",
+        network_destinations=("ollama",),
         sensitivity="operational",  # acts on the rig, returns rig state
         description="Slet en Ollama-model fra riggen. Kræver bekræftelse.",
         params={
@@ -837,6 +904,8 @@ REGISTRY: dict[str, Tool] = {
         schedulable=False,
         impact="admin",
         unschedulable_because="modelhentning er en administrativ handling der bruger båndbredde og disk uden opsyn", risk="write",
+        network="configured_service",
+        network_destinations=("ollama",),
         sensitivity="operational",  # acts on the rig, returns rig state
         description="Hent (download) en Ollama-model til riggen. Kræver bekræftelse.",
         params={
@@ -995,6 +1064,8 @@ class ToolGate:
              "unschedulable_reason": (
                  "" if t.schedulable else t.unschedulable_because),
              "cancellation": t.cancellation,
+             "network": t.network,
+             "network_destinations": list(t.network_destinations),
              "idempotent": t.idempotent}
             for t in REGISTRY.values()
         ]

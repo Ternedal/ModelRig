@@ -77,7 +77,8 @@ def test_registry_adapter_is_pure_and_complete() -> None:
         assert descriptor.termination_mode == tool.cancellation
         assert descriptor.idempotent is tool.idempotent
         assert descriptor.production_activation is False
-        assert descriptor.network_mode == "undeclared"
+        assert descriptor.network_mode == tool.network
+        assert tuple(descriptor.network.destinations) == tool.network_destinations
         assert descriptor.isolation.mode == (
             "process" if tool.isolate else "in_process"
         )
@@ -97,12 +98,74 @@ def test_registry_adapter_is_pure_and_complete() -> None:
         )
 
 
+def test_registry_owns_network_metadata_and_api_preserves_it() -> None:
+    expected = {
+        "rig_status": ("none", ()),
+        "note_append": ("none", ()),
+        "list_models": ("configured_service", ("ollama",)),
+        "current_datetime": ("none", ()),
+        "job_status": ("none", ()),
+        "cancel_job": ("none", ()),
+        "list_documents": ("none", ()),
+        "delete_model": ("configured_service", ("ollama",)),
+        "pull_model": ("configured_service", ("ollama",)),
+    }
+    actual = {
+        name: (tool.network, tool.network_destinations)
+        for name, tool in tools.REGISTRY.items()
+    }
+    assert actual == expected
+    assert all(mode != "undeclared" for mode, _ in actual.values())
+
+    listed = {item["name"]: item for item in tools.GATE.list_tools()}
+    for name, (mode, destinations) in expected.items():
+        assert listed[name]["network"] == mode
+        assert listed[name]["network_destinations"] == list(destinations)
+
+
+def test_tool_network_metadata_fails_closed() -> None:
+    def make(**overrides):
+        values = {
+            "name": "network_contract_test",
+            "risk": "read",
+            "description": "network metadata contract test",
+            "network": "none",
+        }
+        values.update(overrides)
+        return tools.Tool(**values)
+
+    make(network="none")
+    make(network="configured_service", network_destinations=("ollama",))
+
+    invalid = (
+        {"network": "none", "network_destinations": ("ollama",)},
+        {"network": "configured_service", "network_destinations": ()},
+        {"network": "vpn_magic"},
+        {"network": "public", "network_destinations": ("",)},
+        {"network": "loopback", "network_destinations": ("svc", "svc")},
+        {"network": "public", "network_destinations": ["example.com"]},
+    )
+    for values in invalid:
+        try:
+            make(**values)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(
+                f"invalid Tool network metadata accepted: {values!r}"
+            )
+
+
 def test_schema_document_matches_runtime_contract() -> None:
     assert JSON_SCHEMA["properties"]["schema"]["const"] == SCHEMA
     assert JSON_SCHEMA["additionalProperties"] is False
     assert (
         JSON_SCHEMA["properties"]["production_activation"]["const"]
         is False
+    )
+    assert (
+        "configured_service"
+        in JSON_SCHEMA["properties"]["network"]["properties"]["mode"]["enum"]
     )
     expected = {
         "schema",

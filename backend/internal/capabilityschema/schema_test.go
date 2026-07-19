@@ -69,6 +69,28 @@ func TestSharedFixtures(t *testing.T) {
 	}
 }
 
+func TestConfiguredServiceNetworkMode(t *testing.T) {
+	fixtures := loadFixtures(t)
+	for _, fixture := range fixtures.Valid {
+		descriptor, err := Parse(fixture.Descriptor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if descriptor.CapabilityID != "tool:list_models" {
+			continue
+		}
+		if descriptor.Network.Mode != "configured_service" {
+			t.Fatalf("list_models network mode = %q", descriptor.Network.Mode)
+		}
+		if len(descriptor.Network.Destinations) != 1 ||
+			descriptor.Network.Destinations[0] != "ollama" {
+			t.Fatalf("list_models destinations = %#v", descriptor.Network.Destinations)
+		}
+		return
+	}
+	t.Fatal("list_models configured-service fixture is missing")
+}
+
 func TestCanonicalJSONDoesNotHTMLEscape(t *testing.T) {
 	fixtures := loadFixtures(t)
 	for _, fixture := range fixtures.Valid {

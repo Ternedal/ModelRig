@@ -19,7 +19,7 @@ var (
 	dataClassValues   = set("public", "operational", "private", "secret")
 	confirmationModes = set("none", "required")
 	isolationModes    = set("in_process", "process")
-	networkModes      = set("none", "loopback", "public", "undeclared")
+	networkModes      = set("none", "loopback", "configured_service", "public", "undeclared")
 	terminationModes  = set("none", "cooperative", "forceable")
 	capabilityID      = regexp.MustCompile(`^tool:[A-Za-z0-9._:-]{1,155}$`)
 )
@@ -189,10 +189,10 @@ func (d Descriptor) Validate() error {
 		return err
 	}
 	if (d.Network.Mode == "none" || d.Network.Mode == "undeclared") && len(d.Network.Destinations) != 0 {
-		return errors.New("network destinations require loopback or public mode")
+		return errors.New("network destinations require loopback, configured_service or public mode")
 	}
-	if (d.Network.Mode == "loopback" || d.Network.Mode == "public") && len(d.Network.Destinations) == 0 {
-		return errors.New("loopback or public network mode requires a destination")
+	if (d.Network.Mode == "loopback" || d.Network.Mode == "configured_service" || d.Network.Mode == "public") && len(d.Network.Destinations) == 0 {
+		return errors.New("networked mode requires a destination")
 	}
 	if err := allowed(d.Termination.Mode, terminationModes, "termination.mode"); err != nil {
 		return err
@@ -229,8 +229,8 @@ func (d Descriptor) CanonicalJSON() ([]byte, error) {
 			"mode":         d.Network.Mode,
 			"destinations": d.Network.Destinations,
 		},
-		"termination":          map[string]any{"mode": d.Termination.Mode},
-		"replay":               map[string]any{"idempotent": d.Replay.Idempotent},
+		"termination":           map[string]any{"mode": d.Termination.Mode},
+		"replay":                map[string]any{"idempotent": d.Replay.Idempotent},
 		"production_activation": false,
 	}
 	var buffer bytes.Buffer

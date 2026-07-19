@@ -49,7 +49,7 @@ class Confirmation(StrictModel):
 
 
 class Network(StrictModel):
-    mode: Literal["none", "loopback", "public", "undeclared"]
+    mode: Literal["none", "loopback", "configured_service", "public", "undeclared"]
     destinations: list[str]
 
     @model_validator(mode="after")
@@ -60,12 +60,10 @@ class Network(StrictModel):
             raise ValueError("network.destinations contains duplicates")
         if self.mode in {"none", "undeclared"} and self.destinations:
             raise ValueError(
-                "network destinations require loopback or public mode"
+                "network destinations require loopback, configured_service or public mode"
             )
-        if self.mode in {"loopback", "public"} and not self.destinations:
-            raise ValueError(
-                "loopback or public network mode requires a destination"
-            )
+        if self.mode in {"loopback", "configured_service", "public"} and not self.destinations:
+            raise ValueError("networked mode requires a destination")
         return self
 
 
