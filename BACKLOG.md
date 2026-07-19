@@ -35,15 +35,17 @@ nu fysisk evidens — ikke mere dormant hærdning.
 | Task | Issue | P | Ejerskab | Afhænger af | Accept |
 |---|---:|---|---|---|---|
 | T-001 Frys en validation candidate | — | P0 | [ISO] ✅ gjort | — | Exact SHA/tag valgt; kun validation blockers merges. `freeze_check.py` bekræfter. |
-| T-004 Kør `rig_preflight.py` | #63 | P0 | [RIG] | T-001 | Exit 0 eller dokumenteret blocker. |
+| T-004 Kør `rig_preflight.py` | #63 | P0 | [RIG] (JSON-bevis [ISO] ✅) | T-001 | Exit 0 eller dokumenteret blocker. |
 | T-005 Kør fuld Agent 3 appliance-validation | #64 | P0 | [RIG] | T-001, T-004 | Frisk report matcher version + code SHA. |
-| T-006 Bevis reboot, supervisor, updater, rollback | #65 | P0 | [RIG] | T-001, T-004 | reboot→ready, kill→restart, bad update→rollback. |
+| T-006 Bevis reboot, supervisor, updater, rollback | #65 | P0 | [RIG] (schema/kampagne [ISO] ✅) | T-001, T-004 | reboot→ready, kill→restart, bad update→rollback. |
 | T-007 Frys lokal model-eval baseline | #66 | P1 | [RIG] (harness [ISO] ✅) | T-001 | 30–50 tasks med success, latency og tool-discipline. |
 | T-040 20-turn voice-kvalitetsbaseline | #67 | P1 | [RIG] (harness [ISO] ✅) | T-001, T-004 | TTFA, WER, cold/warm, stop og barge-in målt. |
 | T-043 RAG load- og kvalitetsbenchmark | #68 | P1 | [RIG] (harness [ISO] ✅) | T-001 | 1k/10k chunks, recall, p50/p95, RAM/VRAM. |
 
 Harnessene til T-007, T-040 og T-043 er versionsbundne og regressions-testede.
-Kun de faktiske lokale model-, voice-, device- og GPU-målinger mangler.
+Preflight-JSON, lifecycle-schema og den samlede candidate-bound kampagnekontrol er
+også leveret isoleret. Kun de faktiske rig-, model-, voice-, device-, update- og
+GPU-observationer mangler.
 
 ---
 

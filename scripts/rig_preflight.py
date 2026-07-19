@@ -26,7 +26,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import subprocess
 import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
 import urllib.error
 import urllib.request
 
@@ -40,6 +45,49 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 _OK = "  OK   "
 _WARN = "  WARN "
 _FAIL = "  FAIL "
+PREFLIGHT_SCHEMA = "kaliv-rig-preflight/v1"
+
+
+def _write_json_atomic(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix=path.name + ".",
+        suffix=".tmp",
+        delete=False,
+    ) as handle:
+        handle.write(payload)
+        temp = Path(handle.name)
+    temp.replace(path)
+
+
+def _candidate_identity() -> dict:
+    root = Path(__file__).resolve().parents[1]
+    version = (root / "VERSION").read_text(encoding="utf-8").strip()
+    proc = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    git_sha = proc.stdout.strip()
+    if proc.returncode != 0 or re.fullmatch(r"[0-9a-f]{40}", git_sha) is None:
+        raise RuntimeError("git HEAD is unavailable for preflight evidence")
+    worker = root / "worker"
+    if str(worker) not in sys.path:
+        sys.path.insert(0, str(worker))
+    from app.build_identity import code_fingerprint
+
+    return {
+        "version": version,
+        "git_sha": git_sha,
+        "code_sha256": code_fingerprint(),
+    }
 
 
 class Check:
@@ -77,6 +125,14 @@ class Check:
         if self.fix and self.status != "ok":
             for fl in self.fix.splitlines():
                 print(f"         -> {fl}")
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "status": self.status,
+            "detail": self.detail,
+            "fix": self.fix,
+        }
 
 
 def _get(url: str, token: str | None = None, timeout: float = 5.0):
@@ -315,6 +371,11 @@ def main(argv: list[str] | None = None) -> int:
                     default=os.environ.get("MODELRIG_BASE_URL", "http://127.0.0.1:8080"),
                     help="backend base URL (default: env MODELRIG_BASE_URL or "
                          "http://127.0.0.1:8080)")
+    ap.add_argument(
+        "--report",
+        type=Path,
+        help="optional atomic JSON report for the physical campaign",
+    )
     args = ap.parse_args(argv)
 
     print()
@@ -356,6 +417,25 @@ def main(argv: list[str] | None = None) -> int:
 
     # A report already present and accepted means validation has run and passed.
     already_valid = rig.get("eligible_for_developer_preview") is True
+    ready = not fails
+    if args.report is not None:
+        report = {
+            "schema": PREFLIGHT_SCHEMA,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "candidate": _candidate_identity(),
+            "backend": {"base_url": args.base_url},
+            "ready": ready,
+            "already_validated": already_valid,
+            "summary": {
+                "checks": len(checks),
+                "ok": sum(c.status == "ok" for c in checks),
+                "warnings": len(warns),
+                "failures": len(fails),
+            },
+            "checks": [c.to_dict() for c in checks],
+        }
+        _write_json_atomic(args.report, report)
+        print(f"  report: {args.report}")
 
     if fails:
         print(f"  NOT READY -- {len(fails)} blocker(s) above must be fixed first.")

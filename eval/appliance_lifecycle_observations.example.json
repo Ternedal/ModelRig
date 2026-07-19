@@ -1,0 +1,79 @@
+{
+  "schema": "kaliv-appliance-lifecycle-observations/v1",
+  "candidate": {
+    "version": "FILL_ME",
+    "git_sha": "FILL_ME_40_HEX",
+    "code_sha256": "FILL_ME_64_HEX"
+  },
+  "host": {
+    "hostname": "FILL_ME",
+    "windows_version": "FILL_ME"
+  },
+  "started_at": "2026-07-19T00:00:00+00:00",
+  "finished_at": "2026-07-19T00:30:00+00:00",
+  "trials": {
+    "reboot": {
+      "performed": false,
+      "ready": false,
+      "ready_ms": null,
+      "backend_version": "FILL_ME",
+      "worker_version": "FILL_ME",
+      "worker_code_sha256": "FILL_ME_64_HEX",
+      "notes": "FILL_ME",
+      "evidence_path": "validation/appliance-lifecycle-evidence/reboot.log",
+      "evidence_sha256": "FILL_ME_64_HEX"
+    },
+    "supervisor_backend": {
+      "performed": false,
+      "restarted": false,
+      "ready": false,
+      "restart_ms": null,
+      "active_version": "FILL_ME",
+      "active_code_sha256": "FILL_ME_64_HEX",
+      "notes": "FILL_ME",
+      "evidence_path": "validation/appliance-lifecycle-evidence/supervisor_backend.log",
+      "evidence_sha256": "FILL_ME_64_HEX"
+    },
+    "supervisor_worker": {
+      "performed": false,
+      "restarted": false,
+      "ready": false,
+      "restart_ms": null,
+      "active_version": "FILL_ME",
+      "active_code_sha256": "FILL_ME_64_HEX",
+      "notes": "FILL_ME",
+      "evidence_path": "validation/appliance-lifecycle-evidence/supervisor_worker.log",
+      "evidence_sha256": "FILL_ME_64_HEX"
+    },
+    "good_update": {
+      "performed": false,
+      "source_version": "FILL_ME",
+      "source_git_sha": "FILL_ME_40_HEX",
+      "target_version": "FILL_ME",
+      "target_git_sha": "FILL_ME_40_HEX",
+      "target_code_sha256": "FILL_ME_64_HEX",
+      "ready": false,
+      "rollback_observed": false,
+      "data_preserved": false,
+      "schedules_preserved": false,
+      "notes": "FILL_ME",
+      "evidence_path": "validation/appliance-lifecycle-evidence/good_update.log",
+      "evidence_sha256": "FILL_ME_64_HEX"
+    },
+    "bad_update": {
+      "performed": false,
+      "attempted_version": "FILL_ME",
+      "attempted_git_sha": "FILL_ME_40_HEX",
+      "rejected_or_rolled_back": false,
+      "active_version": "FILL_ME",
+      "active_git_sha": "FILL_ME_40_HEX",
+      "active_code_sha256": "FILL_ME_64_HEX",
+      "ready": false,
+      "data_preserved": false,
+      "schedules_preserved": false,
+      "notes": "FILL_ME",
+      "evidence_path": "validation/appliance-lifecycle-evidence/bad_update.log",
+      "evidence_sha256": "FILL_ME_64_HEX"
+    }
+  }
+}
