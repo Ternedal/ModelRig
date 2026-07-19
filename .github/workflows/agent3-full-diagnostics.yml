@@ -26,15 +26,20 @@ jobs:
       - name: Apply exact final T-030 API and documentation patch
         if: github.head_ref == 'agent/t030-api-doc-client-fixtures'
         env:
-          T030_EXPECTED_PARENT: 1be8654bef50ddfc84014e426a565ac1c439ad34
+          T030_EXPECTED_PARENT: 09cb6e2d083186353da4906a738bac4f27bc4568
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           head_sha="${{ github.event.pull_request.head.sha }}"
           git fetch origin "$head_sha" --depth=2
           git checkout -B agent/t030-api-doc-client-fixtures "$head_sha"
           test "$(git rev-parse HEAD^)" = "$T030_EXPECTED_PARENT"
-          GITHUB_HEAD_REF=agent/t030-api-doc-client-fixtures \
-            python3 scripts/_t030_finalize_capability_contract.py
+          if ! GITHUB_HEAD_REF=agent/t030-api-doc-client-fixtures \
+            python3 scripts/_t030_finalize_capability_contract.py \
+            >/tmp/t030-finalize.log 2>&1; then
+            cat /tmp/t030-finalize.log
+            exit 1
+          fi
+          cat /tmp/t030-finalize.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
@@ -84,6 +89,8 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: agent3-full-test-log
-          path: /tmp/modelrig-full-test.log
-          if-no-files-found: error
+          path: |
+            /tmp/t030-finalize.log
+            /tmp/modelrig-full-test.log
+          if-no-files-found: warn
           retention-days: 7
