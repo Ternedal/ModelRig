@@ -370,7 +370,7 @@ class DataSharingLedger:
     def _permission_transition(self, permission_id: str, actor: str, now: int, target: str) -> None:
         allowed = {
             "approved": {"pending"}, "denied": {"pending"},
-            "revoked": {"pending", "approved"},
+            "revoked": {"pending", "approved", "consumed"},
         }
         if target not in allowed:
             raise DataSharingContractError("invalid permission transition")
@@ -391,19 +391,29 @@ class DataSharingLedger:
                 if row["status"] not in allowed[target]:
                     raise DataSharingDenied(f"permission cannot transition to {target}")
                 if target == "approved":
-                    self._db.execute(
+                    changed = self._db.execute(
                         "UPDATE sharing_permissions SET status='approved', approved_by=?, approved_at=? "
                         "WHERE permission_id=? AND status='pending'", (actor, now, permission_id),
+                    ).rowcount
+                elif target == "revoked":
+                    changed = self._db.execute(
+                        "UPDATE sharing_permissions SET status='revoked', revoked_by=?, revoked_at=? "
+                        "WHERE permission_id=? AND status IN ('pending','approved','consumed')",
+                        (actor, now, permission_id),
+                    ).rowcount
+                    self._db.execute(
+                        "UPDATE sharing_receipts SET status='revoked' "
+                        "WHERE permission_id=? AND status='authorized'",
+                        (permission_id,),
                     )
                 else:
-                    self._db.execute(
-                        f"UPDATE sharing_permissions SET status=?, revoked_by=?, revoked_at=? "
-                        f"WHERE permission_id=? AND status IN "
-                        f"({'?,?' if target == 'revoked' else '?'})",
-                        ((target, actor, now, permission_id, "pending", "approved")
-                         if target == "revoked"
-                         else (target, actor, now, permission_id, "pending")),
-                    )
+                    changed = self._db.execute(
+                        "UPDATE sharing_permissions SET status='denied', revoked_by=?, revoked_at=? "
+                        "WHERE permission_id=? AND status='pending'",
+                        (actor, now, permission_id),
+                    ).rowcount
+                if changed != 1:
+                    raise DataSharingDenied(f"permission cannot transition to {target}")
                 self._event_from_row(row, now, f"permission_{target}", permission_id)
                 self._db.execute("COMMIT")
             except Exception:

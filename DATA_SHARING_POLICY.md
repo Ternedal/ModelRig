@@ -36,9 +36,10 @@ A confirmation-required request creates a `kaliv-data-sharing-permission/v1` pro
 - time-limited;
 - one-use;
 - explicitly approvable, deniable and revocable;
-- consumed atomically when a receipt is issued.
+- consumed atomically when a receipt is issued;
+- still revocable until the issued receipt is claimed; revocation atomically invalidates every unclaimed receipt linked to it.
 
-External processing requires a claimable `kaliv-data-sharing-receipt/v1`. Receipts are short-lived, exact-request-bound, one-use at the boundary and terminal after completion.
+External processing requires a claimable `kaliv-data-sharing-receipt/v1`. Receipts are short-lived, exact-request-bound, one-use at the boundary and terminal after completion. Once claimed, revocation cannot pretend that already-started external processing never happened.
 
 Changing provider, destination, content, purpose, summary, surface or byte budget creates a different digest and therefore requires a new decision.
 

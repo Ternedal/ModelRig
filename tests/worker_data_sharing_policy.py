@@ -150,6 +150,20 @@ rejects(
     "revoked permission cannot authorize",
 )
 
+issued_then_revoked = ledger.propose(request, now=210, ttl_seconds=30)
+ledger.approve(issued_then_revoked.permission_id, actor="Anders", now=211)
+revoked_receipt = ledger.authorize(
+    request,
+    permission_id=issued_then_revoked.permission_id,
+    now=212,
+)
+ledger.revoke(issued_then_revoked.permission_id, actor="Anders", now=213)
+rejects(
+    lambda: ledger.claim(revoked_receipt, request, now=214),
+    DataSharingDenied,
+    "revocation invalidates an issued but unclaimed receipt",
+)
+
 denied = ledger.propose(request, now=300, ttl_seconds=30)
 ledger.deny(denied.permission_id, actor="Anders", now=301)
 rejects(
