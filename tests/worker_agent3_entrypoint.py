@@ -55,6 +55,8 @@ os.environ["KALIV_AGENT3_ENABLED"] = "0"
 before_count = route_count()
 check(run_worker._mount_optional_agent3() is False, "feature remains off without explicit flag")
 check(status("GET", "/experimental/agent3/status") == 404, "flag-off worker exposes no Agent 3.0 API")
+check(status("GET", "/experimental/agent3/task-readiness") == 404,
+      "flag-off worker exposes no task-readiness API")
 check(route_count() == before_count, "flag-off mount changes no route registrations")
 
 os.environ["KALIV_AGENT3_ENABLED"] = "1"
@@ -74,6 +76,14 @@ check(isinstance(_code, str) and len(_code) == 64,
       else f"NO USABLE code_sha256 ({_code!r}) -- physical validation would fail")
 check(_body.get("worker_version"),
       "and the version binding travels the same road, so one cannot arrive alone")
+
+_readiness = asyncio.run(request("GET", "/experimental/agent3/task-readiness")).json()
+check(_readiness.get("schema") == "kaliv-agent3-task-readiness/v1",
+      "task-readiness exposes the versioned typed contract")
+check(_readiness.get("selected_surface") == "agent2"
+      and _readiness.get("production_activation") is False,
+      "task-readiness remains dormant and fail-closed")
+
 # Validation errors prove the POST route exists without calling Ollama.
 check(status("POST", "/experimental/agent3/plan", {}) == 422, "planner API is reachable")
 # A missing single-use plan is a domain conflict, not a missing route.
