@@ -117,6 +117,9 @@ Kopiér den versionerede skabelon:
 Copy-Item `
   eval\appliance_lifecycle_observations.example.json `
   validation\appliance-lifecycle-observations.json
+New-Item -ItemType Directory `
+  validation\appliance-lifecycle-evidence `
+  -Force | Out-Null
 ```
 
 Udfyld kandidat/host/timestamps og fem trials:
@@ -127,6 +130,28 @@ Udfyld kandidat/host/timestamps og fem trials:
 4. gyldig update fra en tidligere build til kandidaten;
 5. ugyldig update, som afvises eller rulles tilbage til kandidaten.
 
+Hver trial skal have sin egen lokale evidensfil under:
+
+```text
+validation/appliance-lifecycle-evidence/
+```
+
+Gem eksempelvis konsoludskrift, health-tidslinje eller updater/supervisor-log i
+filen. Udfyld trialens repository-relative `evidence_path`, og beregn den hash,
+som skrives i `evidence_sha256`:
+
+```powershell
+(Get-FileHash `
+  validation\appliance-lifecycle-evidence\reboot.log `
+  -Algorithm SHA256).Hash.ToLowerInvariant()
+```
+
+Kampagnen genlæser hver fil, kræver en almindelig ikke-tom fil på højst 32 MiB,
+forbyder symlinks og paths uden for den allowlistede mappe og sammenligner den
+faktiske SHA-256 med JSON-feltet. En ændret log gør hele verify-gaten rød.
+Artifactindholdet kopieres ikke ind i kampagnerapporten; den gemmer path, hash og
+byteantal.
+
 Alle boolske felter skal være ægte JSON-booleans. Tider skal være tal i
 millisekunder. `good_update.target_*`, reboot/supervisor identity og
 `bad_update.active_*` skal matche kandidaten. Den gyldige updates source-version
@@ -135,7 +160,7 @@ Git-SHA skal også være anderledes end kandidatens. Data og schedules skal vær
 bevaret i begge update-trials.
 
 Skabelonen er bevidst rød (`false`, `null`, `FILL_ME`) indtil de fysiske
-observationer er gennemført.
+observationer og deres artifact-hashes er gennemført.
 
 ## 5. T-040 — voice baseline
 
@@ -196,9 +221,10 @@ Kontrollér før commit:
 - candidate version, Git-SHA og code fingerprint;
 - alle seks evidence statuses er `pass`;
 - ingen `missing`, `failed` eller `candidate_errors`;
-- hver fil-SHA og alder er udfyldt;
+- hver rapport- og lifecycle-artifact-SHA er udfyldt;
 - `physical_campaign_complete=true`;
 - `production_activation=false`.
 
-Rolling-filer, lifecycle-arbejdsfilen, rå voice-fixtures og manuelle work files
-forbliver lokale. Kun dateret, manuelt reviewet evidens må committes.
+Rolling-filer, lifecycle-arbejdsfilen, lifecycle-artifacts, rå voice-fixtures og
+manuelle work files forbliver lokale. Kun dateret, manuelt reviewet evidens må
+committes.
