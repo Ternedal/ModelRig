@@ -4,7 +4,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   full-test-log:
@@ -29,25 +29,15 @@ jobs:
           java-version: "21"
       - name: Validate desktop capability fixtures in isolation
         run: |
-          set +e
           cd desktop
           ./gradlew :composeApp:test \
             --tests '*CapabilityDescriptorV2FixtureTest' \
-            --no-daemon --console=plain \
-            >/tmp/t030-desktop.log 2>&1
-          status=$?
-          set -e
-          if [ "$status" -ne 0 ]; then
-            tail -n 200 /tmp/t030-desktop.log
-            exit "$status"
-          fi
-          tail -n 40 /tmp/t030-desktop.log
-      - name: Apply exact final T-030 API and documentation patch
+            --no-daemon --console=plain
+      - name: Apply exact final T-030 API and documentation patch locally
         if: github.head_ref == 'agent/t030-api-doc-client-fixtures'
         env:
-          T030_EXPECTED_PARENT: 36dd202494ec81e708d5bd2da71727ef66449f4f
+          T030_EXPECTED_PARENT: 1e70fa1cfd23580ff67fcce61ae10b7436b53aad
         run: |
-          exec > >(tee /tmp/t030-finalize.log) 2>&1
           set -euo pipefail
           head_sha="${{ github.event.pull_request.head.sha }}"
           git fetch origin "$head_sha" --depth=2
@@ -55,12 +45,20 @@ jobs:
           test "$(git rev-parse HEAD^)" = "$T030_EXPECTED_PARENT"
           GITHUB_HEAD_REF=agent/t030-api-doc-client-fixtures \
             python3 scripts/_t030_finalize_capability_contract.py
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git diff --cached --check
-          git commit -m "feat(capabilities): expose canonical descriptors to API docs and clients"
-          git push origin HEAD:agent/t030-api-doc-client-fixtures
+          test ! -e scripts/_t030_finalize_capability_contract.py
+          test "$(git diff -- .github/workflows/agent3-full-diagnostics.yml | grep -c T030_FINAL_PATCH_BEGIN || true)" = "1"
+      - name: Upload exact final T-030 source bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: t030-final-source
+          path: |
+            CURRENT_STATE.md
+            worker/app/tools.py
+            scripts/current_state.py
+            tests/worker_capability_schema_v2.py
+            .github/workflows/agent3-full-diagnostics.yml
+          if-no-files-found: error
+          retention-days: 7
       # T030_FINAL_PATCH_END
 
       - name: Build backend
@@ -104,10 +102,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: agent3-full-test-log
-          path: |
-            /tmp/t030-desktop.log
-            /tmp/t030-finalize.log
-            /tmp/modelrig-full-test.log
-            desktop/composeApp/build/test-results/test/*.xml
+          path: /tmp/modelrig-full-test.log
           if-no-files-found: warn
           retention-days: 7
