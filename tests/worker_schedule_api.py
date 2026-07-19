@@ -492,5 +492,82 @@ finally:
     if old_scheduler is not None:
         os.environ["KALIV_SCHEDULER"] = old_scheduler
 
+# --- approval receipts through the REAL token flow (T-014) -------------------
+# The store suite proves the bookkeeping with faked receipt dicts. Here the
+# receipt's content must come from the ACTUAL verified token: the device_id,
+# issued_at and nonce the backend signed are what the detail view shows.
+
+t014_now = int(time.time())
+t014_nonce_create = base64.urlsafe_b64encode(
+    secrets.token_bytes(32)).decode().rstrip("=")
+t014_nonce_renew = base64.urlsafe_b64encode(
+    secrets.token_bytes(32)).decode().rstrip("=")
+t014_preview = client.post(
+    "/schedules/preview",
+    json={
+        "tool": "append_note",
+        "args": {"text": "T-014 receipt-spor"},
+        "cadence": "every:60",
+        "ttl_days": 30,
+        "max_runs": 2,
+    },
+).json()["preview"]
+t014_token = token_for(
+    t014_preview,
+    device_id="pixel-6a-t014",
+    issued_at=t014_now - 5,
+    nonce=t014_nonce_create,
+)
+t014_resp = client.post(
+    "/schedules", json=create_body(t014_preview, token=t014_token))
+check(t014_resp.status_code == 200,
+      "a token-approved write schedule is created")
+t014_id = t014_resp.json()["schedule"]["schedule_id"]
+
+detail = client.get(f"/schedules/{t014_id}").json()
+receipts = detail.get("approval_receipts")
+check(isinstance(receipts, list) and len(receipts) == 1,
+      "the detail view exposes exactly one receipt after create")
+rc = receipts[0]
+check(rc["kind"] == "create"
+      and rc["device_id"] == "pixel-6a-t014"
+      and rc["issued_at"] == t014_now - 5
+      and rc["nonce"] == t014_nonce_create
+      and rc["revision"] == 0,
+      "the receipt carries the token's OWN device, issue time and nonce -- "
+      "attribution comes from the verified token, not from guesswork")
+check(rc["consumed_at"] >= rc["issued_at"],
+      "consumption follows issuance, as a real approval must")
+
+t014_renew_preview = client.post(
+    f"/schedules/{t014_id}/renew/preview",
+    json={"ttl_days": 30, "max_runs": 2},
+).json()["preview"]
+t014_renew_token = token_for(
+    t014_renew_preview,
+    device_id="desktop-t014",
+    issued_at=t014_now + 1,
+    nonce=t014_nonce_renew,
+)
+renew_resp = client.post(
+    f"/schedules/{t014_id}/renew",
+    json={"ttl_days": 30, "max_runs": 2,
+          "approval_token": t014_renew_token},
+)
+check(renew_resp.status_code == 200, "the same grant can be renewed by token")
+
+detail2 = client.get(f"/schedules/{t014_id}").json()
+receipts2 = detail2.get("approval_receipts")
+check(len(receipts2) == 2
+      and receipts2[0]["kind"] == "create"
+      and receipts2[1]["kind"] == "renew",
+      "renewal APPENDS its receipt -- the approval history is complete and "
+      "ordered")
+check(receipts2[1]["device_id"] == "desktop-t014"
+      and receipts2[1]["nonce"] == t014_nonce_renew
+      and receipts2[1]["revision"] == 1,
+      "the renew receipt names the OTHER device and the bumped revision -- "
+      "each incarnation of the grant knows exactly who approved it, and when")
+
 print(f"\n===== SCHEDULE API: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

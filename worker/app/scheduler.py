@@ -318,6 +318,25 @@ class ScheduleStore:
                 self._conn.execute(
                     "ALTER TABLE schedules ADD COLUMN "
                     "revision INTEGER NOT NULL DEFAULT 0")
+            # Approval receipts (T-014). The backend token carries WHO approved
+            # (device_id) and WHEN (issued_at); before this, verification threw
+            # all of it away at the moment of consumption and kept only the
+            # fingerprint. A schedule that fires in three weeks could not answer
+            # "when did I approve this, and from where?". Each consumed approval
+            # -- create or renew -- persists one receipt row, in the same
+            # transaction as the grant it authorises.
+            self._conn.execute(
+                """CREATE TABLE IF NOT EXISTS approval_receipts (
+                       id INTEGER PRIMARY KEY AUTOINCREMENT,
+                       schedule_id TEXT NOT NULL,
+                       kind TEXT NOT NULL,
+                       fingerprint TEXT NOT NULL,
+                       device_id TEXT NOT NULL,
+                       nonce TEXT NOT NULL,
+                       issued_at INTEGER NOT NULL,
+                       consumed_at REAL NOT NULL,
+                       revision INTEGER NOT NULL)"""
+            )
             self._conn.commit()
 
     def close(self) -> None:
@@ -326,7 +345,8 @@ class ScheduleStore:
 
     def create(self, tool: str, args: dict, cadence: str, *,
                approve_write: bool = False, ttl_days: int = DEFAULT_TTL_DAYS,
-               max_runs: int = DEFAULT_MAX_RUNS, now: float | None = None) -> Schedule:
+               max_runs: int = DEFAULT_MAX_RUNS, now: float | None = None,
+               receipt: dict | None = None) -> Schedule:
         """Record a schedule AND the approval it was created with.
 
         `approve_write=True` is Anders saying "yes, this exact action, on this
@@ -340,6 +360,9 @@ class ScheduleStore:
         if ttl_days <= 0:
             raise ScheduleError("en plan skal have et udløb — det er hele pointen")
         fp = fingerprint(tool, args) if approve_write else None
+        if receipt is not None and fp is None:
+            raise ScheduleError(
+                "en approval-receipt uden en godkendt write giver ikke mening")
         sched = Schedule(
             schedule_id=uuid.uuid4().hex[:12],
             tool=tool, args=args, cadence=cadence,
@@ -356,7 +379,27 @@ class ScheduleStore:
                 (sched.schedule_id, tool, json.dumps(args, ensure_ascii=False), cadence,
                  fp, sched.expires_at, max_runs, 0, sched.due_at, 0, now),
             )
-            self._conn.commit()
+            try:
+                if receipt is not None:
+                    # Same transaction as the grant (T-014): a schedule that
+                    # claims human approval without a receipt, or a receipt
+                    # without its schedule, must not be able to exist. If this
+                    # insert fails the whole create rolls back -- the consumed
+                    # token stays burned ("consume before persistence"), and
+                    # the user confirms again.
+                    self._conn.execute(
+                        "INSERT INTO approval_receipts (schedule_id, kind,"
+                        " fingerprint, device_id, nonce, issued_at, consumed_at,"
+                        " revision) VALUES (?,?,?,?,?,?,?,0)",
+                        (sched.schedule_id, "create", fp,
+                         receipt["device_id"], receipt["nonce"],
+                         int(receipt["issued_at"]),
+                         float(receipt["consumed_at"])),
+                    )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
         return sched
 
     def get(self, schedule_id: str) -> Schedule | None:
@@ -672,6 +715,17 @@ class ScheduleStore:
                 )
             self._conn.commit()
         return True
+
+    def approval_receipts(self, schedule_id: str) -> list[dict]:
+        """Every consumed approval behind this grant, oldest first (T-014)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT kind, fingerprint, device_id, nonce, issued_at,"
+                " consumed_at, revision FROM approval_receipts"
+                " WHERE schedule_id=? ORDER BY id",
+                (schedule_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def current_guard(self, schedule_id: str) -> dict | None:
         """The live facts a claimed occurrence must re-check before ToolGate (T-013).

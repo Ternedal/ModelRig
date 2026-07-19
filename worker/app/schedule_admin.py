@@ -112,6 +112,7 @@ class ScheduleAdminStore(ScheduleStore):
         max_runs: int = DEFAULT_MAX_RUNS,
         enabled: bool | None = None,
         now: float | None = None,
+        receipt: dict | None = None,
     ) -> Schedule | None:
         now = time.time() if now is None else now
         if ttl_days <= 0:
@@ -137,9 +138,17 @@ class ScheduleAdminStore(ScheduleStore):
                     # not permission to replay whatever became due while paused.
                     due_at = next_run(parse_cadence(row["cadence"]), now)
 
+                # Renewal is a maximal user-intent mutation: it replaces the
+                # approval, resets the budget and moves the horizon. It MUST
+                # bump the revision (T-013): for the same tool+args the renewed
+                # fingerprint is identical to the old one, so without the bump
+                # neither of the guard's other belts would catch an in-flight
+                # claim taken under the OLD grant -- it would fire against the
+                # FRESH budget. With the bump it cancels and refunds instead.
                 self._conn.execute(
                     "UPDATE schedules SET approved_fingerprint=?, expires_at=?, "
-                    "max_runs=?, runs_used=0, enabled=?, due_at=? WHERE id=?",
+                    "max_runs=?, runs_used=0, enabled=?, due_at=?, "
+                    "revision=revision+1 WHERE id=?",
                     (
                         approved_fingerprint,
                         now + ttl_days * 86400,
@@ -149,6 +158,24 @@ class ScheduleAdminStore(ScheduleStore):
                         schedule_id,
                     ),
                 )
+                if receipt is not None:
+                    if approved_fingerprint is None:
+                        raise ScheduleError(
+                            "en approval-receipt uden en godkendt write giver "
+                            "ikke mening")
+                    # Same transaction as the renewed grant (T-014), stamped
+                    # with the post-bump revision so the receipt says which
+                    # incarnation of the grant it authorised.
+                    self._conn.execute(
+                        "INSERT INTO approval_receipts (schedule_id, kind,"
+                        " fingerprint, device_id, nonce, issued_at,"
+                        " consumed_at, revision) VALUES (?,?,?,?,?,?,?,?)",
+                        (schedule_id, "renew", approved_fingerprint,
+                         receipt["device_id"], receipt["nonce"],
+                         int(receipt["issued_at"]),
+                         float(receipt["consumed_at"]),
+                         int(row["revision"]) + 1),
+                    )
                 self._conn.commit()
             except Exception:
                 self._conn.rollback()
@@ -244,6 +271,7 @@ class ScheduleAdmin:
         ttl_days: int = DEFAULT_TTL_DAYS,
         max_runs: int = DEFAULT_MAX_RUNS,
         approved_fingerprint: str | None = None,
+        receipt: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         preview = self.preview(
             tool, args, cadence, ttl_days=ttl_days, max_runs=max_runs
@@ -258,6 +286,7 @@ class ScheduleAdmin:
                 ttl_days=ttl_days,
                 max_runs=max_runs,
                 now=self._clock(),
+                receipt=receipt,
             )
         return self.describe(schedule)
 
@@ -269,6 +298,11 @@ class ScheduleAdmin:
         return [
             self.describe(item, registry=registry, now=now) for item in schedules
         ]
+
+    def approval_receipts(self, schedule_id: str) -> list[dict[str, Any]]:
+        """The consumed approvals behind a grant, for the detail view (T-014)."""
+        with self._store() as store:
+            return store.approval_receipts(schedule_id)
 
     def get(self, schedule_id: str) -> dict[str, Any]:
         with self._store() as store:
@@ -301,6 +335,7 @@ class ScheduleAdmin:
         max_runs: int = DEFAULT_MAX_RUNS,
         approved_fingerprint: str | None = None,
         enable: bool | None = None,
+        receipt: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         with self._store() as store:
             current = store.get(schedule_id)
@@ -328,6 +363,7 @@ class ScheduleAdmin:
                 ttl_days=ttl_days,
                 max_runs=max_runs,
                 enabled=enable,
+                receipt=receipt,
                 now=self._clock(),
             )
         assert updated is not None

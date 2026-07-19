@@ -11,6 +11,7 @@ preview and durably consumes its random nonce before persisting the grant. A
 fingerprint computed by the caller is never accepted as evidence of consent.
 """
 from __future__ import annotations
+import time
 
 from typing import Any, Callable
 
@@ -141,15 +142,28 @@ def _preview_payload(preview) -> dict[str, Any]:
     }
 
 
-def _approval_for(preview, token: str | None) -> str | None:
-    """Verify and consume a write approval; reads deliberately need none."""
+def _approval_for(preview, token: str | None) -> tuple[str | None, dict | None]:
+    """Verify and consume a write approval; reads deliberately need none.
+
+    Returns (fingerprint, receipt). The receipt carries the attribution the
+    verified token proved -- WHICH device approved, WHEN it was issued, and
+    when this worker consumed it (T-014). Before this, all of it was verified
+    and then thrown away, so a firing schedule could not answer "who approved
+    this, and from where?".
+    """
     if not preview.requires_approval:
-        return None
+        return None, None
     verified = verify_schedule_approval(token, preview)
     # Consume before persistence. A downstream failure burns the token rather
     # than making a failed write approval reusable; the user must confirm again.
     consume_schedule_approval(verified.nonce)
-    return preview.approval_fingerprint
+    receipt = {
+        "device_id": verified.device_id,
+        "nonce": verified.nonce,
+        "issued_at": verified.issued_at,
+        "consumed_at": time.time(),
+    }
+    return preview.approval_fingerprint, receipt
 
 
 def build_schedule_router(
@@ -207,7 +221,8 @@ def build_schedule_router(
                 ttl_days=req.ttl_days,
                 max_runs=req.max_runs,
             )
-            approved_fingerprint = _approval_for(preview, req.approval_token)
+            approved_fingerprint, receipt = _approval_for(
+                preview, req.approval_token)
             schedule = service.create(
                 req.tool,
                 req.args,
@@ -215,6 +230,7 @@ def build_schedule_router(
                 ttl_days=req.ttl_days,
                 max_runs=req.max_runs,
                 approved_fingerprint=approved_fingerprint,
+                receipt=receipt,
             )
         except (
             ScheduleAdminError,
@@ -229,9 +245,10 @@ def build_schedule_router(
         _require_operator(request, operator_allowed)
         try:
             schedule = service.get(schedule_id)
+            receipts = service.approval_receipts(schedule_id)
         except (ScheduleAdminError, ScheduleError) as exc:
             _raise(exc)
-        return {"schedule": schedule}
+        return {"schedule": schedule, "approval_receipts": receipts}
 
     @router.post("/{schedule_id}/enabled")
     def set_schedule_enabled(
@@ -272,13 +289,15 @@ def build_schedule_router(
                 max_runs=req.max_runs,
                 enable=req.enable,
             )
-            approved_fingerprint = _approval_for(preview, req.approval_token)
+            approved_fingerprint, receipt = _approval_for(
+                preview, req.approval_token)
             schedule = service.renew(
                 schedule_id,
                 ttl_days=req.ttl_days,
                 max_runs=req.max_runs,
                 approved_fingerprint=approved_fingerprint,
                 enable=req.enable,
+                receipt=receipt,
             )
         except (
             ScheduleAdminError,

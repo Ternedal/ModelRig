@@ -161,5 +161,48 @@ check(tick.completed == 1,
       "an unmodified schedule executes exactly as before -- the guard only "
       "fires on a real change")
 
+# --- renew after claim: identical fingerprint, and ONLY the revision saves us
+# Renewal replaces the approval with a fingerprint of the SAME (tool, args) --
+# byte-identical to the old one -- resets the budget and keeps enabled True.
+# Every belt except the revision looks fine. A claim taken under the old grant
+# must cancel, not fire against the fresh budget.
+from app.schedule_admin import ScheduleAdminStore  # noqa: E402
+
+
+def make_admin_env():
+    td = tempfile.mkdtemp(prefix="revoke-renew-")
+    schedules = ScheduleAdminStore(os.path.join(td, "schedules.db"))
+    jobs = JobStore(os.path.join(td, "jobs.db"))
+    audit = T.AuditLog(os.path.join(td, "audit.db"))
+    gate = T.ToolGate(audit=audit, state_file=None)
+    gate.set_enabled(True)
+    runner = SchedulerRunner(schedules, jobs, gate, feature_enabled=lambda: True)
+    return schedules, jobs, gate, runner
+
+
+st, jb, gt, rn = make_admin_env()
+sched = st.create("rig_status", {}, "every:60", now=NOW)
+claim = st.claim_due(now=NOW + 61)[0]
+renewed = st.renew(
+    sched.schedule_id,
+    approved_fingerprint=sched.approved_fingerprint,
+    ttl_days=7, max_runs=4, now=NOW + 62,
+)
+check(renewed is not None
+      and renewed.approved_fingerprint == claim.schedule.approved_fingerprint
+      and renewed.enabled,
+      "the renewed grant has the IDENTICAL fingerprint and is enabled -- "
+      "nothing but the revision distinguishes it from the claimed snapshot")
+jid = jb.create("schedule:rig_status", detail=f"occ={claim.claim_id}")
+st.bind_job(claim.claim_id, jid)
+outcome = rn._run_claim(claim, jid, NOW + 63)
+check(outcome == "blocked",
+      "a claim from before the renewal does not fire under the renewed grant")
+check(_runs_used(st, sched.schedule_id) == 0,
+      "and the FRESH budget is untouched -- the stale occurrence cannot spend "
+      "the renewal's runs")
+check(_occ_status(st, claim.claim_id) == "released",
+      "the stale occurrence resolves released, exactly like a pause")
+
 print(f"\n===== SCHEDULE REVOKE: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
