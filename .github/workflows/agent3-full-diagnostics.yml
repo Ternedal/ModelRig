@@ -4,7 +4,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   full-test-log:
@@ -36,7 +36,7 @@ jobs:
       - name: Apply exact final T-030 API and documentation patch locally
         if: github.head_ref == 'agent/t030-api-doc-client-fixtures'
         env:
-          T030_EXPECTED_PARENT: 1e70fa1cfd23580ff67fcce61ae10b7436b53aad
+          T030_EXPECTED_PARENT: d24c7b4bbda13adce0f4fa46e8ff3cc9546b494a
         run: |
           set -euo pipefail
           head_sha="${{ github.event.pull_request.head.sha }}"
