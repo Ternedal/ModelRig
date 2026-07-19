@@ -167,6 +167,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_research_data_sharing_adapter.py`
 - `tests/worker_research_egress_ledger.py`
 - `tests/worker_research_peer_binding.py`
+- `tests/worker_research_sharing_boundary.py`
 - `tests/worker_schedule_api.py`
 - `tests/worker_schedule_api_guard.py`
 - `tests/worker_schedule_approval.py`
