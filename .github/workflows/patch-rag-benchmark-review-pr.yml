@@ -45,13 +45,15 @@ jobs:
           if [ "$status" -ne 0 ]; then
             tail -n 120 "$log" > RAG_REVIEW_FAILURE.txt
             cat RAG_REVIEW_FAILURE.txt
-            git add scripts/rag_benchmark.py tests/worker_rag_benchmark.py scripts/_patch_rag_benchmark_review.py RAG_REVIEW_FAILURE.txt
+            git status --short
+            git add -A
             git commit -m "chore: capture final RAG review failure"
             git push origin HEAD:agent/rag-benchmark-harness
             exit "$status"
           fi
 
           cat "$log"
-          git add scripts/rag_benchmark.py tests/worker_rag_benchmark.py scripts/_patch_rag_benchmark_review.py
+          git status --short
+          git add -A
           git commit -m "fix(eval): harden RAG benchmark evidence and dataset"
           git push origin HEAD:agent/rag-benchmark-harness
