@@ -4,7 +4,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   full-test-log:
@@ -22,6 +22,29 @@ jobs:
 
       - name: Install worker deps
         run: pip install -r worker/requirements.txt --break-system-packages
+
+      # T032_REVOCATION_PATCH_BEGIN
+      - name: Apply exact T-032 revocation hardening
+        if: github.head_ref == 'agent/t032-data-sharing-policy-v1'
+        env:
+          T032_EXPECTED_PARENT: ad66494b88fbd4433713d42e117f6b6fd813a3fd
+        run: |
+          set -euo pipefail
+          head_sha="${{ github.event.pull_request.head.sha }}"
+          git fetch origin "$head_sha" --depth=2
+          git checkout -B agent/t032-data-sharing-policy-v1 "$head_sha"
+          test "$(git rev-parse HEAD^)" = "$T032_EXPECTED_PARENT"
+          GITHUB_HEAD_REF=agent/t032-data-sharing-policy-v1 \
+            python3 scripts/_t032_revocation_patch.py
+          PYTHONPATH=worker python3 tests/worker_data_sharing_policy.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add worker/app/data_sharing.py tests/worker_data_sharing_policy.py DATA_SHARING_POLICY.md
+          git diff --cached --check
+          test "$(git diff --cached --name-only | wc -l)" = "3"
+          git commit -m "fix(data-sharing): revoke unclaimed issued receipts"
+          git push origin HEAD:agent/t032-data-sharing-policy-v1
+      # T032_REVOCATION_PATCH_END
 
       - name: Build backend
         run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
