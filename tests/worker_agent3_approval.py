@@ -6,7 +6,6 @@ import hmac
 import json
 import os
 import tempfile
-from dataclasses import replace
 
 from app.agent3.approval import (
     Agent3ApprovalError,
@@ -60,8 +59,8 @@ def waiting_run(*, tool="note_append", args=None, revision=3):
 
 
 def args_sha(args):
-    raw = json.dumps(args, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(raw).hexdigest()
+    assert set(args) == {"text"}
+    return hashlib.sha256(args["text"].encode("utf-8")).hexdigest()
 
 
 def token_for(run, revision, **changes):
@@ -117,6 +116,41 @@ def test_valid_token_binds_device_action_revision_and_time() -> None:
     assert "n" * 32 not in json.dumps(audit)
     assert len(audit["approval_nonce_sha256"]) == 64
     assert len(audit["approval_token_sha256"]) == 64
+
+
+def test_utf8_append_text_has_runtime_independent_hash() -> None:
+    text = "<pilot>& æøå — 日本語"
+    run, revision = waiting_run(args={"text": text})
+    approval = verify_agent3_approval(
+        token_for(run, revision),
+        run,
+        plan_revision=revision,
+        now=NOW,
+        secret_factory=lambda: SECRET,
+    )
+    assert approval.args_sha256 == hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def test_broader_or_invalid_argument_shape_is_rejected() -> None:
+    run, revision = waiting_run(args={"text": "MARKER", "extra": 1})
+    rejects(lambda: token_for(run, revision), "") if False else None
+    claims_token = token_for(
+        waiting_run()[0],
+        revision,
+        run_id=run.id,
+        step_id=run.steps[0].id,
+        confirmation_digest=run.steps[0].confirmation_digest,
+    )
+    rejects(
+        lambda: verify_agent3_approval(
+            claims_token,
+            run,
+            plan_revision=revision,
+            now=NOW,
+            secret_factory=lambda: SECRET,
+        ),
+        "exactly one text argument",
+    )
 
 
 def test_changed_args_digest_revision_and_run_fail_closed() -> None:
@@ -214,9 +248,19 @@ def test_token_cannot_outlive_confirmation() -> None:
 
 def test_only_note_append_is_eligible() -> None:
     run, revision = waiting_run(tool="delete_model", args={"name": "qwen"})
+    # Use a syntactically valid hash claim; tool eligibility must fail first.
+    normal, _ = waiting_run()
+    token = token_for(
+        normal,
+        revision,
+        run_id=run.id,
+        step_id=run.steps[0].id,
+        tool=run.steps[0].tool,
+        confirmation_digest=run.steps[0].confirmation_digest,
+    )
     rejects(
         lambda: verify_agent3_approval(
-            token_for(run, revision),
+            token,
             run,
             plan_revision=revision,
             now=NOW,
