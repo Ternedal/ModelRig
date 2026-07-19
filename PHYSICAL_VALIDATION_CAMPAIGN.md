@@ -22,6 +22,23 @@ RAG-måling fra commit C er ikke en valideret kandidat. Kampagnen kræver:
 - grønne individuelle gates og cleanup-resultater;
 - komplette typed observations for reboot, supervisor, update og rollback.
 
+## Kandidat-checkout må ikke flytte sig under kampagnen
+
+Kør alle faser fra den samme rene checkout af den valgte candidate. Før første
+fase:
+
+```powershell
+git status --short
+git rev-parse HEAD
+Get-Content VERSION
+```
+
+`git status --short` skal være tom. Gem SHA’en, og skift ikke branch, pull ikke
+nye commits og redigér ikke tracked filer mellem faserne. Rolling reports og WAV-
+fixtures er ignorerede arbejdsfiler og gør ikke checkoutet dirty. Hvis HEAD
+ændres, er den tidligere evidens ikke længere en samlet kampagne og skal køres
+igen mod den nye kandidat.
+
 ## 0. Frys kandidat og opret kampagnechecklisten
 
 Fra repositoryets rod:
@@ -112,8 +129,9 @@ Udfyld kandidat/host/timestamps og fem trials:
 
 Alle boolske felter skal være ægte JSON-booleans. Tider skal være tal i
 millisekunder. `good_update.target_*`, reboot/supervisor identity og
-`bad_update.active_*` skal matche kandidaten. Den ugyldige updates attempted
-Git-SHA skal være anderledes end kandidatens. Data og schedules skal være
+`bad_update.active_*` skal matche kandidaten. Den gyldige updates source-version
+og source-SHA skal være anderledes end kandidatens. Den ugyldige updates attempted
+Git-SHA skal også være anderledes end kandidatens. Data og schedules skal være
 bevaret i begge update-trials.
 
 Skabelonen er bevidst rød (`false`, `null`, `FILL_ME`) indtil de fysiske
