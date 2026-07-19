@@ -50,6 +50,13 @@ kaliv-tools-state.json.tmp
 /validation/physical-validation-campaign-latest.json
 /validation/physical-validation-campaign-latest.json.tmp
 
+# Scheduler pilot: local inventory, filled manifest and rolling evidence stay on
+# the rig. Only a manually reviewed, dated pilot report may be committed.
+/eval/scheduler_pilot_manifest.json
+/validation/scheduler-pilot-inventory.json
+/validation/scheduler-pilot-latest.json
+/validation/scheduler-pilot-latest.json.tmp
+
 # Voice baseline: raw recordings and rolling/manual work files stay on the rig.
 # Only a manually reviewed, dated evidence report may be committed.
 /validation/voice-fixtures/
