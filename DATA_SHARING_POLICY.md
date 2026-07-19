@@ -1,6 +1,6 @@
 # Data-sharing policy v1
 
-Status: **dormant contract**. This document and `worker/app/data_sharing.py` do not enable any route, connector, tool or network client.
+Status: **dormant contract and migration boundaries**. These modules do not enable any route, connector, tool or network client.
 
 ## Decision
 
@@ -51,8 +51,22 @@ It stores hashes of purpose, summary and content—not the raw purpose, preview 
 
 Denial, timeout, revocation, mismatch and reuse produce no valid receipt. Local fallback is recorded with `bytes_sent=0`.
 
+## Research migration boundaries
+
+`worker/app/research_data_sharing.py` translates the legacy research `EgressPlan` into the common request. The normalized domain allowlist is included through a full SHA-256 scope digest, so a wider or simply different domain set requires a new decision.
+
+`worker/app/research_sharing_boundary.py` defines the dormant execution lease around the eventual external operation:
+
+- `observe` reports legacy/common policy differences but is side-effect free, contains no receipt and can never authorize bytes;
+- `enforce` must issue and claim an exact common receipt before the real external-processing boundary;
+- every lease binds the legacy plan digest, common request digest and active policy digest;
+- rollback from `enforce` to `observe` cannot claim or reuse an enforced lease;
+- the caller must report the measured external byte count and real terminal outcome; the boundary never guesses either value.
+
+The intentional migration delta is explicit: legacy research allowed `operational` data automatically, while common v1 requires permission.
+
 ## Integration gate
 
 No surface may call an external read service directly. Agent v2, Agent 3, research and connectors must all cross this module or a later compatible version.
 
-This PR only lands the policy, state machine and tests. Integration and activation remain separate dormant changes.
+The delivered research adapter and lease boundary are not imported by BrowserHost, ToolGate or an API route. BrowserHost/CDP wiring, public-peer pinning and controlled public-network validation remain separate activation blockers.
