@@ -1,0 +1,52 @@
+name: finalize-pr93-test-collection
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.head_ref == 'agent/scheduler-time-semantics-design'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: agent/scheduler-time-semantics-design
+          fetch-depth: 1
+          show-progress: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install validation dependencies
+        run: |
+          pip install -r worker/requirements.txt --break-system-packages >/dev/null
+          pip install --quiet ruff
+      - name: Regenerate state and validate collection
+        run: |
+          python scripts/current_state.py
+          ruff check scripts/scheduler_time_oracle.py tests/workflow_scheduler_time_oracle.py --select E9,F63,F7,F82
+          PYTHONPATH=worker python tests/workflow_scheduler_time_oracle.py
+          PYTHONPATH=worker python tests/workflow_test_coverage.py
+          PYTHONPATH=worker python tests/workflow_current_state.py
+      - name: Remove temporary workflows and validate diff
+        shell: bash
+        run: |
+          rm .github/workflows/diagnose-test-glob-pr93.yml
+          rm .github/workflows/finalize-pr93-test-collection.yml
+          git diff --check
+          grep -q 'tests/workflow_scheduler_time_oracle.py' CURRENT_STATE.md
+          ! grep -q 'tests/scheduler_time_oracle.py' CURRENT_STATE.md
+      - name: Commit clean collected suite
+        shell: bash
+        run: |
+          git config user.name 'ModelRig automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add \
+            CURRENT_STATE.md \
+            .github/workflows/diagnose-test-glob-pr93.yml \
+            .github/workflows/finalize-pr93-test-collection.yml
+          git commit -m 'test(workflow): collect scheduler time reference'
+          git push origin HEAD:agent/scheduler-time-semantics-design
