@@ -33,6 +33,8 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
+import importlib.util
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -40,6 +42,14 @@ import urllib.error
 import urllib.request
 
 REPO = "Ternedal/ModelRig"
+
+
+def _load_frozen_attestation():
+    p = os.path.join(os.path.dirname(__file__), "frozen_attestation.py")
+    spec = importlib.util.spec_from_file_location("frozen_attestation", p)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _run(*args: str) -> tuple[int, str]:
@@ -126,6 +136,74 @@ def main() -> int:
         short = sha[:7]
         print(f"  candidate: {version}  @  {short}  (gitless -- identity via "
               f"published release v{version})")
+
+        # --- release-tree binding (F-1303) ---------------------------------
+        # Resolving the release proves a candidate EXISTS -- not that THIS
+        # tree is it. A ZIP can claim any VERSION. Fetch the release
+        # commit's full git tree and verify every committed file's blob sha
+        # against the bytes on disk: the extraction is bound to the exact
+        # commit cryptographically, with no new publishing machinery.
+        try:
+            tree = _api(f"https://api.github.com/repos/{REPO}"
+                        f"/git/trees/{sha}?recursive=1", token)
+        except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+            reason = getattr(exc, "reason", None) or getattr(exc, "code", "?")
+            print(f"  FAIL  could not fetch the release tree ({reason})")
+            return 1
+        if tree.get("truncated"):
+            print("  FAIL  release tree listing was truncated -- the "
+                  "binding cannot be proven")
+            return 1
+        blobs = {e["path"]: e["sha"] for e in tree.get("tree", [])
+                 if e.get("type") == "blob"}
+        repo_root = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), ".."))
+        mismatched: list[str] = []
+        missing: list[str] = []
+        for rel_path, want in sorted(blobs.items()):
+            local = os.path.join(repo_root, rel_path)
+            try:
+                with open(local, "rb") as fh:
+                    body = fh.read()
+            except OSError:
+                missing.append(rel_path)
+                continue
+            got = hashlib.sha1(
+                b"blob %d\x00" % len(body) + body).hexdigest()
+            if got != want:
+                mismatched.append(rel_path)
+        if mismatched or missing:
+            print(f"  FAIL  the local tree is NOT release commit {short}: "
+                  f"{len(mismatched)} mismatched, {len(missing)} missing")
+            for rel_path in (mismatched + missing)[:5]:
+                print(f"         - {rel_path}")
+            print(f"         -> download the official source ZIP for "
+                  f"v{version} and start from an untouched extraction")
+            return 1
+        tree_files_verified = len(blobs)
+        extras = 0
+        for dirpath, dirnames, filenames in os.walk(repo_root):
+            kept = []
+            for d in dirnames:
+                if d in {".git", "__pycache__", "node_modules"}:
+                    continue
+                if dirpath == repo_root and d == "validation":
+                    continue
+                kept.append(d)
+            dirnames[:] = kept
+            for fname in filenames:
+                if fname.endswith(".pyc"):
+                    continue
+                rel_path = os.path.relpath(
+                    os.path.join(dirpath, fname), repo_root
+                ).replace(os.sep, "/")
+                if rel_path not in blobs:
+                    extras += 1
+        if extras:
+            print(f"  NOTE  {extras} local file(s) not in the release tree "
+                  "(build outputs are expected; a fresh ZIP has zero)")
+        print(f"  release-tree binding: {tree_files_verified} committed "
+              f"files match commit {short}")
     else:
         _, short = _run("git", "rev-parse", "--short", "HEAD")
         print(f"  candidate: {version or '?'}  @  {short}")
@@ -238,20 +316,17 @@ def main() -> int:
     # candidate_identity and rig_preflight read this file when git is absent,
     # so the chain of custody is explicit: this gate verified the identity
     # against the API; they inherit exactly that verdict, nothing looser.
-    att_dir = os.path.join(os.path.dirname(__file__), "..", "validation")
-    os.makedirs(att_dir, exist_ok=True)
-    att_path = os.path.join(att_dir, "frozen-candidate.json")
-    with open(att_path, "w", encoding="utf-8") as fh:
-        json.dump({
-            "schema": "kaliv-frozen-candidate/v1",
-            "version": version,
-            "git_sha": sha,
-            "mode": "gitless-api" if gitless else "git",
-            "checked_at": datetime.now(timezone.utc).isoformat(),
-            "ci": "success",
-            "codeql": "success",
-        }, fh, indent=2)
-    print(f"  attestation written: validation{os.sep}frozen-candidate.json")
+    from pathlib import Path as _Path
+    _fa = _load_frozen_attestation()
+    _fa.write_attestation(
+        _Path(os.path.join(os.path.dirname(__file__), "..")).resolve(),
+        version=version,
+        git_sha=sha,
+        mode="gitless-api" if gitless else "git",
+        tree_files_verified=tree_files_verified if gitless else 0,
+    )
+    print(f"  attestation written: validation{os.sep}frozen-candidate.json "
+          f"(schema {_fa.SCHEMA})")
     if warns:
         print(f"  FROZEN (with {warns} note(s) above) -- candidate {version} @ {short}")
         print("  The coherence checks passed. Resolve the notes if you can, then:")

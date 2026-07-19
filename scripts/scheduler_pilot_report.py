@@ -40,7 +40,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "kaliv-scheduler-pilot/v2"
+SCHEMA = "kaliv-scheduler-pilot/v3"
+
+# The section-1.6 pilot manifest (F-1305). The runbook pins the read plan to
+# exactly these values; the write plan's args and cadence are chosen in the
+# app flow, so the manifest pins its TOOL and leaves the approval ceremony
+# (receipts, device attribution) to prove the rest. A report that merely
+# shows "something executed" is presence, not proof -- this is the exact
+# thing it must have been.
+PILOT_MANIFEST = {
+    "read": {"tool": "rig_status", "args": {}, "cadence": "every:60",
+             "max_runs": 3},
+    "write": {"tool": "note_append"},
+}
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -109,16 +121,52 @@ def read_forensics(schedules_db: str, jobs_db: str, audit_db: str,
     }
 
 
+def schedule_inventory(schedules_db: str) -> list[dict[str, Any]]:
+    """EVERY schedule in the store: the pilot's completeness half (F-1305).
+
+    Pinning the two pilot schedules proves what they were; only the full
+    inventory proves nothing ELSE ran beside them in the pilot window."""
+    sc = _ro(schedules_db)
+    rows = [dict(r) for r in sc.execute(
+        "SELECT id, tool, cadence, created FROM schedules ORDER BY created")]
+    sc.close()
+    return rows
+
+
 def fetch_json(url: str, *, timeout: float = 10.0) -> dict[str, Any]:
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.load(resp)
 
 
+def _manifest_problems(schedule: dict[str, Any] | None, spec: dict[str, Any],
+                       label: str) -> list[str]:
+    problems: list[str] = []
+    if not schedule:
+        return [f"{label}-planen findes ikke i storen"]
+    for key, want in spec.items():
+        got = schedule.get(key)
+        if key == "args":
+            try:
+                got = json.loads(got) if isinstance(got, str) else got
+            except (TypeError, ValueError):
+                problems.append(f"{label}-planens args er ikke gyldig JSON")
+                continue
+        if got != want:
+            problems.append(
+                f"{label}-planens {key} er {got!r}, runbookens manifest "
+                f"siger {want!r} -- piloten kørte ikke det aftalte")
+    return problems
+
+
 def judge(read_detail: dict[str, Any], write_detail: dict[str, Any],
           manual: dict[str, Any],
           read_forensics_data: dict[str, Any] | None = None,
-          write_forensics_data: dict[str, Any] | None = None) -> list[str]:
+          write_forensics_data: dict[str, Any] | None = None,
+          inventory: list[dict[str, Any]] | None = None,
+          read_id: str | None = None,
+          write_id: str | None = None,
+          window_start: float | None = None) -> list[str]:
     """Every reason the pilot does NOT hold. Empty list == the pilot holds."""
     problems: list[str] = []
 
@@ -152,6 +200,37 @@ def judge(read_detail: dict[str, Any], write_detail: dict[str, Any],
         if not (write_forensics_data.get("receipts") or []):
             problems.append(
                 "forensik: ingen receipt-raekke i storen for write-planen")
+
+    # --- F-1305: manifest-bundet, ikke presence-baseret ---------------
+    if read_forensics_data is not None:
+        problems.extend(_manifest_problems(
+            read_forensics_data.get("schedule"), PILOT_MANIFEST["read"],
+            "read"))
+        for occ in read_forensics_data.get("occurrences") or []:
+            if occ.get("status") == "executed" and not occ.get("claim_id"):
+                problems.append(
+                    "forensik: en executed read-occurrence uden claim_id -- "
+                    "recovery-kaeden er ikke claim-bundet")
+    if write_forensics_data is not None:
+        problems.extend(_manifest_problems(
+            write_forensics_data.get("schedule"), PILOT_MANIFEST["write"],
+            "write"))
+        for occ in write_forensics_data.get("occurrences") or []:
+            if occ.get("status") == "executed" and not occ.get("claim_id"):
+                problems.append(
+                    "forensik: en executed write-occurrence uden claim_id -- "
+                    "recovery-kaeden er ikke claim-bundet")
+    if inventory is not None and window_start is not None:
+        listed = {read_id, write_id}
+        for row in inventory:
+            created = row.get("created")
+            if created is None or created < window_start:
+                continue
+            if row.get("id") not in listed:
+                problems.append(
+                    f"unlisted schedule i pilotvinduet: {row.get('id')} "
+                    f"({row.get('tool')!r}) -- pilotens inventar er ikke "
+                    "komplet, beviset kan skjule en tredje plan")
 
     r_sched = read_detail.get("schedule") or {}
     r_receipts = read_detail.get("approval_receipts")
@@ -200,10 +279,35 @@ def build_report(candidate: dict[str, Any], worker_url: str,
                  read_detail: dict[str, Any], write_detail: dict[str, Any],
                  manual: dict[str, Any], now_iso: str,
                  read_forensics_data: dict[str, Any] | None = None,
-                 write_forensics_data: dict[str, Any] | None = None
+                 write_forensics_data: dict[str, Any] | None = None,
+                 inventory: list[dict[str, Any]] | None = None
                  ) -> dict[str, Any]:
+    window_start = None
+    starts = [
+        (f or {}).get("window", {}).get("first_created")
+        for f in (read_forensics_data, write_forensics_data)
+    ]
+    starts = [s for s in starts if s is not None]
+    if starts:
+        window_start = min(starts)
     problems = judge(read_detail, write_detail, manual,
-                     read_forensics_data, write_forensics_data)
+                     read_forensics_data, write_forensics_data,
+                     inventory=inventory, read_id=read_id,
+                     write_id=write_id, window_start=window_start)
+    in_window = []
+    unlisted = []
+    preexisting = 0
+    if inventory is not None and window_start is not None:
+        for row in inventory:
+            created = row.get("created")
+            if created is None or created < window_start:
+                preexisting += 1
+                continue
+            entry = {"id": row.get("id"), "tool": row.get("tool"),
+                     "cadence": row.get("cadence")}
+            in_window.append(entry)
+            if row.get("id") not in {read_id, write_id}:
+                unlisted.append(entry)
     r_sched = read_detail.get("schedule") or {}
     w_sched = write_detail.get("schedule") or {}
     w_receipts = write_detail.get("approval_receipts") or []
@@ -236,6 +340,13 @@ def build_report(candidate: dict[str, Any], worker_url: str,
         "forensics": {
             "read": read_forensics_data,
             "write": write_forensics_data,
+        },
+        "pilot_window": {"start": window_start, "end": now_iso},
+        "manifest": PILOT_MANIFEST,
+        "inventory": {
+            "schedules_in_window": in_window,
+            "unlisted_in_window": unlisted,
+            "preexisting_count": preexisting,
         },
         "manual": {
             "revocation_confirmed": manual.get("revocation_confirmed"),
@@ -306,7 +417,8 @@ def main(argv: list[str] | None = None) -> int:
     report = build_report(candidate, base, args.read_schedule_id,
                           args.write_schedule_id, details["read"],
                           details["write"], manual, now_iso,
-                          forensics["read"], forensics["write"])
+                          forensics["read"], forensics["write"],
+                          inventory=schedule_inventory(args.schedules_db))
 
     args.report.parent.mkdir(parents=True, exist_ok=True)
     tmp = args.report.with_suffix(args.report.suffix + ".tmp")

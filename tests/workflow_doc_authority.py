@@ -75,6 +75,21 @@ for name in GENERATED:
         check("Genereret" in head or "GENERATED" in head,
               f"{name}: says it is generated, so nobody edits it by hand")
 
+# F-1302: the canonical campaign runbook once forbade running model_eval based
+# on a retracted misdiagnosis ("/plan is dead"). These checks pin the runbook
+# to the wired reality so the false claim cannot regrow -- and so the
+# prerequisites the sandbox smoke proved necessary stay documented.
+_runbook = (ROOT / "PHYSICAL_VALIDATION_CAMPAIGN.md").read_text(encoding="utf-8")
+check("nedlagte `/plan`" not in _runbook and "Kør IKKE model_eval" not in _runbook,
+      "runbook does not claim /plan is dead or forbid model_eval -- that "
+      "diagnosis was retracted; the route is wired from 1.58.131")
+check("/plans/{id}/start" in _runbook,
+      "runbook names the documented production creation path, matching the "
+      "wiring the entrypoint suite proves")
+check("MODELRIG_TOKEN" in _runbook and "KALIV_AGENT3_ENABLED" in _runbook,
+      "runbook documents the model_eval prerequisites the smoke proved "
+      "necessary (paired token, flag on both backend and worker)")
+
 # The detector must be able to fail.
 check(bool(HEADER_VERSION.search("**Version:** v1.58.52")),
       "self-test: a header version claim IS detected")

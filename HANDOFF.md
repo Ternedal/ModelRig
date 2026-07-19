@@ -146,6 +146,19 @@ hardware-beviste før valideringsrunden):**
   af §1.6-kæden, hvor recovery kørte perfekt og sagde intet; token-mint
   kræver v:1 + ALLE previewede vilkår, og aggregatorens
   path-escape-guard beviste sig selv).
+  **Evidens-integritetskæden (1.58.132, svar på helanalyse-gap-droppet
+  F-1301..F-1327):** gitless FROZEN binder det lokale ZIP-træ til
+  release-committen fil-for-fil (git/trees-API, blob-sha'er); attestationen
+  er v2 i ÉT delt modul (`scripts/frozen_attestation.py`) som writer og
+  begge læsere håndhæver — strict schema, version-pin, 24t-freshness,
+  offline tamper-evidens via genberegnet worker-fingerprint (fem
+  forfalsknings-mutationer + ZIP-tamper testet røde). Schedulerpiloten er
+  v3: manifest-bundet mod §1.6 (exact read-spec, write-tool), komplet
+  inventar i pilotvinduet (unlisted plan = rød), claim-bundet executed.
+  Runbookens falske model_eval-blocker er fjernet med doc-parity-checks i
+  doc-gaten. Agent3-ps1'en (`run-agent3-rig-validation.ps1`) er auditeret
+  OK: token-krav, backend-stier, report_sha256-binding og
+  production_activation-vagt matcher koden.
 
 **Bygget 12-14/7 (samme forbehold):**
 - **Substrat:** JobStore (persistent, terminal sandhed, cancel, restart→

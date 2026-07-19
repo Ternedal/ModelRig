@@ -100,6 +100,11 @@ Kampagnen genbruger den eksisterende Agent 3 validation-gate og kræver:
 
 ## 3. T-007 — plan-only model-eval
 
+Forudsætninger: `MODELRIG_TOKEN` (paired device-token) i miljøet,
+`KALIV_AGENT3_ENABLED=1` på BÅDE backend og worker, og backend'en kørende —
+produceren taler backend-dialekt (`/api/v1/...`) mod `--base-url`
+(default `http://127.0.0.1:8080`).
+
 ```powershell
 python scripts\agent3_model_eval.py `
   --planner-model <MODEL> `
@@ -193,11 +198,13 @@ validation/rag-benchmark-latest.json
 Kampagnen kræver præcis 1.000 og 10.000 chunks, grøn benchmark-gate, 0 errors og
 clean source removal for begge skalaer.
 
-> **KENDT BLOCKER (model_eval, fundet 19/7):** produceren kalder det
-> nedlagte `/plan`-API og vil 404'e. Kør IKKE model_eval-delen før
-> produceren er omlagt til chat→runs-flowet — fundet og planen står i
-> BACKLOG. Agent3-wiringen i entrypointet er fixet i 1.58.131
-> (KALIV_AGENT3_ENABLED=1 kræves fortsat).
+> **Rettet 19/7 (blockeren var en fejldiagnose):** `/plan` →
+> `/plans/{id}/start` ER den dokumenterede produktionssti; ruterne var
+> orphanede på planner-routeren og er wiret fra 1.58.131. Produceren er
+> uændret og skal køres. Smoke-bevist e2e i sandkassen (pair → token →
+> backend → planner → Ollama). Får du 422 "unsupported top-level fields"
+> er det den typede kontrakts fail-closed afvisning af modellens output —
+> et ægte eval-fund, ikke en kædefejl (se TROUBLESHOOTING).
 
 ## 7. T-019 — scheduler-pilot (read + `note_append`)
 

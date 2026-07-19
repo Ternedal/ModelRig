@@ -295,6 +295,18 @@ def valid_reports() -> dict[str, dict]:
                                "last_resolved": 1002.5},
                 },
             },
+            "pilot_window": {"start": 900.0,
+                             "end": "2026-07-19T12:00:00+00:00"},
+            "manifest": {"read": {"tool": "rig_status", "args": {},
+                                  "cadence": "every:60", "max_runs": 3},
+                         "write": {"tool": "note_append"}},
+            "inventory": {"schedules_in_window": [
+                              {"id": "sched-read", "tool": "rig_status",
+                               "cadence": "every:60"},
+                              {"id": "sched-write", "tool": "note_append",
+                               "cadence": "every:60"}],
+                          "unlisted_in_window": [],
+                          "preexisting_count": 0},
             "manual": {
                 "revocation_confirmed": True,
                 "recovery_line": ("scheduler: recovered 0 executed / 1 "
@@ -590,9 +602,19 @@ def _gitless_root(att=None, version="1.58.131"):
     return d
 
 
-_gr = _gitless_root(att={"schema": "kaliv-frozen-candidate/v1",
-                         "version": "1.58.131", "git_sha": "d" * 40,
-                         "mode": "gitless-api"})
+def _v2_att(**over):
+    """A fully valid v2 attestation matching _gitless_root's stub tree."""
+    from datetime import datetime, timezone
+    base = {"schema": "kaliv-frozen-candidate/v2", "version": "1.58.131",
+            "git_sha": "d" * 40, "mode": "gitless-api",
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "ci": "success", "codeql": "success",
+            "code_sha256": "a" * 64, "tree_files_verified": 3}
+    base.update(over)
+    return base
+
+
+_gr = _gitless_root(att=_v2_att())
 _ident = campaign.candidate_identity(_gr)
 check(_ident["git_sha"] == "d" * 40
       and _ident["identity_source"] == "frozen-candidate-attestation"
@@ -610,11 +632,49 @@ except campaign.CampaignError as exc:
 
 try:
     campaign.candidate_identity(_gitless_root(
-        att={"version": "1.58.99", "git_sha": "e" * 40}))
+        att=_v2_att(version="1.58.99", git_sha="e" * 40)))
     check(False, "version-mismatched attestation must refuse")
 except campaign.CampaignError as exc:
     check("1.58.99" in str(exc) and "1.58.131" in str(exc),
           "an attestation for another version refuses, naming both versions")
+
+# The drop's mutation list (F-1304): each forgery mode must refuse BY NAME.
+try:
+    campaign.candidate_identity(_gitless_root(
+        att=_v2_att(checked_at="2026-07-17T00:00:00+00:00")))
+    check(False, "a stale attestation must refuse")
+except campaign.CampaignError as exc:
+    check("timer" in str(exc) and "freeze_check" in str(exc),
+          "a replayed attestation from an earlier day refuses on freshness "
+          "and points at rerunning the gate")
+
+try:
+    campaign.candidate_identity(_gitless_root(att=_v2_att(ci="failure")))
+    check(False, "an attestation claiming red CI must refuse")
+except campaign.CampaignError as exc:
+    check("ci=success" in str(exc),
+          "an attestation without green CI verdicts refuses -- only a green "
+          "candidate can be frozen")
+
+try:
+    campaign.candidate_identity(_gitless_root(att=_v2_att(
+        code_sha256="f" * 64)))
+    check(False, "a digest-mismatched attestation must refuse")
+except campaign.CampaignError as exc:
+    check("fingerprint" in str(exc),
+          "a fabricated attestation dies on the recomputed worker "
+          "fingerprint -- the tree in front of us is the arbiter, offline")
+
+try:
+    campaign.candidate_identity(_gitless_root(
+        att={"schema": "kaliv-frozen-candidate/v1",
+             "version": "1.58.131", "git_sha": "d" * 40,
+             "mode": "gitless-api"}))
+    check(False, "the old v1 shape must refuse")
+except campaign.CampaignError as exc:
+    check("mangler felter" in str(exc),
+          "yesterday's looser v1 attestation refuses, naming the missing "
+          "fields -- the contract upgrade is fail-closed, not silent")
 
 # The producer's own judgement, offline via its pure functions.
 pilot_mod = load_module("scheduler_pilot_report_test",
@@ -628,20 +688,26 @@ _manual_ok = {"revocation_confirmed": True,
               "operator": "Anders"}
 check(pilot_mod.judge(_read_ok, _write_ok, _manual_ok) == [],
       "the producer judges a holding pilot as holding")
-_rf = {"occurrences": [
+_rf = {"schedule": {"tool": "rig_status", "args": "{}",
+                    "cadence": "every:60", "max_runs": 3},
+       "occurrences": [
     {"claim_id": "r1", "status": "executed",
      "job": {"status": "completed"}, "audit_outcomes": ["attempt", "executed"]},
     {"claim_id": "r2", "status": "released",
      "job": {"status": "cancelled"}, "audit_outcomes": []}],
     "receipts": [], "window": {"first_created": 1.0, "last_resolved": 2.0}}
-_wf = {"occurrences": [
+_wf = {"schedule": {"tool": "note_append", "args": "{\"text\": \"x\"}",
+                    "cadence": "every:60", "max_runs": 2},
+       "occurrences": [
     {"claim_id": "w1", "status": "executed",
      "job": {"status": "completed"}, "audit_outcomes": ["attempt", "executed"]}],
     "receipts": [{"kind": "create", "device_id": "pixel-6a"}],
     "window": {"first_created": 1.0, "last_resolved": 2.0}}
 check(pilot_mod.judge(_read_ok, _write_ok, _manual_ok, _rf, _wf) == [],
       "with full forensics the pilot still holds")
-_wf_bad = {"occurrences": [
+_wf_bad = {"schedule": {"tool": "note_append", "args": "{}",
+                        "cadence": "every:60", "max_runs": 2},
+           "occurrences": [
     {"claim_id": "w1", "status": "executed",
      "job": {"status": "completed"}, "audit_outcomes": ["executed"]}],
     "receipts": [{"kind": "create"}],
@@ -649,13 +715,37 @@ _wf_bad = {"occurrences": [
 check(any("attempt" in p for p in pilot_mod.judge(
           _read_ok, _write_ok, _manual_ok, _rf, _wf_bad)),
       "the producer refuses a pinned write without its attempt-audit")
-_rf_bad = {"occurrences": [
+_rf_bad = {"schedule": {"tool": "rig_status", "args": "{}",
+                        "cadence": "every:60", "max_runs": 3},
+           "occurrences": [
     {"claim_id": "r1", "status": "executed",
      "job": {"status": "completed"}, "audit_outcomes": ["attempt", "executed"]}],
     "receipts": [], "window": {"first_created": 1.0, "last_resolved": 2.0}}
 check(any("paus" in p for p in pilot_mod.judge(
           _read_ok, _write_ok, _manual_ok, _rf_bad, _wf)),
       "the producer refuses a pilot without the pause proof in the store")
+# F-1305: manifestbrud, unlisted planer og claim-loese executions refuses.
+_rf_cad = {**_rf, "schedule": {**_rf["schedule"], "cadence": "every:5"}}
+check(any("cadence" in p for p in pilot_mod.judge(
+          _read_ok, _write_ok, _manual_ok, _rf_cad, _wf)),
+      "a read plan whose cadence differs from the runbook manifest refuses "
+      "by field name -- the pilot must be THE pilot, not A pilot")
+check(any("unlisted" in p for p in pilot_mod.judge(
+          _read_ok, _write_ok, _manual_ok, _rf, _wf,
+          inventory=[{"id": "sched-x", "tool": "delete_model",
+                      "cadence": "every:60", "created": 5.0}],
+          read_id="sched-read", write_id="sched-write", window_start=1.0)),
+      "a third schedule created inside the pilot window refuses -- the "
+      "evidence must cover everything that ran, not just the listed pair")
+_rf_claim = {**_rf, "occurrences": [
+    {"claim_id": None, "status": "executed",
+     "job": {"status": "completed"}, "audit_outcomes": ["attempt", "executed"]},
+    _rf["occurrences"][1]]}
+check(any("claim" in p for p in pilot_mod.judge(
+          _read_ok, _write_ok, _manual_ok, _rf_claim, _wf)),
+      "an executed occurrence without a claim_id refuses -- recovery "
+      "attribution is part of the proof")
+
 check(any("receipt" in p for p in pilot_mod.judge(
           _read_ok, {"schedule": {"runs_used": 1}, "approval_receipts": []},
           _manual_ok)),

@@ -203,6 +203,20 @@ den valgte rig-model, og voice-cloud har sin EGEN model (voiceCloudModel,
 v1.52.0). **Tjek routing-striben** under headeren: den viser altid hvilken
 model der svarer tekst og tale, og om cloud er i spil.
 
+## freeze_check siger "NOT release commit" eller afviser attestationen
+
+Træ-bindingen (1.58.132) sammenligner HVER committet fil i det udpakkede
+ZIP-træ mod release-committens git-tree via API'et. "NOT release commit: N
+mismatched, M missing" betyder at dine lokale bytes IKKE er releasen — typisk
+en redigeret fil eller en forkert/gammel ZIP. Løsning: hent den officielle
+source-ZIP for tagget igen og start fra en urørt udpakning. Attestations-
+afvisninger fra campaign/preflight navngiver altid feltet: "mangler felter"
+(gammel v1-fil → kør freeze igen), "timer gammel" (>24t — kør freeze igen på
+SELVE rig-dagen), "fingerprint matcher ikke" (træet er ændret EFTER freeze,
+eller filen er fabrikeret — hent ZIP + kør freeze forfra). Rediger aldrig
+`validation/frozen-candidate.json` i hånden; den er bevismateriale, ikke
+konfiguration.
+
 ## Streamende voice: sætninger mangler / meter frosset / forkert transskription gemt
 
 v1.54.0's streaming havde tre samtidigheds-bugs fundet i selv-audit (v1.55.0):

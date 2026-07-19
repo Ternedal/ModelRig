@@ -182,8 +182,17 @@ from pathlib import Path as _P
 
 _root = _P(_tf.mkdtemp(prefix="pf-gitless-"))
 (_root / "validation").mkdir()
+# The strict reader recomputes the worker fingerprint from THIS root.
+(_root / "worker" / "app").mkdir(parents=True)
+(_root / "worker" / "app" / "build_identity.py").write_text(
+    "def code_fingerprint():\n    return 'a' * 64\n", encoding="utf-8")
+from datetime import datetime as _dt, timezone as _tz
 (_root / "validation" / "frozen-candidate.json").write_text(
-    json.dumps({"version": "1.58.131", "git_sha": "f" * 40}),
+    json.dumps({"schema": "kaliv-frozen-candidate/v2", "version": "1.58.131",
+                "git_sha": "f" * 40, "mode": "gitless-api",
+                "checked_at": _dt.now(_tz.utc).isoformat(),
+                "ci": "success", "codeql": "success",
+                "code_sha256": "a" * 64, "tree_files_verified": 1}),
     encoding="utf-8")
 check(preflight._attested_sha(_root, "1.58.131") == "f" * 40,
       "preflight reads the attested sha when git is absent")

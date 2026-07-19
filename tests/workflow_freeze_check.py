@@ -15,6 +15,7 @@ import importlib.util
 import os
 import subprocess
 import sys
+import hashlib
 import tempfile
 from pathlib import Path
 
@@ -56,6 +57,16 @@ def _make_repo(clean=True, version="1.58.0", with_origin=True):
         "import sys, os\n"
         "sys.exit(0 if os.environ.get('STUB_VT_OK','1')=='1' else 1)\n")
     (d / "freeze_check.py").write_text("# placeholder\n")
+    # The freeze writer recomputes the worker-source fingerprint via the
+    # tree's own build_identity; give fixtures a deterministic stub.
+    (d / "worker" / "app").mkdir(parents=True)
+    (d / "worker" / "app" / "build_identity.py").write_text(
+        "def code_fingerprint():\n    return 'b' * 64\n")
+    # The sibling module must be tracked BEFORE the commit, or the copy in
+    # run_in dirties the tree and fails the cleanliness gate itself.
+    import shutil
+    shutil.copy(ROOT / "scripts" / "frozen_attestation.py",
+                d / "scripts" / "frozen_attestation.py")
     _git(d, "add", "-A")
     _git(d, "commit", "-q", "-m", "init")
     if with_origin:
@@ -91,6 +102,13 @@ def run_in(repo, token=None, api=None):
     buf = io.StringIO()
     try:
         os.chdir(repo)
+        # freeze_check loads its sibling attestation module relative to its
+        # own file; the harness repoints that at the fixture's scripts dir,
+        # so the sibling must exist there too.
+        _sibling = repo / "scripts" / "frozen_attestation.py"
+        if not _sibling.exists():
+            import shutil
+            shutil.copy(ROOT / "scripts" / "frozen_attestation.py", _sibling)
         # freeze_check reads VERSION and version_tool relative to its own
         # __file__, so temporarily repoint that at the throwaway scripts dir.
         fc_dir = str(repo / "scripts")
@@ -226,7 +244,7 @@ def _strip_git(repo):
     return repo
 
 
-def _gitless_api(*, release_draft=False, release_missing=False,
+def _gitless_api(repo=None, tamper=None, *, release_draft=False, release_missing=False,
                  compare_status="behind", sha="c" * 40,
                  ci=("completed", "success"), codeql=("completed", "success")):
     def api(url, token):
@@ -244,12 +262,30 @@ def _gitless_api(*, release_draft=False, release_missing=False,
                 {"name": "codeql", "status": codeql[0],
                  "conclusion": codeql[1]},
             ]}
+        if "/git/trees/" in url:
+            # Serve the fixture's OWN tree as the release commit's tree, so
+            # the binding holds by construction -- and lies where `tamper`
+            # says, so its refusal is testable.
+            entries = []
+            for p in sorted(repo.rglob("*")):
+                if not p.is_file():
+                    continue
+                rel = p.relative_to(repo).as_posix()
+                if rel.startswith((".git/", "validation/")) \
+                        or "__pycache__" in rel or rel.endswith(".pyc"):
+                    continue
+                body = p.read_bytes()
+                sha1 = hashlib.sha1(
+                    b"blob %d\x00" % len(body) + body).hexdigest()
+                entries.append({"path": rel, "type": "blob",
+                                "sha": (tamper or {}).get(rel, sha1)})
+            return {"truncated": False, "tree": entries}
         raise AssertionError(f"uventet API-url i testen: {url}")
     return api
 
 
 _g_ok = _strip_git(_make_repo(version="1.58.131"))
-_code, _out = run_in(_g_ok, token="tok", api=_gitless_api())
+_code, _out = run_in(_g_ok, token="tok", api=_gitless_api(_g_ok))
 check(_code == 0 and "gitless" in _out and "FROZEN" in _out,
       "gitless tree with a published green release is FROZEN -- identity via "
       "the API, exactly the rig's ZIP workflow")
@@ -259,6 +295,9 @@ check("cannot be verified without git" in _out,
 _att = _g_ok / "validation" / "frozen-candidate.json"
 check(_att.exists(), "FROZEN writes the attestation file the gitless "
       "campaign toolchain consumes")
+check("release-tree binding" in _out,
+      "FROZEN proves the local tree IS the release commit, file for file -- "
+      "resolving that a release exists is not the same as being it (F-1303)")
 if _att.exists():
     _data = json.loads(_att.read_text(encoding="utf-8"))
     check(_data.get("git_sha") == "c" * 40
@@ -266,6 +305,26 @@ if _att.exists():
           and _data.get("mode") == "gitless-api",
           "the attestation pins exactly the API-resolved sha, version and "
           "mode")
+    check(_data.get("schema") == "kaliv-frozen-candidate/v2"
+          and _data.get("code_sha256") == "b" * 64
+          and isinstance(_data.get("tree_files_verified"), int)
+          and _data["tree_files_verified"] >= 1
+          and _data.get("ci") == "success"
+          and _data.get("checked_at"),
+          "the v2 attestation carries the recomputable worker fingerprint, "
+          "the verified-file count, CI verdicts and a timestamp -- the "
+          "strict contract every reader now enforces (F-1304)")
+
+# Mutation: one committed byte differs from the release tree -- the ZIP is
+# NOT the release, no matter what VERSION claims. Nothing may be attested.
+_g_tmp = _strip_git(_make_repo(version="1.58.131"))
+_code, _out = run_in(_g_tmp, token="tok",
+                     api=_gitless_api(_g_tmp,
+                                      tamper={"VERSION": "0" * 40}))
+check(_code == 1 and "NOT release commit" in _out
+      and not (_g_tmp / "validation" / "frozen-candidate.json").exists(),
+      "a single mismatched file fails the tree binding by name and nothing "
+      "is attested -- a tampered ZIP cannot become FROZEN")
 
 _g_notok = _strip_git(_make_repo(version="1.58.131"))
 _code, _out = run_in(_g_notok, token=None, api=_gitless_api())
@@ -276,14 +335,14 @@ check(_code == 1 and "GITHUB_TOKEN" in _out
 
 _g_norel = _strip_git(_make_repo(version="1.58.131"))
 _code, _out = run_in(_g_norel, token="tok",
-                     api=_gitless_api(release_missing=True))
+                     api=_gitless_api(_g_norel, release_missing=True))
 check(_code == 1 and "no published release" in _out,
       "gitless with no published release for the tag is refused -- the "
       "candidate must BE a release")
 
 _g_div = _strip_git(_make_repo(version="1.58.131"))
 _code, _out = run_in(_g_div, token="tok",
-                     api=_gitless_api(compare_status="diverged"))
+                     api=_gitless_api(_g_div, compare_status="diverged"))
 check(_code == 1 and "not on main" in _out
       and not (_g_div / "validation" / "frozen-candidate.json").exists(),
       "gitless candidate not on main is a blocker and nothing is attested")

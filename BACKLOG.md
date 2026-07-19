@@ -125,6 +125,28 @@ afvisning af legetøjsmodellens sjusk, dvs. præcis dét evalen måler.
 Fuld skala med qwen3:14b er riggens. (3) RAG-kæden generalprøvet grønt mod ægte
 Ollama (producer exit 0, validator-kontrakt ren — kun de forventede
 skala-afvigelser); fuld skala er riggens (~80+ min på 1 CPU her).
+**Helanalyse-gap-drop mod 1.58.131 (19/7, F-1301..F-1327):** dom "platform-
+complete candidate with unproven and partially under-bound promotion
+evidence" — bevisapparatet var længere fremme end bevisets egen integritet.
+De fire adresserbare P1'er lukket i 1.58.132: **F-1302** runbookens falske
+model_eval-blocker fjernet (den forbød at køre et påkrævet slot på basis af
+den tilbagetrukne diagnose) + doc-parity-checks i doc-gaten så påstanden
+ikke kan gro tilbage. **F-1303** gitless FROZEN binder nu det lokale
+ZIP-træ til release-committen fil-for-fil via git/trees-API'et (blob-sha-
+sammenligning, truncated→FAIL, extras navngives) — at en release FINDES er
+ikke det samme som at VÆRE den. **F-1304** attestationen er v2 med ét delt
+modul (`scripts/frozen_attestation.py`) som writer og BEGGE læsere
+(campaign+preflight, før: to løsere kopier) håndhæver: strict schema,
+version-pin, 24t-freshness (dækker også F-1324/P3), ci=codeql=success, og
+offline tamper-evidens via genberegnet worker-fingerprint — fem
+forfalsknings-mutationer + ZIP-tamper testet røde. **F-1305** schedulerpilot
+v3 er manifest-bundet: §1.6-manifestet pinnes (read: rig_status/{}/every:60/
+max 3; write: note_append + ceremonien), komplet inventar i pilotvinduet
+(unlisted plan = rød), executed uden claim_id = rød; kampagne-validatoren
+kræver vindue+manifest+tomt unlisted. F-1301 (kampagnen) er fortsat
+riggens. P2/P3 (F-1306..F-1327: scheduler-tid/grants/concurrency, Android-UX,
+capability/data-sharing/research, isolation, memory, updater, merge-tog for
+de 17 drafts #92–#110) er parkeret til EFTER kampagnen jf. styringsreglen.
 
 ## Milepæl 3 — Agent 3-pilot (mål task success) — tracker #60
 

@@ -34,7 +34,7 @@ from typing import Any, Callable
 SCHEMA = "kaliv-physical-validation-campaign/v1"
 LIFECYCLE_SCHEMA = "kaliv-appliance-lifecycle-observations/v1"
 PREFLIGHT_SCHEMA = "kaliv-rig-preflight/v1"
-SCHEDULER_PILOT_SCHEMA = "kaliv-scheduler-pilot/v2"
+SCHEDULER_PILOT_SCHEMA = "kaliv-scheduler-pilot/v3"
 MAX_EVIDENCE_BYTES = 32 * 1024 * 1024
 DEFAULT_REPORT = Path("validation/physical-validation-campaign-latest.json")
 
@@ -150,38 +150,30 @@ def _load_build_identity(root: Path) -> str:
     return value
 
 
+def _load_frozen_attestation():
+    path = Path(__file__).resolve().parent / "frozen_attestation.py"
+    spec = importlib.util.spec_from_file_location("frozen_attestation", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _attested_sha(root, version):
-    """Gitless fallback: the sha the freeze gate verified and wrote down.
+    """Gitless fallback: the strictly validated verdict the freeze gate wrote.
 
-    The rig has no git (sources arrive as a ZIP), so identity comes from
-    validation/frozen-candidate.json -- written by freeze_check only on a
-    FROZEN verdict after resolving the published tag via the GitHub API and
-    seeing ci+codeql green on that exact sha. Reading it here inherits that
-    verdict; nothing looser. Missing or mismatching file: refuse loudly and
-    point at the gate.
+    All validation lives in frozen_attestation.load_attestation (F-1304):
+    strict schema, version pin, freshness, and the offline tamper-evidence
+    of recomputing the worker-source fingerprint against the tree we are
+    actually standing on. This function only translates the refusal into
+    the campaign's own error type.
     """
-    att = root / "validation" / "frozen-candidate.json"
+    fa = _load_frozen_attestation()
     try:
-        data = json.loads(att.read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise CampaignError(
-            "git er utilgaengelig og der findes ingen frossen-kandidat-"
-            "attestation -- koer foerst: python scripts\\freeze_check.py "
-            "(den skriver validation\\frozen-candidate.json paa FROZEN)"
-        ) from exc
-    except json.JSONDecodeError as exc:
-        raise CampaignError(
-            "validation/frozen-candidate.json er ikke gyldig JSON -- koer "
-            "freeze_check igen") from exc
-    if data.get("version") != version:
-        raise CampaignError(
-            f"attestationen gaelder version {data.get('version')!r}, men "
-            f"traeet er {version!r} -- koer freeze_check igen paa DETTE trae")
-    sha = data.get("git_sha") or ""
-    if not re.fullmatch(r"[0-9a-f]{40}", sha):
-        raise CampaignError("attestationens git_sha er ikke en gyldig sha")
-    return sha
-
+        return fa.load_attestation(Path(root), expected_version=version)[
+            "git_sha"
+        ]
+    except fa.AttestationError as exc:
+        raise CampaignError(str(exc)) from exc
 
 def candidate_identity(root: Path) -> dict[str, Any]:
     try:
@@ -780,6 +772,28 @@ def _validate_scheduler_pilot(
     _expect_equal(errors, "candidate.code_sha256",
                   _nested(report, "candidate", "code_sha256"),
                   candidate["code_sha256"])
+    # F-1305: the report must be manifest-bound, window-bound and complete --
+    # a pilot proof that cannot say WHEN it ran, WHAT exactly ran, and that
+    # NOTHING ELSE ran, is presence, not proof.
+    if not _nested(report, "pilot_window", "start"):
+        errors.append(
+            "pilot_window.start mangler -- rapporten kan ikke sige hvornaar "
+            "piloten fandt sted")
+    if _nested(report, "manifest", "read", "tool") != "rig_status":
+        errors.append(
+            "manifest.read.tool er ikke rig_status -- rapporten er ikke "
+            "bundet til runbookens section-1.6 manifest")
+    unlisted = _nested(report, "inventory", "unlisted_in_window")
+    if unlisted is None:
+        errors.append(
+            "inventory.unlisted_in_window mangler -- pilotens completeness "
+            "kan ikke bedommes")
+    elif unlisted:
+        names = ", ".join(
+            f"{e.get('id')}({e.get('tool')})" for e in unlisted)
+        errors.append(
+            f"unlisted schedules i pilotvinduet: {names} -- beviset "
+            "daekker ikke alt der koerte")
 
     read_runs = _nested(report, "read_schedule", "runs_used")
     if not isinstance(read_runs, int) or read_runs < 1:
