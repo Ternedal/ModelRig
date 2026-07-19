@@ -1,6 +1,6 @@
 # Scheduler execution model — T-018 explicit single-flight
 
-**Status: draft implementation and tests only. Not merged into the frozen physical-validation candidate.**
+**Status: draft implementation and tests only. Not merged into the physical-validation candidate.**
 
 ModelRig deliberately starts with one scheduler execution lane:
 
@@ -20,6 +20,10 @@ introducing cross-thread cancellation or result-ordering ambiguity. A future poo
 would require a separate reviewed design and migration; increasing an environment
 number cannot enable it.
 
+Revocation is stronger under this model than under the former batch claim: if
+occurrence A pauses schedule B, B is never reserved as the next item. It spends no
+budget, creates no in-flight occurrence and remains durably paused in SQLite.
+
 ## Acceptance evidence in the draft
 
 `tests/worker_scheduler_single_flight.py` proves:
@@ -33,6 +37,7 @@ number cannot enable it.
 7. each schedule consumes one budget slot;
 8. a claim exception releases the lane.
 
-`tests/worker_schedule_service.py` additionally proves that service status
-publishes the explicit model and bound. Physical pilot evidence is still required
-before Scheduler promotion.
+`tests/worker_schedule_revoke.py` proves that a preceding tool can pause the next
+schedule before any claim or budget reservation. `tests/worker_schedule_service.py`
+additionally proves that service status publishes the explicit model and bound.
+Physical pilot evidence is still required before Scheduler promotion.
