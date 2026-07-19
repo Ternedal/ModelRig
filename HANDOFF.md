@@ -110,7 +110,7 @@ streamende voice.
 **Varige arkitektur-fakta (dyre at genopdage — alle CI-verificerede, IKKE
 hardware-beviste før valideringsrunden):**
 
-- **Scheduler-leveringsmodellen (bygget 18-19/7, 1.58.116–123):** execution-truth
+- **Scheduler-leveringsmodellen (bygget 18-19/7, 1.58.116–129):** execution-truth
   er durable fra claim, ikke fra finish. `occurrences`-ledger: claim skriver
   durable række + reserverer budget-slot i SAMME transaktion som due_at-advance;
   claim_id binder job, audit, outcome og recovery. Recovery er evidensbaseret —
@@ -122,9 +122,24 @@ hardware-beviste før valideringsrunden):**
   Approval-receipts: hver konsumeret godkendelse (create/renew) persisterer
   device_id/nonce/issued_at/consumed_at/revision i samme tx som granten; en
   grant med menneskelig godkendelse kan ikke eksistere uden sin receipt.
-  `GET /schedules/{id}` viser historikken. Ærligt restvindue: crash præcis
-  mellem side-effekt og audit-række læses ikke-kørt (ms-bredt, ingen re-run,
-  undertælling foretrukket).
+  `GET /schedules/{id}` viser historikken.
+  **Det ukendte vindue (F-1002, 1.58.126 — RETTELSE af en tidligere
+  dokumenteret invariant):** runneren skriver en durable attempt-række
+  umiddelbart før propose; recovery skelner tre dødsfald: intet attempt →
+  refund; attempt+executed → behold; attempt alene → UKENDT, hvor slotten
+  BEHOLDES og granten pauses (refusion var hvordan max_runs=N blev N+1
+  reelle writes — den gamle "undertælling foretrukket"-sætning her var
+  forkert). Unknown+pause er ÉN transaktion (F-1204). **Owner-lease
+  (F-1003/F-1202/F-1203, 1.58.126+129):** recovery og tick kræver lease;
+  service-heartbeat (ttl/3) holder den forbi lange kørsler; stop drainer FØR
+  frigivelse og frigiver IKKE ved join-timeout (TTL er fallback).
+  **max_runs-claim-splittet (1.58.128, levende P1 fra 116):** claimede
+  snapshots inkluderer reservationen — refusal på claim-stien må ikke bruge
+  stored-`>=` (max_runs=1 afviste ellers sin egen første kørsel).
+  **Freeze-gaten er fail-closed (1.58.127):** FROZEN kræver token +
+  ci+codeql grønne på exact head. **Kampagnens scheduler_pilot-slot
+  (v2, 1.58.129):** forensisk — pinner occurrence/job/audit-sekvens
+  (claim→attempt→executed)/receipt/tidsvindue direkte fra storene.
 
 **Bygget 12-14/7 (samme forbehold):**
 - **Substrat:** JobStore (persistent, terminal sandhed, cancel, restart→
@@ -225,8 +240,12 @@ halv release og lignede en hel. Flowet nu:
    `389e6b11-bf7b-812f-89ba-fc17e3c2dcda`, dateret entry + Version-property).
    Stående ordre, spørg ikke først. **Connectoren har været nede siden 16/7;
    genbekræftet 19/7 (tool_search finder ingen Notion-tools i sessionen).
-   UDESTÅENDE: samlet status for 1.58.116→123 (scheduler-durability-kæden
-   T-010→T-015 + T-014) — post den som det FØRSTE når connectoren er tilbage.**
+   UDESTÅENDE (genbekræftet 4× d. 19/7 — tool_search finder fortsat ingen
+   Notion-tools): samlet status for 1.58.116→129 (durability-kæden
+   T-010→T-015 + T-014, to analyse-drops lukket samme dag inkl. Gate A
+   F-1202→F-1206, forensic pilot-slot) — post den som det FØRSTE når
+   connectoren er tilbage. Ét-tryks-artifact med den fulde tekst ligger hos
+   Anders.**
 
 ---
 
