@@ -93,6 +93,17 @@ for bad_zone in ("", "Copenhagen", "Europe/DefinitelyMissing"):
         rejected = True
     check(rejected, f"invalid IANA zone {bad_zone!r} is rejected")
 
+# Absolute intervals preserve elapsed seconds through a civil-time offset change.
+zone = oracle.load_zone("Europe/Copenhagen")
+interval_start = datetime(2026, 3, 28, 8, 0, tzinfo=zone).timestamp()
+interval_end = oracle.next_interval(interval_start, 86_400)
+interval_end_local = datetime.fromtimestamp(interval_end, UTC).astimezone(zone)
+check(interval_end - interval_start == 86_400, "daily-sized interval remains exactly 86400 seconds")
+check(
+    (interval_end_local.hour, interval_end_local.minute) == (9, 0),
+    "absolute interval does not pretend to preserve wall time through DST",
+)
+
 # Downtime policy: one coalesced claim, all older overdue occurrences reported.
 due = datetime(2026, 7, 10, 6, 0, tzinfo=UTC).timestamp()
 now = datetime(2026, 7, 13, 12, 0, tzinfo=UTC).timestamp()
@@ -136,6 +147,16 @@ try:
 except oracle.TimePolicyError:
     monotonic_rejected = True
 check(monotonic_rejected, "non-advancing next function is rejected")
+
+# The design artifact must stay outside runtime until the later integration PR.
+worker_source = "\n".join(
+    path.read_text(encoding="utf-8", errors="replace")
+    for path in sorted((ROOT / "worker" / "app").rglob("*.py"))
+)
+check(
+    "scheduler_time_oracle" not in worker_source,
+    "worker runtime does not import the reference oracle",
+)
 
 print(f"\n===== SCHEDULER TIME ORACLE: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
