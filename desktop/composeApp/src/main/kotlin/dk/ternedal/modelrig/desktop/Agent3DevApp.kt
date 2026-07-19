@@ -149,7 +149,7 @@ fun Agent3DevApp() {
             }
         }
 
-        fun cancelRun() {
+        fun stopPlan() {
             val id = run?.id ?: return
             if (busy) return
             busy = true
@@ -158,7 +158,7 @@ fun Agent3DevApp() {
                 val result = withContext(Dispatchers.IO) { runCatching { client().cancel(id) } }
                 busy = false
                 result.onSuccess { run = it }
-                    .onFailure { error = it.message ?: "Run kunne ikke annulleres" }
+                    .onFailure { error = it.message ?: "Planen kunne ikke stoppes" }
             }
         }
 
@@ -273,7 +273,7 @@ fun Agent3DevApp() {
 
             run?.let {
                 Spacer(Modifier.height(12.dp))
-                RunCard(it, busy, ::refreshRun, { decide(true) }, { decide(false) }, ::cancelRun)
+                RunCard(it, busy, ::refreshRun, { decide(true) }, { decide(false) }, ::stopPlan)
             }
             Spacer(Modifier.height(24.dp))
         }
@@ -370,10 +370,12 @@ private fun RunCard(
     onRefresh: () -> Unit,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
-    onCancel: () -> Unit,
+    onStopPlan: () -> Unit,
 ) {
     val current = run.steps.getOrNull(run.currentStep)
     val waiting = run.state == "waiting_confirmation" && current?.id != null && current.confirmationDigest != null
+    val termination = run.termination
+    val canStopPlan = termination?.plan?.canRequest == true
     DevCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -403,12 +405,67 @@ private fun RunCard(
                 OutlinedButton(enabled = !busy, onClick = onDeny) { Text("Afvis") }
             }
         }
+        Spacer(Modifier.height(10.dp))
+        TerminationCard(termination, run.state)
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = !busy, onClick = onRefresh) { Text("Opdatér") }
-            if (run.state !in setOf("completed", "failed", "cancelled")) {
-                OutlinedButton(enabled = !busy, onClick = onCancel) { Text("Annullér") }
+            if (canStopPlan) {
+                OutlinedButton(enabled = !busy, onClick = onStopPlan) { Text("Stop plan") }
             }
+        }
+    }
+}
+
+@Composable
+private fun TerminationCard(
+    receipt: dk.ternedal.modelrig.desktop.net.Agent3TerminationReceipt?,
+    runState: String,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(9.dp))
+            .background(KalivTheme.colors.SurfaceHigh)
+            .padding(10.dp),
+    ) {
+        Text("Stopstatus", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.SemiBold)
+        if (receipt == null) {
+            Text(
+                if (runState in setOf("completed", "failed", "cancelled")) {
+                    "Run er afsluttet."
+                } else {
+                    "Serveren sendte ingen verificeret stopstatus. Ingen stopkontrol vises."
+                },
+                color = KalivTheme.colors.TextMuted,
+                fontSize = 11.sp,
+            )
+            return@Column
+        }
+        Text(
+            when (receipt.plan.effect) {
+                "prevent_future_steps_active_tool_continues" ->
+                    "Stop plan forhindrer kommende trin. Det aktive tool fortsætter uden et bundet stop-handle."
+                else -> "Stop plan forhindrer kommende trin."
+            },
+            color = KalivTheme.colors.TextMuted,
+            fontSize = 11.sp,
+        )
+        receipt.activeTool?.let { active ->
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (active.canRequest && active.handlePresent) {
+                    "Aktivt tool: ${active.tool} · direkte stop er tilgængeligt."
+                } else {
+                    "Aktivt tool: ${active.tool} · direkte tool-stop er ikke tilgængeligt (${active.reason})."
+                },
+                color = if (active.canRequest && active.handlePresent) {
+                    KalivTheme.colors.Amber
+                } else {
+                    KalivTheme.colors.TextMuted
+                },
+                fontSize = 10.sp,
+            )
         }
     }
 }

@@ -84,6 +84,45 @@ data class Agent3ReadReview(
 )
 
 @Serializable
+data class Agent3TerminationPlan(
+    val state: String = "",
+    @SerialName("can_request") val canRequest: Boolean = false,
+    @SerialName("request_scope") val requestScope: String = "",
+    val effect: String = "",
+    val reason: String = "",
+)
+
+@Serializable
+data class Agent3TerminationModelStream(
+    val state: String = "",
+    val active: Boolean = false,
+    @SerialName("can_request") val canRequest: Boolean = false,
+    @SerialName("handle_present") val handlePresent: Boolean = false,
+    val reason: String = "",
+)
+
+@Serializable
+data class Agent3TerminationActiveTool(
+    @SerialName("step_id") val stepId: String = "",
+    val tool: String = "",
+    val state: String = "",
+    val semantics: String? = null,
+    @SerialName("handle_present") val handlePresent: Boolean = false,
+    @SerialName("can_request") val canRequest: Boolean = false,
+    @SerialName("request_state") val requestState: String = "",
+    val reason: String = "",
+)
+
+@Serializable
+data class Agent3TerminationReceipt(
+    val schema: String = "",
+    val plan: Agent3TerminationPlan = Agent3TerminationPlan(),
+    @SerialName("model_stream") val modelStream: Agent3TerminationModelStream = Agent3TerminationModelStream(),
+    @SerialName("active_tool") val activeTool: Agent3TerminationActiveTool? = null,
+    @SerialName("production_activation") val productionActivation: Boolean = true,
+)
+
+@Serializable
 data class Agent3PlanPreview(
     @SerialName("plan_id") val planId: String? = null,
     @SerialName("expires_in_seconds") val expiresInSeconds: Int? = null,
@@ -105,6 +144,7 @@ data class Agent3Run(
     val steps: List<Agent3Step> = emptyList(),
     val answer: String? = null,
     val error: String? = null,
+    val termination: Agent3TerminationReceipt? = null,
 )
 
 @Serializable
@@ -150,6 +190,7 @@ data class Agent3RunEnvelope(
     @SerialName("review_reads") val reviewReads: Boolean = false,
     @SerialName("read_review") val readReview: Agent3ReadReview = Agent3ReadReview(),
     @SerialName("capability_receipt") val capabilityReceipt: Agent3CapabilityReceipt? = null,
+    val termination: Agent3TerminationReceipt? = null,
 )
 
 @Serializable
@@ -209,18 +250,13 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
         return preview
     }
 
-    fun startPlanEnvelope(planId: String): Agent3RunEnvelope {
-        val envelope = decode<Agent3RunEnvelope>(
-            post("/api/v1/experimental/agent3/plans/$planId/start", "{}")
-        )
-        validateCapabilityReceipt(envelope.capabilityReceipt)
-        return envelope
-    }
+    fun startPlanEnvelope(planId: String): Agent3RunEnvelope =
+        decodeRunEnvelope(post("/api/v1/experimental/agent3/plans/$planId/start", "{}"))
 
     fun startPlan(planId: String): Agent3Run = startPlanEnvelope(planId).run
 
     fun getRun(runId: String): Agent3Run =
-        decode<Agent3RunEnvelope>(get("/api/v1/experimental/agent3/runs/$runId")).run
+        decodeRunEnvelope(get("/api/v1/experimental/agent3/runs/$runId")).run
 
     fun listRuns(): List<Agent3Run> =
         decode<RunsEnvelope>(get("/api/v1/experimental/agent3/runs")).runs
@@ -229,7 +265,7 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
         decode<EventsEnvelope>(get("/api/v1/experimental/agent3/runs/$runId/events")).events
 
     fun retry(runId: String, cloudReady: Boolean = false): Agent3Run =
-        decode<Agent3RunEnvelope>(
+        decodeRunEnvelope(
             post(
                 "/api/v1/experimental/agent3/runs/$runId/retry",
                 json.encodeToString(RetryRequest(cloudReady)),
@@ -240,14 +276,52 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
         val body = json.encodeToString(
             ConfirmRequest(stepId, if (approve) "approve" else "deny", digest)
         )
-        return decode<Agent3RunEnvelope>(post("/api/v1/experimental/agent3/runs/$runId/confirm", body)).run
+        return decodeRunEnvelope(post("/api/v1/experimental/agent3/runs/$runId/confirm", body)).run
     }
 
     fun resume(runId: String): Agent3Run =
-        decode<Agent3RunEnvelope>(post("/api/v1/experimental/agent3/runs/$runId/resume", "{}")).run
+        decodeRunEnvelope(post("/api/v1/experimental/agent3/runs/$runId/resume", "{}")).run
 
     fun cancel(runId: String): Agent3Run =
-        decode<Agent3RunEnvelope>(post("/api/v1/experimental/agent3/runs/$runId/cancel", "{}")).run
+        decodeRunEnvelope(post("/api/v1/experimental/agent3/runs/$runId/cancel", "{}")).run
+
+    private fun decodeRunEnvelope(body: String): Agent3RunEnvelope {
+        val envelope = decode<Agent3RunEnvelope>(body)
+        validateCapabilityReceipt(envelope.capabilityReceipt)
+        validateTerminationReceipt(envelope.termination)
+        return envelope.copy(run = envelope.run.copy(termination = envelope.termination))
+    }
+
+    private fun validateTerminationReceipt(receipt: Agent3TerminationReceipt?) {
+        if (receipt == null) return
+        if (receipt.schema != "kaliv-agent3-termination/v1") {
+            throw Agent3Exception("Unsupported Agent 3.0 termination receipt schema: ${receipt.schema}")
+        }
+        if (receipt.productionActivation) {
+            throw Agent3Exception("Invalid termination receipt: it must never activate production")
+        }
+        if (receipt.plan.state !in setOf("available", "terminal") ||
+            receipt.plan.requestScope != "plan" ||
+            receipt.plan.effect.isBlank() || receipt.plan.reason.isBlank() ||
+            receipt.plan.canRequest != (receipt.plan.state == "available")
+        ) {
+            throw Agent3Exception("Invalid termination receipt: inconsistent plan scope")
+        }
+        if (receipt.modelStream.state.isBlank() || receipt.modelStream.reason.isBlank() ||
+            (receipt.modelStream.canRequest && !receipt.modelStream.handlePresent)
+        ) {
+            throw Agent3Exception("Invalid termination receipt: inconsistent model stream")
+        }
+        receipt.activeTool?.let { active ->
+            if (active.stepId.isBlank() || active.tool.isBlank() || active.state.isBlank() ||
+                active.requestState.isBlank() || active.reason.isBlank() ||
+                active.semantics !in setOf(null, "none", "cooperative", "runtime") ||
+                (active.canRequest && !active.handlePresent)
+            ) {
+                throw Agent3Exception("Invalid termination receipt: inconsistent active tool")
+            }
+        }
+    }
 
     private fun validateCapabilityReceipt(receipt: Agent3CapabilityReceipt?) {
         if (receipt == null) return
