@@ -64,7 +64,12 @@ python scripts/rag_benchmark.py `
 |---:|---|
 | `0` | Alle skalaer, queries, quality-gate og cleanup bestod. |
 | `1` | Harnesset kørte, men quality-/latency-gaten eller en skala fejlede. |
-| `2` | Miljø- eller harness-fejl, eksempelvis utilgængelig Ollama/model. Rapporten skrives stadig. |
+| `2` | Miljø- eller harness-fejl, eksempelvis utilgængelig Ollama/model. Rapporten skrives stadig med `gate.passed=false`. |
+
+En warmup-fejl, eksempelvis en manglende embeddingmodel, skriver stadig den
+fulde evidenskontrakt med build-SHA, isolation, konfiguration, Ollama-model,
+tom `scales`-liste, fejldetalje og eksplicit fejlet gate. Det gør rapporten
+validerbar uden adgang til riggens konsol.
 
 ## Rapporten skal kontrolleres
 
