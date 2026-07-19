@@ -37,6 +37,10 @@ kaliv-tools-state.json.tmp
 /validation/agent3-rig-validation-latest.json
 /validation/agent3-rig-validation-latest.json.tmp
 
+# Agent 3 read-only pilot: rolling evidence stays local until manually reviewed.
+/validation/agent3-readonly-pilot-latest.json
+/validation/agent3-readonly-pilot-latest.json.tmp
+
 # Physical campaign: rolling reports and manually completed lifecycle work stay
 # on the rig. Only manually reviewed, dated campaign evidence may be committed.
 /validation/rig-preflight-latest.json
