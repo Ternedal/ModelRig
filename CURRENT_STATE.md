@@ -34,6 +34,11 @@ gate enforces another.
 | Env | Default |
 |---|---|
 | `KALIV_AGENT3_ENABLED` | `0` |
+| `KALIV_AGENT3_PILOT_MAX_AGE_HOURS` | `(unset)` |
+| `KALIV_AGENT3_PILOT_REPORT` | `(unset)` |
+| `KALIV_AGENT3_TASK_UI` | `(unset)` |
+| `KALIV_AGENT3_VALIDATION_MAX_AGE_HOURS` | `(unset)` |
+| `KALIV_AGENT3_VALIDATION_REPORT` | `(unset)` |
 | `KALIV_ALLOW_RAG_CLOUD` | `` |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` |
 | `KALIV_DATA_DIR` | `(unset)` |
