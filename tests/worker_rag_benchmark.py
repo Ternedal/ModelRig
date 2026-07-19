@@ -10,6 +10,7 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKER = ROOT / "worker"
@@ -298,6 +299,50 @@ finally:
         os.environ.pop("MODELRIG_EMBED_MODEL", None)
     else:
         os.environ["MODELRIG_EMBED_MODEL"] = old_embed_model
+
+# Warmup/model failures are expected environment failures and must still
+# emit the same complete evidence envelope as successful runs.
+from app import ollama_client as warmup_oc
+
+old_warmup_embed = warmup_oc.embed
+
+
+async def fail_warmup(_text, model=None):
+    raise RuntimeError("simulated missing embedding model")
+
+
+warmup_oc.embed = fail_warmup
+try:
+    warmup_report, warmup_exit = run(
+        rb._run(
+            SimpleNamespace(
+                scales=[1],
+                queries=1,
+                repetitions=1,
+                seed=20260718,
+                sample_interval=0.5,
+                fail_under_recall_at_5=0.95,
+                max_p95_ms=0.0,
+            )
+        )
+    )
+    check(warmup_exit == 2, "warmup failure uses reserved environment exit 2")
+    check(warmup_report["gate"]["passed"] is False, "warmup failure explicitly fails the gate")
+    check(warmup_report["scales"] == [], "warmup failure records that no scale ran")
+    check(
+        warmup_report["ollama"]["embedding_dimensions"] is None,
+        "warmup failure keeps unknown dimensions explicit",
+    )
+    check(
+        warmup_report["error"]["message"] == "simulated missing embedding model",
+        "warmup failure remains diagnosable",
+    )
+    check(
+        warmup_report["isolation"]["user_index_opened"] is False,
+        "warmup failure still proves the user index was untouched",
+    )
+finally:
+    warmup_oc.embed = old_warmup_embed
 
 print(f"\n===== RAG BENCHMARK: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

@@ -780,11 +780,56 @@ async def _run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         try:
             warmup_embedding = await oc.embed("Kaliv RAG benchmark warmup")
         except Exception as exc:
+            warmup_ms = (time.perf_counter() - warmup_started) * 1000
             report = {
                 "schema": SCHEMA,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
+                "dataset_schema": DATASET_SCHEMA,
+                "dataset_version": DATASET_VERSION,
+                "isolation": {
+                    "temporary_database": True,
+                    "user_index_opened": False,
+                    "synthesis_enabled": False,
+                },
+                "build": {
+                    "version": (root / "VERSION").read_text(encoding="utf-8").strip(),
+                    "git_sha": _git_sha(root),
+                },
+                "host": {
+                    "platform": platform.platform(),
+                    "python": platform.python_version(),
+                },
+                "ollama": {
+                    "url": oc.OLLAMA_URL,
+                    "embedding_model": oc.EMBED_MODEL,
+                    "embedding_dimensions": None,
+                    "warmup_ms": round(warmup_ms, 3),
+                },
+                "configuration": {
+                    "scales": args.scales,
+                    "queries": args.queries,
+                    "repetitions": args.repetitions,
+                    "seed": args.seed,
+                    "top_k": MAX_TOP_K,
+                    "min_score": 0.0,
+                    "chunk_size": CHUNK_SIZE,
+                    "overlap": 0,
+                },
+                "scales": [],
                 "error": _safe_error(exc),
-                "summary": {"scales": 0, "errors": 1},
+                "summary": {
+                    "scales": 0,
+                    "errors": 1,
+                    "minimum_recall_at_5": None,
+                    "maximum_query_p95_ms": None,
+                },
+                "gate": {
+                    "passed": False,
+                    "fail_under_recall_at_5": args.fail_under_recall_at_5,
+                    "max_p95_ms": (
+                        args.max_p95_ms if args.max_p95_ms > 0 else None
+                    ),
+                },
             }
             return report, 2
         warmup_ms = (time.perf_counter() - warmup_started) * 1000
