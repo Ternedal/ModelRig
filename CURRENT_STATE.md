@@ -33,6 +33,7 @@ gate enforces another.
 
 | Env | Default |
 |---|---|
+| `KALIV_AGENT3_APPROVAL_REQUIRED` | `(unset)` |
 | `KALIV_AGENT3_ENABLED` | `0` |
 | `KALIV_AGENT3_PILOT_MAX_AGE_HOURS` | `(unset)` |
 | `KALIV_AGENT3_PILOT_REPORT` | `(unset)` |
@@ -83,6 +84,9 @@ Run by glob, so a file that matches is a file that runs
 - `tests/backend_smoke.py`
 - `tests/backend_v1.py`
 - `tests/e2e.py`
+- `tests/worker_agent3_approval.py`
+- `tests/worker_agent3_approval_api.py`
+- `tests/worker_agent3_approval_concurrency.py`
 - `tests/worker_agent3_atomic_journal.py`
 - `tests/worker_agent3_capability_graph.py`
 - `tests/worker_agent3_capability_graph_api.py`
