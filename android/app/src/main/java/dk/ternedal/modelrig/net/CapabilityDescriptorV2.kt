@@ -90,7 +90,15 @@ data class CapabilityDescriptorV2(
             throw CapabilityContractException("invalid capability descriptor JSON", exc)
         }
 
-        fun parse(source: JSONObject): CapabilityDescriptorV2 {
+        fun parse(source: JSONObject): CapabilityDescriptorV2 = try {
+            parseObject(source)
+        } catch (exc: CapabilityContractException) {
+            throw exc
+        } catch (exc: Exception) {
+            throw CapabilityContractException("invalid capability descriptor JSON", exc)
+        }
+
+        private fun parseObject(source: JSONObject): CapabilityDescriptorV2 {
             requireExactKeys(source, topLevelKeys, "descriptor")
             val schema = requireString(source, "schema")
             val capabilityId = requireString(source, "capability_id")
@@ -111,7 +119,7 @@ data class CapabilityDescriptorV2(
             requireContract(schema == CAPABILITY_SCHEMA_V2, "unsupported schema: $schema")
             requireContract(capabilityIdPattern.matches(capabilityId), "invalid capability_id")
             requireContract(kind == "tool", "kind must be tool")
-            requireContract(description.isNotEmpty(), "description must be non-empty")
+            requireContract(description.isNotBlank(), "description must contain visible text")
             requireContract(access in accessValues, "unsupported access: $access")
             requireContract(impact in impactValues, "unsupported impact: $impact")
             requireContract(dataClass in dataClassValues, "unsupported data_class: $dataClass")
