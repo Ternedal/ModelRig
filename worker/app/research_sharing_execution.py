@@ -11,7 +11,7 @@ import asyncio
 import re
 import threading
 from dataclasses import dataclass
-from typing import Generic, Literal, Protocol, TypeVar
+from typing import Generic, Literal, Protocol, TypeVar, cast
 
 from .research_data_sharing import ResearchSharingIntent
 from .research_sharing_boundary import ResearchSharingBoundary, ResearchSharingLease
@@ -19,6 +19,7 @@ from .research_sharing_boundary import ResearchSharingBoundary, ResearchSharingL
 T = TypeVar("T")
 ExecutionOutcome = Literal["completed", "failed", "blocked"]
 _ERROR_CODE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+_MISSING = object()
 
 
 class ResearchSharingExecutionContractError(ValueError):
@@ -154,7 +155,7 @@ async def execute_research_sharing(
     boundary.claim(lease, intent, now=now_claim)
 
     meter = OutboundByteMeter(intent.to_request().max_bytes)
-    value: T | None = None
+    value: object = _MISSING
     outcome: ExecutionOutcome = "completed"
     error_code: str | None = None
     cancelled: asyncio.CancelledError | None = None
@@ -171,6 +172,9 @@ async def execute_research_sharing(
     except ResearchExternalSignal as exc:
         outcome = exc.outcome
         error_code = exc.error_code
+    except ResearchSharingExecutionContractError:
+        outcome = "blocked"
+        error_code = "operation_contract_violation"
     except Exception:
         outcome = "failed"
         error_code = "operation_failed"
@@ -207,5 +211,7 @@ async def execute_research_sharing(
             error_code=error_code,
             bytes_sent=meter.bytes_sent,
         ) from None
-    assert value is not None
-    return ResearchSharingExecutionResult(value=value, bytes_sent=meter.bytes_sent)
+    return ResearchSharingExecutionResult(
+        value=cast(T, None if value is _MISSING else value),
+        bytes_sent=meter.bytes_sent,
+    )
