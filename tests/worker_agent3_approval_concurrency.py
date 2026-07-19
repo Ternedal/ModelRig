@@ -55,8 +55,7 @@ run = AgentRun(
 
 
 def args_sha() -> str:
-    raw = json.dumps(step.args, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(raw).hexdigest()
+    return hashlib.sha256(step.args["text"].encode("utf-8")).hexdigest()
 
 
 def token(nonce_byte: bytes) -> str:
