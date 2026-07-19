@@ -20,8 +20,9 @@ ASR/TTS/LLM-latency og telefonens reelle stop/barge-in kræver riggen og Pixel 6
 - fem manuelle Pixel-trials for stop og barge-in.
 
 Harnesset åbner kun en `http://localhost`, `127.0.0.1` eller `::1` worker-URL.
-Det accepterer ingen device-token eller cloud-nøgle. Rapporten indeholder hashes,
-format, timings og tekstscore — ikke rå inputlyd eller det fulde modelsvar.
+IPv6-loopback skrives canonical som `http://[::1]:8099`. Det accepterer ingen
+device-token eller cloud-nøgle. Rapporten indeholder hashes, format, timings og
+tekstscore — ikke rå inputlyd eller det fulde modelsvar.
 
 ## 1. Opret de 20 WAV-fixtures
 
