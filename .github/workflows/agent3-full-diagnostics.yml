@@ -45,7 +45,7 @@ jobs:
       - name: Apply exact final T-030 API and documentation patch
         if: github.head_ref == 'agent/t030-api-doc-client-fixtures'
         env:
-          T030_EXPECTED_PARENT: 2ff2825d4d81ad2cd2bf560cef198429a2654f5c
+          T030_EXPECTED_PARENT: 36dd202494ec81e708d5bd2da71727ef66449f4f
         run: |
           exec > >(tee /tmp/t030-finalize.log) 2>&1
           set -euo pipefail
