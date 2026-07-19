@@ -49,10 +49,16 @@ The HMAC token binds:
 - authenticated device ID;
 - run ID and step ID;
 - tool (`note_append` only);
-- canonical argument SHA-256;
-- immutable confirmation digest;
+- SHA-256 of the exact UTF-8 `text` payload;
+- immutable confirmation digest, which independently binds the full step and
+  argument object;
 - current plan revision;
 - issue and expiry timestamps.
+
+The pilot accepts exactly one non-empty `text` argument of at most 10,000
+characters. Generic JSON hashing is deliberately avoided because runtimes can
+serialize numbers and escaping differently. Go and Python therefore hash the
+same executable string bytes, including non-ASCII and HTML-like text.
 
 Its expiry is at most two minutes and can never outlive the existing confirmation
 card.
@@ -61,8 +67,8 @@ card.
 
 When `KALIV_AGENT3_APPROVAL_REQUIRED=1`, approve without a token fails closed.
 A supplied token is always verified, even while the migration switch is off.
-The worker checks signature, time, action, args, digest, revision and the current
-waiting run before any write.
+The worker checks signature, time, action, exact text hash, digest, revision and
+the current waiting run before any write.
 
 Before the orchestrator may execute, SQLite atomically consumes:
 
@@ -74,9 +80,10 @@ The second uniqueness constraint matters: two simultaneous approve requests may
 receive different random tokens, but only one can authorize the same append.
 
 The run event ledger receives a content-free `approval_consumed` event followed
-by the existing `confirmation_approved`, `step_started` and `step_succeeded`
-events. Attribution includes only device ID, timestamps, revision and hashes;
-raw token, nonce and note text are never written to the event ledger.
+by the existing `confirmation_approved`, `policy_decision`, `step_started` and
+`step_succeeded` events. Attribution includes only device ID, timestamps,
+revision and hashes; raw token, nonce and note text are never written to the
+event ledger.
 
 ## Configuration
 
@@ -118,6 +125,7 @@ After T-020/T-021 physical evidence and review:
 3. test denial, timeout, changed args, stale revision, replay and concurrent
    approval;
 4. compare the exact note marker with `approval_consumed`,
-   `confirmation_approved`, `step_started`, `step_succeeded` and `run_completed`;
+   `confirmation_approved`, `policy_decision`, `step_started`, `step_succeeded`
+   and `run_completed`;
 5. verify stop/retry/replan cannot duplicate the append;
 6. publish a dated, version- and code-bound physical report before any promotion.
