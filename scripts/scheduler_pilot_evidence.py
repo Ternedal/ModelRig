@@ -34,6 +34,9 @@ from typing import Any, Callable
 SCHEMA = "kaliv-scheduler-pilot-evidence/v1"
 MANIFEST_SCHEMA = "kaliv-scheduler-pilot-manifest/v1"
 MAX_JSON_BYTES = 256 * 1024
+MAX_PILOT_WINDOW_SECONDS = 12 * 60 * 60
+MAX_EVIDENCE_AGE_SECONDS = 24 * 60 * 60
+FUTURE_TOLERANCE_SECONDS = 5 * 60
 _HEX_32 = re.compile(r"^[0-9a-f]{32}$")
 _HEX_40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
@@ -299,6 +302,13 @@ def validate_manifest(value: dict[str, Any]) -> tuple[dict[str, Any], list[str]]
     clean_claims = [item for item in all_claims if isinstance(item, str)]
     if len(clean_claims) != len(set(clean_claims)):
         errors.append("claim ids must be unique across all pilot trials")
+    schedule_ids = [
+        normalized[name].get("schedule_id")
+        for name in ("read", "write", "revoke", "recovery")
+        if isinstance(normalized[name].get("schedule_id"), str)
+    ]
+    if len(schedule_ids) != len(set(schedule_ids)):
+        errors.append("pilot trials must use four distinct schedule ids")
 
     return {
         "schema": MANIFEST_SCHEMA,
@@ -482,6 +492,54 @@ def _audits(conn: sqlite3.Connection, conversation_id: str) -> list[dict[str, An
     return [dict(row) for row in rows]
 
 
+def _schedule_occurrence_ids(conn: sqlite3.Connection, schedule_id: str) -> list[str]:
+    rows = conn.execute(
+        "SELECT claim_id FROM occurrences WHERE schedule_id=? ORDER BY created, claim_id",
+        (schedule_id,),
+    ).fetchall()
+    return [str(row[0]) for row in rows]
+
+
+def _blocked_schedule_audit(
+    conn: sqlite3.Connection,
+    schedule: dict[str, Any],
+    *,
+    window: dict[str, float],
+    errors: list[str],
+) -> dict[str, Any]:
+    schedule_id = str(schedule.get("id") or "")
+    rows = [
+        row
+        for row in _audits(conn, f"schedule:{schedule_id}")
+        if row.get("outcome") == "blocked"
+    ]
+    result = {
+        "binding": "schedule",
+        "blocked_rows": len(rows),
+        "claim_bound": False,
+    }
+    if len(rows) != 1:
+        errors.append("revocation requires exactly one schedule-level blocked audit row")
+        return result
+    row = rows[0]
+    if row.get("tool") != schedule.get("tool"):
+        errors.append("revocation blocked audit tool mismatch")
+    if row.get("origin") != "schedule":
+        errors.append("revocation blocked audit origin is not schedule")
+    try:
+        audit_args = json.loads(row.get("args_json") or "")
+    except json.JSONDecodeError:
+        audit_args = None
+    if not isinstance(audit_args, dict) or _json_sha(audit_args) != _json_sha(
+        schedule.get("args_value")
+    ):
+        errors.append("revocation blocked audit args hash mismatch")
+    audit_epoch = _audit_epoch(row.get("ts"))
+    if audit_epoch is None or not _within_window(audit_epoch, window):
+        errors.append("revocation blocked audit is outside the pilot window")
+    return result
+
+
 def _receipts(conn: sqlite3.Connection, schedule_id: str) -> list[dict[str, Any]]:
     rows = conn.execute(
         "SELECT kind, fingerprint, device_id, nonce, issued_at, consumed_at, revision "
@@ -641,6 +699,15 @@ def collect_evidence(
     ):
         # Keep later checks deterministic even for a malformed manifest.
         window = {"started_epoch": math.inf, "finished_epoch": -math.inf}
+    started_epoch = float(window["started_epoch"])
+    finished_epoch = float(window["finished_epoch"])
+    if finished_epoch - started_epoch > MAX_PILOT_WINDOW_SECONDS:
+        errors.append("pilot window exceeds the 12-hour maximum")
+    if finished_epoch > generated + FUTURE_TOLERANCE_SECONDS:
+        errors.append("pilot window finishes in the future")
+    if generated - finished_epoch > MAX_EVIDENCE_AGE_SECONDS:
+        errors.append("pilot window is older than the 24-hour evidence limit")
+
     expected_candidate = normalized["candidate"]
     for key in ("version", "git_sha", "code_sha256"):
         if expected_candidate.get(key) != candidate.get(key):
@@ -691,6 +758,10 @@ def collect_evidence(
             )
             for claim_id in read_spec["claim_ids"]
         ]
+        if set(_schedule_occurrence_ids(schedules, read_spec["schedule_id"])) != set(
+            read_spec["claim_ids"]
+        ):
+            read_errors.append("read schedule occurrence set does not match the manifest")
         if read_schedule is not None:
             if not _within_window(read_schedule.get("created"), window):
                 read_errors.append("read schedule was not created inside the pilot window")
@@ -724,8 +795,12 @@ def collect_evidence(
                 write_errors.append("write pilot receipt fingerprint mismatch")
             if receipt.get("device_id") != write_spec["device_id"]:
                 write_errors.append("write pilot receipt device mismatch")
+            if not _within_window(receipt.get("issued_at"), window):
+                write_errors.append("write pilot receipt was not issued inside the pilot window")
             if not _within_window(receipt.get("consumed_at"), window):
                 write_errors.append("write pilot receipt was not consumed inside the pilot window")
+            if write_schedule is not None and receipt.get("revision") != write_schedule.get("revision"):
+                write_errors.append("write pilot receipt revision does not match the schedule")
             nonce = receipt.get("nonce")
             if not isinstance(nonce, str) or not nonce:
                 write_errors.append("write pilot receipt nonce is missing")
@@ -771,6 +846,10 @@ def collect_evidence(
             for claim_id in write_spec["claim_ids"]
         ]
         marker_count: int | None = None
+        if set(_schedule_occurrence_ids(schedules, write_spec["schedule_id"])) != set(
+            write_spec["claim_ids"]
+        ):
+            write_errors.append("write schedule occurrence set does not match the manifest")
         if write_schedule is not None:
             if not _within_window(write_schedule.get("created"), window):
                 write_errors.append("write schedule was not created inside the pilot window")
@@ -816,6 +895,10 @@ def collect_evidence(
             revoke_errors.append("revocation schedule was not created inside the pilot window")
         elif bool(revoke_schedule.get("enabled")):
             revoke_errors.append("revocation schedule is still enabled")
+        if _schedule_occurrence_ids(schedules, revoke_spec["schedule_id"]) != [
+            revoke_spec["claim_id"]
+        ]:
+            revoke_errors.append("revocation schedule occurrence set does not match the manifest")
         revoke_claim = _claim_evidence(
             schedules,
             jobs,
@@ -830,11 +913,19 @@ def collect_evidence(
             window=window,
             errors=revoke_errors,
         )
+        revoke_audit = (
+            _blocked_schedule_audit(
+                audit, revoke_schedule, window=window, errors=revoke_errors
+            )
+            if revoke_schedule is not None
+            else {"binding": "schedule", "blocked_rows": 0, "claim_bound": False}
+        )
         phases["revoke"] = {
             "passed": not revoke_errors,
             "errors": revoke_errors,
             "schedule_id": revoke_spec["schedule_id"],
             "claim": revoke_claim,
+            "audit": revoke_audit,
         }
 
         recovery_spec = normalized["trials"]["recovery"]
@@ -844,6 +935,10 @@ def collect_evidence(
             recovery_errors.append("recovery schedule does not exist")
         elif not _within_window(recovery_schedule.get("created"), window):
             recovery_errors.append("recovery schedule was not created inside the pilot window")
+        if _schedule_occurrence_ids(schedules, recovery_spec["schedule_id"]) != [
+            recovery_spec["claim_id"]
+        ]:
+            recovery_errors.append("recovery schedule occurrence set does not match the manifest")
         recovery_claim = _claim_evidence(
             schedules,
             jobs,

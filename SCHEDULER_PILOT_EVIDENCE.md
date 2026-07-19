@@ -19,6 +19,9 @@ The manifest names exact schedule and occurrence ids. The collector cross-checks
 - one executed audit row and one terminal job for every named executed occurrence;
 - the unique note marker occurs exactly once per named write claim;
 - a revoked occurrence is released, terminal and has no executed audit;
+- exactly one blocked audit exists for the revoked schedule inside the pilot
+  window; current runtime records blocked audit at schedule scope, so the report
+  explicitly states `claim_bound=false` rather than pretending claim-level binding;
 - a recovered occurrence is exactly `executed` or `abandoned` as declared;
 - all named pilot occurrences are terminal and no pilot schedule remains reserved;
 - `production_activation=false` regardless of outcome.
@@ -147,8 +150,11 @@ Confirm that:
 - every evidence timestamp falls within the declared pilot window;
 - read has zero receipts;
 - write has one receipt from the expected device;
-- every named claim has one terminal occurrence and bound job;
-- each executed claim has exactly one matching audit execution;
+- each pilot trial uses a distinct schedule and its complete occurrence set
+  matches the manifest exactly;
+- every named claim has one terminal occurrence and a job status consistent with
+  the occurrence outcome;
+- each executed claim has exactly one matching audit execution and args hash;
 - marker count equals write claim count;
 - revoke and recovery match their declared outcomes;
 - no local absolute path, raw marker, args or token appears;

@@ -170,6 +170,20 @@ def create_sources(root: Path) -> pilot.DataPaths:
             "schedule",
         ),
     )
+    audit.execute(
+        "INSERT INTO audit (ts,conversation_id,tool,args_json,risk,outcome,confirmation_id,origin) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (
+            "1970-01-01T00:23:22",
+            "schedule:revoke-schedule",
+            "rig_status",
+            "{}",
+            "read",
+            "blocked",
+            None,
+            "schedule",
+        ),
+    )
     audit.commit()
     audit.close()
 
@@ -250,6 +264,24 @@ with tempfile.TemporaryDirectory(prefix="scheduler-pilot-evidence-") as temp_dir
               for error in stale["phases"]["read"]["errors"]),
           "stale claim explanation is explicit")
 
+    broad_manifest = manifest()
+    broad_manifest["window"]["started_at"] = "1969-12-31T00:00:00+00:00"
+    broad, broad_exit = pilot.collect_evidence(
+        broad_manifest, candidate=CANDIDATE, runtime=RUNTIME, paths=paths, now=3_000.0
+    )
+    check(broad_exit == 1, "an over-broad pilot window is rejected")
+    check("pilot window exceeds the 12-hour maximum" in broad["gate"]["errors"],
+          "broad-window reason is explicit")
+
+    future_manifest = manifest()
+    future_manifest["window"]["finished_at"] = "1970-01-01T01:30:00+00:00"
+    future, future_exit = pilot.collect_evidence(
+        future_manifest, candidate=CANDIDATE, runtime=RUNTIME, paths=paths, now=3_000.0
+    )
+    check(future_exit == 1, "a future pilot window is rejected")
+    check("pilot window finishes in the future" in future["gate"]["errors"],
+          "future-window reason is explicit")
+
     bad_runtime = dict(RUNTIME, worker_code_sha256="d" * 64)
     mismatch, mismatch_exit = pilot.collect_evidence(
         manifest(), candidate=CANDIDATE, runtime=bad_runtime, paths=paths, now=3_000.0
@@ -318,6 +350,20 @@ with tempfile.TemporaryDirectory(prefix="scheduler-pilot-evidence-") as temp_dir
     check(duplicate_audit_exit == 1, "duplicate executed audit blocks the pilot")
     check(any("exactly one executed audit" in error for error in duplicate_audit["phases"]["write"]["errors"]),
           "duplicate execution evidence is explicit")
+
+    schedules = sqlite3.connect(paths.schedules)
+    schedules.execute(
+        "INSERT INTO occurrences VALUES (?,?,?,?,?,?,?)",
+        ("unexpected-read-claim", "read-schedule", 1_600.0, "released", 1_601.0, 1_602.0, "revoke-job-1"),
+    )
+    schedules.commit()
+    schedules.close()
+    extra, extra_exit = pilot.collect_evidence(
+        manifest(), candidate=CANDIDATE, runtime=RUNTIME, paths=paths, now=3_000.0
+    )
+    check(extra_exit == 1, "an unlisted occurrence blocks pilot evidence")
+    check(any("occurrence set" in error for error in extra["phases"]["read"]["errors"]),
+          "unlisted occurrence explanation is explicit")
 
     inventory = pilot.inventory(paths)
     inventory_text = json.dumps(inventory)
