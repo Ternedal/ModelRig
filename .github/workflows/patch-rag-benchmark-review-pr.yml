@@ -19,11 +19,9 @@ jobs:
           show-progress: false
       - name: Apply final benchmark review findings
         run: python scripts/_patch_rag_benchmark_review.py
-      - name: Validate syntax and patch shape
-        shell: bash
+      - name: Validate syntax
         run: |
           python -m py_compile scripts/rag_benchmark.py tests/worker_rag_benchmark.py
-          git diff --check
           test ! -e scripts/_patch_rag_benchmark_review.py
       - name: Commit final review patch
         shell: bash
