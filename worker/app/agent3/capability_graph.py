@@ -93,6 +93,60 @@ class RuntimeToolCapability:
         return risk
 
 
+def ToolCapability(
+    name: str,
+    enabled: bool,
+    declared_risk: str,
+    description: str = "",
+    cancellation: str = "none",
+) -> RuntimeToolCapability:
+    """Deprecated constructor for graph-v1 test and caller compatibility.
+
+    This is intentionally a function, not a second metadata class. It converts
+    the legacy graph arguments immediately into the canonical v2 descriptor and
+    returns the same runtime wrapper used by the production registry path. New
+    code must construct descriptors or call ``runtime_tool_capabilities``.
+    """
+
+    from .integration import _V2_RISK
+
+    if declared_risk not in _V2_RISK:
+        raise ValueError(
+            f"ukendt risikoklasse {declared_risk!r} for {name}: "
+            "kapabilitetsgrafen gætter ikke på risiko"
+        )
+    access = (
+        declared_risk
+        if declared_risk in {"read", "write", "desktop"}
+        else "write"
+    )
+    descriptor = CapabilityDescriptorV2.model_validate(
+        {
+            "schema": "kaliv-capability/v2",
+            "capability_id": f"tool:{name}",
+            "kind": "tool",
+            "description": description or f"{name} capability",
+            "access": access,
+            "impact": declared_risk,
+            "data_class": "operational",
+            "parameters": {},
+            "isolation": {"mode": "in_process", "env_allow": []},
+            "scheduling": {
+                "allowed": False,
+                "reason": "legacy graph compatibility constructor",
+            },
+            "confirmation": {
+                "mode": "none" if access == "read" else "required"
+            },
+            "network": {"mode": "undeclared", "destinations": []},
+            "termination": {"mode": cancellation},
+            "replay": {"idempotent": declared_risk == "read"},
+            "production_activation": False,
+        }
+    )
+    return RuntimeToolCapability(descriptor=descriptor, enabled=enabled)
+
+
 def runtime_tool_capabilities(adapter) -> list[RuntimeToolCapability]:
     """Bind canonical registry descriptors to the existing V2 gate state.
 
