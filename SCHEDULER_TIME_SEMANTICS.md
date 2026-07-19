@@ -4,9 +4,11 @@
 
 This document freezes the intended civil-time behavior before the scheduler's
 runtime/storage migration begins. The executable reference is
-`scripts/scheduler_time_oracle.py`; `tests/scheduler_time_oracle.py` proves the
-edge cases. Until the later integration PR is merged, production behavior remains
-the current process-local `time.localtime` / `time.mktime` implementation.
+`scripts/scheduler_time_oracle.py`; `tests/workflow_scheduler_time_oracle.py`
+proves the edge cases and is collected by the repository's authoritative
+`tests/workflow_*.py` CI glob. Until the later integration PR is merged,
+production behavior remains the current process-local `time.localtime` /
+`time.mktime` implementation.
 
 ## Why the current representation is insufficient
 
