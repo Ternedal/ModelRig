@@ -4,7 +4,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   full-test-log:
@@ -22,41 +22,6 @@ jobs:
 
       - name: Install worker deps
         run: pip install -r worker/requirements.txt --break-system-packages
-      # T030_FINAL_PATCH_BEGIN
-      - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
-        with:
-          distribution: temurin
-          java-version: "21"
-      - name: Validate desktop capability fixtures in isolation
-        run: |
-          cd desktop
-          ./gradlew :composeApp:test \
-            --tests '*CapabilityDescriptorV2FixtureTest' \
-            --no-daemon --console=plain
-      - name: Apply and push exact final T-030 generated files
-        if: github.head_ref == 'agent/t030-api-doc-client-fixtures'
-        env:
-          T030_EXPECTED_PARENT: d88bee9efdd229c486e3d50b15f6389ca4f8f0ba
-        run: |
-          set -euo pipefail
-          head_sha="${{ github.event.pull_request.head.sha }}"
-          git fetch origin "$head_sha" --depth=2
-          git checkout -B agent/t030-api-doc-client-fixtures "$head_sha"
-          test "$(git rev-parse HEAD^)" = "$T030_EXPECTED_PARENT"
-          GITHUB_HEAD_REF=agent/t030-api-doc-client-fixtures \
-            python3 scripts/_t030_finalize_capability_contract.py
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            CURRENT_STATE.md \
-            worker/app/tools.py \
-            scripts/current_state.py \
-            tests/worker_capability_schema_v2.py
-          git diff --cached --check
-          test "$(git diff --cached --name-only | wc -l)" = "4"
-          git commit -m "feat(capabilities): expose canonical descriptors to API docs and clients"
-          git push origin HEAD:agent/t030-api-doc-client-fixtures
-      # T030_FINAL_PATCH_END
 
       - name: Build backend
         run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
@@ -65,7 +30,7 @@ jobs:
         run: python3 scripts/current_state.py
 
       - name: Upload generated current state
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: agent3-generated-current-state
           path: CURRENT_STATE.md
@@ -96,9 +61,9 @@ jobs:
 
       - name: Upload full failed test log
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: agent3-full-test-log
           path: /tmp/modelrig-full-test.log
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7
