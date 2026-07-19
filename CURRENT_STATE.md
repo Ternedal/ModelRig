@@ -88,6 +88,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_approval_api.py`
 - `tests/worker_agent3_approval_concurrency.py`
 - `tests/worker_agent3_atomic_journal.py`
+- `tests/worker_agent3_cancellation_contract.py`
 - `tests/worker_agent3_capability_graph.py`
 - `tests/worker_agent3_capability_graph_api.py`
 - `tests/worker_agent3_capability_probe.py`
