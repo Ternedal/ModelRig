@@ -720,6 +720,22 @@ def load_manual_observations(path: Path | None) -> dict[str, Any] | None:
     return value
 
 
+def _manual_trial_passes(trial: dict[str, Any]) -> bool:
+    latency = trial.get("stop_latency_ms")
+    latency_valid = (
+        isinstance(latency, (int, float))
+        and not isinstance(latency, bool)
+        and 0 <= float(latency) <= 30_000
+    )
+    return (
+        trial.get("recognized") is True
+        and trial.get("playback_stopped") is True
+        and trial.get("stale_audio_resumed") is False
+        and trial.get("ui_terminal_state") in {"cancelled", "idle"}
+        and latency_valid
+    )
+
+
 def _manual_summary(value: dict[str, Any] | None) -> dict[str, Any]:
     if value is None:
         return {
@@ -729,19 +745,15 @@ def _manual_summary(value: dict[str, Any] | None) -> dict[str, Any]:
             "stop_latency_ms": summarize_numbers([]),
         }
     trials = value["trials"]
-    passed = all(
-        bool(trial["recognized"])
-        and bool(trial["playback_stopped"])
-        and not bool(trial["stale_audio_resumed"])
-        and str(trial["ui_terminal_state"]) in {"cancelled", "idle"}
-        for trial in trials
-    )
     return {
         "provided": True,
         "trials": len(trials),
-        "passed": passed,
+        "passed": all(_manual_trial_passes(trial) for trial in trials),
         "stop_latency_ms": summarize_numbers(
-            trial.get("stop_latency_ms") for trial in trials
+            trial.get("stop_latency_ms")
+            for trial in trials
+            if isinstance(trial.get("stop_latency_ms"), (int, float))
+            and not isinstance(trial.get("stop_latency_ms"), bool)
         ),
     }
 

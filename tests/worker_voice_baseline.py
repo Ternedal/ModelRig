@@ -330,6 +330,30 @@ manual_summary = vb._manual_summary(manual)
 check(manual_summary["provided"] and not manual_summary["passed"],
       "pending manual observations cannot pass the gate")
 
+typed_trial = {
+    "id": "typed",
+    "trigger": "barge-in",
+    "recognized": True,
+    "playback_stopped": True,
+    "stale_audio_resumed": False,
+    "ui_terminal_state": "cancelled",
+    "stop_latency_ms": 175,
+}
+check(vb._manual_trial_passes(typed_trial), "typed successful manual trial passes")
+stringy_trial = dict(typed_trial)
+stringy_trial["recognized"] = "false"
+stringy_trial["stop_latency_ms"] = "175"
+check(
+    not vb._manual_trial_passes(stringy_trial),
+    "string booleans and latency cannot pass manual scoring",
+)
+missing_latency_trial = dict(typed_trial)
+missing_latency_trial["stop_latency_ms"] = None
+check(
+    not vb._manual_trial_passes(missing_latency_trial),
+    "manual scoring requires numeric stop latency",
+)
+
 old_temp_entries = vb._voice_temp_entries
 samples = iter([{"old", "new"}, {"old"}])
 vb._voice_temp_entries = lambda: next(samples, {"old"})
