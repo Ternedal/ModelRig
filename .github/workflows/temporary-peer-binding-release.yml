@@ -61,3 +61,5 @@ jobs:
             CURRENT_STATE.md ACTIVATION_READINESS.md
           git commit -m 'chore(release): prepare public peer binding'
           git push origin HEAD:agent/research-public-peer-binding
+
+# Exact one-shot trigger; bot commits do not satisfy the job condition.
