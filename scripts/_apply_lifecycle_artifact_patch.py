@@ -21,7 +21,20 @@ fixed = '''def reports_with_artifacts(temp: Path) -> dict[str, dict]:
     reports = valid_reports()'''
 if test.count(recursive) != 1:
     raise SystemExit(f"recursive artifact helper count is {test.count(recursive)}")
-test_path.write_text(test.replace(recursive, fixed), encoding="utf-8")
+test = test.replace(recursive, fixed)
+
+old_temp = '''    with tempfile.TemporaryDirectory(dir=ROOT, prefix="campaign-test-") as temp_dir:
+        temp = Path(temp_dir)'''
+new_temp = '''    artifact_parent = ROOT / "validation" / "appliance-lifecycle-evidence"
+    artifact_parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        dir=artifact_parent,
+        prefix="campaign-test-",
+    ) as temp_dir:
+        temp = Path(temp_dir)'''
+if test.count(old_temp) != 1:
+    raise SystemExit(f"campaign temp fixture count is {test.count(old_temp)}")
+test_path.write_text(test.replace(old_temp, new_temp), encoding="utf-8")
 
 Path(".github/workflows/retry-lifecycle-artifacts-pr.yml").unlink(missing_ok=True)
 Path("scripts/_apply_lifecycle_artifact_patch.py").unlink()
