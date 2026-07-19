@@ -16,11 +16,9 @@ class CapabilityDescriptorV2FixtureTest {
 
     private fun fixtureText(): String {
         val cwd = File(System.getProperty("user.dir"))
-        val candidates = listOf(
-            File(cwd, "../contracts/kaliv-capability-v2-fixtures.json"),
-            File(cwd, "contracts/kaliv-capability-v2-fixtures.json"),
-        )
-        val file = candidates.firstOrNull { it.isFile }
+        val file = generateSequence(cwd) { it.parentFile }
+            .map { File(it, "contracts/kaliv-capability-v2-fixtures.json") }
+            .firstOrNull { it.isFile }
             ?: error("shared capability fixtures not found from ${cwd.absolutePath}")
         return file.readText(Charsets.UTF_8)
     }
