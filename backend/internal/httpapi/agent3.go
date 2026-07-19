@@ -116,8 +116,10 @@ func (s *server) handleAgent3ReplanPreviewApply(w http.ResponseWriter, r *http.R
 }
 
 func (s *server) handleAgent3RunConfirm(w http.ResponseWriter, r *http.Request) {
-	// Approval can execute a write and then advance the run.
-	s.WorkerSlow.Forward(w, r, agent3RunTarget(r, "/confirm"))
+	// Denials remain direct and side-effect free. An approval is rebound to the
+	// current worker checkpoint and authenticated device before the backend sends
+	// a short-lived one-use token over loopback.
+	s.handleAgent3ApprovalConfirm(w, r)
 }
 
 func (s *server) handleAgent3RunResume(w http.ResponseWriter, r *http.Request) {
