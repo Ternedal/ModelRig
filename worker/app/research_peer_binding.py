@@ -29,6 +29,8 @@ _MAX_DNS_ANSWERS = 32
 _MAX_TTL_SECONDS = 300
 _ERROR_CODE_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_RECEIPT_ID_RE = re.compile(r"^egr_[a-z0-9._-]{1,96}$")
+_CONSENT_ID_RE = re.compile(r"^egc_[a-z0-9._-]{1,96}$")
 BindingOutcome = Literal["connected", "failed", "blocked"]
 Resolver = Callable[[str, int], Sequence[str]]
 
@@ -103,6 +105,20 @@ def _validate_egress(
         raise PeerBindingContractError("plan must be an EgressPlan")
     if not isinstance(receipt, EgressReceipt):
         raise PeerBindingContractError("receipt must be an EgressReceipt")
+    if not isinstance(receipt.receipt_id, str) or not _RECEIPT_ID_RE.fullmatch(receipt.receipt_id):
+        raise PeerBindingContractError("egress receipt_id has an invalid format")
+    for name, value in (("authorized_at", receipt.authorized_at), ("expires_at", receipt.expires_at)):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise PeerBindingContractError(f"egress {name} must be a non-negative integer timestamp")
+    if receipt.expires_at <= receipt.authorized_at:
+        raise PeerBindingContractError("egress receipt expiry must follow authorization")
+    if receipt.authorization not in {"automatic", "consented"}:
+        raise PeerBindingContractError("egress receipt authorization is invalid")
+    if receipt.authorization == "automatic" and receipt.consent_id is not None:
+        raise PeerBindingContractError("automatic egress receipt cannot include consent_id")
+    if receipt.authorization == "consented":
+        if not isinstance(receipt.consent_id, str) or not _CONSENT_ID_RE.fullmatch(receipt.consent_id):
+            raise PeerBindingContractError("consented egress receipt requires a valid consent_id")
     if receipt.plan_digest != plan.digest:
         raise PeerBindingDenied("egress receipt does not match the plan")
     if receipt.max_bytes != plan.max_bytes:

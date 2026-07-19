@@ -193,6 +193,21 @@ rejects(
     PeerBindingDenied,
     "receipt byte ceiling must match plan",
 )
+for invalid_receipt, name in (
+    (replace(RECEIPT, receipt_id=""), "empty receipt id is rejected"),
+    (replace(RECEIPT, authorized_at=True), "boolean authorization timestamp is rejected"),
+    (replace(RECEIPT, expires_at=100), "receipt expiry must follow authorization"),
+    (replace(RECEIPT, authorization="unknown"), "unknown receipt authorization is rejected"),
+    (replace(RECEIPT, authorization="automatic", consent_id="egc_test_consent"), "automatic receipt cannot carry consent"),
+    (replace(RECEIPT, authorization="consented", consent_id=None), "consented receipt requires consent id"),
+):
+    before = list(scope_ledger.events())
+    rejects(
+        lambda value=invalid_receipt: scope_ledger.issue(PLAN, value, RAW_URL, now=110),
+        PeerBindingContractError,
+        name,
+    )
+    check(scope_ledger.events() == before, f"{name} leaves no audit row")
 expired_receipt = replace(RECEIPT, expires_at=110)
 rejects(
     lambda: scope_ledger.issue(PLAN, expired_receipt, RAW_URL, now=110),
