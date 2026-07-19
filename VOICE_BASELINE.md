@@ -87,6 +87,9 @@ Udfyld device/app-version. Kør de fem beskrevne trials på Pixel 6a og udfyld:
 - `stop_latency_ms`: observeret latency fra trigger til stoppet audio.
 
 Skabelonens `pending`/`false`-værdier kan ikke bestå en required-manual gate.
+Felterne skal være ægte JSON-booleans (`true`/`false` uden citationstegn), og
+`stop_latency_ms` skal være et tal mellem `0` og `30000`. Tekstværdier og `null`
+kan ikke tælle som en bestået observation.
 
 ## 3. Cold-start-forudsætning
 
