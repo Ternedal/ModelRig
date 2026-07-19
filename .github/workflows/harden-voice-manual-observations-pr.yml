@@ -1,0 +1,147 @@
+name: harden-voice-manual-observations-pr
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.head_ref == 'eval/voice-baseline-harness'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: eval/voice-baseline-harness
+          fetch-depth: 1
+          show-progress: false
+      - uses: actions/setup-python@a26af69be951213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Require typed manual observations
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text(encoding='utf-8')
+              if text.count(old) != 1:
+                  raise SystemExit(f'{path}: target count is {text.count(old)}')
+              target.write_text(text.replace(old, new), encoding='utf-8')
+
+          replace_once(
+              'scripts/voice_baseline.py',
+              '''def _manual_summary(value: dict[str, Any] | None) -> dict[str, Any]:
+              if value is None:
+                  return {
+                      "provided": False,
+                      "trials": 0,
+                      "passed": None,
+                      "stop_latency_ms": summarize_numbers([]),
+                  }
+              trials = value["trials"]
+              passed = all(
+                  bool(trial["recognized"])
+                  and bool(trial["playback_stopped"])
+                  and not bool(trial["stale_audio_resumed"])
+                  and str(trial["ui_terminal_state"]) in {"cancelled", "idle"}
+                  for trial in trials
+              )
+              return {
+                  "provided": True,
+                  "trials": len(trials),
+                  "passed": passed,
+                  "stop_latency_ms": summarize_numbers(
+                      trial.get("stop_latency_ms") for trial in trials
+                  ),
+              }''',
+              '''def _manual_trial_passes(trial: dict[str, Any]) -> bool:
+              latency = trial.get("stop_latency_ms")
+              latency_valid = (
+                  isinstance(latency, (int, float))
+                  and not isinstance(latency, bool)
+                  and 0 <= float(latency) <= 30_000
+              )
+              return (
+                  trial.get("recognized") is True
+                  and trial.get("playback_stopped") is True
+                  and trial.get("stale_audio_resumed") is False
+                  and trial.get("ui_terminal_state") in {"cancelled", "idle"}
+                  and latency_valid
+              )
+
+
+          def _manual_summary(value: dict[str, Any] | None) -> dict[str, Any]:
+              if value is None:
+                  return {
+                      "provided": False,
+                      "trials": 0,
+                      "passed": None,
+                      "stop_latency_ms": summarize_numbers([]),
+                  }
+              trials = value["trials"]
+              return {
+                  "provided": True,
+                  "trials": len(trials),
+                  "passed": all(_manual_trial_passes(trial) for trial in trials),
+                  "stop_latency_ms": summarize_numbers(
+                      trial.get("stop_latency_ms")
+                      for trial in trials
+                      if isinstance(trial.get("stop_latency_ms"), (int, float))
+                      and not isinstance(trial.get("stop_latency_ms"), bool)
+                  ),
+              }''',
+          )
+
+          marker = '''check(manual_summary["provided"] and not manual_summary["passed"],
+                "pending manual observations cannot pass the gate")
+          '''
+          addition = marker + '''
+          typed_trial = {
+              "id": "typed",
+              "trigger": "barge-in",
+              "recognized": True,
+              "playback_stopped": True,
+              "stale_audio_resumed": False,
+              "ui_terminal_state": "cancelled",
+              "stop_latency_ms": 175,
+          }
+          check(vb._manual_trial_passes(typed_trial), "typed successful manual trial passes")
+          stringy_trial = dict(typed_trial)
+          stringy_trial["recognized"] = "false"
+          stringy_trial["stop_latency_ms"] = "175"
+          check(
+              not vb._manual_trial_passes(stringy_trial),
+              "string booleans and latency cannot pass manual scoring",
+          )
+          missing_latency_trial = dict(typed_trial)
+          missing_latency_trial["stop_latency_ms"] = None
+          check(
+              not vb._manual_trial_passes(missing_latency_trial),
+              "manual scoring requires numeric stop latency",
+          )
+          '''
+          replace_once('tests/worker_voice_baseline.py', marker, addition)
+
+          Path('.github/workflows/harden-voice-manual-observations-pr.yml').unlink()
+          PY
+      - name: Validate typed manual gate
+        shell: bash
+        run: |
+          pip install --quiet ruff
+          ruff check --select E9,F63,F7,F82 scripts/voice_baseline.py tests/worker_voice_baseline.py
+          PYTHONPATH=worker python tests/worker_voice_baseline.py
+          git diff --check
+          test ! -e .github/workflows/harden-voice-manual-observations-pr.yml
+      - name: Commit manual observation hardening
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(eval): require typed voice manual observations"
+          git push origin HEAD:eval/voice-baseline-harness
