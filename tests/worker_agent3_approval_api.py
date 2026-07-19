@@ -186,6 +186,7 @@ def test_valid_token_consumes_then_executes_once_with_redacted_receipt() -> None
         assert kinds == [
             "approval_consumed",
             "confirmation_approved",
+            "policy_decision",
             "step_started",
             "step_succeeded",
             "run_completed",
