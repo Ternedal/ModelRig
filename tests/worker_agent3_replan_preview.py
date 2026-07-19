@@ -53,8 +53,18 @@ class Tool:
     def __init__(self, name, risk):
         self.name = name
         self.risk = risk
+        self.impact = risk
         self.description = name
         self.params = {"type": "object", "properties": {}}
+        self.isolate = False
+        self.env_allow = ()
+        self.schedulable = True
+        self.unschedulable_because = ""
+        self.sensitivity = "operational"
+        self.cancellation = "none"
+        self.idempotent = risk == "read"
+        self.network = "none"
+        self.network_destinations = ()
 
     def human_summary(self, args):
         return f"{self.name}: {args}"
