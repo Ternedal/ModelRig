@@ -412,6 +412,52 @@ check(_fc._SANCTIONED_ROOT_DIRS == _fa._SANCTIONED_ROOT_DIRS
       "the freeze gate and the offline reader sanction EXACTLY the same "
       "paths -- drift between them would let an extra slip past one (F-1503)")
 
+# F-1507: the reader must reject an INTERNALLY INCOHERENT attestation --
+# duplicate/absolute/traversal paths, or a verified-count that disagrees
+# with the path list. Each mutation edits a valid attestation on disk and
+# confirms the reader refuses by reason. Build a clean gitless tree first.
+_g1507 = _strip_git(_make_repo(version="1.58.131"))
+_c, _o = run_in(_g1507, token="tok", api=_gitless_api(_g1507))
+check(_c == 0, "sanity: clean tree for F-1507 froze")
+_att_path = _g1507 / "validation" / "frozen-candidate.json"
+import json as _json1507
+_base_att = _json1507.loads(_att_path.read_text(encoding="utf-8"))
+
+def _reject_1507(mutate, needle, label):
+    d = _json1507.loads(_json1507.dumps(_base_att))
+    mutate(d)
+    _att_path.write_text(_json1507.dumps(d), encoding="utf-8")
+    try:
+        _fa.load_attestation(_g1507, expected_version="1.58.131")
+        check(False, f"{label}: must be rejected")
+    except _fa.AttestationError as e:
+        check(needle in str(e), f"{label}: {str(e)[:70]}")
+
+def _dup(d):
+    d["tree_paths"] = list(d["tree_paths"]) + [d["tree_paths"][0]]
+    d["tree_files_verified"] = len(d["tree_paths"])
+_reject_1507(_dup, "dubletter",
+             "a duplicated tree path is rejected as non-canonical (F-1507)")
+
+def _abs(d):
+    d["tree_paths"] = ["/etc/passwd"] + list(d["tree_paths"])[1:]
+_reject_1507(_abs, "absolut sti",
+             "an absolute tree path is rejected (F-1507)")
+
+def _traverse(d):
+    d["tree_paths"] = ["../escape.py"] + list(d["tree_paths"])[1:]
+_reject_1507(_traverse, "ikke-kanonisk",
+             "a traversal (..) tree path is rejected (F-1507)")
+
+def _countmismatch(d):
+    d["tree_files_verified"] = len(d["tree_paths"]) + 5
+_reject_1507(_countmismatch, "matcher ikke antal",
+             "tree_files_verified disagreeing with the path count is "
+             "rejected as internally inconsistent (F-1507)")
+
+# Restore so nothing downstream sees the mutated file.
+_att_path.write_text(_json1507.dumps(_base_att), encoding="utf-8")
+
 # F-1505: git-mode must refuse when HEAD is not the published tag's commit,
 # so git-mode and the release ZIP cannot validate different code under one
 # version. The fixture's HEAD differs from the tag the API reports.

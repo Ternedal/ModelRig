@@ -282,6 +282,28 @@ def load_attestation(
         isinstance(p, str) and p for p in tree_paths
     ):
         raise AttestationError("tree_paths er ikke en liste af stier")
+    # F-1507: the path list must be internally coherent, or the rollup could
+    # be gamed with duplicates, absolute paths, or traversal. Require
+    # canonical relative unique paths, and that the recorded verified-count
+    # equals the list length (they describe the same set).
+    if len(set(tree_paths)) != len(tree_paths):
+        raise AttestationError(
+            "tree_paths indeholder dubletter -- filliste er ikke kanonisk")
+    for p in tree_paths:
+        if p.startswith("/") or (len(p) > 1 and p[1] == ":"):
+            raise AttestationError(
+                f"tree_paths har en absolut sti: {p} -- kun relative stier")
+        parts = p.replace("\\", "/").split("/")
+        if ".." in parts or "." in parts:
+            raise AttestationError(
+                f"tree_paths har en ikke-kanonisk sti (. eller ..): {p}")
+        if p != p.replace("\\", "/"):
+            raise AttestationError(
+                f"tree_paths bruger backslash: {p} -- brug '/' konsekvent")
+    if tfv != len(tree_paths):
+        raise AttestationError(
+            f"tree_files_verified ({tfv}) matcher ikke antal tree_paths "
+            f"({len(tree_paths)}) -- attestationen er intern inkonsistent")
     if data["mode"] == "gitless-api":
         if not tree_paths or not re.fullmatch(r"[0-9a-f]{64}", str(tree_sha)):
             raise AttestationError(

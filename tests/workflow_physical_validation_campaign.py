@@ -935,6 +935,49 @@ check(any("historiske" in p for p in pilot_mod.judge(
       "against now -- replayed pilot IDs prove a PAST pilot, not this "
       "candidate's rig day")
 
+# F-1509: occurrence_inventory must be bounded by an EXPLICIT [start, end).
+# Before, it filtered only created >= window_start, so an occurrence created
+# AFTER the pilot (e.g. a schedule firing the next day) still counted. This
+# builds a real occurrences DB and proves the upper bound excludes it.
+import sqlite3 as _sqlite1509
+import tempfile as _tf1509
+with _tf1509.TemporaryDirectory() as _td1509:
+    _dbp = str(Path(_td1509) / "sched.db")
+    _cx = _sqlite1509.connect(_dbp)
+    _cx.execute("CREATE TABLE schedules (id TEXT PRIMARY KEY, tool TEXT NOT "
+                "NULL, args TEXT NOT NULL, cadence TEXT NOT NULL, "
+                "expires_at REAL NOT NULL, max_runs INTEGER NOT NULL DEFAULT "
+                "0, runs_used INTEGER NOT NULL DEFAULT 0, due_at REAL NOT "
+                "NULL, missed INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT "
+                "NULL DEFAULT 1, created REAL NOT NULL)")
+    _cx.execute("CREATE TABLE occurrences (claim_id TEXT PRIMARY KEY, "
+                "schedule_id TEXT NOT NULL, occurrence_due_at REAL NOT NULL, "
+                "status TEXT NOT NULL, created REAL NOT NULL, resolved REAL)")
+    _cx.execute("INSERT INTO schedules (id, tool, args, cadence, expires_at, "
+                "due_at, created) VALUES "
+                "('s-old', 'rig_status', '{}', 'every:60', 0, 0, 0)")
+    _wstart, _wend = 1000.0, 2000.0
+    # one inside the window, one AFTER window_end
+    _cx.execute("INSERT INTO occurrences VALUES "
+                "('o-in', 's-old', 1500.0, 'executed', 1500.0, 1505.0)")
+    _cx.execute("INSERT INTO occurrences VALUES "
+                "('o-after', 's-old', 2500.0, 'executed', 2500.0, 2505.0)")
+    _cx.commit()
+    _cx.close()
+    _inv = pilot_mod.occurrence_inventory(_dbp, _wstart, _wend)
+    _counts = {r["id"]: r["occurrences"] for r in _inv}
+    check(_counts.get("s-old") == 1,
+          "occurrence_inventory counts ONLY the occurrence inside "
+          "[start, end) -- the one created after window_end is excluded by "
+          "the explicit upper bound (F-1509)")
+    # And with a window that ends AFTER both, both count -- proving the bound
+    # is real, not an accident of the fixture.
+    _inv2 = pilot_mod.occurrence_inventory(_dbp, _wstart, 3000.0)
+    _counts2 = {r["id"]: r["occurrences"] for r in _inv2}
+    check(_counts2.get("s-old") == 2,
+          "widening window_end to include both occurrences counts both -- "
+          "the upper bound is a real filter, not fixture luck (F-1509)")
+
 check(any("receipt" in p for p in pilot_mod.judge(
           _read_ok, {"schedule": {"runs_used": 1}, "approval_receipts": []},
           _manual_ok)),

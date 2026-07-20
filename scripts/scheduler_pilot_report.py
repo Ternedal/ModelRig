@@ -147,19 +147,28 @@ def schedule_inventory(schedules_db: str) -> list[dict[str, Any]]:
 
 
 def occurrence_inventory(schedules_db: str,
-                         window_start: float) -> list[dict[str, Any]]:
-    """Schedules med EXECUTIONS i pilotvinduet (F-1405).
+                         window_start: float,
+                         window_end: float) -> list[dict[str, Any]]:
+    """Schedules med EXECUTIONS i pilotvinduet (F-1405/F-1509).
 
     schedule.created-scopingen ser kun oprettelser -- en FOREKSISTERENDE
     plan der fyrer under piloten er usynlig for den. Dette inventar ser
-    alt der KOERTE."""
+    alt der KOERTE i vinduet.
+
+    F-1509: vinduet er nu et EKSPLICIT [start, end] (half-open: created i
+    [start, end)). Uden en oevre graense ville en occurrence oprettet EFTER
+    pilotens afslutning ogsaa taelle -- fx en plan der fyrer dagen efter.
+    Overlap-policy: en occurrence hoerer til vinduet hvis dens created-tid
+    ligger i intervallet; jobs/audits arver occurrence'ens vindue via
+    forensik-pinningen, saa vi scoper paa den ene autoritative tid.
+    """
     sc = _ro(schedules_db)
     rows = [dict(r) for r in sc.execute(
         "SELECT o.schedule_id AS id, s.tool AS tool, "
         "COUNT(*) AS occurrences "
         "FROM occurrences o LEFT JOIN schedules s ON s.id = o.schedule_id "
-        "WHERE o.created >= ? GROUP BY o.schedule_id",
-        (window_start,))]
+        "WHERE o.created >= ? AND o.created < ? GROUP BY o.schedule_id",
+        (window_start, window_end))]
     sc.close()
     return rows
 
@@ -397,8 +406,12 @@ def build_report(candidate: dict[str, Any], worker_url: str,
     except ValueError:
         now_ts = None
     occ_inv = None
-    if schedules_db is not None and window_start is not None:
-        occ_inv = occurrence_inventory(schedules_db, window_start)
+    if (schedules_db is not None and window_start is not None
+            and now_ts is not None):
+        # F-1509: the pilot window is [first_created, report generated_at) --
+        # an explicit upper bound, so an occurrence created AFTER the pilot
+        # (e.g. a schedule firing the next day) cannot count.
+        occ_inv = occurrence_inventory(schedules_db, window_start, now_ts)
     problems = judge(read_detail, write_detail, manual,
                      read_forensics_data, write_forensics_data,
                      inventory=inventory, read_id=read_id,

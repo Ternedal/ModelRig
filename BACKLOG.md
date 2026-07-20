@@ -208,7 +208,26 @@ samme semver efter en docs-only commit). Bonus: bytecode-suppression i alle
 tre readers + PYTHONDONTWRITEBYTECODE arvet af subprocesser. Freeze-suite
 26→32. F-1501 = riggen. Krydsvalidering: droppet fandt IKKE app-surface-
 hullerne (fundet statisk), 134/135 fandt IKKE bytecode/reader-hullerne
-(fundet ved generalprøve mod ægte ZIP). P2/P3 (F-1506..F-1536)
+(fundet ved generalprøve mod ægte ZIP). P2/P3 (F-1506..F-1536) — fire software-P2'er taget i 1.58.138 (resten kræver rig eller beslutninger):
+**F-1507** attestations-læseren håndhæver nu fuld intern træ-konsistens:
+canonical unikke relative stier (afviser dubletter, absolutte stier, `..`,
+backslash) + `tree_files_verified == len(tree_paths)` — fem mutationer
+røde. **F-1509** occurrence-inventaret er nu bundet til et EKSPLICIT
+`[start, end)`-vindue (før: kun `created >= start`, så en occurrence dagen
+EFTER piloten talte med); DB-test beviser upper-bound-eksklusion.
+**F-1510** wiring-gaten beviser nu handler-SEMANTIK, ikke kun URL-
+tilstedeværelse: den rekursivt går ind i `_IncludedRouter`-containerne
+(som `app.routes`-iteration OG openapi er blinde for) og fanger duplicate
+`(method, path)` = first-match-shadowing (135-buggen), med selvtest så
+"ingen dubletter" ikke er intetsigende, plus verifikation af at planneren
+faktisk fik plan_store/memory/graph injiceret. **F-1511** runnerens mount-
+guard tjekkede `agent3_planner_mounted` som mount aldrig satte (permanent
+falsk, skjult af idempotens) — rettet til `agent3_mounted`, og fire døde
+imports fra 135-oprydningen fjernet. Suiter: freeze 32→37, campaign
+68→70, wiring 8→12; fuld glob 110/110 + Go 8/8. Resten af F-1506..F-1536
+er rig-afhængige (baselines qwen3/voice/RAG, Pixel-verify, isolation-
+matrix) eller beslutninger (data-sharing-policy, kryptering, self-update,
+merge-tæket for de 19 drafts) — parkeret til efter kampagnen.
 
 ## Milepæl 3 — Agent 3-pilot (mål task success) — tracker #60
 

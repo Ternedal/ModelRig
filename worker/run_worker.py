@@ -42,26 +42,19 @@ def _mount_optional_agent3() -> bool:
         return False
 
     routing_app = _routing_app()
-    if getattr(routing_app.state, "agent3_planner_mounted", False):
+    # F-1511: the guard must read the state-key mount_agent3 actually sets
+    # (agent3_mounted), not agent3_planner_mounted which nothing sets -- the
+    # old key made this guard permanently false, and only mount_agent3's own
+    # idempotency hid it. If already mounted, this is a no-op.
+    if getattr(routing_app.state, "agent3_mounted", False):
         return True
 
-    from app import paths as app_paths
     from app.agent3.api import mount_agent3
-    from app.agent3.capability_graph_api import (
-        build_capability_graph_router,
-        build_runtime_capability_graph,
-    )
-    from app.agent3.replan_preview_api import (
-        build_default_replan_preview_service,
-        build_replan_preview_router,
-    )
 
-    if not mount_agent3(routing_app):
-        return False
     # mount_agent3 owns the FULL production surface (rich planner,
     # replan-preview, outcome-answer, capability graph + receipt, memory).
     # The runner adds nothing -- dev serves exactly what production serves.
-    return True
+    return bool(mount_agent3(routing_app))
 
 
 if __name__ == "__main__":
