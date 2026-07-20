@@ -172,6 +172,14 @@ hardware-beviste før valideringsrunden):**
   produktion) OG at runnerens rige planner var stille skygget af mountens
   bare fra 131 (first-match). Mountet ejer nu HELE surfacen; runnerne
   tilføjer intet. Princip: dev serverer præcis hvad produktion serverer.
+  **Evidens-kæden strammet igen (1.58.137, gap-136-droppet F-1501..F-1536):**
+  bytecode (.pyc/__pycache__) er nu FAIL i freeze i begge modes (readerne
+  sætter dont_write_bytecode så de ikke selv-detonerer på rig-dagen); de
+  offline læsere geninventerer træet og afviser filer TILFØJET efter freeze
+  (ikke kun ændrede); kampagne-validatoren håndhæver per-halvdel freshness +
+  12t-spænd uafhængigt af produceren; git-mode kræver HEAD == publiceret
+  tag-SHA. Generalprøve mod ægte 136-ZIP afslørede bytecode-selvdetonering
+  og git/gitignore-hullet — ting hverken statisk analyse eller suiten fandt.
   **Gap-drop mod 133 lukket i 1.58.136 (F-1402..F-1405 + 1407/1426/1431):**
   extras = FAIL i gitless freeze; attestation v3 med fuldt træ-rollup
   (offline tamper-evidens for HELE træet, ikke kun worker/) + exact key

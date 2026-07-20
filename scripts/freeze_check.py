@@ -34,17 +34,51 @@ rather than failing, so the coherence checks still run offline.
 """
 from __future__ import annotations
 
-import json
+# F-1502/F-1503: this gate must not leave .pyc files in the candidate tree --
+# a freshly generated cache would look like an unaccounted-for extra to the
+# very check that forbids extras. Suppress bytecode for this process and
+# everything it launches, before importing anything that could emit a cache.
+import sys
+sys.dont_write_bytecode = True
 import os
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
+import json
 import hashlib
 import importlib.util
 import subprocess
-import sys
 from datetime import datetime, timezone
 import urllib.error
 import urllib.request
 
 REPO = "Ternedal/ModelRig"
+
+
+_SANCTIONED_ROOT_DIRS = {".git"}
+_SANCTIONED_TOP = {"validation"}
+
+
+def _scan_extras(repo_root, blobs):
+    """Every local file NOT in the committed blob set, minus the sanctioned
+    attestation dir (F-1502/F-1503). Bytecode/__pycache__ are extras -- the
+    reader in frozen_attestation uses an identical rule, pinned by a test."""
+    extras = []
+    for dirpath, dirnames, filenames in os.walk(repo_root):
+        kept = []
+        for d in dirnames:
+            if d in _SANCTIONED_ROOT_DIRS:
+                continue
+            if dirpath == repo_root and d in _SANCTIONED_TOP:
+                continue
+            kept.append(d)
+        dirnames[:] = kept
+        for fname in filenames:
+            rel_path = os.path.relpath(
+                os.path.join(dirpath, fname), repo_root
+            ).replace(os.sep, "/")
+            if rel_path not in blobs:
+                extras.append(rel_path)
+    return extras
 
 
 def _load_frozen_attestation():
@@ -191,29 +225,18 @@ def main() -> int:
         # runtime outputs already excluded below (validation/, __pycache__,
         # *.pyc). Anything else riding along inside an attested tree is
         # exactly what the attestation exists to refuse.
-        extras: list[str] = []
-        for dirpath, dirnames, filenames in os.walk(repo_root):
-            kept = []
-            for d in dirnames:
-                if d in {".git", "__pycache__", "node_modules"}:
-                    continue
-                if dirpath == repo_root and d == "validation":
-                    continue
-                kept.append(d)
-            dirnames[:] = kept
-            for fname in filenames:
-                if fname.endswith(".pyc"):
-                    continue
-                rel_path = os.path.relpath(
-                    os.path.join(dirpath, fname), repo_root
-                ).replace(os.sep, "/")
-                if rel_path not in blobs:
-                    extras.append(rel_path)
+        extras = _scan_extras(repo_root, blobs)
         if extras:
+            bytecode = [p for p in extras
+                        if p.endswith(".pyc") or "__pycache__" in p]
             print(f"  FAIL  {len(extras)} local file(s) are NOT in the "
                   f"release tree:")
             for rel_path in sorted(extras)[:5]:
                 print(f"         - {rel_path}")
+            if bytecode:
+                print(f"         ({len(bytecode)} are Python bytecode -- "
+                      f"delete __pycache__/*.pyc BEFORE freeze; caches "
+                      f"belong in a runtime dir made after attestation)")
             print(f"         -> a fresh ZIP has zero extras; start from an "
                   f"untouched extraction of v{version}")
             return 1
@@ -224,6 +247,50 @@ def main() -> int:
     else:
         _, short = _run("git", "rev-parse", "--short", "HEAD")
         print(f"  candidate: {version or '?'}  @  {short}")
+        # F-1505: git-mode freezes HEAD; gitless-mode resolves the published
+        # tag. After a post-release docs commit without a version bump the
+        # two modes would freeze DIFFERENT commits under the same semver.
+        # Require HEAD to be exactly the published tag's commit -- or bump.
+        if token and version:
+            try:
+                ref = _api(f"https://api.github.com/repos/{REPO}"
+                           f"/git/ref/tags/v{version}", token)
+                obj = ref.get("object") or {}
+                tag_sha = obj.get("sha") or ""
+                if obj.get("type") == "tag" and tag_sha:
+                    tag_sha = (_api(f"https://api.github.com/repos/{REPO}"
+                                    f"/git/tags/{tag_sha}", token)
+                               .get("object", {}).get("sha") or "")
+                _, head_full = _run("git", "rev-parse", "HEAD")
+                if tag_sha and head_full and tag_sha != head_full:
+                    print(f"  FAIL  HEAD ({head_full[:7]}) is not the published "
+                          f"v{version} commit ({tag_sha[:7]})")
+                    print("         -> git-mode and the release ZIP would then "
+                          "validate different code under one version.")
+                    print(f"         -> Check out v{version} exactly, or bump the "
+                          "version for this post-release commit and publish it.")
+                    return 1
+                if tag_sha:
+                    print(f"  OK    HEAD is exactly the published v{version} "
+                          f"commit")
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404:
+                    print(f"  FAIL  no published release tag v{version} to pin "
+                          f"HEAD against (HTTP 404)")
+                    print("         -> Publish the release for this version, or "
+                          "validate gitless against an existing tag.")
+                    return 1
+                print(f"  FAIL  could not resolve tag v{version} (HTTP "
+                      f"{exc.code})")
+                return 1
+            except urllib.error.URLError as exc:
+                print(f"  FAIL  could not reach the API to pin the tag "
+                      f"({exc.reason})")
+                return 1
+        elif not token:
+            print("  NOTE  cannot pin HEAD to the published tag without a "
+                  "token (F-1505)")
+            warns += 1
     print()
 
     # --- 1. clean working tree ----------------------------------------------
@@ -243,6 +310,32 @@ def main() -> int:
             blockers += 1
         else:
             print("  OK    working tree clean")
+        # F-1502: .pyc/__pycache__ are gitignored, so `git status` above
+        # cannot see them -- but bytecode must not exist at candidate-freeze
+        # in EITHER mode. The gitless branch scans via the blob set; git-mode
+        # scans explicitly here so the two modes agree.
+        repo_root_git = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), ".."))
+        stray_bytecode = []
+        for dirpath, dirnames, filenames in os.walk(repo_root_git):
+            if ".git" in dirnames:
+                dirnames.remove(".git")
+            for fname in filenames:
+                if fname.endswith(".pyc") or "__pycache__" in dirpath:
+                    stray_bytecode.append(os.path.relpath(
+                        os.path.join(dirpath, fname), repo_root_git
+                    ).replace(os.sep, "/"))
+        if stray_bytecode:
+            print(f"  FAIL  {len(stray_bytecode)} Python bytecode file(s) in "
+                  f"the candidate tree:")
+            for rel_path in sorted(stray_bytecode)[:5]:
+                print(f"         - {rel_path}")
+            print("         -> delete __pycache__/*.pyc BEFORE freeze (they "
+                  "are gitignored, so git status cannot catch them); caches "
+                  "belong in a runtime dir made after attestation (F-1502)")
+            blockers += 1
+        else:
+            print("  OK    no Python bytecode in the candidate tree")
 
     # --- 2. version stamps consistent ---------------------------------------
     vt = os.path.join(os.path.dirname(__file__), "version_tool.py")

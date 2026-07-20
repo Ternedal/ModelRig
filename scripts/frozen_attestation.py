@@ -31,6 +31,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -67,6 +68,35 @@ def attestation_path(root: Path) -> Path:
 def _blob_sha1(path: Path) -> str:
     body = path.read_bytes()
     return hashlib.sha1(b"blob %d\x00" % len(body) + body).hexdigest()
+
+
+# F-1503: the reader's own copy of the freeze gate's extras rule. It cannot
+# import freeze_check (freeze_check imports THIS module), so the rule is
+# duplicated -- but a parity check in the freeze suite asserts the two stay
+# identical, so drift is caught. Only validation/ (the attestation) and .git
+# are sanctioned; bytecode is an extra.
+_SANCTIONED_ROOT_DIRS = {".git"}
+_SANCTIONED_TOP = {"validation"}
+
+
+def _scan_extras_offline(root: Path, blob_set: set) -> list:
+    extras = []
+    for dirpath, dirnames, filenames in os.walk(str(root)):
+        kept = []
+        for d in dirnames:
+            if d in _SANCTIONED_ROOT_DIRS:
+                continue
+            if os.path.samefile(dirpath, str(root)) and d in _SANCTIONED_TOP:
+                continue
+            kept.append(d)
+        dirnames[:] = kept
+        for fname in filenames:
+            rel_path = os.path.relpath(
+                os.path.join(dirpath, fname), str(root)
+            ).replace(os.sep, "/")
+            if rel_path not in blob_set:
+                extras.append(rel_path)
+    return extras
 
 
 def compute_tree_sha256(root: Path, paths: list[str]) -> str:
@@ -266,5 +296,22 @@ def load_attestation(
                 "er aendret efter freeze. "
                 f"attesteret: {str(tree_sha)[:12]}..., "
                 f"beregnet: {actual_tree[:12]}..."
+            )
+        # F-1503: the rollup proves the RECORDED files are unchanged, but a
+        # file ADDED after freeze is not in tree_paths and would go unseen.
+        # Re-inventory the actual tree offline and refuse any extra, using
+        # the SAME scanner the freeze gate uses (so gate and reader agree on
+        # exactly one rule). Bytecode/__pycache__ count as extras here too.
+        blob_set = set(tree_paths)
+        extras = _scan_extras_offline(root, blob_set)
+        if extras:
+            bytecode = [p for p in extras
+                        if p.endswith(".pyc") or "__pycache__" in p]
+            detail = f" ({len(bytecode)} bytecode)" if bytecode else ""
+            raise AttestationError(
+                f"{len(extras)} fil(er) er tilfoejet i traeet EFTER freeze"
+                f"{detail} -- ikke i attestationen: "
+                + ", ".join(sorted(extras)[:3])
+                + " -- hent en frisk ZIP og koer freeze_check forfra"
             )
     return data

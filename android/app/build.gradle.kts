@@ -23,8 +23,8 @@ android {
         applicationId = "dk.ternedal.modelrig"
         minSdk = 26
         targetSdk = 35
-        versionCode = 269          // monotonic, bumped every release (not tied to semver)
-        versionName = "1.58.136"
+        versionCode = 270          // monotonic, bumped every release (not tied to semver)
+        versionName = "1.58.137"
     }
 
     signingConfigs {

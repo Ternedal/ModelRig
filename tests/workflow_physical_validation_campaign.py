@@ -619,6 +619,59 @@ with tempfile.TemporaryDirectory(dir=ROOT) as td:
           "an executed write without its attempt-audit fails -- the pinned "
           "sequence is the proof, not the counter")
 
+# F-1504: the producer enforces per-HALF freshness and a <=12h cross-half
+# span; the campaign validator must re-derive BOTH independently. These two
+# mutations are specifically ones the OLD single-newest-stamp check missed:
+# in each, the globally newest timestamp is fresh, so only per-half / span
+# logic can catch them.
+with tempfile.TemporaryDirectory(dir=ROOT) as td:
+    temp = Path(td)
+    for name, report in reports_with_artifacts(temp).items():
+        write(temp / f"{name}.json", report)
+    pilot = reports_with_artifacts(temp)["scheduler_pilot"]
+    # Age ONLY the read half by ~2 days; the write half stays fresh, so
+    # max(all stamps) is still recent. A validator that only checks the
+    # newest stamp would pass this stale-read/fresh-write mix.
+    rd = pilot["forensics"]["read"]
+    for key in ("first_created", "last_resolved"):
+        rd["window"][key] -= 180000.0
+    for occ in rd["occurrences"]:
+        for key in ("created", "resolved", "occurrence_due_at"):
+            if isinstance(occ.get(key), (int, float)):
+                occ[key] -= 180000.0
+    write(temp / "scheduler_pilot.json", pilot)
+    r, code = campaign.campaign_report(args_for(temp, "verify"))
+    errs = r["evidence"]["scheduler_pilot"]["errors"]
+    check(code == 1 and any("read-halvdelen" in e and "F-1504" in e
+                            for e in errs),
+          "a stale read half carried by a fresh write half fails the "
+          "campaign by naming the read half -- per-half freshness parity "
+          "the old global-newest check could not see (F-1504)")
+
+with tempfile.TemporaryDirectory(dir=ROOT) as td:
+    temp = Path(td)
+    for name, report in reports_with_artifacts(temp).items():
+        write(temp / f"{name}.json", report)
+    pilot = reports_with_artifacts(temp)["scheduler_pilot"]
+    # Push the read half back ~20h and the write half back ~1h. BOTH are
+    # within 24h of the report, so per-half freshness passes -- but they are
+    # >12h apart, so they cannot be one pilot sitting. Only the cross-half
+    # span check catches this.
+    rd = pilot["forensics"]["read"]
+    for key in ("first_created", "last_resolved"):
+        rd["window"][key] -= 72000.0
+    for occ in rd["occurrences"]:
+        for key in ("created", "resolved", "occurrence_due_at"):
+            if isinstance(occ.get(key), (int, float)):
+                occ[key] -= 72000.0
+    write(temp / "scheduler_pilot.json", pilot)
+    r, code = campaign.campaign_report(args_for(temp, "verify"))
+    errs = r["evidence"]["scheduler_pilot"]["errors"]
+    check(code == 1 and any("spaender" in e and "SAMME pilot" in e
+                            for e in errs),
+          "two halves 20h apart -- each fresh, but not one sitting -- fail "
+          "the campaign on the cross-half 12h span (F-1504)")
+
 # Gitless identity: the rig unpacks a ZIP; candidate_identity must inherit
 # the freeze gate's attestation instead of dying on "git HEAD is unavailable".
 def _gitless_root(att=None, version="1.58.131"):

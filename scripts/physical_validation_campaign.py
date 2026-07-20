@@ -16,6 +16,13 @@ present, fresh, candidate-bound and green.
 """
 from __future__ import annotations
 
+# F-1502/F-1503: this reader must not leave .pyc in the candidate tree --
+# a fresh cache would look like an extra to the check that forbids extras.
+import sys as _sys
+_sys.dont_write_bytecode = True
+import os as _os
+_os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 import argparse
 import hashlib
 import importlib.util
@@ -802,31 +809,58 @@ def _validate_scheduler_pilot(
     # the newest durable timestamp in the forensics must lie within the
     # rig-day window of the report's own generated_at -- replayed
     # historical pilot IDs die here even if a doctored producer let them by.
+    #
+    # F-1504: the producer enforces per-HALF freshness and a <=12h span
+    # across halves; a validator that only checks the single newest stamp
+    # would pass a stale read half carried by a fresh write half. Re-derive
+    # BOTH properties independently, per half, with the same thresholds.
     gen = report.get("generated_at")
-    stamps = []
-    for half in ("read", "write"):
-        fdata = _nested(report, "forensics", half) or {}
-        win = fdata.get("window") or {}
-        for key in ("first_created", "last_resolved"):
-            if isinstance(win.get(key), (int, float)):
-                stamps.append(float(win[key]))
-        for occ in fdata.get("occurrences") or []:
-            for key in ("created", "resolved"):
-                if isinstance(occ.get(key), (int, float)):
-                    stamps.append(float(occ[key]))
-    if stamps and isinstance(gen, str):
+    gen_ts = None
+    if isinstance(gen, str):
         try:
             gen_ts = datetime.fromisoformat(gen).timestamp()
         except ValueError:
-            gen_ts = None
             errors.append("generated_at er ikke en ISO-8601 tid")
-        if gen_ts is not None:
-            age_h = (gen_ts - max(stamps)) / 3600.0
+    per_half_newest: dict[str, float] = {}
+    per_half_oldest: dict[str, float] = {}
+    stamps = []
+    for half in ("read", "write"):
+        fdata = _nested(report, "forensics", half) or {}
+        half_stamps = []
+        win = fdata.get("window") or {}
+        for key in ("first_created", "last_resolved"):
+            if isinstance(win.get(key), (int, float)):
+                half_stamps.append(float(win[key]))
+        for occ in fdata.get("occurrences") or []:
+            for key in ("created", "resolved"):
+                if isinstance(occ.get(key), (int, float)):
+                    half_stamps.append(float(occ[key]))
+        if half_stamps:
+            per_half_newest[half] = max(half_stamps)
+            per_half_oldest[half] = min(half_stamps)
+            stamps.extend(half_stamps)
+    if gen_ts is not None:
+        for half, newest in per_half_newest.items():
+            age_h = (gen_ts - newest) / 3600.0
             if age_h > 24.0:
                 errors.append(
-                    f"pilot-forensikken er {age_h:.1f} timer aeldre end "
-                    "rapporten (max 24) -- historiske pilot-IDs beviser "
-                    "ikke denne kandidats rig-dag")
+                    f"{half}-halvdelen er {age_h:.1f} timer aeldre end "
+                    "rapporten (max 24) -- en gammel halvdel maa ikke baere "
+                    "en frisk med (F-1504 parity)")
+    if len(per_half_newest) == 2 and len(per_half_oldest) == 2:
+        span_h = (max(per_half_newest.values())
+                  - min(per_half_oldest.values())) / 3600.0
+        if span_h > 12.0:
+            errors.append(
+                f"pilot-halvdelene spaender {span_h:.1f} timer (max 12) -- "
+                "read og write er ikke fra SAMME pilot (F-1504 parity)")
+    if stamps and gen_ts is not None:
+        age_h = (gen_ts - max(stamps)) / 3600.0
+        if age_h > 24.0:
+            errors.append(
+                f"pilot-forensikken er {age_h:.1f} timer aeldre end "
+                "rapporten (max 24) -- historiske pilot-IDs beviser "
+                "ikke denne kandidats rig-dag")
     elif not stamps and (_nested(report, "forensics", "read")
                          or _nested(report, "forensics", "write")):
         errors.append(

@@ -23,6 +23,13 @@ Exit code is 0 only when the rig is ready to validate.
 """
 from __future__ import annotations
 
+# F-1502/F-1503: this reader must not leave .pyc in the candidate tree --
+# a fresh cache would look like an extra to the check that forbids extras.
+import sys as _sys
+_sys.dont_write_bytecode = True
+import os as _os
+_os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 import argparse
 import importlib.util
 import json

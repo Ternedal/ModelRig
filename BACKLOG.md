@@ -190,6 +190,25 @@ app-surface-hullerne — 134/135's kontrakt-mod-tabel-målinger så ting
 statisk helanalyse ikke gjorde. P2/P3 fra det NYE drop (F-1406..F-1431: baselines qwen3/RAG/voice, scheduler-tid/grants/concurrency, Android-UX,
 capability/data-sharing/research, isolation, memory, updater, merge-tog for
 de 19 drafts er parkeret til EFTER kampagnen jf. styringsreglen.
+**Helanalyse-gap-drop mod 1.58.136 (20/7, F-1501..F-1536):** dom "runtime-
+wired, evidence-hardened promotion candidate — still physically unproven".
+Fire nye adresserbare kanter, alle lukket i 1.58.137: **F-1502** eksekverbar
+Python-bytecode (.pyc/__pycache__) er nu FAIL i freeze i BEGGE modes (før:
+sanktioneret skip) — bytecode kan bære adfærd ingen source-blob dækker;
+readerne sætter `sys.dont_write_bytecode` så de ikke selv-detonerer.
+**F-1503** de offline attestations-læsere geninventerer nu træet og afviser
+filer TILFØJET efter freeze (rollup fangede kun ændrede registrerede filer,
+ikke nye) — delt `_scan_extras`-regel mellem gate og læser, pinnet identisk
+af paritetstest. **F-1504** kampagne-validatoren genberegner nu per-halvdel
+freshness OG 12t-spænd uafhængigt (før: kun nyeste globale stamp — en gammel
+halvdel kunne ride på en frisk); to mutationer bevist røde MOD den blinde
+gamle check. **F-1505** git-mode kræver nu at HEAD == publiceret tag-SHA
+(før: git fryser HEAD, gitless løser tagget → forskellige commits under
+samme semver efter en docs-only commit). Bonus: bytecode-suppression i alle
+tre readers + PYTHONDONTWRITEBYTECODE arvet af subprocesser. Freeze-suite
+26→32. F-1501 = riggen. Krydsvalidering: droppet fandt IKKE app-surface-
+hullerne (fundet statisk), 134/135 fandt IKKE bytecode/reader-hullerne
+(fundet ved generalprøve mod ægte ZIP). P2/P3 (F-1506..F-1536)
 
 ## Milepæl 3 — Agent 3-pilot (mål task success) — tracker #60
 

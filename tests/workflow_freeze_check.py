@@ -196,6 +196,20 @@ check("ci was GREEN" in _out and "codeql was GREEN" in _out,
       "and BOTH workflows are named as verified -- codeql is part of the "
       "evidence now, not just ci")
 
+# F-1502 in git-mode: bytecode is gitignored, so the cleanliness check
+# cannot see it; an explicit scan must fail the freeze anyway.
+_pyc_git = _make_repo(clean=True)
+(_pyc_git / "worker" / "app" / "__pycache__").mkdir(parents=True)
+(_pyc_git / "worker" / "app" / "__pycache__" / "y.cpython-312.pyc"
+ ).write_bytes(b"\x00fake")
+_code, _out = run_in(
+    _pyc_git, token="tkn",
+    api=lambda url, token: _runs(ci=("completed", "success"),
+                                 codeql=("completed", "success")))
+check(_code == 1 and "bytecode" in _out,
+      "git-mode fails freeze on gitignored bytecode the cleanliness check "
+      "cannot see -- both modes forbid .pyc at candidate-freeze (F-1502)")
+
 # --- every degraded CI state blocks ------------------------------------------
 for name, api, needle in [
     ("codeql missing", lambda u, t: _runs(ci=("completed", "success")),
@@ -215,9 +229,17 @@ for name, api, needle in [
 
 def _boom(url, token):
     import urllib.error
-    raise urllib.error.URLError("offline")
+    # The F-1505 tag pin resolves the tag BEFORE the CI check; this case is
+    # specifically about the Actions API being unreachable, so let the tag
+    # resolve (HEAD == tag in the fixture) and only the runs endpoint fails.
+    if "/git/ref/tags/" in url:
+        return {"object": {"type": "commit", "sha": _HEAD_SHA}}
+    if "/actions/runs" in url:
+        raise urllib.error.URLError("offline")
+    raise AssertionError(f"uventet API-url i _boom: {url}")
 
 _r = _make_repo(clean=True)
+_HEAD_SHA = _git(_r, "rev-parse", "HEAD").stdout.strip()
 _code, _out = run_in(_r, token="tkn", api=_boom)
 check(_code == 1 and "could not read CI status" in _out,
       "an unreadable Actions API is NOT FROZEN -- fail closed, never "
@@ -344,6 +366,66 @@ check(_code == 1 and "NOT release commit" in _out
       and not (_g_tmp / "validation" / "frozen-candidate.json").exists(),
       "a single mismatched file fails the tree binding by name and nothing "
       "is attested -- a tampered ZIP cannot become FROZEN")
+
+# F-1502: Python bytecode is an extra now, not a sanctioned runtime output.
+# A .pyc riding inside an attested tree can carry behaviour no source blob
+# accounts for.
+_g_pyc = _strip_git(_make_repo(version="1.58.131"))
+(_g_pyc / "worker" / "app" / "__pycache__").mkdir(parents=True)
+(_g_pyc / "worker" / "app" / "__pycache__" / "x.cpython-312.pyc").write_bytes(
+    b"\x00fakebytecode")
+_code, _out = run_in(_g_pyc, token="tok", api=_gitless_api(_g_pyc))
+check(_code == 1 and "bytecode" in _out
+      and not (_g_pyc / "validation" / "frozen-candidate.json").exists(),
+      "a stray .pyc fails freeze by name and nothing is attested -- bytecode "
+      "must not exist at candidate-freeze (F-1502)")
+
+# F-1503: a reader must re-inventory the tree and reject a file ADDED after
+# freeze, even though the recorded rollup still matches. This is the offline
+# rig-day check, so it is exercised through the attestation module directly.
+_g_add = _strip_git(_make_repo(version="1.58.131"))
+_code, _out = run_in(_g_add, token="tok", api=_gitless_api(_g_add))
+check(_code == 0, "sanity: clean gitless tree froze")
+import importlib.util as _ilu
+_faspec = _ilu.spec_from_file_location(
+    "fa_reader", ROOT / "scripts" / "frozen_attestation.py")
+_fa = _ilu.module_from_spec(_faspec); _faspec.loader.exec_module(_fa)
+_fa.load_attestation(_g_add, expected_version="1.58.131")  # passes clean
+(_g_add / "sneaked_in.py").write_text("print('added after freeze')\n")
+try:
+    _fa.load_attestation(_g_add, expected_version="1.58.131")
+    check(False, "a file added after freeze must be rejected by the reader")
+except _fa.AttestationError as _e:
+    check("EFTER freeze" in str(_e) and "sneaked_in.py" in str(_e),
+          "the offline reader re-inventories the tree and rejects a "
+          "post-freeze extra by name -- the rollup alone could not (F-1503)")
+
+# F-1503 parity: the reader's scanner rule and the gate's scanner rule must
+# be byte-identical, or a file one accepts the other could reject. They live
+# in two modules (no import cycle) so a test pins them together.
+import inspect as _inspect
+_fc_spec = _ilu.spec_from_file_location(
+    "fc_scan", ROOT / "scripts" / "freeze_check.py")
+_fc = _ilu.module_from_spec(_fc_spec); _fc_spec.loader.exec_module(_fc)
+check(_fc._SANCTIONED_ROOT_DIRS == _fa._SANCTIONED_ROOT_DIRS
+      and _fc._SANCTIONED_TOP == _fa._SANCTIONED_TOP,
+      "the freeze gate and the offline reader sanction EXACTLY the same "
+      "paths -- drift between them would let an extra slip past one (F-1503)")
+
+# F-1505: git-mode must refuse when HEAD is not the published tag's commit,
+# so git-mode and the release ZIP cannot validate different code under one
+# version. The fixture's HEAD differs from the tag the API reports.
+_g1505 = _make_repo(clean=True, version="1.58.131")
+_other = "a" * 40
+def _api_1505(url, token):
+    if "/git/ref/tags/" in url:
+        return {"object": {"type": "commit", "sha": _other}}
+    return _runs(ci=("completed", "success"),
+                 codeql=("completed", "success"))
+_code, _out = run_in(_g1505, token="tok", api=_api_1505)
+check(_code == 1 and "not the published" in _out,
+      "git-mode refuses when HEAD is not the published tag commit -- both "
+      "workflows must validate the same artifact (F-1505)")
 
 _g_notok = _strip_git(_make_repo(version="1.58.131"))
 _code, _out = run_in(_g_notok, token=None, api=_gitless_api())
