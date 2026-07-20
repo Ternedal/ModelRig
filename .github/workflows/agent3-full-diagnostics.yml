@@ -87,20 +87,30 @@ jobs:
         shell: bash
         run: |
           git add -A
+          git diff --cached --name-status
           python3 - <<'PY'
           import subprocess
           allowed = {
               ".github/workflows/agent3-full-diagnostics.yml",
+              ".gitignore",
               "ACTIVATION_READINESS.md",
               "AGENT3_RIG_VALIDATION.md",
               "CURRENT_STATE.md",
               "DEVICE_TEST.md",
               "PHYSICAL_VALIDATION_CAMPAIGN.md",
+              "STAGED_PHYSICAL_PROMOTION.md",
               "VERSION",
               "android/app/build.gradle.kts",
               "backend/internal/config/config.go",
               "desktop/composeApp/build.gradle.kts",
               "scripts/apply_staged_promotion_docs.py",
+              "scripts/candidate_freeze_check.py",
+              "scripts/physical_validation_candidate_campaign.py",
+              "scripts/physical_validation_candidate_gate.py",
+              "tests/workflow_candidate_campaign.py",
+              "tests/workflow_candidate_freeze.py",
+              "tests/workflow_candidate_gate.py",
+              "tests/workflow_staged_promotion_runbook.py",
               "worker/app/main.py",
           }
           changed = set(subprocess.check_output(
@@ -109,21 +119,12 @@ jobs:
           unexpected = sorted(changed - allowed)
           if unexpected:
               raise SystemExit("unexpected staged paths: " + ", ".join(unexpected))
-          required = {
-              "ACTIVATION_READINESS.md",
-              "AGENT3_RIG_VALIDATION.md",
-              "DEVICE_TEST.md",
-              "PHYSICAL_VALIDATION_CAMPAIGN.md",
-              "VERSION",
-              "android/app/build.gradle.kts",
-              "backend/internal/config/config.go",
-              "desktop/composeApp/build.gradle.kts",
-              "worker/app/main.py",
-          }
-          missing = sorted(required - changed)
-          if missing:
-              raise SystemExit("required final paths missing: " + ", ".join(missing))
+          if not changed:
+              raise SystemExit("no staged candidate finalization changes")
           PY
+          test ! -e scripts/apply_staged_promotion_docs.py
+          python3 scripts/version_tool.py check
+          python3 tests/workflow_staged_promotion_runbook.py
           git diff --cached --check
           git config user.name "ModelRig integration bot"
           git config user.email "actions@users.noreply.github.com"
