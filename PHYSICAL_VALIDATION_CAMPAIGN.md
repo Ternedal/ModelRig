@@ -1,7 +1,8 @@
 # Physical validation campaign — én kandidat, ét samlet bevis
 
-Denne runbook samler de fysiske **Prove**-opgaver T-004, T-005, T-006,
-T-007, T-040 og T-043. De enkelte harnesses har fortsat deres egne detaljerede
+Denne runbook samler de syv fysiske **Prove**-opgaver T-004, T-005, T-006,
+T-007, T-040, T-043 og T-019. De enkelte harnesses har fortsat deres egne
+detaljerede
 runbooks; denne kampagne sørger for, at deres rapporter faktisk beskriver den
 samme version, Git-commit og worker-kode.
 
@@ -252,7 +253,7 @@ Exit codes:
 
 | Exit | Betydning |
 |---:|---|
-| `0` | I `verify`: alle seks fysiske beviser er present, friske, candidate-bound og grønne. |
+| `0` | I `verify`: alle syv fysiske beviser er present, friske, candidate-bound og grønne. |
 | `1` | En rapport mangler, er stale, mismatched eller har en rød individuel gate. |
 | `2` | Kampagneværktøjet kunne ikke bestemme kandidat eller skrive en troværdig rapport. |
 
@@ -273,7 +274,7 @@ Copy-Item `
 Kontrollér før commit:
 
 - candidate version, Git-SHA og code fingerprint;
-- alle seks evidence statuses er `pass`;
+- alle syv evidence statuses er `pass`;
 - ingen `missing`, `failed` eller `candidate_errors`;
 - hver rapport- og lifecycle-artifact-SHA er udfyldt;
 - `physical_campaign_complete=true`;

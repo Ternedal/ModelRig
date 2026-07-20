@@ -190,6 +190,9 @@ def evaluate(module, root: Path, candidate: dict, campaign: Path, attestation: P
 
 def main() -> None:
     module = load_module()
+    doc = " ".join((module.__doc__ or "").split())
+    assert "seven-proof physical campaign" in doc
+    assert "eighth-proof final receipt" in doc
     now = datetime(2026, 7, 20, 18, 30, tzinfo=timezone.utc)
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)

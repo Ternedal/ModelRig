@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Combine the six-proof physical campaign with physical T-032 peer evidence.
+"""Combine the seven-proof physical campaign with physical T-032 peer evidence.
 
 This script performs no network request. It validates the existing campaign
 receipt, the interactive-Windows attestation and the exact underlying browser
-peer receipt against one current clean candidate, then writes a seventh-proof
+peer receipt against one current clean candidate, then writes an eighth-proof
 final receipt with production_activation=false.
 """
 from __future__ import annotations
