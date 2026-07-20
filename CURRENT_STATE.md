@@ -201,11 +201,13 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_agent3_dormant.py`
 - `tests/workflow_android_credential_commit.py`
 - `tests/workflow_browser_peer_public_validation.py`
+- `tests/workflow_browser_peer_public_validation_operator.py`
 - `tests/workflow_current_state.py`
 - `tests/workflow_dep_pins.py`
 - `tests/workflow_doc_authority.py`
 - `tests/workflow_freeze_check.py`
 - `tests/workflow_physical_validation_campaign.py`
+- `tests/workflow_physical_validation_final_gate.py`
 - `tests/workflow_release.py`
 - `tests/workflow_rig_preflight.py`
 - `tests/workflow_test_coverage.py`
