@@ -210,12 +210,15 @@ def _browser_headers(value: Any) -> tuple[tuple[str, str], ...]:
             raise BrowserPeerFulfillmentContractError(
                 "browser header name is invalid"
             )
+        cleaned_value = _header_value(raw_value)
         if name in _FORBIDDEN_REQUEST_HEADERS:
+            if not cleaned_value:
+                continue
             raise BrowserPeerFulfillmentDenied(
                 "credential or framing browser header is forbidden"
             )
         if name in _ALLOWED_BROWSER_HEADERS:
-            clean[name] = _header_value(raw_value)
+            clean[name] = cleaned_value
     clean.setdefault("accept", "text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.1")
     clean.setdefault("accept-language", "en-US,en;q=0.8")
     clean.setdefault("user-agent", "ModelRig-BrowserPeer/1.0")
