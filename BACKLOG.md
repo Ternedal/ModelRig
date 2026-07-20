@@ -149,7 +149,14 @@ håndhævet i BÅDE producer og kampagne-validator — droppens "historiske
 pilot-IDs"-mutation testet rød på begge niveauer. Accepteret rest fra
 mutationslisten: recovery-linjens tal kan ikke DB-krydstjekkes ærligt
 offline (startup-snapshot ≠ slut-tilstand); linjen kræves fortsat, tallene
-attesteres af operatøren. F-1301 (kampagnen) er fortsat riggens. P2/P3 (F-1306..F-1327: scheduler-tid/grants/concurrency, Android-UX,
+attesteres af operatøren. F-1301 (kampagnen) er fortsat riggens.
+**Post-133-audit af ps1-kæden (19/7):** harnessens komplette rute-kontrakt
+målt mod den mountede tabel (openapi-linsen — app.routes-iteration er blind
+for includes) afslørede TREDJE forekomst af orphaned-wiring-klassen:
+`build_memory_router` havde nul callere; harnessen kalder POST /memory,
+/memory/context-preview og DELETE /memory/{id} → ps1'ens step 1 ville 404'e
+på rig-dagen. Mountet i 1.58.134 (mount ejer store + router; dev-runnerne
+slanket til genbrug), wiring-suiten kræver trioen. P2/P3 (F-1306..F-1327: scheduler-tid/grants/concurrency, Android-UX,
 capability/data-sharing/research, isolation, memory, updater, merge-tog for
 de 17 drafts #92–#110) er parkeret til EFTER kampagnen jf. styringsreglen.
 

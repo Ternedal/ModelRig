@@ -73,6 +73,14 @@ def entrypoint_routes(agent3_flag: str, tmp: str) -> list[str]:
 
 with tempfile.TemporaryDirectory() as td:
     routes_on = entrypoint_routes("1", td)
+    check(all(p in routes_on for p in (
+        "/experimental/agent3/memory",
+        "/experimental/agent3/memory/context-preview",
+        "/experimental/agent3/memory/{memory_id}")),
+          "the memory surface the rig-evidence harness calls is mounted by "
+          "the production entrypoint -- third orphaned router (mount -> "
+          "planner -> memory), found by auditing the harness' complete "
+          "route contract")
     check("/experimental/agent3/status" in routes_on,
           "with the flag ON, the documented entrypoint serves agent3 status "
           "-- the exact route the campaign's model_eval slot calls through "

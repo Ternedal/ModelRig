@@ -21,8 +21,6 @@ from app.agent3.capability_graph_api import (
 )
 from app.agent3.capability_receipt_api import build_capability_receipt_router
 from app.agent3.integration import V2ToolAdapter
-from app.agent3.memory import MemoryStore
-from app.agent3.memory_api import build_memory_router
 from app.agent3.outcome_answer_api import build_outcome_answer_router
 from app.agent3.plan_store import PlanStore
 from app.agent3.planner import build_planner_router
@@ -48,8 +46,9 @@ if __name__ == "__main__":
         adapter = V2ToolAdapter()
         worker_version = getattr(app, "version", None)
         plan_db = app_paths.resolve("./kaliv-agent3-plans.db", env="KALIV_AGENT3_PLAN_DB")
-        memory_db = app_paths.resolve("./kaliv-agent3-memory.db", env="KALIV_AGENT3_MEMORY_DB")
-        memory_store = MemoryStore(memory_db)
+        # mount_agent3 owns the memory surface now (router + store on
+        # app.state) -- the runner reuses it instead of double-including.
+        memory_store = app.state.agent3_memory_store
         replan_preview_service = build_default_replan_preview_service(
             adapter,
             app.state.agent3_replanner,
@@ -70,7 +69,6 @@ if __name__ == "__main__":
                 capability_graph_provider=graph_provider,
             )
         )
-        app.include_router(build_memory_router(memory_store))
         app.include_router(
             build_replan_preview_router(
                 replan_preview_service,
@@ -90,7 +88,6 @@ if __name__ == "__main__":
                 graph_provider,
             )
         )
-        app.state.agent3_memory_store = memory_store
         app.state.agent3_replan_preview_service = replan_preview_service
         app.state.agent3_outcome_answer_mounted = True
         app.state.agent3_capability_graph_mounted = True

@@ -506,6 +506,21 @@ def mount_agent3(app: FastAPI) -> bool:
     app.include_router(
         build_planner_router(adapter, orchestrator=orchestrator)
     )
+    # Third instance of the same orphaned-wiring class (mount -> planner ->
+    # memory): build_memory_router existed, was suite-tested in isolation,
+    # and had ZERO callers -- the rig-evidence harness calls POST /memory,
+    # POST /memory/context-preview and DELETE /memory/{id}, so the ps1's
+    # step 1 died in 404 on rig day. Found by auditing the harness'
+    # complete route contract against the mounted table (openapi lens).
+    from .. import paths as _paths
+    from .memory import MemoryStore
+    from .memory_api import build_memory_router
+    memory_path = _paths.resolve(
+        "./kaliv-agent3-memory.db", env="KALIV_AGENT3_MEMORY_DB"
+    )
+    memory_store = MemoryStore(str(memory_path))
+    app.include_router(build_memory_router(memory_store))
+    app.state.agent3_memory_store = memory_store
     app.state.agent3_mounted = True
     app.state.agent3_orchestrator = orchestrator
     app.state.agent3_replanner = replan_service
