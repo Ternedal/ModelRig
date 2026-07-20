@@ -10,7 +10,6 @@ Defaults mirror deploy/run-windows.ps1: loopback on 8099 (the worker is only
 ever called by the backend on the same machine; it is deliberately NOT
 LAN-exposed).
 """
-import ipaddress
 import os
 import sys
 
@@ -18,12 +17,10 @@ import uvicorn
 
 # Production must use the outer ASGI guard: it bounds chunked request bodies
 # before FastAPI parses them and removes voice temp data after the final stream
-# frame. Optional Agent 3.0 routes are mounted on the wrapped FastAPI instance,
+# frame. Optional Agent 3 routes are mounted on the wrapped FastAPI instance,
 # while uvicorn continues to serve this hardened outer app.
 from app.netguard import enforce_loopback
 from app.entrypoint import app
-
-
 
 
 def _routing_app():
@@ -37,29 +34,22 @@ def _routing_app():
 
 
 def _mount_optional_agent3() -> bool:
-    """Mount the dormant Agent 3.0 draft only after explicit operator opt-in."""
+    """Mount the complete dormant Agent 3 surface after explicit operator opt-in."""
     if os.getenv("KALIV_AGENT3_ENABLED", "0") != "1":
         return False
 
     routing_app = _routing_app()
-    # F-1511: the guard must read the state-key mount_agent3 actually sets
-    # (agent3_mounted), not agent3_planner_mounted which nothing sets -- the
-    # old key made this guard permanently false, and only mount_agent3's own
-    # idempotency hid it. If already mounted, this is a no-op.
-    if getattr(routing_app.state, "agent3_mounted", False):
+    if getattr(routing_app.state, "agent3_full_surface_mounted", False):
         return True
 
-    from app.agent3.api import mount_agent3
+    from app.agent3.production_mount import mount_agent3
 
-    # mount_agent3 owns the FULL production surface (rich planner,
-    # replan-preview, outcome-answer, capability graph + receipt, memory).
-    # The runner adds nothing -- dev serves exactly what production serves.
     return bool(mount_agent3(routing_app))
 
 
 if __name__ == "__main__":
     # Isolated tool execution re-invokes this exe with --tool-child (a frozen
-    # build has no python -m). This must run before server or Agent 3.0 setup.
+    # build has no python -m). This must run before server or Agent 3 setup.
     if "--tool-child" in sys.argv:
         from app.tool_child import main as _child_main
 
