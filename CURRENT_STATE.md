@@ -164,6 +164,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_rag_pdf_lifecycle.py`
 - `tests/worker_read_scope.py`
 - `tests/worker_research_claim_evidence.py`
+- `tests/worker_research_common_peer_binding.py`
 - `tests/worker_research_contract.py`
 - `tests/worker_research_data_sharing_adapter.py`
 - `tests/worker_research_egress_ledger.py`
