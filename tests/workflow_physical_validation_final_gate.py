@@ -48,8 +48,16 @@ def fixtures(root: Path, now: datetime) -> tuple[dict, Path, Path]:
         "mode": "verify",
         "candidate": candidate,
         "summary": {
-            "total": 6,
-            "passed": ["preflight", "agent3", "model_eval", "voice", "rag", "lifecycle"],
+            "total": 7,
+            "passed": [
+                "preflight",
+                "agent3",
+                "model_eval",
+                "voice",
+                "rag",
+                "lifecycle",
+                "scheduler_pilot",
+            ],
             "failed": [],
             "missing": [],
             "candidate_errors": [],
@@ -189,7 +197,8 @@ def main() -> None:
         report, code = evaluate(module, root, candidate, campaign, attestation, now)
         assert code == 0
         assert report["gate"]["all_physical_evidence_complete"] is True
-        assert report["summary"]["total"] == 7
+        assert report["summary"]["total"] == 8
+        assert "scheduler_pilot" in report["summary"]["passed"]
         assert report["summary"]["passed"][-1] == "browser_peer_physical"
         assert report["gate"]["production_activation"] is False
 
@@ -230,7 +239,7 @@ def main() -> None:
         assert code == 1
         assert any("candidate.git_sha" in error for error in report["summary"]["errors"])
 
-    print("physical validation final seven-proof gate: PASS")
+    print("physical validation final eight-proof gate: PASS")
 
 
 if __name__ == "__main__":
