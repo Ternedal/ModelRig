@@ -119,7 +119,7 @@ def main() -> None:
     assert "merge-base --is-ancestor" in launcher
     assert "Reconcile the integration candidate" in launcher
     assert launcher.index("merge-base --is-ancestor") < launcher.index(
-        "browser_peer_public_validation_operator.py"
+        "& $python.Source $operatorScript --url $Url"
     )
 
     module = load_module()
