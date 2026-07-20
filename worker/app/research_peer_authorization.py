@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
-from .data_sharing import DataSharingContractError, DataSharingDenied
+from .data_sharing import DataSharingDenied
 from .research_claim_evidence import (
     DataSharingClaimEvidence,
     VerifiableResearchSharingBoundary,
