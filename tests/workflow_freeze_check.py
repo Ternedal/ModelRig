@@ -270,6 +270,8 @@ def _boom(url, token):
     # resolve (HEAD == tag in the fixture) and only the runs endpoint fails.
     if "/git/ref/tags/" in url:
         return {"object": {"type": "commit", "sha": _HEAD_SHA}}
+    if "/releases/tags/" in url:
+        return {"draft": False}
     if "/actions/runs" in url:
         raise urllib.error.URLError("offline")
     raise AssertionError(f"uventet API-url i _boom: {url}")
@@ -508,6 +510,36 @@ _code, _out = run_in(_g1505, token="tok", api=_api_1505)
 check(_code == 1 and "not the published" in _out,
       "git-mode refuses when HEAD is not the published tag commit -- both "
       "workflows must validate the same artifact (F-1505)")
+
+# F-1605: git-mode must also require a PUBLISHED (non-draft) release, like
+# gitless. HEAD matches the tag here, so the pin passes -- but the release is
+# a draft, so freeze must still fail.
+_g1605 = _make_repo(clean=True, version="1.58.131")
+_head1605 = _git(_g1605, "rev-parse", "HEAD").stdout.strip()
+def _api_1605_draft(url, token):
+    if "/git/ref/tags/" in url:
+        return {"object": {"type": "commit", "sha": _head1605}}
+    if "/releases/tags/" in url:
+        return {"draft": True}
+    return _runs(ci=("completed", "success"),
+                 codeql=("completed", "success"))
+_code, _out = run_in(_g1605, token="tok", api=_api_1605_draft)
+check(_code == 1 and "still a draft" in _out and "F-1605" in _out,
+      "git-mode refuses a tag whose release is still a draft -- same "
+      "published-release contract as the ZIP flow (F-1605)")
+
+# And when a matching commit HAS no release at all, git-mode refuses too.
+def _api_1605_missing(url, token):
+    if "/git/ref/tags/" in url:
+        return {"object": {"type": "commit", "sha": _head1605}}
+    if "/releases/tags/" in url:
+        raise _ue.HTTPError(url, 404, "not found", {}, None)
+    return _runs(ci=("completed", "success"),
+                 codeql=("completed", "success"))
+_code, _out = run_in(_g1605, token="tok", api=_api_1605_missing)
+check(_code == 1 and "no published release" in _out and "F-1605" in _out,
+      "git-mode refuses a tag with no published release -- git-mode requires "
+      "it just like gitless (F-1605)")
 
 _g_notok = _strip_git(_make_repo(version="1.58.131"))
 _code, _out = run_in(_g_notok, token=None, api=_gitless_api())

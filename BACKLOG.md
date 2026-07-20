@@ -241,7 +241,14 @@ kontrakten — nu fuld uafhaengig paritet: fingerprint-binding, revision-match
 og kind genkontrolleres (rapporten udvidet til at eksponere dem); tre
 mutationer roede. Suiter: freeze 40, campaign 73; glob 110/110 + Go 8/8.
 Resten (F-1604..F-1635, 28 draft-PR'er) er rig- eller beslutningsafhaengigt,
-parkeret.
+parkeret. **F-1605 taget i 1.58.140:** git-mode kraevede kun tag-SHA, ikke en
+publiceret non-draft release (gitless gjorde) — saa et tag kunne fryses uden
+de artifacts lifecycle/updater forventer. Git-mode kraever nu samme
+publicerede releasekontrakt (draft-release + manglende release begge roede;
+freeze 40\u219242). F-1609 (exact-head CI) var allerede daekket af freeze_check
+mod aegte release. F-1604 (signeret attestation) og F-1608 (fuld E2E-dataflow)
+er arkitektur; F-1613 (finite max_runs) er runtime mod styringsreglen \u2014 alle
+parkeret til drøftelse/efter kampagnen.
 
 ## Milepæl 3 — Agent 3-pilot (mål task success) — tracker #60
 

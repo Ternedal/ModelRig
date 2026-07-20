@@ -273,6 +273,35 @@ def main() -> int:
                 if tag_sha:
                     print(f"  OK    HEAD is exactly the published v{version} "
                           f"commit")
+                # F-1605: pinning the tag proves the COMMIT exists, not that a
+                # published (non-draft) RELEASE exists for it. Gitless-mode
+                # already requires that (the ZIP flow reads releases/tags);
+                # git-mode must require the SAME published-release contract, or
+                # a developer could freeze a tag whose release -- and the
+                # assets lifecycle/updater expect -- was never published.
+                try:
+                    rel = _api(f"https://api.github.com/repos/{REPO}"
+                               f"/releases/tags/v{version}", token)
+                    if rel.get("draft"):
+                        print(f"  FAIL  release v{version} is still a draft -- "
+                              f"git-mode needs the same published-release "
+                              f"contract as the ZIP flow (F-1605)")
+                        print("         -> Publish the release before freezing "
+                              "this candidate.")
+                        return 1
+                    print(f"  OK    v{version} is a published (non-draft) "
+                          f"release")
+                except urllib.error.HTTPError as exc:
+                    if exc.code == 404:
+                        print(f"  FAIL  no published release for tag v{version}"
+                              f" -- git-mode requires it just like gitless "
+                              f"(F-1605)")
+                        print("         -> Publish the release for this "
+                              "version before freezing.")
+                        return 1
+                    print(f"  FAIL  could not resolve release v{version} (HTTP "
+                          f"{exc.code})")
+                    return 1
             except urllib.error.HTTPError as exc:
                 if exc.code == 404:
                     print(f"  FAIL  no published release tag v{version} to pin "
