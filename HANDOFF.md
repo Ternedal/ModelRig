@@ -159,7 +159,14 @@ hardware-beviste før valideringsrunden):**
   doc-gaten. Freshness (1.58.133): pilot-forensik ≤24t fra generated_at,
   producer + validator uafhængigt — replayede pilot-IDs dør på begge. Agent3-ps1'en (`run-agent3-rig-validation.ps1`) er auditeret
   OK: token-krav, backend-stier, report_sha256-binding og
-  production_activation-vagt matcher koden.
+  production_activation-vagt matcher koden. **Dens harness-afhængighed
+  havde derimod hullet (1.58.134):** build_memory_router var TREDJE
+  orphaned router (mount → planner → memory) — harnessen kalder tre
+  memory-ruter som produktions-entrypointet aldrig mountede (dev-
+  runnerne byggede dem selv: dev/prod-divergens). Mountet ejer nu
+  store+router (KALIV_AGENT3_MEMORY_DB-konventionen); wiring-suiten
+  kræver trioen. Audit-metoden: harnessens KOMPLETTE rute-kontrakt mod
+  openapi-tabellen — app.routes-iteration er blind for includes.
 
 **Bygget 12-14/7 (samme forbehold):**
 - **Substrat:** JobStore (persistent, terminal sandhed, cancel, restart→
