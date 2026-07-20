@@ -14,7 +14,6 @@ from app.browser_peer_fulfillment import (
     BrowserPeerFulfillmentContractError,
     BrowserPeerFulfillmentController,
     BrowserPeerFulfillmentDenied,
-    BrowserPinnedTransportError,
     PendingBrowserFulfillment,
     PinnedBrowserPeerTransport,
 )
@@ -211,18 +210,31 @@ def make_context(
         max_response_bytes=max_response_bytes,
         transport=transport,
     )
-    return (
-        intent,
-        common,
-        boundary,
+    return intent, common, boundary, lease, peer, factory, active_tls, controller
+
+
+def finish_common(
+    intent,
+    common,
+    boundary,
+    lease,
+    peer,
+    controller,
+    *,
+    outcome: str,
+    now: int,
+    error_code: str | None = None,
+) -> None:
+    boundary.complete(
         lease,
-        evidence,
-        peer,
-        factory,
-        active_tls,
-        transport,
-        controller,
+        intent,
+        outcome=outcome,
+        bytes_sent=controller.bytes_sent,
+        error_code=error_code,
+        now=now,
     )
+    peer.close()
+    common.close()
 
 
 rejects(
@@ -238,12 +250,12 @@ rejects(
         headers=(),
         max_response_bytes=1,
     ),
-    (BrowserPeerFulfillmentContractError, BrowserPeerFulfillmentDenied),
-    "transport cannot prepare without an active pin",
+    BrowserPeerFulfillmentContractError,
+    "transport validates pin receipt before lookup",
 )
 
-# A successful pinned GET is fetched outside Chromium and committed only after
-# the caller has successfully sent Fetch.fulfillRequest.
+# Positive GET: ModelRig owns the socket, and success is not recorded until the
+# caller confirms that Fetch.fulfillRequest itself completed.
 sock = FakeSocket(
     wire(
         headers=(
@@ -256,18 +268,10 @@ sock = FakeSocket(
     ),
     send_plan=[7, 11, 10_000],
 )
-(
-    intent,
-    common,
-    boundary,
-    lease,
-    evidence,
-    peer,
-    factory,
-    tls,
-    transport,
-    controller,
-) = make_context(sock, now=100)
+intent, common, boundary, lease, peer, factory, tls, controller = make_context(
+    sock,
+    now=100,
+)
 pending = controller.prepare(
     request_event(
         URL_A,
@@ -276,7 +280,6 @@ pending = controller.prepare(
         headers={
             "Accept": "text/html",
             "User-Agent": "TestBrowser/1.0",
-            "Cookie": "",
             "X-Ignored": "not-forwarded",
         },
     ),
@@ -284,71 +287,68 @@ pending = controller.prepare(
 )
 check(pending.payload.schema == BROWSER_FULFILLMENT_SCHEMA, "fulfillment is versioned")
 check(factory.calls == [(socket.AF_INET, socket.SOCK_STREAM)], "IPv4 socket is selected")
-check(sock.sockaddr == (PUBLIC_V4, 443), "transport connects to the selected numeric peer")
-check(tls.server_names == ["example.com"], "TLS SNI preserves canonical hostname")
-check(sock.sent.startswith(b"GET /releases/a?channel=stable HTTP/1.1\r\n"), "canonical request target is sent")
-check(b"Host: example.com\r\n" in sock.sent, "HTTP Host preserves canonical hostname")
+check(sock.sockaddr == (PUBLIC_V4, 443), "transport connects to exact selected peer")
+check(tls.server_names == ["example.com"], "TLS SNI preserves canonical host")
+check(
+    sock.sent.startswith(b"GET /releases/a?channel=stable HTTP/1.1\r\n"),
+    "canonical request target is sent",
+)
+check(b"Host: example.com\r\n" in sock.sent, "HTTP Host preserves canonical host")
 check(b"Connection: close\r\n" in sock.sent, "transport is single-request")
-check(b"x-ignored" not in sock.sent.lower(), "arbitrary browser headers are not forwarded")
-check(b"cookie" not in sock.sent.lower(), "cookies are never forwarded")
-check(pending.payload.bytes_sent == len(sock.sent), "only confirmed socket writes are counted")
-check(controller.bytes_sent == len(sock.sent), "aggregate common meter records confirmed writes")
+check(b"x-ignored" not in sock.sent.lower(), "arbitrary browser headers are dropped")
+check(b"cookie" not in sock.sent.lower(), "credentials are never forwarded")
+check(pending.payload.bytes_sent == len(sock.sent), "confirmed socket writes are counted")
+check(controller.bytes_sent == len(sock.sent), "common aggregate meter records writes")
 params = pending.cdp_params()
-check(params["requestId"] == "fetch-a" and params["responseCode"] == 200, "CDP fulfillment targets paused request")
-check(base64.b64decode(params["body"]) == b"hello", "CDP body is the pinned response body")
+check(
+    params["requestId"] == "fetch-a" and params["responseCode"] == 200,
+    "CDP fulfillment targets the paused request",
+)
+check(base64.b64decode(params["body"]) == b"hello", "CDP body is pinned response body")
 response_names = {item["name"] for item in params["responseHeaders"]}
-check("set-cookie" not in response_names and "connection" not in response_names, "credentials and hop headers are stripped")
-check("content-length" in response_names, "fulfilled body has deterministic content length")
-check(peer.events()[-1]["event_type"] == "claimed", "peer transfer remains in flight before CDP commit")
+check(
+    "set-cookie" not in response_names and "connection" not in response_names,
+    "credentials and hop headers are stripped",
+)
+check("content-length" in response_names, "fulfilled body has deterministic length")
+check(peer.events()[-1]["event_type"] == "claimed", "peer remains in flight before commit")
 pending.commit(now=104)
 check(
     peer.events()[-1]["outcome"] == "connected"
     and peer.events()[-1]["peer_address"] == PUBLIC_V4
     and peer.events()[-1]["bytes_sent"] == len(sock.sent),
-    "successful CDP commit terminalizes exact peer and request bytes",
+    "CDP commit terminalizes exact peer and measured request bytes",
 )
 rejects(
-    lambda: pending.cdp_params(),
+    pending.cdp_params,
     BrowserPeerFulfillmentDenied,
     "committed fulfillment cannot be reused",
 )
 check(sock.closed, "public socket closes before fulfillment is returned")
 audit = json.dumps(pending.payload.audit_dict(), ensure_ascii=False)
-check(RAW_PURPOSE not in audit, "fulfillment audit excludes raw purpose")
-check(RAW_SUMMARY not in audit, "fulfillment audit excludes raw summary")
-check(RAW_PAYLOAD.decode() not in audit, "fulfillment audit excludes shared content")
-check("/releases/a" not in audit and "channel=stable" not in audit, "fulfillment audit excludes URL path/query")
-boundary.complete(
-    lease,
-    intent,
-    outcome="completed",
-    bytes_sent=controller.bytes_sent,
-    now=105,
-)
-peer.close()
-common.close()
-
-# HEAD preserves response metadata without exposing a response body.
-head_sock = FakeSocket(
-    wire(
-        headers=(
-            ("Content-Type", "text/plain"),
-            ("Content-Length", "123"),
-        )
-    )
-)
-(
+check(RAW_PURPOSE not in audit, "audit excludes raw purpose")
+check(RAW_SUMMARY not in audit, "audit excludes raw summary")
+check(RAW_PAYLOAD.decode() not in audit, "audit excludes shared content")
+check("/releases/a" not in audit and "channel=stable" not in audit, "audit excludes URL path/query")
+finish_common(
     intent,
     common,
     boundary,
     lease,
-    evidence,
     peer,
-    factory,
-    tls,
-    transport,
     controller,
-) = make_context(head_sock, now=200)
+    outcome="completed",
+    now=105,
+)
+
+# HEAD preserves metadata but never reads or fulfills a response body.
+head_sock = FakeSocket(
+    wire(headers=(("Content-Type", "text/plain"), ("Content-Length", "123")))
+)
+intent, common, boundary, lease, peer, _, _, controller = make_context(
+    head_sock,
+    now=200,
+)
 pending = controller.prepare(
     request_event(
         URL_A,
@@ -358,81 +358,67 @@ pending = controller.prepare(
     ),
     now=203,
 )
-check(head_sock.sent.startswith(b"HEAD "), "HEAD method reaches pinned transport")
-check(pending.payload.body == b"", "HEAD fulfillment has no response body")
-check(dict(pending.payload.response_headers)["content-length"] == "123", "HEAD preserves declared entity length")
-pending.commit(now=204)
-boundary.complete(
-    lease,
-    intent,
-    outcome="completed",
-    bytes_sent=controller.bytes_sent,
-    now=205,
+check(head_sock.sent.startswith(b"HEAD "), "HEAD reaches pinned transport")
+check(pending.payload.body == b"", "HEAD fulfillment has no body")
+check(
+    dict(pending.payload.response_headers)["content-length"] == "123",
+    "HEAD preserves declared entity length",
 )
-peer.close()
-common.close()
-
-# Multiple exact URLs share one aggregate common budget. The second request is
-# refused before another socket exists, rather than receiving a fresh full meter.
-first = FakeSocket(wire(headers=(("Content-Length", "1"),), body=b"a"))
-(
+pending.commit(now=204)
+finish_common(
     intent,
     common,
     boundary,
     lease,
-    evidence,
     peer,
-    factory,
-    tls,
-    transport,
     controller,
-) = make_context(first, now=300, max_bytes=300)
+    outcome="completed",
+    now=205,
+)
+
+# Different exact URLs under one common claim share one byte ceiling. The next
+# request is refused before a second socket is opened.
+first = FakeSocket(wire(headers=(("Content-Length", "1"),), body=b"a"))
+intent, common, boundary, lease, peer, factory, _, controller = make_context(
+    first,
+    now=300,
+    max_bytes=300,
+)
 pending = controller.prepare(
     request_event(URL_A, request_id="fetch-1", network_id="network-1"),
     now=303,
 )
 pending.commit(now=304)
-check(0 < controller.bytes_sent <= 300, "first request consumes the shared budget")
+check(0 < controller.bytes_sent <= 300, "first request consumes shared budget")
 rejects(
     lambda: controller.prepare(
         request_event(URL_B, request_id="fetch-2", network_id="network-2"),
         now=305,
     ),
     BrowserPeerFulfillmentDenied,
-    "second request cannot multiply the common byte ceiling",
+    "second URL cannot multiply common byte ceiling",
     "aggregate",
 )
-check(len(factory.calls) == 1, "aggregate budget is checked before a second public socket")
-check(peer.events()[-1]["error_code"] == "byte_budget_exceeded", "budget refusal terminalizes second peer claim")
-boundary.complete(
-    lease,
-    intent,
-    outcome="blocked",
-    bytes_sent=controller.bytes_sent,
-    error_code="byte_budget_exceeded",
-    now=306,
-)
-peer.close()
-common.close()
-
-# Partial writes are counted exactly and terminalized even when the response is
-# never available.
-partial = FakeSocket(
-    b"",
-    send_plan=[13, socket.timeout("private detail")],
-)
-(
+check(len(factory.calls) == 1, "budget is checked before second public socket")
+check(peer.events()[-1]["error_code"] == "byte_budget_exceeded", "budget block is audited")
+finish_common(
     intent,
     common,
     boundary,
     lease,
-    evidence,
     peer,
-    factory,
-    tls,
-    transport,
     controller,
-) = make_context(partial, now=400)
+    outcome="blocked",
+    error_code="byte_budget_exceeded",
+    now=306,
+)
+
+# Partial application writes are exact evidence even when no response arrives.
+partial = FakeSocket(b"", send_plan=[13, socket.timeout("private detail")])
+intent, common, boundary, lease, peer, _, _, controller = make_context(
+    partial,
+    now=400,
+)
 rejects(
     lambda: controller.prepare(
         request_event(URL_A, request_id="fetch-partial", network_id="network-partial"),
@@ -442,78 +428,58 @@ rejects(
     "partial request write fails closed",
     "request_send_failed",
 )
-check(controller.bytes_sent == 13, "aggregate meter records exact partial send progress")
+check(controller.bytes_sent == 13, "aggregate meter records exact partial progress")
 check(
     peer.events()[-1]["bytes_sent"] == 13
     and peer.events()[-1]["error_code"] == "request_send_failed",
-    "partial send is retained in terminal peer audit",
+    "partial send remains in terminal peer audit",
 )
-boundary.complete(
-    lease,
-    intent,
-    outcome="blocked",
-    bytes_sent=controller.bytes_sent,
-    error_code="request_send_failed",
-    now=404,
-)
-peer.close()
-common.close()
-
-# A socket that reaches another public address is rejected before application
-# bytes are sent.
-wrong_peer = FakeSocket(wire(), peer="1.1.1.1")
-(
+finish_common(
     intent,
     common,
     boundary,
     lease,
-    evidence,
     peer,
-    factory,
-    tls,
-    transport,
     controller,
-) = make_context(wrong_peer, now=500)
+    outcome="blocked",
+    error_code="request_send_failed",
+    now=404,
+)
+
+# A socket reaching another public IP is rejected before application data leaves.
+wrong_peer = FakeSocket(wire(), peer="1.1.1.1")
+intent, common, boundary, lease, peer, _, _, controller = make_context(
+    wrong_peer,
+    now=500,
+)
 rejects(
     lambda: controller.prepare(
         request_event(URL_A, request_id="fetch-peer", network_id="network-peer"),
         now=503,
     ),
     BrowserPeerFulfillmentDenied,
-    "actual socket peer must equal the selected address",
+    "actual socket peer must equal selected address",
     "connected_peer_mismatch",
 )
 check(wrong_peer.sent == b"" and controller.bytes_sent == 0, "peer mismatch sends no application bytes")
-boundary.complete(
-    lease,
-    intent,
-    outcome="blocked",
-    bytes_sent=0,
-    error_code="connected_peer_mismatch",
-    now=504,
-)
-peer.close()
-common.close()
-
-# TLS verification and response-size failures are normalized and preserve any
-# request bytes that were actually sent.
-tls_sock = FakeSocket(b"")
-cert_error = ssl.SSLCertVerificationError("private certificate detail")
-(
+finish_common(
     intent,
     common,
     boundary,
     lease,
-    evidence,
     peer,
-    factory,
-    tls,
-    transport,
     controller,
-) = make_context(
+    outcome="blocked",
+    error_code="connected_peer_mismatch",
+    now=504,
+)
+
+# TLS and response-size failures are normalized without losing measured writes.
+tls_sock = FakeSocket(b"")
+intent, common, boundary, lease, peer, _, _, controller = make_context(
     tls_sock,
     now=600,
-    tls=FakeTLSContext(error=cert_error),
+    tls=FakeTLSContext(error=ssl.SSLCertVerificationError("private detail")),
 )
 rejects(
     lambda: controller.prepare(
@@ -525,69 +491,53 @@ rejects(
     "tls_certificate_failed",
 )
 check(controller.bytes_sent == 0, "TLS failure occurs before application bytes")
-boundary.complete(
-    lease,
-    intent,
-    outcome="blocked",
-    bytes_sent=0,
-    error_code="tls_certificate_failed",
-    now=604,
-)
-peer.close()
-common.close()
-
-oversized = FakeSocket(
-    wire(headers=(("Content-Length", "6"),), body=b"abcdef")
-)
-(
+finish_common(
     intent,
     common,
     boundary,
     lease,
-    evidence,
     peer,
-    factory,
-    tls,
-    transport,
     controller,
-) = make_context(oversized, now=700, max_response_bytes=5)
+    outcome="blocked",
+    error_code="tls_certificate_failed",
+    now=604,
+)
+
+oversized = FakeSocket(wire(headers=(("Content-Length", "6"),), body=b"abcdef"))
+intent, common, boundary, lease, peer, _, _, controller = make_context(
+    oversized,
+    now=700,
+    max_response_bytes=5,
+)
 rejects(
     lambda: controller.prepare(
         request_event(URL_A, request_id="fetch-large", network_id="network-large"),
         now=703,
     ),
     BrowserPeerFulfillmentDenied,
-    "oversized browser response is stopped",
+    "oversized response is stopped",
     "response_body_too_large",
 )
-check(controller.bytes_sent == len(oversized.sent) > 0, "request bytes remain measured after response overflow")
-check(peer.events()[-1]["error_code"] == "response_body_too_large", "response overflow is terminally audited")
-boundary.complete(
-    lease,
-    intent,
-    outcome="blocked",
-    bytes_sent=controller.bytes_sent,
-    error_code="response_body_too_large",
-    now=704,
-)
-peer.close()
-common.close()
-
-# If Fetch.fulfillRequest itself fails, the already-performed public request is
-# blocked with its measured bytes rather than falsely reported as connected.
-cdp_fail = FakeSocket(wire(headers=(("Content-Length", "2"),), body=b"ok"))
-(
+check(controller.bytes_sent == len(oversized.sent) > 0, "request bytes survive response overflow")
+check(peer.events()[-1]["error_code"] == "response_body_too_large", "response overflow is audited")
+finish_common(
     intent,
     common,
     boundary,
     lease,
-    evidence,
     peer,
-    factory,
-    tls,
-    transport,
     controller,
-) = make_context(cdp_fail, now=800)
+    outcome="blocked",
+    error_code="response_body_too_large",
+    now=704,
+)
+
+# A failed Fetch.fulfillRequest must not falsely report a connected success.
+cdp_fail = FakeSocket(wire(headers=(("Content-Length", "2"),), body=b"ok"))
+intent, common, boundary, lease, peer, _, _, controller = make_context(
+    cdp_fail,
+    now=800,
+)
 pending = controller.prepare(
     request_event(URL_A, request_id="fetch-cdp", network_id="network-cdp"),
     now=803,
@@ -609,16 +559,17 @@ rejects(
     BrowserPeerFulfillmentDenied,
     "aborted fulfillment cannot later commit",
 )
-boundary.complete(
-    lease,
+finish_common(
     intent,
+    common,
+    boundary,
+    lease,
+    peer,
+    controller,
     outcome="blocked",
-    bytes_sent=controller.bytes_sent,
     error_code="cdp_fulfill_failed",
     now=805,
 )
-peer.close()
-common.close()
 
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)
