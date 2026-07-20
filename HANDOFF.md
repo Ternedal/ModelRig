@@ -156,7 +156,8 @@ hardware-beviste før valideringsrunden):**
   v3: manifest-bundet mod §1.6 (exact read-spec, write-tool), komplet
   inventar i pilotvinduet (unlisted plan = rød), claim-bundet executed.
   Runbookens falske model_eval-blocker er fjernet med doc-parity-checks i
-  doc-gaten. Agent3-ps1'en (`run-agent3-rig-validation.ps1`) er auditeret
+  doc-gaten. Freshness (1.58.133): pilot-forensik ≤24t fra generated_at,
+  producer + validator uafhængigt — replayede pilot-IDs dør på begge. Agent3-ps1'en (`run-agent3-rig-validation.ps1`) er auditeret
   OK: token-krav, backend-stier, report_sha256-binding og
   production_activation-vagt matcher koden.
 

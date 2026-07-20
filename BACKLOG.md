@@ -143,8 +143,13 @@ forfalsknings-mutationer + ZIP-tamper testet røde. **F-1305** schedulerpilot
 v3 er manifest-bundet: §1.6-manifestet pinnes (read: rig_status/{}/every:60/
 max 3; write: note_append + ceremonien), komplet inventar i pilotvinduet
 (unlisted plan = rød), executed uden claim_id = rød; kampagne-validatoren
-kræver vindue+manifest+tomt unlisted. F-1301 (kampagnen) er fortsat
-riggens. P2/P3 (F-1306..F-1327: scheduler-tid/grants/concurrency, Android-UX,
+kræver vindue+manifest+tomt unlisted. **Freshness (1.58.133):** pilotens
+nyeste forensik-tidsstempel skal ligge ≤24t fra rapportens generated_at,
+håndhævet i BÅDE producer og kampagne-validator — droppens "historiske
+pilot-IDs"-mutation testet rød på begge niveauer. Accepteret rest fra
+mutationslisten: recovery-linjens tal kan ikke DB-krydstjekkes ærligt
+offline (startup-snapshot ≠ slut-tilstand); linjen kræves fortsat, tallene
+attesteres af operatøren. F-1301 (kampagnen) er fortsat riggens. P2/P3 (F-1306..F-1327: scheduler-tid/grants/concurrency, Android-UX,
 capability/data-sharing/research, isolation, memory, updater, merge-tog for
 de 17 drafts #92–#110) er parkeret til EFTER kampagnen jf. styringsreglen.
 

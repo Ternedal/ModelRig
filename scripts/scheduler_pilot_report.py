@@ -48,6 +48,10 @@ SCHEMA = "kaliv-scheduler-pilot/v3"
 # (receipts, device attribution) to prove the rest. A report that merely
 # shows "something executed" is presence, not proof -- this is the exact
 # thing it must have been.
+# Same rig-day policy as the frozen-candidate attestation: evidence older
+# than this proves a PAST pilot, not THIS candidate's campaign day.
+PILOT_MAX_AGE_HOURS = 24.0
+
 PILOT_MANIFEST = {
     "read": {"tool": "rig_status", "args": {}, "cadence": "every:60",
              "max_runs": 3},
@@ -166,7 +170,8 @@ def judge(read_detail: dict[str, Any], write_detail: dict[str, Any],
           inventory: list[dict[str, Any]] | None = None,
           read_id: str | None = None,
           write_id: str | None = None,
-          window_start: float | None = None) -> list[str]:
+          window_start: float | None = None,
+          now_ts: float | None = None) -> list[str]:
     """Every reason the pilot does NOT hold. Empty list == the pilot holds."""
     problems: list[str] = []
 
@@ -220,6 +225,34 @@ def judge(read_detail: dict[str, Any], write_detail: dict[str, Any],
                 problems.append(
                     "forensik: en executed write-occurrence uden claim_id -- "
                     "recovery-kaeden er ikke claim-bundet")
+    if now_ts is not None:
+        stamps: list[float] = []
+        for fdata in (read_forensics_data, write_forensics_data):
+            if fdata is None:
+                continue
+            win = fdata.get("window") or {}
+            for key in ("first_created", "last_resolved"):
+                val = win.get(key)
+                if isinstance(val, (int, float)):
+                    stamps.append(float(val))
+            for occ in fdata.get("occurrences") or []:
+                for key in ("created", "resolved"):
+                    val = occ.get(key)
+                    if isinstance(val, (int, float)):
+                        stamps.append(float(val))
+        if stamps:
+            age_h = (now_ts - max(stamps)) / 3600.0
+            if age_h > PILOT_MAX_AGE_HOURS:
+                problems.append(
+                    f"piloten er {age_h:.1f} timer gammel (max "
+                    f"{PILOT_MAX_AGE_HOURS:.0f}) -- historiske pilot-IDs "
+                    "beviser en FORTIDIG pilot, ikke denne kandidats "
+                    "rig-dag; koer section 1.6 igen")
+        elif read_forensics_data is not None or write_forensics_data is not None:
+            problems.append(
+                "forensik uden tidsstempler -- pilotens alder kan ikke "
+                "bedommes, beviset er ikke tidsbundet")
+
     if inventory is not None and window_start is not None:
         listed = {read_id, write_id}
         for row in inventory:
@@ -290,10 +323,15 @@ def build_report(candidate: dict[str, Any], worker_url: str,
     starts = [s for s in starts if s is not None]
     if starts:
         window_start = min(starts)
+    try:
+        now_ts = datetime.fromisoformat(now_iso).timestamp()
+    except ValueError:
+        now_ts = None
     problems = judge(read_detail, write_detail, manual,
                      read_forensics_data, write_forensics_data,
                      inventory=inventory, read_id=read_id,
-                     write_id=write_id, window_start=window_start)
+                     write_id=write_id, window_start=window_start,
+                     now_ts=now_ts)
     in_window = []
     unlisted = []
     preexisting = 0

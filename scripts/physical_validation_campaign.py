@@ -783,6 +783,40 @@ def _validate_scheduler_pilot(
         errors.append(
             "manifest.read.tool er ikke rig_status -- rapporten er ikke "
             "bundet til runbookens section-1.6 manifest")
+    # Freshness re-check, independent of the producer (defense in depth):
+    # the newest durable timestamp in the forensics must lie within the
+    # rig-day window of the report's own generated_at -- replayed
+    # historical pilot IDs die here even if a doctored producer let them by.
+    gen = report.get("generated_at")
+    stamps = []
+    for half in ("read", "write"):
+        fdata = _nested(report, "forensics", half) or {}
+        win = fdata.get("window") or {}
+        for key in ("first_created", "last_resolved"):
+            if isinstance(win.get(key), (int, float)):
+                stamps.append(float(win[key]))
+        for occ in fdata.get("occurrences") or []:
+            for key in ("created", "resolved"):
+                if isinstance(occ.get(key), (int, float)):
+                    stamps.append(float(occ[key]))
+    if stamps and isinstance(gen, str):
+        try:
+            gen_ts = datetime.fromisoformat(gen).timestamp()
+        except ValueError:
+            gen_ts = None
+            errors.append("generated_at er ikke en ISO-8601 tid")
+        if gen_ts is not None:
+            age_h = (gen_ts - max(stamps)) / 3600.0
+            if age_h > 24.0:
+                errors.append(
+                    f"pilot-forensikken er {age_h:.1f} timer aeldre end "
+                    "rapporten (max 24) -- historiske pilot-IDs beviser "
+                    "ikke denne kandidats rig-dag")
+    elif not stamps and (_nested(report, "forensics", "read")
+                         or _nested(report, "forensics", "write")):
+        errors.append(
+            "pilot-forensik uden tidsstempler -- alderen kan ikke bedommes")
+
     unlisted = _nested(report, "inventory", "unlisted_in_window")
     if unlisted is None:
         errors.append(
