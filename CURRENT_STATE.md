@@ -169,6 +169,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_research_egress_ledger.py`
 - `tests/worker_research_peer_authorization.py`
 - `tests/worker_research_peer_binding.py`
+- `tests/worker_research_peer_transfer.py`
 - `tests/worker_research_sharing_boundary.py`
 - `tests/worker_research_sharing_boundary_consistency.py`
 - `tests/worker_research_sharing_execution.py`
