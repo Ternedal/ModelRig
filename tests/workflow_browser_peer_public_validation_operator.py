@@ -110,6 +110,18 @@ def main() -> None:
     assert "Invoke-WebRequest" not in launcher and "curl" not in launcher.lower()
     assert "browser_peer_public_validation_operator.py" in launcher
 
+    # The intended launcher must refuse to create physical evidence from a stale
+    # stacked head. It fetches the current main anchor, requires a clean tree and
+    # proves that exact fetched commit is an ancestor before invoking Python.
+    assert "status --porcelain" in launcher
+    assert "fetch --quiet origin main" in launcher
+    assert "rev-parse origin/main" in launcher
+    assert "merge-base --is-ancestor" in launcher
+    assert "Reconcile the integration candidate" in launcher
+    assert launcher.index("merge-base --is-ancestor") < launcher.index(
+        "browser_peer_public_validation_operator.py"
+    )
+
     module = load_module()
     module._require_physical_operator(
         environ={},
