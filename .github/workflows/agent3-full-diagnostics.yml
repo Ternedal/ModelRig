@@ -23,6 +23,27 @@ jobs:
       - name: Install worker deps
         run: pip install -r worker/requirements.txt --break-system-packages
 
+      - name: Apply exact T-032 proof-count correction
+        run: python3 scripts/t032_proof_count_fix.py
+
+      - name: Run focused proof-count contracts
+        run: |
+          python3 tests/workflow_physical_validation_campaign.py
+          python3 tests/workflow_physical_validation_final_gate.py
+
+      - name: Upload verified proof-count files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: t032-proof-count-fix-files
+          path: |
+            PHYSICAL_VALIDATION_CAMPAIGN.md
+            scripts/physical_validation_campaign.py
+            scripts/physical_validation_final_gate.py
+            tests/workflow_physical_validation_campaign.py
+            tests/workflow_physical_validation_final_gate.py
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Build backend
         run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
 
