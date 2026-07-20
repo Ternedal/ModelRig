@@ -24,7 +24,9 @@ jobs:
         run: pip install -r worker/requirements.txt --break-system-packages
 
       - name: Apply exact T-032 proof-count correction
-        run: python3 scripts/t032_proof_count_fix.py
+        run: |
+          python3 scripts/t032_proof_count_fix.py
+          python3 scripts/t032_proof_count_test_fix.py
 
       - name: Run focused proof-count contracts
         id: proof_count
