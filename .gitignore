@@ -56,6 +56,15 @@ kaliv-tools-state.json.tmp
 /validation/physical-validation-final-latest.json
 /validation/physical-validation-final-latest.json.tmp
 
+# Pre-release staged physical promotion receipts. These are candidate-bound local
+# rolling evidence; only manually reviewed dated copies may ever be committed.
+/validation/pre-release-candidate-freeze-latest.json
+/validation/pre-release-candidate-freeze-latest.json.tmp
+/validation/physical-validation-candidate-campaign-latest.json
+/validation/physical-validation-candidate-campaign-latest.json.tmp
+/validation/physical-validation-candidate-final-latest.json
+/validation/physical-validation-candidate-final-latest.json.tmp
+
 # Browser peer public validation: plans are one-use local authorization artifacts;
 # rolling reports contain rig/network observations. Only manually reviewed, dated
 # evidence should ever be committed.
