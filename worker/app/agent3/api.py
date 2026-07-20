@@ -495,32 +495,73 @@ def mount_agent3(app: FastAPI) -> bool:
             replan_service=replan_service,
         )
     )
-    # The planner surface (/plan -> /plans/{id}/start) is the DOCUMENTED
-    # production creation path (see StartReq's docstring), yet it lived on
-    # its own router that nothing included -- the same orphaned-wiring
-    # failure as the mount itself, one layer down. The earlier diagnosis
-    # ("rewrite the model_eval producer to a chat->runs flow") was wrong:
-    # the producer's target route was right all along; only the wiring was
-    # missing.
-    from .planner import build_planner_router  # local: avoids import cycles
-    app.include_router(
-        build_planner_router(adapter, orchestrator=orchestrator)
-    )
-    # Third instance of the same orphaned-wiring class (mount -> planner ->
-    # memory): build_memory_router existed, was suite-tested in isolation,
-    # and had ZERO callers -- the rig-evidence harness calls POST /memory,
-    # POST /memory/context-preview and DELETE /memory/{id}, so the ps1's
-    # step 1 died in 404 on rig day. Found by auditing the harness'
-    # complete route contract against the mounted table (openapi lens).
+    # The production surface is OWNED here, in one place. History: mount
+    # itself was orphaned (fixed 1.58.131), then the planner router (131),
+    # then the memory router (134) -- and the dev runners kept including a
+    # RICHER planner (plan_store, memory context, capability graph) plus
+    # four more routers that production never mounted, so the Android app's
+    # capabilities screen and replan-preview flow 404'ed in production while
+    # working in dev. Worse: once 131 added the bare planner here, FastAPI's
+    # first-match routing silently shadowed the runners' rich planner in dev
+    # too. One owner, full wiring, runners reuse.
     from .. import paths as _paths
+    from .capability_graph_api import (
+        build_capability_graph_router,
+        build_runtime_capability_graph,
+    )
+    from .capability_receipt_api import build_capability_receipt_router
     from .memory import MemoryStore
     from .memory_api import build_memory_router
+    from .outcome_answer_api import build_outcome_answer_router
+    from .plan_store import PlanStore
+    from .planner import build_planner_router  # local: avoids import cycles
+    from .replan_preview_api import (
+        build_default_replan_preview_service,
+        build_replan_preview_router,
+    )
+
+    worker_version = getattr(app, "version", None)
     memory_path = _paths.resolve(
         "./kaliv-agent3-memory.db", env="KALIV_AGENT3_MEMORY_DB"
     )
     memory_store = MemoryStore(str(memory_path))
+    plan_db = _paths.resolve(
+        "./kaliv-agent3-plans.db", env="KALIV_AGENT3_PLAN_DB"
+    )
+
+    def _graph_provider():
+        return build_runtime_capability_graph(
+            adapter, worker_version=worker_version
+        )
+
     app.include_router(build_memory_router(memory_store))
+    app.include_router(
+        build_planner_router(
+            adapter,
+            orchestrator=orchestrator,
+            plan_store=PlanStore(str(plan_db)),
+            memory_store=memory_store,
+            capability_graph_provider=_graph_provider,
+        )
+    )
+    replan_preview_service = build_default_replan_preview_service(
+        adapter, replan_service
+    )
+    app.include_router(
+        build_replan_preview_router(
+            replan_preview_service,
+            review_store=orchestrator.review_store,
+        )
+    )
+    app.include_router(build_outcome_answer_router(orchestrator.store))
+    app.include_router(
+        build_capability_graph_router(adapter, worker_version=worker_version)
+    )
+    app.include_router(
+        build_capability_receipt_router(orchestrator.store, _graph_provider)
+    )
     app.state.agent3_memory_store = memory_store
+    app.state.agent3_replan_preview_service = replan_preview_service
     app.state.agent3_mounted = True
     app.state.agent3_orchestrator = orchestrator
     app.state.agent3_replanner = replan_service

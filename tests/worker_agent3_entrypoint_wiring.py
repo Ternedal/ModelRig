@@ -81,6 +81,18 @@ with tempfile.TemporaryDirectory() as td:
           "the production entrypoint -- third orphaned router (mount -> "
           "planner -> memory), found by auditing the harness' complete "
           "route contract")
+    check(all(p in routes_on for p in (
+        "/experimental/agent3/capabilities",
+        "/experimental/agent3/runs/{run_id}/replan-preview",
+        "/experimental/agent3/replan-previews/{preview_id}/apply",
+        "/experimental/agent3/runs/{run_id}/answer-preview",
+        "/experimental/agent3/runs/{run_id}/capability-receipt")),
+      "the full Android-app contract plus runner parity is mounted -- "
+      "fourth/fifth orphans: the capabilities screen and the replan-preview "
+      "flow 404'ed in production while dev's richer includes worked, and "
+      "the bare planner (131) silently shadowed the rich one in dev; the "
+      "mount is now the ONE owner, so dev serves exactly what production "
+      "serves")
     check("/experimental/agent3/status" in routes_on,
           "with the flag ON, the documented entrypoint serves agent3 status "
           "-- the exact route the campaign's model_eval slot calls through "

@@ -167,6 +167,11 @@ hardware-beviste før valideringsrunden):**
   store+router (KALIV_AGENT3_MEMORY_DB-konventionen); wiring-suiten
   kræver trioen. Audit-metoden: harnessens KOMPLETTE rute-kontrakt mod
   openapi-tabellen — app.routes-iteration er blind for includes.
+  **Samme audit ét ring ud (1.58.135):** appens kontrakt afslørede fjerde+
+  femte orphan (/capabilities-skærmen og replan-preview-flowet 404'ede i
+  produktion) OG at runnerens rige planner var stille skygget af mountens
+  bare fra 131 (first-match). Mountet ejer nu HELE surfacen; runnerne
+  tilføjer intet. Princip: dev serverer præcis hvad produktion serverer.
 
 **Bygget 12-14/7 (samme forbehold):**
 - **Substrat:** JobStore (persistent, terminal sandhed, cancel, restart→

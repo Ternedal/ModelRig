@@ -19,11 +19,6 @@ from app.agent3.capability_graph_api import (
     build_capability_graph_router,
     build_runtime_capability_graph,
 )
-from app.agent3.capability_receipt_api import build_capability_receipt_router
-from app.agent3.integration import V2ToolAdapter
-from app.agent3.outcome_answer_api import build_outcome_answer_router
-from app.agent3.plan_store import PlanStore
-from app.agent3.planner import build_planner_router
 from app.agent3.replan_preview_api import (
     build_default_replan_preview_service,
     build_replan_preview_router,
@@ -42,57 +37,10 @@ from app.main import app
 if __name__ == "__main__":
     host = os.getenv("MODELRIG_WORKER_HOST", "127.0.0.1")
     enforce_loopback(host)
-    if mount_agent3(app):
-        adapter = V2ToolAdapter()
-        worker_version = getattr(app, "version", None)
-        plan_db = app_paths.resolve("./kaliv-agent3-plans.db", env="KALIV_AGENT3_PLAN_DB")
-        # mount_agent3 owns the memory surface now (router + store on
-        # app.state) -- the runner reuses it instead of double-including.
-        memory_store = app.state.agent3_memory_store
-        replan_preview_service = build_default_replan_preview_service(
-            adapter,
-            app.state.agent3_replanner,
-        )
-
-        def graph_provider():
-            return build_runtime_capability_graph(
-                adapter,
-                worker_version=worker_version,
-            )
-
-        app.include_router(
-            build_planner_router(
-                adapter,
-                orchestrator=app.state.agent3_orchestrator,
-                plan_store=PlanStore(plan_db),
-                memory_store=memory_store,
-                capability_graph_provider=graph_provider,
-            )
-        )
-        app.include_router(
-            build_replan_preview_router(
-                replan_preview_service,
-                review_store=app.state.agent3_read_review_store,
-            )
-        )
-        app.include_router(build_outcome_answer_router(app.state.agent3_orchestrator.store))
-        app.include_router(
-            build_capability_graph_router(
-                adapter,
-                worker_version=worker_version,
-            )
-        )
-        app.include_router(
-            build_capability_receipt_router(
-                app.state.agent3_orchestrator.store,
-                graph_provider,
-            )
-        )
-        app.state.agent3_replan_preview_service = replan_preview_service
-        app.state.agent3_outcome_answer_mounted = True
-        app.state.agent3_capability_graph_mounted = True
-        app.state.agent3_capability_receipt_mounted = True
-    else:
+    # mount_agent3 owns the FULL production surface (rich planner,
+    # replan-preview, outcome-answer, capability graph + receipt, memory).
+    # The runner adds nothing -- dev serves exactly what production serves.
+    if not mount_agent3(app):
         sys.stderr.write(
             "Agent 3.0 was not mounted because KALIV_AGENT3_ENABLED is not 1. "
             "The ordinary worker API will still start.\n"

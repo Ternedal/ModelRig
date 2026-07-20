@@ -156,7 +156,18 @@ for includes) afslørede TREDJE forekomst af orphaned-wiring-klassen:
 `build_memory_router` havde nul callere; harnessen kalder POST /memory,
 /memory/context-preview og DELETE /memory/{id} → ps1'ens step 1 ville 404'e
 på rig-dagen. Mountet i 1.58.134 (mount ejer store + router; dev-runnerne
-slanket til genbrug), wiring-suiten kræver trioen. P2/P3 (F-1306..F-1327: scheduler-tid/grants/concurrency, Android-UX,
+slanket til genbrug), wiring-suiten kræver trioen.
+**Fjerde+femte orphan (1.58.135, samme audit ét ring ud):** Android-appens
+egen rute-kontrakt målt mod tabellen — `/capabilities` (en hel skærm) og
+replan-preview-flowet (`/runs/{id}/replan-preview` + `/replan-previews/
+{id}/apply`) 404'ede i produktion, mens dev-runnernes rigere includes
+virkede. Værre: runnerens RIGE planner (plan_store, memory-kontekst,
+capability-graph) blev stille skygget af mountens bare planner fra 131 —
+first-match-routing gjorde plan-persistens død selv i dev. Mountet ejer nu
+HELE surfacen (rig planner + replan-preview + outcome-answer + capability
+graph/receipt); runnerne tilføjer intet — dev serverer præcis hvad
+produktion serverer. 19→24 mountede stier; wiring-suiten kræver app-
+kontrakten (8 checks). P2/P3 (F-1306..F-1327: scheduler-tid/grants/concurrency, Android-UX,
 capability/data-sharing/research, isolation, memory, updater, merge-tog for
 de 17 drafts #92–#110) er parkeret til EFTER kampagnen jf. styringsreglen.
 
