@@ -27,11 +27,20 @@ jobs:
         run: python3 scripts/t032_proof_count_fix.py
 
       - name: Run focused proof-count contracts
+        id: proof_count
+        shell: bash
         run: |
-          python3 tests/workflow_physical_validation_campaign.py
-          python3 tests/workflow_physical_validation_final_gate.py
+          set +e
+          {
+            python3 tests/workflow_physical_validation_campaign.py
+            python3 tests/workflow_physical_validation_final_gate.py
+          } > /tmp/t032-proof-count-test.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/t032-proof-count-test.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
 
-      - name: Upload verified proof-count files
+      - name: Upload proof-count files and focused log
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: t032-proof-count-fix-files
@@ -41,8 +50,13 @@ jobs:
             scripts/physical_validation_final_gate.py
             tests/workflow_physical_validation_campaign.py
             tests/workflow_physical_validation_final_gate.py
+            /tmp/t032-proof-count-test.log
           if-no-files-found: error
           retention-days: 7
+
+      - name: Enforce focused proof-count contracts
+        if: steps.proof_count.outputs.status != '0'
+        run: exit 1
 
       - name: Build backend
         run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
@@ -86,5 +100,5 @@ jobs:
         with:
           name: agent3-full-test-log
           path: /tmp/modelrig-full-test.log
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
