@@ -187,7 +187,7 @@ attestationen afviser ukendte felter (exact key set); **F-1426** freeze's
 v4, attestation-schema v3, alle mutationer testet røde. F-1401 = riggen.
 Krydsvalidering: droppet (133-snapshot) fandt IKKE memory-orphanen eller
 app-surface-hullerne — 134/135's kontrakt-mod-tabel-målinger så ting
-statisk helanalyse ikke gjorde. P2/P3 (F-1306..F-1327: scheduler-tid/grants/concurrency, Android-UX,
+statisk helanalyse ikke gjorde. P2/P3 fra det NYE drop (F-1406..F-1431: baselines qwen3/RAG/voice, scheduler-tid/grants/concurrency, Android-UX,
 capability/data-sharing/research, isolation, memory, updater, merge-tog for
 de 19 drafts er parkeret til EFTER kampagnen jf. styringsreglen.
 
