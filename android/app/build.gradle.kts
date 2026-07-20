@@ -24,7 +24,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 273          // monotonic, bumped every release (not tied to semver)
-        versionName = "1.58.140"
+        versionName = "1.58.141"
     }
 
     signingConfigs {

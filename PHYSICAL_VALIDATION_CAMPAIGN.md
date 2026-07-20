@@ -6,6 +6,11 @@ detaljerede
 runbooks; denne kampagne sørger for, at deres rapporter faktisk beskriver den
 samme version, Git-commit og worker-kode.
 
+> **Scope:** Dette er Stage B's fulde releasekampagne. En upubliceret kandidat
+> starter i [`STAGED_PHYSICAL_PROMOTION.md`](STAGED_PHYSICAL_PROMOTION.md), hvor
+> seks ikke-releasebundne beviser og T-032-browserbeviset samles først. T-006
+> lifecycle kan først bevises, når samme SHA er publiceret som en nyere release.
+
 `scripts/physical_validation_campaign.py` er read-only. Det starter ikke
 services, bruger ingen token, udfører ingen update/reboot og ændrer ingen
 featureflag. Det læser lokale JSON-rapporter, validerer dem og skriver én atomisk
@@ -40,33 +45,25 @@ fixtures er ignorerede arbejdsfiler og gør ikke checkoutet dirty. Hvis HEAD
 ændres, er den tidligere evidens ikke længere en samlet kampagne og skal køres
 igen mod den nye kandidat.
 
-## 0. Frys kandidat og opret kampagnechecklisten
+## 0. Frys den publicerede release og opret releasechecklisten
 
-Fra repositoryets rod:
+Denne sektion er Stage B. Kør først Stage A i `STAGED_PHYSICAL_PROMOTION.md`,
+og fortsæt kun efter exact-SHA fast-forward, tag og offentlig release.
 
 ```powershell
 python scripts\freeze_check.py
-
-**Riggen er gitless** (kilderne ankommer som ZIP): freeze_check opdager det
-selv og kører i API-mode — den slår den publicerede release `v{VERSION}` op,
-verificerer at sha'en er på main og at ci+codeql var grønne på præcis den, og
-skriver ved FROZEN `validation\frozen-candidate.json`. Preflight og
-aggregatoren læser den fil i stedet for git — kæden er eksplicit:
-freeze-gaten fældede dommen, resten arver den. Det ene der IKKE kan
-verificeres uden git er working-tree-renhed; det navngives som note
-(trust-ankeret er den officielt hentede, urørte ZIP) i stedet for at grønnes.
 python scripts\physical_validation_campaign.py `
   --mode prepare `
   --report validation\physical-validation-campaign-latest.json
 ```
 
-`prepare` passer kun, når kandidaten er coherent, working tree er rent, og alle
-rapporter der allerede findes matcher kandidaten. Manglende fremtidige rapporter
-vises som `missing`, men gør ikke prepare-gaten rød. En eksisterende stale eller
-mismatched rapport gør gaten rød og skal flyttes/slettes eller køres igen.
+`freeze_check.py` kræver, at HEAD er præcis det publicerede `v{VERSION}`-tag,
+at releasen ikke er draft, at SHA'en er på `origin/main`, og at exact-head
+`ci` samt `codeql` er grønne. På en gitless release-ZIP verificerer den det
+lokale træ mod release-committen og skriver `validation\frozen-candidate.json`.
 
-Rapportens `commands`-felt indeholder den autoritative rækkefølge og de
-forventede rolling paths.
+`prepare` accepterer manglende fremtidige rapporter, men stale, røde eller
+candidate-mismatched rapporter blokerer.
 
 ## 1. T-004 — rig preflight
 
@@ -125,6 +122,10 @@ bevidst accepteret modelgrænse kan kun bruges eksplicit ved kampagneverify:
 Grænsen skal være dokumenteret; den må ikke sænkes blot for at få en grøn fil.
 
 ## 4. T-006 — reboot, supervisor, updater og rollback
+
+> **Kun Stage B:** updaterens gyldige update kræver, at kandidaten er den
+> nyeste offentlige release og har en højere semver end den kørende rig. Kør
+> aldrig denne del mod en upubliceret branch eller ved manuel binærkopiering.
 
 Kopiér den versionerede skabelon:
 

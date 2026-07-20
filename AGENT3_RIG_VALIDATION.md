@@ -92,7 +92,7 @@ ikke normal chat-routing, automatiske writes eller produktion.
 
 Kør fra repository-roden på ModelRig-maskinen.
 
-- `main` eller det konkrete release-tag, der skal valideres, er checket ud.
+- Den exact-SHA pre-release-kandidat fra `STAGED_PHYSICAL_PROMOTION.md` Stage A eller det konkrete publicerede release-tag fra Stage B er checket ud.
 - Go-backend og worker kører fra samme commit, version og code-fingerprint.
 - `KALIV_AGENT3_ENABLED=1` var sat ved processtart.
 - `KALIV_TOOLS_ENABLED=1` var sat ved processtart.
