@@ -43,6 +43,11 @@ def fixture() -> tuple[Path, str, str]:
     git(root, "config", "user.email", "test@example.invalid")
     git(root, "config", "user.name", "test")
     (root / "VERSION").write_text("1.58.141\n", encoding="utf-8")
+    (root / ".gitignore").write_text(
+        "/validation/pre-release-candidate-freeze-latest.json\n"
+        "/validation/pre-release-candidate-freeze-latest.json.tmp\n",
+        encoding="utf-8",
+    )
     (root / "scripts").mkdir()
     (root / "scripts" / "version_tool.py").write_text(
         "import sys\nsys.exit(0)\n", encoding="utf-8"
