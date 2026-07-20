@@ -54,6 +54,15 @@ kaliv-tools-state.json.tmp
 /validation/physical-validation-campaign-latest.json
 /validation/physical-validation-campaign-latest.json.tmp
 
+# Browser peer public validation: plans are one-use local authorization artifacts;
+# rolling reports contain rig/network observations. Only manually reviewed, dated
+# evidence should ever be committed.
+/validation/browser-peer-public-validation-plan.json
+/validation/browser-peer-public-validation-plan.json.tmp
+/validation/browser-peer-public-validation-plan.consumed-*.json
+/validation/browser-peer-public-validation-latest.json
+/validation/browser-peer-public-validation-latest.json.tmp
+
 # Voice baseline: raw recordings and rolling/manual work files stay on the rig.
 # Only a manually reviewed, dated evidence report may be committed.
 /validation/voice-fixtures/
