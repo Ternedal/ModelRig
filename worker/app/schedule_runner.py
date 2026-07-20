@@ -1,21 +1,16 @@
-"""Compatibility facade for the integrated scheduler runner.
+"""Compatibility alias for the integrated scheduler runner.
 
-The implementation is retained byte-for-byte from current main in
-``schedule_runner_impl``.  Before exposing it, install the one read-only
-AuditLog query that implementation requires.  This keeps the large common
-T-030/T-032 tool registry untouched while preserving main's crash-recovery
-contract.
+Install the common audit attempt contract, then expose current main's preserved
+implementation as the actual ``app.schedule_runner`` module.  Module-level
+safety probes that deliberately patch ``refusal`` therefore observe the same
+global object used by ``SchedulerRunner`` methods.
 """
 from __future__ import annotations
 
+import sys
+
 from .audit_attempt_contract import install_audit_attempt_contract
+from . import schedule_runner_impl as _implementation
 
 install_audit_attempt_contract()
-
-from .schedule_runner_impl import (  # noqa: E402,F401
-    SchedulerRunner,
-    TickResult,
-    _occurrence_conversation,
-)
-
-__all__ = ["SchedulerRunner", "TickResult"]
+sys.modules[__name__] = _implementation
