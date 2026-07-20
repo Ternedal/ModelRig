@@ -28,7 +28,9 @@ jobs:
         run: pip install -r worker/requirements.txt --break-system-packages
 
       - name: Apply staged promotion version and docs
-        run: python3 scripts/apply_staged_promotion_docs.py
+        run: |
+          python3 scripts/apply_staged_promotion_docs.py
+          python3 scripts/fix_activation_readiness_markdown.py
 
       - name: Remove transport mechanics before validation
         shell: bash
@@ -36,6 +38,7 @@ jobs:
           git fetch --quiet origin agent/t032-integration-candidate
           git checkout origin/agent/t032-integration-candidate -- .github/workflows/agent3-full-diagnostics.yml
           rm -f scripts/apply_staged_promotion_docs.py
+          rm -f scripts/fix_activation_readiness_markdown.py
 
       - name: Run staged-promotion contracts
         run: |
@@ -118,8 +121,10 @@ jobs:
               "android/app/build.gradle.kts",
               "backend/internal/config/config.go",
               "desktop/composeApp/build.gradle.kts",
+              "scripts/activation_readiness.py",
               "scripts/apply_staged_promotion_docs.py",
               "scripts/candidate_freeze_check.py",
+              "scripts/fix_activation_readiness_markdown.py",
               "scripts/physical_validation_candidate_campaign.py",
               "scripts/physical_validation_candidate_gate.py",
               "tests/workflow_candidate_campaign.py",
@@ -138,6 +143,7 @@ jobs:
               raise SystemExit("no staged candidate finalization changes")
           PY
           test ! -e scripts/apply_staged_promotion_docs.py
+          test ! -e scripts/fix_activation_readiness_markdown.py
           python3 scripts/version_tool.py check
           python3 tests/workflow_staged_promotion_runbook.py
           git diff --cached --check
