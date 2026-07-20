@@ -20,14 +20,20 @@ receipt under ``validation/`` only after every check passes.
 """
 from __future__ import annotations
 
+# Candidate inspection must not create the bytecode that its own freeze gate
+# correctly forbids. Set both interpreter and child-process contracts before
+# importing the worker fingerprint module or invoking version_tool.
+import os
+import sys
+sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 import argparse
 import hashlib
 import importlib.util
 import json
-import os
 import re
 import subprocess
-import sys
 import tempfile
 import urllib.error
 import urllib.request
