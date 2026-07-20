@@ -30,13 +30,22 @@ _probe.measure = lambda **kw: {  # type: ignore[assignment]
 }
 
 
-
 class Tool:
     def __init__(self, name: str, risk: str):
         self.name = name
         self.risk = risk
+        self.impact = risk
         self.description = f"description:{name}"
         self.params = {"type": "object", "properties": {}}
+        self.isolate = False
+        self.env_allow = ()
+        self.schedulable = True
+        self.unschedulable_because = ""
+        self.sensitivity = "operational"
+        self.cancellation = "none"
+        self.idempotent = risk == "read"
+        self.network = "none"
+        self.network_destinations = ()
 
     def human_summary(self, args):
         return f"{self.name}: {args}"

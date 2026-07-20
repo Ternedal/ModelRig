@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from ..capability_schema import CapabilitySchemaError, descriptor_from_tool
 from .core import (
     AgentStep,
     EgressClass,
@@ -120,16 +121,37 @@ class V2ToolAdapter:
         return bool(getattr(gate, "enabled", False) and name in self.tools.REGISTRY)
 
     def tool_catalog(self) -> list[dict[str, Any]]:
-        """Planner-facing catalog. Risk/sensitivity are deliberately omitted."""
-        return [
-            {
-                "name": tool.name,
-                "description": tool.description,
-                "params": tool.params,
-            }
-            for tool in self.tools.REGISTRY.values()
-            if self.is_enabled(tool.name)
-        ]
+        """Planner-facing canonical catalog with the existing wire shape.
+
+        Registry insertion order and the exact `{name, description, params}`
+        payload are preserved. Static values are validated through the v2
+        descriptor before they enter a model prompt; risk, sensitivity and every
+        other policy axis remain deliberately omitted.
+        """
+        catalog: list[dict[str, Any]] = []
+        for name, tool in self.tools.REGISTRY.items():
+            if not self.is_enabled(name):
+                continue
+            try:
+                descriptor = descriptor_from_tool(tool)
+            except CapabilitySchemaError as exc:
+                raise Agent3PlanError(
+                    f"invalid capability descriptor for {name}: {exc}"
+                ) from exc
+            expected_id = f"tool:{name}"
+            if descriptor.capability_id != expected_id:
+                raise Agent3PlanError(
+                    f"registry key {name!r} does not match "
+                    f"{descriptor.capability_id!r}"
+                )
+            catalog.append(
+                {
+                    "name": name,
+                    "description": descriptor.description,
+                    "params": descriptor.parameters,
+                }
+            )
+        return catalog
 
     def build_steps(
         self,

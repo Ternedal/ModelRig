@@ -25,6 +25,7 @@ func TestAgent3RoutesRequireFeatureFlagAndAuth(t *testing.T) {
 		s.routes()
 
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/status", http.StatusNotFound)
+		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/task-readiness", http.StatusNotFound)
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/capabilities", http.StatusNotFound)
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/memory", http.StatusNotFound)
 		assertStatus(t, s.mux, http.MethodDelete, "/api/v1/experimental/agent3/memory/example", http.StatusNotFound)
@@ -42,6 +43,7 @@ func TestAgent3RoutesRequireFeatureFlagAndAuth(t *testing.T) {
 		s.routes()
 
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/status", http.StatusUnauthorized)
+		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/task-readiness", http.StatusUnauthorized)
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/capabilities", http.StatusUnauthorized)
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/memory", http.StatusUnauthorized)
 		assertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/memory/example/correct", http.StatusUnauthorized)
@@ -52,6 +54,38 @@ func TestAgent3RoutesRequireFeatureFlagAndAuth(t *testing.T) {
 		assertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/runs/example/answer-preview", http.StatusUnauthorized)
 		assertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/replan-previews/example/apply", http.StatusUnauthorized)
 	})
+}
+
+func TestAgent3TaskReadinessProxiesToWorkerOnly(t *testing.T) {
+	t.Setenv("KALIV_AGENT3_ENABLED", "1")
+	h, workerHits, ollamaHits := upstreams(t)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/experimental/agent3/task-readiness",
+		nil,
+	)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("task readiness: got %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("task readiness returned invalid JSON: %v", err)
+	}
+	if body["upstream"] != "worker" {
+		t.Fatalf("task readiness went to %q, want worker", body["upstream"])
+	}
+	want := "/experimental/agent3/task-readiness"
+	if len(*workerHits) != 1 || (*workerHits)[0] != want {
+		t.Fatalf("worker hits = %v, want %s", *workerHits, want)
+	}
+	if len(*ollamaHits) != 0 {
+		t.Fatalf("task readiness bypassed worker and reached Ollama: %v", *ollamaHits)
+	}
 }
 
 func TestAgent3CapabilitiesProxiesToWorkerOnly(t *testing.T) {

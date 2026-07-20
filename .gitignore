@@ -37,6 +37,10 @@ kaliv-tools-state.json.tmp
 /validation/agent3-rig-validation-latest.json
 /validation/agent3-rig-validation-latest.json.tmp
 
+# Agent 3 read-only pilot: rolling evidence stays local until manually reviewed.
+/validation/agent3-readonly-pilot-latest.json
+/validation/agent3-readonly-pilot-latest.json.tmp
+
 # Physical campaign: rolling reports and manually completed lifecycle work stay
 # on the rig. Only manually reviewed, dated campaign evidence may be committed.
 /validation/rig-preflight-latest.json
@@ -49,6 +53,19 @@ kaliv-tools-state.json.tmp
 /validation/appliance-lifecycle-evidence/
 /validation/physical-validation-campaign-latest.json
 /validation/physical-validation-campaign-latest.json.tmp
+/validation/physical-validation-final-latest.json
+/validation/physical-validation-final-latest.json.tmp
+
+# Browser peer public validation: plans are one-use local authorization artifacts;
+# rolling reports contain rig/network observations. Only manually reviewed, dated
+# evidence should ever be committed.
+/validation/browser-peer-public-validation-plan.json
+/validation/browser-peer-public-validation-plan.json.tmp
+/validation/browser-peer-public-validation-plan.consumed-*.json
+/validation/browser-peer-public-validation-latest.json
+/validation/browser-peer-public-validation-latest.json.tmp
+/validation/browser-peer-public-validation-physical-latest.json
+/validation/browser-peer-public-validation-physical-latest.json.tmp
 
 # Voice baseline: raw recordings and rolling/manual work files stay on the rig.
 # Only a manually reviewed, dated evidence report may be committed.

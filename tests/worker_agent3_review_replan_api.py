@@ -23,8 +23,18 @@ class Tool:
     def __init__(self, name: str, risk: str):
         self.name = name
         self.risk = risk
+        self.impact = risk
         self.description = name
         self.params = {"type": "object", "properties": {}}
+        self.isolate = False
+        self.env_allow = ()
+        self.schedulable = True
+        self.unschedulable_because = ""
+        self.sensitivity = "operational"
+        self.cancellation = "none"
+        self.idempotent = risk == "read"
+        self.network = "none"
+        self.network_destinations = ()
 
     def human_summary(self, args):
         return f"{self.name}: {args}"
@@ -121,7 +131,6 @@ app.include_router(
 )
 client = TestClient(app)
 
-
 # Start executes one read and persists an exact review checkpoint.
 started_response = client.post(
     "/experimental/agent3/runs",
@@ -151,7 +160,6 @@ assert started["read_review"]["enabled"] is True
 assert started["read_review"]["waiting"] is True
 assert started["read_review"]["removable_step_ids"] == [old_read_id]
 
-
 # Preview is read-only and the model never sees immutable write arguments.
 preview_response = client.post(
     f"/experimental/agent3/runs/{run_id}/replan-preview",
@@ -166,7 +174,6 @@ assert preview["plan"][0]["tool"] == "current_datetime"
 assert executor.calls == [("rig_status", {})]
 assert planner_calls["count"] == 1
 assert review_store.get(run_id)["removable_step_ids"] == [old_read_id]
-
 
 # Apply consumes the reviewed token, preserves the write tail and rebinds the
 # paused checkpoint to the newly persisted replacement read.
@@ -194,7 +201,6 @@ assert client.post(
     f"/experimental/agent3/replan-previews/{preview_id}/apply"
 ).status_code == 409
 
-
 # GET exposes the same authoritative checkpoint. Explicit resume runs only the
 # replacement read and then reaches the untouched write confirmation.
 loaded_response = client.get(f"/experimental/agent3/runs/{run_id}")
@@ -214,7 +220,6 @@ write = resumed["run"]["steps"][2]
 assert write["id"] == write_id
 assert write["state"] == "waiting_confirmation"
 assert write["confirmation_digest"]
-
 
 # The immutable write executes only after its own fresh confirmation.
 confirm_response = client.post(
@@ -253,7 +258,6 @@ for required in (
 assert kinds.index("replan_review_required") < kinds.index("replan_committed")
 assert kinds.index("replan_committed") < kinds.index("replan_review_resumed")
 assert kinds.index("replan_review_resumed") < kinds.index("confirmation_required")
-
 
 # Retry is server-owned: a client cannot disable the original review policy or
 # replace the stored plan. Unknown fields are rejected before any retry starts.

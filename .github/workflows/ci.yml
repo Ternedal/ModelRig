@@ -17,9 +17,11 @@ jobs:
     uses: ./.github/workflows/_tests.yml
 
   # The optional browser runtime stays out of worker/requirements.txt. This job
-  # validates the pinned package and locked profile, then launches real Chromium
-  # against one controlled localhost fixture. It creates no model client and
-  # performs no public-site research or product activation.
+  # validates the pinned package and locked profile, launches real Chromium
+  # against one controlled localhost fixture, then proves the claim-bound CDP
+  # fulfillment/citation composition with an injected in-memory socket. It
+  # creates no model client, contacts no public destination and activates no
+  # BrowserHost or ToolGate route.
   browser-use-runtime-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -76,6 +78,21 @@ jobs:
           set -e
           cat "$report"
           exit "$status"
+      - name: Compose claim-bound runtime with installed Chromium
+        id: peer-runtime-fixture
+        shell: bash
+        env:
+          MODELRIG_BROWSER_EXECUTABLE: ${{ steps.chromium.outputs.path }}
+          MODELRIG_BROWSER_PEER_FIXTURE_REPORT: ${{ runner.temp }}/browser-peer-runtime-live-fixture.json
+          BROWSER_USE_LOGGING_LEVEL: warning
+        run: |
+          report="$RUNNER_TEMP/browser-peer-runtime-live-fixture.txt"
+          set +e
+          PYTHONPATH=worker python scripts/browser_peer_runtime_live_fixture.py >"$report" 2>&1
+          status=$?
+          set -e
+          cat "$report"
+          exit "$status"
       - name: Upload Browser Use contract failure reports
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -85,6 +102,8 @@ jobs:
             ${{ runner.temp }}/browser-use-runtime-contract.txt
             ${{ runner.temp }}/browser-use-live-fixture.txt
             ${{ runner.temp }}/browser-use-live-fixture.json
+            ${{ runner.temp }}/browser-peer-runtime-live-fixture.txt
+            ${{ runner.temp }}/browser-peer-runtime-live-fixture.json
           if-no-files-found: warn
           retention-days: 7
 

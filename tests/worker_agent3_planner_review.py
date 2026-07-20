@@ -28,11 +28,20 @@ _probe.measure = lambda **kw: {  # type: ignore[assignment]
 }
 
 
-
 class Tool:
     risk = "read"
+    impact = "read"
     description = "read tool"
     params = {"type": "object", "properties": {}}
+    isolate = False
+    env_allow = ()
+    schedulable = True
+    unschedulable_because = ""
+    sensitivity = "operational"
+    cancellation = "none"
+    idempotent = True
+    network = "none"
+    network_destinations = ()
 
     def __init__(self, name):
         self.name = name
