@@ -244,7 +244,7 @@ def _event_request(event: Any) -> tuple[str, str, str, tuple[tuple[str, str], ..
         "",
     }:
         raise BrowserPeerFulfillmentDenied("request body is forbidden")
-    canonical, *_ = _canonical_target(request.get("url"))
+    _canonical_target(request.get("url"))
     return request_id, network_id, method.upper(), _browser_headers(
         request.get("headers")
     )
@@ -423,6 +423,10 @@ class PinnedBrowserPeerTransport:
             del self._pins[receipt.pin_id]
 
     def _require_pin(self, receipt: BrowserPeerPinReceipt) -> None:
+        if not isinstance(receipt, BrowserPeerPinReceipt):
+            raise BrowserPeerFulfillmentContractError(
+                "receipt must be a BrowserPeerPinReceipt"
+            )
         with self._lock:
             if self._pins.get(receipt.pin_id) != receipt:
                 raise BrowserPeerFulfillmentDenied("transport pin is not active")
