@@ -47,8 +47,10 @@ jobs:
       - name: Build backend
         run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
 
-      - name: Generate authoritative current state
-        run: python3 scripts/current_state.py
+      - name: Regenerate authoritative generated state
+        run: |
+          python3 scripts/current_state.py
+          python3 scripts/activation_readiness.py
 
       - name: Full repository test log on intended clean tree
         env:
@@ -89,6 +91,7 @@ jobs:
           import subprocess
           allowed = {
               ".github/workflows/agent3-full-diagnostics.yml",
+              "ACTIVATION_READINESS.md",
               "AGENT3_RIG_VALIDATION.md",
               "CURRENT_STATE.md",
               "DEVICE_TEST.md",
@@ -107,6 +110,7 @@ jobs:
           if unexpected:
               raise SystemExit("unexpected staged paths: " + ", ".join(unexpected))
           required = {
+              "ACTIVATION_READINESS.md",
               "AGENT3_RIG_VALIDATION.md",
               "DEVICE_TEST.md",
               "PHYSICAL_VALIDATION_CAMPAIGN.md",
