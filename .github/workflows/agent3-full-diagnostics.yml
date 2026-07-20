@@ -83,11 +83,26 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Commit verified staged candidate
+      - name: Capture staged finalization paths
         shell: bash
         run: |
           git add -A
-          git diff --cached --name-status
+          git diff --cached --name-status | tee /tmp/staged-paths.txt
+          git diff --cached --check > /tmp/staged-check.txt 2>&1 || true
+
+      - name: Upload staged finalization diagnostics
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: staged-promotion-commit-diagnostics
+          path: |
+            /tmp/staged-paths.txt
+            /tmp/staged-check.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Commit verified staged candidate
+        shell: bash
+        run: |
           python3 - <<'PY'
           import subprocess
           allowed = {
