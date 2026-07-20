@@ -6,6 +6,7 @@ outside it. Run with ``uvicorn app.entrypoint:app``. Tests that need direct rout
 access may still import ``app.main:app``; process launchers must use this module
 so parsing, streaming and scheduler lifecycle are guarded at the ASGI boundary.
 """
+from .agent3.cancellation_status import install_termination_contract
 from .agent3.production_mount import mount_agent3
 from .hardening import harden
 from .main import app as fastapi_app
@@ -17,7 +18,12 @@ from .schedule_runtime import scheduler_lifespan
 # There is no model-visible tool for creating schedules.
 fastapi_app.include_router(build_schedule_router())
 
-# Agent 3 wires through the same documented entrypoint the campaign probes.  The
+# Middleware must be registered before the first ASGI request. It is inert when
+# no Agent 3 response exists: it only decorates JSON payloads under the dormant
+# /experimental/agent3 prefix and cannot mount or activate a route.
+install_termination_contract(fastapi_app)
+
+# Agent 3 wires through the same documented entrypoint the campaign probes. The
 # mount self-guards on KALIV_AGENT3_ENABLED (default off) and owns the complete
 # production surface; launchers do not add parallel routers.
 mount_agent3(fastapi_app)
