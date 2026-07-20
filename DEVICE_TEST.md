@@ -139,7 +139,11 @@ Notér `schedule_id` fra svaret. **Bør se** inden for ~2 min: et job pr.
 occurrence, og i `GET /schedules/{id}`: `runs_used` der tæller op og en tom
 `approval_receipts` (reads har ingen — det er designet, ikke en fejl).
 
-**Skriv-halvdelen (`note_append`):** writes kræver den fulde
+**Skriv-halvdelen (`note_append`):** Kampagnen kræver PRÆCIS den
+kanoniske pilot-write — opret den i appen med nøjagtig disse værdier:
+tool `note_append`, args `{"text": "pilot"}`, cadence `every:60`,
+max_runs `2`, ttl_days `1`. Andre værdier er EN pilot, ikke DEN pilot
+(F-1404), og validatoren afviser rapporten. Writes kræver den fulde
 godkendelses-ceremoni (backend-udstedt engangs-token bundet til din parrede
 enhed). Kør den gennem appens schedule-flow; det præcise mint-kald ligger i
 `backend/internal/httpapi/schedule_approvals.go` hvis du vil curl'e det. **Bør

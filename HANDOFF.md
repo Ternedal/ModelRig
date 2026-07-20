@@ -172,6 +172,13 @@ hardware-beviste før valideringsrunden):**
   produktion) OG at runnerens rige planner var stille skygget af mountens
   bare fra 131 (first-match). Mountet ejer nu HELE surfacen; runnerne
   tilføjer intet. Princip: dev serverer præcis hvad produktion serverer.
+  **Gap-drop mod 133 lukket i 1.58.136 (F-1402..F-1405 + 1407/1426/1431):**
+  extras = FAIL i gitless freeze; attestation v3 med fuldt træ-rollup
+  (offline tamper-evidens for HELE træet, ikke kun worker/) + exact key
+  set; kanonisk pilot-write pinnet exact med receipt↔grant-binding
+  (fingerprint/revision); freshness pr. halvdel + 12t samlet vindue +
+  execution-inventar (foreksisterende planer der fyrer fanges). Schemas:
+  attestation v3, pilot v4 — begge fail-closed mod ældre filer.
 
 **Bygget 12-14/7 (samme forbehold):**
 - **Substrat:** JobStore (persistent, terminal sandhed, cancel, restart→

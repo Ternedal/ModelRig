@@ -40,7 +40,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "kaliv-scheduler-pilot/v3"
+SCHEMA = "kaliv-scheduler-pilot/v4"
 
 # The section-1.6 pilot manifest (F-1305). The runbook pins the read plan to
 # exactly these values; the write plan's args and cadence are chosen in the
@@ -51,11 +51,20 @@ SCHEMA = "kaliv-scheduler-pilot/v3"
 # Same rig-day policy as the frozen-candidate attestation: evidence older
 # than this proves a PAST pilot, not THIS candidate's campaign day.
 PILOT_MAX_AGE_HOURS = 24.0
+# F-1405: read- og write-halvdelen skal vaere fra SAMME pilot. Hele
+# aktivitetsspaendet (aeldste til nyeste stempel paa tvaers af halvdele)
+# skal ligge i eet eksplicit vindue -- en frisk halvdel maa ikke baere en
+# gammel med.
+PILOT_WINDOW_MAX_HOURS = 12.0
 
 PILOT_MANIFEST = {
     "read": {"tool": "rig_status", "args": {}, "cadence": "every:60",
              "max_runs": 3},
-    "write": {"tool": "note_append"},
+    # F-1404: write-halvdelen er nu ogsaa exact. DEVICE_TEST section 1.6
+    # definerer den kanoniske pilot-write; en godkendt write med andre
+    # args/cadence/budget er EN pilot, ikke DEN pilot.
+    "write": {"tool": "note_append", "args": {"text": "pilot"},
+              "cadence": "every:60", "max_runs": 2},
 }
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -137,6 +146,24 @@ def schedule_inventory(schedules_db: str) -> list[dict[str, Any]]:
     return rows
 
 
+def occurrence_inventory(schedules_db: str,
+                         window_start: float) -> list[dict[str, Any]]:
+    """Schedules med EXECUTIONS i pilotvinduet (F-1405).
+
+    schedule.created-scopingen ser kun oprettelser -- en FOREKSISTERENDE
+    plan der fyrer under piloten er usynlig for den. Dette inventar ser
+    alt der KOERTE."""
+    sc = _ro(schedules_db)
+    rows = [dict(r) for r in sc.execute(
+        "SELECT o.schedule_id AS id, s.tool AS tool, "
+        "COUNT(*) AS occurrences "
+        "FROM occurrences o LEFT JOIN schedules s ON s.id = o.schedule_id "
+        "WHERE o.created >= ? GROUP BY o.schedule_id",
+        (window_start,))]
+    sc.close()
+    return rows
+
+
 def fetch_json(url: str, *, timeout: float = 10.0) -> dict[str, Any]:
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -171,7 +198,8 @@ def judge(read_detail: dict[str, Any], write_detail: dict[str, Any],
           read_id: str | None = None,
           write_id: str | None = None,
           window_start: float | None = None,
-          now_ts: float | None = None) -> list[str]:
+          now_ts: float | None = None,
+          occ_inventory: list[dict[str, Any]] | None = None) -> list[str]:
     """Every reason the pilot does NOT hold. Empty list == the pilot holds."""
     problems: list[str] = []
 
@@ -226,10 +254,13 @@ def judge(read_detail: dict[str, Any], write_detail: dict[str, Any],
                     "forensik: en executed write-occurrence uden claim_id -- "
                     "recovery-kaeden er ikke claim-bundet")
     if now_ts is not None:
-        stamps: list[float] = []
-        for fdata in (read_forensics_data, write_forensics_data):
+        newest: list[float] = []
+        oldest: list[float] = []
+        for label, fdata in (("read", read_forensics_data),
+                             ("write", write_forensics_data)):
             if fdata is None:
                 continue
+            stamps: list[float] = []
             win = fdata.get("window") or {}
             for key in ("first_created", "last_resolved"):
                 val = win.get(key)
@@ -240,18 +271,28 @@ def judge(read_detail: dict[str, Any], write_detail: dict[str, Any],
                     val = occ.get(key)
                     if isinstance(val, (int, float)):
                         stamps.append(float(val))
-        if stamps:
+            if not stamps:
+                problems.append(
+                    f"{label}-forensik uden tidsstempler -- pilotens alder "
+                    "kan ikke bedommes, beviset er ikke tidsbundet")
+                continue
+            newest.append(max(stamps))
+            oldest.append(min(stamps))
             age_h = (now_ts - max(stamps)) / 3600.0
             if age_h > PILOT_MAX_AGE_HOURS:
                 problems.append(
-                    f"piloten er {age_h:.1f} timer gammel (max "
+                    f"{label}-halvdelen er {age_h:.1f} timer gammel (max "
                     f"{PILOT_MAX_AGE_HOURS:.0f}) -- historiske pilot-IDs "
                     "beviser en FORTIDIG pilot, ikke denne kandidats "
-                    "rig-dag; koer section 1.6 igen")
-        elif read_forensics_data is not None or write_forensics_data is not None:
-            problems.append(
-                "forensik uden tidsstempler -- pilotens alder kan ikke "
-                "bedommes, beviset er ikke tidsbundet")
+                    "rig-dag; koer section 1.6 igen (F-1405)")
+        if newest and oldest:
+            span_h = (max(newest) - min(oldest)) / 3600.0
+            if span_h > PILOT_WINDOW_MAX_HOURS:
+                problems.append(
+                    f"pilotens samlede vindue spaender {span_h:.1f} timer "
+                    f"(max {PILOT_WINDOW_MAX_HOURS:.0f}) -- read og write "
+                    "er ikke fra SAMME pilot; en frisk halvdel maa ikke "
+                    "baere en gammel med (F-1405)")
 
     if inventory is not None and window_start is not None:
         listed = {read_id, write_id}
@@ -264,6 +305,17 @@ def judge(read_detail: dict[str, Any], write_detail: dict[str, Any],
                     f"unlisted schedule i pilotvinduet: {row.get('id')} "
                     f"({row.get('tool')!r}) -- pilotens inventar er ikke "
                     "komplet, beviset kan skjule en tredje plan")
+    if occ_inventory is not None:
+        listed = {read_id, write_id}
+        for row in occ_inventory:
+            if row.get("id") not in listed:
+                problems.append(
+                    f"unlisted EXECUTION i pilotvinduet: schedule "
+                    f"{row.get('id')} ({row.get('tool')!r}, "
+                    f"{row.get('occurrences')} occurrence(s)) -- en "
+                    "foreksisterende plan fyrede under piloten; beviset "
+                    "skal daekke alt der KOERTE, ikke kun alt der blev "
+                    "oprettet (F-1405)")
 
     r_sched = read_detail.get("schedule") or {}
     r_receipts = read_detail.get("approval_receipts")
@@ -284,6 +336,22 @@ def judge(read_detail: dict[str, Any], write_detail: dict[str, Any],
             "attributionsspor må ikke findes")
     else:
         r0 = w_receipts[0]
+        w_fp = w_sched.get("approved_fingerprint")
+        if not (isinstance(w_fp, str) and w_fp):
+            problems.append(
+                "write-planen mangler approved_fingerprint -- en godkendt "
+                "grant uden sin binding kan ikke bevises (F-1404)")
+        elif r0.get("fingerprint") != w_fp:
+            problems.append(
+                "write-receiptens fingerprint matcher ikke planens "
+                "approved_fingerprint -- godkendelsen daekker en ANDEN "
+                "grant end den der koerte (F-1404)")
+        if (r0.get("revision") is not None
+                and w_sched.get("revision") is not None
+                and r0.get("revision") != w_sched.get("revision")):
+            problems.append(
+                "write-receiptens revision matcher ikke planens -- "
+                "godkendelsen er fra en anden version af granten (F-1404)")
         if not (isinstance(r0.get("device_id"), str) and r0["device_id"]):
             problems.append("receipten navngiver ingen enhed (device_id)")
         issued = r0.get("issued_at")
@@ -313,7 +381,8 @@ def build_report(candidate: dict[str, Any], worker_url: str,
                  manual: dict[str, Any], now_iso: str,
                  read_forensics_data: dict[str, Any] | None = None,
                  write_forensics_data: dict[str, Any] | None = None,
-                 inventory: list[dict[str, Any]] | None = None
+                 inventory: list[dict[str, Any]] | None = None,
+                 schedules_db: str | None = None
                  ) -> dict[str, Any]:
     window_start = None
     starts = [
@@ -327,11 +396,14 @@ def build_report(candidate: dict[str, Any], worker_url: str,
         now_ts = datetime.fromisoformat(now_iso).timestamp()
     except ValueError:
         now_ts = None
+    occ_inv = None
+    if schedules_db is not None and window_start is not None:
+        occ_inv = occurrence_inventory(schedules_db, window_start)
     problems = judge(read_detail, write_detail, manual,
                      read_forensics_data, write_forensics_data,
                      inventory=inventory, read_id=read_id,
                      write_id=write_id, window_start=window_start,
-                     now_ts=now_ts)
+                     now_ts=now_ts, occ_inventory=occ_inv)
     in_window = []
     unlisted = []
     preexisting = 0
@@ -385,6 +457,11 @@ def build_report(candidate: dict[str, Any], worker_url: str,
             "schedules_in_window": in_window,
             "unlisted_in_window": unlisted,
             "preexisting_count": preexisting,
+            "executions_in_window": occ_inv if occ_inv is not None else [],
+            "executions_unlisted": [
+                r for r in (occ_inv or [])
+                if r.get("id") not in {read_id, write_id}
+            ],
         },
         "manual": {
             "revocation_confirmed": manual.get("revocation_confirmed"),
@@ -456,7 +533,8 @@ def main(argv: list[str] | None = None) -> int:
                           args.write_schedule_id, details["read"],
                           details["write"], manual, now_iso,
                           forensics["read"], forensics["write"],
-                          inventory=schedule_inventory(args.schedules_db))
+                          inventory=schedule_inventory(args.schedules_db),
+                          schedules_db=args.schedules_db)
 
     args.report.parent.mkdir(parents=True, exist_ok=True)
     tmp = args.report.with_suffix(args.report.suffix + ".tmp")

@@ -167,9 +167,29 @@ first-match-routing gjorde plan-persistens død selv i dev. Mountet ejer nu
 HELE surfacen (rig planner + replan-preview + outcome-answer + capability
 graph/receipt); runnerne tilføjer intet — dev serverer præcis hvad
 produktion serverer. 19→24 mountede stier; wiring-suiten kræver app-
-kontrakten (8 checks). P2/P3 (F-1306..F-1327: scheduler-tid/grants/concurrency, Android-UX,
+kontrakten (8 checks).
+**Helanalyse-gap-drop mod 1.58.133 (20/7, F-1401..F-1431):** dom
+"evidence-hardened promotion candidate, still physically unproven" — fem
+resterende risici, fire lukket i 1.58.136: **F-1402** extras i gitless
+freeze er nu FAIL (før NOTE) — en frisk ZIP har nul; kun validation/,
+__pycache__ og *.pyc er sanktionerede mutationer. **F-1403** attestation
+v3 med fuldt træ-rollup: freeze registrerer HELE den committede filliste
++ sha256-rollup over blob-sha'er; begge læsere genberegner offline — en
+post-freeze-ændring HVOR SOM HELST i træet (ikke kun worker/) afvises ved
+navn. **F-1404** write-manifestet er exact (kanonisk pilot-write defineret
+i §1.6: note_append/{"text":"pilot"}/every:60/max 2) + receipt bundet til
+granten (fingerprint == approved_fingerprint, revision-match). **F-1405**
+freshness pr. HALVDEL (en frisk halvdel bærer ikke en gammel), samlet
+12t-vindue på tværs, og execution-completeness: occurrences-inventar
+fanger foreksisterende planer der fyrer i vinduet. Bonus: **F-1407**
+attestationen afviser ukendte felter (exact key set); **F-1426** freeze's
+"changes nothing"-docstring rettet; **F-1431** draft-tallet. Pilot-schema
+v4, attestation-schema v3, alle mutationer testet røde. F-1401 = riggen.
+Krydsvalidering: droppet (133-snapshot) fandt IKKE memory-orphanen eller
+app-surface-hullerne — 134/135's kontrakt-mod-tabel-målinger så ting
+statisk helanalyse ikke gjorde. P2/P3 (F-1306..F-1327: scheduler-tid/grants/concurrency, Android-UX,
 capability/data-sharing/research, isolation, memory, updater, merge-tog for
-de 17 drafts #92–#110) er parkeret til EFTER kampagnen jf. styringsreglen.
+de 19 drafts er parkeret til EFTER kampagnen jf. styringsreglen.
 
 ## Milepæl 3 — Agent 3-pilot (mål task success) — tracker #60
 

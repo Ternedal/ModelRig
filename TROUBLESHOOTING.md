@@ -213,7 +213,11 @@ source-ZIP for tagget igen og start fra en urørt udpakning. Attestations-
 afvisninger fra campaign/preflight navngiver altid feltet: "mangler felter"
 (gammel v1-fil → kør freeze igen), "timer gammel" (>24t — kør freeze igen på
 SELVE rig-dagen), "fingerprint matcher ikke" (træet er ændret EFTER freeze,
-eller filen er fabrikeret — hent ZIP + kør freeze forfra). Rediger aldrig
+eller filen er fabrikeret — hent ZIP + kør freeze forfra). "rollup-digest matcher ikke" (v3, 1.58.136: en committet fil HVOR SOM
+HELST i træet er ændret efter freeze — hent ZIP + kør freeze forfra),
+"ukendte felter" (fremmed/nyere fil afvises fremfor at ignoreres), og
+"NOT in the release tree" ved freeze (en ekstra lokal fil — en frisk ZIP
+har nul extras). Rediger aldrig
 `validation/frozen-candidate.json` i hånden; den er bevismateriale, ikke
 konfiguration.
 

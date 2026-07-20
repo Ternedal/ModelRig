@@ -280,7 +280,8 @@ def valid_reports() -> dict[str, dict]:
                     "schedule": {"tool": "note_append",
                                  "args": "{\"text\": \"pilot\"}",
                                  "cadence": "every:60", "max_runs": 2,
-                                 "runs_used": 1, "revision": 0, "enabled": 1},
+                                 "runs_used": 1, "revision": 0, "enabled": 1,
+                                 "approved_fingerprint": "f" * 64},
                     "occurrences": [
                         {"claim_id": "occ-w1", "status": "executed",
                          "occurrence_due_at": _ts - 3600.0,
@@ -302,14 +303,22 @@ def valid_reports() -> dict[str, dict]:
             "pilot_window": {"start": _ts - 7200.0, "end": stamp},
             "manifest": {"read": {"tool": "rig_status", "args": {},
                                   "cadence": "every:60", "max_runs": 3},
-                         "write": {"tool": "note_append"}},
+                         "write": {"tool": "note_append",
+                                   "args": {"text": "pilot"},
+                                   "cadence": "every:60", "max_runs": 2}},
             "inventory": {"schedules_in_window": [
                               {"id": "sched-read", "tool": "rig_status",
                                "cadence": "every:60"},
                               {"id": "sched-write", "tool": "note_append",
                                "cadence": "every:60"}],
                           "unlisted_in_window": [],
-                          "preexisting_count": 0},
+                          "preexisting_count": 0,
+                          "executions_in_window": [
+                              {"id": "sched-read", "tool": "rig_status",
+                               "occurrences": 2},
+                              {"id": "sched-write", "tool": "note_append",
+                               "occurrences": 1}],
+                          "executions_unlisted": []},
             "manual": {
                 "revocation_confirmed": True,
                 "recovery_line": ("scheduler: recovered 0 executed / 1 "
@@ -628,14 +637,26 @@ def _gitless_root(att=None, version="1.58.131"):
     return d
 
 
+_fa_mod = load_module("frozen_attestation_test",
+                      SCRIPTS / "frozen_attestation.py")
+_ATT_TREE_PATHS = ["VERSION", "scripts/version_tool.py",
+                   "worker/app/build_identity.py"]
+# The stub files are byte-identical across fixture roots, so the rollup is
+# a constant: compute it once from a throwaway root via the REAL module.
+_ATT_TREE_SHA = _fa_mod.compute_tree_sha256(
+    _gitless_root(att=None), _ATT_TREE_PATHS)
+
+
 def _v2_att(**over):
-    """A fully valid v2 attestation matching _gitless_root's stub tree."""
+    """A fully valid v3 attestation matching _gitless_root's stub tree."""
     from datetime import datetime, timezone
-    base = {"schema": "kaliv-frozen-candidate/v2", "version": "1.58.131",
+    base = {"schema": "kaliv-frozen-candidate/v3", "version": "1.58.131",
             "git_sha": "d" * 40, "mode": "gitless-api",
             "checked_at": datetime.now(timezone.utc).isoformat(),
             "ci": "success", "codeql": "success",
-            "code_sha256": "a" * 64, "tree_files_verified": 3}
+            "code_sha256": "a" * 64, "tree_files_verified": 3,
+            "tree_paths": list(_ATT_TREE_PATHS),
+            "tree_sha256": _ATT_TREE_SHA}
     base.update(over)
     return base
 
@@ -702,13 +723,35 @@ except campaign.CampaignError as exc:
           "yesterday's looser v1 attestation refuses, naming the missing "
           "fields -- the contract upgrade is fail-closed, not silent")
 
+try:
+    campaign.candidate_identity(_gitless_root(att=_v2_att(smuggled="x")))
+    check(False, "an attestation with unknown fields must refuse")
+except campaign.CampaignError as exc:
+    check("ukendte felter" in str(exc) and "smuggled" in str(exc),
+          "an unknown field refuses BY NAME -- the key set is exact, so a "
+          "foreign or future file is rejected rather than ignored (F-1407)")
+
+_gr_edit = _gitless_root(att=_v2_att())
+(_gr_edit / "scripts" / "version_tool.py").write_text(
+    "import sys\nsys.exit(1)  # tampered\n", encoding="utf-8")
+try:
+    campaign.candidate_identity(_gr_edit)
+    check(False, "a post-freeze edit outside worker/ must refuse")
+except campaign.CampaignError as exc:
+    check("rollup" in str(exc),
+          "editing ANY committed file after freeze -- here VERSION, not "
+          "worker code -- breaks the tree rollup offline; the old v2 only "
+          "guarded worker/app (F-1403)")
+
 # The producer's own judgement, offline via its pure functions.
 pilot_mod = load_module("scheduler_pilot_report_test",
                         SCRIPTS / "scheduler_pilot_report.py")
 _read_ok = {"schedule": {"runs_used": 2}, "approval_receipts": []}
-_write_ok = {"schedule": {"runs_used": 1}, "approval_receipts": [
-    {"kind": "create", "device_id": "pixel-6a",
-     "issued_at": 10.0, "consumed_at": 11.0}]}
+_write_ok = {"schedule": {"runs_used": 1, "revision": 0,
+                          "approved_fingerprint": "f" * 64},
+             "approval_receipts": [
+    {"kind": "create", "device_id": "pixel-6a", "fingerprint": "f" * 64,
+     "revision": 0, "issued_at": 10.0, "consumed_at": 11.0}]}
 _manual_ok = {"revocation_confirmed": True,
               "recovery_line": "scheduler: recovered 0 executed / 1 abandoned / 0 unknown occurrence(s) at startup",
               "operator": "Anders"}
@@ -722,7 +765,7 @@ _rf = {"schedule": {"tool": "rig_status", "args": "{}",
     {"claim_id": "r2", "status": "released",
      "job": {"status": "cancelled"}, "audit_outcomes": []}],
     "receipts": [], "window": {"first_created": 1.0, "last_resolved": 2.0}}
-_wf = {"schedule": {"tool": "note_append", "args": "{\"text\": \"x\"}",
+_wf = {"schedule": {"tool": "note_append", "args": "{\"text\": \"pilot\"}",
                     "cadence": "every:60", "max_runs": 2},
        "occurrences": [
     {"claim_id": "w1", "status": "executed",
@@ -731,7 +774,8 @@ _wf = {"schedule": {"tool": "note_append", "args": "{\"text\": \"x\"}",
     "window": {"first_created": 1.0, "last_resolved": 2.0}}
 check(pilot_mod.judge(_read_ok, _write_ok, _manual_ok, _rf, _wf) == [],
       "with full forensics the pilot still holds")
-_wf_bad = {"schedule": {"tool": "note_append", "args": "{}",
+_wf_bad = {"schedule": {"tool": "note_append",
+                        "args": "{\"text\": \"pilot\"}",
                         "cadence": "every:60", "max_runs": 2},
            "occurrences": [
     {"claim_id": "w1", "status": "executed",
@@ -771,6 +815,64 @@ check(any("claim" in p for p in pilot_mod.judge(
           _read_ok, _write_ok, _manual_ok, _rf_claim, _wf)),
       "an executed occurrence without a claim_id refuses -- recovery "
       "attribution is part of the proof")
+
+# F-1404: write-halvdelen er exact, og receipten er bundet til granten.
+_wf_wrongargs = {**_wf, "schedule": {**_wf["schedule"],
+                                     "args": "{\"text\": \"other\"}"}}
+check(any("args" in p for p in pilot_mod.judge(
+          _read_ok, _write_ok, _manual_ok, _rf, _wf_wrongargs)),
+      "a write plan with non-canonical args refuses by field name -- the "
+      "write half is exact now, not just the tool (F-1404)")
+_w_fpmis = {**_write_ok, "approval_receipts": [
+    {**_write_ok["approval_receipts"][0], "fingerprint": "e" * 64}]}
+check(any("fingerprint" in p for p in pilot_mod.judge(
+          _read_ok, _w_fpmis, _manual_ok)),
+      "a receipt whose fingerprint differs from the plan's approved grant "
+      "refuses -- the approval covered a DIFFERENT grant (F-1404)")
+
+# F-1405: per-halvdel freshness, samlet vindue, execution-completeness.
+import time as _t2
+_now2 = _t2.time()
+_rf_fresh = {**_rf, "window": {"first_created": _now2 - 60,
+                               "last_resolved": _now2 - 30},
+             "occurrences": [
+    {"claim_id": "r1", "status": "executed", "created": _now2 - 60,
+     "resolved": _now2 - 30, "job": {"status": "completed"},
+     "audit_outcomes": ["attempt", "executed"]},
+    {"claim_id": "r2", "status": "released", "created": _now2 - 50,
+     "resolved": _now2 - 25, "job": {"status": "cancelled"},
+     "audit_outcomes": []}]}
+_wf_old = {**_wf, "window": {"first_created": _now2 - 90000,
+                             "last_resolved": _now2 - 89000},
+           "occurrences": [
+    {"claim_id": "w1", "status": "executed", "created": _now2 - 90000,
+     "resolved": _now2 - 89000, "job": {"status": "completed"},
+     "audit_outcomes": ["attempt", "executed"]}]}
+_probs_half = pilot_mod.judge(_read_ok, _write_ok, _manual_ok,
+                              _rf_fresh, _wf_old, now_ts=_now2)
+check(any("write-halvdelen" in p and "historiske" in p
+          for p in _probs_half),
+      "a fresh read half cannot carry a stale write half -- freshness is "
+      "judged PER HALF now, naming the stale one (F-1405)")
+_wf_apart = {**_wf, "window": {"first_created": _now2 - 47000,
+                               "last_resolved": _now2 - 46000},
+             "occurrences": [
+    {"claim_id": "w1", "status": "executed", "created": _now2 - 47000,
+     "resolved": _now2 - 46000, "job": {"status": "completed"},
+     "audit_outcomes": ["attempt", "executed"]}]}
+check(any("spaender" in p for p in pilot_mod.judge(
+          _read_ok, _write_ok, _manual_ok, _rf_fresh, _wf_apart,
+          now_ts=_now2)),
+      "two individually fresh halves 13 hours apart refuse -- both must "
+      "lie in ONE explicit pilot window (F-1405)")
+check(any("EXECUTION" in p for p in pilot_mod.judge(
+          _read_ok, _write_ok, _manual_ok, _rf, _wf,
+          read_id="sched-read", write_id="sched-write",
+          occ_inventory=[{"id": "sched-old", "tool": "rig_status",
+                          "occurrences": 4}])),
+      "a PRE-EXISTING schedule firing during the pilot window refuses -- "
+      "completeness now covers everything that RAN, not just everything "
+      "created (F-1405)")
 
 import time as _time
 check(any("historiske" in p for p in pilot_mod.judge(

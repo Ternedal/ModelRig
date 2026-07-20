@@ -28,6 +28,7 @@ the gate proved, carried to readers that must work offline.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import re
@@ -35,7 +36,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "kaliv-frozen-candidate/v2"
+SCHEMA = "kaliv-frozen-candidate/v3"
 MAX_AGE_HOURS = 24.0
 _CLOCK_SKEW = timedelta(minutes=5)
 _MODES = {"git", "gitless-api"}
@@ -50,6 +51,8 @@ REQUIRED_FIELDS = (
     "codeql",
     "code_sha256",
     "tree_files_verified",
+    "tree_paths",
+    "tree_sha256",
 )
 
 
@@ -59,6 +62,35 @@ class AttestationError(Exception):
 
 def attestation_path(root: Path) -> Path:
     return Path(root) / "validation" / "frozen-candidate.json"
+
+
+def _blob_sha1(path: Path) -> str:
+    body = path.read_bytes()
+    return hashlib.sha1(b"blob %d\x00" % len(body) + body).hexdigest()
+
+
+def compute_tree_sha256(root: Path, paths: list[str]) -> str:
+    """Rollup digest over the COMMITTED files' bytes (F-1403).
+
+    code_sha256 guards worker/app; everything else the campaign runs --
+    freeze_check itself, the aggregator, preflight, tests, backend sources
+    -- could be edited after freeze without the offline recompute noticing.
+    This digest covers the full recorded file list: sha256 over sorted
+    "path:git-blob-sha1" lines, recomputable offline from bytes on disk.
+    A missing listed file raises with its name.
+    """
+    lines = []
+    for rel in sorted(paths):
+        p = Path(root) / rel
+        try:
+            digest = _blob_sha1(p)
+        except OSError as exc:
+            raise AttestationError(
+                f"attesteret fil mangler i traeet: {rel} -- traeet er "
+                "aendret efter freeze (eller filen er fabrikeret)"
+            ) from exc
+        lines.append(f"{rel}:{digest}")
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
 
 def compute_code_sha256(root: Path) -> str:
@@ -81,6 +113,8 @@ def write_attestation(
     git_sha: str,
     mode: str,
     tree_files_verified: int,
+    tree_paths: list[str] | None = None,
+    tree_sha256: str = "",
     now: datetime | None = None,
 ) -> Path:
     """Write the attestation for a FROZEN verdict. The gate calls this once."""
@@ -98,6 +132,8 @@ def write_attestation(
         "codeql": "success",
         "code_sha256": compute_code_sha256(root),
         "tree_files_verified": int(tree_files_verified),
+        "tree_paths": sorted(tree_paths or []),
+        "tree_sha256": tree_sha256,
     }
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2)
@@ -137,6 +173,13 @@ def load_attestation(
         raise AttestationError(
             "attestationen mangler felter: " + ", ".join(missing)
             + " -- en aeldre eller haandskrevet fil; koer freeze_check igen"
+        )
+    unknown = sorted(set(data) - set(REQUIRED_FIELDS))
+    if unknown:
+        raise AttestationError(
+            "attestationen har ukendte felter: " + ", ".join(unknown)
+            + " -- kontrakten er exact (F-1407); en fremmed eller nyere "
+            "fil afvises fremfor at ignoreres"
         )
     if data["schema"] != SCHEMA:
         raise AttestationError(
@@ -202,4 +245,26 @@ def load_attestation(
             "gitless-attestation uden verificerede trae-filer -- freeze-"
             "gatens release-binding manglede; koer freeze_check igen"
         )
+
+    tree_paths = data["tree_paths"]
+    tree_sha = data["tree_sha256"]
+    if not isinstance(tree_paths, list) or not all(
+        isinstance(p, str) and p for p in tree_paths
+    ):
+        raise AttestationError("tree_paths er ikke en liste af stier")
+    if data["mode"] == "gitless-api":
+        if not tree_paths or not re.fullmatch(r"[0-9a-f]{64}", str(tree_sha)):
+            raise AttestationError(
+                "gitless-attestation uden tree digest -- koer freeze_check "
+                "fra 1.58.136+ igen"
+            )
+        actual_tree = compute_tree_sha256(root, tree_paths)
+        if actual_tree != tree_sha:
+            raise AttestationError(
+                "traeets rollup-digest matcher ikke attestationen -- en "
+                "committet fil (hvor som helst i traeet, ikke kun worker/) "
+                "er aendret efter freeze. "
+                f"attesteret: {str(tree_sha)[:12]}..., "
+                f"beregnet: {actual_tree[:12]}..."
+            )
     return data

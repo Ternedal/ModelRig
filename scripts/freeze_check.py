@@ -14,7 +14,10 @@ answers three questions the run itself cannot:
   3. What is the candidate's identity (version + SHA), recorded so the report
      can be tied back to it and drift past it is visible?
 
-It changes nothing. It reads git, the version tool, and -- if a token is
+It never mutates git state or sources. It writes exactly ONE artifact:
+validation/frozen-candidate.json, and only on a FROZEN verdict (F-1426 --
+the old "changes nothing" claim was stale the day the attestation writer
+landed). It reads git, the version tool, and -- if a token is
 available -- the GitHub Actions status for this exact SHA.
 
 Usage (from the repo root):
@@ -160,6 +163,7 @@ def main() -> int:
             os.path.join(os.path.dirname(__file__), ".."))
         mismatched: list[str] = []
         missing: list[str] = []
+        local_lines: list[str] = []
         for rel_path, want in sorted(blobs.items()):
             local = os.path.join(repo_root, rel_path)
             try:
@@ -170,6 +174,7 @@ def main() -> int:
                 continue
             got = hashlib.sha1(
                 b"blob %d\x00" % len(body) + body).hexdigest()
+            local_lines.append(f"{rel_path}:{got}")
             if got != want:
                 mismatched.append(rel_path)
         if mismatched or missing:
@@ -181,7 +186,12 @@ def main() -> int:
                   f"v{version} and start from an untouched extraction")
             return 1
         tree_files_verified = len(blobs)
-        extras = 0
+        # F-1402: an unknown local file is a FAIL, not a note. A fresh ZIP
+        # has zero extras; the only sanctioned local mutations are the
+        # runtime outputs already excluded below (validation/, __pycache__,
+        # *.pyc). Anything else riding along inside an attested tree is
+        # exactly what the attestation exists to refuse.
+        extras: list[str] = []
         for dirpath, dirnames, filenames in os.walk(repo_root):
             kept = []
             for d in dirnames:
@@ -198,10 +208,17 @@ def main() -> int:
                     os.path.join(dirpath, fname), repo_root
                 ).replace(os.sep, "/")
                 if rel_path not in blobs:
-                    extras += 1
+                    extras.append(rel_path)
         if extras:
-            print(f"  NOTE  {extras} local file(s) not in the release tree "
-                  "(build outputs are expected; a fresh ZIP has zero)")
+            print(f"  FAIL  {len(extras)} local file(s) are NOT in the "
+                  f"release tree:")
+            for rel_path in sorted(extras)[:5]:
+                print(f"         - {rel_path}")
+            print(f"         -> a fresh ZIP has zero extras; start from an "
+                  f"untouched extraction of v{version}")
+            return 1
+        tree_sha256_local = hashlib.sha256(
+            "\n".join(local_lines).encode("utf-8")).hexdigest()
         print(f"  release-tree binding: {tree_files_verified} committed "
               f"files match commit {short}")
     else:
@@ -324,6 +341,8 @@ def main() -> int:
         git_sha=sha,
         mode="gitless-api" if gitless else "git",
         tree_files_verified=tree_files_verified if gitless else 0,
+        tree_paths=sorted(blobs) if gitless else [],
+        tree_sha256=tree_sha256_local if gitless else "",
     )
     print(f"  attestation written: validation{os.sep}frozen-candidate.json "
           f"(schema {_fa.SCHEMA})")

@@ -244,7 +244,7 @@ def _strip_git(repo):
     return repo
 
 
-def _gitless_api(repo=None, tamper=None, *, release_draft=False, release_missing=False,
+def _gitless_api(repo=None, tamper=None, exclude=None, *, release_draft=False, release_missing=False,
                  compare_status="behind", sha="c" * 40,
                  ci=("completed", "success"), codeql=("completed", "success")):
     def api(url, token):
@@ -277,6 +277,8 @@ def _gitless_api(repo=None, tamper=None, *, release_draft=False, release_missing
                 body = p.read_bytes()
                 sha1 = hashlib.sha1(
                     b"blob %d\x00" % len(body) + body).hexdigest()
+                if rel in (exclude or set()):
+                    continue
                 entries.append({"path": rel, "type": "blob",
                                 "sha": (tamper or {}).get(rel, sha1)})
             return {"truncated": False, "tree": entries}
@@ -305,15 +307,32 @@ if _att.exists():
           and _data.get("mode") == "gitless-api",
           "the attestation pins exactly the API-resolved sha, version and "
           "mode")
-    check(_data.get("schema") == "kaliv-frozen-candidate/v2"
+    check(_data.get("schema") == "kaliv-frozen-candidate/v3"
           and _data.get("code_sha256") == "b" * 64
           and isinstance(_data.get("tree_files_verified"), int)
           and _data["tree_files_verified"] >= 1
           and _data.get("ci") == "success"
           and _data.get("checked_at"),
-          "the v2 attestation carries the recomputable worker fingerprint, "
+          "the v3 attestation carries the recomputable worker fingerprint, "
           "the verified-file count, CI verdicts and a timestamp -- the "
-          "strict contract every reader now enforces (F-1304)")
+          "strict contract every reader enforces (F-1304)")
+    check(isinstance(_data.get("tree_paths"), list)
+          and len(_data["tree_paths"]) == _data["tree_files_verified"]
+          and isinstance(_data.get("tree_sha256"), str)
+          and len(_data["tree_sha256"]) == 64,
+          "the v3 attestation records the FULL committed file list and its "
+          "rollup digest -- offline readers can now detect a post-freeze "
+          "edit anywhere in the tree, not just under worker/ (F-1403)")
+
+# Mutation: an extra local file not in the release tree is a FAIL, not a
+# note -- a fresh ZIP has zero extras (F-1402).
+_g_extra = _strip_git(_make_repo(version="1.58.131"))
+_code, _out = run_in(_g_extra, token="tok",
+                     api=_gitless_api(_g_extra, exclude={"VERSION"}))
+check(_code == 1 and "NOT in the release tree" in _out
+      and not (_g_extra / "validation" / "frozen-candidate.json").exists(),
+      "a local file the release tree does not know is a named FAIL and "
+      "nothing is attested -- extras were only a NOTE before (F-1402)")
 
 # Mutation: one committed byte differs from the release tree -- the ZIP is
 # NOT the release, no matter what VERSION claims. Nothing may be attested.

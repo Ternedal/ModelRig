@@ -34,7 +34,7 @@ from typing import Any, Callable
 SCHEMA = "kaliv-physical-validation-campaign/v1"
 LIFECYCLE_SCHEMA = "kaliv-appliance-lifecycle-observations/v1"
 PREFLIGHT_SCHEMA = "kaliv-rig-preflight/v1"
-SCHEDULER_PILOT_SCHEMA = "kaliv-scheduler-pilot/v3"
+SCHEDULER_PILOT_SCHEMA = "kaliv-scheduler-pilot/v4"
 MAX_EVIDENCE_BYTES = 32 * 1024 * 1024
 DEFAULT_REPORT = Path("validation/physical-validation-campaign-latest.json")
 
@@ -783,6 +783,21 @@ def _validate_scheduler_pilot(
         errors.append(
             "manifest.read.tool er ikke rig_status -- rapporten er ikke "
             "bundet til runbookens section-1.6 manifest")
+    if _nested(report, "manifest", "write", "args") != {"text": "pilot"}:
+        errors.append(
+            "manifest.write er ikke den kanoniske section-1.6 pilot-write "
+            "-- write-halvdelen skal vaere exact (F-1404)")
+    exec_unlisted = _nested(report, "inventory", "executions_unlisted")
+    if exec_unlisted is None:
+        errors.append(
+            "inventory.executions_unlisted mangler -- execution-"
+            "completeness kan ikke bedommes (F-1405)")
+    elif exec_unlisted:
+        names = ", ".join(
+            f"{e.get('id')}({e.get('tool')})" for e in exec_unlisted)
+        errors.append(
+            f"unlisted executions i pilotvinduet: {names} -- noget KOERTE "
+            "som beviset ikke daekker (F-1405)")
     # Freshness re-check, independent of the producer (defense in depth):
     # the newest durable timestamp in the forensics must lie within the
     # rig-day window of the report's own generated_at -- replayed

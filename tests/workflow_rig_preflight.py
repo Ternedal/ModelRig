@@ -187,12 +187,21 @@ _root = _P(_tf.mkdtemp(prefix="pf-gitless-"))
 (_root / "worker" / "app" / "build_identity.py").write_text(
     "def code_fingerprint():\n    return 'a' * 64\n", encoding="utf-8")
 from datetime import datetime as _dt, timezone as _tz
+import importlib.util as _ilu
+_fa_spec = _ilu.spec_from_file_location(
+    "frozen_attestation_pf", ROOT / "scripts" / "frozen_attestation.py")
+_fa = _ilu.module_from_spec(_fa_spec)
+_fa_spec.loader.exec_module(_fa)
+_pf_tree_paths = ["worker/app/build_identity.py"]
 (_root / "validation" / "frozen-candidate.json").write_text(
-    json.dumps({"schema": "kaliv-frozen-candidate/v2", "version": "1.58.131",
+    json.dumps({"schema": "kaliv-frozen-candidate/v3", "version": "1.58.131",
                 "git_sha": "f" * 40, "mode": "gitless-api",
                 "checked_at": _dt.now(_tz.utc).isoformat(),
                 "ci": "success", "codeql": "success",
-                "code_sha256": "a" * 64, "tree_files_verified": 1}),
+                "code_sha256": "a" * 64, "tree_files_verified": 1,
+                "tree_paths": _pf_tree_paths,
+                "tree_sha256": _fa.compute_tree_sha256(
+                    _root, _pf_tree_paths)}),
     encoding="utf-8")
 check(preflight._attested_sha(_root, "1.58.131") == "f" * 40,
       "preflight reads the attested sha when git is absent")
