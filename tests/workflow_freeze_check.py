@@ -196,6 +196,42 @@ check("ci was GREEN" in _out and "codeql was GREEN" in _out,
       "and BOTH workflows are named as verified -- codeql is part of the "
       "evidence now, not just ci")
 
+# F-1602: git-mode must ALSO record the committed path-set + rollup, so the
+# offline reader enforces post-freeze continuity regardless of mode. Prove
+# the attestation carries a non-empty tree list, the reader accepts a clean
+# tree, and a post-freeze edit to a committed file is caught offline.
+check("tracked-tree rollup" in _out,
+      "git-mode records the committed tree for offline continuity -- not "
+      "just gitless (F-1602)")
+_gm_att = _ok / "validation" / "frozen-candidate.json"
+if _gm_att.exists():
+    import json as _json1602
+    _gm = _json1602.loads(_gm_att.read_text(encoding="utf-8"))
+    check(_gm.get("mode") == "git" and _gm.get("tree_files_verified", 0) >= 1
+          and len(_gm.get("tree_paths") or []) == _gm.get("tree_files_verified")
+          and bool(_gm.get("tree_sha256")),
+          "the git-mode attestation carries the same tree list + rollup a "
+          "gitless one does -- the reader can now check continuity either "
+          "way (F-1602)")
+    import importlib.util as _ilu1602
+    _fa2s = _ilu1602.spec_from_file_location(
+        "fa_gitmode", ROOT / "scripts" / "frozen_attestation.py")
+    _fa2 = _ilu1602.module_from_spec(_fa2s); _fa2s.loader.exec_module(_fa2)
+    _fa2.load_attestation(_ok, expected_version="1.58.0")  # clean: passes
+    # Edit a committed file after freeze; the rollup must catch it offline.
+    _victim = _ok / "VERSION"
+    _orig = _victim.read_text(encoding="utf-8")
+    _victim.write_text(_orig + "\n# tampered after freeze\n", encoding="utf-8")
+    try:
+        _fa2.load_attestation(_ok, expected_version="1.58.0")
+        check(False, "git-mode post-freeze edit must be caught")
+    except _fa2.AttestationError as _e2:
+        check("rollup-digest matcher ikke" in str(_e2),
+              "a committed file edited after a git-mode freeze is caught "
+              "offline by the rollup -- continuity holds in git-mode too "
+              "(F-1602)")
+    _victim.write_text(_orig, encoding="utf-8")
+
 # F-1502 in git-mode: bytecode is gitignored, so the cleanliness check
 # cannot see it; an explicit scan must fail the freeze anyway.
 _pyc_git = _make_repo(clean=True)

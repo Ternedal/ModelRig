@@ -244,12 +244,16 @@ def valid_reports() -> dict[str, dict]:
             "write_schedule": {
                 "schedule_id": "sched-write",
                 "runs_used": 1,
+                "revision": 1,
+                "approved_fingerprint": "w" * 64,
                 "receipts_count": 1,
                 "first_receipt": {
                     "kind": "create",
                     "device_id": "pixel-6a",
                     "issued_at": 1000.0,
                     "consumed_at": 1002.5,
+                    "revision": 1,
+                    "fingerprint": "w" * 64,
                 },
             },
             "forensics": {
@@ -566,6 +570,53 @@ with tempfile.TemporaryDirectory(dir=ROOT) as td:
     errs = r["evidence"]["scheduler_pilot"]["errors"]
     check(any("receipt" in e for e in errs),
           "and the error names the missing receipt")
+
+# F-1603: the campaign validator must re-prove the FULL receipt contract --
+# fingerprint binding, revision match, kind -- not just presence. Each
+# mutation keeps the receipt PRESENT but breaks one bound property, so only
+# full parity (not the old presence check) can catch it.
+with tempfile.TemporaryDirectory(dir=ROOT) as td:
+    temp = Path(td)
+    for name, report in reports_with_artifacts(temp).items():
+        write(temp / f"{name}.json", report)
+    pilot = reports_with_artifacts(temp)["scheduler_pilot"]
+    # receipt fingerprint no longer matches the schedule's approved one:
+    # the approval covers a DIFFERENT grant than the one that ran.
+    pilot["write_schedule"]["first_receipt"]["fingerprint"] = "e" * 64
+    write(temp / "scheduler_pilot.json", pilot)
+    r, code = campaign.campaign_report(args_for(temp, "verify"))
+    errs = r["evidence"]["scheduler_pilot"]["errors"]
+    check(code == 1 and any("fingerprint" in e and "F-1603" in e
+                            for e in errs),
+          "a receipt whose fingerprint differs from the schedule's "
+          "approved_fingerprint fails the campaign -- the approval must "
+          "cover the grant that RAN (F-1603)")
+
+with tempfile.TemporaryDirectory(dir=ROOT) as td:
+    temp = Path(td)
+    for name, report in reports_with_artifacts(temp).items():
+        write(temp / f"{name}.json", report)
+    pilot = reports_with_artifacts(temp)["scheduler_pilot"]
+    pilot["write_schedule"]["first_receipt"]["revision"] = 2  # sched says 1
+    write(temp / "scheduler_pilot.json", pilot)
+    r, code = campaign.campaign_report(args_for(temp, "verify"))
+    errs = r["evidence"]["scheduler_pilot"]["errors"]
+    check(code == 1 and any("revision" in e and "F-1603" in e for e in errs),
+          "a receipt from a different revision of the grant fails the "
+          "campaign -- approval must match the grant version (F-1603)")
+
+with tempfile.TemporaryDirectory(dir=ROOT) as td:
+    temp = Path(td)
+    for name, report in reports_with_artifacts(temp).items():
+        write(temp / f"{name}.json", report)
+    pilot = reports_with_artifacts(temp)["scheduler_pilot"]
+    pilot["write_schedule"]["first_receipt"]["kind"] = ""  # unlabelled
+    write(temp / "scheduler_pilot.json", pilot)
+    r, code = campaign.campaign_report(args_for(temp, "verify"))
+    errs = r["evidence"]["scheduler_pilot"]["errors"]
+    check(code == 1 and any("kind" in e and "F-1603" in e for e in errs),
+          "an unlabelled receipt (no kind) fails the campaign -- it cannot "
+          "be audited (F-1603)")
 
 with tempfile.TemporaryDirectory(dir=ROOT) as td:
     temp = Path(td)

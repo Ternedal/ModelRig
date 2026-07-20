@@ -452,12 +452,16 @@ def build_report(candidate: dict[str, Any], worker_url: str,
         "write_schedule": {
             "schedule_id": write_id,
             "runs_used": w_sched.get("runs_used"),
+            "revision": w_sched.get("revision"),
+            "approved_fingerprint": w_sched.get("approved_fingerprint"),
             "receipts_count": len(w_receipts),
             "first_receipt": {
                 "kind": first.get("kind"),
                 "device_id": first.get("device_id"),
                 "issued_at": first.get("issued_at"),
                 "consumed_at": first.get("consumed_at"),
+                "revision": first.get("revision"),
+                "fingerprint": first.get("fingerprint"),
             },
         },
         "forensics": {

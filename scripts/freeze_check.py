@@ -337,6 +337,47 @@ def main() -> int:
         else:
             print("  OK    no Python bytecode in the candidate tree")
 
+        # F-1602: post-freeze continuity must hold in BOTH modes. Gitless
+        # records the committed file list + rollup from the release tree;
+        # git-mode records the SAME from `git ls-tree -r HEAD`, so the
+        # offline readers run their full rollup/extras check either way. A
+        # developer freezing in git-mode is no longer exempt from tamper-
+        # evidence just because they have a .git dir.
+        _rc_ls, _ls_out = _run("git", "ls-tree", "-r", "--name-only", "HEAD")
+        if _rc_ls != 0:
+            print("  FAIL  could not list the committed tree (git ls-tree)")
+            blockers += 1
+            tracked_paths = []
+        else:
+            tracked_paths = [ln for ln in _ls_out.splitlines() if ln]
+        repo_root_git2 = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), ".."))
+        _git_lines = []
+        _missing_tracked = []
+        for rel in sorted(tracked_paths):
+            local = os.path.join(repo_root_git2, rel)
+            try:
+                with open(local, "rb") as fh:
+                    body = fh.read()
+            except OSError:
+                _missing_tracked.append(rel)
+                continue
+            _git_lines.append(
+                rel + ":" + hashlib.sha1(
+                    b"blob %d\x00" % len(body) + body).hexdigest())
+        if _missing_tracked:
+            print(f"  FAIL  {len(_missing_tracked)} tracked file(s) missing "
+                  "from the working tree")
+            for rel in _missing_tracked[:5]:
+                print(f"         - {rel}")
+            blockers += 1
+        tree_files_verified = len(tracked_paths)
+        blobs = {p: None for p in tracked_paths}
+        tree_sha256_local = hashlib.sha256(
+            "\n".join(_git_lines).encode("utf-8")).hexdigest()
+        print(f"  tracked-tree rollup: {tree_files_verified} committed files "
+              "recorded for offline continuity")
+
     # --- 2. version stamps consistent ---------------------------------------
     vt = os.path.join(os.path.dirname(__file__), "version_tool.py")
     rc, out = _run(sys.executable, vt, "check")
@@ -433,9 +474,9 @@ def main() -> int:
         version=version,
         git_sha=sha,
         mode="gitless-api" if gitless else "git",
-        tree_files_verified=tree_files_verified if gitless else 0,
-        tree_paths=sorted(blobs) if gitless else [],
-        tree_sha256=tree_sha256_local if gitless else "",
+        tree_files_verified=tree_files_verified,
+        tree_paths=sorted(blobs),
+        tree_sha256=tree_sha256_local,
     )
     print(f"  attestation written: validation{os.sep}frozen-candidate.json "
           f"(schema {_fa.SCHEMA})")

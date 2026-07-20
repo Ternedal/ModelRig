@@ -228,6 +228,20 @@ imports fra 135-oprydningen fjernet. Suiter: freeze 32→37, campaign
 er rig-afhængige (baselines qwen3/voice/RAG, Pixel-verify, isolation-
 matrix) eller beslutninger (data-sharing-policy, kryptering, self-update,
 merge-tæket for de 19 drafts) — parkeret til efter kampagnen.
+**Helanalyse-gap-drop mod 1.58.138 (20/7, F-1601..F-1635):** dom "high-
+assurance software candidate, awaiting final evidence parity and physical
+proof". To software-P1'er lukket i 1.58.139 (F-1601 = den fysiske kampagne,
+din). **F-1602** full-tree post-freeze continuity gjaldt KUN gitless-mode —
+git-mode skrev tomme tree-felter, saa readerens rollup/extras-kontrol
+(F-1503/1507) sprang over. Git-mode registrerer nu committed path-set +
+rollup via `git ls-tree` og readeren haandhaever samme logik i BEGGE modes;
+bevist ende-til-ende (freeze git-repo, laes offline, tamper fanget).
+**F-1603** kampagne-validatoren genbeviste kun DELE af pilot-receipt-
+kontrakten — nu fuld uafhaengig paritet: fingerprint-binding, revision-match
+og kind genkontrolleres (rapporten udvidet til at eksponere dem); tre
+mutationer roede. Suiter: freeze 40, campaign 73; glob 110/110 + Go 8/8.
+Resten (F-1604..F-1635, 28 draft-PR'er) er rig- eller beslutningsafhaengigt,
+parkeret.
 
 ## Milepæl 3 — Agent 3-pilot (mål task success) — tracker #60
 

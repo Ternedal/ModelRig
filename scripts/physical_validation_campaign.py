@@ -904,6 +904,34 @@ def _validate_scheduler_pilot(
             or not isinstance(consumed, (int, float)) or consumed < issued:
         errors.append("write_schedule.first_receipt must carry issued_at <= "
                       "consumed_at")
+    # F-1603: full receipt-contract parity with the producer -- re-prove the
+    # fingerprint binding, revision match and kind independently, so a
+    # doctored producer that skipped them cannot slip a receipt covering a
+    # DIFFERENT grant than the one that ran.
+    approved_fp = _nested(report, "write_schedule", "approved_fingerprint")
+    receipt_fp = _nested(report, "write_schedule", "first_receipt",
+                         "fingerprint")
+    if not (isinstance(approved_fp, str) and approved_fp):
+        errors.append("write_schedule.approved_fingerprint must bind the "
+                      "granted approval -- an approved write without its "
+                      "fingerprint binding cannot be proven (F-1603)")
+    elif receipt_fp != approved_fp:
+        errors.append("write_schedule.first_receipt.fingerprint must equal "
+                      "the schedule's approved_fingerprint -- the approval "
+                      "must cover the grant that RAN, not another (F-1603)")
+    sched_rev = _nested(report, "write_schedule", "revision")
+    receipt_rev = _nested(report, "write_schedule", "first_receipt",
+                          "revision")
+    if (sched_rev is not None and receipt_rev is not None
+            and sched_rev != receipt_rev):
+        errors.append("write_schedule.first_receipt.revision must match the "
+                      "schedule's revision -- the approval is from another "
+                      "version of the grant (F-1603)")
+    kind = _nested(report, "write_schedule", "first_receipt", "kind")
+    if not (isinstance(kind, str) and kind):
+        errors.append("write_schedule.first_receipt.kind must name the "
+                      "approval kind -- an unlabelled receipt cannot be "
+                      "audited (F-1603)")
 
     if _nested(report, "manual", "revocation_confirmed") is not True:
         errors.append("manual.revocation_confirmed must be true -- the "

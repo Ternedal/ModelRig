@@ -270,10 +270,10 @@ def load_attestation(
     tfv = data["tree_files_verified"]
     if not isinstance(tfv, int) or isinstance(tfv, bool) or tfv < 0:
         raise AttestationError("tree_files_verified er ikke et ikke-negativt tal")
-    if data["mode"] == "gitless-api" and tfv < 1:
+    if tfv < 1:
         raise AttestationError(
-            "gitless-attestation uden verificerede trae-filer -- freeze-"
-            "gatens release-binding manglede; koer freeze_check igen"
+            "attestation uden verificerede trae-filer -- freeze-gatens "
+            "trae-optegnelse manglede; koer freeze_check igen"
         )
 
     tree_paths = data["tree_paths"]
@@ -304,36 +304,41 @@ def load_attestation(
         raise AttestationError(
             f"tree_files_verified ({tfv}) matcher ikke antal tree_paths "
             f"({len(tree_paths)}) -- attestationen er intern inkonsistent")
-    if data["mode"] == "gitless-api":
-        if not tree_paths or not re.fullmatch(r"[0-9a-f]{64}", str(tree_sha)):
-            raise AttestationError(
-                "gitless-attestation uden tree digest -- koer freeze_check "
-                "fra 1.58.136+ igen"
-            )
-        actual_tree = compute_tree_sha256(root, tree_paths)
-        if actual_tree != tree_sha:
-            raise AttestationError(
-                "traeets rollup-digest matcher ikke attestationen -- en "
-                "committet fil (hvor som helst i traeet, ikke kun worker/) "
-                "er aendret efter freeze. "
-                f"attesteret: {str(tree_sha)[:12]}..., "
-                f"beregnet: {actual_tree[:12]}..."
-            )
-        # F-1503: the rollup proves the RECORDED files are unchanged, but a
-        # file ADDED after freeze is not in tree_paths and would go unseen.
-        # Re-inventory the actual tree offline and refuse any extra, using
-        # the SAME scanner the freeze gate uses (so gate and reader agree on
-        # exactly one rule). Bytecode/__pycache__ count as extras here too.
-        blob_set = set(tree_paths)
-        extras = _scan_extras_offline(root, blob_set)
-        if extras:
-            bytecode = [p for p in extras
-                        if p.endswith(".pyc") or "__pycache__" in p]
-            detail = f" ({len(bytecode)} bytecode)" if bytecode else ""
-            raise AttestationError(
-                f"{len(extras)} fil(er) er tilfoejet i traeet EFTER freeze"
-                f"{detail} -- ikke i attestationen: "
-                + ", ".join(sorted(extras)[:3])
-                + " -- hent en frisk ZIP og koer freeze_check forfra"
-            )
+    # F-1602: post-freeze continuity now holds in BOTH modes. Both git-mode
+    # (via git ls-tree) and gitless-api (via the release tree) record the
+    # committed path-set + rollup, so the reader runs the same tamper-
+    # evidence check regardless of how the candidate was frozen. Older
+    # git-mode attestations wrote empty tree fields; treat an empty path-set
+    # on a non-gitless attestation as a stale-format refusal, not a skip.
+    if not tree_paths or not re.fullmatch(r"[0-9a-f]{64}", str(tree_sha)):
+        raise AttestationError(
+            "attestationen mangler tree-liste/digest -- en aeldre freeze "
+            "(foer 1.58.139 i git-mode); koer freeze_check igen"
+        )
+    actual_tree = compute_tree_sha256(root, tree_paths)
+    if actual_tree != tree_sha:
+        raise AttestationError(
+            "traeets rollup-digest matcher ikke attestationen -- en "
+            "committet fil (hvor som helst i traeet, ikke kun worker/) "
+            "er aendret efter freeze. "
+            f"attesteret: {str(tree_sha)[:12]}..., "
+            f"beregnet: {actual_tree[:12]}..."
+        )
+    # F-1503: the rollup proves the RECORDED files are unchanged, but a
+    # file ADDED after freeze is not in tree_paths and would go unseen.
+    # Re-inventory the actual tree offline and refuse any extra, using
+    # the SAME scanner the freeze gate uses (so gate and reader agree on
+    # exactly one rule). Bytecode/__pycache__ count as extras here too.
+    blob_set = set(tree_paths)
+    extras = _scan_extras_offline(root, blob_set)
+    if extras:
+        bytecode = [p for p in extras
+                    if p.endswith(".pyc") or "__pycache__" in p]
+        detail = f" ({len(bytecode)} bytecode)" if bytecode else ""
+        raise AttestationError(
+            f"{len(extras)} fil(er) er tilfoejet i traeet EFTER freeze"
+            f"{detail} -- ikke i attestationen: "
+            + ", ".join(sorted(extras)[:3])
+            + " -- hent en frisk ZIP og koer freeze_check forfra"
+        )
     return data
