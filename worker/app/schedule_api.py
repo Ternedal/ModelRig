@@ -113,6 +113,11 @@ def _runtime_status(request: Request) -> dict[str, Any]:
             "running": False,
             "resources_open": False,
             "last_error": None,
+            "max_concurrency": 1,
+            "queue_capacity": 0,
+            "active_executions": 0,
+            "accepted_ticks": 0,
+            "overlap_rejections": 0,
         }
     try:
         state = runtime.status()
@@ -122,12 +127,22 @@ def _runtime_status(request: Request) -> dict[str, Any]:
             "running": False,
             "resources_open": True,
             "last_error": f"{type(exc).__name__}: {exc}"[:500],
+            "max_concurrency": 1,
+            "queue_capacity": 0,
+            "active_executions": 0,
+            "accepted_ticks": 0,
+            "overlap_rejections": 0,
         }
     return {
         "configured": bool(state.configured),
         "running": bool(state.running),
         "resources_open": bool(state.resources_open),
         "last_error": state.last_error,
+        "max_concurrency": int(getattr(state, "max_concurrency", 1)),
+        "queue_capacity": int(getattr(state, "queue_capacity", 0)),
+        "active_executions": int(getattr(state, "active_executions", 0)),
+        "accepted_ticks": int(getattr(state, "accepted_ticks", 0)),
+        "overlap_rejections": int(getattr(state, "overlap_rejections", 0)),
     }
 
 

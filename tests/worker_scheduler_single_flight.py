@@ -14,6 +14,8 @@ from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 
+from app.schedule_api import _runtime_status  # noqa: E402
+from app.schedule_runtime import SchedulerRuntime  # noqa: E402
 from app.schedule_service import SchedulerService  # noqa: E402
 from app.scheduler_single_flight import install_single_flight  # noqa: E402
 from app.schedule_runner import SchedulerRunner  # noqa: E402
@@ -146,6 +148,22 @@ overlap_elapsed = time.monotonic() - overlap_started
 check(service_overlap.claimed == 0, "service overlap is rejected before claim")
 check(overlap_elapsed < 0.25, "zero-queue service overlap returns immediately")
 check(service_runner.calls == 1, "service overlap never enters underlying execution")
+runtime = SchedulerRuntime(enabled_fn=lambda: True)
+runtime._service = service
+runtime._jobs = object()
+runtime._schedules = object()
+runtime._started = True
+runtime_state = runtime.status()
+check(runtime_state.max_concurrency == 1, "runtime exposes max concurrency")
+check(runtime_state.queue_capacity == 0, "runtime exposes zero queue capacity")
+check(runtime_state.active_executions == 1, "runtime exposes active execution")
+check(runtime_state.overlap_rejections == 1, "runtime exposes rejection count")
+request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(scheduler_runtime=runtime)))
+payload = _runtime_status(request)
+check(payload["max_concurrency"] == 1, "operator API exposes max concurrency")
+check(payload["queue_capacity"] == 0, "operator API exposes zero queue")
+check(payload["active_executions"] == 1, "operator API exposes active execution")
+check(payload["overlap_rejections"] == 1, "operator API exposes rejection count")
 check(not service.stop(timeout=0.05), "shutdown timeout reports active tick honestly")
 check(service.status().running, "service remains running after failed drain")
 check(service_runner.single_flight_status().active == 1, "single-flight remains active during timeout")
