@@ -2,7 +2,7 @@
 """T-017 ScheduleAdmin create/describe/renew timezone persistence contracts.
 
 This layer starts from an already canonical preview. HTTP request models and
-signed approval tokens remain outside this test.
+signed approval tokens remain outside this test. Only durable admin flows live here.
 Run: PYTHONPATH=worker python3 tests/worker_schedule_admin_persistence_time.py
 """
 from __future__ import annotations
