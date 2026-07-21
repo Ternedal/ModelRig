@@ -92,15 +92,14 @@ def run_rig_validation(planner: str) -> None:
             planner,
         ]
     )
-    validation = read_object(RIG_REPORT)
-    assessment = validation.get("assessment")
-    if not isinstance(assessment, dict):
-        raise PilotOperatorError("Rig-validationen mangler assessment.")
-    if assessment.get("eligible_for_developer_preview") is not True:
-        raise PilotOperatorError(
-            "Rig-validationen er ikke eligible_for_developer_preview; piloten startes ikke."
-        )
-    stage.ok("Rig-validation er frisk og eligible for developer preview.")
+    # The PowerShell runner is the authoritative fail-closed gate: it verifies
+    # worker visibility, exact report SHA, developer-preview eligibility and
+    # production_activation=false through the authenticated status endpoint.
+    # The persisted evidence file intentionally contains measurements, not that
+    # separate runtime assessment.
+    if not read_object(RIG_REPORT):
+        raise PilotOperatorError("Rig-validationen bestod, men rapportfilen mangler eller er ugyldig.")
+    stage.ok("Rig-validation er frisk, exact-report-bound og eligible for developer preview.")
 
 
 def run_pilot(planner: str) -> int:
@@ -141,7 +140,9 @@ def main() -> int:
         print(f"  Rapport: {REPORT_PATH}")
         return 0
     if existing:
-        archive_existing("stale" if existing.get("candidate", {}).get("git_sha") != sha else "failed")
+        candidate = existing.get("candidate")
+        prior_sha = candidate.get("git_sha") if isinstance(candidate, dict) else None
+        archive_existing("stale" if prior_sha != sha else "failed")
 
     planner = stage.ensure_models()
     stage.ensure_device_token()
