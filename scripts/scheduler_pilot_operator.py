@@ -277,6 +277,10 @@ class PilotOperator:
         )
         if completed.get("state") != "released" or completed.get("claim_id") != active.get("claim_id"):
             raise OperatorError("pause-barrieren afsluttede ikke released på samme claim")
+        archive_path = self.barrier_dir / f"pause-{active.get('claim_id')}.json"
+        if archive_path.exists():
+            raise OperatorError(f"pause-receipt findes allerede: {archive_path}")
+        os.replace(self.barrier_dir / COMPLETED_NAME, archive_path)
 
         deadline = self.monotonic() + wait_seconds
         final: dict[str, Any] | None = None
@@ -298,7 +302,7 @@ class PilotOperator:
             "runs_used_before": baseline_runs,
             "runs_used_after": int(final.get("runs_used") or 0) if final else None,
             "api_verified": True,
-            "receipt": str(self.barrier_dir / COMPLETED_NAME),
+            "receipt": str(archive_path),
         }
         state.pop("barrier_challenge", None)
         self.save_state(state)
