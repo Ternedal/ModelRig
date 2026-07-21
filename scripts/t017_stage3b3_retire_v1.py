@@ -53,26 +53,26 @@ CRYPTO = "tests/worker_schedule_approval.py"
 replace_once(CRYPTO, '''        "v": 1,\n''', '''        "v": 2,\n''')
 replace_once(
     CRYPTO,
-    '''        "cadence": preview.cadence,\n        "ttl_days": preview.ttl_days,\n''',
-    '''        "cadence": preview.cadence,\n        "timezone": preview.timezone,\n        "misfire_policy": preview.misfire_policy,\n        "ttl_days": preview.ttl_days,\n''',
+    '''        "tool": preview.tool,\n        "args": preview.args,\n        "cadence": preview.cadence,\n        "ttl_days": preview.ttl_days,\n        "max_runs": preview.max_runs,\n''',
+    '''        "tool": preview.tool,\n        "args": preview.args,\n        "cadence": preview.cadence,\n        "timezone": preview.timezone,\n        "misfire_policy": preview.misfire_policy,\n        "ttl_days": preview.ttl_days,\n        "max_runs": preview.max_runs,\n''',
 )
 replace_once(
     CRYPTO,
-    '''    cadence="daily:08:00",\n    ttl_days=30,\n''',
-    '''    cadence="daily:08:00",\n    timezone="Europe/Copenhagen",\n    misfire_policy="run_once",\n    ttl_days=30,\n''',
+    '''    args={"text": "Husk brygdag"},\n    cadence="daily:08:00",\n    ttl_days=30,\n''',
+    '''    args={"text": "Husk brygdag"},\n    cadence="daily:08:00",\n    timezone="Europe/Copenhagen",\n    misfire_policy="run_once",\n    ttl_days=30,\n''',
 )
 
 API = "tests/worker_schedule_api.py"
 replace_once(API, '''        "v": 1,\n''', '''        "v": 2,\n''')
 replace_once(
     API,
-    '''        "cadence": preview["cadence"],\n        "ttl_days": preview["ttl_days"],\n''',
-    '''        "cadence": preview["cadence"],\n        "timezone": preview["timezone"],\n        "misfire_policy": preview["misfire_policy"],\n        "ttl_days": preview["ttl_days"],\n''',
+    '''        "tool": preview["tool"],\n        "args": preview["args"],\n        "cadence": preview["cadence"],\n        "ttl_days": preview["ttl_days"],\n        "max_runs": preview["max_runs"],\n        "enable": preview["enable"],\n''',
+    '''        "tool": preview["tool"],\n        "args": preview["args"],\n        "cadence": preview["cadence"],\n        "timezone": preview["timezone"],\n        "misfire_policy": preview["misfire_policy"],\n        "ttl_days": preview["ttl_days"],\n        "max_runs": preview["max_runs"],\n        "enable": preview["enable"],\n''',
 )
 replace_once(
     API,
-    '''        "cadence": preview["cadence"],\n        "ttl_days": preview["ttl_days"],\n        "max_runs": preview["max_runs"],\n''',
-    '''        "cadence": preview["cadence"],\n        "timezone": preview["timezone"],\n        "misfire_policy": preview["misfire_policy"],\n        "ttl_days": preview["ttl_days"],\n        "max_runs": preview["max_runs"],\n''',
+    '''def create_body(preview, token=None, **changes):\n    body = {\n        "tool": preview["tool"],\n        "args": preview["args"],\n        "cadence": preview["cadence"],\n        "ttl_days": preview["ttl_days"],\n        "max_runs": preview["max_runs"],\n    }\n''',
+    '''def create_body(preview, token=None, **changes):\n    body = {\n        "tool": preview["tool"],\n        "args": preview["args"],\n        "cadence": preview["cadence"],\n        "timezone": preview["timezone"],\n        "misfire_policy": preview["misfire_policy"],\n        "ttl_days": preview["ttl_days"],\n        "max_runs": preview["max_runs"],\n    }\n''',
 )
 
 TRANSITION = "tests/worker_schedule_approval_time.py"
