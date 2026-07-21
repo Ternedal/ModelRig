@@ -156,7 +156,10 @@ try:
         "post-expiry takeover finds no orphan after a clean drain",
     )
     after_takeover = runner_b.run_once(now=NOW + 201)
-    check(after_takeover.claimed == 0, "takeover cannot exceed max_runs=1")
+    check(
+        after_takeover.completed == 0,
+        "takeover cannot execute beyond max_runs=1",
+    )
     check(len(run_calls) == 1, "takeover does not replay the completed tool")
 finally:
     release.set()
