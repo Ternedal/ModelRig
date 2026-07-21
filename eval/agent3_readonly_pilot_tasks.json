@@ -1,0 +1,318 @@
+{
+  "description": "20 frozen Danish read-only Agent 3 tasks for T-020. Every plan is reviewed before start; no write tool is allowed.",
+  "name": "agent3-readonly-developer-pilot-da",
+  "schema": "kaliv-agent3-readonly-pilot-task-set/v1",
+  "tasks": [
+    {
+      "category": "rig/status",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "rig_status"
+          }
+        ]
+      },
+      "id": "01",
+      "prompt": "Vis mig riggens aktuelle status. Brug præcis rig_status og intet andet."
+    },
+    {
+      "category": "rig/status",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "rig_status"
+          }
+        ]
+      },
+      "id": "02",
+      "prompt": "Kontrollér GPU, disk og worker-status via ét rig_status-step."
+    },
+    {
+      "category": "rig/status",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "rig_status"
+          }
+        ]
+      },
+      "id": "03",
+      "prompt": "Er ModelRig klar til lokale værktøjer? Planlæg kun rig_status."
+    },
+    {
+      "category": "rig/status",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "rig_status"
+          }
+        ]
+      },
+      "id": "04",
+      "prompt": "Lav en read-only kontrol af riggen med rig_status som eneste handling."
+    },
+    {
+      "category": "models/list",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_models"
+          }
+        ]
+      },
+      "id": "05",
+      "prompt": "Vis de installerede Ollama-modeller. Brug kun list_models."
+    },
+    {
+      "category": "models/list",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_models"
+          }
+        ]
+      },
+      "id": "06",
+      "prompt": "Hvilke lokale modeller kan Kaliv bruge? Ét step: list_models."
+    },
+    {
+      "category": "models/list",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_models"
+          }
+        ]
+      },
+      "id": "07",
+      "prompt": "Hent modeloversigten uden ændringer. Planlæg præcis list_models."
+    },
+    {
+      "category": "time/current",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "current_datetime"
+          }
+        ]
+      },
+      "id": "08",
+      "prompt": "Hvad er dato og klokkeslæt på riggen? Brug current_datetime."
+    },
+    {
+      "category": "time/current",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "current_datetime"
+          }
+        ]
+      },
+      "id": "09",
+      "prompt": "Vis riggens lokale tidspunkt via ét current_datetime-step."
+    },
+    {
+      "category": "time/current",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "current_datetime"
+          }
+        ]
+      },
+      "id": "10",
+      "prompt": "Kontrollér den aktuelle dato uden andre handlinger end current_datetime."
+    },
+    {
+      "category": "documents/list",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_documents"
+          }
+        ]
+      },
+      "id": "11",
+      "prompt": "Hvilke dokumenter ligger i RAG? Brug kun list_documents."
+    },
+    {
+      "category": "documents/list",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_documents"
+          }
+        ]
+      },
+      "id": "12",
+      "prompt": "Vis de indlæste dokumentkilder og antal chunks via list_documents."
+    },
+    {
+      "category": "documents/list",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_documents"
+          }
+        ]
+      },
+      "id": "13",
+      "prompt": "Hent RAG-dokumentoversigten read-only med ét list_documents-step."
+    },
+    {
+      "category": "jobs/list",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "job_status"
+          }
+        ]
+      },
+      "id": "14",
+      "prompt": "Vis de seneste baggrundsjobs. Brug job_status uden argumenter."
+    },
+    {
+      "category": "jobs/list",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "job_status"
+          }
+        ]
+      },
+      "id": "15",
+      "prompt": "Hent en read-only oversigt over jobstatus med job_status uden argumenter."
+    },
+    {
+      "category": "combined/health",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "rig_status"
+          },
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_models"
+          }
+        ]
+      },
+      "id": "16",
+      "prompt": "Kontrollér først riggens status og vis derefter de installerede modeller."
+    },
+    {
+      "category": "combined/context",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "current_datetime"
+          },
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_documents"
+          }
+        ]
+      },
+      "id": "17",
+      "prompt": "Vis først dato og tid og derefter RAG-dokumentoversigten."
+    },
+    {
+      "category": "combined/operations",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "job_status"
+          },
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "rig_status"
+          }
+        ]
+      },
+      "id": "18",
+      "prompt": "Hent først joboversigten og kontrollér derefter riggens status."
+    },
+    {
+      "category": "combined/inventory",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_models"
+          },
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_documents"
+          }
+        ]
+      },
+      "id": "19",
+      "prompt": "Vis installerede modeller og indlæste dokumenter som to read-only steps."
+    },
+    {
+      "category": "combined/snapshot",
+      "expected": {
+        "steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "current_datetime"
+          },
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "rig_status"
+          },
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "job_status"
+          }
+        ]
+      },
+      "id": "20",
+      "prompt": "Lav et read-only øjebliksbillede med current_datetime, rig_status og job_status i den rækkefølge."
+    }
+  ],
+  "version": "2026-07-19.1"
+}

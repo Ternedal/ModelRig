@@ -113,6 +113,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_planner_memory.py`
 - `tests/worker_agent3_planner_review.py`
 - `tests/worker_agent3_planner_review_guard.py`
+- `tests/worker_agent3_readonly_pilot.py`
 - `tests/worker_agent3_replan_api.py`
 - `tests/worker_agent3_replan_planner.py`
 - `tests/worker_agent3_replan_preview.py`
@@ -201,6 +202,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_action_pins.py`
 - `tests/workflow_activation_readiness.py`
 - `tests/workflow_agent3_dormant.py`
+- `tests/workflow_agent3_readonly_pilot_one_click.py`
 - `tests/workflow_android_credential_commit.py`
 - `tests/workflow_browser_peer_public_validation.py`
 - `tests/workflow_browser_peer_public_validation_operator.py`
