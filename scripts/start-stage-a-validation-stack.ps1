@@ -6,9 +6,7 @@ param(
 
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
-    [string]$ValidationReport,
-
-    [switch]$ReplaceLocalProcesses
+    [string]$ValidationReport
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,16 +29,18 @@ function Get-ListenerPid {
     return $null
 }
 
-function Stop-LocalListener {
+function Wait-PortFree {
     param([int]$Port)
     $pidValue = Get-ListenerPid -Port $Port
     if ($null -eq $pidValue) { return }
-    if (-not $ReplaceLocalProcesses) {
-        throw "Port $Port bruges allerede af proces $pidValue. Luk de gamle Kaliv-vinduer, eller start wizard'en igen og godkend udskiftning af den lokale test-stack."
+    Write-Host ""
+    Write-Host "  Port $Port bruges af proces $pidValue." -ForegroundColor Yellow
+    Write-Host "  Luk det gamle Kaliv backend/worker-vindue. Scriptet fortsætter selv, når porten er fri."
+    $deadline = (Get-Date).AddMinutes(5)
+    while ($null -ne (Get-ListenerPid -Port $Port) -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 1
     }
-    Write-Host "  Stopper lokal proces $pidValue på port $Port..." -ForegroundColor Yellow
-    & taskkill.exe /PID $pidValue /T /F | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Kunne ikke stoppe proces $pidValue på port $Port." }
+    if ($null -ne (Get-ListenerPid -Port $Port)) { throw "Port $Port blev ikke frigivet inden for fem minutter." }
 }
 
 function Wait-Endpoint {
@@ -75,11 +75,13 @@ function Find-PairingData {
         catch { }
     }
 
-    $existing = $candidates |
-        Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
-        ForEach-Object { (Resolve-Path -LiteralPath $_).Path } |
-        Select-Object -Unique
-    if (-not $existing) {
+    $existing = @(
+        $candidates |
+            Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
+            ForEach-Object { (Resolve-Path -LiteralPath $_).Path } |
+            Select-Object -Unique
+    )
+    if ($existing.Count -eq 0) {
         throw "Kunne ikke finde riggens modelrig-data.json med pairing-data. Start den sædvanlige backend, eller sæt MODELRIG_DATA til den eksisterende fil og kør igen."
     }
     return $existing[0]
@@ -92,8 +94,8 @@ if (-not (Get-Command go -ErrorAction SilentlyContinue)) { throw "Go blev ikke f
 $pairingData = Find-PairingData
 New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
 
-Stop-LocalListener -Port 8080
-Stop-LocalListener -Port 8099
+Wait-PortFree -Port 8080
+Wait-PortFree -Port 8099
 
 Write-Host "  Bygger exact-head backend..." -ForegroundColor Cyan
 Push-Location (Join-Path $repoRoot "backend")
@@ -121,6 +123,7 @@ set "KALIV_AGENT3_ENABLED=1"
 @echo off
 cd /d "$escapedRepo"
 set "PYTHONPATH=$escapedRepo\worker"
+set "PYTHONDONTWRITEBYTECODE=1"
 set "KALIV_AGENT3_ENABLED=1"
 set "KALIV_TOOLS_ENABLED=1"
 set "KALIV_AGENT3_PLANNER_MODEL=$PlannerModel"
@@ -130,6 +133,7 @@ python -m uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099
 
 Write-Host "  Starter kandidatens backend og worker i to synlige vinduer..." -ForegroundColor Cyan
 Start-Process -FilePath "cmd.exe" -ArgumentList "/k", ('"' + $backendCmd + '"') -WorkingDirectory $runtimeDir | Out-Null
+Start-Sleep -Seconds 1
 Start-Process -FilePath "cmd.exe" -ArgumentList "/k", ('"' + $workerCmd + '"') -WorkingDirectory $repoRoot | Out-Null
 
 Wait-Endpoint -Url "http://127.0.0.1:8080/healthz"
