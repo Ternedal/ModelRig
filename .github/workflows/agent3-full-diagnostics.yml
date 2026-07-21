@@ -26,7 +26,10 @@ jobs:
         run: pip install -r worker/requirements.txt --break-system-packages
 
       - name: Apply ScheduleAdmin patch only
-        run: python3 scripts/t017_stage2_schedule_admin.py
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 scripts/t017_stage2_schedule_admin.py 2>&1 | tee /tmp/t017-stage2.log
 
       - name: Remove transport and restore ordinary workflow
         shell: bash
@@ -102,6 +105,8 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: t017-stage2-diagnostics
-          path: /tmp/modelrig-full-test.log
+          path: |
+            /tmp/t017-stage2.log
+            /tmp/modelrig-full-test.log
           if-no-files-found: warn
           retention-days: 1
