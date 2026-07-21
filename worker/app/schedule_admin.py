@@ -149,7 +149,12 @@ class ScheduleAdminStore(ScheduleStore):
                 if enabled is True:
                     # Explicitly starting a renewed schedule is a fresh promise,
                     # not permission to replay whatever became due while paused.
-                    due_at = next_run(parse_cadence(row["cadence"]), now)
+                    if row["misfire_policy"] != MISFIRE_POLICY:
+                        raise ScheduleError(
+                            f"ukendt misfire-policy "
+                            f"{row['misfire_policy']!r}")
+                    due_at = next_run(
+                        parse_cadence(row["cadence"]), now, row["timezone"])
 
                 # Renewal is a maximal user-intent mutation: it replaces the
                 # approval, resets the budget and moves the horizon. It MUST
@@ -289,11 +294,14 @@ class ScheduleAdmin:
         *,
         ttl_days: int = DEFAULT_TTL_DAYS,
         max_runs: int = DEFAULT_MAX_RUNS,
+        timezone_name: str = DEFAULT_TIMEZONE,
+        misfire_policy: str = MISFIRE_POLICY,
         approved_fingerprint: str | None = None,
         receipt: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         preview = self.preview(
-            tool, args, cadence, ttl_days=ttl_days, max_runs=max_runs
+            tool, args, cadence, ttl_days=ttl_days, max_runs=max_runs,
+            timezone_name=timezone_name, misfire_policy=misfire_policy,
         )
         self._require_approval(preview, approved_fingerprint)
         with self._store() as store:
@@ -306,6 +314,8 @@ class ScheduleAdmin:
                 max_runs=max_runs,
                 now=self._clock(),
                 receipt=receipt,
+                timezone_name=preview.timezone,
+                misfire_policy=preview.misfire_policy,
             )
         return self.describe(schedule)
 
@@ -444,6 +454,9 @@ class ScheduleAdmin:
             "tool": schedule.tool,
             "args": schedule.args,
             "cadence": schedule.cadence,
+            "timezone": schedule.timezone,
+            "misfire_policy": schedule.misfire_policy,
+            "due_at_local": local_due_iso(schedule.due_at, schedule.timezone),
             "risk": risk,
             "sensitivity": sensitivity,
             "action_fingerprint": current_action,
