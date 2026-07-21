@@ -46,16 +46,28 @@ class FakeTickResult:
     job_ids: tuple[str, ...] = ()
 
 
+class FakeAudit:
+    def __init__(self, *, fail=False):
+        self.fail = fail
+        self.rows = []
+
+    def record(self, **row):
+        if self.fail:
+            raise RuntimeError("injected audit outage")
+        self.rows.append(row)
+
+
 def runner_type():
     class SlowRunner:
-        def __init__(self, entered, release, *, fail_once=False):
+        def __init__(self, entered, release, *, fail_once=False, audit_fail=False):
             self.entered = entered
             self.release = release
             self.fail_once = fail_once
             self.calls = 0
             self.owner_id = "t018-test-owner"
             self.feature_enabled = lambda: True
-            self.gate = SimpleNamespace(enabled=True)
+            self.audit = FakeAudit(fail=audit_fail)
+            self.gate = SimpleNamespace(enabled=True, audit=self.audit)
 
         def run_once(self):
             self.calls += 1
@@ -107,6 +119,27 @@ check("max_concurrency=1" in overlap_log, "overlap log identifies max concurrenc
 check("queue_capacity=0" in overlap_log, "overlap log identifies zero queue capacity")
 check("overlap_rejections=12" in overlap_log, "overlap log carries the cumulative rejection count")
 check("owner_id=t018-test-owner" in overlap_log, "overlap log identifies the rejecting owner")
+check(len(runner.audit.rows) == 12, "every rejected tick receives one durable audit receipt")
+check(
+    all(row["tool"] == "scheduler_tick" and row["outcome"] == "blocked" for row in runner.audit.rows),
+    "audit receipts identify synthetic blocked scheduler ticks",
+)
+check(
+    all(row["origin"] == "schedule" and row["risk"] == "read" for row in runner.audit.rows),
+    "audit receipts preserve scheduler origin without inventing a write",
+)
+check(
+    all("afvist før claim" in row["result_summary"] for row in runner.audit.rows),
+    "audit explains that rejection happened before claim",
+)
+check(
+    all("ingen budget-slot" in row["result_summary"] for row in runner.audit.rows),
+    "audit explains that no budget was reserved",
+)
+check(
+    all(row["args"]["queue_capacity"] == 0 for row in runner.audit.rows),
+    "audit explains that no occurrence waited in a queue",
+)
 
 release.set()
 thread.join(2.0)
@@ -114,6 +147,23 @@ status_after = runner.single_flight_status()
 check(not thread.is_alive(), "slow tick drains after release")
 check(first and first[0].completed == 1, "accepted tick keeps its normal result")
 check(status_after.active == 0, "single-flight slot is released after success")
+
+# Audit is explanatory, not authoritative for admission: an audit outage must
+# never turn zero-queue overlap into a blocking or failing caller path.
+audit_outage_entered = threading.Event()
+audit_outage_release = threading.Event()
+audit_outage_runner = SlowRunner(
+    audit_outage_entered, audit_outage_release, audit_fail=True
+)
+audit_thread = threading.Thread(target=audit_outage_runner.run_once)
+audit_thread.start()
+check(audit_outage_entered.wait(1.0), "audit-outage scenario has one active tick")
+audit_overlap = audit_outage_runner.run_once()
+check(audit_overlap.claimed == 0, "audit outage still rejects overlap before claim")
+check(audit_outage_runner.calls == 1, "audit outage never opens a second execution")
+audit_outage_release.set()
+audit_thread.join(2.0)
+check(not audit_thread.is_alive(), "audit-outage active tick still drains")
 
 FailRunner = runner_type()
 entered2 = threading.Event()
@@ -138,7 +188,8 @@ class BlockingServiceRunner:
         self.release = threading.Event()
         self.calls = 0
         self.owner_id = "t018-service-owner"
-        self.gate = SimpleNamespace(enabled=True)
+        self.audit = FakeAudit()
+        self.gate = SimpleNamespace(enabled=True, audit=self.audit)
         self.feature_enabled = lambda: True
 
     def disable_unschedulable(self):
