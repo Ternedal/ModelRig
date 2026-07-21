@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""T-018 concurrency and lifecycle contract for scheduler ticks.
+
+Run: PYTHONPATH=worker python3 tests/worker_scheduler_single_flight.py
+"""
+from __future__ import annotations
+
+import io
+import logging
+import os
+import sys
+import threading
+import time
+from dataclasses import dataclass
+from types import SimpleNamespace
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
+
+from app.schedule_api import _runtime_status  # noqa: E402
+from app.schedule_runtime import SchedulerRuntime  # noqa: E402
+from app.schedule_service import SchedulerService  # noqa: E402
+from app.scheduler_single_flight import install_single_flight  # noqa: E402
+from app.schedule_runner import SchedulerRunner  # noqa: E402
+
+passed = failed = 0
+
+
+def check(condition, message):
+    global passed, failed
+    if condition:
+        passed += 1
+        print(f"  PASS: {message}")
+    else:
+        failed += 1
+        print(f"  FAIL: {message}")
+
+
+@dataclass(frozen=True)
+class FakeTickResult:
+    enabled: bool
+    paused: bool
+    claimed: int
+    completed: int
+    blocked: int
+    failed: int
+    job_ids: tuple[str, ...] = ()
+
+
+class FakeAudit:
+    def __init__(self, *, fail=False):
+        self.fail = fail
+        self.rows = []
+
+    def record(self, **row):
+        if self.fail:
+            raise RuntimeError("injected audit outage")
+        self.rows.append(row)
+
+
+def runner_type():
+    class SlowRunner:
+        def __init__(self, entered, release, *, fail_once=False, audit_fail=False):
+            self.entered = entered
+            self.release = release
+            self.fail_once = fail_once
+            self.calls = 0
+            self.owner_id = "t018-test-owner"
+            self.feature_enabled = lambda: True
+            self.audit = FakeAudit(fail=audit_fail)
+            self.gate = SimpleNamespace(enabled=True, audit=self.audit)
+
+        def run_once(self):
+            self.calls += 1
+            self.entered.set()
+            self.release.wait(2.0)
+            if self.fail_once:
+                self.fail_once = False
+                raise RuntimeError("injected slow-tool failure")
+            return FakeTickResult(True, False, 1, 1, 0, 0, ("job-1",))
+
+    install_single_flight(SlowRunner, FakeTickResult)
+    return SlowRunner
+
+
+check(SchedulerRunner.MAX_CONCURRENCY == 1, "production runner exposes max concurrency 1")
+check(SchedulerRunner.QUEUE_CAPACITY == 0, "production runner exposes zero waiting queue")
+check(hasattr(SchedulerRunner, "single_flight_status"), "production runner exposes inspectable status")
+
+SlowRunner = runner_type()
+entered = threading.Event()
+release = threading.Event()
+runner = SlowRunner(entered, release)
+first = []
+thread = threading.Thread(target=lambda: first.append(runner.run_once()))
+thread.start()
+check(entered.wait(1.0), "first slow tick entered")
+
+log_stream = io.StringIO()
+log_handler = logging.StreamHandler(log_stream)
+runner_logger = logging.getLogger("app.schedule_runner")
+old_level = runner_logger.level
+runner_logger.setLevel(logging.WARNING)
+runner_logger.addHandler(log_handler)
+try:
+    overlap = [runner.run_once() for _ in range(12)]
+finally:
+    runner_logger.removeHandler(log_handler)
+    runner_logger.setLevel(old_level)
+overlap_log = log_stream.getvalue()
+status_while_busy = runner.single_flight_status()
+check(runner.calls == 1, "overlap pressure never enters the underlying runner")
+check(all(item.claimed == 0 for item in overlap), "every overlap is rejected before claim")
+check(status_while_busy.active == 1, "status reports exactly one active tick")
+check(status_while_busy.accepted == 1, "only the first tick was accepted")
+check(status_while_busy.overlap_rejections == 12, "all overlap rejections are counted")
+check(status_while_busy.queue_capacity == 0, "pressure creates no waiting queue")
+check("policy=single-flight" in overlap_log, "overlap log identifies the active policy")
+check("max_concurrency=1" in overlap_log, "overlap log identifies max concurrency")
+check("queue_capacity=0" in overlap_log, "overlap log identifies zero queue capacity")
+check("overlap_rejections=12" in overlap_log, "overlap log carries the cumulative rejection count")
+check("owner_id=t018-test-owner" in overlap_log, "overlap log identifies the rejecting owner")
+check(len(runner.audit.rows) == 12, "every rejected tick receives one durable audit receipt")
+check(
+    all(row["tool"] == "scheduler_tick" and row["outcome"] == "blocked" for row in runner.audit.rows),
+    "audit receipts identify synthetic blocked scheduler ticks",
+)
+check(
+    all(row["origin"] == "schedule" and row["risk"] == "read" for row in runner.audit.rows),
+    "audit receipts preserve scheduler origin without inventing a write",
+)
+check(
+    all("afvist før claim" in row["result_summary"] for row in runner.audit.rows),
+    "audit explains that rejection happened before claim",
+)
+check(
+    all("ingen budget-slot" in row["result_summary"] for row in runner.audit.rows),
+    "audit explains that no budget was reserved",
+)
+check(
+    all(row["args"]["queue_capacity"] == 0 for row in runner.audit.rows),
+    "audit explains that no occurrence waited in a queue",
+)
+
+release.set()
+thread.join(2.0)
+status_after = runner.single_flight_status()
+check(not thread.is_alive(), "slow tick drains after release")
+check(first and first[0].completed == 1, "accepted tick keeps its normal result")
+check(status_after.active == 0, "single-flight slot is released after success")
+
+# Audit is explanatory, not authoritative for admission: an audit outage must
+# never turn zero-queue overlap into a blocking or failing caller path.
+audit_outage_entered = threading.Event()
+audit_outage_release = threading.Event()
+audit_outage_runner = SlowRunner(
+    audit_outage_entered, audit_outage_release, audit_fail=True
+)
+audit_thread = threading.Thread(target=audit_outage_runner.run_once)
+audit_thread.start()
+check(audit_outage_entered.wait(1.0), "audit-outage scenario has one active tick")
+audit_overlap = audit_outage_runner.run_once()
+check(audit_overlap.claimed == 0, "audit outage still rejects overlap before claim")
+check(audit_outage_runner.calls == 1, "audit outage never opens a second execution")
+audit_outage_release.set()
+audit_thread.join(2.0)
+check(not audit_thread.is_alive(), "audit-outage active tick still drains")
+
+FailRunner = runner_type()
+entered2 = threading.Event()
+release2 = threading.Event()
+release2.set()
+failing = FailRunner(entered2, release2, fail_once=True)
+error = None
+try:
+    failing.run_once()
+except RuntimeError as exc:
+    error = exc
+check(error is not None, "injected runner exception remains visible")
+check(failing.single_flight_status().active == 0, "slot is released after exception")
+second = failing.run_once()
+check(second.completed == 1, "a later tick can enter after exception cleanup")
+check(failing.calls == 2, "exception does not permanently wedge single-flight")
+
+
+class BlockingServiceRunner:
+    def __init__(self):
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.calls = 0
+        self.owner_id = "t018-service-owner"
+        self.audit = FakeAudit()
+        self.gate = SimpleNamespace(enabled=True, audit=self.audit)
+        self.feature_enabled = lambda: True
+
+    def disable_unschedulable(self):
+        return []
+
+    def recover_interrupted(self):
+        return {"executed": [], "abandoned": [], "unknown": []}
+
+    def run_once(self):
+        self.calls += 1
+        self.entered.set()
+        self.release.wait(3.0)
+        return FakeTickResult(True, False, 1, 1, 0, 0, (f"job-{self.calls}",))
+
+
+install_single_flight(BlockingServiceRunner, FakeTickResult)
+service_runner = BlockingServiceRunner()
+service = SchedulerService(service_runner, poll_s=60.0)
+check(service.start(), "service starts with explicit single-flight runner")
+check(service_runner.entered.wait(1.0), "service tick enters blocking tool path")
+
+overlap_started = time.monotonic()
+service_overlap = service_runner.run_once()
+overlap_elapsed = time.monotonic() - overlap_started
+check(service_overlap.claimed == 0, "service overlap is rejected before claim")
+check(overlap_elapsed < 0.25, "zero-queue service overlap returns immediately")
+check(service_runner.calls == 1, "service overlap never enters underlying execution")
+runtime = SchedulerRuntime(enabled_fn=lambda: True)
+runtime._service = service
+runtime._jobs = object()
+runtime._schedules = object()
+runtime._started = True
+runtime_state = runtime.status()
+check(runtime_state.max_concurrency == 1, "runtime exposes max concurrency")
+check(runtime_state.queue_capacity == 0, "runtime exposes zero queue capacity")
+check(runtime_state.active_executions == 1, "runtime exposes active execution")
+check(runtime_state.overlap_rejections == 1, "runtime exposes rejection count")
+request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(scheduler_runtime=runtime)))
+payload = _runtime_status(request)
+check(payload["max_concurrency"] == 1, "operator API exposes max concurrency")
+check(payload["queue_capacity"] == 0, "operator API exposes zero queue")
+check(payload["active_executions"] == 1, "operator API exposes active execution")
+check(payload["overlap_rejections"] == 1, "operator API exposes rejection count")
+check(not service.stop(timeout=0.05), "shutdown timeout reports active tick honestly")
+check(service.status().running, "service remains running after failed drain")
+check(service_runner.single_flight_status().active == 1, "single-flight remains active during timeout")
+
+service_runner.release.set()
+check(service.stop(timeout=2.0), "shutdown succeeds after active tick drains")
+check(not service.status().running, "service reports stopped after drain")
+service_status = service_runner.single_flight_status()
+check(service_status.active == 0, "single-flight slot is empty after shutdown")
+check(service_status.overlap_rejections == 1, "shutdown preserves overlap rejection counter")
+
+service_runner.entered.clear()
+check(service.start(), "drained service can start again")
+check(service_runner.entered.wait(1.0), "restarted service executes a new tick")
+check(service.stop(timeout=2.0), "restarted service stops cleanly")
+check(service_runner.calls >= 2, "restart creates a later accepted execution")
+
+print(f"\n===== SCHEDULER SINGLE-FLIGHT: {passed} passed, {failed} failed =====")
+raise SystemExit(1 if failed else 0)
