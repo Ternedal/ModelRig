@@ -202,6 +202,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_activation_readiness.py`
 - `tests/workflow_agent3_dormant.py`
 - `tests/workflow_android_credential_commit.py`
+- `tests/workflow_android_scheduler_picker.py`
 - `tests/workflow_browser_peer_public_validation.py`
 - `tests/workflow_browser_peer_public_validation_operator.py`
 - `tests/workflow_candidate_campaign.py`
