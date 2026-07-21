@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T-017 worker approval-version transition for timezone-bound grants.
+"""T-017 worker v2-only approval contract for timezone-bound grants.
 
 All issuers now use explicit v2 claims. Version 1 is rejected even for the
 historical Copenhagen/run_once terms so no unsigned time defaults survive.
