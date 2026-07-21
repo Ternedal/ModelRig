@@ -6,7 +6,9 @@ param(
 
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
-    [string]$ValidationReport
+    [string]$ValidationReport,
+
+    [switch]$WorkerOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,12 +32,12 @@ function Get-ListenerPid {
 }
 
 function Wait-PortFree {
-    param([int]$Port)
+    param([int]$Port, [string]$Label)
     $pidValue = Get-ListenerPid -Port $Port
     if ($null -eq $pidValue) { return }
     Write-Host ""
-    Write-Host "  Port $Port bruges af proces $pidValue." -ForegroundColor Yellow
-    Write-Host "  Luk det gamle Kaliv backend/worker-vindue. Scriptet fortsætter selv, når porten er fri."
+    Write-Host "  $Label bruger port $Port (proces $pidValue)." -ForegroundColor Yellow
+    Write-Host "  Luk det gamle $Label-vindue. Scriptet fortsætter selv, når porten er fri."
     $deadline = (Get-Date).AddMinutes(5)
     while ($null -ne (Get-ListenerPid -Port $Port) -and (Get-Date) -lt $deadline) {
         Start-Sleep -Seconds 1
@@ -89,35 +91,13 @@ function Find-PairingData {
 
 if ($env:OS -ne "Windows_NT") { throw "Validation-stacken må kun startes på Windows-riggen." }
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) { throw "Python blev ikke fundet på PATH." }
-if (-not (Get-Command go -ErrorAction SilentlyContinue)) { throw "Go blev ikke fundet på PATH; den eksakte backend kan derfor ikke bygges fra kandidatens checkout." }
-
-$pairingData = Find-PairingData
-New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
-
-Wait-PortFree -Port 8080
-Wait-PortFree -Port 8099
-
-Write-Host "  Bygger exact-head backend..." -ForegroundColor Cyan
-Push-Location (Join-Path $repoRoot "backend")
-try {
-    & go build -o $backendExe .\cmd\modelrig-server
-    if ($LASTEXITCODE -ne 0) { throw "Backend-build fejlede." }
+if (-not $WorkerOnly -and -not (Get-Command go -ErrorAction SilentlyContinue)) {
+    throw "Go blev ikke fundet på PATH; den eksakte backend kan derfor ikke bygges fra kandidatens checkout."
 }
-finally { Pop-Location }
 
+New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
 $escapedRepo = $repoRoot.Replace('%', '%%')
-$escapedData = $pairingData.Replace('%', '%%')
 $escapedReport = ([IO.Path]::GetFullPath($ValidationReport)).Replace('%', '%%')
-
-@"
-@echo off
-cd /d "$runtimeDir"
-set "MODELRIG_HOST=127.0.0.1"
-set "MODELRIG_PORT=8080"
-set "MODELRIG_DATA=$escapedData"
-set "KALIV_AGENT3_ENABLED=1"
-"$backendExe"
-"@ | Set-Content -LiteralPath $backendCmd -Encoding ASCII
 
 @"
 @echo off
@@ -130,6 +110,38 @@ set "KALIV_AGENT3_PLANNER_MODEL=$PlannerModel"
 set "KALIV_AGENT3_VALIDATION_REPORT=$escapedReport"
 python -m uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099
 "@ | Set-Content -LiteralPath $workerCmd -Encoding ASCII
+
+if ($WorkerOnly) {
+    Wait-PortFree -Port 8099 -Label "worker"
+    Write-Host "  Starter exact-head worker i et nyt vindue..." -ForegroundColor Cyan
+    Start-Process -FilePath "cmd.exe" -ArgumentList "/k", ('"' + $workerCmd + '"') -WorkingDirectory $repoRoot | Out-Null
+    Wait-Endpoint -Url "http://127.0.0.1:8099/healthz"
+    Write-Host "  Exact-head worker er klar." -ForegroundColor Green
+    return
+}
+
+$pairingData = Find-PairingData
+$escapedData = $pairingData.Replace('%', '%%')
+Wait-PortFree -Port 8080 -Label "backend"
+Wait-PortFree -Port 8099 -Label "worker"
+
+Write-Host "  Bygger exact-head backend..." -ForegroundColor Cyan
+Push-Location (Join-Path $repoRoot "backend")
+try {
+    & go build -o $backendExe .\cmd\modelrig-server
+    if ($LASTEXITCODE -ne 0) { throw "Backend-build fejlede." }
+}
+finally { Pop-Location }
+
+@"
+@echo off
+cd /d "$runtimeDir"
+set "MODELRIG_HOST=127.0.0.1"
+set "MODELRIG_PORT=8080"
+set "MODELRIG_DATA=$escapedData"
+set "KALIV_AGENT3_ENABLED=1"
+"$backendExe"
+"@ | Set-Content -LiteralPath $backendCmd -Encoding ASCII
 
 Write-Host "  Starter kandidatens backend og worker i to synlige vinduer..." -ForegroundColor Cyan
 Start-Process -FilePath "cmd.exe" -ArgumentList "/k", ('"' + $backendCmd + '"') -WorkingDirectory $runtimeDir | Out-Null
