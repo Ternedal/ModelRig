@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 title Kaliv Scheduler Pilot
 set "PYTHONDONTWRITEBYTECODE=1"
-python "%~dp0scripts\scheduler_pilot_one_click.py"
+python "%~dp0scripts\scheduler_pilot_easy_entry.py"
 set "EXIT_CODE=%ERRORLEVEL%"
 if not "%EXIT_CODE%"=="0" goto done
 python "%~dp0scripts\scheduler_pilot_android_gate.py" --report "%~dp0validation\scheduler-pilot-latest.json" --manual-observations "%~dp0validation\scheduler-manual-observations.json"
