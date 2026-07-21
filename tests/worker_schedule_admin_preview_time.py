@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """T-017 ScheduleAdmin preview and approval-fingerprint time contracts.
 
+This layer proves interpretation and consent binding without changing persistence APIs.
 Run: PYTHONPATH=worker python3 tests/worker_schedule_admin_preview_time.py
 """
 from __future__ import annotations
