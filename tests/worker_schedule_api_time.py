@@ -4,6 +4,7 @@
 Backend token claim expansion is a later stage. This test proves the worker
 accepts, validates and persists explicit time terms, while the already-signed
 approval fingerprint prevents a token from being reused with another zone.
+This stage changes worker request forwarding only, not the signed claim schema.
 Run: PYTHONPATH=worker python3 tests/worker_schedule_api_time.py
 """
 from __future__ import annotations
