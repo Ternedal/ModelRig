@@ -3,8 +3,10 @@
 
 The proven pilot module owns all safety and evidence logic. This adapter only:
 1. discovers the newly created exact Android write plan, so no schedule-id must
-   be copied; and
-2. asks for the in-flight observation while the deterministic hold is active.
+   be copied;
+2. asks for the in-flight observation while the deterministic hold is active;
+3. converts each hold into pause -> arm -> enable -> wait, removing the final
+   claim-before-command race without changing scheduler production code.
 """
 from __future__ import annotations
 
@@ -77,6 +79,7 @@ def discover_write_id(state: dict[str, Any]) -> str:
 
 
 _original_require_yes = pilot.require_yes
+_original_arm_hold = pilot.arm_hold
 _original_wait_hold = pilot.wait_hold
 _deferred_in_flight = False
 _hold_count = 0
@@ -90,8 +93,17 @@ def defer_in_flight_question(message: str) -> None:
     _original_require_yes(message)
 
 
+def arm_hold_safely(schedule_id: str, purpose: str) -> str:
+    # The underlying flow historically enabled before arming. Force the plan
+    # paused here, write the exact one-shot command, and let wait_hold_and_confirm
+    # perform the only re-enable after the command is durable.
+    pilot.set_schedule_enabled(schedule_id, False)
+    return _original_arm_hold(schedule_id, purpose)
+
+
 def wait_hold_and_confirm(schedule_id: str, nonce: str, *, timeout: float = 90.0):
     global _hold_count, _deferred_in_flight
+    pilot.set_schedule_enabled(schedule_id, True)
     marker = _original_wait_hold(schedule_id, nonce, timeout=timeout)
     _hold_count += 1
     if _hold_count == 1 and _deferred_in_flight:
@@ -104,6 +116,7 @@ def wait_hold_and_confirm(schedule_id: str, nonce: str, *, timeout: float = 90.0
 
 pilot.get_write_id = discover_write_id
 pilot.require_yes = defer_in_flight_question
+pilot.arm_hold = arm_hold_safely
 pilot.wait_hold = wait_hold_and_confirm
 
 if __name__ == "__main__":
