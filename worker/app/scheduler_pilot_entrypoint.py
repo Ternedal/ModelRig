@@ -19,7 +19,14 @@ def _install_pilot_log() -> None:
         return
     path = Path(raw)
     path.parent.mkdir(parents=True, exist_ok=True)
-    handler = logging.FileHandler(path, encoding="utf-8")
+    # The wizard stores a file-size offset before restart and slices the appended
+    # text afterwards. ASCII + backslashreplace makes one character exactly one
+    # byte even when Danish log messages contain non-ASCII letters.
+    handler = logging.FileHandler(
+        path,
+        encoding="ascii",
+        errors="backslashreplace",
+    )
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     handler._kaliv_scheduler_pilot_file = True  # type: ignore[attr-defined]
     for name in ("app.schedule_service", "app.schedule_runner"):
