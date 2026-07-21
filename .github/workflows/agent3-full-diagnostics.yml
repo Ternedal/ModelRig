@@ -25,11 +25,11 @@ jobs:
       - name: Install worker deps
         run: pip install -r worker/requirements.txt --break-system-packages
 
-      - name: Apply ScheduleAdmin patch only
+      - name: Apply admin-preview patch only
         shell: bash
         run: |
           set -o pipefail
-          python3 scripts/t017_stage2_schedule_admin.py 2>&1 | tee /tmp/t017-stage2.log
+          python3 scripts/t017_stage2a_admin_preview.py 2>&1 | tee /tmp/t017-stage2a.log
 
       - name: Remove transport and restore ordinary workflow
         shell: bash
@@ -37,16 +37,17 @@ jobs:
           set -euo pipefail
           git fetch --no-tags --depth=1 origin 7ebecbd0f62818218ddd25385379f5c38b6413ca
           git show 7ebecbd0f62818218ddd25385379f5c38b6413ca:.github/workflows/agent3-full-diagnostics.yml > .github/workflows/agent3-full-diagnostics.yml
-          rm -f scripts/t017_stage2_schedule_admin.py
+          rm -f scripts/t017_stage2a_admin_preview.py
+          test ! -e scripts/t017_stage2_schedule_admin.py
 
       - name: Regenerate authoritative current state
         run: python3 scripts/current_state.py
 
-      - name: Focused ScheduleAdmin contracts
+      - name: Focused admin-preview contracts
         shell: bash
         run: |
           set -euo pipefail
-          PYTHONPATH=worker python3 tests/worker_schedule_admin_time.py
+          PYTHONPATH=worker python3 tests/worker_schedule_admin_preview_time.py
           PYTHONPATH=worker python3 tests/worker_schedule_api.py
           PYTHONPATH=worker python3 tests/worker_schedule_approval.py
           PYTHONPATH=worker python3 tests/worker_scheduler_time_store.py
@@ -80,17 +81,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test ! -e scripts/t017_stage2a_admin_preview.py
           test ! -e scripts/t017_stage2_schedule_admin.py
           git diff --check
-          allowed='^(CURRENT_STATE\.md|worker/requirements\.txt|worker/app/scheduler\.py|worker/app/scheduler_time\.py|worker/app/schedule_admin\.py|tests/worker_schedule_admin_time\.py|tests/worker_scheduler\.py|tests/worker_scheduler_time\.py|tests/worker_scheduler_time_store\.py)$'
+          allowed='^(CURRENT_STATE\.md|worker/requirements\.txt|worker/app/scheduler\.py|worker/app/scheduler_time\.py|worker/app/schedule_admin\.py|tests/worker_schedule_admin_preview_time\.py|tests/worker_scheduler\.py|tests/worker_scheduler_time\.py|tests/worker_scheduler_time_store\.py)$'
           unexpected=$(git diff --name-only 7ebecbd0f62818218ddd25385379f5c38b6413ca | grep -Ev "$allowed" || true)
           if [ -n "$unexpected" ]; then
-            echo "Unexpected stage-2 paths:"
+            echo "Unexpected stage-2A paths:"
             echo "$unexpected"
             exit 1
           fi
 
-      - name: Commit proven ScheduleAdmin layer
+      - name: Commit proven admin-preview layer
         shell: bash
         run: |
           set -euo pipefail
@@ -104,9 +106,9 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: t017-stage2-diagnostics
+          name: t017-stage2a-diagnostics
           path: |
-            /tmp/t017-stage2.log
+            /tmp/t017-stage2a.log
             /tmp/modelrig-full-test.log
           if-no-files-found: warn
           retention-days: 1
