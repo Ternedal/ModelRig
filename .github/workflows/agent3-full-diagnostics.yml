@@ -25,15 +25,20 @@ jobs:
       - name: Install worker deps
         run: pip install -r worker/requirements.txt --break-system-packages
 
-      - name: Apply scheduler-core stage only
+      - name: Apply scheduler-core patch only
+        run: python3 scripts/t017_stage1_scheduler_core.py
+
+      - name: Remove transport and restore ordinary workflow
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/t017_stage1_scheduler_core.py 2>&1 | tee /tmp/t017-stage1.log
+          git fetch --no-tags --depth=1 origin 7ebecbd0f62818218ddd25385379f5c38b6413ca
           git show 7ebecbd0f62818218ddd25385379f5c38b6413ca:.github/workflows/agent3-full-diagnostics.yml > .github/workflows/agent3-full-diagnostics.yml
           rm -f scripts/t017_stage1_scheduler_core.py
           rm -f scripts/t017_integrate_worker_time.py
-          python3 scripts/current_state.py
+
+      - name: Regenerate authoritative current state
+        run: python3 scripts/current_state.py
 
       - name: Focused scheduler-core contracts
         shell: bash
@@ -98,8 +103,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: t017-stage1-diagnostics
-          path: |
-            /tmp/t017-stage1.log
-            /tmp/modelrig-full-test.log
+          path: /tmp/modelrig-full-test.log
           if-no-files-found: warn
           retention-days: 1
