@@ -16,11 +16,21 @@ class ScheduleTimeDisplayTest {
     }
 
     @Test
+    fun missingServerTimeFailsClosedInsteadOfGuessingOnDevice() {
+        assertEquals(
+            "ukendt · Europe/Copenhagen",
+            authoritativeScheduleTime("", "Europe/Copenhagen"),
+        )
+        assertEquals("ukendt", authoritativeScheduleTime("", ""))
+    }
+
+    @Test
     fun runOncePolicyIsExplainedWithoutReplayLanguage() {
         assertEquals(
             "Kør én gang; ældre forfald registreres som missed",
             scheduleMisfireLabel("run_once"),
         )
         assertEquals("ukendt-policy", scheduleMisfireLabel("ukendt-policy"))
+        assertEquals("ukendt", scheduleMisfireLabel(""))
     }
 }
