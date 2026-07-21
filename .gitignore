@@ -74,9 +74,9 @@ kaliv-tools-state.json.tmp
 /validation/stage-a-runtime/
 /validation/archive/
 
-# T-019 scheduler-pilot operator: resumable state, barrier arms and local receipts.
-# These contain rig/process observations and remain local until the final reviewed
-# scheduler-pilot report is copied to dated evidence.
+# T-019 scheduler-pilot operator: resumable state, barrier arms and one-shot pause/
+# crash receipts. These contain rig/process observations and remain local until the
+# final reviewed scheduler-pilot report is copied to dated evidence.
 /validation/scheduler-pilot-operator-state.json
 /validation/scheduler-pilot-operator-state.json.tmp-*
 /validation/scheduler-pilot-barrier/
