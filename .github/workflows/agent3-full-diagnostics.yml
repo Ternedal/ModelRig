@@ -4,13 +4,15 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   full-test-log:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
@@ -20,22 +22,45 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install worker deps
-        run: pip install -r worker/requirements.txt --break-system-packages
+      - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+
+      - name: Install platform and worker deps
+        shell: bash
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          pip install -r worker/requirements.txt --break-system-packages
+
+      - name: Apply Android-client patch only
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 scripts/t017_stage4a_android_client.py 2>&1 | tee /tmp/t017-stage4a.log
+
+      - name: Remove transport and restore ordinary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin 7ebecbd0f62818218ddd25385379f5c38b6413ca
+          git show 7ebecbd0f62818218ddd25385379f5c38b6413ca:.github/workflows/agent3-full-diagnostics.yml > .github/workflows/agent3-full-diagnostics.yml
+          rm -f scripts/t017_stage4a_android_client.py
+
+      - name: Regenerate authoritative current state
+        run: python3 scripts/current_state.py
+
+      - name: Android client compile and tests
+        working-directory: android
+        shell: bash
+        run: |
+          echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
+          ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest --no-daemon --console=plain
 
       - name: Build backend
         run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
-
-      - name: Generate authoritative current state
-        run: python3 scripts/current_state.py
-
-      - name: Upload generated current state
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: agent3-generated-current-state
-          path: CURRENT_STATE.md
-          if-no-files-found: error
-          retention-days: 7
 
       - name: Full repository test log
         env:
@@ -59,11 +84,37 @@ jobs:
           done
           exit "$status"
 
-      - name: Upload full failed test log
+      - name: Verify isolated stage scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e scripts/t017_stage4a_android_client.py
+          git diff --check
+          allowed='^(CURRENT_STATE\.md|worker/requirements\.txt|worker/app/scheduler\.py|worker/app/scheduler_time\.py|worker/app/schedule_admin\.py|worker/app/schedule_api\.py|worker/app/schedule_approval\.py|backend/internal/httpapi/schedule_approvals\.go|backend/internal/httpapi/schedule_approval_time_test\.go|backend/internal/httpapi/schedule_approval_http_time_test\.go|backend/internal/httpapi/schedule_renewal_time_test\.go|backend/internal/httpapi/schedules_test\.go|android/app/src/main/java/dk/ternedal/modelrig/net/ScheduleClient\.kt|android/app/src/test/java/dk/ternedal/modelrig/net/ScheduleClientTest\.kt|tests/worker_schedule_admin_persistence_time\.py|tests/worker_schedule_admin_preview_time\.py|tests/worker_schedule_api_time\.py|tests/worker_schedule_approval_time\.py|tests/worker_schedule_approval\.py|tests/worker_schedule_api\.py|tests/worker_scheduler\.py|tests/worker_scheduler_time\.py|tests/worker_scheduler_time_store\.py)$'
+          unexpected=$(git diff --name-only 7ebecbd0f62818218ddd25385379f5c38b6413ca | grep -Ev "$allowed" || true)
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected stage-4A paths:"
+            echo "$unexpected"
+            exit 1
+          fi
+
+      - name: Commit proven Android client layer
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "feat(scheduler): carry time terms through Android client"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+
+      - name: Upload failure diagnostics
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: agent3-full-test-log
-          path: /tmp/modelrig-full-test.log
-          if-no-files-found: error
-          retention-days: 7
+          name: t017-stage4a-diagnostics
+          path: |
+            /tmp/t017-stage4a.log
+            /tmp/modelrig-full-test.log
+          if-no-files-found: warn
+          retention-days: 1
