@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Run the pre-release physical validation in a fail-closed operator sequence.
+"""Run pre-release physical validation as one fail-closed Stage A sequence.
 
-This command is deliberately limited to Stage A of STAGED_PHYSICAL_PROMOTION.md.
-It can freeze the exact unpublished candidate, prepare/verify the six physical
-proofs and, after an interactive one-use browser validation, produce the
-seven-proof candidate receipt. It cannot merge, tag, release or activate
-anything. Every successful result keeps release validation pending and
+The command can freeze an exact unpublished candidate, prepare or verify the six
+pre-release physical proofs and, after an interactive one-use browser validation,
+produce the seven-proof candidate receipt. It cannot integrate, publish or
+activate anything. Every successful result keeps release validation pending and
 production activation false.
 """
 from __future__ import annotations
@@ -75,7 +74,7 @@ def _run(
     *,
     root: Path = ROOT,
     timeout: int = 1800,
-) -> str:
+) -> None:
     try:
         process = subprocess.run(
             [executable, *arguments],
@@ -85,12 +84,14 @@ def _run(
             timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise StageAOperatorError(f"command could not complete: {Path(executable).name}") from exc
+        raise StageAOperatorError(
+            f"command could not complete: {Path(executable).name}"
+        ) from exc
     if process.returncode != 0:
         raise StageAOperatorError(
-            f"command was blocked or failed: {Path(executable).name} (exit {process.returncode})"
+            f"command was blocked or failed: {Path(executable).name} "
+            f"(exit {process.returncode})"
         )
-    return ""
 
 
 def _git(*arguments: str, root: Path = ROOT) -> str:
@@ -130,7 +131,7 @@ def _candidate_identity(expected_sha: str, *, root: Path = ROOT) -> dict[str, An
         raise StageAOperatorError("--expected-sha must be a lowercase 40-hex Git SHA")
     if shutil.which("git") is None:
         raise StageAOperatorError("Git was not found on PATH")
-    if shutil.which(Path(sys.executable).name) is None and not Path(sys.executable).exists():
+    if not Path(sys.executable).is_file():
         raise StageAOperatorError("Python executable is unavailable")
 
     top = Path(_git("rev-parse", "--show-toplevel", root=root)).resolve()
@@ -142,8 +143,7 @@ def _candidate_identity(expected_sha: str, *, root: Path = ROOT) -> dict[str, An
     branch = _git("branch", "--show-current", root=root)
     if branch != EXPECTED_BRANCH:
         raise StageAOperatorError(f"candidate must be checked out on {EXPECTED_BRANCH}")
-    dirty = _git("status", "--porcelain", root=root)
-    if dirty:
+    if _git("status", "--porcelain", root=root):
         raise StageAOperatorError("candidate working tree is not clean")
 
     version = (root / "VERSION").read_text(encoding="utf-8").strip()
@@ -170,16 +170,16 @@ def _candidate_identity(expected_sha: str, *, root: Path = ROOT) -> dict[str, An
         )
 
     identity = campaign_contract.candidate_identity(root)
-    if identity.get("identity_source") != "git":
-        raise StageAOperatorError("Stage A requires a normal git checkout")
-    if identity.get("git_sha") != expected_sha:
-        raise StageAOperatorError("candidate identity SHA mismatch")
-    if identity.get("version") != EXPECTED_VERSION:
-        raise StageAOperatorError("candidate identity version mismatch")
-    if identity.get("working_tree_clean") is not True:
-        raise StageAOperatorError("candidate identity reports a dirty tree")
-    if identity.get("version_stamps_consistent") is not True:
-        raise StageAOperatorError("candidate version stamps are inconsistent")
+    expected = {
+        "identity_source": "git",
+        "git_sha": expected_sha,
+        "version": EXPECTED_VERSION,
+        "working_tree_clean": True,
+        "version_stamps_consistent": True,
+    }
+    for key, value in expected.items():
+        if identity.get(key) != value:
+            raise StageAOperatorError(f"candidate identity {key} mismatch")
     return identity
 
 
@@ -208,7 +208,9 @@ def _load_json(path: Path, *, root: Path = ROOT) -> dict[str, Any]:
     return value
 
 
-def _same_candidate(report: Mapping[str, Any], identity: Mapping[str, Any], label: str) -> None:
+def _same_candidate(
+    report: Mapping[str, Any], identity: Mapping[str, Any], label: str
+) -> None:
     candidate = report.get("candidate")
     if not isinstance(candidate, Mapping):
         raise StageAOperatorError(f"{label} candidate identity is missing")
@@ -220,18 +222,21 @@ def _same_candidate(report: Mapping[str, Any], identity: Mapping[str, Any], labe
 def _require_pending_gate(gate: Any, label: str) -> Mapping[str, Any]:
     if not isinstance(gate, Mapping):
         raise StageAOperatorError(f"{label} gate is missing")
-    if gate.get("passed") is not True:
-        raise StageAOperatorError(f"{label} gate did not pass")
-    if gate.get("release_validation_pending") is not True:
-        raise StageAOperatorError(f"{label} lost release_validation_pending=true")
-    if gate.get("release_complete") is not False:
-        raise StageAOperatorError(f"{label} incorrectly claims release completion")
-    if gate.get("production_activation") is not False:
-        raise StageAOperatorError(f"{label} incorrectly activated production")
+    required = {
+        "passed": True,
+        "release_validation_pending": True,
+        "release_complete": False,
+        "production_activation": False,
+    }
+    for key, value in required.items():
+        if gate.get(key) is not value:
+            raise StageAOperatorError(f"{label} gate.{key} mismatch")
     return gate
 
 
-def _run_freeze(expected_sha: str, identity: Mapping[str, Any], *, root: Path = ROOT) -> dict[str, Any]:
+def _run_freeze(
+    expected_sha: str, identity: Mapping[str, Any], *, root: Path = ROOT
+) -> dict[str, Any]:
     _require_token()
     _run(
         sys.executable,
@@ -288,8 +293,12 @@ def _run_campaign(
         raise StageAOperatorError("candidate campaign schema or mode mismatch")
     _same_candidate(report, identity, "candidate campaign")
     gate = _require_pending_gate(report.get("gate"), "candidate campaign")
-    if gate.get("candidate_campaign_complete") is not (mode == "verify"):
-        raise StageAOperatorError("candidate campaign completeness does not match mode")
+    complete = gate.get("candidate_campaign_complete")
+    if not isinstance(complete, bool):
+        raise StageAOperatorError("candidate campaign completeness is not boolean")
+    if mode == "verify" and complete is not True:
+        raise StageAOperatorError("candidate campaign is incomplete")
+
     summary = report.get("summary")
     if not isinstance(summary, Mapping) or summary.get("total") != len(PROOF_NAMES):
         raise StageAOperatorError("candidate campaign proof total mismatch")
@@ -305,7 +314,9 @@ def _run_campaign(
 
 def _validate_url(raw: str) -> str:
     if not raw or raw.strip() != raw:
-        raise StageAOperatorError("--url must be a non-empty exact URL without surrounding spaces")
+        raise StageAOperatorError(
+            "--url must be a non-empty exact URL without surrounding spaces"
+        )
     try:
         parsed = urlsplit(raw)
     except ValueError as exc:
@@ -324,7 +335,11 @@ def _validate_url(raw: str) -> str:
 
 
 def _run_browser(url: str, *, root: Path = ROOT) -> None:
-    powershell = shutil.which("powershell") or shutil.which("powershell.exe") or shutil.which("pwsh")
+    powershell = (
+        shutil.which("powershell")
+        or shutil.which("powershell.exe")
+        or shutil.which("pwsh")
+    )
     if not powershell:
         raise StageAOperatorError("PowerShell was not found on PATH")
     _run(
@@ -344,7 +359,9 @@ def _run_browser(url: str, *, root: Path = ROOT) -> None:
     _resolve_report(BROWSER_ATTESTATION, root=root)
 
 
-def _run_final_gate(identity: Mapping[str, Any], *, max_age_hours: float, root: Path = ROOT) -> dict[str, Any]:
+def _run_final_gate(
+    identity: Mapping[str, Any], *, max_age_hours: float, root: Path = ROOT
+) -> dict[str, Any]:
     _run(
         sys.executable,
         [
@@ -396,8 +413,14 @@ def execute(
     root: Path = ROOT,
     physical_guard: bool = True,
 ) -> dict[str, Any]:
+    if action not in {"prepare", "verify", "complete"}:
+        raise StageAOperatorError(f"unsupported action: {action}")
+    exact_url = _validate_url(url or "") if action == "complete" else None
+    if action != "complete" and url:
+        raise StageAOperatorError("--url is only valid with complete")
     if physical_guard:
         _require_physical_operator()
+
     identity = _candidate_identity(expected_sha, root=root)
     _run_freeze(expected_sha, identity, root=root)
 
@@ -427,9 +450,7 @@ def execute(
         print("Next: run action 'complete' with one approved exact HTTPS/443 URL.")
         return campaign
 
-    if action != "complete":
-        raise StageAOperatorError(f"unsupported action: {action}")
-    exact_url = _validate_url(url or "")
+    assert exact_url is not None
     _run_browser(exact_url, root=root)
     final = _run_final_gate(identity, max_age_hours=max_age_hours, root=root)
     print("STAGE A PASS: seven proofs bind to exact candidate " + expected_sha)
@@ -463,7 +484,10 @@ def main(argv: list[str] | None = None) -> int:
             min_model_exact=args.min_model_exact,
         )
     except Exception as exc:
-        print(f"Stage A BLOCKED: {type(exc).__name__}: {str(exc)[:500]}", file=sys.stderr)
+        print(
+            f"Stage A BLOCKED: {type(exc).__name__}: {str(exc)[:500]}",
+            file=sys.stderr,
+        )
         return 1
     return 0
 
