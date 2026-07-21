@@ -104,14 +104,16 @@ def assess(value=None, *, operator=True, validation_value=None, now=NOW):
     )
 
 
-def test_valid_evidence_is_eligible_but_dormant() -> None:
+def test_valid_evidence_selects_readonly_task_surface() -> None:
     value = assess()
     assert value["schema"] == READINESS_SCHEMA
     assert value["eligible_for_task_ui"] is True
     assert value["operator_enabled"] is True
-    assert value["selected_surface"] == "agent2"
+    assert value["selected_surface"] == "agent3_readonly"
     assert value["candidate_surface"] == "agent3_readonly"
-    assert value["reason"] == "task_ui_integration_not_delivered"
+    assert value["fallback_surface"] == "agent2"
+    assert value["reason"] == "agent3_readonly_selected"
+    assert value["reasons"] == []
     assert value["production_activation"] is False
     assert value["normal_chat_route_unchanged"] is True
     assert value["pilot"]["replans"] == 2
@@ -123,6 +125,7 @@ def test_operator_off_keeps_evidence_visible_and_selects_agent2() -> None:
     assert value["eligible_for_task_ui"] is True
     assert value["selected_surface"] == "agent2"
     assert value["reason"] == "operator_disabled"
+    assert value["normal_chat_route_unchanged"] is True
 
 
 def test_stale_report_fails_closed() -> None:
@@ -136,6 +139,7 @@ def test_version_and_code_are_both_bound() -> None:
     bad = report()
     bad["candidate"] = dict(bad["candidate"], version="1.58.124", code_sha256="c" * 64)
     value = assess(bad)
+    assert value["selected_surface"] == "agent2"
     assert value["pilot"]["version_match"] is False
     assert value["pilot"]["code_match"] is False
     assert "pilot_candidate_version_mismatch" in value["reasons"]
@@ -148,6 +152,7 @@ def test_failed_task_or_retry_blocks_readiness() -> None:
     bad["results"][6] = dict(bad["results"][6], success=False, retry_events=1)
     value = assess(bad)
     assert value["eligible_for_task_ui"] is False
+    assert value["selected_surface"] == "agent2"
     assert "pilot_result_not_successful_read_route" in value["reasons"]
 
 
@@ -160,6 +165,7 @@ def test_confirmation_event_blocks_readonly_promotion() -> None:
     )
     value = assess(bad)
     assert value["eligible_for_task_ui"] is False
+    assert value["selected_surface"] == "agent2"
     assert "pilot_result_confirmation_present" in value["reasons"]
 
 
@@ -167,12 +173,14 @@ def test_stop_fallback_is_mandatory() -> None:
     bad = report(stop_fallback={"success": False})
     value = assess(bad)
     assert value["pilot"]["stop_fallback_proven"] is False
+    assert value["selected_surface"] == "agent2"
     assert "pilot_stop_fallback_not_proven" in value["reasons"]
 
 
 def test_rig_validation_must_still_match_candidate() -> None:
     value = assess(validation_value=validation(code_match=False))
     assert value["eligible_for_task_ui"] is False
+    assert value["selected_surface"] == "agent2"
     assert "rig_validation_code_mismatch" in value["reasons"]
 
 
@@ -189,7 +197,7 @@ def test_configured_reader_requires_explicit_path() -> None:
     assert value["pilot"]["configured"] is False
 
 
-def test_configured_reader_hashes_and_redacts_report() -> None:
+def test_configured_reader_hashes_redacts_and_selects_surface() -> None:
     with tempfile.TemporaryDirectory() as temp:
         path = Path(temp) / "pilot.json"
         payload = report(secret="must-not-escape")
@@ -206,6 +214,7 @@ def test_configured_reader_hashes_and_redacts_report() -> None:
             now=NOW,
         )
     assert value["eligible_for_task_ui"] is True
+    assert value["selected_surface"] == "agent3_readonly"
     assert value["pilot"]["report_sha256"] == hashlib.sha256(raw).hexdigest()
     assert "must-not-escape" not in json.dumps(value)
 
@@ -223,7 +232,13 @@ def test_api_rejects_a_provider_that_claims_activation() -> None:
         build_task_readiness_router(
             lambda: {
                 "selected_surface": "agent3_readonly",
+                "candidate_surface": "agent3_readonly",
+                "fallback_surface": "agent2",
+                "eligible_for_task_ui": True,
+                "operator_enabled": True,
+                "normal_chat_route_unchanged": True,
                 "production_activation": True,
+                "reason": "agent3_readonly_selected",
             }
         )
     )
@@ -233,13 +248,36 @@ def test_api_rejects_a_provider_that_claims_activation() -> None:
     assert response.status_code == 500
 
 
-def test_api_returns_typed_dormant_contract() -> None:
+def test_api_rejects_unready_agent3_selection() -> None:
+    app = FastAPI()
+    app.include_router(
+        build_task_readiness_router(
+            lambda: {
+                "selected_surface": "agent3_readonly",
+                "candidate_surface": "agent3_readonly",
+                "fallback_surface": "agent2",
+                "eligible_for_task_ui": False,
+                "operator_enabled": True,
+                "normal_chat_route_unchanged": True,
+                "production_activation": False,
+                "reason": "agent3_readonly_selected",
+            }
+        )
+    )
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/experimental/agent3/task-readiness"
+    )
+    assert response.status_code == 500
+
+
+def test_api_returns_typed_selected_contract() -> None:
     expected = assess()
     app = FastAPI()
     app.include_router(build_task_readiness_router(lambda: expected))
     response = TestClient(app).get("/experimental/agent3/task-readiness")
     assert response.status_code == 200
     assert response.json() == expected
+    assert response.json()["selected_surface"] == "agent3_readonly"
 
 
 TESTS = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
