@@ -1,5 +1,8 @@
 package httpapi
 
+// Stage 3B2a proves the signed claim itself; HTTP forwarding and request matching
+// remain separate so an incomplete route migration cannot hide in this test.
+
 import (
 	"testing"
 	"time"
