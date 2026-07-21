@@ -47,6 +47,8 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` |
 | `KALIV_SCHEDULER` | `` |
 | `KALIV_SCHEDULER_API` | `0` |
+| `KALIV_SCHEDULER_PILOT_CONTROL_DIR` | `` |
+| `KALIV_SCHEDULER_PILOT_LOG` | `` |
 | `KALIV_SCHEDULER_POLL_S` | `` |
 | `KALIV_TOOLS_DIR` | `(unset)` |
 | `KALIV_TOOLS_ENABLED` | `0` |
