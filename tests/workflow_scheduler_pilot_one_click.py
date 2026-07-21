@@ -12,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "worker"))
 passed = failed = 0
 
@@ -36,6 +37,7 @@ def load(name: str, path: Path):
 
 
 wizard_path = ROOT / "scripts" / "scheduler_pilot_one_click.py"
+easy_path = ROOT / "scripts" / "scheduler_pilot_easy_entry.py"
 gate_path = ROOT / "scripts" / "scheduler_pilot_android_gate.py"
 stack_path = ROOT / "scripts" / "start-stage-a-validation-stack.ps1"
 control_path = ROOT / "worker" / "app" / "scheduler_pilot_control.py"
@@ -44,7 +46,8 @@ cmd_path = ROOT / "START_SCHEDULER_PILOT.cmd"
 ignore_path = ROOT / ".gitignore"
 
 for path, label in (
-    (wizard_path, "scheduler-only wizard"),
+    (wizard_path, "scheduler pilot engine"),
+    (easy_path, "zero-copy UX adapter"),
     (gate_path, "Android observation gate"),
     (stack_path, "exact-head stack launcher"),
     (control_path, "deterministic hold"),
@@ -54,18 +57,22 @@ for path, label in (
     check(path.is_file(), f"{label} exists")
 
 wizard_text = wizard_path.read_text(encoding="utf-8")
+easy_text = easy_path.read_text(encoding="utf-8")
 stack_text = stack_path.read_text(encoding="utf-8")
 entrypoint_text = pilot_entrypoint_path.read_text(encoding="utf-8")
 cmd_text = cmd_path.read_text(encoding="utf-8")
 ignore_text = ignore_path.read_text(encoding="utf-8")
 
-check("scheduler_pilot_one_click.py" in cmd_text, "entrypoint launches the scheduler wizard")
+check("scheduler_pilot_easy_entry.py" in cmd_text, "entrypoint launches the zero-copy adapter")
 check("scheduler_pilot_android_gate.py" in cmd_text, "entrypoint enforces Android observations")
 check("PYTHONDONTWRITEBYTECODE" in cmd_text, "entrypoint suppresses Python bytecode")
-check("run_deterministic_pilot(planner, state)" in wizard_text, "wizard uses deterministic pilot flow")
+check("run_deterministic_pilot(planner, state)" in wizard_text, "engine uses deterministic pilot flow")
 check("arm_hold(read_id, \"revocation\")" in wizard_text, "revocation is armed before timing")
 check("arm_hold(read_id, \"crash_recovery\")" in wizard_text, "crash recovery is armed before timing")
-check("schedule_payload(" in wizard_text, "wizard reads the actual nested schedule API shape")
+check("schedule_payload(" in wizard_text, "engine reads the actual nested schedule API shape")
+check("def discover_write_id" in easy_text, "adapter discovers the Android-created write plan")
+check("pilot.get_write_id = discover_write_id" in easy_text, "adapter replaces schedule-id copying")
+check("pilot.wait_hold = wait_hold_and_confirm" in easy_text, "in-flight confirmation uses the held occurrence")
 check('"-SchedulerPilot"' in wizard_text, "every pilot stack launch requests scheduler mode")
 check("[switch]$SchedulerPilot" in stack_text, "stack exposes an explicit pilot switch")
 check('KALIV_SCHEDULER=1' in stack_text, "pilot worker enables the scheduler")
@@ -85,6 +92,7 @@ for ignored in (
 wizard = load("scheduler_pilot_one_click_contract", wizard_path)
 gate_module = load("scheduler_pilot_android_gate_contract", gate_path)
 control = load("scheduler_pilot_control_contract", control_path)
+easy = load("scheduler_pilot_easy_entry_contract", easy_path)
 check(
     wizard.BRANCH == "agent/t019-physical-pilot-candidate",
     "wizard is pinned to the isolated pilot branch",
@@ -140,6 +148,71 @@ check(
     any("Android-observation mangler" in item for item in gated_missing["pilot"]["problems"]),
     "Android gate records a human-readable refusal",
 )
+
+old_write = {
+    "schedule_id": "old-write",
+    "tool": "note_append",
+    "args": {"text": "pilot"},
+    "cadence": "every:60",
+    "max_runs": 2,
+}
+new_write = dict(old_write, schedule_id="new-write")
+snapshots = [[old_write], [old_write, new_write]]
+snapshot_index = [0]
+saved_states: list[dict] = []
+original_list = easy._list_schedules
+original_input = getattr(easy, "input", None)
+original_save = easy.pilot.save_state
+original_ok = easy.pilot.stage.ok
+
+def fake_list():
+    index = min(snapshot_index[0], len(snapshots) - 1)
+    snapshot_index[0] += 1
+    return snapshots[index]
+
+easy._list_schedules = fake_list
+easy.input = lambda _message="": ""
+easy.pilot.save_state = lambda state: saved_states.append(dict(state))
+easy.pilot.stage.ok = lambda _message: None
+try:
+    discovery_state: dict[str, str] = {}
+    discovered = easy.discover_write_id(discovery_state)
+finally:
+    easy._list_schedules = original_list
+    if original_input is None:
+        delattr(easy, "input")
+    else:
+        easy.input = original_input
+    easy.pilot.save_state = original_save
+    easy.pilot.stage.ok = original_ok
+check(discovered == "new-write", "adapter selects the one newly created exact plan")
+check(discovery_state.get("write_schedule_id") == "new-write", "new schedule id is saved for resume")
+check(saved_states and saved_states[-1].get("write_schedule_id") == "new-write", "persisted resume state uses the new plan")
+check(discovered != "old-write", "an older matching plan is never selected")
+
+messages: list[str] = []
+original_yes = easy._original_require_yes
+original_hold = easy._original_wait_hold
+easy._deferred_in_flight = False
+easy._hold_count = 0
+easy._original_require_yes = lambda message: messages.append(message)
+easy._original_wait_hold = lambda schedule_id, nonce, timeout=90.0: {
+    "schedule_id": schedule_id,
+    "nonce": nonce,
+    "phase": "before_live_guard",
+}
+try:
+    easy.defer_in_flight_question("Så du mindst én plan som in-flight/running? Skriv JA")
+    check(not messages, "in-flight question is deferred until the occurrence is held")
+    easy.wait_hold_and_confirm("read-1", "nonce-1")
+    check(len(messages) == 1 and "holdt åben" in messages[0], "in-flight question is asked during the first hold")
+    easy.wait_hold_and_confirm("read-1", "nonce-2")
+    check(len(messages) == 1, "crash hold does not ask the in-flight question twice")
+finally:
+    easy._original_require_yes = original_yes
+    easy._original_wait_hold = original_hold
+    easy._deferred_in_flight = False
+    easy._hold_count = 0
 
 with tempfile.TemporaryDirectory(prefix="kaliv-t019-control-") as tmp:
     root = Path(tmp)
