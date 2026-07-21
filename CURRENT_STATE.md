@@ -188,6 +188,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_schedule_runtime.py`
 - `tests/worker_schedule_service.py`
 - `tests/worker_scheduler.py`
+- `tests/worker_scheduler_pilot_barrier.py`
 - `tests/worker_toolhost.py`
 - `tests/worker_tools.py`
 - `tests/worker_tools_guardrail.py`
