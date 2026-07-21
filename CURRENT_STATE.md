@@ -47,6 +47,8 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` |
 | `KALIV_SCHEDULER` | `` |
 | `KALIV_SCHEDULER_API` | `0` |
+| `KALIV_SCHEDULER_PILOT_CONTROL_DIR` | `` |
+| `KALIV_SCHEDULER_PILOT_LOG` | `` |
 | `KALIV_SCHEDULER_POLL_S` | `` |
 | `KALIV_TOOLS_DIR` | `(unset)` |
 | `KALIV_TOOLS_ENABLED` | `0` |
@@ -216,6 +218,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_physical_validation_final_gate.py`
 - `tests/workflow_release.py`
 - `tests/workflow_rig_preflight.py`
+- `tests/workflow_scheduler_pilot_one_click.py`
 - `tests/workflow_stage_a_one_click.py`
 - `tests/workflow_stage_a_operator_surface.py`
 - `tests/workflow_stage_a_physical_operator.py`

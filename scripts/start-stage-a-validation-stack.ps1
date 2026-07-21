@@ -8,7 +8,9 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$ValidationReport,
 
-    [switch]$WorkerOnly
+    [switch]$WorkerOnly,
+
+    [switch]$SchedulerPilot
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,6 +21,19 @@ $runtimeDir = Join-Path $repoRoot "validation\stage-a-runtime"
 $backendExe = Join-Path $runtimeDir "modelrig-server-stage-a.exe"
 $backendCmd = Join-Path $runtimeDir "backend.cmd"
 $workerCmd = Join-Path $runtimeDir "worker.cmd"
+$pilotControlDir = Join-Path $repoRoot "validation\scheduler-pilot-control"
+$pilotLog = Join-Path $repoRoot "validation\scheduler-pilot-worker.log"
+$schedulerWorkerEnv = ""
+$schedulerBackendEnv = ""
+$workerEntrypoint = "app.entrypoint:app"
+if ($SchedulerPilot) {
+    New-Item -ItemType Directory -Path $pilotControlDir -Force | Out-Null
+    $escapedControlDir = $pilotControlDir.Replace('%', '%%')
+    $escapedPilotLog = $pilotLog.Replace('%', '%%')
+    $schedulerWorkerEnv = "set `"KALIV_SCHEDULER=1`"`r`nset `"KALIV_SCHEDULER_API=1`"`r`nset `"KALIV_SCHEDULER_POLL_S=5`"`r`nset `"KALIV_SCHEDULER_PILOT_CONTROL_DIR=$escapedControlDir`"`r`nset `"KALIV_SCHEDULER_PILOT_LOG=$escapedPilotLog`""
+    $schedulerBackendEnv = "set `"KALIV_SCHEDULER_API=1`""
+    $workerEntrypoint = "app.scheduler_pilot_entrypoint:app"
+}
 
 function Get-ListenerPid {
     param([int]$Port)
@@ -106,9 +121,10 @@ set "PYTHONPATH=$escapedRepo\worker"
 set "PYTHONDONTWRITEBYTECODE=1"
 set "KALIV_AGENT3_ENABLED=1"
 set "KALIV_TOOLS_ENABLED=1"
+$schedulerWorkerEnv
 set "KALIV_AGENT3_PLANNER_MODEL=$PlannerModel"
 set "KALIV_AGENT3_VALIDATION_REPORT=$escapedReport"
-python -m uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099
+python -m uvicorn $workerEntrypoint --host 127.0.0.1 --port 8099
 "@ | Set-Content -LiteralPath $workerCmd -Encoding ASCII
 
 if ($WorkerOnly) {
@@ -140,6 +156,7 @@ set "MODELRIG_HOST=127.0.0.1"
 set "MODELRIG_PORT=8080"
 set "MODELRIG_DATA=$escapedData"
 set "KALIV_AGENT3_ENABLED=1"
+$schedulerBackendEnv
 "$backendExe"
 "@ | Set-Content -LiteralPath $backendCmd -Encoding ASCII
 
@@ -152,5 +169,8 @@ Wait-Endpoint -Url "http://127.0.0.1:8080/healthz"
 Wait-Endpoint -Url "http://127.0.0.1:8099/healthz"
 
 Write-Host "  Exact-head validation-stack er klar." -ForegroundColor Green
+if ($SchedulerPilot) {
+    Write-Host "  Scheduler-pilot mode: scheduler=ON, api=ON, poll=5s, deterministic hold=ON." -ForegroundColor Green
+}
 Write-Host "  Pairing-data: $pairingData"
 Write-Host "  Luk de to nye konsolvinduer efter testen."
