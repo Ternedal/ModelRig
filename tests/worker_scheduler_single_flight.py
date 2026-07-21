@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T-018 concurrency contract for scheduler ticks.
+"""T-018 concurrency and lifecycle contract for scheduler ticks.
 
 Run: PYTHONPATH=worker python3 tests/worker_scheduler_single_flight.py
 """
@@ -8,11 +8,13 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 
+from app.schedule_service import SchedulerService  # noqa: E402
 from app.scheduler_single_flight import install_single_flight  # noqa: E402
 from app.schedule_runner import SchedulerRunner  # noqa: E402
 
@@ -108,6 +110,58 @@ check(failing.single_flight_status().active == 0, "slot is released after except
 second = failing.run_once()
 check(second.completed == 1, "a later tick can enter after exception cleanup")
 check(failing.calls == 2, "exception does not permanently wedge single-flight")
+
+
+class BlockingServiceRunner:
+    def __init__(self):
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.calls = 0
+        self.owner_id = "t018-service-owner"
+        self.gate = SimpleNamespace(enabled=True)
+        self.feature_enabled = lambda: True
+
+    def disable_unschedulable(self):
+        return []
+
+    def recover_interrupted(self):
+        return {"executed": [], "abandoned": [], "unknown": []}
+
+    def run_once(self):
+        self.calls += 1
+        self.entered.set()
+        self.release.wait(3.0)
+        return FakeTickResult(True, False, 1, 1, 0, 0, (f"job-{self.calls}",))
+
+
+install_single_flight(BlockingServiceRunner, FakeTickResult)
+service_runner = BlockingServiceRunner()
+service = SchedulerService(service_runner, poll_s=60.0)
+check(service.start(), "service starts with explicit single-flight runner")
+check(service_runner.entered.wait(1.0), "service tick enters blocking tool path")
+
+overlap_started = time.monotonic()
+service_overlap = service_runner.run_once()
+overlap_elapsed = time.monotonic() - overlap_started
+check(service_overlap.claimed == 0, "service overlap is rejected before claim")
+check(overlap_elapsed < 0.25, "zero-queue service overlap returns immediately")
+check(service_runner.calls == 1, "service overlap never enters underlying execution")
+check(not service.stop(timeout=0.05), "shutdown timeout reports active tick honestly")
+check(service.status().running, "service remains running after failed drain")
+check(service_runner.single_flight_status().active == 1, "single-flight remains active during timeout")
+
+service_runner.release.set()
+check(service.stop(timeout=2.0), "shutdown succeeds after active tick drains")
+check(not service.status().running, "service reports stopped after drain")
+service_status = service_runner.single_flight_status()
+check(service_status.active == 0, "single-flight slot is empty after shutdown")
+check(service_status.overlap_rejections == 1, "shutdown preserves overlap rejection counter")
+
+service_runner.entered.clear()
+check(service.start(), "drained service can start again")
+check(service_runner.entered.wait(1.0), "restarted service executes a new tick")
+check(service.stop(timeout=2.0), "restarted service stops cleanly")
+check(service_runner.calls >= 2, "restart creates a later accepted execution")
 
 print(f"\n===== SCHEDULER SINGLE-FLIGHT: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
