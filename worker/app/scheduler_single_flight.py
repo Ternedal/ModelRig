@@ -64,6 +64,46 @@ class SingleFlightGate:
             )
 
 
+def _record_overlap_audit(runner: Any, status: SingleFlightStatus) -> None:
+    """Best-effort durable explanation for a tick rejected before claim.
+
+    This is deliberately a synthetic scheduler event, not an occurrence event:
+    no occurrence was claimed, queued or budget-reserved. Audit failure must not
+    turn fail-fast backpressure into a blocking or failing caller path.
+    """
+    audit = getattr(getattr(runner, "gate", None), "audit", None)
+    record = getattr(audit, "record", None)
+    if not callable(record):
+        return
+    owner_id = str(getattr(runner, "owner_id", "unknown"))[:100]
+    try:
+        record(
+            tool="scheduler_tick",
+            args={
+                "policy": "single-flight",
+                "max_concurrency": status.max_concurrency,
+                "queue_capacity": status.queue_capacity,
+                "owner_id": owner_id,
+                "overlap_rejections": status.overlap_rejections,
+            },
+            risk="read",
+            outcome="blocked",
+            conversation_id=f"scheduler:overlap:{owner_id}",
+            origin="schedule",
+            result_summary=(
+                "overlap afvist før claim; queue_capacity=0; ingen occurrence "
+                "ventede og ingen budget-slot blev reserveret"
+            ),
+        )
+    except Exception:
+        _logger.warning(
+            "scheduler: overlap rejection could not be persisted to audit "
+            "(owner_id=%s overlap_rejections=%d)",
+            owner_id,
+            status.overlap_rejections,
+        )
+
+
 def install_single_flight(runner_cls: type, tick_result_cls: Callable[..., Any]) -> None:
     """Install the fail-fast single-flight contract on ``SchedulerRunner`` once."""
 
@@ -90,6 +130,7 @@ def install_single_flight(runner_cls: type, tick_result_cls: Callable[..., Any])
                 status.overlap_rejections,
                 getattr(self, "owner_id", "unknown"),
             )
+            _record_overlap_audit(self, status)
             try:
                 enabled = bool(self.feature_enabled())
             except Exception:
