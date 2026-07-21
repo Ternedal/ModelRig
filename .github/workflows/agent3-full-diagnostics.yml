@@ -28,11 +28,22 @@ jobs:
       - name: Apply exact T-017 worker patch and remove transport
         shell: bash
         run: |
-          set -euo pipefail
-          python3 scripts/t017_integrate_worker_time.py
+          set -o pipefail
+          python3 scripts/t017_integrate_worker_time.py 2>&1 | tee /tmp/t017-patch.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then exit "$status"; fi
           git show 7ebecbd0f62818218ddd25385379f5c38b6413ca:.github/workflows/agent3-full-diagnostics.yml > .github/workflows/agent3-full-diagnostics.yml
           rm scripts/t017_integrate_worker_time.py
           python3 scripts/current_state.py
+
+      - name: Upload T-017 patch diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: t017-patch-diagnostics
+          path: /tmp/t017-patch.log
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Focused T-017 contracts
         shell: bash
@@ -75,7 +86,7 @@ jobs:
           set -euo pipefail
           test ! -e scripts/t017_integrate_worker_time.py
           git diff --check
-          allowed='^(CURRENT_STATE\.md|worker/requirements\.txt|worker/app/scheduler\.py|worker/app/scheduler_admin\.py|worker/app/schedule_admin\.py|worker/app/schedule_api\.py|worker/app/schedule_approval\.py|worker/app/scheduler_time\.py|tests/worker_scheduler\.py|tests/worker_scheduler_time\.py|tests/worker_scheduler_time_integration\.py)$'
+          allowed='^(CURRENT_STATE\.md|worker/requirements\.txt|worker/app/scheduler\.py|worker/app/schedule_admin\.py|worker/app/schedule_api\.py|worker/app/schedule_approval\.py|worker/app/scheduler_time\.py|tests/worker_scheduler\.py|tests/worker_scheduler_time\.py|tests/worker_scheduler_time_integration\.py)$'
           unexpected=$(git diff --name-only 7ebecbd0f62818218ddd25385379f5c38b6413ca | grep -Ev "$allowed" || true)
           if [ -n "$unexpected" ]; then
             echo "Unexpected T-017 paths:"
@@ -99,5 +110,5 @@ jobs:
         with:
           name: agent3-full-test-log
           path: /tmp/modelrig-full-test.log
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 7
