@@ -39,6 +39,15 @@ import time
 import uuid
 from dataclasses import dataclass
 
+from .scheduler_time import (
+    DEFAULT_TIMEZONE,
+    MISFIRE_POLICY,
+    ScheduleTimeError,
+    catch_up_daily,
+    next_daily_run,
+    validate_timezone,
+)
+
 # "every:900" -> every 900 seconds. "daily:03:00" -> at 03:00 local time.
 _EVERY = re.compile(r"^every:(\d+)$")
 _DAILY = re.compile(r"^daily:([01]\d|2[0-3]):([0-5]\d)$")
@@ -99,26 +108,34 @@ def parse_cadence(spec: str) -> Cadence:
     )
 
 
-def next_run(cadence: Cadence, after: float) -> float:
-    """The next moment this should fire, strictly after `after`."""
+def next_run(
+    cadence: Cadence, after: float, timezone_name: str = DEFAULT_TIMEZONE
+) -> float:
+    """The next moment this should fire, strictly after ``after``.
+
+    Daily schedules use their persisted IANA zone. Interval schedules are
+    elapsed-time cadences; their zone is persisted for display but cannot alter
+    the arithmetic.
+    """
     if cadence.kind == "every":
         return after + cadence.seconds
     if cadence.kind != "daily":
         raise ScheduleError(f"ukendt cadence-kind {cadence.kind!r}")
-    lt = time.localtime(after)
-    candidate = time.mktime((
-        lt.tm_year, lt.tm_mon, lt.tm_mday,
-        cadence.hour, cadence.minute, 0, 0, 0, -1,
-    ))
-    if candidate <= after:
-        candidate = time.mktime((
-            lt.tm_year, lt.tm_mon, lt.tm_mday + 1,
-            cadence.hour, cadence.minute, 0, 0, 0, -1,
-        ))
-    return candidate
+    try:
+        return next_daily_run(
+            hour=cadence.hour,
+            minute=cadence.minute,
+            after=after,
+            timezone_name=timezone_name,
+        )
+    except ScheduleTimeError as exc:
+        raise ScheduleError(str(exc)) from exc
 
 
-def catch_up(cadence: Cadence, due_at: float, now: float) -> tuple[int, float]:
+def catch_up(
+    cadence: Cadence, due_at: float, now: float,
+    timezone_name: str = DEFAULT_TIMEZONE,
+) -> tuple[int, float]:
     """How many runs were MISSED while the rig was off, and when to fire next.
 
     Returns (missed, next_due). The count is reported, never executed: a rig
@@ -134,13 +151,16 @@ def catch_up(cadence: Cadence, due_at: float, now: float) -> tuple[int, float]:
         return max(0, occurrences - 1), due_at + occurrences * cadence.seconds
     if cadence.kind != "daily":
         raise ScheduleError(f"ukendt cadence-kind {cadence.kind!r}")
-    missed = 0
-    due = due_at
-    while due <= now:
-        due = next_run(cadence, due)
-        missed += 1
-    # The one we are firing now is not a miss.
-    return max(0, missed - 1), due
+    try:
+        return catch_up_daily(
+            hour=cadence.hour,
+            minute=cadence.minute,
+            due_at=due_at,
+            now=now,
+            timezone_name=timezone_name,
+        )
+    except ScheduleTimeError as exc:
+        raise ScheduleError(str(exc)) from exc
 
 
 def refusal(tool_risk: str, approved_fingerprint: str | None,
@@ -227,6 +247,8 @@ class Schedule:
     due_at: float
     missed: int
     enabled: bool
+    timezone: str = DEFAULT_TIMEZONE
+    misfire_policy: str = MISFIRE_POLICY
 
 
 @dataclass(frozen=True)
@@ -288,6 +310,8 @@ class ScheduleStore:
                        due_at REAL NOT NULL,
                        missed INTEGER NOT NULL DEFAULT 0,
                        enabled INTEGER NOT NULL DEFAULT 1,
+                       timezone TEXT NOT NULL DEFAULT 'Europe/Copenhagen',
+                       misfire_policy TEXT NOT NULL DEFAULT 'run_once',
                        created REAL NOT NULL)"""
             )
             # The occurrence-ledger (F-902/F-903). Before this, a claim advanced
@@ -337,6 +361,17 @@ class ScheduleStore:
                 self._conn.execute(
                     "ALTER TABLE schedules ADD COLUMN "
                     "revision INTEGER NOT NULL DEFAULT 0")
+            # T-017: old rows used the rig's host timezone implicitly. The
+            # migration freezes that historical meaning as Copenhagen instead
+            # of silently adopting a later Windows timezone change.
+            if "timezone" not in scols:
+                self._conn.execute(
+                    "ALTER TABLE schedules ADD COLUMN timezone TEXT NOT NULL "
+                    "DEFAULT 'Europe/Copenhagen'")
+            if "misfire_policy" not in scols:
+                self._conn.execute(
+                    "ALTER TABLE schedules ADD COLUMN misfire_policy TEXT NOT NULL "
+                    "DEFAULT 'run_once'")
             # Approval receipts (T-014). The backend token carries WHO approved
             # (device_id) and WHEN (issued_at); before this, verification threw
             # all of it away at the moment of consumption and kept only the
@@ -378,7 +413,9 @@ class ScheduleStore:
     def create(self, tool: str, args: dict, cadence: str, *,
                approve_write: bool = False, ttl_days: int = DEFAULT_TTL_DAYS,
                max_runs: int = DEFAULT_MAX_RUNS, now: float | None = None,
-               receipt: dict | None = None) -> Schedule:
+               receipt: dict | None = None,
+               timezone_name: str = DEFAULT_TIMEZONE,
+               misfire_policy: str = MISFIRE_POLICY) -> Schedule:
         """Record a schedule AND the approval it was created with.
 
         `approve_write=True` is Anders saying "yes, this exact action, on this
@@ -389,6 +426,14 @@ class ScheduleStore:
 
         now = time.time() if now is None else now
         cad = parse_cadence(cadence)          # raises before anything is stored
+        try:
+            zone = validate_timezone(timezone_name).key
+        except ScheduleTimeError as exc:
+            raise ScheduleError(str(exc)) from exc
+        if misfire_policy != MISFIRE_POLICY:
+            raise ScheduleError(
+                f"ukendt misfire-policy {misfire_policy!r}; "
+                f"kun {MISFIRE_POLICY!r} støttes")
         if ttl_days <= 0:
             raise ScheduleError("en plan skal have et udløb — det er hele pointen")
         fp = fingerprint(tool, args) if approve_write else None
@@ -401,15 +446,18 @@ class ScheduleStore:
             approved_fingerprint=fp,
             expires_at=now + ttl_days * 86400,
             max_runs=max_runs, runs_used=0,
-            due_at=next_run(cad, now), missed=0, enabled=True,
+            due_at=next_run(cad, now, zone), missed=0, enabled=True,
+            timezone=zone, misfire_policy=misfire_policy,
         )
         with self._lock:
             self._conn.execute(
                 "INSERT INTO schedules (id, tool, args, cadence, approved_fingerprint,"
-                " expires_at, max_runs, runs_used, due_at, missed, enabled, created)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,1,?)",
+                " expires_at, max_runs, runs_used, due_at, missed, enabled,"
+                " timezone, misfire_policy, created)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?,?)",
                 (sched.schedule_id, tool, json.dumps(args, ensure_ascii=False), cadence,
-                 fp, sched.expires_at, max_runs, 0, sched.due_at, 0, now),
+                 fp, sched.expires_at, max_runs, 0, sched.due_at, 0,
+                 sched.timezone, sched.misfire_policy, now),
             )
             try:
                 if receipt is not None:
@@ -480,7 +528,12 @@ class ScheduleStore:
                     schedule = self._row(row)
                     try:
                         cadence = parse_cadence(schedule.cadence)
-                        missed, next_due = catch_up(cadence, schedule.due_at, now)
+                        if schedule.misfire_policy != MISFIRE_POLICY:
+                            raise ScheduleError(
+                                f"ukendt misfire-policy "
+                                f"{schedule.misfire_policy!r}")
+                        missed, next_due = catch_up(
+                            cadence, schedule.due_at, now, schedule.timezone)
                     except ScheduleError:
                         self._conn.execute(
                             "UPDATE schedules SET enabled=0 WHERE id=?",
@@ -534,6 +587,8 @@ class ScheduleStore:
                         due_at=next_due,
                         missed=schedule.missed + missed,
                         enabled=True,
+                        timezone=schedule.timezone,
+                        misfire_policy=schedule.misfire_policy,
                     )
                     claims.append(ScheduleClaim(
                         schedule=claimed,
@@ -707,7 +762,12 @@ class ScheduleStore:
                     return None
                 schedule = self._row(row)
                 cadence = parse_cadence(schedule.cadence)
-                missed, due = catch_up(cadence, schedule.due_at, now)
+                if schedule.misfire_policy != MISFIRE_POLICY:
+                    raise ScheduleError(
+                        f"ukendt misfire-policy "
+                        f"{schedule.misfire_policy!r}")
+                missed, due = catch_up(
+                    cadence, schedule.due_at, now, schedule.timezone)
                 self._conn.execute(
                     "UPDATE schedules SET runs_used=runs_used+?, "
                     "missed=missed+?, due_at=? WHERE id=?",
@@ -725,7 +785,8 @@ class ScheduleStore:
         now = time.time() if now is None else now
         with self._lock:
             row = self._conn.execute(
-                "SELECT enabled, cadence FROM schedules WHERE id=?",
+                "SELECT enabled, cadence, timezone, misfire_policy "
+                "FROM schedules WHERE id=?",
                 (schedule_id,),
             ).fetchone()
             if row is None:
@@ -734,7 +795,11 @@ class ScheduleStore:
             if current == enabled:
                 return True
             if enabled:
-                due = next_run(parse_cadence(row["cadence"]), now)
+                if row["misfire_policy"] != MISFIRE_POLICY:
+                    raise ScheduleError(
+                        f"ukendt misfire-policy {row['misfire_policy']!r}")
+                due = next_run(
+                    parse_cadence(row["cadence"]), now, row["timezone"])
                 self._conn.execute(
                     "UPDATE schedules SET enabled=1, due_at=?, "
                     "revision=revision+1 WHERE id=?",
@@ -907,5 +972,6 @@ class ScheduleStore:
             cadence=row["cadence"], approved_fingerprint=row["approved_fingerprint"],
             expires_at=row["expires_at"], max_runs=row["max_runs"],
             runs_used=row["runs_used"], due_at=row["due_at"], missed=row["missed"],
-            enabled=bool(row["enabled"]),
+            enabled=bool(row["enabled"]), timezone=row["timezone"],
+            misfire_policy=row["misfire_policy"],
         )
