@@ -74,7 +74,7 @@ jobs:
           set -euo pipefail
           test ! -e scripts/t018_stage2_status.py
           git diff --check
-          allowed='^(CURRENT_STATE\.md|worker/app/schedule_runner\.py|worker/app/scheduler_single_flight\.py|worker/app/schedule_runtime\.py|worker/app/schedule_api\.py|tests/worker_scheduler_single_flight\.py)$'
+          allowed='^(CURRENT_STATE\.md|worker/app/schedule_runner\.py|worker/app/scheduler_single_flight\.py|worker/app/schedule_runtime\.py|worker/app/schedule_api\.py|tests/worker_scheduler_single_flight\.py|tests/worker_schedule_api\.py)$'
           unexpected=$(git diff --name-only 7ebecbd0f62818218ddd25385379f5c38b6413ca | grep -Ev "$allowed" || true)
           if [ -n "$unexpected" ]; then
             echo "Unexpected T-018 status paths:"
