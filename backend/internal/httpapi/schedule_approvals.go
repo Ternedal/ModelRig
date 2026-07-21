@@ -84,6 +84,8 @@ type scheduleApprovalPreview struct {
 	Tool                string         `json:"tool"`
 	Args                map[string]any `json:"args"`
 	Cadence             string         `json:"cadence"`
+	Timezone            string         `json:"timezone"`
+	MisfirePolicy       string         `json:"misfire_policy"`
 	RequiresApproval    bool           `json:"requires_approval"`
 	ActionFingerprint   string         `json:"action_fingerprint"`
 	ApprovalFingerprint *string        `json:"approval_fingerprint"`
@@ -101,6 +103,8 @@ type scheduleApprovalClaims struct {
 	Tool                string         `json:"tool"`
 	Args                map[string]any `json:"args"`
 	Cadence             string         `json:"cadence"`
+	Timezone            string         `json:"timezone"`
+	MisfirePolicy       string         `json:"misfire_policy"`
 	TTLDays             int            `json:"ttl_days"`
 	MaxRuns             int            `json:"max_runs"`
 	Enable              *bool          `json:"enable"`
@@ -141,6 +145,9 @@ func issueScheduleApprovalToken(
 	if preview.ActionFingerprint == "" {
 		return "", scheduleApprovalClaims{}, errors.New("worker preview has no action fingerprint")
 	}
+	if strings.TrimSpace(preview.Timezone) == "" || strings.TrimSpace(preview.MisfirePolicy) == "" {
+		return "", scheduleApprovalClaims{}, errors.New("worker preview has incomplete time terms")
+	}
 	if (preview.Operation == "create" && preview.ScheduleID != nil) ||
 		(preview.Operation == "renew" && (preview.ScheduleID == nil || *preview.ScheduleID == "")) {
 		return "", scheduleApprovalClaims{}, errors.New("worker preview has an invalid schedule binding")
@@ -154,7 +161,7 @@ func issueScheduleApprovalToken(
 		return "", scheduleApprovalClaims{}, fmt.Errorf("approval nonce: %w", err)
 	}
 	claims := scheduleApprovalClaims{
-		Version:             1,
+		Version:             2,
 		Nonce:               base64.RawURLEncoding.EncodeToString(nonceBytes),
 		DeviceID:            deviceID,
 		Operation:           preview.Operation,
@@ -162,6 +169,8 @@ func issueScheduleApprovalToken(
 		Tool:                preview.Tool,
 		Args:                preview.Args,
 		Cadence:             preview.Cadence,
+		Timezone:            preview.Timezone,
+		MisfirePolicy:       preview.MisfirePolicy,
 		TTLDays:             preview.TTLDays,
 		MaxRuns:             preview.MaxRuns,
 		Enable:              preview.Enable,
@@ -207,7 +216,8 @@ func verifyScheduleApprovalToken(token, deviceID string, now time.Time) (schedul
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return scheduleApprovalClaims{}, errors.New("schedule approval token payload is invalid")
 	}
-	if claims.Version != 1 || claims.Nonce == "" || claims.DeviceID == "" {
+	if claims.Version != 2 || claims.Nonce == "" || claims.DeviceID == "" ||
+		strings.TrimSpace(claims.Timezone) == "" || strings.TrimSpace(claims.MisfirePolicy) == "" {
 		return scheduleApprovalClaims{}, errors.New("schedule approval token claims are invalid")
 	}
 	if claims.DeviceID != deviceID {
