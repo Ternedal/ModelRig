@@ -72,6 +72,7 @@ check("arm_hold(read_id, \"crash_recovery\")" in wizard_text, "crash recovery is
 check("schedule_payload(" in wizard_text, "engine reads the actual nested schedule API shape")
 check("def discover_write_id" in easy_text, "adapter discovers the Android-created write plan")
 check("pilot.get_write_id = discover_write_id" in easy_text, "adapter replaces schedule-id copying")
+check("pilot.arm_hold = arm_hold_safely" in easy_text, "adapter enforces safe hold arming")
 check("pilot.wait_hold = wait_hold_and_confirm" in easy_text, "in-flight confirmation uses the held occurrence")
 check('"-SchedulerPilot"' in wizard_text, "every pilot stack launch requests scheduler mode")
 check("[switch]$SchedulerPilot" in stack_text, "stack exposes an explicit pilot switch")
@@ -165,10 +166,12 @@ original_input = getattr(easy, "input", None)
 original_save = easy.pilot.save_state
 original_ok = easy.pilot.stage.ok
 
+
 def fake_list():
     index = min(snapshot_index[0], len(snapshots) - 1)
     snapshot_index[0] += 1
     return snapshots[index]
+
 
 easy._list_schedules = fake_list
 easy.input = lambda _message="": ""
@@ -191,26 +194,43 @@ check(saved_states and saved_states[-1].get("write_schedule_id") == "new-write",
 check(discovered != "old-write", "an older matching plan is never selected")
 
 messages: list[str] = []
+activation_order: list[tuple[str, object]] = []
 original_yes = easy._original_require_yes
+original_arm = easy._original_arm_hold
 original_hold = easy._original_wait_hold
+original_set_enabled = easy.pilot.set_schedule_enabled
 easy._deferred_in_flight = False
 easy._hold_count = 0
 easy._original_require_yes = lambda message: messages.append(message)
+easy._original_arm_hold = lambda schedule_id, purpose: (
+    activation_order.append(("arm", purpose)) or "safe-nonce"
+)
 easy._original_wait_hold = lambda schedule_id, nonce, timeout=90.0: {
     "schedule_id": schedule_id,
     "nonce": nonce,
     "phase": "before_live_guard",
 }
+easy.pilot.set_schedule_enabled = lambda schedule_id, enabled: (
+    activation_order.append(("enabled", enabled)) or {"schedule_id": schedule_id}
+)
 try:
     easy.defer_in_flight_question("Så du mindst én plan som in-flight/running? Skriv JA")
     check(not messages, "in-flight question is deferred until the occurrence is held")
-    easy.wait_hold_and_confirm("read-1", "nonce-1")
+    nonce = easy.arm_hold_safely("read-1", "revocation")
+    easy.wait_hold_and_confirm("read-1", nonce)
+    check(
+        activation_order[:3]
+        == [("enabled", False), ("arm", "revocation"), ("enabled", True)],
+        "effective order is pause, arm, then activate",
+    )
     check(len(messages) == 1 and "holdt åben" in messages[0], "in-flight question is asked during the first hold")
     easy.wait_hold_and_confirm("read-1", "nonce-2")
     check(len(messages) == 1, "crash hold does not ask the in-flight question twice")
 finally:
     easy._original_require_yes = original_yes
+    easy._original_arm_hold = original_arm
     easy._original_wait_hold = original_hold
+    easy.pilot.set_schedule_enabled = original_set_enabled
     easy._deferred_in_flight = False
     easy._hold_count = 0
 
