@@ -55,4 +55,11 @@ replace_once(
     '''check(service_runner.calls == 1, "service overlap never enters underlying execution")\nruntime = SchedulerRuntime(enabled_fn=lambda: True)\nruntime._service = service\nruntime._jobs = object()\nruntime._schedules = object()\nruntime._started = True\nruntime_state = runtime.status()\ncheck(runtime_state.max_concurrency == 1, "runtime exposes max concurrency")\ncheck(runtime_state.queue_capacity == 0, "runtime exposes zero queue capacity")\ncheck(runtime_state.active_executions == 1, "runtime exposes active execution")\ncheck(runtime_state.overlap_rejections == 1, "runtime exposes rejection count")\nrequest = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(scheduler_runtime=runtime)))\npayload = _runtime_status(request)\ncheck(payload["max_concurrency"] == 1, "operator API exposes max concurrency")\ncheck(payload["queue_capacity"] == 0, "operator API exposes zero queue")\ncheck(payload["active_executions"] == 1, "operator API exposes active execution")\ncheck(payload["overlap_rejections"] == 1, "operator API exposes rejection count")\ncheck(not service.stop(timeout=0.05), "shutdown timeout reports active tick honestly")\n''',
 )
 
+API_TEST = "tests/worker_schedule_api.py"
+replace_once(
+    API_TEST,
+    '''        == {\n            "configured": False,\n            "running": False,\n            "resources_open": False,\n            "last_error": None,\n        },\n''',
+    '''        == {\n            "configured": False,\n            "running": False,\n            "resources_open": False,\n            "last_error": None,\n            "max_concurrency": 1,\n            "queue_capacity": 0,\n            "active_executions": 0,\n            "accepted_ticks": 0,\n            "overlap_rejections": 0,\n        },\n''',
+)
+
 print("T-018 stage 2 status patch applied")
