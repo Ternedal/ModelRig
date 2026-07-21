@@ -49,23 +49,23 @@ replace_once(
 )
 replace_once(
     CLIENT,
-    '''        cadence = o.getString("cadence"),\n        risk = o.optString("risk"),\n''',
-    '''        cadence = o.getString("cadence"),\n        timezone = o.getString("timezone"),\n        misfirePolicy = o.getString("misfire_policy"),\n        dueAtLocal = o.getString("due_at_local"),\n        risk = o.optString("risk"),\n''',
+    '''    private fun parsePreview(o: JSONObject) = SchedulePreview(\n        operation = o.optString("operation", "create"),\n        scheduleId = o.optString("schedule_id").takeUnless { it.isBlank() || it == "null" },\n        tool = o.getString("tool"),\n        argsJson = o.optJSONObject("args")?.toString() ?: "{}",\n        cadence = o.getString("cadence"),\n        risk = o.optString("risk"),\n''',
+    '''    private fun parsePreview(o: JSONObject) = SchedulePreview(\n        operation = o.optString("operation", "create"),\n        scheduleId = o.optString("schedule_id").takeUnless { it.isBlank() || it == "null" },\n        tool = o.getString("tool"),\n        argsJson = o.optJSONObject("args")?.toString() ?: "{}",\n        cadence = o.getString("cadence"),\n        timezone = o.getString("timezone"),\n        misfirePolicy = o.getString("misfire_policy"),\n        dueAtLocal = o.getString("due_at_local"),\n        risk = o.optString("risk"),\n''',
 )
 replace_once(
     CLIENT,
-    '''        cadence = o.getString("cadence"),\n        risk = o.optString("risk"),\n        sensitivity = o.optString("sensitivity"),\n        expiresAt = o.optDouble("expires_at"),\n''',
-    '''        cadence = o.getString("cadence"),\n        timezone = o.getString("timezone"),\n        misfirePolicy = o.getString("misfire_policy"),\n        dueAtLocal = o.getString("due_at_local"),\n        risk = o.optString("risk"),\n        sensitivity = o.optString("sensitivity"),\n        expiresAt = o.optDouble("expires_at"),\n''',
+    '''    private fun parseItem(o: JSONObject) = ScheduleItem(\n        id = o.getString("schedule_id"),\n        tool = o.getString("tool"),\n        argsJson = o.optJSONObject("args")?.toString() ?: "{}",\n        cadence = o.getString("cadence"),\n        risk = o.optString("risk"),\n''',
+    '''    private fun parseItem(o: JSONObject) = ScheduleItem(\n        id = o.getString("schedule_id"),\n        tool = o.getString("tool"),\n        argsJson = o.optJSONObject("args")?.toString() ?: "{}",\n        cadence = o.getString("cadence"),\n        timezone = o.getString("timezone"),\n        misfirePolicy = o.getString("misfire_policy"),\n        dueAtLocal = o.getString("due_at_local"),\n        risk = o.optString("risk"),\n''',
 )
 replace_once(
     CLIENT,
-    '''    val cadence: String,\n    val risk: String,\n''',
-    '''    val cadence: String,\n    val timezone: String,\n    val misfirePolicy: String,\n    val dueAtLocal: String,\n    val risk: String,\n''',
+    '''data class SchedulePreview(\n    val operation: String,\n    val scheduleId: String?,\n    val tool: String,\n    val argsJson: String,\n    val cadence: String,\n    val risk: String,\n''',
+    '''data class SchedulePreview(\n    val operation: String,\n    val scheduleId: String?,\n    val tool: String,\n    val argsJson: String,\n    val cadence: String,\n    val timezone: String,\n    val misfirePolicy: String,\n    val dueAtLocal: String,\n    val risk: String,\n''',
 )
 replace_once(
     CLIENT,
-    '''    val cadence: String,\n    val risk: String,\n    val sensitivity: String,\n    val expiresAt: Double,\n''',
-    '''    val cadence: String,\n    val timezone: String,\n    val misfirePolicy: String,\n    val dueAtLocal: String,\n    val risk: String,\n    val sensitivity: String,\n    val expiresAt: Double,\n''',
+    '''data class ScheduleItem(\n    val id: String,\n    val tool: String,\n    val argsJson: String,\n    val cadence: String,\n    val risk: String,\n''',
+    '''data class ScheduleItem(\n    val id: String,\n    val tool: String,\n    val argsJson: String,\n    val cadence: String,\n    val timezone: String,\n    val misfirePolicy: String,\n    val dueAtLocal: String,\n    val risk: String,\n''',
 )
 
 TEST = "android/app/src/test/java/dk/ternedal/modelrig/net/ScheduleClientTest.kt"
