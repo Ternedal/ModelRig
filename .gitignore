@@ -49,6 +49,9 @@ kaliv-tools-state.json.tmp
 /validation/agent3-model-eval-latest.json.tmp
 /validation/rag-benchmark-latest.json
 /validation/rag-benchmark-latest.json.tmp
+/validation/scheduler-pilot-latest.json
+/validation/scheduler-pilot-latest.json.tmp
+/validation/scheduler-manual-observations.json
 /validation/appliance-lifecycle-observations.json
 /validation/appliance-lifecycle-evidence/
 /validation/physical-validation-campaign-latest.json
@@ -64,6 +67,12 @@ kaliv-tools-state.json.tmp
 /validation/physical-validation-candidate-campaign-latest.json.tmp
 /validation/physical-validation-candidate-final-latest.json
 /validation/physical-validation-candidate-final-latest.json.tmp
+
+# One-click Stage A wizard: local progress, exact-head runtime binaries, generated
+# launchers and archived rolling reports remain on the physical rig only.
+/validation/stage-a-easy-state.json
+/validation/stage-a-runtime/
+/validation/archive/
 
 # Browser peer public validation: plans are one-use local authorization artifacts;
 # rolling reports contain rig/network observations. Only manually reviewed, dated
