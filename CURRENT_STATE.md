@@ -178,9 +178,13 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_research_sharing_boundary_consistency.py`
 - `tests/worker_research_sharing_execution.py`
 - `tests/worker_research_sharing_execution_async_contract.py`
+- `tests/worker_schedule_admin_persistence_time.py`
+- `tests/worker_schedule_admin_preview_time.py`
 - `tests/worker_schedule_api.py`
 - `tests/worker_schedule_api_guard.py`
+- `tests/worker_schedule_api_time.py`
 - `tests/worker_schedule_approval.py`
+- `tests/worker_schedule_approval_time.py`
 - `tests/worker_schedule_lease.py`
 - `tests/worker_schedule_post_execution.py`
 - `tests/worker_schedule_revoke.py`
@@ -188,6 +192,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_schedule_runtime.py`
 - `tests/worker_schedule_service.py`
 - `tests/worker_scheduler.py`
+- `tests/worker_scheduler_time.py`
+- `tests/worker_scheduler_time_store.py`
 - `tests/worker_toolhost.py`
 - `tests/worker_tools.py`
 - `tests/worker_tools_guardrail.py`

@@ -37,7 +37,7 @@ def check(cond, msg):
 
 def token_for(preview, secret, *, now=1_800_000_000, nonce=None, device="phone"):
     claims = {
-        "v": 1,
+        "v": 2,
         "nonce": nonce or base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("="),
         "device_id": device,
         "operation": preview.operation,
@@ -45,6 +45,8 @@ def token_for(preview, secret, *, now=1_800_000_000, nonce=None, device="phone")
         "tool": preview.tool,
         "args": preview.args,
         "cadence": preview.cadence,
+        "timezone": preview.timezone,
+        "misfire_policy": preview.misfire_policy,
         "ttl_days": preview.ttl_days,
         "max_runs": preview.max_runs,
         "enable": preview.enable,
@@ -66,6 +68,8 @@ preview = SimpleNamespace(
     tool="note_append",
     args={"text": "Husk brygdag"},
     cadence="daily:08:00",
+    timezone="Europe/Copenhagen",
+    misfire_policy="run_once",
     ttl_days=30,
     max_runs=5,
     enable=True,

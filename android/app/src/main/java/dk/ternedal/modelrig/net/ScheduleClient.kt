@@ -19,6 +19,11 @@ import java.util.concurrent.TimeUnit
  * accepted by the worker as evidence of consent.
  */
 class ScheduleClient(baseUrl: String, private val token: String) {
+    companion object {
+        const val DEFAULT_TIMEZONE = "Europe/Copenhagen"
+        const val RUN_ONCE_MISFIRE_POLICY = "run_once"
+    }
+
     private val base = baseUrl.trimEnd('/')
     private val jsonType = "application/json".toMediaType()
     private val http = OkHttpClient.Builder()
@@ -39,11 +44,15 @@ class ScheduleClient(baseUrl: String, private val token: String) {
         cadence: String,
         ttlDays: Int,
         maxRuns: Int,
+        timezone: String = DEFAULT_TIMEZONE,
+        misfirePolicy: String = RUN_ONCE_MISFIRE_POLICY,
     ): SchedulePreview {
         val body = JSONObject()
             .put("tool", tool)
             .put("args", args)
             .put("cadence", cadence)
+            .put("timezone", timezone)
+            .put("misfire_policy", misfirePolicy)
             .put("ttl_days", ttlDays)
             .put("max_runs", maxRuns)
         return parsePreview(post("/api/v1/schedules/preview", body).getJSONObject("preview"))
@@ -54,6 +63,8 @@ class ScheduleClient(baseUrl: String, private val token: String) {
             .put("tool", preview.tool)
             .put("args", JSONObject(preview.argsJson))
             .put("cadence", preview.cadence)
+            .put("timezone", preview.timezone)
+            .put("misfire_policy", preview.misfirePolicy)
             .put("ttl_days", preview.ttlDays)
             .put("max_runs", preview.maxRuns)
         approvalTokenForCreate(preview)?.let { body.put("approval_token", it) }
@@ -106,6 +117,8 @@ class ScheduleClient(baseUrl: String, private val token: String) {
             .put("tool", preview.tool)
             .put("args", JSONObject(preview.argsJson))
             .put("cadence", preview.cadence)
+            .put("timezone", preview.timezone)
+            .put("misfire_policy", preview.misfirePolicy)
             .put("ttl_days", preview.ttlDays)
             .put("max_runs", preview.maxRuns)
             .put("preview_fingerprint", fingerprint)
@@ -171,6 +184,9 @@ class ScheduleClient(baseUrl: String, private val token: String) {
         tool = o.getString("tool"),
         argsJson = o.optJSONObject("args")?.toString() ?: "{}",
         cadence = o.getString("cadence"),
+        timezone = o.getString("timezone"),
+        misfirePolicy = o.getString("misfire_policy"),
+        dueAtLocal = o.getString("due_at_local"),
         risk = o.optString("risk"),
         sensitivity = o.optString("sensitivity"),
         humanSummary = o.optString("human_summary"),
@@ -189,6 +205,9 @@ class ScheduleClient(baseUrl: String, private val token: String) {
         tool = o.getString("tool"),
         argsJson = o.optJSONObject("args")?.toString() ?: "{}",
         cadence = o.getString("cadence"),
+        timezone = o.getString("timezone"),
+        misfirePolicy = o.getString("misfire_policy"),
+        dueAtLocal = o.getString("due_at_local"),
         risk = o.optString("risk"),
         sensitivity = o.optString("sensitivity"),
         expiresAt = o.optDouble("expires_at"),
@@ -220,6 +239,9 @@ data class SchedulePreview(
     val tool: String,
     val argsJson: String,
     val cadence: String,
+    val timezone: String,
+    val misfirePolicy: String,
+    val dueAtLocal: String,
     val risk: String,
     val sensitivity: String,
     val humanSummary: String,
@@ -237,6 +259,9 @@ data class ScheduleItem(
     val tool: String,
     val argsJson: String,
     val cadence: String,
+    val timezone: String,
+    val misfirePolicy: String,
+    val dueAtLocal: String,
     val risk: String,
     val sensitivity: String,
     val expiresAt: Double,

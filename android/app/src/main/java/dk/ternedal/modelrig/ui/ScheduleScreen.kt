@@ -70,6 +70,7 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
     var tool by remember { mutableStateOf("current_datetime") }
     var argsJson by remember { mutableStateOf("{}") }
     var cadence by remember { mutableStateOf("daily:08:00") }
+    var timezone by remember { mutableStateOf(ScheduleClient.DEFAULT_TIMEZONE) }
     var ttlDays by remember { mutableStateOf("90") }
     var maxRuns by remember { mutableStateOf("0") }
     var preview by remember { mutableStateOf<SchedulePreview?>(null) }
@@ -140,7 +141,17 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
             return
         }
         execute(
-            action = { client().preview(tool.trim(), args, cadence.trim(), ttl, runs) },
+            action = {
+                client().preview(
+                    tool = tool.trim(),
+                    args = args,
+                    cadence = cadence.trim(),
+                    ttlDays = ttl,
+                    maxRuns = runs,
+                    timezone = timezone.trim(),
+                    misfirePolicy = ScheduleClient.RUN_ONCE_MISFIRE_POLICY,
+                )
+            },
             success = {
                 preview = it
                 notice = "Preview klar. Læs hele stående tilladelse før du opretter."
@@ -271,7 +282,7 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
             ScheduleCard {
                 Text("Opret plan", fontWeight = FontWeight.SemiBold, color = KalivTheme.colors.textHigh)
                 Text(
-                    "Du skal først previewe den præcise handling, kadence, udløb og budget.",
+                    "Du skal først previewe handling, kadence, timezone, udløb og budget.",
                     color = KalivTheme.colors.textMuted,
                     fontSize = 11.sp,
                 )
@@ -315,6 +326,17 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(7.dp))
+                OutlinedTextField(
+                    value = timezone,
+                    onValueChange = { timezone = it; clearCreatePreview() },
+                    label = { Text("Timezone") },
+                    supportingText = {
+                        Text("IANA-zone, fx Europe/Copenhagen. Misfire: kør én gang; ældre forfald registreres som missed.")
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(7.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = ttlDays,
@@ -334,7 +356,7 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
                 }
                 Spacer(Modifier.height(10.dp))
                 Button(
-                    enabled = !busy && tool.isNotBlank() && cadence.isNotBlank() && ttlDays.isNotBlank() && maxRuns.isNotBlank(),
+                    enabled = !busy && tool.isNotBlank() && cadence.isNotBlank() && timezone.isNotBlank() && ttlDays.isNotBlank() && maxRuns.isNotBlank(),
                     onClick = ::previewCreate,
                 ) { Text(if (busy) "Arbejder…" else "Forhåndsvis") }
             }
@@ -466,7 +488,9 @@ private fun ScheduleRow(
         Spacer(Modifier.height(6.dp))
         Text(schedule.argsJson, color = KalivTheme.colors.textMuted, fontSize = 11.sp)
         Text("Kadence: ${schedule.cadence}", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
-        Text("Næste: ${formatEpoch(schedule.dueAt)}", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
+        Text("Timezone: ${schedule.timezone}", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
+        Text("Misfire: ${scheduleMisfireLabel(schedule.misfirePolicy)}", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
+        Text("Næste: ${authoritativeScheduleTime(schedule.dueAtLocal, schedule.timezone)}", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
         Text("Udløb: ${formatEpoch(schedule.expiresAt)}", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
         Text(
             "Kørsler: ${schedule.runsUsed}/${if (schedule.maxRuns == 0) "∞ (TTL)" else schedule.maxRuns}",
@@ -510,9 +534,11 @@ private fun ApprovalCard(
         ApprovalLine("Tool", preview.tool)
         ApprovalLine("Argumenter", preview.argsJson)
         ApprovalLine("Kadence", preview.cadence)
+        ApprovalLine("Timezone", preview.timezone)
+        ApprovalLine("Misfire", scheduleMisfireLabel(preview.misfirePolicy))
         ApprovalLine("Risiko", preview.risk)
         ApprovalLine("Følsomhed", preview.sensitivity)
-        ApprovalLine("Første/næste kørsel", formatEpoch(preview.dueAt))
+        ApprovalLine("Første/næste kørsel", authoritativeScheduleTime(preview.dueAtLocal, preview.timezone))
         ApprovalLine("Udløb", formatEpoch(preview.expiresAt))
         ApprovalLine("Budget", if (preview.maxRuns == 0) "Ingen antalgrænse; TTL gælder" else "${preview.maxRuns} kørsler")
         preview.enable?.let { ApprovalLine("Tilstand efter renewal", if (it) "aktiv" else "pause") }
@@ -543,6 +569,22 @@ private fun ScheduleCard(content: @Composable ColumnScope.() -> Unit) {
     Surface(color = KalivTheme.colors.surface, shape = RoundedCornerShape(14.dp)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), content = content)
     }
+}
+
+internal fun authoritativeScheduleTime(dueAtLocal: String, timezone: String): String {
+    val local = dueAtLocal.trim()
+    val zone = timezone.trim()
+    return when {
+        local.isNotEmpty() && zone.isNotEmpty() -> "$local · $zone"
+        local.isNotEmpty() -> local
+        zone.isNotEmpty() -> "ukendt · $zone"
+        else -> "ukendt"
+    }
+}
+
+internal fun scheduleMisfireLabel(policy: String): String = when (policy) {
+    ScheduleClient.RUN_ONCE_MISFIRE_POLICY -> "Kør én gang; ældre forfald registreres som missed"
+    else -> policy.ifBlank { "ukendt" }
 }
 
 private fun formatEpoch(seconds: Double): String {

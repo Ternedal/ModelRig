@@ -97,6 +97,8 @@ func writePreview(w http.ResponseWriter, operation string, scheduleID *string, t
 			"tool":                 tool,
 			"args":                 args,
 			"cadence":              cadence,
+			"timezone":             "Europe/Copenhagen",
+			"misfire_policy":       "run_once",
 			"requires_approval":    true,
 			"action_fingerprint":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			"approval_fingerprint": fingerprint,
@@ -278,7 +280,8 @@ func TestScheduleApprovalTokenRejectsExpiryAndInvalidSecret(t *testing.T) {
 	t.Setenv(scheduleApprovalSecretEnv, scheduleTestSecret)
 	preview := scheduleApprovalPreview{
 		Operation: "create", Tool: "note_append", Args: map[string]any{"text": "x"},
-		Cadence: "daily:08:00", RequiresApproval: true,
+		Cadence: "daily:08:00", Timezone: defaultScheduleTimezone,
+		MisfirePolicy: defaultScheduleMisfire, RequiresApproval: true,
 		ActionFingerprint:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		ApprovalFingerprint: stringPtr("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
 		TTLDays:             30, MaxRuns: 1, Enable: boolPtr(true),

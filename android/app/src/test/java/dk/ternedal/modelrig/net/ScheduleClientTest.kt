@@ -36,8 +36,13 @@ class ScheduleClientTest {
                 cadence = "daily:08:00",
                 ttlDays = 30,
                 maxRuns = 5,
+                timezone = "America/New_York",
+                misfirePolicy = "run_once",
             )
             assertEquals(fingerprint, preview.approvalFingerprint)
+            assertEquals("America/New_York", preview.timezone)
+            assertEquals("run_once", preview.misfirePolicy)
+            assertEquals("2027-01-15T08:00:00-05:00", preview.dueAtLocal)
             val created = client.create(preview)
             assertEquals("012345abcdef", created.id)
 
@@ -51,6 +56,8 @@ class ScheduleClientTest {
             val previewBody = JSONObject(previewRequest.body.readUtf8())
             assertFalse(previewBody.has("approved_fingerprint"))
             assertFalse(previewBody.has("approval_token"))
+            assertEquals("America/New_York", previewBody.getString("timezone"))
+            assertEquals("run_once", previewBody.getString("misfire_policy"))
 
             val approvalRequest = server.takeRequest()
             assertEquals("/api/v1/schedules/approve", approvalRequest.path)
@@ -58,6 +65,8 @@ class ScheduleClientTest {
             val approvalBody = JSONObject(approvalRequest.body.readUtf8())
             assertEquals(fingerprint, approvalBody.getString("preview_fingerprint"))
             assertEquals("Husk brygdag", approvalBody.getJSONObject("args").getString("text"))
+            assertEquals("America/New_York", approvalBody.getString("timezone"))
+            assertEquals("run_once", approvalBody.getString("misfire_policy"))
 
             val createRequest = server.takeRequest()
             assertEquals("/api/v1/schedules", createRequest.path)
@@ -66,6 +75,9 @@ class ScheduleClientTest {
             assertEquals(token, createBody.getString("approval_token"))
             assertFalse(createBody.has("approved_fingerprint"))
             assertEquals("Husk brygdag", createBody.getJSONObject("args").getString("text"))
+            assertEquals("America/New_York", createBody.getString("timezone"))
+            assertEquals("run_once", createBody.getString("misfire_policy"))
+            assertEquals("2027-01-15T08:00:00-05:00", created.dueAtLocal)
         } finally {
             server.shutdown()
         }
@@ -167,6 +179,9 @@ class ScheduleClientTest {
                 tool = "note_append",
                 argsJson = "{}",
                 cadence = "daily:08:00",
+                timezone = "Europe/Copenhagen",
+                misfirePolicy = "run_once",
+                dueAtLocal = "2027-01-15T08:00:00+01:00",
                 risk = "write",
                 sensitivity = "private",
                 humanSummary = "append note",
@@ -200,6 +215,8 @@ class ScheduleClientTest {
         enable: Boolean?,
         requiresApproval: Boolean = true,
         tool: String = "note_append",
+        timezone: String = "America/New_York",
+        dueAtLocal: String = "2027-01-15T08:00:00-05:00",
     ): String {
         val args = if (tool == "note_append") JSONObject().put("text", "Husk brygdag") else JSONObject()
         val preview = JSONObject()
@@ -208,6 +225,9 @@ class ScheduleClientTest {
             .put("tool", tool)
             .put("args", args)
             .put("cadence", if (tool == "note_append") "daily:08:00" else "every:60")
+            .put("timezone", timezone)
+            .put("misfire_policy", "run_once")
+            .put("due_at_local", dueAtLocal)
             .put("risk", if (requiresApproval) "write" else "read")
             .put("sensitivity", if (requiresApproval) "private" else "public")
             .put("human_summary", "Planlagt handling")
@@ -232,6 +252,9 @@ class ScheduleClientTest {
             .put("tool", tool)
             .put("args", if (tool == "note_append") JSONObject().put("text", "Husk brygdag") else JSONObject())
             .put("cadence", if (tool == "note_append") "daily:08:00" else "every:60")
+            .put("timezone", "America/New_York")
+            .put("misfire_policy", "run_once")
+            .put("due_at_local", "2027-01-15T08:00:00-05:00")
             .put("risk", if (tool == "note_append") "write" else "read")
             .put("sensitivity", if (tool == "note_append") "private" else "public")
             .put("approved_fingerprint", if (tool == "note_append") "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" else JSONObject.NULL)
