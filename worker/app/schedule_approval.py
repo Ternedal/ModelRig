@@ -27,7 +27,6 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from . import paths as _paths
-from .scheduler_time import DEFAULT_TIMEZONE, MISFIRE_POLICY
 
 APPROVAL_SECRET_ENV = "KALIV_SCHEDULER_APPROVAL_SECRET"
 MAX_TOKEN_LIFETIME_SECONDS = 180
@@ -98,7 +97,7 @@ def verify_schedule_approval(
     if not isinstance(claims, dict):
         raise ScheduleApprovalError("schedule approval token payload is invalid")
     version = claims.get("v")
-    if version not in (1, 2):
+    if version != 2:
         raise ScheduleApprovalError("schedule approval token version is unsupported")
 
     nonce = claims.get("nonce")
@@ -122,16 +121,8 @@ def verify_schedule_approval(
     if expires_at <= issued_at or expires_at - issued_at > MAX_TOKEN_LIFETIME_SECONDS:
         raise ScheduleApprovalError("schedule approval token lifetime is invalid")
 
-    preview_timezone = getattr(preview, "timezone", DEFAULT_TIMEZONE)
-    preview_misfire = getattr(preview, "misfire_policy", MISFIRE_POLICY)
-    if version == 1 and (
-        preview_timezone != DEFAULT_TIMEZONE
-        or preview_misfire != MISFIRE_POLICY
-    ):
-        raise ScheduleApprovalError(
-            "legacy schedule approval token cannot authorize a non-default "
-            "timezone or misfire policy; confirm the preview again"
-        )
+    preview_timezone = getattr(preview, "timezone", None)
+    preview_misfire = getattr(preview, "misfire_policy", None)
 
     expected = {
         "operation": getattr(preview, "operation", None),
@@ -139,15 +130,14 @@ def verify_schedule_approval(
         "tool": getattr(preview, "tool", None),
         "args": getattr(preview, "args", None),
         "cadence": getattr(preview, "cadence", None),
+        "timezone": preview_timezone,
+        "misfire_policy": preview_misfire,
         "ttl_days": getattr(preview, "ttl_days", None),
         "max_runs": getattr(preview, "max_runs", None),
         "enable": getattr(preview, "enable", None),
         "action_fingerprint": getattr(preview, "action_fingerprint", None),
         "approval_fingerprint": getattr(preview, "approval_fingerprint", None),
     }
-    if version == 2:
-        expected["timezone"] = preview_timezone
-        expected["misfire_policy"] = preview_misfire
     for name, value in expected.items():
         if claims.get(name) != value:
             raise ScheduleApprovalError(

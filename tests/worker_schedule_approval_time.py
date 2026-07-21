@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """T-017 worker approval-version transition for timezone-bound grants.
 
-Stage 3B1 is deliberately read-side only: the worker accepts explicit v2 claims
-while retaining v1 solely for the historical Copenhagen/run_once contract.
-That legacy exception is temporary and is removed only after every issuer uses v2.
+All issuers now use explicit v2 claims. Version 1 is rejected even for the
+historical Copenhagen/run_once terms so no unsigned time defaults survive.
 Run: PYTHONPATH=worker python3 tests/worker_schedule_approval_time.py
 """
 from __future__ import annotations
@@ -127,19 +126,11 @@ check(
     refused(token_for(nondefault, include_time=False), nondefault, "does not match"),
     "v2 missing explicit time claims is refused",
 )
-check(
-    refused(token_for(nondefault, version=1, include_time=False), nondefault, "legacy"),
-    "v1 cannot authorize a non-default timezone grant",
-)
-
 legacy = preview(timezone="Europe/Copenhagen", misfire_policy="run_once")
-legacy_verified = verify_schedule_approval(
-    token_for(legacy, version=1, include_time=False),
-    legacy,
-    now=NOW + 1,
-    secret_factory=lambda: SECRET,
+check(
+    refused(token_for(legacy, version=1, include_time=False), legacy, "version"),
+    "v1 is rejected even for historical default terms",
 )
-check(legacy_verified.device_id == "pixel-6a-t017-v2", "v1 remains valid only for historical default terms")
 check(
     refused(token_for(legacy, version=3), legacy, "version"),
     "unknown token version remains fail-closed",

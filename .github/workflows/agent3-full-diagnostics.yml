@@ -4,15 +4,13 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   full-test-log:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
@@ -25,36 +23,19 @@ jobs:
       - name: Install worker deps
         run: pip install -r worker/requirements.txt --break-system-packages
 
-      - name: Apply approval-v1-retirement patch only
-        shell: bash
-        run: |
-          set -o pipefail
-          python3 scripts/t017_stage3b3_retire_v1.py 2>&1 | tee /tmp/t017-stage3b3.log
-
-      - name: Remove transport and restore ordinary workflow
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=1 origin 7ebecbd0f62818218ddd25385379f5c38b6413ca
-          git show 7ebecbd0f62818218ddd25385379f5c38b6413ca:.github/workflows/agent3-full-diagnostics.yml > .github/workflows/agent3-full-diagnostics.yml
-          rm -f scripts/t017_stage3b3_retire_v1.py
-
-      - name: Regenerate authoritative current state
-        run: python3 scripts/current_state.py
-
-      - name: Focused v2-only approval contracts
-        shell: bash
-        run: |
-          set -euo pipefail
-          PYTHONPATH=worker python3 tests/worker_schedule_approval_time.py
-          PYTHONPATH=worker python3 tests/worker_schedule_approval.py
-          PYTHONPATH=worker python3 tests/worker_schedule_api_time.py
-          PYTHONPATH=worker python3 tests/worker_schedule_api.py
-          cd backend
-          go test ./... -count=1
-
       - name: Build backend
         run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
+
+      - name: Generate authoritative current state
+        run: python3 scripts/current_state.py
+
+      - name: Upload generated current state
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent3-generated-current-state
+          path: CURRENT_STATE.md
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Full repository test log
         env:
@@ -78,37 +59,11 @@ jobs:
           done
           exit "$status"
 
-      - name: Verify isolated stage scope
-        shell: bash
-        run: |
-          set -euo pipefail
-          test ! -e scripts/t017_stage3b3_retire_v1.py
-          git diff --check
-          allowed='^(CURRENT_STATE\.md|worker/requirements\.txt|worker/app/scheduler\.py|worker/app/scheduler_time\.py|worker/app/schedule_admin\.py|worker/app/schedule_api\.py|worker/app/schedule_approval\.py|backend/internal/httpapi/schedule_approvals\.go|backend/internal/httpapi/schedule_approval_time_test\.go|backend/internal/httpapi/schedule_approval_http_time_test\.go|backend/internal/httpapi/schedule_renewal_time_test\.go|backend/internal/httpapi/schedules_test\.go|tests/worker_schedule_admin_persistence_time\.py|tests/worker_schedule_admin_preview_time\.py|tests/worker_schedule_api_time\.py|tests/worker_schedule_approval_time\.py|tests/worker_schedule_approval\.py|tests/worker_schedule_api\.py|tests/worker_scheduler\.py|tests/worker_scheduler_time\.py|tests/worker_scheduler_time_store\.py)$'
-          unexpected=$(git diff --name-only 7ebecbd0f62818218ddd25385379f5c38b6413ca | grep -Ev "$allowed" || true)
-          if [ -n "$unexpected" ]; then
-            echo "Unexpected stage-3B3 paths:"
-            echo "$unexpected"
-            exit 1
-          fi
-
-      - name: Commit proven v2-only approval layer
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m "feat(scheduler): require approval token v2"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
-
-      - name: Upload failure diagnostics
+      - name: Upload full failed test log
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: t017-stage3b3-diagnostics
-          path: |
-            /tmp/t017-stage3b3.log
-            /tmp/modelrig-full-test.log
-          if-no-files-found: warn
-          retention-days: 1
+          name: agent3-full-test-log
+          path: /tmp/modelrig-full-test.log
+          if-no-files-found: error
+          retention-days: 7
