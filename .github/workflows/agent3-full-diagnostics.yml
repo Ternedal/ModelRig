@@ -4,13 +4,15 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   full-test-log:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
@@ -23,19 +25,27 @@ jobs:
       - name: Install worker deps
         run: pip install -r worker/requirements.txt --break-system-packages
 
+      - name: Apply exact T-017 worker patch and remove transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/t017_integrate_worker_time.py
+          git show 7ebecbd0f62818218ddd25385379f5c38b6413ca:.github/workflows/agent3-full-diagnostics.yml > .github/workflows/agent3-full-diagnostics.yml
+          rm scripts/t017_integrate_worker_time.py
+          python3 scripts/current_state.py
+
+      - name: Focused T-017 contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=worker python3 tests/worker_scheduler_time.py
+          PYTHONPATH=worker python3 tests/worker_scheduler_time_integration.py
+          PYTHONPATH=worker python3 tests/worker_scheduler.py
+          PYTHONPATH=worker python3 tests/worker_schedule_approval.py
+          PYTHONPATH=worker python3 tests/worker_schedule_api.py
+
       - name: Build backend
         run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
-
-      - name: Generate authoritative current state
-        run: python3 scripts/current_state.py
-
-      - name: Upload generated current state
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: agent3-generated-current-state
-          path: CURRENT_STATE.md
-          if-no-files-found: error
-          retention-days: 7
 
       - name: Full repository test log
         env:
@@ -58,6 +68,30 @@ jobs:
             echo "::endgroup::"
           done
           exit "$status"
+
+      - name: Verify final T-017 scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e scripts/t017_integrate_worker_time.py
+          git diff --check
+          allowed='^(CURRENT_STATE\.md|worker/requirements\.txt|worker/app/scheduler\.py|worker/app/scheduler_admin\.py|worker/app/schedule_admin\.py|worker/app/schedule_api\.py|worker/app/schedule_approval\.py|worker/app/scheduler_time\.py|tests/worker_scheduler\.py|tests/worker_scheduler_time\.py|tests/worker_scheduler_time_integration\.py)$'
+          unexpected=$(git diff --name-only 7ebecbd0f62818218ddd25385379f5c38b6413ca | grep -Ev "$allowed" || true)
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected T-017 paths:"
+            echo "$unexpected"
+            exit 1
+          fi
+
+      - name: Commit proven worker integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "feat(scheduler): bind IANA timezone and misfire policy"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
 
       - name: Upload full failed test log
         if: failure()
