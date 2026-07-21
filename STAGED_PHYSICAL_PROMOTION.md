@@ -15,7 +15,34 @@ Denne fil er autoritativ for den fysiske promotion. Den gamle rækkefølge “al
 
 # Stage A — pre-release, syv beviser
 
-Stage A styres af `scripts/run-stage-a-physical-validation.ps1`. Launcheren accepterer kun `Prepare`, `Verify` og `Complete`, kræver den eksakte kandidat-SHA og delegerer til den testbare, Windows-only operatør `scripts/stage_a_physical_operator.py`. Operatøren afviser CI, ikke-interaktive terminaler, forkert branch, forkert version, dirty tree og main-drift. Den indeholder ingen repository-, release- eller aktiveringsoperationer.
+## Nemmeste vej — anbefalet
+
+På Windows-riggen skal du normalt kun dobbeltklikke:
+
+```text
+START_STAGE_A_TEST.cmd
+```
+
+One-click-wizard'en:
+
+- henter og fast-forwarder automatisk den rigtige kandidatbranch;
+- finder kandidatens eksakte SHA og nægter at gætte den;
+- bruger eksisterende GitHub CLI-login eller åbner engangs-login i browseren;
+- finder Ollama-modeller og tilbyder at hente manglende planner-/embeddingmodel;
+- læser device-token skjult og gemmer det aldrig;
+- arkiverer gamle eller fejlede rolling reports, så testen kan genoptages uden tab;
+- starter backend og worker direkte fra kandidatens checkout, når den eksisterende stack ikke kan bestå preflight;
+- kører preflight, Agent 3, model-eval og RAG automatisk;
+- åbner de nødvendige filer og mapper ved voice/Pixel-pausepunktet;
+- opretter schedulerens read-plan, gemmer ID'er lokalt og udfører pausekaldet;
+- genstarter exact-head worker ved ægte voice cold-start og scheduler crash-recovery;
+- kører `Prepare`, `Verify` og `Complete` gennem den eksisterende strikse Stage A-operatør.
+
+Du skal fortsat selv udføre de observationer, som software ikke sandfærdigt kan opfinde: optage de 20 voice-fraser, gennemføre fem Pixel-trials, godkende den kanoniske write-plan i appen, time schedulerens pause/crash og bekræfte det ene offentlige browserkald. Wizard'en kan genoptages ved næste dobbeltklik. Den kan ikke merge, pushe, tagge, release eller aktivere produktion.
+
+## Manuel fallback
+
+Stage A kan fortsat styres direkte af `scripts/run-stage-a-physical-validation.ps1`. Launcheren accepterer kun `Prepare`, `Verify` og `Complete`, kræver den eksakte kandidat-SHA og delegerer til den testbare, Windows-only operatør `scripts/stage_a_physical_operator.py`. Operatøren afviser CI, ikke-interaktive terminaler, forkert branch, forkert version, dirty tree og main-drift. Den indeholder ingen repository-, release- eller aktiveringsoperationer.
 
 ## A0. Lås checkout
 
