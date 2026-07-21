@@ -32,9 +32,11 @@ replace_once(
     '''    cadence: str = Field(min_length=1, max_length=100)\n    timezone: str = Field(default=DEFAULT_TIMEZONE, min_length=1, max_length=100)\n    misfire_policy: str = Field(default=MISFIRE_POLICY, min_length=1, max_length=32)\n    ttl_days: int = Field(default=DEFAULT_TTL_DAYS, ge=1, le=MAX_TTL_DAYS)\n''',
 )
 
+# Preview route only. The complete function-local block prevents the same call
+# shape in create_schedule from being selected accidentally.
 replace_once(
-    '''                req.cadence,\n                ttl_days=req.ttl_days,\n                max_runs=req.max_runs,\n            )\n''',
-    '''                req.cadence,\n                ttl_days=req.ttl_days,\n                max_runs=req.max_runs,\n                timezone_name=req.timezone,\n                misfire_policy=req.misfire_policy,\n            )\n''',
+    '''    @router.post("/preview")\n    def preview_schedule(\n        request: Request, req: PreviewScheduleReq\n    ) -> dict[str, Any]:\n        _require_operator(request, operator_allowed)\n        try:\n            preview = service.preview(\n                req.tool,\n                req.args,\n                req.cadence,\n                ttl_days=req.ttl_days,\n                max_runs=req.max_runs,\n            )\n        except (ScheduleAdminError, ScheduleError) as exc:\n''',
+    '''    @router.post("/preview")\n    def preview_schedule(\n        request: Request, req: PreviewScheduleReq\n    ) -> dict[str, Any]:\n        _require_operator(request, operator_allowed)\n        try:\n            preview = service.preview(\n                req.tool,\n                req.args,\n                req.cadence,\n                ttl_days=req.ttl_days,\n                max_runs=req.max_runs,\n                timezone_name=req.timezone,\n                misfire_policy=req.misfire_policy,\n            )\n        except (ScheduleAdminError, ScheduleError) as exc:\n''',
 )
 
 # The create route has its own preview call and then persists the same canonical
