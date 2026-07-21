@@ -33,12 +33,15 @@ from .schedule_approval import (
     verify_schedule_approval,
 )
 from .scheduler import DEFAULT_MAX_RUNS, DEFAULT_TTL_DAYS, ScheduleError, enabled
+from .scheduler_time import DEFAULT_TIMEZONE, MISFIRE_POLICY
 
 
 class PreviewScheduleReq(BaseModel):
     tool: str = Field(min_length=1, max_length=100)
     args: dict[str, Any] = Field(default_factory=dict)
     cadence: str = Field(min_length=1, max_length=100)
+    timezone: str = Field(default=DEFAULT_TIMEZONE, min_length=1, max_length=100)
+    misfire_policy: str = Field(default=MISFIRE_POLICY, min_length=1, max_length=32)
     ttl_days: int = Field(default=DEFAULT_TTL_DAYS, ge=1, le=MAX_TTL_DAYS)
     max_runs: int = Field(default=DEFAULT_MAX_RUNS, ge=0, le=MAX_RUN_BUDGET)
 
@@ -194,6 +197,8 @@ def build_schedule_router(
                 req.cadence,
                 ttl_days=req.ttl_days,
                 max_runs=req.max_runs,
+                timezone_name=req.timezone,
+                misfire_policy=req.misfire_policy,
             )
         except (ScheduleAdminError, ScheduleError) as exc:
             _raise(exc)
@@ -220,6 +225,8 @@ def build_schedule_router(
                 req.cadence,
                 ttl_days=req.ttl_days,
                 max_runs=req.max_runs,
+                timezone_name=req.timezone,
+                misfire_policy=req.misfire_policy,
             )
             approved_fingerprint, receipt = _approval_for(
                 preview, req.approval_token)
@@ -229,6 +236,8 @@ def build_schedule_router(
                 req.cadence,
                 ttl_days=req.ttl_days,
                 max_runs=req.max_runs,
+                timezone_name=req.timezone,
+                misfire_policy=req.misfire_policy,
                 approved_fingerprint=approved_fingerprint,
                 receipt=receipt,
             )
