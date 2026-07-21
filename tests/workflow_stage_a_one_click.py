@@ -75,7 +75,7 @@ check('os.environ["GH_TOKEN"]' in wizard_text, "GitHub token remains process-loc
 check('state.get("candidate_sha") == sha' in wizard_text, "resume state is exact-SHA bound")
 check('[ollama, "stop", planner]' in wizard_text, "voice model is unloaded before cold start")
 check("worker_only=True" in wizard_text, "voice and recovery use worker-only restart")
-check("-WorkerOnly" in stack_text, "stack launcher supports worker-only restart")
+check("[switch]$WorkerOnly" in stack_text, "stack launcher supports worker-only restart")
 check("PYTHONDONTWRITEBYTECODE=1" in stack_text, "started worker cannot create local bytecode")
 check("Wait-PortFree" in stack_text, "launcher waits for old local windows to close")
 
