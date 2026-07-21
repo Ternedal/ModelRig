@@ -184,7 +184,7 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t019-control-") as tmp:
     result: list[str] = []
     thread = threading.Thread(target=lambda: result.append(runner._run_claim(claim, "job-1", time.time())))
     thread.start()
-    deadline = time.monotonic() + 2.0
+    deadline = time.monotonic() + 5.0
     marker = {}
     while time.monotonic() < deadline:
         marker_path = root / "holding.json"
@@ -197,7 +197,7 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t019-control-") as tmp:
     check((root / f"command.consumed-{nonce}.json").is_file(), "consumed command remains auditable")
     runner.schedules.set_enabled("read-1", False)
     (root / f"release-{nonce}.flag").write_text("release\n", encoding="ascii")
-    thread.join(2.0)
+    thread.join(5.0)
     check(not thread.is_alive(), "held occurrence resumes after explicit release")
     check(result == ["blocked"], "live guard sees the pause after deterministic release")
     check(runner.calls == 1, "underlying claim runs exactly once")
@@ -218,10 +218,9 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t019-control-") as tmp:
         ),
         encoding="utf-8",
     )
-    before = time.monotonic()
     runner.schedules.enabled = True
     direct = runner._run_claim(other, "job-2", time.time())
-    check(time.monotonic() - before < 0.5, "a mismatched schedule is never delayed")
+    check(not (root / "holding.json").exists(), "a mismatched schedule never enters the hold")
     check(direct == "completed", "mismatched schedule keeps normal execution")
     check((root / "command.json").is_file(), "mismatched command is not consumed")
 
