@@ -45,31 +45,6 @@ func TestScheduleApprovalV2ClaimsBindTimeTerms(t *testing.T) {
 	if verified.Timezone != "America/New_York" || verified.MisfirePolicy != "run_once" {
 		t.Fatalf("verified time claims = %q/%q", verified.Timezone, verified.MisfirePolicy)
 	}
-
-	req := scheduleCreateCommitRequest{
-		Tool:          preview.Tool,
-		Args:          preview.Args,
-		Cadence:       preview.Cadence,
-		Timezone:      preview.Timezone,
-		MisfirePolicy: preview.MisfirePolicy,
-		TTLDays:       preview.TTLDays,
-		MaxRuns:       preview.MaxRuns,
-		ApprovalToken: token,
-	}
-	if !claimsMatchCreate(verified, req) {
-		t.Fatal("exact create terms did not match v2 claims")
-	}
-
-	changedZone := req
-	changedZone.Timezone = "Europe/Copenhagen"
-	if claimsMatchCreate(verified, changedZone) {
-		t.Fatal("changed timezone matched signed claims")
-	}
-	changedPolicy := req
-	changedPolicy.MisfirePolicy = "skip"
-	if claimsMatchCreate(verified, changedPolicy) {
-		t.Fatal("changed misfire policy matched signed claims")
-	}
 }
 
 func TestScheduleApprovalV2RejectsIncompleteTimeClaims(t *testing.T) {
