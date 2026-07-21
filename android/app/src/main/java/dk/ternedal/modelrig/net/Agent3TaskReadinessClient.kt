@@ -6,12 +6,57 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
+internal fun validateAgent3TaskSurface(
+    selectedSurface: String,
+    candidateSurface: String,
+    fallbackSurface: String,
+    eligibleForTaskUi: Boolean,
+    operatorEnabled: Boolean,
+    normalChatRouteUnchanged: Boolean,
+    productionActivation: Boolean,
+    reason: String,
+    routeSource: String,
+): String {
+    if (candidateSurface != "agent3_readonly" || fallbackSurface != "agent2") {
+        throw ModelRigException("Ugyldig Agent 3 task-readiness: ukendt surface-kontrakt")
+    }
+    if (productionActivation || !normalChatRouteUnchanged) {
+        throw ModelRigException("Ugyldig Agent 3 task-readiness: normal chat må ikke ændres")
+    }
+    if (routeSource != "server_authoritative") {
+        throw ModelRigException("Agent 3 task-readiness har ikke server-authoritative routing")
+    }
+    return when (selectedSurface) {
+        "agent2" -> {
+            if (eligibleForTaskUi && operatorEnabled) {
+                throw ModelRigException(
+                    "Ugyldig Agent 3 task-readiness: klar operatørsession skal vælge read-only surface"
+                )
+            }
+            if (reason == "agent3_readonly_selected") {
+                throw ModelRigException(
+                    "Ugyldig Agent 3 task-readiness: Agent 2 kan ikke påstå Agent 3-selection"
+                )
+            }
+            selectedSurface
+        }
+        "agent3_readonly" -> {
+            if (!eligibleForTaskUi || !operatorEnabled || reason != "agent3_readonly_selected") {
+                throw ModelRigException(
+                    "Ugyldig Agent 3 task-readiness: read-only surface kræver exact readiness"
+                )
+            }
+            selectedSurface
+        }
+        else -> throw ModelRigException("Ugyldig Agent 3 task-readiness: ukendt selected surface")
+    }
+}
+
 /**
- * Typed, read-only transport for the dormant Agent 3 task-readiness contract.
+ * Typed, read-only transport for the server-owned Agent 3 task-surface decision.
  *
- * Unknown schemas or surfaces fail closed. This client has no mutation methods
- * and rejects any response that selects Agent 3 before the task-UI integration
- * has been delivered.
+ * Unknown schemas, surfaces or internally inconsistent readiness values fail
+ * closed. This client has no mutation methods and never changes normal chat.
  */
 class Agent3TaskReadinessClient(baseUrl: String, private val token: String) {
     private val base = baseUrl.trimEnd('/')
@@ -85,14 +130,11 @@ class Agent3TaskReadinessClient(baseUrl: String, private val token: String) {
         val selected = root.optString("selected_surface")
         val candidate = root.optString("candidate_surface")
         val fallback = root.optString("fallback_surface")
-        if (selected != "agent2" || candidate != "agent3_readonly" || fallback != "agent2") {
-            throw ModelRigException("Ugyldig Agent 3 task-readiness: ukendt eller aktiv surface")
-        }
+        val eligible = root.optBoolean("eligible_for_task_ui", false)
+        val operator = root.optBoolean("operator_enabled", false)
         val productionActivation = root.optBoolean("production_activation", true)
         val normalChatUnchanged = root.optBoolean("normal_chat_route_unchanged", false)
-        if (productionActivation || !normalChatUnchanged) {
-            throw ModelRigException("Ugyldig Agent 3 task-readiness: normal chat må ikke ændres")
-        }
+        val reason = root.optString("reason").ifBlank { "unknown" }
 
         val pilot = root.optJSONObject("pilot")
             ?: throw ModelRigException("Agent 3 task-readiness mangler pilot")
@@ -100,19 +142,28 @@ class Agent3TaskReadinessClient(baseUrl: String, private val token: String) {
             ?: throw ModelRigException("Agent 3 task-readiness mangler rig_validation")
         val ui = root.optJSONObject("ui_contract")
             ?: throw ModelRigException("Agent 3 task-readiness mangler ui_contract")
-        if (ui.optString("route_source") != "server_authoritative") {
-            throw ModelRigException("Agent 3 task-readiness har ikke server-authoritative routing")
-        }
+        val routeSource = ui.optString("route_source")
+        validateAgent3TaskSurface(
+            selectedSurface = selected,
+            candidateSurface = candidate,
+            fallbackSurface = fallback,
+            eligibleForTaskUi = eligible,
+            operatorEnabled = operator,
+            normalChatRouteUnchanged = normalChatUnchanged,
+            productionActivation = productionActivation,
+            reason = reason,
+            routeSource = routeSource,
+        )
 
         return Readiness(
             selectedSurface = selected,
             candidateSurface = candidate,
             fallbackSurface = fallback,
-            eligibleForTaskUi = root.optBoolean("eligible_for_task_ui", false),
-            operatorEnabled = root.optBoolean("operator_enabled", false),
-            normalChatRouteUnchanged = true,
-            productionActivation = false,
-            reason = root.optString("reason").ifBlank { "unknown" },
+            eligibleForTaskUi = eligible,
+            operatorEnabled = operator,
+            normalChatRouteUnchanged = normalChatUnchanged,
+            productionActivation = productionActivation,
+            reason = reason,
             reasons = root.optJSONArray("reasons").toStrings(),
             pilot = Pilot(
                 configured = pilot.optBoolean("configured", false),
@@ -144,7 +195,7 @@ class Agent3TaskReadinessClient(baseUrl: String, private val token: String) {
                 reportSha256 = validation.nullableString("report_sha256"),
             ),
             uiContract = UiContract(
-                routeSource = "server_authoritative",
+                routeSource = routeSource,
                 stopVisible = ui.optBoolean("stop_visible", false),
                 fallbackVisible = ui.optBoolean("fallback_visible", false),
                 receiptsVisible = ui.optBoolean("receipts_visible", false),
