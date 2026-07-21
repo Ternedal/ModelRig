@@ -36,11 +36,18 @@ from .scheduler import (
     parse_cadence,
     refusal,
 )
+from .scheduler_time import (
+    DEFAULT_TIMEZONE,
+    MISFIRE_POLICY,
+    ScheduleTimeError,
+    local_due_iso,
+    validate_timezone,
+)
 
 MAX_TTL_DAYS = 365
 MAX_RUN_BUDGET = 100_000
 MAX_ARGS_JSON_BYTES = 20_000
-_APPROVAL_VERSION = 1
+_APPROVAL_VERSION = 2
 
 
 class ScheduleAdminError(ValueError):
@@ -62,6 +69,9 @@ class SchedulePreview:
     tool: str
     args: dict[str, Any]
     cadence: str
+    timezone: str
+    misfire_policy: str
+    due_at_local: str
     risk: str
     sensitivity: str
     human_summary: str
@@ -81,6 +91,9 @@ class SchedulePreview:
             "tool": self.tool,
             "args": self.args,
             "cadence": self.cadence,
+            "timezone": self.timezone,
+            "misfire_policy": self.misfire_policy,
+            "due_at_local": self.due_at_local,
             "risk": self.risk,
             "sensitivity": self.sensitivity,
             "human_summary": self.human_summary,
@@ -225,6 +238,8 @@ class ScheduleAdmin:
         *,
         ttl_days: int = DEFAULT_TTL_DAYS,
         max_runs: int = DEFAULT_MAX_RUNS,
+        timezone_name: str = DEFAULT_TIMEZONE,
+        misfire_policy: str = MISFIRE_POLICY,
     ) -> SchedulePreview:
         """Preview a new standing grant; execute and persist nothing."""
         return self._preview(
@@ -233,6 +248,8 @@ class ScheduleAdmin:
             tool=tool,
             args=args,
             cadence=cadence,
+            timezone_name=timezone_name,
+            misfire_policy=misfire_policy,
             ttl_days=ttl_days,
             max_runs=max_runs,
             enable=True,
@@ -257,6 +274,8 @@ class ScheduleAdmin:
             tool=current.tool,
             args=current.args,
             cadence=current.cadence,
+            timezone_name=current.timezone,
+            misfire_policy=current.misfire_policy,
             ttl_days=ttl_days,
             max_runs=max_runs,
             enable=enable,
@@ -347,6 +366,8 @@ class ScheduleAdmin:
                 tool=current.tool,
                 args=current.args,
                 cadence=current.cadence,
+                timezone_name=current.timezone,
+                misfire_policy=current.misfire_policy,
                 ttl_days=ttl_days,
                 max_runs=max_runs,
                 enable=enable,
@@ -451,6 +472,8 @@ class ScheduleAdmin:
         tool: str,
         args: dict[str, Any],
         cadence: str,
+        timezone_name: str,
+        misfire_policy: str,
         ttl_days: int,
         max_runs: int,
         enable: bool | None,
@@ -459,6 +482,14 @@ class ScheduleAdmin:
             raise ScheduleAdminError(f"unknown schedule operation: {operation}")
         self._validate_bounds(ttl_days, max_runs)
         self._validate_args(args)
+        try:
+            zone = validate_timezone(timezone_name).key
+        except ScheduleTimeError as exc:
+            raise ScheduleAdminError(str(exc)) from exc
+        if misfire_policy != MISFIRE_POLICY:
+            raise ScheduleAdminError(
+                f"ukendt misfire-policy {misfire_policy!r}; "
+                f"kun {MISFIRE_POLICY!r} støttes")
         registry = self._registry_factory()
         spec = registry.get(tool)
         if spec is None:
@@ -487,6 +518,7 @@ class ScheduleAdmin:
         self._validate_tool_args(spec, args)
         cad = parse_cadence(cadence)
         now = self._clock()
+        due_at = next_run(cad, now, zone)
         try:
             summary = str(spec.human_summary(args))[:1000]
         except Exception as exc:
@@ -507,6 +539,8 @@ class ScheduleAdmin:
                 tool=tool,
                 args=args,
                 cadence=cadence,
+                timezone_name=zone,
+                misfire_policy=misfire_policy,
                 ttl_days=ttl_days,
                 max_runs=max_runs,
                 enable=enable,
@@ -517,13 +551,16 @@ class ScheduleAdmin:
             tool=tool,
             args=dict(args),
             cadence=cadence,
+            timezone=zone,
+            misfire_policy=misfire_policy,
+            due_at_local=local_due_iso(due_at, zone),
             risk=risk,
             sensitivity=str(getattr(spec, "sensitivity", None) or "unknown"),
             human_summary=summary,
             requires_approval=risk == "write",
             action_fingerprint=action_fp,
             approval_fingerprint=approval_fp,
-            due_at=next_run(cad, now),
+            due_at=due_at,
             expires_at=now + ttl_days * 86400,
             ttl_days=ttl_days,
             max_runs=max_runs,
@@ -538,6 +575,8 @@ class ScheduleAdmin:
         tool: str,
         args: dict[str, Any],
         cadence: str,
+        timezone_name: str,
+        misfire_policy: str,
         ttl_days: int,
         max_runs: int,
         enable: bool | None,
@@ -549,6 +588,8 @@ class ScheduleAdmin:
             "tool": tool,
             "args": args,
             "cadence": cadence,
+            "timezone": timezone_name,
+            "misfire_policy": misfire_policy,
             "ttl_days": ttl_days,
             "max_runs": max_runs,
             "enable": enable,
@@ -566,7 +607,7 @@ class ScheduleAdmin:
             return
         if approved_fingerprint != preview.approval_fingerprint:
             raise ScheduleAdminConflict(
-                "scheduled write approval does not match the previewed action, cadence, expiry, budget and enable state"
+                "scheduled write approval does not match the previewed action, cadence, timezone, misfire policy, expiry, budget and enable state"
             )
 
     @staticmethod
