@@ -15,6 +15,8 @@ Denne fil er autoritativ for den fysiske promotion. Den gamle rækkefølge “al
 
 # Stage A — pre-release, syv beviser
 
+Stage A styres af `scripts/run-stage-a-physical-validation.ps1`. Launcheren accepterer kun `Prepare`, `Verify` og `Complete`, kræver den eksakte kandidat-SHA og delegerer til den testbare, Windows-only operatør `scripts/stage_a_physical_operator.py`. Operatøren afviser CI, ikke-interaktive terminaler, forkert branch, forkert version, dirty tree og main-drift. Den indeholder ingen repository-, release- eller aktiveringsoperationer.
+
 ## A0. Lås checkout
 
 ```powershell
@@ -30,27 +32,20 @@ if ((Get-Content VERSION -Raw).Trim() -ne "1.58.141") { throw "Forkert version" 
 
 Brug SHA'en fra draft-PR #125; gæt den aldrig.
 
-## A1. Exact-SHA freeze
+## A1. Freeze og forbered checklisten
 
 Sæt `GITHUB_TOKEN` eller `GH_TOKEN` i miljøet, og kør:
 
 ```powershell
-python scripts\candidate_freeze_check.py `
-  --expected-sha $CandidateSha `
-  --report validation\pre-release-candidate-freeze-latest.json
+powershell -ExecutionPolicy Bypass -File `
+  .\scripts\run-stage-a-physical-validation.ps1 `
+  -Action Prepare `
+  -ExpectedSha $CandidateSha
 ```
 
-Gaten kræver exact HEAD, ren tree, versionskonsistens, ingen Python-bytecode, seneste `origin/main` som ancestor og grønne `ci`, `agent3-diagnostics`, `agent3-full-diagnostics` og `codeql` på præcis SHA'en. Resultatet skal bevare `release_validation_pending=true`, `release_complete=false` og `production_activation=false`.
+`Prepare` kører først `candidate_freeze_check.py` og derefter `physical_validation_candidate_campaign.py --mode prepare`. Gaten kræver exact HEAD, ren tree, versionskonsistens, ingen Python-bytecode, seneste `origin/main` som ancestor og grønne `ci`, `agent3-diagnostics`, `agent3-full-diagnostics` og `codeql` på præcis SHA'en. Resultatet bevarer `release_validation_pending=true`, `release_complete=false` og `production_activation=false`.
 
-## A2. Forbered og kør seks kandidatbeviser
-
-```powershell
-python scripts\physical_validation_candidate_campaign.py `
-  --mode prepare `
-  --report validation\physical-validation-candidate-campaign-latest.json
-```
-
-Kør derefter:
+Kør derefter de seks fysiske kandidatbeviser:
 
 1. T-004 preflight — `PHYSICAL_VALIDATION_CAMPAIGN.md` sektion 1.
 2. T-005 Agent 3 — `AGENT3_RIG_VALIDATION.md`.
@@ -61,32 +56,37 @@ Kør derefter:
 
 Kør ikke lifecycle endnu; manuel kopiering af binaries er ikke updater-bevis.
 
+## A2. Verificér de seks beviser
+
 ```powershell
-python scripts\physical_validation_candidate_campaign.py `
-  --mode verify `
-  --max-age-hours 168 `
-  --min-model-exact 1.0 `
-  --report validation\physical-validation-candidate-campaign-latest.json
+powershell -ExecutionPolicy Bypass -File `
+  .\scripts\run-stage-a-physical-validation.ps1 `
+  -Action Verify `
+  -ExpectedSha $CandidateSha `
+  -MaxAgeHours 168 `
+  -MinModelExact 1.0
 ```
 
-Kræv `candidate_campaign_complete=true`, `release_validation_pending=true`, `release_complete=false` og `production_activation=false`.
+`Verify` genkører exact-SHA freeze og kampagnens verify-mode. Den stopper, medmindre den faste allowlist `preflight`, `agent3`, `model_eval`, `voice`, `rag`, `scheduler_pilot` er frisk, kandidatbundet og grøn. Kræv `candidate_campaign_complete=true`, `release_validation_pending=true`, `release_complete=false` og `production_activation=false`.
 
-## A3. T-032 browserbevis og syv-bevis gate
+## A3. Interaktiv T-032 og syv-bevis gate
 
 Vælg én eksakt, på forhånd godkendt HTTPS/443-URL:
 
 ```powershell
 $Url = "https://DEN-EKSAKTE-GODKENDTE-URL/"
 powershell -ExecutionPolicy Bypass -File `
-  .\scripts\run-browser-peer-public-validation.ps1 -Url $Url
-
-python scripts\physical_validation_candidate_gate.py `
-  --candidate-campaign validation\physical-validation-candidate-campaign-latest.json `
-  --browser-attestation validation\browser-peer-public-validation-physical-latest.json `
-  --report validation\physical-validation-candidate-final-latest.json
+  .\scripts\run-stage-a-physical-validation.ps1 `
+  -Action Complete `
+  -ExpectedSha $CandidateSha `
+  -Url $Url `
+  -MaxAgeHours 168 `
+  -MinModelExact 1.0
 ```
 
-Kræv:
+`Complete` genkører freeze og alle seks beviser **før** offentlig kontakt. Derefter kalder den den eksisterende interaktive one-use launcher `run-browser-peer-public-validation.ps1` og til sidst den schema-distinkte `physical_validation_candidate_gate.py`. Browsertrinnets manuelle bekræftelse kan ikke springes over.
+
+Kræv i `validation/physical-validation-candidate-final-latest.json`:
 
 ```text
 gate.passed=true
