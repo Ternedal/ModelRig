@@ -5,6 +5,8 @@ Run: PYTHONPATH=worker python3 tests/worker_scheduler_single_flight.py
 """
 from __future__ import annotations
 
+import io
+import logging
 import os
 import sys
 import threading
@@ -81,7 +83,18 @@ thread = threading.Thread(target=lambda: first.append(runner.run_once()))
 thread.start()
 check(entered.wait(1.0), "first slow tick entered")
 
-overlap = [runner.run_once() for _ in range(12)]
+log_stream = io.StringIO()
+log_handler = logging.StreamHandler(log_stream)
+runner_logger = logging.getLogger("app.schedule_runner")
+old_level = runner_logger.level
+runner_logger.setLevel(logging.WARNING)
+runner_logger.addHandler(log_handler)
+try:
+    overlap = [runner.run_once() for _ in range(12)]
+finally:
+    runner_logger.removeHandler(log_handler)
+    runner_logger.setLevel(old_level)
+overlap_log = log_stream.getvalue()
 status_while_busy = runner.single_flight_status()
 check(runner.calls == 1, "overlap pressure never enters the underlying runner")
 check(all(item.claimed == 0 for item in overlap), "every overlap is rejected before claim")
@@ -89,6 +102,11 @@ check(status_while_busy.active == 1, "status reports exactly one active tick")
 check(status_while_busy.accepted == 1, "only the first tick was accepted")
 check(status_while_busy.overlap_rejections == 12, "all overlap rejections are counted")
 check(status_while_busy.queue_capacity == 0, "pressure creates no waiting queue")
+check("policy=single-flight" in overlap_log, "overlap log identifies the active policy")
+check("max_concurrency=1" in overlap_log, "overlap log identifies max concurrency")
+check("queue_capacity=0" in overlap_log, "overlap log identifies zero queue capacity")
+check("overlap_rejections=12" in overlap_log, "overlap log carries the cumulative rejection count")
+check("owner_id=t018-test-owner" in overlap_log, "overlap log identifies the rejecting owner")
 
 release.set()
 thread.join(2.0)
