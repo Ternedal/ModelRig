@@ -24,22 +24,28 @@ const (
 	scheduleApprovalSecretEnv = "KALIV_SCHEDULER_APPROVAL_SECRET"
 	scheduleApprovalTTL       = 2 * time.Minute
 	maxScheduleBodyBytes      = 64 << 10
+	defaultScheduleTimezone   = "Europe/Copenhagen"
+	defaultScheduleMisfire    = "run_once"
 )
 
 var errScheduleApprovalUnavailable = errors.New("schedule approval secret is unavailable")
 
 type scheduleCreateTerms struct {
-	Tool    string         `json:"tool"`
-	Args    map[string]any `json:"args"`
-	Cadence string         `json:"cadence"`
-	TTLDays int            `json:"ttl_days"`
-	MaxRuns int            `json:"max_runs"`
+	Tool          string         `json:"tool"`
+	Args          map[string]any `json:"args"`
+	Cadence       string         `json:"cadence"`
+	Timezone      string         `json:"timezone"`
+	MisfirePolicy string         `json:"misfire_policy"`
+	TTLDays       int            `json:"ttl_days"`
+	MaxRuns       int            `json:"max_runs"`
 }
 
 type scheduleCreateApprovalRequest struct {
 	Tool               string         `json:"tool"`
 	Args               map[string]any `json:"args"`
 	Cadence            string         `json:"cadence"`
+	Timezone           string         `json:"timezone"`
+	MisfirePolicy      string         `json:"misfire_policy"`
 	TTLDays            int            `json:"ttl_days"`
 	MaxRuns            int            `json:"max_runs"`
 	PreviewFingerprint string         `json:"preview_fingerprint"`
@@ -49,9 +55,21 @@ type scheduleCreateCommitRequest struct {
 	Tool          string         `json:"tool"`
 	Args          map[string]any `json:"args"`
 	Cadence       string         `json:"cadence"`
+	Timezone      string         `json:"timezone"`
+	MisfirePolicy string         `json:"misfire_policy"`
 	TTLDays       int            `json:"ttl_days"`
 	MaxRuns       int            `json:"max_runs"`
 	ApprovalToken string         `json:"approval_token,omitempty"`
+}
+
+func normalizeScheduleTimeTerms(timezone, policy string) (string, string) {
+	if strings.TrimSpace(timezone) == "" {
+		timezone = defaultScheduleTimezone
+	}
+	if strings.TrimSpace(policy) == "" {
+		policy = defaultScheduleMisfire
+	}
+	return timezone, policy
 }
 
 type scheduleRenewTerms struct {
@@ -343,6 +361,8 @@ func (s *server) handleScheduleApproval(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadRequest, "invalid schedule approval request: "+err.Error())
 		return
 	}
+	approval.Timezone, approval.MisfirePolicy = normalizeScheduleTimeTerms(
+		approval.Timezone, approval.MisfirePolicy)
 	if strings.TrimSpace(approval.Tool) == "" || strings.TrimSpace(approval.Cadence) == "" ||
 		strings.TrimSpace(approval.PreviewFingerprint) == "" {
 		writeErr(w, http.StatusBadRequest, "schedule approval requires tool, cadence and preview_fingerprint")
@@ -350,6 +370,7 @@ func (s *server) handleScheduleApproval(w http.ResponseWriter, r *http.Request) 
 	}
 	previewBody, _ := json.Marshal(scheduleCreateTerms{
 		Tool: approval.Tool, Args: approval.Args, Cadence: approval.Cadence,
+		Timezone: approval.Timezone, MisfirePolicy: approval.MisfirePolicy,
 		TTLDays: approval.TTLDays, MaxRuns: approval.MaxRuns,
 	})
 	preview, ok := s.previewForApproval(w, r, "/schedules/preview", previewBody)
@@ -358,7 +379,8 @@ func (s *server) handleScheduleApproval(w http.ResponseWriter, r *http.Request) 
 	}
 	if preview.Operation != "create" || preview.ScheduleID != nil ||
 		preview.Tool != approval.Tool || !reflect.DeepEqual(preview.Args, approval.Args) ||
-		preview.Cadence != approval.Cadence || preview.TTLDays != approval.TTLDays ||
+		preview.Cadence != approval.Cadence || preview.Timezone != approval.Timezone ||
+		preview.MisfirePolicy != approval.MisfirePolicy || preview.TTLDays != approval.TTLDays ||
 		preview.MaxRuns != approval.MaxRuns || preview.Enable == nil || !*preview.Enable {
 		writeErr(w, http.StatusBadGateway, "schedule worker returned a preview for different create terms")
 		return
@@ -449,7 +471,8 @@ func (s *server) handleScheduleRenewApproval(w http.ResponseWriter, r *http.Requ
 func claimsMatchCreate(claims scheduleApprovalClaims, req scheduleCreateCommitRequest) bool {
 	return claims.Operation == "create" && claims.ScheduleID == nil &&
 		claims.Tool == req.Tool && reflect.DeepEqual(claims.Args, req.Args) &&
-		claims.Cadence == req.Cadence && claims.TTLDays == req.TTLDays &&
+		claims.Cadence == req.Cadence && claims.Timezone == req.Timezone &&
+		claims.MisfirePolicy == req.MisfirePolicy && claims.TTLDays == req.TTLDays &&
 		claims.MaxRuns == req.MaxRuns && claims.Enable != nil && *claims.Enable
 }
 
@@ -475,6 +498,8 @@ func (s *server) handleScheduleCreate(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "invalid schedule create request: "+err.Error())
 			return
 		}
+		req.Timezone, req.MisfirePolicy = normalizeScheduleTimeTerms(
+			req.Timezone, req.MisfirePolicy)
 		deviceID, ok := scheduleDeviceID(r)
 		if !ok {
 			writeErr(w, http.StatusUnauthorized, "authenticated device context is missing")
