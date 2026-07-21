@@ -247,8 +247,19 @@ de artifacts lifecycle/updater forventer. Git-mode kraever nu samme
 publicerede releasekontrakt (draft-release + manglende release begge roede;
 freeze 40\u219242). F-1609 (exact-head CI) var allerede daekket af freeze_check
 mod aegte release. F-1604 (signeret attestation) og F-1608 (fuld E2E-dataflow)
-er arkitektur; F-1613 (finite max_runs) er runtime mod styringsreglen \u2014 alle
+er arkitektur; F-1613 (finite max_runs) er runtime mod styringsreglen — alle
 parkeret til drøftelse/efter kampagnen.
+**Rapport 21/7 (F-1801..F-1836): F-1802 lukket i 1.58.141 — vigtigste chain-
+of-custody-lukning foer rig-dagen.** Git-mode hashede lokale bytes og byggede
+en rollup, men sammenlignede ALDRIG hver fils lokale blob-SHA mod blob-ID'et
+i HEAD — den stolede paa `git status`. Men skip-worktree/assume-unchanged
+goer at git status rapporterer en aendret fil som ren, saa et aendret runtime-
+trae kunne arve en fremmed commits groenne CI/CodeQL og SHA-identitet. Freeze
+sammenligner nu hver tracked fils blob-SHA mod `git ls-tree -r HEAD`; mismatch
+= FAIL, intet attesteret. Bevist: en fil skjult via assume-unchanged passerer
+'working tree clean' men faelder byte-checket (freeze 42->44). F-1801
+(kampagnen) er riggens. Oevrige P2'er (signeret attestation, fuld E2E,
+scheduler-drafts #134/135/136, 34 draft-PR'er) er arkitektur/rig/policy.
 
 ## Milepæl 3 — Agent 3-pilot (mål task success) — tracker #60
 
