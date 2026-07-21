@@ -6,6 +6,9 @@ fastapi==0.139.0
 uvicorn==0.51.0
 httpx==0.28.1
 pydantic==2.13.4
+# Python's zoneinfo uses the host database on Unix and this pinned first-party
+# fallback on Windows, so persisted IANA schedule zones mean the same thing.
+tzdata==2026.3
 # Optional -- Alva Voice ASR only. NOT installed by default (keeps the base
 # worker light). Install on the rig with: pip install faster-whisper
 # faster-whisper>=1.0
