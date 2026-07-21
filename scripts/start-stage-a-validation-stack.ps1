@@ -8,7 +8,9 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$ValidationReport,
 
-    [switch]$WorkerOnly
+    [switch]$WorkerOnly,
+
+    [switch]$SchedulerPilot
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,6 +21,12 @@ $runtimeDir = Join-Path $repoRoot "validation\stage-a-runtime"
 $backendExe = Join-Path $runtimeDir "modelrig-server-stage-a.exe"
 $backendCmd = Join-Path $runtimeDir "backend.cmd"
 $workerCmd = Join-Path $runtimeDir "worker.cmd"
+$schedulerWorkerEnv = ""
+$schedulerBackendEnv = ""
+if ($SchedulerPilot) {
+    $schedulerWorkerEnv = "set `"KALIV_SCHEDULER=1`"`r`nset `"KALIV_SCHEDULER_API=1`"`r`nset `"KALIV_SCHEDULER_POLL_S=5`""
+    $schedulerBackendEnv = "set `"KALIV_SCHEDULER_API=1`""
+}
 
 function Get-ListenerPid {
     param([int]$Port)
@@ -106,6 +114,7 @@ set "PYTHONPATH=$escapedRepo\worker"
 set "PYTHONDONTWRITEBYTECODE=1"
 set "KALIV_AGENT3_ENABLED=1"
 set "KALIV_TOOLS_ENABLED=1"
+$schedulerWorkerEnv
 set "KALIV_AGENT3_PLANNER_MODEL=$PlannerModel"
 set "KALIV_AGENT3_VALIDATION_REPORT=$escapedReport"
 python -m uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099
@@ -140,6 +149,7 @@ set "MODELRIG_HOST=127.0.0.1"
 set "MODELRIG_PORT=8080"
 set "MODELRIG_DATA=$escapedData"
 set "KALIV_AGENT3_ENABLED=1"
+$schedulerBackendEnv
 "$backendExe"
 "@ | Set-Content -LiteralPath $backendCmd -Encoding ASCII
 
@@ -152,5 +162,8 @@ Wait-Endpoint -Url "http://127.0.0.1:8080/healthz"
 Wait-Endpoint -Url "http://127.0.0.1:8099/healthz"
 
 Write-Host "  Exact-head validation-stack er klar." -ForegroundColor Green
+if ($SchedulerPilot) {
+    Write-Host "  Scheduler-pilot mode: scheduler=ON, api=ON, poll=5s." -ForegroundColor Green
+}
 Write-Host "  Pairing-data: $pairingData"
 Write-Host "  Luk de to nye konsolvinduer efter testen."
