@@ -4,7 +4,7 @@
 Backend token claim expansion is a later stage. This test proves the worker
 accepts, validates and persists explicit time terms, while the already-signed
 approval fingerprint prevents a token from being reused with another zone.
-This stage changes worker request forwarding only, not the signed claim schema.
+This test now exercises the explicit v2 claim schema read by the worker.
 Run: PYTHONPATH=worker python3 tests/worker_schedule_api_time.py
 """
 from __future__ import annotations
@@ -77,7 +77,7 @@ client = TestClient(app)
 def token_for(preview):
     issued_at = int(time.time())
     claims = {
-        "v": 1,
+        "v": 2,
         "nonce": base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("="),
         "device_id": "pixel-6a-t017-api",
         "operation": preview["operation"],
@@ -85,12 +85,13 @@ def token_for(preview):
         "tool": preview["tool"],
         "args": preview["args"],
         "cadence": preview["cadence"],
+        "timezone": preview["timezone"],
+        "misfire_policy": preview["misfire_policy"],
         "ttl_days": preview["ttl_days"],
         "max_runs": preview["max_runs"],
         "enable": preview["enable"],
         "action_fingerprint": preview["action_fingerprint"],
-        # The v1 envelope has no separate timezone claims, but this signed value
-        # is version 2 and already hashes timezone + misfire policy.
+        # v2 carries explicit time terms as well as the canonical fingerprint.
         "approval_fingerprint": preview["approval_fingerprint"],
         "issued_at": issued_at,
         "expires_at": issued_at + 120,

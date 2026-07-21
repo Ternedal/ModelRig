@@ -184,6 +184,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_schedule_api_guard.py`
 - `tests/worker_schedule_api_time.py`
 - `tests/worker_schedule_approval.py`
+- `tests/worker_schedule_approval_time.py`
 - `tests/worker_schedule_lease.py`
 - `tests/worker_schedule_post_execution.py`
 - `tests/worker_schedule_revoke.py`
