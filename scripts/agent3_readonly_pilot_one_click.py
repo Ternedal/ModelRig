@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """One-click Windows operator for the physical T-020 Agent 3 read-only pilot.
 
-The wrapper reuses the existing Stage A checkout, model, token and exact-head
-stack helpers. It never changes normal chat routing, confirms a write, merges,
-pushes, tags, releases or activates production. The only unavoidable operator
-input is the paired device token, entered hidden and kept only in this process.
+The wrapper reuses the existing Stage A checkout, token and exact-head stack
+helpers. It never changes normal chat routing, confirms a write, merges, pushes,
+tags, releases or activates production. The only unavoidable operator input is
+the paired device token, entered hidden and kept only in this process.
 """
 from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -76,6 +78,53 @@ def archive_existing(label: str) -> None:
     stage.note(f"Tidligere pilotrapport er bevaret i {archive}")
 
 
+def ensure_planner_model() -> str:
+    """Select one local chat model; T-020 is fixed to rag=false."""
+    stage.heading("Ollama og planner-model")
+    ollama = shutil.which("ollama")
+    if not ollama:
+        raise PilotOperatorError("Ollama blev ikke fundet på PATH.")
+
+    try:
+        stage.request_json("http://127.0.0.1:11434/api/version")
+    except Exception:
+        stage.note("Starter Ollama...")
+        subprocess.Popen(
+            [ollama, "serve"],
+            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+        )
+        for _ in range(30):
+            time.sleep(1)
+            try:
+                stage.request_json("http://127.0.0.1:11434/api/version")
+                break
+            except Exception:
+                continue
+        else:
+            raise PilotOperatorError("Ollama svarer ikke på http://127.0.0.1:11434.")
+
+    models = stage.ollama_models()
+    configured = os.environ.get("KALIV_AGENT3_PLANNER_MODEL", "").strip()
+    planner = configured if configured in models else ""
+    if not planner:
+        for pattern in ("qwen3:", "gemma3:"):
+            planner = next((name for name in models if name.startswith(pattern)), "")
+            if planner:
+                break
+    if not planner:
+        planner = next((name for name in models if "embed" not in name.lower()), "")
+    if not planner:
+        planner = "qwen3:8b"
+        stage.note("Ingen lokal chatmodel fundet; henter qwen3:8b automatisk...")
+        stage.run([ollama, "pull", planner])
+
+    os.environ["KALIV_AGENT3_PLANNER_MODEL"] = planner
+    os.environ["KALIV_AGENT3_VALIDATION_REPORT"] = str(RIG_REPORT)
+    stage.ok(f"Planner, answer og fallback: {planner}")
+    stage.note("T-020 bruger rag=false; ingen embeddingmodel kræves eller hentes.")
+    return planner
+
+
 def run_rig_validation(planner: str) -> None:
     stage.heading("Frisk Agent 3-rig-validation")
     stage.run(
@@ -95,8 +144,6 @@ def run_rig_validation(planner: str) -> None:
     # The PowerShell runner is the authoritative fail-closed gate: it verifies
     # worker visibility, exact report SHA, developer-preview eligibility and
     # production_activation=false through the authenticated status endpoint.
-    # The persisted evidence file intentionally contains measurements, not that
-    # separate runtime assessment.
     if not read_object(RIG_REPORT):
         raise PilotOperatorError("Rig-validationen bestod, men rapportfilen mangler eller er ugyldig.")
     stage.ok("Rig-validation er frisk, exact-report-bound og eligible for developer preview.")
@@ -144,7 +191,7 @@ def main() -> int:
         prior_sha = candidate.get("git_sha") if isinstance(candidate, dict) else None
         archive_existing("stale" if prior_sha != sha else "failed")
 
-    planner = stage.ensure_models()
+    planner = ensure_planner_model()
     stage.ensure_device_token()
 
     stage.heading("Start exact-head backend og worker")
