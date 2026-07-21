@@ -2,8 +2,9 @@
 
 The scheduler uses single-flight by design: at most one tick may execute in one
 worker process and overlapping callers are rejected before they can claim an
-occurrence.  Queue capacity is deliberately zero, so pressure cannot create an
-unbounded collection of waiting tasks.
+occurrence. Queue capacity is deliberately zero, so pressure cannot create an
+unbounded collection of waiting tasks. The same counters are exposed through
+the existing operator-only scheduler status endpoint.
 """
 from __future__ import annotations
 
