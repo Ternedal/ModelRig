@@ -3,6 +3,7 @@
 
 Stage 3B1 is deliberately read-side only: the worker accepts explicit v2 claims
 while retaining v1 solely for the historical Copenhagen/run_once contract.
+That legacy exception is temporary and is removed only after every issuer uses v2.
 Run: PYTHONPATH=worker python3 tests/worker_schedule_approval_time.py
 """
 from __future__ import annotations
