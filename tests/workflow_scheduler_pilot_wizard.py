@@ -45,6 +45,10 @@ write = {
     "max_runs": 2,
 }
 check(module.BRANCH == "agent/scheduler-m2-pilot-candidate", "wizard is bound to the combined pilot branch")
+check(
+    not (ROOT / ".github/workflows/scheduler-m2-pilot-compose.yml").exists(),
+    "temporary pilot composition workflow is absent",
+)
 check(module.matches_manifest(read, module.READ_SPEC), "read manifest is exact")
 check(
     not module.matches_manifest({**read, "cadence": "every:61"}, module.READ_SPEC),
