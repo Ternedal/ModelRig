@@ -31,12 +31,15 @@ def load(name: str, path: Path):
 
 version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 runbook_path = ROOT / "STAGED_PHYSICAL_PROMOTION.md"
-check(version == "1.58.143", "staged candidate has a strictly newer release version")
+check(version == "1.58.143", "staged candidate has the exact unified release version")
 check(runbook_path.exists(), "one authoritative staged promotion runbook exists")
 
 if runbook_path.exists():
     runbook = runbook_path.read_text(encoding="utf-8")
     required = (
+        "agent/unified-candidate-1.58.143",
+        "draft-PR #150",
+        "v1.58.143",
         "candidate_freeze_check.py",
         "physical_validation_candidate_campaign.py",
         "run-browser-peer-public-validation.ps1",
@@ -53,7 +56,7 @@ if runbook_path.exists():
         "summary.total=7",
         "summary.total=8",
     )
-    check(all(item in runbook for item in required), "runbook contains both complete gate sequences")
+    check(all(item in runbook for item in required), "runbook contains the exact unified candidate and both complete gate sequences")
     check("squash" in runbook and "rebase" in runbook and "mergecommit" in runbook, "runbook forbids SHA-changing integration after candidate evidence")
     check("1.58.142" in runbook and "1.58.143" in runbook, "lifecycle update source and target versions are explicit")
 
