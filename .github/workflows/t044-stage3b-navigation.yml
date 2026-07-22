@@ -4,7 +4,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate-navigation:
@@ -48,10 +48,11 @@ jobs:
             exit 1
           fi
 
-      - name: Upload proven AppUi
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: t044-stage3b-appui
-          path: android/app/src/main/java/dk/ternedal/modelrig/ui/AppUi.kt
-          if-no-files-found: error
-          retention-days: 1
+      - name: Commit proven navigation and remove transport
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "feat(control-center): wire read-only Android screen"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
