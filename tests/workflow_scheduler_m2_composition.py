@@ -33,6 +33,8 @@ check((ROOT / "worker/app/scheduler_single_flight.py").is_file(), "single-flight
 check((ROOT / "tests/worker_scheduler_single_flight_lease.py").is_file(), "cross-process lease composition test is present")
 check((ROOT / "tests/workflow_android_scheduler_picker.py").is_file(), "picker surface contract is present")
 check((ROOT / "android/app/src/test/java/dk/ternedal/modelrig/ui/ScheduleTimeDisplayTest.kt").is_file(), "time display test is present")
+check(not (ROOT / "scripts/compose_scheduler_m2.py").exists(), "temporary composition patcher is absent")
+check(not (ROOT / ".github/workflows/scheduler-m2-compose.yml").exists(), "temporary composition workflow is absent")
 
 print(f"\n===== SCHEDULER M2 COMPOSITION: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
