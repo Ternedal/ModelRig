@@ -22,6 +22,7 @@ class ControlCenterScreenTest {
         assertEquals("Slået fra", controlCenterStateLabel("disabled"))
         assertEquals("Fallback", controlCenterStateLabel("fallback"))
         assertEquals("Utilgængelig", controlCenterStateLabel("unavailable"))
+        assertEquals("Ukendt", controlCenterStateLabel("synthetic-green"))
     }
 
     @Test
@@ -40,6 +41,7 @@ class ControlCenterScreenTest {
         assertEquals("målt for 2 min. siden", controlCenterAgeLabel(125.0))
         assertNull(controlCenterAgeLabel(null))
         assertNull(controlCenterAgeLabel(-1.0))
+        assertNull(controlCenterAgeLabel(Double.NaN))
         assertNull(controlCenterAgeLabel(Double.POSITIVE_INFINITY))
     }
 }
