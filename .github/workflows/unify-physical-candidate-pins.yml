@@ -1,0 +1,129 @@
+name: Unify physical candidate pins
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: ${{ github.head_ref == 'agent/unified-candidate-1.58.143' && github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4.2.2
+        with:
+          fetch-depth: 0
+          ref: agent/unified-candidate-1.58.143
+
+      - name: Move every physical operator to the unified candidate
+        shell: python
+        run: |
+          from pathlib import Path
+
+          branch = "agent/unified-candidate-1.58.143"
+          old_stage = "agent/t032-integration-candidate"
+          old_combined = "agent/combined-physical-pilots-candidate"
+
+          replacements = {
+              "scripts/stage_a_one_click.py": [
+                  (f'BRANCH = "{old_stage}"', f'BRANCH = "{branch}"'),
+                  ('VERSION = "1.58.141"', 'VERSION = "1.58.143"'),
+              ],
+              "scripts/stage_a_physical_operator.py": [
+                  (f'EXPECTED_BRANCH = "{old_stage}"', f'EXPECTED_BRANCH = "{branch}"'),
+                  ('EXPECTED_VERSION = "1.58.141"', 'EXPECTED_VERSION = "1.58.143"'),
+              ],
+              "scripts/agent3_readonly_pilot_one_click.py": [
+                  (f'BRANCH = "{old_combined}"', f'BRANCH = "{branch}"'),
+                  ('VERSION = "1.58.141"', 'VERSION = "1.58.143"'),
+              ],
+              "scripts/scheduler_pilot_wizard.py": [
+                  (f'BRANCH = "{old_combined}"', f'BRANCH = "{branch}"'),
+                  ('VERSION = "1.58.141"', 'VERSION = "1.58.143"'),
+              ],
+              "tests/workflow_stage_a_one_click.py": [
+                  (f'check(wizard.BRANCH == "{old_stage}",', f'check(wizard.BRANCH == "{branch}",'),
+                  ('check(wizard.VERSION == "1.58.141", "wizard is pinned to version 1.58.141")',
+                   'check(wizard.VERSION == "1.58.143", "wizard is pinned to version 1.58.143")'),
+              ],
+              "tests/workflow_stage_a_physical_operator.py": [
+                  (f'check(module.EXPECTED_BRANCH == "{old_stage}",', f'check(module.EXPECTED_BRANCH == "{branch}",'),
+                  ('check(module.EXPECTED_VERSION == "1.58.141",', 'check(module.EXPECTED_VERSION == "1.58.143",'),
+                  ('"version": "1.58.141",', '"version": "1.58.143",'),
+              ],
+              "tests/workflow_agent3_readonly_pilot_one_click.py": [
+                  (f'check(module.BRANCH == "{old_combined}",', f'check(module.BRANCH == "{branch}",'),
+                  ('check(module.VERSION == "1.58.141", "operator is pinned to version 1.58.141")',
+                   'check(module.VERSION == "1.58.143", "operator is pinned to version 1.58.143")'),
+              ],
+              "tests/workflow_scheduler_pilot_wizard.py": [
+                  (f'check(module.BRANCH == "{old_combined}", "wizard is bound to the combined physical branch")',
+                   f'check(module.BRANCH == "{branch}", "wizard is bound to the unified candidate branch")\ncheck(module.VERSION == "1.58.143", "wizard is bound to candidate version 1.58.143")'),
+              ],
+              "tests/workflow_staged_promotion_runbook.py": [
+                  ('check(version == "1.58.141",', 'check(version == "1.58.143",'),
+                  ('check("1.58.140" in runbook and "1.58.141" in runbook,',
+                   'check("1.58.142" in runbook and "1.58.143" in runbook,'),
+                  ('"all lockstep version sites match 1.58.141"',
+                   '"all lockstep version sites match 1.58.143"'),
+              ],
+          }
+
+          for name, pairs in replacements.items():
+              path = Path(name)
+              text = path.read_text(encoding="utf-8")
+              for old, new in pairs:
+                  count = text.count(old)
+                  if count != 1:
+                      raise SystemExit(f"{name}: expected exactly one {old!r}, found {count}")
+                  text = text.replace(old, new)
+              path.write_text(text, encoding="utf-8", newline="")
+
+          runbook = Path("STAGED_PHYSICAL_PROMOTION.md")
+          text = runbook.read_text(encoding="utf-8")
+          for old, new in (
+              (old_stage, branch),
+              ("1.58.140", "1.58.142"),
+              ("1.58.141", "1.58.143"),
+              ("draft-PR #125", "draft-PR #150"),
+          ):
+              count = text.count(old)
+              if count < 1:
+                  raise SystemExit(f"STAGED_PHYSICAL_PROMOTION.md: missing {old!r}")
+              text = text.replace(old, new)
+          runbook.write_text(text, encoding="utf-8", newline="")
+
+          selected = [Path(name) for name in replacements] + [runbook]
+          for path in selected:
+              text = path.read_text(encoding="utf-8")
+              for stale in (old_stage, old_combined):
+                  if stale in text:
+                      raise SystemExit(f"{path}: stale branch remains: {stale}")
+          for path in selected:
+              text = path.read_text(encoding="utf-8")
+              if "1.58.141" in text or "1.58.140" in text:
+                  raise SystemExit(f"{path}: stale candidate lifecycle version remains")
+
+      - name: Run focused promotion contracts
+        run: |
+          python tests/workflow_stage_a_one_click.py
+          python tests/workflow_stage_a_physical_operator.py
+          python tests/workflow_agent3_readonly_pilot_one_click.py
+          python tests/workflow_scheduler_pilot_wizard.py
+          python tests/workflow_staged_promotion_runbook.py
+
+      - name: Commit the unified operator chain and remove this workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/unify-physical-candidate-pins.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add STAGED_PHYSICAL_PROMOTION.md scripts tests
+          git status --short
+          git commit -m "fix(promotion): bind physical operators to unified 1.58.143 candidate"
+          git push origin HEAD:agent/unified-candidate-1.58.143
