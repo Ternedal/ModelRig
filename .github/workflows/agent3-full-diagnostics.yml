@@ -26,7 +26,9 @@ jobs:
         run: pip install -r worker/requirements.txt --break-system-packages
 
       - name: Apply protected MemoryStore stage
-        run: python3 scripts/t033_stage3_store.py
+        run: |
+          python3 scripts/t033_stage3_store.py
+          python3 scripts/t033_stage3_imports.py
 
       - name: Remove transport and restore ordinary workflow
         shell: bash
@@ -34,7 +36,7 @@ jobs:
           set -euo pipefail
           git fetch --no-tags --depth=1 origin 7ebecbd0f62818218ddd25385379f5c38b6413ca
           git show 7ebecbd0f62818218ddd25385379f5c38b6413ca:.github/workflows/agent3-full-diagnostics.yml > .github/workflows/agent3-full-diagnostics.yml
-          rm -f scripts/t033_stage3_store.py
+          rm -f scripts/t033_stage3_store.py scripts/t033_stage3_imports.py
 
       - name: Regenerate authoritative current state
         run: python3 scripts/current_state.py
@@ -83,8 +85,9 @@ jobs:
         run: |
           set -euo pipefail
           test ! -e scripts/t033_stage3_store.py
+          test ! -e scripts/t033_stage3_imports.py
           git diff --check
-          allowed='^(\.github/workflows/ci\.yml|CURRENT_STATE\.md|worker/app/agent3/memory\.py|worker/app/agent3/memory_protection\.py|worker/app/agent3/memory_dpapi\.py|tests/support_memory_protector\.py|tests/worker_agent3_memory_protection\.py|tests/worker_agent3_memory_dpapi\.py|tests/worker_agent3_memory_storage_protection\.py|tests/worker_agent3_memory\.py|tests/worker_agent3_memory_context\.py|tests/worker_agent3_memory_api\.py|tests/worker_agent3_planner_memory\.py)$'
+          allowed='^(\.github/workflows/ci\.yml|CURRENT_STATE\.md|worker/app/agent3/memory\.py|worker/app/agent3/memory_protection\.py|worker/app/agent3/memory_dpapi\.py|tests/helpers/__init__\.py|tests/helpers/memory_protector\.py|tests/worker_agent3_memory_protection\.py|tests/worker_agent3_memory_dpapi\.py|tests/worker_agent3_memory_storage_protection\.py|tests/worker_agent3_memory\.py|tests/worker_agent3_memory_context\.py|tests/worker_agent3_memory_api\.py|tests/worker_agent3_planner_memory\.py)$'
           unexpected=$(git diff --name-only 7ebecbd0f62818218ddd25385379f5c38b6413ca | grep -Ev "$allowed" || true)
           if [ -n "$unexpected" ]; then
             echo "Unexpected T-033 paths:"
