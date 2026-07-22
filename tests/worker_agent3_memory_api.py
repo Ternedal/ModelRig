@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.agent3.memory import MemoryStore
+from helpers.memory_protector import TestMemoryProtector
 from app.agent3.memory_api import build_memory_router
 
 passed = failed = 0
@@ -23,7 +24,10 @@ def check(cond, name):
         print(f"  FAIL: {name}")
 
 
-store = MemoryStore(os.path.join(tempfile.mkdtemp(prefix="agent3-memory-api-"), "memory.db"))
+store = MemoryStore(
+    os.path.join(tempfile.mkdtemp(prefix="agent3-memory-api-"), "memory.db"),
+    protector=TestMemoryProtector(),
+)
 app = FastAPI()
 app.include_router(build_memory_router(store))
 client = TestClient(app)

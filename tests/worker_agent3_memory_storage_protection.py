@@ -7,7 +7,7 @@ import tempfile
 
 from app.agent3.memory import MemoryStore, MemoryStoreError
 from app.agent3.memory_protection import PREFIX
-from support_memory_protector import TestMemoryProtector
+from helpers.memory_protector import TestMemoryProtector
 
 passed = failed = 0
 

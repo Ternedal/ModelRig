@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from app.agent3.core import Agent3Orchestrator, AgentRunStore
 from app.agent3.integration import V2ToolAdapter
 from app.agent3.memory import MemoryStore
+from helpers.memory_protector import TestMemoryProtector
 from app.agent3.plan_store import PlanStore
 from app.agent3.planner import TypedPlanner, build_planner_router
 # The planner now plans against a rig it MEASURES (F-302, completed in 1.58.73:
@@ -87,7 +88,10 @@ async def planned(messages, _model):
 
 
 root = tempfile.mkdtemp(prefix="agent3-planner-memory-")
-memory_store = MemoryStore(os.path.join(root, "memory.db"))
+memory_store = MemoryStore(
+    os.path.join(root, "memory.db"),
+    protector=TestMemoryProtector(),
+)
 public = memory_store.create(
     subject="modelrig",
     predicate="gpu",
