@@ -36,6 +36,14 @@ def load_module():
 
 check(SCRIPT.is_file(), "combined Python operator exists")
 check(CMD.is_file(), "combined double-click launcher exists")
+check(
+    not (ROOT / ".github/workflows/combined-physical-pilots-compose.yml").exists(),
+    "temporary composition workflow is absent",
+)
+check(
+    not (ROOT / ".github/workflows/combined-pilot-entrypoint-finalize.yml").exists(),
+    "temporary entrypoint workflow is absent",
+)
 source = SCRIPT.read_text(encoding="utf-8")
 cmd = CMD.read_text(encoding="utf-8")
 agent_source = AGENT.read_text(encoding="utf-8")
@@ -68,9 +76,11 @@ finally:
 check(calls == [str(AGENT), str(SCHEDULER)], "both pilots run once in the safe order")
 
 calls.clear()
+
 def fail_first(args, **kwargs):
     calls.append(str(args[1]))
     return SimpleNamespace(returncode=7)
+
 module.subprocess.run = fail_first
 try:
     check(module.main() == 7, "first pilot failure is propagated")
