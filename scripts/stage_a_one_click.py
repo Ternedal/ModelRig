@@ -27,8 +27,8 @@ os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[1]
-BRANCH = "agent/t032-integration-candidate"
-VERSION = "1.58.141"
+BRANCH = "agent/unified-candidate-1.58.143"
+VERSION = "1.58.143"
 VALIDATION = ROOT / "validation"
 STATE_PATH = VALIDATION / "stage-a-easy-state.json"
 CAMPAIGN_PATH = VALIDATION / "physical-validation-candidate-campaign-latest.json"

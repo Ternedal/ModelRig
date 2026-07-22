@@ -63,8 +63,8 @@ check("def ensure_planner_model" in script_text, "operator owns a planner-only m
 check("nomic-embed-text" not in script_text, "read-only pilot never requires the embedding model")
 
 module = load_module()
-check(module.BRANCH == "agent/combined-physical-pilots-candidate", "operator is pinned to the combined physical branch")
-check(module.VERSION == "1.58.141", "operator is pinned to version 1.58.141")
+check(module.BRANCH == "agent/unified-candidate-1.58.143", "operator is pinned to the combined physical branch")
+check(module.VERSION == "1.58.143", "operator is pinned to version 1.58.143")
 sha = "a" * 40
 good = passing_report(module, sha)
 check(module.report_passes(good, sha), "exact-SHA 20/20 report passes")

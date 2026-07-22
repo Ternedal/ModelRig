@@ -26,8 +26,8 @@ from typing import Any, Mapping, Sequence
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_BRANCH = "agent/t032-integration-candidate"
-EXPECTED_VERSION = "1.58.141"
+EXPECTED_BRANCH = "agent/unified-candidate-1.58.143"
+EXPECTED_VERSION = "1.58.143"
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 MAX_JSON_BYTES = 32 * 1024 * 1024
 

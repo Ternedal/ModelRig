@@ -30,8 +30,8 @@ os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[1]
-BRANCH = "agent/combined-physical-pilots-candidate"
-VERSION = "1.58.141"
+BRANCH = "agent/unified-candidate-1.58.143"
+VERSION = "1.58.143"
 WORKER_URL = "http://127.0.0.1:8099"
 BACKEND_URL = "http://127.0.0.1:8080"
 VALIDATION = ROOT / "validation"

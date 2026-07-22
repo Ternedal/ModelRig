@@ -89,8 +89,8 @@ for ignored in (
     check(ignored in ignore_text, f"local artifact is ignored: {ignored}")
 
 wizard = load("stage_a_one_click_contract", wizard_path)
-check(wizard.BRANCH == "agent/t032-integration-candidate", "wizard is pinned to the candidate branch")
-check(wizard.VERSION == "1.58.141", "wizard is pinned to version 1.58.141")
+check(wizard.BRANCH == "agent/unified-candidate-1.58.143", "wizard is pinned to the candidate branch")
+check(wizard.VERSION == "1.58.143", "wizard is pinned to version 1.58.143")
 check(
     wizard.PROOFS == ("preflight", "agent3", "model_eval", "voice", "rag", "scheduler_pilot"),
     "wizard uses the exact six-proof allowlist",

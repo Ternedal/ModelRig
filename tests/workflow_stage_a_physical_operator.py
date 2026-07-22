@@ -39,8 +39,8 @@ module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
-check(module.EXPECTED_BRANCH == "agent/t032-integration-candidate", "candidate branch is pinned")
-check(module.EXPECTED_VERSION == "1.58.141", "candidate version is pinned")
+check(module.EXPECTED_BRANCH == "agent/unified-candidate-1.58.143", "candidate branch is pinned")
+check(module.EXPECTED_VERSION == "1.58.143", "candidate version is pinned")
 check(module.PROOF_NAMES == (
     "preflight",
     "agent3",
@@ -59,7 +59,7 @@ check(refuses(lambda: module._validate_url("https://example.com/#frag"), "fragme
 check(refuses(lambda: module._validate_url(" https://example.com/"), "spaces"), "surrounding spaces are rejected")
 
 identity = {
-    "version": "1.58.141",
+    "version": "1.58.143",
     "git_sha": "a" * 40,
     "code_sha256": "b" * 64,
     "working_tree_clean": True,

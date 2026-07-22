@@ -50,7 +50,8 @@ write = {
     "timezone": "Europe/Copenhagen",
     "misfire_policy": "run_once",
 }
-check(module.BRANCH == "agent/combined-physical-pilots-candidate", "wizard is bound to the combined physical branch")
+check(module.BRANCH == "agent/unified-candidate-1.58.143", "wizard is bound to the unified candidate branch")
+check(module.VERSION == "1.58.143", "wizard is bound to candidate version 1.58.143")
 check(
     not (ROOT / ".github/workflows/scheduler-m2-pilot-compose.yml").exists(),
     "temporary pilot composition workflow is absent",

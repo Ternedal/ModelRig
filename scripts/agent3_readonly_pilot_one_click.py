@@ -24,8 +24,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import stage_a_one_click as stage  # noqa: E402
 
-BRANCH = "agent/combined-physical-pilots-candidate"
-VERSION = "1.58.141"
+BRANCH = "agent/unified-candidate-1.58.143"
+VERSION = "1.58.143"
 BASE_URL = "http://127.0.0.1:8080"
 VALIDATION = ROOT / "validation"
 REPORT_PATH = VALIDATION / "agent3-readonly-pilot-latest.json"

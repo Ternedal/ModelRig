@@ -31,7 +31,7 @@ def load(name: str, path: Path):
 
 version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 runbook_path = ROOT / "STAGED_PHYSICAL_PROMOTION.md"
-check(version == "1.58.141", "staged candidate has a strictly newer release version")
+check(version == "1.58.143", "staged candidate has a strictly newer release version")
 check(runbook_path.exists(), "one authoritative staged promotion runbook exists")
 
 if runbook_path.exists():
@@ -55,7 +55,7 @@ if runbook_path.exists():
     )
     check(all(item in runbook for item in required), "runbook contains both complete gate sequences")
     check("squash" in runbook and "rebase" in runbook and "mergecommit" in runbook, "runbook forbids SHA-changing integration after candidate evidence")
-    check("1.58.140" in runbook and "1.58.141" in runbook, "lifecycle update source and target versions are explicit")
+    check("1.58.142" in runbook and "1.58.143" in runbook, "lifecycle update source and target versions are explicit")
 
 version_check = subprocess.run(
     [sys.executable, "scripts/version_tool.py", "check"],
@@ -63,7 +63,7 @@ version_check = subprocess.run(
     capture_output=True,
     text=True,
 )
-check(version_check.returncode == 0, "all lockstep version sites match 1.58.141")
+check(version_check.returncode == 0, "all lockstep version sites match 1.58.143")
 
 device = (ROOT / "DEVICE_TEST.md").read_text(encoding="utf-8")
 physical = (ROOT / "PHYSICAL_VALIDATION_CAMPAIGN.md").read_text(encoding="utf-8")
