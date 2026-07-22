@@ -40,11 +40,24 @@ jobs:
       - name: Focused migration contracts
         env:
           PYTHONPATH: worker
+        shell: bash
         run: |
-          python3 tests/worker_agent3_memory_migration.py
-          python3 tests/worker_agent3_memory_storage_protection.py
-          python3 tests/worker_agent3_memory_protection.py
-          python3 tests/worker_agent3_memory_dpapi.py
+          set -o pipefail
+          : > /tmp/t033-focused.log
+          status=0
+          for f in \
+            tests/worker_agent3_memory_migration.py \
+            tests/worker_agent3_memory_storage_protection.py \
+            tests/worker_agent3_memory_protection.py \
+            tests/worker_agent3_memory_dpapi.py; do
+            echo "===== $f =====" | tee -a /tmp/t033-focused.log
+            python3 "$f" 2>&1 | tee -a /tmp/t033-focused.log || {
+              status=${PIPESTATUS[0]}
+              echo "FAILED: $f (exit $status)" | tee -a /tmp/t033-focused.log
+              break
+            }
+          done
+          exit "$status"
 
       - name: Build backend
         run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
@@ -88,11 +101,13 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: Upload failure log
+      - name: Upload failure logs
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: t033-migration-failure
-          path: /tmp/modelrig-full-test.log
+          path: |
+            /tmp/t033-focused.log
+            /tmp/modelrig-full-test.log
           if-no-files-found: warn
           retention-days: 1
