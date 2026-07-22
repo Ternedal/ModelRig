@@ -62,6 +62,6 @@ jobs:
           git add VERSION ACTIVATION_READINESS.md CURRENT_STATE.md \
             android/app/build.gradle.kts backend/internal/config/config.go \
             desktop/composeApp/build.gradle.kts worker/app/main.py
-          git diff --cached --check
+          git status --short
           git commit -m "v1.58.143: unified current-main candidate [version-bump-bot]"
           git push origin HEAD:agent/unified-candidate-1.58.143
