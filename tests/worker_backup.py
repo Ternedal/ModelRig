@@ -10,6 +10,7 @@ Run: PYTHONPATH=worker python3 tests/worker_backup.py
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import sqlite3
 import sys
@@ -21,10 +22,13 @@ _root = tempfile.mkdtemp(prefix="kaliv-backup-test-")
 os.environ["MODELRIG_DB"] = os.path.join(_root, "rag.db")
 os.environ["MODELRIG_DATA_PATH"] = os.path.join(_root, "data.json")
 os.environ["KALIV_AUDIT_DB"] = os.path.join(_root, "audit.db")
+os.environ["KALIV_AGENT3_MEMORY_DB"] = os.path.join(_root, "agent3-memory.db")
 os.environ["KALIV_TOOLS_STATE"] = os.path.join(_root, "tools-state.json")
 os.environ["KALIV_TOOLS_DIR"] = os.path.join(_root, "notes")
 
 from app import backup  # noqa: E402
+from app.agent3.memory import MemoryStore  # noqa: E402
+from helpers.memory_protector import TestMemoryProtector  # noqa: E402
 
 passed = failed = 0
 
@@ -38,7 +42,7 @@ def check(cond, name):
 
 
 def seed():
-    """Write realistic state: a sqlite db with rows, a json file, a notes dir."""
+    """Write realistic state, including protected memory in a live WAL DB."""
     con = sqlite3.connect(os.environ["MODELRIG_DB"])
     con.execute("CREATE TABLE docs (id INTEGER PRIMARY KEY, body TEXT)")
     con.executemany("INSERT INTO docs (body) VALUES (?)",
@@ -60,13 +64,42 @@ def seed():
     with open(os.path.join(sub, "deep.md"), "w", encoding="utf-8") as f:
         f.write("nested\n")
 
+    protector = TestMemoryProtector()
+    memory = MemoryStore(os.environ["KALIV_AGENT3_MEMORY_DB"], protector=protector)
+    record = memory.create(
+        subject="anders",
+        predicate="backup-test",
+        value="privat-backup-værdi-7431",
+        sensitivity="private",
+        source_type="user_explicit",
+        source_ref="backup:test-private-source",
+        review_status="confirmed",
+    )
+    # Keep the writer open: backup must include committed WAL state, not merely
+    # whatever happened to be checkpointed into the main database file.
+    with sqlite3.connect(os.environ["KALIV_AGENT3_MEMORY_DB"]) as raw:
+        store_scope = raw.execute(
+            "SELECT value FROM agent_memory_meta WHERE key='store_scope'"
+        ).fetchone()[0]
+    return memory, protector, record.id, store_scope
+
+
+def _sqlite_logical_sha(path: str) -> str:
+    con = sqlite3.connect(f"file:{os.path.abspath(path)}?mode=ro", uri=True)
+    try:
+        payload = "\n".join(con.iterdump()).encode("utf-8")
+    finally:
+        con.close()
+    return hashlib.sha256(payload).hexdigest()
+
 
 def snapshot() -> dict:
-    """sha256 of every persistent file, for a byte-for-byte before/after."""
-    import hashlib
+    """Digest every persistent item; SQLite items use logical WAL-aware state."""
     out = {}
     for it in backup.items():
-        if it.kind == "file" and os.path.exists(it.path):
+        if it.kind == "sqlite" and os.path.exists(it.path):
+            out[it.key] = _sqlite_logical_sha(it.path)
+        elif it.kind == "file" and os.path.exists(it.path):
             out[it.key] = hashlib.sha256(open(it.path, "rb").read()).hexdigest()
         elif it.kind == "dir" and os.path.isdir(it.path):
             for f in backup._walk(it.path):
@@ -78,26 +111,42 @@ def snapshot() -> dict:
 def wipe():
     import shutil
     for it in backup.items():
-        if it.kind == "file" and os.path.exists(it.path):
+        if it.kind in {"file", "sqlite"} and os.path.exists(it.path):
             os.remove(it.path)
         elif it.kind == "dir" and os.path.isdir(it.path):
             shutil.rmtree(it.path)
 
 
 # --- the round trip ---------------------------------------------------------
-seed()
+memory_store, memory_protector, memory_id, memory_scope = seed()
 before = snapshot()
-check(len(before) >= 5, "seed: real state exists (db, json, state, 2 notes)")
+check(len(before) >= 6, "seed: real state exists, including protected memory")
 
 archive = backup.create(os.path.join(_root, "backups"))
 check(os.path.exists(archive), "create: archive written")
 check(archive.endswith(".tar.gz"), "create: archive is a gzip tarball")
 check(not os.path.exists(archive + ".tmp"), "create: no leftover temp file")
 
+with tarfile.open(archive, "r:gz") as tar:
+    member = tar.extractfile("data/agent3-memory.db")
+    memory_backup_bytes = member.read() if member else b""
+check(bool(memory_backup_bytes), "create: protected memory SQLite snapshot is included")
+check(
+    b"privat-backup-v" + bytes([0xc3, 0xa6]) + b"rdi-7431" not in memory_backup_bytes,
+    "create: memory backup contains no private plaintext",
+)
+check(
+    b"backup:test-private-source" not in memory_backup_bytes,
+    "create: memory backup contains no private provenance plaintext",
+)
+
 v = backup.verify(archive)
 check(v["ok"], "verify: a fresh backup passes its own hashes")
 check(v["checked"] == len(before), "verify: every seeded file is in the archive")
 
+# Close only after create: the successful restore below proves the online backup
+# captured the committed row while the original WAL connection was alive.
+memory_store.close()
 wipe()
 check(snapshot() == {}, "wipe: live state is gone")
 
@@ -105,13 +154,30 @@ res = backup.restore(archive)
 check(len(res["restored"]) == len(before), "restore: every file came back")
 
 after = snapshot()
-check(after == before, "restore: byte-for-byte identical to before  <-- the V7 exit criterion")
+check(after == before, "restore: logical state is identical to before")
 
-# The restored sqlite db is not just bytes -- it still opens and has its rows.
+# The restored sqlite databases are not just bytes -- they still open and retain
+# both ordinary rows and DPAPI/envelope scope identity.
 con = sqlite3.connect(os.environ["MODELRIG_DB"])
 n = con.execute("SELECT count(*) FROM docs").fetchone()[0]
 con.close()
-check(n == 200, "restore: the sqlite db still opens and has all 200 rows")
+check(n == 200, "restore: the RAG sqlite db still opens and has all 200 rows")
+
+restored_memory = MemoryStore(
+    os.environ["KALIV_AGENT3_MEMORY_DB"],
+    protector=memory_protector,
+)
+restored_record = restored_memory.get(memory_id)
+check(
+    restored_record.value == "privat-backup-værdi-7431",
+    "restore: same protector opens the latest WAL-backed private memory",
+)
+with sqlite3.connect(os.environ["KALIV_AGENT3_MEMORY_DB"]) as raw:
+    restored_scope = raw.execute(
+        "SELECT value FROM agent_memory_meta WHERE key='store_scope'"
+    ).fetchone()[0]
+check(restored_scope == memory_scope, "restore: protected database store_scope is preserved")
+restored_memory.close()
 
 # --- failure modes ----------------------------------------------------------
 
