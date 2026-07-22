@@ -73,6 +73,9 @@ kaliv-tools-state.json.tmp
 /validation/stage-a-easy-state.json
 /validation/stage-a-runtime/
 /validation/archive/
+/validation/scheduler-pilot-easy-state.json
+/validation/scheduler-pilot-easy-state.json.tmp
+/validation/scheduler-pilot-worker.log
 
 # Browser peer public validation: plans are one-use local authorization artifacts;
 # rolling reports contain rig/network observations. Only manually reviewed, dated
