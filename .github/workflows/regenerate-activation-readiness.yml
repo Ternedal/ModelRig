@@ -1,0 +1,39 @@
+name: Regenerate activation readiness
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    if: ${{ github.head_ref == 'agent/unified-candidate-1.58.143' && github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4.2.2
+        with:
+          fetch-depth: 0
+          ref: agent/unified-candidate-1.58.143
+
+      - name: Install worker dependencies
+        run: python -m pip install -r worker/requirements.txt
+
+      - name: Regenerate and verify readiness page
+        run: |
+          python scripts/activation_readiness.py
+          python scripts/activation_readiness.py --check
+
+      - name: Commit generated readiness page
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ACTIVATION_READINESS.md
+          git status --short
+          git commit -m "docs(readiness): regenerate unified candidate state [readiness-bot]"
+          git push origin HEAD:agent/unified-candidate-1.58.143
