@@ -13,6 +13,9 @@ WHAT IS IN A BACKUP, and why each one hurts to lose:
                   means re-pairing every device.
   audit.db        the append-only tool audit log. It is a security record;
                   losing it is losing the answer to "what did Kaliv do".
+  agent3-memory   protected long-term memory, including its database-scoped
+                  encryption identity. Losing the scope makes protected rows
+                  unreadable even for the same Windows user.
   tools-state     the kill-switch decision (v1.28.0). Losing it re-arms the
                   layer from the env default -- exactly the surprise that
                   persistence was added to prevent.
@@ -38,8 +41,10 @@ import hashlib
 import io
 import json
 import os
+import sqlite3
 import sys
 import tarfile
+import tempfile
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -55,13 +60,21 @@ from . import tools as _tools  # noqa: E402
 class Item:
     key: str          # stable name inside the archive
     path: str         # absolute source path on the rig
-    kind: str         # "file" or "dir"
+    kind: str         # "file", "dir" or "sqlite"
     required: bool    # a missing required item aborts restore; optional is fine
 
 
 def _rag_db() -> str:
     from . import paths as _paths
     return _paths.resolve("./modelrig-rag.db", env="MODELRIG_DB")
+
+
+def _agent3_memory_db() -> str:
+    from . import paths as _paths
+    return _paths.resolve(
+        "./kaliv-agent3-memory.db",
+        env="KALIV_AGENT3_MEMORY_DB",
+    )
 
 
 def _backend_data() -> str:
@@ -84,8 +97,28 @@ def items() -> list[Item]:
     return [
         Item("rag.db", _rag_db(), "file", required=False),
         Item("data.json", _backend_data(), "file", required=False),
-        Item("audit.db", __import__("app.paths", fromlist=["resolve"]).resolve("./kaliv-audit.db", env="KALIV_AUDIT_DB"), "file", required=False),
-        Item("tools-state.json", __import__("app.paths", fromlist=["resolve"]).resolve("./kaliv-tools-state.json", env="KALIV_TOOLS_STATE"), "file", required=False),
+        Item(
+            "audit.db",
+            __import__("app.paths", fromlist=["resolve"]).resolve(
+                "./kaliv-audit.db", env="KALIV_AUDIT_DB"
+            ),
+            "file",
+            required=False,
+        ),
+        Item(
+            "agent3-memory.db",
+            _agent3_memory_db(),
+            "sqlite",
+            required=False,
+        ),
+        Item(
+            "tools-state.json",
+            __import__("app.paths", fromlist=["resolve"]).resolve(
+                "./kaliv-tools-state.json", env="KALIV_TOOLS_STATE"
+            ),
+            "file",
+            required=False,
+        ),
         Item("notes", _tools.tools_dir(), "dir", required=False),
     ]
 
@@ -110,6 +143,27 @@ def _walk(path: str) -> list[str]:
     return sorted(out)
 
 
+def _sqlite_snapshot(source: str, destination: str) -> None:
+    """Create a transactionally consistent SQLite snapshot, including WAL data.
+
+    Copying only the main file while a WAL connection is live can silently omit
+    committed rows. SQLite's online backup API reads the complete logical
+    database and writes one self-contained file suitable for restore.
+    """
+    os.makedirs(os.path.dirname(os.path.abspath(destination)), exist_ok=True)
+    source_uri = f"file:{os.path.abspath(source)}?mode=ro"
+    src = sqlite3.connect(source_uri, uri=True)
+    dst = sqlite3.connect(destination)
+    try:
+        src.backup(dst)
+        dst.commit()
+    except sqlite3.Error as exc:
+        raise ValueError(f"could not snapshot SQLite backup item: {source}") from exc
+    finally:
+        dst.close()
+        src.close()
+
+
 def create(out_dir: str = ".") -> str:
     """Write a timestamped archive. Returns its path."""
     os.makedirs(out_dir, exist_ok=True)
@@ -121,29 +175,40 @@ def create(out_dir: str = ".") -> str:
     # Build the archive in a temp path, then atomically rename: a reader must
     # never see a half-written backup and mistake it for a whole one.
     tmp = archive + ".tmp"
-    with tarfile.open(tmp, "w:gz") as tar:
-        for it in items():
-            if it.kind == "file":
-                if not os.path.exists(it.path):
-                    continue
-                digest = _sha256_file(it.path)
-                manifest["files"][it.key] = {"sha256": digest, "kind": "file"}
-                tar.add(it.path, arcname=f"data/{it.key}")
-            else:  # dir
-                if not os.path.isdir(it.path):
-                    continue
-                filed: dict = {}
-                for f in _walk(it.path):
-                    rel = os.path.relpath(f, it.path)
-                    arc = f"data/{it.key}/{rel}"
-                    filed[rel] = _sha256_file(f)
-                    tar.add(f, arcname=arc)
-                manifest["files"][it.key] = {"kind": "dir", "files": filed}
+    with tempfile.TemporaryDirectory(prefix="kaliv-backup-snapshots-") as snapshot_dir:
+        with tarfile.open(tmp, "w:gz") as tar:
+            for it in items():
+                if it.kind in {"file", "sqlite"}:
+                    if not os.path.exists(it.path):
+                        continue
+                    source = it.path
+                    if it.kind == "sqlite":
+                        source = os.path.join(snapshot_dir, it.key)
+                        _sqlite_snapshot(it.path, source)
+                    digest = _sha256_file(source)
+                    manifest["files"][it.key] = {
+                        "sha256": digest,
+                        "kind": "file",
+                    }
+                    tar.add(source, arcname=f"data/{it.key}")
+                else:  # dir
+                    if not os.path.isdir(it.path):
+                        continue
+                    filed: dict = {}
+                    for f in _walk(it.path):
+                        rel = os.path.relpath(f, it.path)
+                        arc = f"data/{it.key}/{rel}"
+                        filed[rel] = _sha256_file(f)
+                        tar.add(f, arcname=arc)
+                    manifest["files"][it.key] = {
+                        "kind": "dir",
+                        "files": filed,
+                    }
 
-        payload = json.dumps(manifest, indent=2, sort_keys=True).encode()
-        info = tarfile.TarInfo("manifest.json")
-        info.size = len(payload)
-        tar.addfile(info, io.BytesIO(payload))
+            payload = json.dumps(manifest, indent=2, sort_keys=True).encode()
+            info = tarfile.TarInfo("manifest.json")
+            info.size = len(payload)
+            tar.addfile(info, io.BytesIO(payload))
 
     os.replace(tmp, archive)
     return archive
@@ -214,7 +279,9 @@ def restore(archive: str, force: bool = False) -> dict:
     """
     check = verify(archive)
     if not check["ok"]:
-        raise ValueError(f"archive failed verification, refusing to restore: {check['problems']}")
+        raise ValueError(
+            f"archive failed verification, refusing to restore: {check['problems']}"
+        )
 
     manifest = _read_manifest(archive)
     targets = {it.key: it for it in items()}
@@ -228,7 +295,9 @@ def restore(archive: str, force: bool = False) -> dict:
                 clashes.append(it.path)
         if clashes:
             raise FileExistsError(
-                "these already exist (use --force to overwrite): " + ", ".join(clashes))
+                "these already exist (use --force to overwrite): "
+                + ", ".join(clashes)
+            )
 
     restored: list[str] = []
     with tarfile.open(archive, "r:gz") as tar:
