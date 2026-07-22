@@ -139,6 +139,16 @@ def run_in(repo, token=None, api=None):
         os.environ.update(old_env)
 
 
+# --- git-absence regression: on a rig with NO git installed, _run must not
+# crash -- it returns 127 so the gitless fallback triggers. This is the exact
+# failure that stopped the operator's first real rig-day run: git rev-parse
+# raised FileNotFoundError before the fallback could run.
+_rc_missing, _out_missing = fc._run("definitely-not-a-real-binary-zzz", "x")
+check(_rc_missing == 127 and _out_missing == "",
+      "_run returns 127 (not a crash) when the executable is absent -- a "
+      "gitless rig without git installed falls back cleanly instead of dying")
+
+
 # --- F-1005: no token means NOT FROZEN -- the evidence IS the freeze ---------
 _clean = _make_repo(clean=True)
 _code, _out = run_in(_clean, token=None)

@@ -203,6 +203,15 @@ den valgte rig-model, og voice-cloud har sin EGEN model (voiceCloudModel,
 v1.52.0). **Tjek routing-striben** under headeren: den viser altid hvilken
 model der svarer tekst og tale, og om cloud er i spil.
 
+## freeze_check/rig_preflight crasher med FileNotFoundError paa "git"
+
+Rettet i 1.58.142. Paa en rig UDEN git installeret (normaltilfaeldet:
+kilder kommer som ZIP) kastede `git rev-parse HEAD` en FileNotFoundError,
+der crashede gaten foer gitless-fallbacken kunne udloese. `_run` og
+preflights identitetstjek fanger nu manglende git-binary og behandler det
+som gitless (127 -> API-baseret identitet). Ingen handling paa riggen; brug
+1.58.142+.
+
 ## freeze_check siger "NOT release commit" eller afviser attestationen
 
 Træ-bindingen (1.58.132) sammenligner HVER committet fil i det udpakkede

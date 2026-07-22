@@ -90,7 +90,16 @@ def _load_frozen_attestation():
 
 
 def _run(*args: str) -> tuple[int, str]:
-    p = subprocess.run(args, capture_output=True, text=True)
+    # A missing executable raises FileNotFoundError -- on a gitless rig (the
+    # normal case: sources arrive as a ZIP, git is not installed) the very
+    # first `git rev-parse HEAD` would otherwise crash the whole gate before
+    # the gitless fallback could trigger. Treat "command not found" as a
+    # nonzero exit (127, the shell convention) so the caller falls back
+    # cleanly instead of dying.
+    try:
+        p = subprocess.run(args, capture_output=True, text=True)
+    except FileNotFoundError:
+        return 127, ""
     return p.returncode, (p.stdout or p.stderr).strip()
 
 
