@@ -30,7 +30,7 @@ os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[1]
-BRANCH = "agent/scheduler-m2-pilot-candidate"
+BRANCH = "agent/combined-physical-pilots-candidate"
 VERSION = "1.58.141"
 WORKER_URL = "http://127.0.0.1:8099"
 BACKEND_URL = "http://127.0.0.1:8080"

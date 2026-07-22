@@ -225,6 +225,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_physical_validation_campaign.py`
 - `tests/workflow_physical_validation_final_gate.py`
 - `tests/workflow_release.py`
+- `tests/workflow_remaining_physical_pilots.py`
 - `tests/workflow_rig_preflight.py`
 - `tests/workflow_scheduler_m2_composition.py`
 - `tests/workflow_scheduler_pilot_wizard.py`
