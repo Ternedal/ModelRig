@@ -75,6 +75,7 @@ check(private_row["schema_version"] == 2, "private row records protected schema 
 check(secret_row["value"].startswith(PREFIX), "secret value is stored as a protected envelope")
 check(secret_row["source_ref"].startswith(PREFIX), "secret source reference is protected")
 check(len(scope_rows) == 1 and scope_rows[0][0], "database owns one persistent protection scope")
+store_scope = scope_rows[0][0]
 
 raw_text = "\n".join(
     str(value)
@@ -145,6 +146,11 @@ check("hemmelig-værdi-987".encode("utf-8") not in file_bytes, "secret plaintext
 
 reopened = MemoryStore(path, protector=protector)
 check(reopened.get(private.id).value == "ingen fisk", "same protector reopens persisted private memory")
+with sqlite3.connect(path) as raw:
+    reopened_scope = raw.execute(
+        "SELECT value FROM agent_memory_meta WHERE key='store_scope'"
+    ).fetchone()[0]
+check(reopened_scope == store_scope, "reopen preserves the database protection scope")
 reopened.close()
 
 wrong = MemoryStore(path, protector=TestMemoryProtector(key=b"different-memory-test-key"))
