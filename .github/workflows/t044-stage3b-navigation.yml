@@ -1,0 +1,57 @@
+name: t044-stage3b-navigation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-navigation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
+
+      - name: Install Android platform and build tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Apply navigation patch
+        run: python3 scripts/t044_stage3b_navigation.py
+
+      - name: Remove transport before validation
+        run: |
+          rm -f scripts/t044_stage3b_navigation.py
+          rm -f .github/workflows/t044-stage3b-navigation.yml
+
+      - name: Compile Android and run all unit tests
+        working-directory: android
+        run: ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest --stacktrace
+
+      - name: Verify isolated UI scope
+        run: |
+          set -euo pipefail
+          git diff --check
+          allowed='^(android/app/src/main/java/dk/ternedal/modelrig/ui/AppUi\.kt|android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen\.kt|android/app/src/test/java/dk/ternedal/modelrig/ui/ControlCenterScreenTest\.kt)$'
+          unexpected=$(git diff --name-only 725ef22e4c21db653d224c097fe42425603f8201 | grep -Ev "$allowed" || true)
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected T-044 UI paths:"
+            echo "$unexpected"
+            exit 1
+          fi
+
+      - name: Upload proven AppUi
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: t044-stage3b-appui
+          path: android/app/src/main/java/dk/ternedal/modelrig/ui/AppUi.kt
+          if-no-files-found: error
+          retention-days: 1
