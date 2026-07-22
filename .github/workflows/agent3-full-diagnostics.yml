@@ -23,44 +23,19 @@ jobs:
       - name: Install worker deps
         run: pip install -r worker/requirements.txt --break-system-packages
 
-      - name: Apply atomic legacy migration stage
-        run: python3 scripts/t033_stage4_migration.py
-
-      - name: Restore ordinary workflow and remove transport
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=1 origin 7ebecbd0f62818218ddd25385379f5c38b6413ca
-          git show 7ebecbd0f62818218ddd25385379f5c38b6413ca:.github/workflows/agent3-full-diagnostics.yml > .github/workflows/agent3-full-diagnostics.yml
-          rm -f scripts/t033_stage4_migration.py
-
-      - name: Regenerate authoritative current state
-        run: python3 scripts/current_state.py
-
-      - name: Focused migration contracts
-        env:
-          PYTHONPATH: worker
-        shell: bash
-        run: |
-          set -o pipefail
-          : > /tmp/t033-focused.log
-          status=0
-          for f in \
-            tests/worker_agent3_memory_migration.py \
-            tests/worker_agent3_memory_storage_protection.py \
-            tests/worker_agent3_memory_protection.py \
-            tests/worker_agent3_memory_dpapi.py; do
-            echo "===== $f =====" | tee -a /tmp/t033-focused.log
-            python3 "$f" 2>&1 | tee -a /tmp/t033-focused.log || {
-              status=${PIPESTATUS[0]}
-              echo "FAILED: $f (exit $status)" | tee -a /tmp/t033-focused.log
-              break
-            }
-          done
-          exit "$status"
-
       - name: Build backend
         run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
+
+      - name: Generate authoritative current state
+        run: python3 scripts/current_state.py
+
+      - name: Upload generated current state
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent3-generated-current-state
+          path: CURRENT_STATE.md
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Full repository test log
         env:
@@ -72,42 +47,23 @@ jobs:
           status=0
           for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
             [ -e "$f" ] || continue
+            echo "::group::$f"
             echo "===== $f =====" | tee -a /tmp/modelrig-full-test.log
             PYTHONPATH=worker python3 "$f" 2>&1 | tee -a /tmp/modelrig-full-test.log || {
               status=${PIPESTATUS[0]}
               echo "FAILED: $f (exit $status)" | tee -a /tmp/modelrig-full-test.log
+              echo "::endgroup::"
               break
             }
+            echo "::endgroup::"
           done
           exit "$status"
 
-      - name: Verify migration artifact scope
-        shell: bash
-        run: |
-          set -euo pipefail
-          test ! -e scripts/t033_stage4_migration.py
-          git diff --check
-          allowed='^(\.github/workflows/ci\.yml|CURRENT_STATE\.md|worker/app/agent3/memory\.py|worker/app/agent3/memory_protection\.py|worker/app/agent3/memory_dpapi\.py|tests/helpers/__init__\.py|tests/helpers/memory_protector\.py|tests/worker_agent3_memory_protection\.py|tests/worker_agent3_memory_dpapi\.py|tests/worker_agent3_memory_storage_protection\.py|tests/worker_agent3_memory_migration\.py|tests/worker_agent3_memory\.py|tests/worker_agent3_memory_context\.py|tests/worker_agent3_memory_api\.py|tests/worker_agent3_planner_memory\.py)$'
-          unexpected=$(git diff --name-only 7ebecbd0f62818218ddd25385379f5c38b6413ca | grep -Ev "$allowed" || true)
-          test -z "$unexpected" || { echo "$unexpected"; exit 1; }
-
-      - name: Upload proven migration files
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: t033-proven-migration-files
-          path: |
-            worker/app/agent3/memory.py
-            CURRENT_STATE.md
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Upload failure logs
+      - name: Upload full failed test log
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: t033-migration-failure
-          path: |
-            /tmp/t033-focused.log
-            /tmp/modelrig-full-test.log
-          if-no-files-found: warn
-          retention-days: 1
+          name: agent3-full-test-log
+          path: /tmp/modelrig-full-test.log
+          if-no-files-found: error
+          retention-days: 7
