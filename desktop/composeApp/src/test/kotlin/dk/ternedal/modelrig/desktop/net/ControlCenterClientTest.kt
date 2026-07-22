@@ -123,7 +123,10 @@ class ControlCenterClientTest {
     private fun assertInvalid(client: ControlCenterClient, body: String, text: String) {
         val error = runCatching { client.parse(body) }.exceptionOrNull()
         assertTrue(error is ControlCenterException)
-        assertTrue("${error?.message} should contain $text", error?.message.orEmpty().contains(text))
+        assertTrue(
+            error?.message.orEmpty().contains(text),
+            "${error?.message} should contain $text",
+        )
     }
 
     private fun server(handler: (com.sun.net.httpserver.HttpExchange) -> Unit): HttpServer {
