@@ -8,6 +8,15 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from .memory_dpapi import WindowsDpapiMemoryProtector
+from .memory_protection import (
+    MemoryProtectionError,
+    MemoryProtector,
+    is_protected,
+    open_text,
+    seal_text,
+)
+
 
 KINDS = {"fact", "preference", "project", "relationship", "routine", "constraint", "note"}
 SENSITIVITIES = {"public", "operational", "private", "secret"}
@@ -69,10 +78,16 @@ class MemoryStore:
     - normal context excludes pending, rejected, expired, deleted and secret rows.
     """
 
-    def __init__(self, path: str):
+    def __init__(
+        self,
+        path: str,
+        *,
+        protector: MemoryProtector | None = None,
+    ):
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._protector = protector or WindowsDpapiMemoryProtector()
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys=ON")
@@ -101,6 +116,20 @@ class MemoryStore:
             )
             """
         )
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS agent_memory_meta ("
+            "key TEXT PRIMARY KEY,value TEXT NOT NULL)"
+        )
+        self._conn.execute(
+            "INSERT OR IGNORE INTO agent_memory_meta(key,value) VALUES('store_scope',?)",
+            (uuid.uuid4().hex,),
+        )
+        scope_row = self._conn.execute(
+            "SELECT value FROM agent_memory_meta WHERE key='store_scope'"
+        ).fetchone()
+        if scope_row is None or not isinstance(scope_row[0], str) or not scope_row[0]:
+            raise MemoryStoreError("memory store protection scope is missing")
+        self._store_scope = scope_row[0]
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_agent_memories_lookup "
             "ON agent_memories(subject,predicate,lifecycle_status,review_status)"
@@ -282,28 +311,39 @@ class MemoryStore:
         include_secret: bool = False,
         limit: int = 50,
     ) -> list[MemoryRecord]:
-        q = self._clean_text("query", query, 300)
-        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        pattern = f"%{escaped.lower()}%"
+        # Sensitive values are ciphertext in SQLite and must never be indexed or
+        # matched as storage syntax. Select a bounded recent candidate set using
+        # non-sensitive metadata, then open/filter inside the authorized store.
+        needle = self._clean_text("query", query, 300).casefold()
+        result_limit = max(1, min(int(limit), 200))
+        candidate_limit = max(200, min(result_limit * 20, 2_000))
         clauses = [
             "lifecycle_status='active'",
             "(expires_at IS NULL OR expires_at>?)",
-            "(lower(subject) LIKE ? ESCAPE '\\' OR lower(predicate) LIKE ? ESCAPE '\\' "
-            "OR lower(value) LIKE ? ESCAPE '\\')",
         ]
-        params: list[Any] = [time.time(), pattern, pattern, pattern]
+        params: list[Any] = [time.time()]
         if confirmed_only:
             clauses.append("review_status='confirmed'")
         if not include_secret:
             clauses.append("sensitivity!='secret'")
-        params.append(max(1, min(int(limit), 200)))
+        params.append(candidate_limit)
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM agent_memories WHERE " + " AND ".join(clauses)
                 + " ORDER BY updated_at DESC LIMIT ?",
                 tuple(params),
             ).fetchall()
-        return [self._record(row) for row in rows]
+        matches: list[MemoryRecord] = []
+        for row in rows:
+            record = self._record(row)
+            if any(
+                needle in value.casefold()
+                for value in (record.subject, record.predicate, record.value)
+            ):
+                matches.append(record)
+                if len(matches) >= result_limit:
+                    break
+        return matches
 
     def context_records(
         self,
@@ -368,6 +408,42 @@ class MemoryStore:
             ).fetchall()
         return [self._record(row) for row in rows]
 
+    @staticmethod
+    def _is_sensitive(sensitivity: str) -> bool:
+        return sensitivity in {"private", "secret"}
+
+    def _seal_field(self, value: str, *, memory_id: str, field: str) -> str:
+        try:
+            return seal_text(
+                self._protector,
+                value,
+                store_scope=self._store_scope,
+                record_id=memory_id,
+                field=field,
+            )
+        except MemoryProtectionError as exc:
+            raise MemoryStoreError(
+                f"sensitive memory {field} could not be protected"
+            ) from exc
+
+    def _open_field(self, value: str, *, memory_id: str, field: str) -> str:
+        if not is_protected(value):
+            raise MemoryStoreError(
+                "legacy sensitive memory requires protected migration"
+            )
+        try:
+            return open_text(
+                self._protector,
+                value,
+                store_scope=self._store_scope,
+                record_id=memory_id,
+                field=field,
+            )
+        except MemoryProtectionError as exc:
+            raise MemoryStoreError(
+                f"sensitive memory {field} could not be opened"
+            ) from exc
+
     def _insert_locked(
         self,
         *,
@@ -385,20 +461,32 @@ class MemoryStore:
     ) -> MemoryRecord:
         memory_id = str(uuid.uuid4())
         now = time.time()
+        schema_version = 1
+        stored_value = value
+        stored_source_ref = source_ref
+        if self._is_sensitive(sensitivity):
+            stored_value = self._seal_field(
+                value, memory_id=memory_id, field="value"
+            )
+            if source_ref is not None:
+                stored_source_ref = self._seal_field(
+                    source_ref, memory_id=memory_id, field="source_ref"
+                )
+            schema_version = 2
         self._conn.execute(
             "INSERT INTO agent_memories("
             "id,subject,predicate,value,kind,sensitivity,source_type,source_ref,confidence,"
             "review_status,lifecycle_status,supersedes_id,created_at,updated_at,expires_at,"
-            "deleted_at,schema_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
+            "deleted_at,schema_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 memory_id,
                 subject,
                 predicate,
-                value,
+                stored_value,
                 kind,
                 sensitivity,
                 source_type,
-                source_ref,
+                stored_source_ref,
                 confidence,
                 review_status,
                 "active",
@@ -407,6 +495,7 @@ class MemoryStore:
                 now,
                 expires_at,
                 None,
+                schema_version,
             ),
         )
         return self._record(
@@ -510,8 +599,21 @@ class MemoryStore:
             raise MemoryStoreError(f"invalid {name}: {value!r}")
         return value
 
-    @staticmethod
-    def _record(row: sqlite3.Row | None) -> MemoryRecord:
+    def _record(self, row: sqlite3.Row | None) -> MemoryRecord:
         if row is None:
             raise MemoryNotFound("memory not found")
-        return MemoryRecord(**dict(row))
+        data = dict(row)
+        if (
+            self._is_sensitive(data["sensitivity"])
+            and data["lifecycle_status"] != "deleted"
+        ):
+            data["value"] = self._open_field(
+                data["value"], memory_id=data["id"], field="value"
+            )
+            if data["source_ref"] is not None:
+                data["source_ref"] = self._open_field(
+                    data["source_ref"],
+                    memory_id=data["id"],
+                    field="source_ref",
+                )
+        return MemoryRecord(**data)

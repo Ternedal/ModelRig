@@ -6,6 +6,7 @@ import tempfile
 import time
 
 from app.agent3.memory import MemoryStore
+from helpers.memory_protector import TestMemoryProtector
 from app.agent3.memory_context import ContextTarget, MemoryContextCompiler
 
 passed = failed = 0
@@ -21,7 +22,10 @@ def check(cond, name):
         print(f"  FAIL: {name}")
 
 
-store = MemoryStore(os.path.join(tempfile.mkdtemp(prefix="agent3-memory-context-"), "memory.db"))
+store = MemoryStore(
+    os.path.join(tempfile.mkdtemp(prefix="agent3-memory-context-"), "memory.db"),
+    protector=TestMemoryProtector(),
+)
 public = store.create(
     subject="modelrig",
     predicate="gpu",

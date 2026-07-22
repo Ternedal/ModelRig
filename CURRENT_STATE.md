@@ -101,6 +101,10 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_memory.py`
 - `tests/worker_agent3_memory_api.py`
 - `tests/worker_agent3_memory_context.py`
+- `tests/worker_agent3_memory_dpapi.py`
+- `tests/worker_agent3_memory_migration.py`
+- `tests/worker_agent3_memory_protection.py`
+- `tests/worker_agent3_memory_storage_protection.py`
 - `tests/worker_agent3_model_eval.py`
 - `tests/worker_agent3_outcome_answer.py`
 - `tests/worker_agent3_outcome_answer_api.py`

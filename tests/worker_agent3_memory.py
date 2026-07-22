@@ -5,6 +5,7 @@ import tempfile
 import time
 
 from app.agent3.memory import MemoryNotFound, MemoryStore, MemoryStoreError
+from helpers.memory_protector import TestMemoryProtector
 
 passed = failed = 0
 
@@ -20,7 +21,8 @@ def check(cond, name):
 
 
 path = os.path.join(tempfile.mkdtemp(prefix="agent3-memory-"), "memory.db")
-store = MemoryStore(path)
+protector = TestMemoryProtector()
+store = MemoryStore(path, protector=protector)
 
 explicit = store.create(
     subject="anders",
@@ -138,7 +140,7 @@ small_budget = store.context_records(subjects=["budget"], max_chars=20)
 check(not small_budget, "context compiler respects max_chars for the first record")
 
 store.close()
-reopened = MemoryStore(path)
+reopened = MemoryStore(path, protector=protector)
 check(reopened.get(inferred.id).review_status == "confirmed", "memory state persists across reopen")
 reopened.close()
 
