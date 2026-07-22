@@ -69,12 +69,21 @@ jobs:
       - name: Compose Android picker with timezone UI
         run: python3 scripts/compose_scheduler_m2.py
 
-      - name: Remove transport and regenerate authoritative state
+      - name: Remove composition transport
         shell: bash
         run: |
           set -euo pipefail
           rm -f scripts/compose_scheduler_m2.py .github/workflows/scheduler-m2-compose.yml
-          python3 scripts/current_state.py
+          test ! -e scripts/compose_scheduler_m2.py
+          test ! -e .github/workflows/scheduler-m2-compose.yml
+
+      - name: Regenerate authoritative current state
+        run: python3 scripts/current_state.py
+
+      - name: Validate composed diff formatting
+        shell: bash
+        run: |
+          set -euo pipefail
           git diff --check
 
       - name: Install worker dependencies
