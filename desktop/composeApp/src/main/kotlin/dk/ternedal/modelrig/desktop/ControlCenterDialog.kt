@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -74,6 +75,24 @@ internal fun desktopControlCenterAge(ageSeconds: Double?): String? {
     }
 }
 
+internal fun desktopControlCenterError(raw: String?): String {
+    val message = raw.orEmpty()
+    return when {
+        message.contains("(401)") ->
+            "Ikke godkendt. Parringen mangler eller er udløbet."
+        message.contains("(502)") || message.contains("status unavailable") ->
+            "Riggen kunne ikke levere Control Center-status. Tjek at backend og worker kører."
+        message.contains("timed out", ignoreCase = true) ||
+            message.contains("HttpTimeout", ignoreCase = true) ->
+            "Statuskaldet fik tidsudløb. Prøv igen."
+        message.contains("Connection refused", ignoreCase = true) ||
+            message.contains("ConnectException") ->
+            "Kan ikke nå riggen. Tjek URL og at serveren kører."
+        message.isBlank() -> "Control Center-status kunne ikke hentes."
+        else -> message.take(300)
+    }
+}
+
 @Composable
 fun DesktopControlCenterDialog(
     baseUrl: String,
@@ -102,7 +121,7 @@ fun DesktopControlCenterDialog(
             error = null
         }.onFailure {
             status = null
-            error = apiErrorHint(it.message)
+            error = desktopControlCenterError(it.message)
         }
         loading = false
     }
