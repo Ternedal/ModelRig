@@ -43,7 +43,7 @@ Start-Process .\modelrig-worker-windows-x64.exe
 
 ```powershell
 # byg backend + installér worker-deps (én gang)
-go build -o backend\modelrig-server.exe .\backend\cmd\modelrig-server
+go build -C backend -trimpath -o modelrig-server.exe .\cmd\modelrig-server
 pip install -r worker\requirements.txt
 
 # kør begge (binder 0.0.0.0 så telefonen kan nå den)

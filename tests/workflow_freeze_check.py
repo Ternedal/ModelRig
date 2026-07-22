@@ -139,6 +139,16 @@ def run_in(repo, token=None, api=None):
         os.environ.update(old_env)
 
 
+# --- git-absence regression: on a rig with NO git installed, _run must not
+# crash -- it returns 127 so the gitless fallback triggers. This is the exact
+# failure that stopped the operator's first real rig-day run: git rev-parse
+# raised FileNotFoundError before the fallback could run.
+_rc_missing, _out_missing = fc._run("definitely-not-a-real-binary-zzz", "x")
+check(_rc_missing == 127 and _out_missing == "",
+      "_run returns 127 (not a crash) when the executable is absent -- a "
+      "gitless rig without git installed falls back cleanly instead of dying")
+
+
 # --- F-1005: no token means NOT FROZEN -- the evidence IS the freeze ---------
 _clean = _make_repo(clean=True)
 _code, _out = run_in(_clean, token=None)
@@ -495,6 +505,33 @@ _reject_1507(_countmismatch, "matcher ikke antal",
 
 # Restore so nothing downstream sees the mutated file.
 _att_path.write_text(_json1507.dumps(_base_att), encoding="utf-8")
+
+# F-1802: a tracked file changed on disk but hidden from `git status` via
+# assume-unchanged must still be caught -- the byte-level blob-SHA comparison
+# against HEAD is the only thing that sees it. Without the fix, git-mode
+# would hash the CHANGED bytes, record a matching rollup, and freeze -- the
+# candidate would carry the commit's identity with different code.
+_g1802 = _make_repo(clean=True, version="1.58.131")
+(_g1802 / "VERSION").write_text("1.58.131\n# sneaked change\n")
+_git(_g1802, "update-index", "--assume-unchanged", "VERSION")
+_status_after = _git(_g1802, "status", "--porcelain").stdout
+_head1802 = _git(_g1802, "rev-parse", "HEAD").stdout.strip()
+def _api_1802(url, token):
+    if "/releases/tags/" in url:
+        return {"draft": False}
+    if "/git/ref/tags/" in url:
+        return {"object": {"type": "commit", "sha": _head1802}}
+    return _runs(ci=("completed", "success"),
+                 codeql=("completed", "success"))
+_code, _out = run_in(_g1802, token="tok", api=_api_1802)
+check("VERSION" not in _status_after,
+      "sanity: assume-unchanged silences git status about the modified file")
+check(_code == 1 and "differ from" in _out and "F-1802" in _out
+      and not (_g1802 / "validation" / "frozen-candidate.json").exists(),
+      "a tracked file changed on disk but hidden from git status via "
+      "assume-unchanged fails freeze on the byte-level HEAD-blob comparison, "
+      "and nothing is attested -- the candidate cannot inherit the commit's "
+      "identity with different code (F-1802)")
 
 # F-1505: git-mode must refuse when HEAD is not the published tag's commit,
 # so git-mode and the release ZIP cannot validate different code under one

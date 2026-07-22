@@ -98,16 +98,25 @@ def _attested_sha(root, version):
 def _candidate_identity() -> dict:
     root = Path(__file__).resolve().parents[1]
     version = (root / "VERSION").read_text(encoding="utf-8").strip()
-    proc = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
-    )
-    git_sha = proc.stdout.strip()
-    if proc.returncode != 0 or re.fullmatch(r"[0-9a-f]{40}", git_sha) is None:
+    # On a gitless rig (git not installed) subprocess raises FileNotFoundError;
+    # catch it and fall back to the attested SHA, exactly as a nonzero git exit
+    # would. Without this, preflight crashes before the fallback (mirrors the
+    # freeze_check fix).
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        git_sha = proc.stdout.strip()
+        git_rc = proc.returncode
+    except (OSError, subprocess.TimeoutExpired):
+        git_sha = ""
+        git_rc = 127
+    if git_rc != 0 or re.fullmatch(r"[0-9a-f]{40}", git_sha) is None:
         git_sha = _attested_sha(root, version)
     worker = root / "worker"
     if str(worker) not in sys.path:

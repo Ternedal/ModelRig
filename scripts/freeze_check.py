@@ -90,7 +90,16 @@ def _load_frozen_attestation():
 
 
 def _run(*args: str) -> tuple[int, str]:
-    p = subprocess.run(args, capture_output=True, text=True)
+    # A missing executable raises FileNotFoundError -- on a gitless rig (the
+    # normal case: sources arrive as a ZIP, git is not installed) the very
+    # first `git rev-parse HEAD` would otherwise crash the whole gate before
+    # the gitless fallback could trigger. Treat "command not found" as a
+    # nonzero exit (127, the shell convention) so the caller falls back
+    # cleanly instead of dying.
+    try:
+        p = subprocess.run(args, capture_output=True, text=True)
+    except FileNotFoundError:
+        return 127, ""
     return p.returncode, (p.stdout or p.stderr).strip()
 
 
@@ -366,24 +375,37 @@ def main() -> int:
         else:
             print("  OK    no Python bytecode in the candidate tree")
 
-        # F-1602: post-freeze continuity must hold in BOTH modes. Gitless
-        # records the committed file list + rollup from the release tree;
-        # git-mode records the SAME from `git ls-tree -r HEAD`, so the
-        # offline readers run their full rollup/extras check either way. A
-        # developer freezing in git-mode is no longer exempt from tamper-
-        # evidence just because they have a .git dir.
-        _rc_ls, _ls_out = _run("git", "ls-tree", "-r", "--name-only", "HEAD")
+        # F-1602/F-1802: post-freeze continuity must hold in BOTH modes, AND
+        # git-mode must prove each tracked file's local bytes STILL hash to
+        # the blob-ID recorded in HEAD. `git status` is not sufficient:
+        # skip-worktree / assume-unchanged make it report a modified file as
+        # clean, so a changed runtime tree could otherwise inherit a foreign
+        # commit's green CI and SHA identity. We therefore read the blob-IDs
+        # from `git ls-tree -r HEAD` (not just names) and compare each against
+        # the blob-SHA computed from the bytes on disk.
+        _rc_ls, _ls_out = _run("git", "ls-tree", "-r", "HEAD")
         if _rc_ls != 0:
             print("  FAIL  could not list the committed tree (git ls-tree)")
             blockers += 1
             tracked_paths = []
+            _head_blobs = {}
         else:
-            tracked_paths = [ln for ln in _ls_out.splitlines() if ln]
+            _head_blobs = {}
+            for ln in _ls_out.splitlines():
+                if not ln.strip():
+                    continue
+                # format: "<mode> blob <sha>\t<path>"
+                meta, _, path = ln.partition("\t")
+                parts = meta.split()
+                if len(parts) >= 3 and parts[1] == "blob":
+                    _head_blobs[path] = parts[2]
+            tracked_paths = sorted(_head_blobs)
         repo_root_git2 = os.path.abspath(
             os.path.join(os.path.dirname(__file__), ".."))
         _git_lines = []
         _missing_tracked = []
-        for rel in sorted(tracked_paths):
+        _divergent = []
+        for rel in tracked_paths:
             local = os.path.join(repo_root_git2, rel)
             try:
                 with open(local, "rb") as fh:
@@ -391,15 +413,32 @@ def main() -> int:
             except OSError:
                 _missing_tracked.append(rel)
                 continue
-            _git_lines.append(
-                rel + ":" + hashlib.sha1(
-                    b"blob %d\x00" % len(body) + body).hexdigest())
+            local_blob = hashlib.sha1(
+                b"blob %d\x00" % len(body) + body).hexdigest()
+            # F-1802: the byte-level truth check. A mismatch means the working
+            # copy differs from HEAD even if `git status` was silenced.
+            if _head_blobs.get(rel) and local_blob != _head_blobs[rel]:
+                _divergent.append(rel)
+            _git_lines.append(rel + ":" + local_blob)
         if _missing_tracked:
             print(f"  FAIL  {len(_missing_tracked)} tracked file(s) missing "
                   "from the working tree")
             for rel in _missing_tracked[:5]:
                 print(f"         - {rel}")
             blockers += 1
+        if _divergent:
+            print(f"  FAIL  {len(_divergent)} tracked file(s) differ from "
+                  "their HEAD blob (working copy diverges from the commit):")
+            for rel in _divergent[:5]:
+                print(f"         - {rel}")
+            print("         -> `git status` can be silenced by skip-worktree / "
+                  "assume-unchanged; this is the byte-level check. Reset these "
+                  "files to HEAD before freezing, or the candidate would "
+                  "inherit the commit's identity with different code (F-1802)")
+            blockers += 1
+        else:
+            print("  OK    every tracked file matches its HEAD blob (byte-"
+                  "level, not just git status)")
         tree_files_verified = len(tracked_paths)
         blobs = {p: None for p in tracked_paths}
         tree_sha256_local = hashlib.sha256(

@@ -7,7 +7,7 @@
   Prereqs:
     - Ollama running with your models pulled
     - Python deps installed:  pip install -r ..\worker\requirements.txt
-    - Backend built:          go build -o ..\backend\modelrig-server.exe ..\backend\cmd\modelrig-server
+    - Backend built:          go build -C backend -trimpath -o modelrig-server.exe .\cmd\modelrig-server
 
   Usage:
     powershell -ExecutionPolicy Bypass -File .\run-windows.ps1

@@ -9,7 +9,7 @@ can reach the backend.
 ## Windows (local dev / homelab)
 ```powershell
 # once: build the backend and install worker deps
-go build -o backend\modelrig-server.exe .\backend\cmd\modelrig-server
+go build -C backend -trimpath -o modelrig-server.exe .\cmd\modelrig-server
 pip install -r worker\requirements.txt
 
 # run both (binds 0.0.0.0):
