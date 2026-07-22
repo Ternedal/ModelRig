@@ -46,35 +46,57 @@ replace_once(
     '''    def _record(self, row: sqlite3.Row | None) -> MemoryRecord:\n        if row is None:\n            raise MemoryNotFound("memory not found")\n        data = dict(row)\n        if (\n            self._is_sensitive(data["sensitivity"])\n            and data["lifecycle_status"] != "deleted"\n        ):\n            data["value"] = self._open_field(\n                data["value"], memory_id=data["id"], field="value"\n            )\n            if data["source_ref"] is not None:\n                data["source_ref"] = self._open_field(\n                    data["source_ref"],\n                    memory_id=data["id"],\n                    field="source_ref",\n                )\n        return MemoryRecord(**data)\n''',
 )
 
-for path, constructor in (
-    ("tests/worker_agent3_memory.py", "store = MemoryStore(path)"),
-    (
-        "tests/worker_agent3_memory_context.py",
-        'store = MemoryStore(os.path.join(tempfile.mkdtemp(prefix="agent3-memory-context-"), "memory.db"))',
-    ),
-    (
-        "tests/worker_agent3_memory_api.py",
-        'store = MemoryStore(os.path.join(tempfile.mkdtemp(prefix="agent3-memory-api-"), "memory.db"))',
-    ),
-    (
-        "tests/worker_agent3_planner_memory.py",
-        'memory_store = MemoryStore(os.path.join(root, "memory.db"))',
-    ),
-):
-    replace_once(
-        path,
-        "from app.agent3.memory import MemoryStore" + (", MemoryStoreError" if path.endswith("memory.py") else "") + "\n",
-        "from app.agent3.memory import MemoryStore" + (", MemoryStoreError" if path.endswith("memory.py") else "") + "\nfrom support_memory_protector import TestMemoryProtector\n",
-    )
-    replacement = constructor.replace(
-        ")", ", protector=TestMemoryProtector())", 1
-    ) if "os.path.join" in constructor else "protector = TestMemoryProtector()\nstore = MemoryStore(path, protector=protector)"
-    replace_once(path, constructor, replacement)
-
+replace_once(
+    "tests/worker_agent3_memory.py",
+    "from app.agent3.memory import MemoryNotFound, MemoryStore, MemoryStoreError\n",
+    "from app.agent3.memory import MemoryNotFound, MemoryStore, MemoryStoreError\n"
+    "from support_memory_protector import TestMemoryProtector\n",
+)
+replace_once(
+    "tests/worker_agent3_memory.py",
+    "store = MemoryStore(path)",
+    "protector = TestMemoryProtector()\nstore = MemoryStore(path, protector=protector)",
+)
 replace_once(
     "tests/worker_agent3_memory.py",
     "reopened = MemoryStore(path)",
     "reopened = MemoryStore(path, protector=protector)",
+)
+
+replace_once(
+    "tests/worker_agent3_memory_context.py",
+    "from app.agent3.memory import MemoryStore\n",
+    "from app.agent3.memory import MemoryStore\n"
+    "from support_memory_protector import TestMemoryProtector\n",
+)
+replace_once(
+    "tests/worker_agent3_memory_context.py",
+    'store = MemoryStore(os.path.join(tempfile.mkdtemp(prefix="agent3-memory-context-"), "memory.db"))',
+    'store = MemoryStore(\n    os.path.join(tempfile.mkdtemp(prefix="agent3-memory-context-"), "memory.db"),\n    protector=TestMemoryProtector(),\n)',
+)
+
+replace_once(
+    "tests/worker_agent3_memory_api.py",
+    "from app.agent3.memory import MemoryStore\n",
+    "from app.agent3.memory import MemoryStore\n"
+    "from support_memory_protector import TestMemoryProtector\n",
+)
+replace_once(
+    "tests/worker_agent3_memory_api.py",
+    'store = MemoryStore(os.path.join(tempfile.mkdtemp(prefix="agent3-memory-api-"), "memory.db"))',
+    'store = MemoryStore(\n    os.path.join(tempfile.mkdtemp(prefix="agent3-memory-api-"), "memory.db"),\n    protector=TestMemoryProtector(),\n)',
+)
+
+replace_once(
+    "tests/worker_agent3_planner_memory.py",
+    "from app.agent3.memory import MemoryStore\n",
+    "from app.agent3.memory import MemoryStore\n"
+    "from support_memory_protector import TestMemoryProtector\n",
+)
+replace_once(
+    "tests/worker_agent3_planner_memory.py",
+    'memory_store = MemoryStore(os.path.join(root, "memory.db"))',
+    'memory_store = MemoryStore(\n    os.path.join(root, "memory.db"),\n    protector=TestMemoryProtector(),\n)',
 )
 
 print("T-033 protected MemoryStore stage applied")
