@@ -25,24 +25,13 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Bind pilot manifest to M2 time semantics
-        shell: bash
+      - name: Patch exact pilot manifests
         run: |
-          set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-
-          def replace_once(path: Path, old: str, new: str, label: str) -> None:
-              text = path.read_text(encoding='utf-8')
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected one match, found {count}')
-              path.write_text(text.replace(old, new, 1), encoding='utf-8')
-
-          wizard = Path('scripts/scheduler_pilot_wizard.py')
-          replace_once(
-              wizard,
-              '''READ_SPEC = {
+          p = Path('scripts/scheduler_pilot_wizard.py')
+          text = p.read_text(encoding='utf-8')
+          old = '''READ_SPEC = {
               "tool": "rig_status",
               "args": {},
               "cadence": "every:60",
@@ -56,8 +45,8 @@ jobs:
               "ttl_days": 1,
               "max_runs": 2,
           }
-          ''',
-              '''READ_SPEC = {
+          '''
+          new = '''READ_SPEC = {
               "tool": "rig_status",
               "args": {},
               "cadence": "every:60",
@@ -75,85 +64,95 @@ jobs:
               "timezone": "Europe/Copenhagen",
               "misfire_policy": "run_once",
           }
-          ''',
-              'manifest fields',
-          )
-          replace_once(
-              wizard,
-              '''        and row.get("cadence") == spec["cadence"]
-              and int(row.get("max_runs") or -1) == int(spec["max_runs"])
-          )
-          ''',
-              '''        and row.get("cadence") == spec["cadence"]
-              and int(row.get("ttl_days") or -1) == int(spec["ttl_days"])
-              and int(row.get("max_runs") or -1) == int(spec["max_runs"])
-              and row.get("timezone") == spec["timezone"]
-              and row.get("misfire_policy") == spec["misfire_policy"]
-          )
-          ''',
-              'manifest matcher',
-          )
-          replace_once(
-              wizard,
-              '''    print('    note_append · {"text":"pilot"} · every:60 · max_runs=2 · ttl_days=1')
-          ''',
-              '''    print('    note_append · {"text":"pilot"} · every:60 · max_runs=2 · ttl_days=1')
-              print('    timezone=Europe/Copenhagen · misfire_policy=run_once')
-          ''',
-              'operator instruction',
-          )
+          '''
+          if text.count(old) != 1:
+              raise SystemExit(f'manifest anchor count={text.count(old)}')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
 
-          test = Path('tests/workflow_scheduler_pilot_wizard.py')
-          replace_once(
-              test,
-              '''    "cadence": "every:60",
+      - name: Patch manifest matcher
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/scheduler_pilot_wizard.py')
+          text = p.read_text(encoding='utf-8')
+          old = '        and int(row.get("max_runs") or -1) == int(spec["max_runs"])\n'
+          new = (
+              '        and int(row.get("ttl_days") or -1) == int(spec["ttl_days"])\n'
+              '        and int(row.get("max_runs") or -1) == int(spec["max_runs"])\n'
+              '        and row.get("timezone") == spec["timezone"]\n'
+              '        and row.get("misfire_policy") == spec["misfire_policy"]\n'
+          )
+          if text.count(old) != 1:
+              raise SystemExit(f'matcher anchor count={text.count(old)}')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Patch Android operator instruction
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/scheduler_pilot_wizard.py')
+          text = p.read_text(encoding='utf-8')
+          old = '    print(\'    note_append · {"text":"pilot"} · every:60 · max_runs=2 · ttl_days=1\')\n'
+          new = old + '    print(\'    timezone=Europe/Copenhagen · misfire_policy=run_once\')\n'
+          if text.count(old) != 1:
+              raise SystemExit(f'instruction anchor count={text.count(old)}')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Patch wizard test fixtures
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('tests/workflow_scheduler_pilot_wizard.py')
+          text = p.read_text(encoding='utf-8')
+          read_old = '''    "cadence": "every:60",
               "max_runs": 3,
           }
           write = {
-          ''',
-              '''    "cadence": "every:60",
+          '''
+          read_new = '''    "cadence": "every:60",
               "ttl_days": 1,
               "max_runs": 3,
               "timezone": "Europe/Copenhagen",
               "misfire_policy": "run_once",
           }
           write = {
-          ''',
-              'read fixture',
-          )
-          replace_once(
-              test,
-              '''    "cadence": "every:60",
+          '''
+          write_old = '''    "cadence": "every:60",
               "max_runs": 2,
           }
-          check(module.BRANCH''',
-              '''    "cadence": "every:60",
+          check(module.BRANCH'''
+          write_new = '''    "cadence": "every:60",
               "ttl_days": 1,
               "max_runs": 2,
               "timezone": "Europe/Copenhagen",
               "misfire_policy": "run_once",
           }
-          check(module.BRANCH''',
-              'write fixture',
-          )
-          replace_once(
-              test,
-              '''check(module.matches_manifest(write, module.WRITE_SPEC), "write manifest is exact")
-          check(
+          check(module.BRANCH'''
+          if text.count(read_old) != 1:
+              raise SystemExit(f'read fixture anchor count={text.count(read_old)}')
+          text = text.replace(read_old, read_new, 1)
+          if text.count(write_old) != 1:
+              raise SystemExit(f'write fixture anchor count={text.count(write_old)}')
+          p.write_text(text.replace(write_old, write_new, 1), encoding='utf-8')
+          PY
+
+      - name: Add time-drift rejection tests
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('tests/workflow_scheduler_pilot_wizard.py')
+          text = p.read_text(encoding='utf-8')
+          anchor = '''check(
               not module.matches_manifest(
                   {**write, "args": {"text": "other"}}, module.WRITE_SPEC
               ),
               "write argument drift is rejected",
           )
-          ''',
-              '''check(module.matches_manifest(write, module.WRITE_SPEC), "write manifest is exact")
-          check(
-              not module.matches_manifest(
-                  {**write, "args": {"text": "other"}}, module.WRITE_SPEC
-              ),
-              "write argument drift is rejected",
-          )
-          check(
+          '''
+          addition = anchor + '''check(
               not module.matches_manifest(
                   {**write, "timezone": "America/New_York"}, module.WRITE_SPEC
               ),
@@ -169,13 +168,13 @@ jobs:
               not module.matches_manifest({**write, "ttl_days": 2}, module.WRITE_SPEC),
               "write TTL drift is rejected",
           )
-          ''',
-              'time drift tests',
-          )
+          '''
+          if text.count(anchor) != 1:
+              raise SystemExit(f'drift anchor count={text.count(anchor)}')
+          p.write_text(text.replace(anchor, addition, 1), encoding='utf-8')
           PY
 
       - name: Remove temporary workflow
-        shell: bash
         run: |
           rm -f .github/workflows/scheduler-m2-pilot-time-contract.yml
           test ! -e .github/workflows/scheduler-m2-pilot-time-contract.yml
