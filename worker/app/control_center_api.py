@@ -44,11 +44,31 @@ def _require_loopback(
 
 
 async def _default_health_provider() -> Mapping[str, Any]:
-    # Imported lazily to keep route construction side-effect free and avoid a
-    # module cycle while app.main is still creating the FastAPI application.
-    from .main import health_full
+    """Probe only process/Ollama facts; never import ToolGate or open its DB."""
+    import httpx
 
-    return await health_full(deep=False)
+    from . import ollama_client as oc
+    from .main import VERSION
+
+    models: dict[str, Any]
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            response = await client.get(f"{oc.OLLAMA_URL}/api/tags")
+        models = {
+            "ok": response.status_code == 200,
+            "detail": f"HTTP {response.status_code}",
+        }
+    except Exception as exc:
+        models = {
+            "ok": False,
+            "detail": f"provider_error:{type(exc).__name__}",
+        }
+    return {
+        "checks": {
+            "worker": {"ok": True, "version": VERSION},
+            "ollama": models,
+        }
+    }
 
 
 def _default_agent3_provider() -> Mapping[str, Any]:
