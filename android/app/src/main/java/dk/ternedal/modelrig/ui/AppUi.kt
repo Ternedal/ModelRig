@@ -57,7 +57,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, CloudPicker, VoiceCloudPicker }
+private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, ControlCenter, CloudPicker, VoiceCloudPicker }
 
 @Composable
 fun AppUi() {
@@ -83,7 +83,12 @@ fun AppUi() {
                 Screen.Splash -> SplashScreen(onDone = {
                     screen = if (store.hasRig || store.hasCloud) Screen.Chat else Screen.Setup
                 })
-                Screen.Setup -> SetupScreen(store, db, onDone = { screen = Screen.Chat })
+                Screen.Setup -> SetupScreen(
+                    store,
+                    db,
+                    onDone = { screen = Screen.Chat },
+                    onOpenControlCenter = { screen = Screen.ControlCenter },
+                )
                 Screen.Chat -> ChatScreen(
                     store, db, openConvId, cloudModelTick,
                     darkMode = darkMode,
@@ -108,6 +113,10 @@ fun AppUi() {
                 Screen.Models -> ModelsScreen(store, onBack = { screen = Screen.Chat })
                 Screen.Knowledge -> KnowledgeScreen(store, onBack = { screen = Screen.Chat })
                 Screen.Schedules -> ScheduleScreen(store = store, onClose = { screen = Screen.Chat })
+                Screen.ControlCenter -> ControlCenterScreen(
+                    store = store,
+                    onClose = { screen = Screen.Setup },
+                )
                 Screen.VoiceCloudPicker -> CloudModelPickerScreen(
                     store,
                     forVoice = true,
@@ -131,7 +140,12 @@ fun AppUi() {
 
 // ---- setup: cloud and/or rig ----
 @Composable
-private fun SetupScreen(store: TokenStore, db: ChatDb, onDone: () -> Unit) {
+private fun SetupScreen(
+    store: TokenStore,
+    db: ChatDb,
+    onDone: () -> Unit,
+    onOpenControlCenter: () -> Unit,
+) {
     var refresh by remember { mutableStateOf(0) }
     val canChat = remember(refresh) { store.hasRig || store.hasCloud }
 
@@ -153,6 +167,20 @@ private fun SetupScreen(store: TokenStore, db: ChatDb, onDone: () -> Unit) {
             if (canChat) TextButton(onClick = onDone) { Text("Til chat →", color = KalivTheme.colors.signal) }
         }
         Text("Vælg mindst én kilde", fontSize = 14.sp, color = KalivTheme.colors.textMuted)
+        if (store.hasRig) {
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = onOpenControlCenter,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Åbn Control Center")
+            }
+            Text(
+                "Read-only drift, routing og freshness fra riggen.",
+                color = KalivTheme.colors.textMuted,
+                fontSize = 11.sp,
+            )
+        }
         Spacer(Modifier.height(16.dp))
         CloudCard(store, db) { refresh++; onDone() }
         Spacer(Modifier.height(16.dp))
