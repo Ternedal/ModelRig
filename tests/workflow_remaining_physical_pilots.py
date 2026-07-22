@@ -12,6 +12,8 @@ SCRIPT = ROOT / "scripts" / "remaining_physical_pilots.py"
 CMD = ROOT / "START_REMAINING_PHYSICAL_TESTS.cmd"
 AGENT = ROOT / "scripts" / "agent3_readonly_pilot_one_click.py"
 SCHEDULER = ROOT / "scripts" / "scheduler_pilot_wizard.py"
+EXPECTED_BRANCH = "agent/unified-candidate-1.58.143"
+EXPECTED_VERSION = "1.58.143"
 passed = failed = 0
 
 
@@ -57,12 +59,20 @@ check(
     "Agent 3 runs before scheduler to avoid stack conflicts",
 )
 check(
-    'BRANCH = "agent/combined-physical-pilots-candidate"' in agent_source,
-    "Agent 3 operator is bound to the combined branch",
+    f'BRANCH = "{EXPECTED_BRANCH}"' in agent_source,
+    "Agent 3 operator is bound to the unified candidate branch",
 )
 check(
-    'BRANCH = "agent/combined-physical-pilots-candidate"' in scheduler_source,
-    "scheduler operator is bound to the combined branch",
+    f'BRANCH = "{EXPECTED_BRANCH}"' in scheduler_source,
+    "scheduler operator is bound to the unified candidate branch",
+)
+check(
+    f'VERSION = "{EXPECTED_VERSION}"' in agent_source,
+    "Agent 3 operator is bound to candidate version 1.58.143",
+)
+check(
+    f'VERSION = "{EXPECTED_VERSION}"' in scheduler_source,
+    "scheduler operator is bound to candidate version 1.58.143",
 )
 
 module = load_module()
@@ -77,9 +87,11 @@ check(calls == [str(AGENT), str(SCHEDULER)], "both pilots run once in the safe o
 
 calls.clear()
 
+
 def fail_first(args, **kwargs):
     calls.append(str(args[1]))
     return SimpleNamespace(returncode=7)
+
 
 module.subprocess.run = fail_first
 try:
