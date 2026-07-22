@@ -35,14 +35,20 @@ read = {
     "tool": "rig_status",
     "args": {},
     "cadence": "every:60",
+    "ttl_days": 1,
     "max_runs": 3,
+    "timezone": "Europe/Copenhagen",
+    "misfire_policy": "run_once",
 }
 write = {
     "schedule_id": "write1",
     "tool": "note_append",
     "args": {"text": "pilot"},
     "cadence": "every:60",
+    "ttl_days": 1,
     "max_runs": 2,
+    "timezone": "Europe/Copenhagen",
+    "misfire_policy": "run_once",
 }
 check(module.BRANCH == "agent/scheduler-m2-pilot-candidate", "wizard is bound to the combined pilot branch")
 check(
@@ -60,6 +66,22 @@ check(
         {**write, "args": {"text": "other"}}, module.WRITE_SPEC
     ),
     "write argument drift is rejected",
+)
+check(
+    not module.matches_manifest(
+        {**write, "timezone": "America/New_York"}, module.WRITE_SPEC
+    ),
+    "write timezone drift is rejected",
+)
+check(
+    not module.matches_manifest(
+        {**write, "misfire_policy": "skip"}, module.WRITE_SPEC
+    ),
+    "write misfire drift is rejected",
+)
+check(
+    not module.matches_manifest({**write, "ttl_days": 2}, module.WRITE_SPEC),
+    "write TTL drift is rejected",
 )
 check(module.schedule_view({"schedule": write}) == write, "nested API schedule is unwrapped")
 check(module.schedule_id({"schedule_id": "abc"}) == "abc", "schedule id is read")

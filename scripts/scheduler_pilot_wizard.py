@@ -51,6 +51,8 @@ READ_SPEC = {
     "cadence": "every:60",
     "ttl_days": 1,
     "max_runs": 3,
+    "timezone": "Europe/Copenhagen",
+    "misfire_policy": "run_once",
 }
 WRITE_SPEC = {
     "tool": "note_append",
@@ -58,6 +60,8 @@ WRITE_SPEC = {
     "cadence": "every:60",
     "ttl_days": 1,
     "max_runs": 2,
+    "timezone": "Europe/Copenhagen",
+    "misfire_policy": "run_once",
 }
 RECOVERY_RE = re.compile(
     r"scheduler: recovered \d+ executed / \d+ abandoned / \d+ unknown occurrence\(s\) at startup"
@@ -411,7 +415,10 @@ def matches_manifest(row: dict[str, Any], spec: dict[str, Any]) -> bool:
         row.get("tool") == spec["tool"]
         and row.get("args") == spec["args"]
         and row.get("cadence") == spec["cadence"]
+        and int(row.get("ttl_days") or -1) == int(spec["ttl_days"])
         and int(row.get("max_runs") or -1) == int(spec["max_runs"])
+        and row.get("timezone") == spec["timezone"]
+        and row.get("misfire_policy") == spec["misfire_policy"]
     )
 
 
@@ -494,6 +501,7 @@ def wait_for_write(state: dict[str, Any], *, timeout: float = 900.0) -> str:
     heading("Android: godkend den ene kanoniske write-plan")
     print("  Wizard'en finder selv ID'et. Opret præcis:")
     print('    note_append · {"text":"pilot"} · every:60 · max_runs=2 · ttl_days=1')
+    print('    timezone=Europe/Copenhagen · misfire_policy=run_once')
     print("  Tryk Godkend i appen. Du skal ikke kopiere noget tilbage hertil.")
 
     deadline = time.monotonic() + timeout
