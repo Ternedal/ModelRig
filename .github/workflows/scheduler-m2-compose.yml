@@ -77,6 +77,9 @@ jobs:
           test ! -e scripts/compose_scheduler_m2.py
           test ! -e .github/workflows/scheduler-m2-compose.yml
 
+      - name: Install worker dependencies
+        run: pip install -r worker/requirements.txt --break-system-packages
+
       - name: Regenerate authoritative current state
         run: python3 scripts/current_state.py
 
@@ -85,9 +88,6 @@ jobs:
         run: |
           set -euo pipefail
           git diff --check
-
-      - name: Install worker dependencies
-        run: pip install -r worker/requirements.txt --break-system-packages
 
       - name: Build and test backend
         shell: bash
