@@ -153,9 +153,13 @@ with sqlite3.connect(path) as raw:
 check(reopened_scope == store_scope, "reopen preserves the database protection scope")
 reopened.close()
 
-wrong = MemoryStore(path, protector=TestMemoryProtector(key=b"different-memory-test-key"))
-rejects(lambda: wrong.get(private.id), "wrong protector cannot open a private record")
-wrong.close()
+rejects(
+    lambda: MemoryStore(
+        path,
+        protector=TestMemoryProtector(key=b"different-memory-test-key"),
+    ),
+    "wrong protector prevents the sensitive store from opening",
+)
 
 copy_path = os.path.join(root, "scope-copy.db")
 copy_store = MemoryStore(copy_path, protector=protector)
