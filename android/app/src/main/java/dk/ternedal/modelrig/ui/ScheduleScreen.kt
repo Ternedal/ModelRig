@@ -34,12 +34,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.data.TokenStore
-import dk.ternedal.modelrig.net.ModelRigClient
 import dk.ternedal.modelrig.net.ScheduleClient
 import dk.ternedal.modelrig.net.ScheduleItem
 import dk.ternedal.modelrig.net.SchedulePreview
 import dk.ternedal.modelrig.net.ScheduleRuntimeStatus
-import dk.ternedal.modelrig.net.ToolInfo
+import dk.ternedal.modelrig.net.SchedulerToolCatalogLoader
+import dk.ternedal.modelrig.net.SchedulerToolInfo
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -62,12 +62,12 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
     val scope = rememberCoroutineScope()
     var runtime by remember { mutableStateOf<ScheduleRuntimeStatus?>(null) }
     var schedules by remember { mutableStateOf<List<ScheduleItem>>(emptyList()) }
-    var tools by remember { mutableStateOf<List<ToolInfo>>(emptyList()) }
+    var tools by remember { mutableStateOf<List<SchedulerToolInfo>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
 
-    var tool by remember { mutableStateOf("current_datetime") }
+    var tool by remember { mutableStateOf("") }
     var argsJson by remember { mutableStateOf("{}") }
     var cadence by remember { mutableStateOf("daily:08:00") }
     var timezone by remember { mutableStateOf(ScheduleClient.DEFAULT_TIMEZONE) }
@@ -81,11 +81,16 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
     var renewalMode by remember { mutableStateOf("preserve") }
     var renewalPreview by remember { mutableStateOf<SchedulePreview?>(null) }
 
-    fun client(): ScheduleClient {
+    fun connection(): Pair<String, String> {
         val base = store.baseUrl?.takeIf { it.isNotBlank() }
             ?: error("Ingen rig-URL er gemt")
         val token = store.token?.takeIf { it.isNotBlank() }
             ?: error("Ingen device-token er gemt")
+        return base to token
+    }
+
+    fun client(): ScheduleClient {
+        val (base, token) = connection()
         return ScheduleClient(base, token)
     }
 
@@ -104,21 +109,34 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
     fun load() {
         execute(
             action = {
-                val api = client()
+                val (base, token) = connection()
+                val api = ScheduleClient(base, token)
                 Triple(
                     api.status(),
                     api.list(),
-                    ModelRigClient(store.baseUrl ?: "", store.token).toolsList().tools,
+                    SchedulerToolCatalogLoader(base, token).load(),
                 )
             },
             success = {
                 runtime = it.first
                 schedules = it.second
-                tools = it.third.filter { info -> info.risk == "read" || info.risk == "write" }
-                if (tools.none { info -> info.name == tool }) {
-                    tool = tools.firstOrNull()?.name ?: tool
+                val catalog = it.third
+                tools = catalog.tools
+
+                val currentStillValid = tools.any { info -> info.name == tool && info.selectable }
+                if (!currentStillValid) {
+                    tool = tools.firstOrNull { info -> info.selectable }?.name.orEmpty()
+                    preview = null
                 }
-                notice = "${schedules.size} planer hentet. Ingen handling er kørt."
+
+                when {
+                    catalog.metadataError != null -> error = catalog.metadataError
+                    !catalog.enabled -> error = "Værktøjslaget er slået fra på riggen; ingen ny plan kan oprettes."
+                    tools.none { info -> info.selectable } ->
+                        error = "Riggen rapporterer ingen aktiverede, planlægbare værktøjer."
+                    else -> notice =
+                        "${schedules.size} planer hentet · ${tools.count { info -> info.selectable }} værktøjer kan planlægges."
+                }
             },
             fallback = "Planer kunne ikke hentes",
         )
@@ -130,6 +148,12 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
     }
 
     fun previewCreate() {
+        val selectedTool = tools.firstOrNull { info -> info.name == tool }
+        if (selectedTool?.selectable != true) {
+            preview = null
+            error = selectedTool?.disabledReason ?: "Vælg et aktiveret, planlægbart værktøj fra listen."
+            return
+        }
         val ttl = ttlDays.toIntOrNull()
         val runs = maxRuns.toIntOrNull()
         if (ttl == null || runs == null) {
@@ -143,7 +167,7 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
         execute(
             action = {
                 client().preview(
-                    tool = tool.trim(),
+                    tool = selectedTool.name,
                     args = args,
                     cadence = cadence.trim(),
                     ttlDays = ttl,
@@ -282,27 +306,46 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
             ScheduleCard {
                 Text("Opret plan", fontWeight = FontWeight.SemiBold, color = KalivTheme.colors.textHigh)
                 Text(
-                    "Du skal først previewe handling, kadence, timezone, udløb og budget.",
+                    "Vælg kun et værktøj, som riggens autoritative kontrakt tillader uden opsyn; preview binder også timezone, misfire, udløb og budget.",
                     color = KalivTheme.colors.textMuted,
                     fontSize = 11.sp,
                 )
                 Spacer(Modifier.height(8.dp))
-                if (tools.isNotEmpty()) {
+                if (tools.isEmpty()) {
+                    Text("Ingen tool-metadata modtaget fra riggen.", color = KalivTheme.colors.danger, fontSize = 11.sp)
+                } else {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                         tools.forEach { info ->
                             FilterChip(
                                 selected = tool == info.name,
+                                enabled = !busy && info.selectable,
                                 onClick = { tool = info.name; clearCreatePreview() },
                                 label = { Text(info.name, fontSize = 11.sp) },
                                 modifier = Modifier.padding(end = 6.dp),
                             )
                         }
                     }
+                    tools.filterNot { info -> info.selectable }.forEach { info ->
+                        Text(
+                            "${info.name}: ${info.disabledReason ?: "kan ikke planlægges"}",
+                            color = KalivTheme.colors.danger,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(top = 3.dp),
+                        )
+                    }
                 }
+                val selectedTool = tools.firstOrNull { info -> info.name == tool }
                 OutlinedTextField(
-                    value = tool,
-                    onValueChange = { tool = it; clearCreatePreview() },
-                    label = { Text("Tool") },
+                    value = tool.ifBlank { "Intet planlægbart værktøj" },
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Tool fra riggens kontrakt") },
+                    supportingText = {
+                        Text(
+                            selectedTool?.description?.takeIf { it.isNotBlank() }
+                                ?: "Vælg et aktiveret tool ovenfor; fri tekst er bevidst slået fra.",
+                        )
+                    },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -356,7 +399,7 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
                 }
                 Spacer(Modifier.height(10.dp))
                 Button(
-                    enabled = !busy && tool.isNotBlank() && cadence.isNotBlank() && timezone.isNotBlank() && ttlDays.isNotBlank() && maxRuns.isNotBlank(),
+                    enabled = !busy && selectedTool?.selectable == true && cadence.isNotBlank() && timezone.isNotBlank() && ttlDays.isNotBlank() && maxRuns.isNotBlank(),
                     onClick = ::previewCreate,
                 ) { Text(if (busy) "Arbejder…" else "Forhåndsvis") }
             }

@@ -192,6 +192,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_schedule_runtime.py`
 - `tests/worker_schedule_service.py`
 - `tests/worker_scheduler.py`
+- `tests/worker_scheduler_single_flight.py`
+- `tests/worker_scheduler_single_flight_lease.py`
 - `tests/worker_scheduler_time.py`
 - `tests/worker_scheduler_time_store.py`
 - `tests/worker_toolhost.py`
@@ -208,6 +210,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_activation_readiness.py`
 - `tests/workflow_agent3_dormant.py`
 - `tests/workflow_android_credential_commit.py`
+- `tests/workflow_android_scheduler_picker.py`
 - `tests/workflow_browser_peer_public_validation.py`
 - `tests/workflow_browser_peer_public_validation_operator.py`
 - `tests/workflow_candidate_campaign.py`
@@ -221,6 +224,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_physical_validation_final_gate.py`
 - `tests/workflow_release.py`
 - `tests/workflow_rig_preflight.py`
+- `tests/workflow_scheduler_m2_composition.py`
 - `tests/workflow_stage_a_one_click.py`
 - `tests/workflow_stage_a_operator_surface.py`
 - `tests/workflow_stage_a_physical_operator.py`

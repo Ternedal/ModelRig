@@ -154,6 +154,11 @@ try:
             "running": False,
             "resources_open": False,
             "last_error": None,
+            "max_concurrency": 1,
+            "queue_capacity": 0,
+            "active_executions": 0,
+            "accepted_ticks": 0,
+            "overlap_rejections": 0,
         },
         "status tells the truth while the dormant flag is off",
     )
