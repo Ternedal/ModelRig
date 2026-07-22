@@ -1,0 +1,231 @@
+name: scheduler-m2-pilot-time-contract
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-prove:
+    if: github.head_ref == 'agent/scheduler-m2-pilot-candidate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.23'
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Bind pilot manifest to M2 time semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str, label: str) -> None:
+              text = path.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          wizard = Path('scripts/scheduler_pilot_wizard.py')
+          replace_once(
+              wizard,
+              '''READ_SPEC = {
+              "tool": "rig_status",
+              "args": {},
+              "cadence": "every:60",
+              "ttl_days": 1,
+              "max_runs": 3,
+          }
+          WRITE_SPEC = {
+              "tool": "note_append",
+              "args": {"text": "pilot"},
+              "cadence": "every:60",
+              "ttl_days": 1,
+              "max_runs": 2,
+          }
+          ''',
+              '''READ_SPEC = {
+              "tool": "rig_status",
+              "args": {},
+              "cadence": "every:60",
+              "ttl_days": 1,
+              "max_runs": 3,
+              "timezone": "Europe/Copenhagen",
+              "misfire_policy": "run_once",
+          }
+          WRITE_SPEC = {
+              "tool": "note_append",
+              "args": {"text": "pilot"},
+              "cadence": "every:60",
+              "ttl_days": 1,
+              "max_runs": 2,
+              "timezone": "Europe/Copenhagen",
+              "misfire_policy": "run_once",
+          }
+          ''',
+              'manifest fields',
+          )
+          replace_once(
+              wizard,
+              '''        and row.get("cadence") == spec["cadence"]
+              and int(row.get("max_runs") or -1) == int(spec["max_runs"])
+          )
+          ''',
+              '''        and row.get("cadence") == spec["cadence"]
+              and int(row.get("ttl_days") or -1) == int(spec["ttl_days"])
+              and int(row.get("max_runs") or -1) == int(spec["max_runs"])
+              and row.get("timezone") == spec["timezone"]
+              and row.get("misfire_policy") == spec["misfire_policy"]
+          )
+          ''',
+              'manifest matcher',
+          )
+          replace_once(
+              wizard,
+              '''    print('    note_append · {"text":"pilot"} · every:60 · max_runs=2 · ttl_days=1')
+          ''',
+              '''    print('    note_append · {"text":"pilot"} · every:60 · max_runs=2 · ttl_days=1')
+              print('    timezone=Europe/Copenhagen · misfire_policy=run_once')
+          ''',
+              'operator instruction',
+          )
+
+          test = Path('tests/workflow_scheduler_pilot_wizard.py')
+          replace_once(
+              test,
+              '''    "cadence": "every:60",
+              "max_runs": 3,
+          }
+          write = {
+          ''',
+              '''    "cadence": "every:60",
+              "ttl_days": 1,
+              "max_runs": 3,
+              "timezone": "Europe/Copenhagen",
+              "misfire_policy": "run_once",
+          }
+          write = {
+          ''',
+              'read fixture',
+          )
+          replace_once(
+              test,
+              '''    "cadence": "every:60",
+              "max_runs": 2,
+          }
+          check(module.BRANCH''',
+              '''    "cadence": "every:60",
+              "ttl_days": 1,
+              "max_runs": 2,
+              "timezone": "Europe/Copenhagen",
+              "misfire_policy": "run_once",
+          }
+          check(module.BRANCH''',
+              'write fixture',
+          )
+          replace_once(
+              test,
+              '''check(module.matches_manifest(write, module.WRITE_SPEC), "write manifest is exact")
+          check(
+              not module.matches_manifest(
+                  {**write, "args": {"text": "other"}}, module.WRITE_SPEC
+              ),
+              "write argument drift is rejected",
+          )
+          ''',
+              '''check(module.matches_manifest(write, module.WRITE_SPEC), "write manifest is exact")
+          check(
+              not module.matches_manifest(
+                  {**write, "args": {"text": "other"}}, module.WRITE_SPEC
+              ),
+              "write argument drift is rejected",
+          )
+          check(
+              not module.matches_manifest(
+                  {**write, "timezone": "America/New_York"}, module.WRITE_SPEC
+              ),
+              "write timezone drift is rejected",
+          )
+          check(
+              not module.matches_manifest(
+                  {**write, "misfire_policy": "skip"}, module.WRITE_SPEC
+              ),
+              "write misfire drift is rejected",
+          )
+          check(
+              not module.matches_manifest({**write, "ttl_days": 2}, module.WRITE_SPEC),
+              "write TTL drift is rejected",
+          )
+          ''',
+              'time drift tests',
+          )
+          PY
+
+      - name: Remove temporary workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/scheduler-m2-pilot-time-contract.yml
+          test ! -e .github/workflows/scheduler-m2-pilot-time-contract.yml
+
+      - name: Install worker dependencies
+        run: pip install -r worker/requirements.txt --break-system-packages
+
+      - name: Regenerate state and run all tests
+        env:
+          MODELRIG_BIN: /tmp/modelrig-server
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/current_state.py
+          cd backend
+          go build -o /tmp/modelrig-server ./cmd/modelrig-server
+          go vet ./...
+          go test ./...
+          cd ..
+          pip install --quiet ruff
+          ruff check --select E9,F63,F7,F82 worker/ tests/
+          git diff --check
+          for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
+            [ -e "$f" ] || continue
+            PYTHONPATH=worker python3 "$f"
+          done
+
+      - name: Verify stable five-file pilot scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/expected.txt <<'EOF'
+          .gitignore
+          CURRENT_STATE.md
+          START_SCHEDULER_PILOT.cmd
+          scripts/scheduler_pilot_wizard.py
+          tests/workflow_scheduler_pilot_wizard.py
+          EOF
+          git diff --name-only 9dc470878317ac0c44dfc69660b9f96fe66d7063 | sort > /tmp/actual.txt
+          sort -o /tmp/expected.txt /tmp/expected.txt
+          diff -u /tmp/expected.txt /tmp/actual.txt
+          test ! -e .github/workflows/scheduler-m2-pilot-time-contract.yml
+          git diff --check
+
+      - name: Commit tightened time-bound pilot
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "validation(scheduler): bind physical pilot to exact time semantics"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
