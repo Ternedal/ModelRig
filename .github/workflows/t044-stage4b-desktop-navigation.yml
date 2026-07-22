@@ -1,0 +1,53 @@
+name: t044-stage4b-desktop-navigation
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  validate-desktop-navigation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Apply desktop navigation patch
+        run: python3 scripts/t044_stage4b_desktop_navigation.py
+
+      - name: Remove transport before validation
+        run: |
+          rm -f scripts/t044_stage4b_desktop_navigation.py
+          rm -f .github/workflows/t044-stage4b-desktop-navigation.yml
+
+      - name: Compile desktop and run all unit tests
+        working-directory: desktop
+        run: ./gradlew :composeApp:compileKotlin :composeApp:test --stacktrace
+
+      - name: Verify isolated UI scope
+        run: |
+          set -euo pipefail
+          git diff --check
+          allowed='^(desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/App\.kt|desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog\.kt|desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialogTest\.kt)$'
+          unexpected=$(git diff --name-only d6525446bdfb902228012f70bf2e7ea6c7511b74 | grep -Ev "$allowed" || true)
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected T-044 desktop UI paths:"
+            echo "$unexpected"
+            exit 1
+          fi
+
+      - name: Commit proven desktop navigation and remove transport
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "feat(control-center): wire read-only desktop dialog"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
