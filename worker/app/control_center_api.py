@@ -109,15 +109,25 @@ async def _call_health(provider: HealthProvider) -> Mapping[str, Any]:
     return result
 
 
+def _copy_explicit_verdict(source: Mapping[str, Any], target: dict[str, Any]) -> None:
+    verdict = source.get("ok")
+    if isinstance(verdict, bool):
+        target["ok"] = verdict
+
+
 def _backend_component(request: Request) -> Mapping[str, Any]:
     observed_at = request.headers.get("x-kaliv-backend-observed-at")
     version = request.headers.get("x-kaliv-backend-version")
     status = request.headers.get("x-kaliv-backend-status")
-    return {
-        "ok": status == "ok",
+    component: dict[str, Any] = {
         "observed_at": observed_at,
         "detail": f"modelrig-server {version}" if version else None,
     }
+    if status == "ok":
+        component["ok"] = True
+    elif status == "unavailable":
+        component["ok"] = False
+    return component
 
 
 def _health_components(
@@ -133,17 +143,20 @@ def _health_components(
     worker = worker if isinstance(worker, Mapping) else {}
     models = checks.get("ollama")
     models = models if isinstance(models, Mapping) else {}
+
+    worker_component: dict[str, Any] = {
+        "observed_at": observed_at,
+        "detail": worker.get("detail") or worker.get("version"),
+    }
+    model_component: dict[str, Any] = {
+        "observed_at": observed_at,
+        "detail": models.get("detail"),
+    }
+    _copy_explicit_verdict(worker, worker_component)
+    _copy_explicit_verdict(models, model_component)
     return {
-        "worker": {
-            "ok": worker.get("ok") is True,
-            "observed_at": observed_at,
-            "detail": worker.get("detail") or worker.get("version"),
-        },
-        "models": {
-            "ok": models.get("ok") is True,
-            "observed_at": observed_at,
-            "detail": models.get("detail"),
-        },
+        "worker": worker_component,
+        "models": model_component,
     }
 
 
