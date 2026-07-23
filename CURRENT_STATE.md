@@ -213,6 +213,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_agent3_readonly_pilot_one_click.py`
 - `tests/workflow_android_credential_commit.py`
 - `tests/workflow_android_scheduler_picker.py`
+- `tests/workflow_appliance_lifecycle_updater_chain.py`
 - `tests/workflow_browser_peer_public_validation.py`
 - `tests/workflow_browser_peer_public_validation_operator.py`
 - `tests/workflow_candidate_campaign.py`
@@ -233,6 +234,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_stage_a_operator_surface.py`
 - `tests/workflow_stage_a_physical_operator.py`
 - `tests/workflow_stage_a_resume_cleanup.py`
+- `tests/workflow_stage_b_physical_gate.py`
 - `tests/workflow_staged_promotion_runbook.py`
 - `tests/workflow_test_coverage.py`
 - `tests/workflow_worker_entrypoints.py`
