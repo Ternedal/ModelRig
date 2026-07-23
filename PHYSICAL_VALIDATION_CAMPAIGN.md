@@ -2,7 +2,8 @@
 
 Denne runbook samler Stage B's syv fysiske **Prove**-opgaver T-004, T-005,
 T-006, T-007, T-040, T-043 og T-019. Det interaktive T-032-browserbevis
-samles bagefter i otte-bevis-slutgaten.
+samles bagefter i otte-bevis-slutgaten. Når alle syv fysiske beviser er grønne,
+er releasekampagnen komplet; browserbeviset gør den efterfølgende slutgate til otte.
 
 > **Scope:** Dette er releasefasen. En upubliceret kandidat starter i
 > [`STAGED_PHYSICAL_PROMOTION.md`](STAGED_PHYSICAL_PROMOTION.md). T-006 kan først
@@ -269,7 +270,8 @@ production_activation=false
 summary.total=8
 ```
 
-Review version, Git-SHA, worker-fingerprint, alle komponenthashes, syv releasebeviser
-og T-032-browserattestationen. Rolling-filer og rå fixtures forbliver lokale. Kun
+Kontrollér før en senere beslutning, at alle syv evidence statuses i kampagnerapporten
+er `pass`, og review version, Git-SHA, worker-fingerprint, alle komponenthashes og
+T-032-browserattestationen. Rolling-filer og rå fixtures forbliver lokale. Kun
 dateret, manuelt reviewet evidens må committes. En senere aktivering kræver fortsat
 en særskilt eksplicit beslutning.
