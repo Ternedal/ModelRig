@@ -1,7 +1,5 @@
 name: Compose unified candidate 1.58.145
 
-# This second commit intentionally supplies the synchronize event after the
-# workflow file itself exists on the candidate branch.
 on:
   pull_request:
     branches:
@@ -15,6 +13,8 @@ jobs:
   compose:
     if: ${{ github.head_ref == 'agent/unified-candidate-1.58.145' && github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
+    env:
+      CANDIDATE_PR_NUMBER: ${{ github.event.pull_request.number }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4.2.2
         with:
@@ -62,12 +62,14 @@ jobs:
       - name: Move candidate contract to 1.58.145
         shell: python
         run: |
+          import os
           from pathlib import Path
 
           old_branch = "agent/unified-candidate-1.58.143"
           new_branch = "agent/unified-candidate-1.58.145"
           old_target = "1.58.143"
           new_target = "1.58.145"
+          pr_number = os.environ["CANDIDATE_PR_NUMBER"]
 
           Path("VERSION").write_text(new_target + "\n", encoding="utf-8")
 
@@ -130,7 +132,7 @@ jobs:
                   text.replace(old_branch, new_branch)
                   .replace("1.58.142", "1.58.144")
                   .replace(old_target, new_target)
-                  .replace("#150", "#159")
+                  .replace("#150", f"#{pr_number}")
               )
               path.write_text(text, encoding="utf-8", newline="")
 
