@@ -18,6 +18,7 @@ import agent3_model_eval as _base
 ROOT = Path(__file__).resolve().parents[1]
 OVERRIDES = ROOT / "eval" / "agent3_model_tasks_stage_a_overrides.json"
 ORIGINAL_LOAD = _base.load_task_set
+ORIGINAL_CLIENT_REQUEST = _base.Client.request
 
 
 def _require_object(value: Any, *, where: str) -> dict[str, Any]:
@@ -83,7 +84,37 @@ def load_stage_a_task_set(path: Path) -> dict[str, Any]:
     return task_set
 
 
+def normalize_stage_a_status(response: dict[str, Any]) -> dict[str, Any]:
+    """Expose the worker's version under the evaluator's legacy version field."""
+    version = response.get("version")
+    if isinstance(version, str) and version.strip():
+        return response
+
+    worker_version = response.get("worker_version")
+    if not isinstance(worker_version, str) or not worker_version.strip():
+        raise _base.EvalError(
+            "Agent 3 status is missing both version and worker_version; refusing unbound evidence"
+        )
+
+    normalized = dict(response)
+    normalized["version"] = worker_version.strip()
+    return normalized
+
+
+def stage_a_client_request(
+    self: _base.Client,
+    method: str,
+    path: str,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    response = ORIGINAL_CLIENT_REQUEST(self, method, path, payload)
+    if path == "/api/v1/experimental/agent3/status":
+        return normalize_stage_a_status(response)
+    return response
+
+
 _base.load_task_set = load_stage_a_task_set
+_base.Client.request = stage_a_client_request
 
 if __name__ == "__main__":
     raise SystemExit(_base.main())
