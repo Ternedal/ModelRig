@@ -1,5 +1,7 @@
 name: Compose unified candidate 1.58.145
 
+# This second commit intentionally supplies the synchronize event after the
+# workflow file itself exists on the candidate branch.
 on:
   pull_request:
     branches:
