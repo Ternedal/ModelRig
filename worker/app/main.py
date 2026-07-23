@@ -6,9 +6,9 @@ owned by this small versioned module. Importers still receive the implementation
 module itself; monkeypatching, private helpers and function globals therefore
 behave exactly as they did when the implementation lived at ``app.main``.
 
-Run the worker through ``uvicorn app.entrypoint:app``. NOT through
-``uvicorn app.main:app``; the production entrypoint owns the outer hardening and
-optional-service lifecycle.
+Run the worker through ``uvicorn app.entrypoint:app``.
+NOT ``uvicorn app.main:app``; the production entrypoint owns the outer hardening
+and optional-service lifecycle.
 """
 from __future__ import annotations
 
