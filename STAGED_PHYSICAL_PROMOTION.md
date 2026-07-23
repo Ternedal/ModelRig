@@ -4,7 +4,7 @@ Denne fil er autoritativ for den fysiske promotion. Den gamle rækkefølge “al
 
 ## Invariants
 
-- Kandidatversionen er `1.58.143`; riggens tidligere release er `1.58.142`.
+- Kandidatversionen er `1.58.145`; riggens tidligere release er `1.58.144`.
 - Samme 40-tegns SHA bruges til Stage A, exact fast-forward, tag og release.
 - Efter Stage A: ingen squash, rebase, mergecommit eller rettelsescommit.
 - SHA-skift ugyldiggør Stage A og kræver ny fysisk evidens.
@@ -49,15 +49,15 @@ Stage A kan fortsat styres direkte af `scripts/run-stage-a-physical-validation.p
 ```powershell
 cd C:\Users\Anders\Desktop\ModelRig
 git fetch origin
-git switch agent/unified-candidate-1.58.143
-git pull --ff-only origin agent/unified-candidate-1.58.143
+git switch agent/unified-candidate-1.58.145
+git pull --ff-only origin agent/unified-candidate-1.58.145
 $CandidateSha = "<CANDIDATE_SHA>"
 if ((git rev-parse HEAD).Trim() -ne $CandidateSha) { throw "Forkert SHA" }
 if (git status --short) { throw "Working tree er ikke ren" }
-if ((Get-Content VERSION -Raw).Trim() -ne "1.58.143") { throw "Forkert version" }
+if ((Get-Content VERSION -Raw).Trim() -ne "1.58.145") { throw "Forkert version" }
 ```
 
-Brug SHA'en fra draft-PR #150; gæt den aldrig.
+Brug SHA'en fra draft-PR #161; gæt den aldrig.
 
 ## A1. Freeze og forbered checklisten
 
@@ -129,7 +129,7 @@ Review version, SHA, worker-fingerprint, seks beviser, DNS/connected peer, hashe
 
 # Beslutningspunkt
 
-Kun efter eksplicit godkendelse må `main` fast-forwardes til præcis Stage A-SHA'en. Ingen squash, rebase eller mergecommit. Verificér `origin/main`, tag samme SHA som `v1.58.143`, og publicér det komplette release-sæt. Ændres SHA'en, skal Stage A køres om. Valideringsværktøjerne udfører ingen repository-operationer.
+Kun efter eksplicit godkendelse må `main` fast-forwardes til præcis Stage A-SHA'en. Ingen squash, rebase eller mergecommit. Verificér `origin/main`, tag samme SHA som `v1.58.145`, og publicér det komplette release-sæt. Ændres SHA'en, skal Stage A køres om. Valideringsværktøjerne udfører ingen repository-operationer.
 
 # Stage B — release, otte beviser
 
@@ -142,15 +142,15 @@ if ((git rev-parse HEAD).Trim() -ne $CandidateSha) { throw "SHA flyttede sig" }
 python scripts\freeze_check.py
 ```
 
-Release-freeze kræver publiceret `v1.58.143`, samme SHA på `origin/main` og grøn exact-head CI/CodeQL.
+Release-freeze kræver publiceret `v1.58.145`, samme SHA på `origin/main` og grøn exact-head CI/CodeQL.
 
 Følg derefter `PHYSICAL_VALIDATION_CAMPAIGN.md` sektion 4 og dokumentér T-006:
 
 1. normal reboot;
 2. backend supervisor-restart;
 3. worker supervisor-restart;
-4. gyldig updater-update fra 1.58.142 til 1.58.143;
-5. ugyldig update, afvist eller rullet tilbage til 1.58.143.
+4. gyldig updater-update fra 1.58.144 til 1.58.145;
+5. ugyldig update, afvist eller rullet tilbage til 1.58.145.
 
 Den faktiske updater-kæde skal bevise download, checksum, provenance, swap, health og heartbeat. Manuel binærudskiftning tæller ikke.
 
