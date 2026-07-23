@@ -1,0 +1,46 @@
+{
+  "schema": "kaliv-scheduler-pilot-manifest/v1",
+  "candidate": {
+    "version": "FILL_ME",
+    "git_sha": "FILL_ME_40_LOWERCASE_HEX",
+    "code_sha256": "FILL_ME_64_LOWERCASE_HEX"
+  },
+  "window": {
+    "started_at": "FILL_ME_ISO_8601_WITH_OFFSET",
+    "finished_at": "FILL_ME_ISO_8601_WITH_OFFSET"
+  },
+  "trials": {
+    "read": {
+      "schedule_id": "FILL_ME",
+      "tool": "rig_status",
+      "cadence": "every:60",
+      "max_runs": 2,
+      "args_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "claim_ids": [
+        "FILL_ME_READ_CLAIM_1",
+        "FILL_ME_READ_CLAIM_2"
+      ]
+    },
+    "write": {
+      "schedule_id": "FILL_ME",
+      "tool": "note_append",
+      "cadence": "every:60",
+      "max_runs": 1,
+      "args_sha256": "FILL_ME_64_LOWERCASE_HEX_OF_CANONICAL_ARGS_OBJECT",
+      "marker_sha256": "FILL_ME_64_LOWERCASE_HEX_OF_TRIMMED_TEXT",
+      "device_id": "FILL_ME_PAIRED_DEVICE_ID",
+      "claim_ids": [
+        "FILL_ME_WRITE_CLAIM"
+      ]
+    },
+    "revoke": {
+      "schedule_id": "FILL_ME",
+      "claim_id": "FILL_ME_RELEASED_CLAIM"
+    },
+    "recovery": {
+      "schedule_id": "FILL_ME",
+      "claim_id": "FILL_ME_RECOVERED_CLAIM",
+      "expected_status": "abandoned"
+    }
+  }
+}
