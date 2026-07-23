@@ -10,7 +10,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   test:
@@ -152,3 +152,154 @@ jobs:
       - name: Run desktop credential tests against Windows DPAPI
         working-directory: desktop
         run: .\gradlew.bat :composeApp:test --no-daemon --console=plain
+
+  compose-unified-candidate-1-58-145:
+    if: ${{ github.event_name == 'pull_request' && github.head_ref == 'agent/unified-candidate-1.58.145' && github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    env:
+      CANDIDATE_PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+          ref: agent/unified-candidate-1.58.145
+      - name: Merge exact current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --quiet origin main
+          expected_main="2e2a29a241c0540b118a7f937bdf3bdd1cc23cbe"
+          actual_main="$(git rev-parse origin/main)"
+          if [ "$actual_main" != "$expected_main" ]; then
+            echo "main moved: expected $expected_main, got $actual_main" >&2
+            exit 1
+          fi
+          set +e
+          git merge --no-ff --no-commit origin/main
+          merge_rc=$?
+          set -e
+          if [ "$merge_rc" -ne 0 ]; then
+            unresolved="$(git diff --name-only --diff-filter=U)"
+            allowed=$'ACTIVATION_READINESS.md\nCURRENT_STATE.md\nVERSION\nandroid/app/build.gradle.kts\nbackend/internal/config/config.go\ndesktop/composeApp/build.gradle.kts\nworker/app/main.py'
+            while IFS= read -r path; do
+              [ -z "$path" ] && continue
+              if ! grep -Fxq "$path" <<<"$allowed"; then
+                echo "unexpected merge conflict: $path" >&2
+                exit 1
+              fi
+              git checkout --ours -- "$path"
+              git add "$path"
+            done <<<"$unresolved"
+          fi
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            echo "unresolved merge conflicts remain" >&2
+            git diff --name-only --diff-filter=U >&2
+            exit 1
+          fi
+      - name: Move candidate contract to 1.58.145
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          old_branch = "agent/unified-candidate-1.58.143"
+          new_branch = "agent/unified-candidate-1.58.145"
+          old_target = "1.58.143"
+          new_target = "1.58.145"
+          pr_number = os.environ["CANDIDATE_PR_NUMBER"]
+          Path("VERSION").write_text(new_target + "\n", encoding="utf-8")
+          exact = {
+              "android/app/build.gradle.kts": [
+                  ("versionCode = 276", "versionCode = 277"),
+                  ('versionName = "1.58.143"', 'versionName = "1.58.145"'),
+              ],
+              "backend/internal/config/config.go": [
+                  ('const Version = "1.58.143"', 'const Version = "1.58.145"'),
+              ],
+              "desktop/composeApp/build.gradle.kts": [
+                  ('packageVersion = "1.58.143"', 'packageVersion = "1.58.145"'),
+              ],
+              "worker/app/main.py": [
+                  ('VERSION = "1.58.143"', 'VERSION = "1.58.145"'),
+              ],
+          }
+          for name, pairs in exact.items():
+              path = Path(name)
+              text = path.read_text(encoding="utf-8")
+              for old, new in pairs:
+                  count = text.count(old)
+                  if count != 1:
+                      raise SystemExit(f"{name}: expected exactly one {old!r}, found {count}")
+                  text = text.replace(old, new)
+              path.write_text(text, encoding="utf-8", newline="")
+          contract_files = [
+              "scripts/stage_a_one_click.py",
+              "scripts/stage_a_physical_operator.py",
+              "scripts/agent3_readonly_pilot_one_click.py",
+              "scripts/scheduler_pilot_wizard.py",
+              "tests/workflow_stage_a_one_click.py",
+              "tests/workflow_stage_a_physical_operator.py",
+              "tests/workflow_agent3_readonly_pilot_one_click.py",
+              "tests/workflow_scheduler_pilot_wizard.py",
+              "tests/workflow_remaining_physical_pilots.py",
+          ]
+          for name in contract_files:
+              path = Path(name)
+              text = path.read_text(encoding="utf-8")
+              if old_branch not in text or old_target not in text:
+                  raise SystemExit(f"{name}: old candidate binding missing")
+              path.write_text(
+                  text.replace(old_branch, new_branch).replace(old_target, new_target),
+                  encoding="utf-8",
+                  newline="",
+              )
+          for name in ("STAGED_PHYSICAL_PROMOTION.md", "tests/workflow_staged_promotion_runbook.py"):
+              path = Path(name)
+              text = path.read_text(encoding="utf-8")
+              for value in (old_branch, "1.58.142", old_target, "#150"):
+                  if value not in text:
+                      raise SystemExit(f"{name}: expected lifecycle value missing: {value}")
+              path.write_text(
+                  text.replace(old_branch, new_branch)
+                  .replace("1.58.142", "1.58.144")
+                  .replace(old_target, new_target)
+                  .replace("#150", f"#{pr_number}"),
+                  encoding="utf-8",
+                  newline="",
+              )
+          selected = [Path(name) for name in contract_files] + [
+              Path("STAGED_PHYSICAL_PROMOTION.md"),
+              Path("tests/workflow_staged_promotion_runbook.py"),
+          ]
+          for path in selected:
+              text = path.read_text(encoding="utf-8")
+              if old_branch in text or old_target in text:
+                  raise SystemExit(f"{path}: stale candidate binding remains")
+      - name: Regenerate authoritative state
+        run: |
+          python -m pip install -r worker/requirements.txt
+          python scripts/current_state.py
+          python scripts/activation_readiness.py
+          python scripts/current_state.py --check
+          python scripts/activation_readiness.py --check
+          python scripts/version_tool.py check
+      - name: Run focused candidate contracts
+        run: |
+          python tests/workflow_stage_a_one_click.py
+          python tests/workflow_stage_a_physical_operator.py
+          python tests/workflow_agent3_readonly_pilot_one_click.py
+          python tests/workflow_scheduler_pilot_wizard.py
+          python tests/workflow_remaining_physical_pilots.py
+          python tests/workflow_staged_promotion_runbook.py
+      - name: Commit merge and restore normal CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show HEAD^:.github/workflows/ci.yml > .github/workflows/ci.yml
+          git rm .github/workflows/compose-unified-candidate-1.58.145.yml
+          git add -A
+          git status --short
+          git diff --cached --check
+          git commit -m "merge(candidate): compose current main into unified 1.58.145"
+          git push origin HEAD:agent/unified-candidate-1.58.145
