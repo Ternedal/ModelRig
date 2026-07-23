@@ -49,16 +49,46 @@ if runbook_path.exists():
         "release_complete=false",
         "all_physical_evidence_complete=false",
         "production_activation=false",
+        "STAGE_B_UPDATER_EVIDENCE.md",
+        "VERIFY_STAGE_B_EVIDENCE.cmd",
         "freeze_check.py",
+        "appliance_lifecycle_updater_chain.py",
         "physical_validation_campaign.py",
         "physical_validation_final_gate.py",
+        "stage_b_physical_gate.py",
+        "kaliv-stage-b-physical-final/v1",
+        "stage-b-physical-final-latest.json",
+        "release_freeze_complete=true",
+        "updater_chain_complete=true",
         "all_physical_evidence_complete=true",
         "summary.total=7",
         "summary.total=8",
     )
-    check(all(item in runbook for item in required), "runbook contains the exact unified candidate and both complete gate sequences")
-    check("squash" in runbook and "rebase" in runbook and "mergecommit" in runbook, "runbook forbids SHA-changing integration after candidate evidence")
-    check("1.58.142" in runbook and "1.58.143" in runbook, "lifecycle update source and target versions are explicit")
+    check(
+        all(item in runbook for item in required),
+        "runbook contains the exact unified candidate and both complete fail-closed gate sequences",
+    )
+    check(
+        "squash" in runbook and "rebase" in runbook and "mergecommit" in runbook,
+        "runbook forbids SHA-changing integration after candidate evidence",
+    )
+    check(
+        "1.58.142" in runbook and "1.58.143" in runbook,
+        "lifecycle update source and target versions are explicit",
+    )
+    check(
+        runbook.index("appliance_lifecycle_updater_chain.py")
+        < runbook.index("physical_validation_campaign.py --mode verify")
+        < runbook.index("physical_validation_final_gate.py")
+        < runbook.index("stage_b_physical_gate.py"),
+        "Stage B documents semantic updater verification before campaign and final bundling",
+    )
+    check(
+        "-insecure-skip-verify" in runbook
+        and "-skip-attestation" in runbook
+        and "-no-heartbeat-check" in runbook,
+        "Stage B explicitly forbids updater verification bypasses",
+    )
 
 version_check = subprocess.run(
     [sys.executable, "scripts/version_tool.py", "check"],
@@ -74,6 +104,9 @@ agent3 = (ROOT / "AGENT3_RIG_VALIDATION.md").read_text(encoding="utf-8")
 check("STAGED_PHYSICAL_PROMOTION.md" in device, "device runbook delegates promotion order to staged authority")
 check("candidate_freeze_check.py" in device and "Stage B" in device, "device freeze section distinguishes pre-release and release freeze")
 check("STAGED_PHYSICAL_PROMOTION.md" in physical and "Stage B" in physical, "release campaign declares its post-release scope")
+check("STAGE_B_UPDATER_EVIDENCE.md" in physical, "release campaign delegates updater operations to the semantic Stage B authority")
+check("appliance_lifecycle_updater_chain.py" in physical, "release campaign requires machine-verifiable updater log semantics")
+check("VERIFY_STAGE_B_EVIDENCE.cmd" in physical, "release campaign names the single Stage B verification entrypoint")
 check("STAGED_PHYSICAL_PROMOTION.md" in agent3, "Agent 3 prerequisites accept the exact staged candidate")
 
 candidate_campaign = load(
@@ -85,9 +118,33 @@ candidate_gate = load(
 release_gate = load(
     "runbook_release_gate", ROOT / "scripts" / "physical_validation_final_gate.py"
 )
-check(len(candidate_campaign.PROOF_NAMES) == 6 and "lifecycle" not in candidate_campaign.PROOF_NAMES, "pre-release campaign excludes exactly the release-bound lifecycle slot")
-check(candidate_gate.SCHEMA != release_gate.SCHEMA, "seven-proof candidate receipt is schema-distinct from final release receipt")
-check(candidate_gate.CAMPAIGN_SCHEMA != release_gate.CAMPAIGN_SCHEMA, "six-proof candidate campaign is schema-distinct from release campaign")
+updater_chain = load(
+    "runbook_updater_chain", ROOT / "scripts" / "appliance_lifecycle_updater_chain.py"
+)
+stage_b_gate = load(
+    "runbook_stage_b_gate", ROOT / "scripts" / "stage_b_physical_gate.py"
+)
+check(
+    len(candidate_campaign.PROOF_NAMES) == 6
+    and "lifecycle" not in candidate_campaign.PROOF_NAMES,
+    "pre-release campaign excludes exactly the release-bound lifecycle slot",
+)
+check(
+    candidate_gate.SCHEMA != release_gate.SCHEMA,
+    "seven-proof candidate receipt is schema-distinct from final release receipt",
+)
+check(
+    candidate_gate.CAMPAIGN_SCHEMA != release_gate.CAMPAIGN_SCHEMA,
+    "six-proof candidate campaign is schema-distinct from release campaign",
+)
+check(
+    updater_chain.SCHEMA == "kaliv-appliance-lifecycle-updater-chain/v1",
+    "Stage B updater semantics have a versioned receipt schema",
+)
+check(
+    stage_b_gate.SCHEMA == "kaliv-stage-b-physical-final/v1",
+    "Stage B has one schema-distinct authoritative final receipt",
+)
 
 print(f"staged promotion runbook contracts: {passed} passed, {failed} failed")
 if failed:
