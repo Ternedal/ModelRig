@@ -1,0 +1,50 @@
+{
+  "schema": "kaliv-agent3-model-eval-overrides/v1",
+  "base_task_set": {
+    "name": "agent3-local-planner-baseline-da",
+    "version": "2026-07-18.1"
+  },
+  "override_version": "2026-07-23.1",
+  "overrides": [
+    {
+      "id": "20-note_append",
+      "from": {"tool": "note_append", "risk": "write", "args": {"text": "Test af lokal planner 20"}},
+      "to": {"tool": "note_append", "risk": "write", "args": {"text": "Test af lokal planner 20."}}
+    },
+    {
+      "id": "24-pull_model",
+      "from": {"tool": "pull_model", "risk": "write", "args": {"name": "qwen3:8b"}},
+      "to": {"tool": "pull_model", "risk": "admin", "args": {"name": "qwen3:8b"}}
+    },
+    {
+      "id": "25-pull_model",
+      "from": {"tool": "pull_model", "risk": "write", "args": {"name": "nomic-embed-text"}},
+      "to": {"tool": "pull_model", "risk": "admin", "args": {"name": "nomic-embed-text"}}
+    },
+    {
+      "id": "26-pull_model",
+      "from": {"tool": "pull_model", "risk": "write", "args": {"name": "gemma3:12b"}},
+      "to": {"tool": "pull_model", "risk": "admin", "args": {"name": "gemma3:12b"}}
+    },
+    {
+      "id": "27-delete_model",
+      "from": {"tool": "delete_model", "risk": "write", "args": {"name": "qwen3:8b"}},
+      "to": {"tool": "delete_model", "risk": "destructive", "args": {"name": "qwen3:8b"}}
+    },
+    {
+      "id": "28-delete_model",
+      "from": {"tool": "delete_model", "risk": "write", "args": {"name": "old/model:test"}},
+      "to": {"tool": "delete_model", "risk": "destructive", "args": {"name": "old/model:test"}}
+    },
+    {
+      "id": "29-delete_model",
+      "from": {"tool": "delete_model", "risk": "write", "args": {"name": "nomic-embed-text"}},
+      "to": {"tool": "delete_model", "risk": "destructive", "args": {"name": "nomic-embed-text"}}
+    },
+    {
+      "id": "30-delete_model",
+      "from": {"tool": "delete_model", "risk": "write", "args": {"name": "gemma3:12b"}},
+      "to": {"tool": "delete_model", "risk": "destructive", "args": {"name": "gemma3:12b"}}
+    }
+  ]
+}
