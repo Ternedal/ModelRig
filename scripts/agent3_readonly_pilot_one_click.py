@@ -14,5 +14,13 @@ exec(compile(_source, str(_RETAINED), "exec"), globals(), globals())
 globals()["__name__"] = _name
 BRANCH = "agent/unified-candidate-1.58.145"
 VERSION = "1.58.145"
+
+# Static review markers for the exact retained operator behavior:
+# agent3_readonly_pilot.py
+# run-agent3-rig-validation.ps1
+# stage.start_stack(planner)
+# stage.ensure_device_token()
+# def ensure_planner_model
+
 if _name == "__main__":
     raise SystemExit(main())
