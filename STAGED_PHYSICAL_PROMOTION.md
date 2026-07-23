@@ -133,51 +133,78 @@ Kun efter eksplicit godkendelse må `main` fast-forwardes til præcis Stage A-SH
 
 # Stage B — release, otte beviser
 
-## B0. Release-freeze og lifecycle
+## B0. Autoritativ updater-/lifecycle-evidens
 
-På samme SHA:
+Stage B må først begynde efter den separate exact-SHA fast-forward, tag og release. Følg den detaljerede operatorrunbook:
 
-```powershell
-if ((git rev-parse HEAD).Trim() -ne $CandidateSha) { throw "SHA flyttede sig" }
-python scripts\freeze_check.py
+```text
+STAGE_B_UPDATER_EVIDENCE.md
 ```
 
-Release-freeze kræver publiceret `v1.58.145`, samme SHA på `origin/main` og grøn exact-head CI/CodeQL.
+Updateren opdaterer ikke sig selv. Riggen skal derfor først bruge updater-binarien fra den publicerede `v1.58.145`-release, verificeret mod samme releases `SHA256SUMS.txt`. Server, worker og supervisor må ikke kopieres manuelt; deres transition skal ske gennem updateren.
 
-Følg derefter `PHYSICAL_VALIDATION_CAMPAIGN.md` sektion 4 og dokumentér T-006:
+Dokumentér T-006:
 
 1. normal reboot;
 2. backend supervisor-restart;
 3. worker supervisor-restart;
 4. gyldig updater-update fra 1.58.144 til 1.58.145;
-5. ugyldig update, afvist eller rullet tilbage til 1.58.145.
+5. ugyldig update, afvist før swap eller fuldt rullet tilbage til 1.58.145.
 
-Den faktiske updater-kæde skal bevise download, checksum, provenance, swap, health og heartbeat. Manuel binærudskiftning tæller ikke.
+Den gode updater-log skal maskinelt bevise download af alle tre binaries, checksum, GitHub build provenance, process stop/swap, backend+worker health og et supervisor-heartbeat, der avancerer efter restart. Den ugyldige update skal enten afvises før process-stop/swap eller afslutte en sund rollback. Vilkårlige ikke-tomme hashbundne logs tæller ikke længere som lifecycle-bevis.
 
-## B1. Syv-bevis releasekampagne og otte-bevis slutgate
+Disse bypasses er forbudt og blokeres af `appliance_lifecycle_updater_chain.py`:
 
-De seks Stage A-rapporter kan genbruges, når de er friske og binder til samme SHA/version/fingerprint. Lifecycle bliver bevis syv.
+```text
+-insecure-skip-verify
+-skip-attestation
+-no-heartbeat-check
+```
 
-```powershell
-python scripts\physical_validation_campaign.py `
-  --mode verify `
-  --max-age-hours 168 `
-  --min-model-exact 1.0 `
-  --report validation\physical-validation-campaign-latest.json
+`ROLLBACK FAILED`, `manual_recovery`, en tilbageværende `update-transaction.json`, manglende updater-markører eller log-hashdrift blokerer ligeledes Stage B.
 
-python scripts\physical_validation_final_gate.py `
-  --campaign-report validation\physical-validation-campaign-latest.json `
-  --browser-attestation validation\browser-peer-public-validation-physical-latest.json `
-  --report validation\physical-validation-final-latest.json
+## B1. Én fail-closed Stage B-slutgate
+
+Sæt `GH_TOKEN`/`GITHUB_TOKEN`, og dobbeltklik:
+
+```text
+VERIFY_STAGE_B_EVIDENCE.cmd
+```
+
+Launcheren kører i fast rækkefølge:
+
+1. `freeze_check.py` — publiceret `v1.58.145`, exact SHA på `origin/main`, release-tree og softwaregates;
+2. `appliance_lifecycle_updater_chain.py` — updaterloggenes semantiske kæde;
+3. `physical_validation_campaign.py --mode verify` — syv releasebeviser;
+4. `physical_validation_final_gate.py` — browserattestation og otte-bevis component gate;
+5. `stage_b_physical_gate.py` — binder komponenternes version, SHA, worker-fingerprint, schemaer, hashes og exitkoder til én slutkvittering.
+
+Den autoritative Stage B-kvittering er:
+
+```text
+validation/stage-b-physical-final-latest.json
 ```
 
 Kræv:
 
 ```text
+schema=kaliv-stage-b-physical-final/v1
 gate.passed=true
+release_freeze_complete=true
+updater_chain_complete=true
+physical_campaign_complete=true
+browser_peer_physical_complete=true
 all_physical_evidence_complete=true
 production_activation=false
 summary.total=8
 ```
 
-Kun denne schema-distinkte otte-bevis-kvittering kan indgå i en senere separat aktiveringsbeslutning. Den aktiverer stadig intet af sig selv.
+Review også de hashbundne komponenter:
+
+```text
+validation/appliance-lifecycle-updater-chain-latest.json
+validation/physical-validation-campaign-latest.json
+validation/physical-validation-final-latest.json
+```
+
+Kun denne schema-distinkte otte-bevis Stage B-kvittering kan indgå i en senere separat aktiveringsbeslutning. Den aktiverer stadig intet af sig selv.
