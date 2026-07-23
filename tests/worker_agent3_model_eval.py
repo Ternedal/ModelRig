@@ -197,6 +197,26 @@ def test_stage_a_overrides_match_current_risk_contract() -> None:
     for task_id in ("27-delete_model", "28-delete_model", "29-delete_model", "30-delete_model"):
         assert tasks[task_id]["expected"]["steps"][0]["risk"] == "destructive"
 
+    normalized = wrapper.normalize_stage_a_status(
+        {
+            "enabled": True,
+            "experimental": True,
+            "worker_version": "1.58.145",
+            "code_sha256": "a" * 64,
+        }
+    )
+    assert normalized["version"] == "1.58.145"
+
+    already_bound = {"version": "1.58.145", "worker_version": "ignored"}
+    assert wrapper.normalize_stage_a_status(already_bound) is already_bound
+
+    try:
+        wrapper.normalize_stage_a_status({"experimental": True})
+    except MODULE.EvalError as exc:
+        assert "missing both version and worker_version" in str(exc)
+    else:
+        raise AssertionError("Stage A status normalization must fail closed without a version")
+
 
 def test_stage_a_loader_uses_overlay_and_keeps_checkout_clean() -> None:
     source = (ROOT / "scripts" / "stage_a_one_click.py").read_text(encoding="utf-8")
