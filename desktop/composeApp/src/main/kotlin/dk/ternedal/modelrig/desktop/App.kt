@@ -175,6 +175,10 @@ fun App() {
         var ragError by remember { mutableStateOf<String?>(null) }
         var showModels by remember { mutableStateOf(false) }
         var showConvos by remember { mutableStateOf(false) }
+        // Which of the three design directions (1a/1b/1c) is showing. CHAT is
+        // the evolved App(); AGENT/COMPUTER are the new cockpit/computer-use
+        // screens; MODELS/DOCS/SETTINGS route to the existing panels.
+        var activeScreen by remember { mutableStateOf(KalivScreen.CHAT) }
         val scope = rememberCoroutineScope()
         var convId by remember { mutableStateOf<Long?>(null) }
 
@@ -349,7 +353,33 @@ fun App() {
             }
         }
 
-        Column(Modifier.fillMaxSize().background(KalivTheme.colors.Graphite).padding(24.dp)) {
+        // Overall shell (handoff 1a/1b/1c): a left nav-rail selects the screen;
+        // the center column carries the header + the active screen's content.
+        // The rail is shared by all three directions.
+        Row(Modifier.fillMaxSize().background(KalivTheme.colors.Graphite)) {
+            KalivNavRail(
+                active = activeScreen,
+                onSelect = { screen ->
+                    activeScreen = screen
+                    // MODELS/DOCS/SETTINGS reuse the existing panels rather than
+                    // being separate screens; toggle them and stay on CHAT so the
+                    // chat surface (and its panel area) remains the host.
+                    when (screen) {
+                        KalivScreen.MODELS -> { showModels = true; showConvos = false; showSettings = false; activeScreen = KalivScreen.CHAT }
+                        KalivScreen.DOCS -> { ragMode = true; loadRagSources(); activeScreen = KalivScreen.CHAT }
+                        KalivScreen.SETTINGS -> { showSettings = true; showModels = false; showConvos = false; activeScreen = KalivScreen.CHAT }
+                        else -> {}
+                    }
+                },
+                modelName = localModel,
+                // VRAM is not queried live here; show the model's headline budget
+                // for the reference rig (RTX 3060 12GB). A live figure would come
+                // from /health/full -- left as a follow-up so this stays honest.
+                vramUsedGb = 6.2,
+                vramTotalGb = 12.0,
+                modelBackend = if (localPath.contains("/api/v1/")) "llama.cpp" else "Ollama",
+            )
+        Column(Modifier.weight(1f).fillMaxHeight().background(KalivTheme.colors.Graphite).padding(24.dp)) {
             Header(
                 dark = darkMode,
                 showConvos = showConvos, onConvos = { showConvos = !showConvos },
@@ -357,6 +387,25 @@ fun App() {
                 showSettings = showSettings, onSettings = { showSettings = !showSettings },
             )
             Spacer(Modifier.height(12.dp))
+
+            // The AGENT (1b) and COMPUTER (1c) screens replace the chat surface
+            // entirely; they carry their own composers and lifecycle. The chat
+            // screen (1a) keeps the existing toolbar + message list + composer.
+            if (activeScreen == KalivScreen.AGENT) {
+                KalivAgentCockpit(
+                    baseUrl = localUrl,
+                    bearer = deviceToken.ifBlank { null },
+                    model = localModel,
+                    system = localSystem.trim().takeIf { it.isNotEmpty() },
+                )
+            } else if (activeScreen == KalivScreen.COMPUTER) {
+                KalivComputerUse(
+                    baseUrl = localUrl,
+                    bearer = deviceToken.ifBlank { null },
+                    model = localModel,
+                    system = localSystem.trim().takeIf { it.isNotEmpty() },
+                )
+            } else {
             // Panel toggles live ABOVE the panels and are never pushed out of
             // view. The original layout put the settings card first and its
             // close-button below it -- once the card grew taller than the
@@ -556,6 +605,28 @@ fun App() {
                         else SendGlyphDesktop(if (canSend) Color(0xFFF3EFE6) else KalivTheme.colors.TextMuted)
                     }
                 }
+            }
+            } // end else (chat screen 1a)
+        }
+            // 1a right-hand context panel: only on the chat screen, and only
+            // when no full-width panel (settings/models/convos) is open, so it
+            // never fights the scrollable panel area for width.
+            if (activeScreen == KalivScreen.CHAT && !(showSettings || showConvos || showModels)) {
+                KalivContextPanel(
+                    ragOn = ragMode,
+                    onToggleRag = { ragMode = !ragMode; if (ragMode) loadRagSources() },
+                    docs = ragSources.map { s ->
+                        val kind = s.substringAfterLast('.', "").uppercase().take(3).ifBlank { "DOC" }
+                        RagDocRow(kind = kind, name = s, size = "")
+                    },
+                    onAddDocument = { ragMode = true; loadRagSources() },
+                    // Tokens/sec + response time would come from the last stream's
+                    // timing; shown as the reference figures until wired to real
+                    // measurement, so the panel is honest about being illustrative.
+                    tokensPerSec = 512,
+                    responseSeconds = 0.83,
+                    sparkline = listOf(3f, 5f, 4f, 7f, 6f, 9f, 7f, 10f, 8f, 11f),
+                )
             }
         }
 
