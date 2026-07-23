@@ -686,7 +686,16 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
                 name = t.optString("name"),
                 risk = t.optString("risk"),
                 description = t.optString("description"),
-                enabled = t.optBoolean("enabled"),
+                // These contract fields are type-strict. Only an actual
+                // JSON boolean is accepted; strings and numbers use the default.
+                enabled = t.opt("enabled") == true,
+                impact = t.optString("impact").takeUnless { it.isBlank() || it == "null" },
+                schedulable = t.opt("schedulable") == true,
+                unschedulableReason = t.optString("unschedulable_reason")
+                    .takeUnless { it.isBlank() || it == "null" },
+                cancellation = t.optString("cancellation")
+                    .takeUnless { it.isBlank() || it == "null" },
+                idempotent = t.opt("idempotent") as? Boolean,
             )
         }
         return ToolRegistry(
@@ -880,7 +889,28 @@ data class ToolInfo(
     val risk: String,
     val description: String,
     val enabled: Boolean,
-)
+    val impact: String? = null,
+    val schedulable: Boolean = false,
+    val unschedulableReason: String? = null,
+    val cancellation: String? = null,
+    val idempotent: Boolean? = null,
+) {
+    /**
+     * The scheduler picker fails closed. Only an explicit backend declaration
+     * may make a tool selectable; a missing field is not permission.
+     */
+    val scheduleBlockReason: String?
+        get() = when {
+            !schedulable -> unschedulableReason
+                ?.takeIf { it.isNotBlank() }
+                ?: "Riggen har ikke markeret værktøjet som planlægbart."
+            !enabled -> "Værktøjet er slået fra på riggen."
+            else -> null
+        }
+
+    val canSchedule: Boolean
+        get() = scheduleBlockReason == null
+}
 
 /** The rig's tool registry: the kill switch, where writes may land, the tools. */
 data class ToolRegistry(
