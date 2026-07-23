@@ -102,7 +102,7 @@ def token_for(preview, *, issued_at=None, expires_at=None, device_id="phone", no
     issued_at = int(time.time()) if issued_at is None else int(issued_at)
     expires_at = issued_at + 120 if expires_at is None else int(expires_at)
     claims = {
-        "v": 1,
+        "v": 2,
         "nonce": nonce or base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("="),
         "device_id": device_id,
         "operation": preview["operation"],
@@ -110,6 +110,8 @@ def token_for(preview, *, issued_at=None, expires_at=None, device_id="phone", no
         "tool": preview["tool"],
         "args": preview["args"],
         "cadence": preview["cadence"],
+        "timezone": preview["timezone"],
+        "misfire_policy": preview["misfire_policy"],
         "ttl_days": preview["ttl_days"],
         "max_runs": preview["max_runs"],
         "enable": preview["enable"],
@@ -130,6 +132,8 @@ def create_body(preview, token=None, **changes):
         "tool": preview["tool"],
         "args": preview["args"],
         "cadence": preview["cadence"],
+        "timezone": preview["timezone"],
+        "misfire_policy": preview["misfire_policy"],
         "ttl_days": preview["ttl_days"],
         "max_runs": preview["max_runs"],
     }
@@ -150,6 +154,11 @@ try:
             "running": False,
             "resources_open": False,
             "last_error": None,
+            "max_concurrency": 1,
+            "queue_capacity": 0,
+            "active_executions": 0,
+            "accepted_ticks": 0,
+            "overlap_rejections": 0,
         },
         "status tells the truth while the dormant flag is off",
     )

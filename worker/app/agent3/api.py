@@ -8,12 +8,19 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import capability_probe
+from .approval import (
+    Agent3ApprovalError,
+    approval_required,
+    consume_agent3_approval,
+    verify_agent3_approval,
+)
 
 
 def _build_code_identity() -> str:
     from ..build_identity import code_fingerprint
 
     return code_fingerprint()
+
 
 from .core import (
     Agent3Orchestrator,
@@ -82,9 +89,11 @@ class RetryReq(BaseModel):
 
 
 class ConfirmReq(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     step_id: str
     decision: str = Field(pattern="^(approve|deny)$")
     digest: str
+    approval_token: str | None = None
 
 
 class ReplanReq(BaseModel):
@@ -148,6 +157,7 @@ def build_router(
     validation_provider: ValidationProvider | None = None,
     worker_version: str | None = None,
     replan_service: PersistentReadReplanner | None = None,
+    approval_db_path: str | None = None,
     *,
     allow_client_plans: bool = False,
 ) -> APIRouter:
@@ -204,6 +214,12 @@ def build_router(
             )
         return outcomes
 
+    def current_revision(run_id: str) -> int:
+        if replan_service is None:
+            return 0
+        revision, _count = replan_service.journal.revision_state(run_id)
+        return revision
+
     @router.get("/status")
     def status() -> dict[str, Any]:
         validation = validation_provider()
@@ -216,6 +232,8 @@ def build_router(
                 "explicit-pending-read-window" if replan_service is not None else "disabled"
             ),
             "read_review": "opt-in-persistent" if reviewing else "disabled",
+            "write_approval": "backend-issued-device-bound-single-use",
+            "write_approval_required": approval_required(),
             "production_tools_path_untouched": True,
             "max_steps": orchestrator.max_steps,
             "worker_version": worker_version,
@@ -281,7 +299,6 @@ def build_router(
             methods=["POST"],
             include_in_schema=False,
         )
-
 
     @router.post("/runs/{run_id}/retry")
     def retry(run_id: str, req: RetryReq) -> dict[str, Any]:
@@ -374,13 +391,37 @@ def build_router(
     @router.post("/runs/{run_id}/confirm")
     def confirm(run_id: str, req: ConfirmReq) -> dict[str, Any]:
         recover_or_block(run_id)
+        approval_receipt: dict[str, Any] | None = None
         try:
+            pending = orchestrator.store.load(run_id)
+            if pending is None:
+                raise KeyError(run_id)
+            if req.decision == "deny":
+                if req.approval_token:
+                    raise Agent3ApprovalError("deny must not carry an approval token")
+            elif req.approval_token:
+                approval = verify_agent3_approval(
+                    req.approval_token,
+                    pending,
+                    plan_revision=current_revision(run_id),
+                )
+                consume_agent3_approval(approval, db_path=approval_db_path)
+                approval_receipt = approval.audit_payload()
+                orchestrator.store.event(
+                    run_id,
+                    "approval_consumed",
+                    {"step_id": req.step_id, "tool": approval.tool, **approval_receipt},
+                )
+            elif approval_required():
+                raise Agent3ApprovalError(
+                    "approve requires a backend-issued device-bound approval token"
+                )
             run = orchestrator.confirm(run_id, req.step_id, req.decision, req.digest)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="run not found") from exc
-        except ConfirmationError as exc:
+        except (ConfirmationError, Agent3ApprovalError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return response(run)
+        return response(run, approval_receipt=approval_receipt)
 
     @router.post("/runs/{run_id}/resume")
     def resume(run_id: str) -> dict[str, Any]:
@@ -495,73 +536,6 @@ def mount_agent3(app: FastAPI) -> bool:
             replan_service=replan_service,
         )
     )
-    # The production surface is OWNED here, in one place. History: mount
-    # itself was orphaned (fixed 1.58.131), then the planner router (131),
-    # then the memory router (134) -- and the dev runners kept including a
-    # RICHER planner (plan_store, memory context, capability graph) plus
-    # four more routers that production never mounted, so the Android app's
-    # capabilities screen and replan-preview flow 404'ed in production while
-    # working in dev. Worse: once 131 added the bare planner here, FastAPI's
-    # first-match routing silently shadowed the runners' rich planner in dev
-    # too. One owner, full wiring, runners reuse.
-    from .. import paths as _paths
-    from .capability_graph_api import (
-        build_capability_graph_router,
-        build_runtime_capability_graph,
-    )
-    from .capability_receipt_api import build_capability_receipt_router
-    from .memory import MemoryStore
-    from .memory_api import build_memory_router
-    from .outcome_answer_api import build_outcome_answer_router
-    from .plan_store import PlanStore
-    from .planner import build_planner_router  # local: avoids import cycles
-    from .replan_preview_api import (
-        build_default_replan_preview_service,
-        build_replan_preview_router,
-    )
-
-    worker_version = getattr(app, "version", None)
-    memory_path = _paths.resolve(
-        "./kaliv-agent3-memory.db", env="KALIV_AGENT3_MEMORY_DB"
-    )
-    memory_store = MemoryStore(str(memory_path))
-    plan_db = _paths.resolve(
-        "./kaliv-agent3-plans.db", env="KALIV_AGENT3_PLAN_DB"
-    )
-
-    def _graph_provider():
-        return build_runtime_capability_graph(
-            adapter, worker_version=worker_version
-        )
-
-    app.include_router(build_memory_router(memory_store))
-    app.include_router(
-        build_planner_router(
-            adapter,
-            orchestrator=orchestrator,
-            plan_store=PlanStore(str(plan_db)),
-            memory_store=memory_store,
-            capability_graph_provider=_graph_provider,
-        )
-    )
-    replan_preview_service = build_default_replan_preview_service(
-        adapter, replan_service
-    )
-    app.include_router(
-        build_replan_preview_router(
-            replan_preview_service,
-            review_store=orchestrator.review_store,
-        )
-    )
-    app.include_router(build_outcome_answer_router(orchestrator.store))
-    app.include_router(
-        build_capability_graph_router(adapter, worker_version=worker_version)
-    )
-    app.include_router(
-        build_capability_receipt_router(orchestrator.store, _graph_provider)
-    )
-    app.state.agent3_memory_store = memory_store
-    app.state.agent3_replan_preview_service = replan_preview_service
     app.state.agent3_mounted = True
     app.state.agent3_orchestrator = orchestrator
     app.state.agent3_replanner = replan_service

@@ -90,11 +90,18 @@ class FakeRegister:
 
 
 class FakeSendFetch:
-    def __init__(self, *, fail_fail_request: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail_fail_request: bool = False,
+        fail_fulfill_request: bool = False,
+    ) -> None:
         self.fail_fail_request = fail_fail_request
+        self.fail_fulfill_request = fail_fulfill_request
         self.enabled: list[tuple[dict, str | None]] = []
         self.continued: list[tuple[dict, str | None]] = []
         self.failed: list[tuple[dict, str | None]] = []
+        self.fulfilled: list[tuple[dict, str | None]] = []
         self.disabled: list[str | None] = []
 
     async def enable(self, *, params, session_id=None) -> None:
@@ -108,26 +115,56 @@ class FakeSendFetch:
             raise RuntimeError("simulated CDP failure")
         self.failed.append((params, session_id))
 
+    async def fulfillRequest(self, *, params, session_id=None) -> None:  # noqa: N802
+        if self.fail_fulfill_request:
+            raise RuntimeError("simulated fulfillment failure")
+        self.fulfilled.append((params, session_id))
+
     async def disable(self, *, session_id=None) -> None:
         self.disabled.append(session_id)
 
 
 class FakeSend:
-    def __init__(self, *, fail_fail_request: bool = False) -> None:
-        self.Fetch = FakeSendFetch(fail_fail_request=fail_fail_request)
+    def __init__(
+        self,
+        *,
+        fail_fail_request: bool = False,
+        fail_fulfill_request: bool = False,
+    ) -> None:
+        self.Fetch = FakeSendFetch(
+            fail_fail_request=fail_fail_request,
+            fail_fulfill_request=fail_fulfill_request,
+        )
 
 
 class FakeClient:
-    def __init__(self, *, fail_fail_request: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail_fail_request: bool = False,
+        fail_fulfill_request: bool = False,
+    ) -> None:
         self.register = FakeRegister()
-        self.send = FakeSend(fail_fail_request=fail_fail_request)
+        self.send = FakeSend(
+            fail_fail_request=fail_fail_request,
+            fail_fulfill_request=fail_fulfill_request,
+        )
 
 
 class FakeSession:
-    def __init__(self, *, fail_fail_request: bool = False, target: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        fail_fail_request: bool = False,
+        fail_fulfill_request: bool = False,
+        target: bool = True,
+    ) -> None:
         self.started = 0
         self.agent_focus_target_id = "target-1" if target else None
-        self.client = FakeClient(fail_fail_request=fail_fail_request)
+        self.client = FakeClient(
+            fail_fail_request=fail_fail_request,
+            fail_fulfill_request=fail_fulfill_request,
+        )
         self.cdp_session = SimpleNamespace(
             cdp_client=self.client,
             session_id="session-1",
@@ -143,6 +180,43 @@ class FakeSession:
         assert target_id == "target-1"
         assert focus is False
         return self.cdp_session
+
+
+class FakePendingFulfillment:
+    def __init__(self, request_id: str) -> None:
+        self.request_id = request_id
+        self.committed: list[int] = []
+        self.aborted: list[tuple[str, int]] = []
+
+    def cdp_params(self) -> dict:
+        return {
+            "requestId": self.request_id,
+            "responseCode": 200,
+            "responsePhrase": "OK",
+            "responseHeaders": [{"name": "content-length", "value": "2"}],
+            "body": "b2s=",
+        }
+
+    def commit(self, *, now: int) -> None:
+        self.committed.append(now)
+
+    def abort(self, *, error_code: str, now: int) -> None:
+        self.aborted.append((error_code, now))
+
+
+class FakeFulfillmentController:
+    def __init__(self, *, fail_prepare: bool = False) -> None:
+        self.fail_prepare = fail_prepare
+        self.calls: list[tuple[dict, int]] = []
+        self.pending: list[FakePendingFulfillment] = []
+
+    def prepare(self, event, *, now: int, ttl_seconds: int = 30):
+        self.calls.append((event, now))
+        if self.fail_prepare:
+            raise RuntimeError("simulated prepare failure")
+        pending = FakePendingFulfillment(event["requestId"])
+        self.pending.append(pending)
+        return pending
 
 
 async def exercise_guard() -> tuple[BrowserUseNetworkGuard, FakeSession]:
@@ -178,7 +252,7 @@ async def exercise_guard() -> tuple[BrowserUseNetworkGuard, FakeSession]:
 
 guard, session = run(exercise_guard())
 fetch = session.client.send.Fetch
-check(session.started == 1, "guard starts the BrowserSession exactly once")
+check(session.started == 1, "guard starts BrowserSession exactly once")
 check(len(fetch.enabled) == 1, "Fetch interception is enabled once")
 check(
     fetch.enabled[0][0] == {
@@ -188,25 +262,159 @@ check(
 )
 check(
     [entry[0]["requestId"] for entry in fetch.continued] == ["allowed-1"],
-    "only the allowlisted request is continued",
+    "default mode continues only allowlisted request",
 )
 check(
     [entry[0]["requestId"] for entry in fetch.failed] == ["blocked-1", "blocked-2"],
-    "disallowed domain and IP requests are failed in Chromium",
+    "disallowed domain and IP requests fail in Chromium",
 )
 check(
     all(entry[0]["errorReason"] == "BlockedByClient" for entry in fetch.failed),
-    "blocked requests use Chromium's explicit BlockedByClient reason",
+    "blocked requests use explicit BlockedByClient reason",
 )
 check(
     guard.blocked_urls == [
         "https://other.example/report",
         "http://127.0.0.1/secret",
     ],
-    "guard records bounded blocked URL evidence",
+    "guard records bounded policy-block evidence",
 )
 run(guard.close())
-check(fetch.disabled == ["session-1"], "guard disables Fetch during orderly cleanup")
+check(fetch.disabled == ["session-1"], "guard disables Fetch during cleanup")
+
+
+async def exercise_fulfillment() -> tuple[BrowserUseNetworkGuard, FakeSession, FakeFulfillmentController]:
+    session = FakeSession()
+    controller = FakeFulfillmentController()
+    guard = BrowserUseNetworkGuard(
+        session,
+        ("example.com",),
+        fulfillment_controller=controller,
+        now_factory=lambda: 123,
+    )
+    await guard.install()
+    callback = session.client.register.Fetch.callback
+    assert callback is not None
+    event = {
+        "requestId": "fulfilled-1",
+        "networkId": "network-1",
+        "request": {
+            "url": "https://example.com/report",
+            "method": "GET",
+            "headers": {},
+            "hasPostData": False,
+        },
+    }
+    callback(event, "session-1")
+    callback(
+        {
+            "requestId": "internal-1",
+            "request": {"url": "about:blank"},
+        },
+        "session-1",
+    )
+    await guard.assert_healthy()
+    return guard, session, controller
+
+
+guard, session, controller = run(exercise_fulfillment())
+fetch = session.client.send.Fetch
+check(len(controller.calls) == 1, "HTTP request is delegated to injected controller")
+check(controller.calls[0][1] == 123, "controller receives validated timestamp")
+check(
+    [entry[0]["requestId"] for entry in fetch.fulfilled] == ["fulfilled-1"],
+    "controller response is delivered through Fetch.fulfillRequest",
+)
+check(
+    [entry[0]["requestId"] for entry in fetch.continued] == ["internal-1"],
+    "internal browser schemes remain local and are continued",
+)
+check(controller.pending[0].committed == [123], "peer fulfillment commits only after CDP success")
+check(controller.pending[0].aborted == [], "successful fulfillment is not aborted")
+run(guard.close())
+
+
+async def exercise_fulfillment_failure() -> tuple[bool, FakeSession, FakeFulfillmentController]:
+    session = FakeSession(fail_fulfill_request=True)
+    controller = FakeFulfillmentController()
+    guard = BrowserUseNetworkGuard(
+        session,
+        ("example.com",),
+        fulfillment_controller=controller,
+        now_factory=lambda: 456,
+    )
+    await guard.install()
+    callback = session.client.register.Fetch.callback
+    callback(
+        {
+            "requestId": "fulfill-failure",
+            "networkId": "network-failure",
+            "request": {
+                "url": "https://example.com/report",
+                "method": "GET",
+                "headers": {},
+                "hasPostData": False,
+            },
+        },
+        "session-1",
+    )
+    try:
+        await guard.assert_healthy()
+    except BrowserUseNetworkGuardError:
+        return True, session, controller
+    return False, session, controller
+
+
+unhealthy, session, controller = run(exercise_fulfillment_failure())
+check(unhealthy, "CDP fulfillment failure makes guard unhealthy")
+check(
+    controller.pending[0].aborted == [("cdp_fulfill_failed", 456)],
+    "failed CDP fulfillment aborts pending peer receipt",
+)
+check(
+    [entry[0]["requestId"] for entry in session.client.send.Fetch.failed]
+    == ["fulfill-failure"],
+    "failed fulfillment explicitly fails paused request",
+)
+
+
+async def exercise_prepare_failure() -> tuple[bool, FakeSession]:
+    session = FakeSession()
+    guard = BrowserUseNetworkGuard(
+        session,
+        ("example.com",),
+        fulfillment_controller=FakeFulfillmentController(fail_prepare=True),
+        now_factory=lambda: 789,
+    )
+    await guard.install()
+    callback = session.client.register.Fetch.callback
+    callback(
+        {
+            "requestId": "prepare-failure",
+            "networkId": "network-prepare",
+            "request": {
+                "url": "https://example.com/report",
+                "method": "GET",
+                "headers": {},
+                "hasPostData": False,
+            },
+        },
+        "session-1",
+    )
+    try:
+        await guard.assert_healthy()
+    except BrowserUseNetworkGuardError:
+        return True, session
+    return False, session
+
+
+unhealthy, session = run(exercise_prepare_failure())
+check(unhealthy, "controller preparation failure makes guard unhealthy")
+check(
+    [entry[0]["requestId"] for entry in session.client.send.Fetch.failed]
+    == ["prepare-failure"],
+    "prepare failure sends no permissive fallback",
+)
 
 
 async def exercise_guard_failure() -> bool:
@@ -228,7 +436,7 @@ async def exercise_guard_failure() -> bool:
     return False
 
 
-check(run(exercise_guard_failure()), "a CDP response failure makes the guard unhealthy")
+check(run(exercise_guard_failure()), "CDP response failure makes guard unhealthy")
 
 
 async def exercise_missing_target() -> bool:
@@ -241,7 +449,7 @@ async def exercise_missing_target() -> bool:
     return False
 
 
-check(run(exercise_missing_target()), "guard fails closed when no browser target exists")
+check(run(exercise_missing_target()), "guard fails closed when browser target is absent")
 
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)

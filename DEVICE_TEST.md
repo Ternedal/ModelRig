@@ -64,30 +64,24 @@ Det er hele pointen med endpointet: du skal ikke gætte hvilken del der er nede.
 
 ## 1.4 Frys kandidaten først
 
-**Gør:** før du overhovedet rører riggen, bekræft at det du er ved at validere er
-én sammenhængende, CI-grøn kandidat — ikke en halv tilstand eller en commit hvis
-CI fejlede. Evidensen er code-bound: validerer du én version og shipper den næste,
-er beviset ugyldigt uden at du kører noget om. Denne tjekker det, uden at ændre
-noget:
+Promotionen er todelt. Følg den autoritative
+[`STAGED_PHYSICAL_PROMOTION.md`](STAGED_PHYSICAL_PROMOTION.md).
 
-```cmd
-python scripts\freeze_check.py
-# Gitless rig (ZIP): freeze_check kører selv i API-mode og skriver
-# validation\frozen-candidate.json — preflight og kampagnen arver den.
+Før release bruger Stage A den eksplicitte exact-SHA-gate:
+
+```powershell
+$CandidateSha = "<CANDIDATE_SHA>"
+python scripts\candidate_freeze_check.py --expected-sha $CandidateSha
 ```
 
-**Bør se:** `FROZEN` — ren working tree, ens versionsstempler, kandidaten er på
-`origin/main`, og både `ci` og `codeql` verificeret GRØNNE på præcis denne
-commit. **Uden `GITHUB_TOKEN`/`GH_TOKEN` er dommen IKKE FROSSET** (F-1005):
-frysens pointe ER exact-head-beviset, så sæt tokenet
-(`$env:GITHUB_TOKEN = "<token>"`) og kør igen.
+Den kræver ren kandidat, seneste `origin/main` som ancestor og grønne `ci`,
+`agent3-diagnostics`, `agent3-full-diagnostics` og `codeql` på præcis SHA'en.
+Den kan kun skrive `release_validation_pending=true` og
+`production_activation=false`.
 
-**Fejler noget →** hver `FAIL` har en `->`-linje. De almindelige: ucommittede
-ændringer (commit eller kassér dem), versionsdrift (kør `version_tool.py sync`),
-eller rød CI (ret den før du validerer). Pointen: du bruger ikke rig-tid på at
-validere en kandidat der flytter sig under dig.
-
-Når kandidaten er `FROZEN`: stop med at shippe, og gå videre til preflight.
+Kør ikke `freeze_check.py` på den upublicerede kandidat. Den eksisterende
+release-freeze hører til Stage B, efter at samme SHA er fast-forwardet til
+`main` og publiceret som release.
 
 ---
 
@@ -168,23 +162,20 @@ budget-overskridelse — det er hele T-010→T-012-kæden fysisk.
 
 ---
 
-## 1.7 Kampagnen samlet — én kandidat, ét bevis
+## 1.7 Kampagnen samlet — staged kandidat og release
 
-Den fulde fysiske kampagne (Agent 3, model-eval, lifecycle inkl.
-reboot/rollback, voice, RAG) har sin egen kanoniske runbook:
-[`PHYSICAL_VALIDATION_CAMPAIGN.md`](PHYSICAL_VALIDATION_CAMPAIGN.md) — kør
-delene dér, og saml til sidst med `scripts/physical_validation_campaign.py`
-(read-only aggregator: kræver samme VERSION, samme Git-SHA og samme worker
-`code_sha256` på tværs af alle rapporter, ellers intet samlet bevis).
+Den autoritative rækkefølge står i
+[`STAGED_PHYSICAL_PROMOTION.md`](STAGED_PHYSICAL_PROMOTION.md):
 
-Rækkefølgen på dagen: **§1.4 frys → §1.5 preflight → kampagnens dele →
-§1.6 scheduler-piloten → aggregatoren**.
+- Stage A samler preflight, Agent 3, model-eval, voice, RAG og scheduler-pilot
+  med `physical_validation_candidate_campaign.py`, og tilføjer browserbeviset
+  med `physical_validation_candidate_gate.py`.
+- Stage B køres først efter exact-SHA fast-forward og release. Her tilføjes
+  lifecycle/updater-beviset, hvorefter `physical_validation_campaign.py` og
+  `physical_validation_final_gate.py` producerer det endelige otte-bevis.
 
-**Hullet er lukket (19/7):** aggregatoren har nu et `scheduler_pilot`-slot.
-Efter §1.6-piloten: kør `scripts/scheduler_pilot_report.py` med de to
-schedule-id'er og en lille manual-observations-fil (se
-`PHYSICAL_VALIDATION_CAMPAIGN.md` sektion 7) — så indgår T-019-beviset i
-`--mode verify` på lige fod med de øvrige seks, bundet til samme kandidat.
+Begge lag kræver samme VERSION, Git-SHA og worker `code_sha256`. En ny commit
+mellem lagene ugyldiggør kandidatbeviset.
 
 ---
 

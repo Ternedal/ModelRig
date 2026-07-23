@@ -25,6 +25,11 @@ class RuntimeStatus:
     running: bool
     resources_open: bool
     last_error: str | None
+    max_concurrency: int
+    queue_capacity: int
+    active_executions: int
+    accepted_ticks: int
+    overlap_rejections: int
 
 
 class SchedulerRuntime:
@@ -161,6 +166,15 @@ class SchedulerRuntime:
                     running = bool(self._service.status().running)
                 except Exception:
                     running = self._started
+            single_flight = None
+            if self._service is not None:
+                runner = getattr(self._service, "runner", None)
+                status_fn = getattr(runner, "single_flight_status", None)
+                if callable(status_fn):
+                    try:
+                        single_flight = status_fn()
+                    except Exception:
+                        single_flight = None
             return RuntimeStatus(
                 configured=configured,
                 running=running,
@@ -169,6 +183,13 @@ class SchedulerRuntime:
                     for resource in (self._service, self._jobs, self._schedules)
                 ),
                 last_error=self._last_error,
+                max_concurrency=int(getattr(single_flight, "max_concurrency", 1)),
+                queue_capacity=int(getattr(single_flight, "queue_capacity", 0)),
+                active_executions=int(getattr(single_flight, "active", 0)),
+                accepted_ticks=int(getattr(single_flight, "accepted", 0)),
+                overlap_rejections=int(
+                    getattr(single_flight, "overlap_rejections", 0)
+                ),
             )
 
     def _factories(self):

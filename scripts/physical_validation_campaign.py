@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Aggregate every physical ModelRig proof against one exact candidate.
 
-The physical validation campaign currently spans independent tools and reports:
-freeze/preflight, Agent 3 appliance evidence, planner model eval, voice baseline,
-RAG baseline and appliance lifecycle observations. Each is useful alone, but a
-folder full of green JSON files is not proof if they describe different commits,
+The physical validation campaign currently spans seven independent proofs:
+preflight, Agent 3 appliance evidence, planner model eval, voice baseline,
+RAG baseline, appliance lifecycle observations and the scheduler pilot. Each is
+useful alone, but a folder full of green JSON files is not proof if they describe
+different commits,
 worker fingerprints or software versions.
 
 This evaluation-only script changes no runtime state and makes no network calls.
@@ -54,6 +55,8 @@ DEFAULT_PATHS = {
     "lifecycle": Path("validation/appliance-lifecycle-observations.json"),
     "scheduler_pilot": Path("validation/scheduler-pilot-latest.json"),
 }
+
+CAMPAIGN_PROOF_COUNT = len(DEFAULT_PATHS)
 
 COMMANDS = {
     "freeze": "python scripts\\freeze_check.py",
@@ -1120,7 +1123,7 @@ def campaign_report(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         "commands": COMMANDS,
         "evidence": evidence,
         "summary": {
-            "total": len(evidence),
+            "total": CAMPAIGN_PROOF_COUNT,
             "passed": passed,
             "failed": failed,
             "missing": missing,

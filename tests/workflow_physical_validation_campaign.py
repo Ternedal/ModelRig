@@ -65,6 +65,17 @@ CANDIDATE = {
 }
 
 
+RUNBOOK = (ROOT / "PHYSICAL_VALIDATION_CAMPAIGN.md").read_text(encoding="utf-8")
+check(campaign.CAMPAIGN_PROOF_COUNT == 7,
+      "campaign proof count is structurally seven")
+check("alle syv fysiske beviser" in RUNBOOK
+      and "alle syv evidence statuses" in RUNBOOK,
+      "operator runbook names all seven campaign proofs")
+check("alle seks fysiske beviser" not in RUNBOOK
+      and "alle seks evidence statuses" not in RUNBOOK,
+      "stale six-proof wording cannot return")
+
+
 def valid_reports() -> dict[str, dict]:
     stamp = NOW.isoformat()
     _ts = NOW.timestamp()

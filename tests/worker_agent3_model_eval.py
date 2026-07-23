@@ -178,6 +178,84 @@ def test_atomic_report_writer_emits_valid_json() -> None:
         assert not list(path.parent.glob("*.tmp"))
 
 
+def test_stage_a_overrides_match_current_risk_contract() -> None:
+    wrapper_path = ROOT / "scripts" / "stage_a_agent3_model_eval.py"
+    spec = importlib.util.spec_from_file_location("stage_a_agent3_model_eval_test", wrapper_path)
+    assert spec is not None and spec.loader is not None
+    wrapper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(wrapper)
+
+    task_set = wrapper.load_stage_a_task_set(ROOT / "eval" / "agent3_model_tasks.json")
+    assert task_set["version"] == "2026-07-23.1"
+    tasks = {task["id"]: task for task in task_set["tasks"]}
+
+    assert tasks["20-note_append"]["expected"]["steps"] == [
+        {"tool": "note_append", "risk": "write", "args": {"text": "Test af lokal planner 20."}}
+    ]
+    for task_id in ("24-pull_model", "25-pull_model", "26-pull_model"):
+        assert tasks[task_id]["expected"]["steps"][0]["risk"] == "admin"
+    for task_id in ("27-delete_model", "28-delete_model", "29-delete_model", "30-delete_model"):
+        assert tasks[task_id]["expected"]["steps"][0]["risk"] == "destructive"
+
+    normalized = wrapper.normalize_stage_a_status(
+        {
+            "enabled": True,
+            "experimental": True,
+            "worker_version": "1.58.145",
+            "code_sha256": "a" * 64,
+        }
+    )
+    assert normalized["version"] == "1.58.145"
+
+    already_bound = {"version": "1.58.145", "worker_version": "ignored"}
+    assert wrapper.normalize_stage_a_status(already_bound) is already_bound
+
+    try:
+        wrapper.normalize_stage_a_status({"experimental": True})
+    except MODULE.EvalError as exc:
+        assert "missing both version and worker_version" in str(exc)
+    else:
+        raise AssertionError("Stage A status normalization must fail closed without a version")
+
+
+def test_stage_a_loader_uses_overlay_and_keeps_checkout_clean() -> None:
+    source = (ROOT / "scripts" / "stage_a_one_click.py").read_text(encoding="utf-8")
+    assert "stage_a_agent3_model_eval.py" in source
+    assert "-SkipReadinessRegeneration" in source
+    assert "refusing an ambiguous replacement" in source
+
+
+def test_deep_health_timeout_handles_a_cold_timeout_without_crashing() -> None:
+    path = ROOT / "scripts" / "rig_preflight_substrate.py"
+    spec = importlib.util.spec_from_file_location("rig_preflight_substrate_test", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.DEEP_HEALTH_TIMEOUT_SECONDS >= 60.0
+
+    class Check:
+        def __init__(self, name: str):
+            self.name = name
+
+        def ok(self, detail: str):
+            return {"status": "ok", "detail": detail}
+
+        def warn(self, detail: str, advice: str):
+            return {"status": "warn", "detail": detail, "advice": advice}
+
+        def fail(self, detail: str, advice: str):
+            return {"status": "fail", "detail": detail, "advice": advice}
+
+    def timeout_get(_url: str, *, token: str, timeout: float):
+        assert token == "token"
+        assert timeout == module.DEEP_HEALTH_TIMEOUT_SECONDS
+        raise TimeoutError("timed out")
+
+    checks = module.check_substrate(timeout_get, Check, "http://127.0.0.1:8080", "token", "qwen3:14b")
+    assert checks[0]["status"] == "fail"
+    assert "timed out" in checks[0]["detail"]
+
+
 TESTS = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
 if __name__ == "__main__":
     for test in TESTS:

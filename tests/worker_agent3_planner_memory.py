@@ -45,8 +45,18 @@ def check(cond, name):
 class Tool:
     name = "note_append"
     risk = "write"
+    impact = "write"
     description = "Skriv en note"
     params = {"type": "object", "properties": {"text": {"type": "string"}}}
+    isolate = False
+    env_allow = ()
+    schedulable = True
+    unschedulable_because = ""
+    sensitivity = "private"
+    cancellation = "none"
+    idempotent = False
+    network = "none"
+    network_destinations = ()
 
     @staticmethod
     def human_summary(args):

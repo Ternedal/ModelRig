@@ -94,7 +94,10 @@ def verify_schedule_approval(
         claims = json.loads(payload_raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ScheduleApprovalError("schedule approval token payload is invalid") from exc
-    if not isinstance(claims, dict) or claims.get("v") != 1:
+    if not isinstance(claims, dict):
+        raise ScheduleApprovalError("schedule approval token payload is invalid")
+    version = claims.get("v")
+    if version != 2:
         raise ScheduleApprovalError("schedule approval token version is unsupported")
 
     nonce = claims.get("nonce")
@@ -118,12 +121,17 @@ def verify_schedule_approval(
     if expires_at <= issued_at or expires_at - issued_at > MAX_TOKEN_LIFETIME_SECONDS:
         raise ScheduleApprovalError("schedule approval token lifetime is invalid")
 
+    preview_timezone = getattr(preview, "timezone", None)
+    preview_misfire = getattr(preview, "misfire_policy", None)
+
     expected = {
         "operation": getattr(preview, "operation", None),
         "schedule_id": getattr(preview, "schedule_id", None),
         "tool": getattr(preview, "tool", None),
         "args": getattr(preview, "args", None),
         "cadence": getattr(preview, "cadence", None),
+        "timezone": preview_timezone,
+        "misfire_policy": preview_misfire,
         "ttl_days": getattr(preview, "ttl_days", None),
         "max_runs": getattr(preview, "max_runs", None),
         "enable": getattr(preview, "enable", None),
@@ -133,7 +141,7 @@ def verify_schedule_approval(
     for name, value in expected.items():
         if claims.get(name) != value:
             raise ScheduleApprovalError(
-                "schedule approval does not match the previewed action, cadence, expiry, budget or enable state"
+                "schedule approval does not match the previewed action, cadence, timezone, misfire policy, expiry, budget or enable state"
             )
 
     return VerifiedScheduleApproval(

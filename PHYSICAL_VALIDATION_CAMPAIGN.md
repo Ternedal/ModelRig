@@ -1,71 +1,57 @@
-# Physical validation campaign — én kandidat, ét samlet bevis
+# Physical validation campaign — én release, ét samlet bevis
 
-Denne runbook samler de fysiske **Prove**-opgaver T-004, T-005, T-006,
-T-007, T-040 og T-043. De enkelte harnesses har fortsat deres egne detaljerede
-runbooks; denne kampagne sørger for, at deres rapporter faktisk beskriver den
-samme version, Git-commit og worker-kode.
+Denne runbook samler Stage B's syv fysiske **Prove**-opgaver T-004, T-005,
+T-006, T-007, T-040, T-043 og T-019. Det interaktive T-032-browserbevis
+samles bagefter i otte-bevis-slutgaten. Når alle syv fysiske beviser er grønne,
+er releasekampagnen komplet; browserbeviset gør den efterfølgende slutgate til otte.
 
-`scripts/physical_validation_campaign.py` er read-only. Det starter ikke
-services, bruger ingen token, udfører ingen update/reboot og ændrer ingen
-featureflag. Det læser lokale JSON-rapporter, validerer dem og skriver én atomisk
+> **Scope:** Dette er releasefasen. En upubliceret kandidat starter i
+> [`STAGED_PHYSICAL_PROMOTION.md`](STAGED_PHYSICAL_PROMOTION.md). T-006 kan først
+> bevises, når præcis samme Stage A-SHA er fast-forwardet, tagget og publiceret
+> som en nyere release. Den operative updater-runbook er
+> [`STAGE_B_UPDATER_EVIDENCE.md`](STAGE_B_UPDATER_EVIDENCE.md).
+
+`scripts/physical_validation_campaign.py` er read-only. Det starter ikke services,
+bruger ingen token, udfører ingen update eller reboot og ændrer ingen featureflag.
+Det genvaliderer rapporterne mod én candidate-identitet og skriver en atomisk
 kampagnerapport med `production_activation=false`.
 
-## Hvorfor aggregatoren er nødvendig
+## Fælles invariants
 
-En grøn Agent 3-rapport fra commit A, en voice-baseline fra commit B og en
-RAG-måling fra commit C er ikke en valideret kandidat. Kampagnen kræver:
+Alle beviser skal beskrive samme:
 
-- samme `VERSION`;
-- samme 40-tegns Git-SHA, hvor rapporttypen understøtter den;
-- samme worker `code_sha256`, hvor rapporten måler runtime-koden;
+- `VERSION`;
+- 40-tegns Git-SHA, hvor rapporttypen understøtter den;
+- worker `code_sha256`, hvor runtime-koden måles;
+- rene checkout og konsistente versionsstempler;
 - friske, timezone-aware timestamps;
-- grønne individuelle gates og cleanup-resultater;
-- komplette typed observations for reboot, supervisor, update og rollback.
+- grønne individuelle gates og komplet cleanup.
 
-## Kandidat-checkout må ikke flytte sig under kampagnen
+Rolling reports, WAV-fixtures og manuelle observationer ligger under `validation/`
+og må ikke gøre checkoutet dirty. Flytter HEAD sig, er kampagnen ugyldig.
 
-Kør alle faser fra den samme rene checkout af den valgte candidate. Før første
-fase:
+## 0. Release-freeze
+
+Stage A skal være bestået først. Fortsæt kun efter den separate exact-SHA
+fast-forward, tag `v1.58.145` og publicerede release.
 
 ```powershell
+cd C:\Users\Anders\Desktop\ModelRig
 git status --short
 git rev-parse HEAD
 Get-Content VERSION
-```
-
-`git status --short` skal være tom. Gem SHA’en, og skift ikke branch, pull ikke
-nye commits og redigér ikke tracked filer mellem faserne. Rolling reports og WAV-
-fixtures er ignorerede arbejdsfiler og gør ikke checkoutet dirty. Hvis HEAD
-ændres, er den tidligere evidens ikke længere en samlet kampagne og skal køres
-igen mod den nye kandidat.
-
-## 0. Frys kandidat og opret kampagnechecklisten
-
-Fra repositoryets rod:
-
-```powershell
+$env:GH_TOKEN = gh auth token
 python scripts\freeze_check.py
-
-**Riggen er gitless** (kilderne ankommer som ZIP): freeze_check opdager det
-selv og kører i API-mode — den slår den publicerede release `v{VERSION}` op,
-verificerer at sha'en er på main og at ci+codeql var grønne på præcis den, og
-skriver ved FROZEN `validation\frozen-candidate.json`. Preflight og
-aggregatoren læser den fil i stedet for git — kæden er eksplicit:
-freeze-gaten fældede dommen, resten arver den. Det ene der IKKE kan
-verificeres uden git er working-tree-renhed; det navngives som note
-(trust-ankeret er den officielt hentede, urørte ZIP) i stedet for at grønnes.
 python scripts\physical_validation_campaign.py `
   --mode prepare `
   --report validation\physical-validation-campaign-latest.json
 ```
 
-`prepare` passer kun, når kandidaten er coherent, working tree er rent, og alle
-rapporter der allerede findes matcher kandidaten. Manglende fremtidige rapporter
-vises som `missing`, men gør ikke prepare-gaten rød. En eksisterende stale eller
-mismatched rapport gør gaten rød og skal flyttes/slettes eller køres igen.
-
-Rapportens `commands`-felt indeholder den autoritative rækkefølge og de
-forventede rolling paths.
+`freeze_check.py` kræver publiceret release, exact tag/HEAD, SHA på `origin/main`,
+release-tree-paritet og grøn exact-head `ci`/`codeql`. På en gitless release-ZIP
+verificeres hvert committed blob mod release-committen. `prepare` må inventarisere
+manglende fremtidige rapporter, men candidate-drift eller røde eksisterende
+rapporter blokerer.
 
 ## 1. T-004 — rig preflight
 
@@ -75,35 +61,35 @@ python scripts\rig_preflight.py `
   --report validation\rig-preflight-latest.json
 ```
 
-Rapporten indeholder kandidatens version, Git-SHA og worker-fingerprint samt
-alle checks som typed `ok`/`warn`/`fail`. Device-tokenet bliver aldrig skrevet.
-Kampagnen accepterer warnings i den normale “ingen validation report endnu”
-tilstand, men ingen failed checks.
+Rapporten skal binde version, SHA og worker-fingerprint. Device-tokenet må aldrig
+skrives. Warnings accepteres kun i den dokumenterede pre-validation-tilstand;
+failed checks accepteres ikke.
 
 ## 2. T-005 — Agent 3 appliance-evidens
 
-Følg `AGENT3_RIG_VALIDATION.md` og kør wrapperen med et eksplicit lokalt
-planner-modelnavn. Den forventede fil er:
+Følg `AGENT3_RIG_VALIDATION.md`. Kræv blandt andet:
+
+- `success=true`;
+- backend/worker-version lig releasen;
+- worker `code_sha256` lig release-fingerprint;
+- fuld cleanup;
+- eligibility for developer preview;
+- `production_activation=false`.
+
+Forventet rapport:
 
 ```text
 validation/agent3-rig-validation-latest.json
 ```
 
-Kampagnen genbruger den eksisterende Agent 3 validation-gate og kræver:
-
-- `success=true`;
-- backend/worker-version lig kandidaten;
-- worker `code_sha256` lig kandidatens fingerprint;
-- fuld cleanup;
-- eligibility for developer preview;
-- `production_activation=false`.
-
 ## 3. T-007 — plan-only model-eval
 
-Forudsætninger: `MODELRIG_TOKEN` (paired device-token) i miljøet,
-`KALIV_AGENT3_ENABLED=1` på BÅDE backend og worker, og backend'en kørende —
-produceren taler backend-dialekt (`/api/v1/...`) mod `--base-url`
-(default `http://127.0.0.1:8080`).
+Forudsætninger:
+
+- `MODELRIG_TOKEN` er et parret device-token;
+- `KALIV_AGENT3_ENABLED=1` på både backend og worker;
+- backend kører på den angivne `--base-url`;
+- produceren bruger den dokumenterede sti `/plan` → `/plans/{id}/start`.
 
 ```powershell
 python scripts\agent3_model_eval.py `
@@ -113,19 +99,13 @@ python scripts\agent3_model_eval.py `
   --report validation\agent3-model-eval-latest.json
 ```
 
-Standardkampagnen kræver exact-match rate `1.0`, discipline rate `1.0`, ingen
-request errors, `starts_plans=false` og `executes_tools=false`. En lavere,
-bevidst accepteret modelgrænse kan kun bruges eksplicit ved kampagneverify:
-
-```powershell
---min-model-exact 0.95
-```
-
-Grænsen skal være dokumenteret; den må ikke sænkes blot for at få en grøn fil.
+Standardgaten kræver exact-match rate `1.0`, discipline rate `1.0`, nul request
+errors, `starts_plans=false` og `executes_tools=false`. En lavere eksplicit grænse
+skal være begrundet; den må ikke sænkes for blot at få grøn status.
 
 ## 4. T-006 — reboot, supervisor, updater og rollback
 
-Kopiér den versionerede skabelon:
+Følg `STAGE_B_UPDATER_EVIDENCE.md`. Start fra den versionerede skabelon:
 
 ```powershell
 Copy-Item `
@@ -136,109 +116,123 @@ New-Item -ItemType Directory `
   -Force | Out-Null
 ```
 
-Udfyld kandidat/host/timestamps og fem trials:
+Gennemfør og dokumentér:
 
 1. normal reboot → backend og worker ready;
 2. backend supervisor-restart;
 3. worker supervisor-restart;
-4. gyldig update fra en tidligere build til kandidaten;
-5. ugyldig update, som afvises eller rulles tilbage til kandidaten.
+4. gyldig updater-update fra `1.58.144` til `1.58.145`;
+5. ugyldig update, som afvises før swap eller rulles helt tilbage til `1.58.145`.
 
-Hver trial skal have sin egen lokale evidensfil under:
+### Lifecycle-JSON
+
+Alle booleans skal være ægte JSON-booleans, og tider skal være tal i millisekunder.
+`good_update.target_*`, reboot/supervisor identity og `bad_update.active_*` skal
+matche releasen. Source- og attempted-SHA skal være forskellige fra release-SHA.
+Data og schedules skal være bevaret.
+
+Hver trial skal referere en almindelig repository-relativ fil under:
 
 ```text
 validation/appliance-lifecycle-evidence/
 ```
 
-Gem eksempelvis konsoludskrift, health-tidslinje eller updater/supervisor-log i
-filen. Udfyld trialens repository-relative `evidence_path`, og beregn den hash,
-som skrives i `evidence_sha256`:
+`evidence_sha256` skal matche filens faktiske SHA-256. Symlinks, path escape,
+tomme filer, filer over 32 MiB og hashdrift afvises.
+
+### Updaterens semantiske kæde
+
+En vilkårlig ikke-tom log er **ikke** updaterbevis. Kør:
 
 ```powershell
-(Get-FileHash `
-  validation\appliance-lifecycle-evidence\reboot.log `
-  -Algorithm SHA256).Hash.ToLowerInvariant()
+python scripts\appliance_lifecycle_updater_chain.py `
+  --lifecycle-report validation\appliance-lifecycle-observations.json `
+  --report validation\appliance-lifecycle-updater-chain-latest.json
 ```
 
-Kampagnen genlæser hver fil, kræver en almindelig ikke-tom fil på højst 32 MiB,
-forbyder symlinks og paths uden for den allowlistede mappe og sammenligner den
-faktiske SHA-256 med JSON-feltet. En ændret log gør hele verify-gaten rød.
-Artifactindholdet kopieres ikke ind i kampagnerapporten; den gemmer path, hash og
-byteantal.
+Den gode updater-log skal bevise:
 
-Alle boolske felter skal være ægte JSON-booleans. Tider skal være tal i
-millisekunder. `good_update.target_*`, reboot/supervisor identity og
-`bad_update.active_*` skal matche kandidaten. Den gyldige updates source-version
-og source-SHA skal være anderledes end kandidatens. Den ugyldige updates attempted
-Git-SHA skal også være anderledes end kandidatens. Data og schedules skal være
-bevaret i begge update-trials.
+- download af server, supervisor og worker;
+- `checksums verified for 3 exe(s)`;
+- `build provenance verified for 3 exe(s)`;
+- process-stop før swap;
+- backend og worker på `1.58.145`;
+- supervisor-heartbeat, der avancerer efter restart;
+- afsluttende `update OK` uden rollback eller fatal tilstand.
 
-Skabelonen er bevidst rød (`false`, `null`, `FILL_ME`) indtil de fysiske
-observationer og deres artifact-hashes er gennemført.
+Den ugyldige update accepteres kun som:
+
+- en checksum/provenance/release-integritetsafvisning **før** process-stop/swap; eller
+- en fuldført rollback med backend, worker og supervisor bevist sunde på
+  `1.58.145`.
+
+Disse bypasses blokerer altid:
+
+```text
+-insecure-skip-verify
+-skip-attestation
+-no-heartbeat-check
+```
+
+`ROLLBACK FAILED`, `manual_recovery`, manglende heartbeat-markør eller en
+stående `update-transaction.json` blokerer også. Kræv i chain-rapporten:
+
+```text
+schema=kaliv-appliance-lifecycle-updater-chain/v1
+gate.passed=true
+updater_chain_complete=true
+production_activation=false
+```
 
 ## 5. T-040 — voice baseline
 
-Følg `VOICE_BASELINE.md`. Den forventede fil er:
+Følg `VOICE_BASELINE.md`. Kræv grøn top-level gate, nul errors, completed cold
+probe, alle connection-cancellation-prober og den beståede typed Pixel
+stop/barge-in-matrix.
 
 ```text
 validation/voice-baseline-latest.json
 ```
 
-Kampagnen kræver grøn top-level gate, 0 errors, completed cold probe, alle
-connection-cancellation-prober og en bestået typed Pixel stop/barge-in-matrix.
-
 ## 6. T-043 — RAG baseline
 
-Følg `RAG_BENCHMARK.md`. Den forventede fil er:
+Følg `RAG_BENCHMARK.md`. Kræv præcis 1.000 og 10.000 chunks, grøn benchmark-gate,
+nul errors og clean source removal for begge skalaer.
 
 ```text
 validation/rag-benchmark-latest.json
 ```
 
-Kampagnen kræver præcis 1.000 og 10.000 chunks, grøn benchmark-gate, 0 errors og
-clean source removal for begge skalaer.
+## 7. T-019 — scheduler-pilot
 
-> **Rettet 19/7 (blockeren var en fejldiagnose):** `/plan` →
-> `/plans/{id}/start` ER den dokumenterede produktionssti; ruterne var
-> orphanede på planner-routeren og er wiret fra 1.58.131. Produceren er
-> uændret og skal køres. Smoke-bevist e2e i sandkassen (pair → token →
-> backend → planner → Ollama). Får du 422 "unsupported top-level fields"
-> er det den typede kontrakts fail-closed afvisning af modellens output —
-> et ægte eval-fund, ikke en kædefejl (se TROUBLESHOOTING).
-
-## 7. T-019 — scheduler-pilot (read + `note_append`)
-
-Kør runbooken i `DEVICE_TEST.md` sektion 1.6 (read-plan via loopback, write-plan
-med den fulde godkendelses-ceremoni, pausen mid-flight, crash-recovery). Notér
-de to schedule-id'er, recovery-linjen fra worker-loggen, og skriv den lille
-manual-observations-fil:
-
-```json
-{"revocation_confirmed": true,
- "recovery_line": "scheduler: recovered 0 executed / 1 abandoned / 0 unknown occurrence(s) at startup",
- "operator": "Anders"}
-```
-
-Producér derefter evidensen (maskin-halvdelen læses live fra workeren:
-receipts, budgetter, read-uden-approval; menneske-halvdelen er dine to
-observationer):
+Følg `DEVICE_TEST.md` sektion 1.6. Kør read-plan via loopback, write-planen med
+fuld godkendelsesceremoni, pause mid-flight og crash-recovery. Producer derefter:
 
 ```cmd
 python scripts\scheduler_pilot_report.py --read-schedule-id <ID> --write-schedule-id <ID> --manual-observations validation\scheduler-manual-observations.json --report validation\scheduler-pilot-latest.json
 ```
 
-Produceren fælder selv dom (`pilot.passed`) og skriver rapporten uanset —
-aggregatoren genvaliderer alt mod den frosne kandidat.
+Rapporten skal pinne konkrete occurrences, jobs, audit-sekvenser og receipts.
+Pausens bevis er en `released` occurrence bundet til et `cancelled` job; aggregate
+tællere alene er ikke promotion-evidens.
 
-**Forensik (v2):** rapporten pinner det *konkrete* forløb direkte fra storene
-(read-only): schedule-rækken (tool/args/cadence/budget), hver occurrence med
-claim_id, status, job og audit-sekvens (`attempt` → `executed`), receipt-rækken
-og tidsvinduet. Pausens bevis er en `released`-occurrence bundet til et
-`cancelled` job. Kør produceren fra workerens arbejdsmappe, eller peg
-`--schedules-db`/`--jobs-db`/`--audit-db` på dens filer — aggregater tæller,
-forensikken beviser.
+## 8. Verificér hele Stage B
 
-## 8. Verificér hele kampagnen
+Den anbefalede og autoritative indgang er:
+
+```text
+VERIFY_STAGE_B_EVIDENCE.cmd
+```
+
+Den kører fail-closed:
+
+1. `freeze_check.py`;
+2. `appliance_lifecycle_updater_chain.py`;
+3. `physical_validation_campaign.py --mode verify`;
+4. `physical_validation_final_gate.py`;
+5. `stage_b_physical_gate.py`.
+
+Den interne syv-bevis-kampagne kan fortsat køres manuelt:
 
 ```powershell
 python scripts\physical_validation_campaign.py `
@@ -252,33 +246,32 @@ Exit codes:
 
 | Exit | Betydning |
 |---:|---|
-| `0` | I `verify`: alle seks fysiske beviser er present, friske, candidate-bound og grønne. |
-| `1` | En rapport mangler, er stale, mismatched eller har en rød individuel gate. |
-| `2` | Kampagneværktøjet kunne ikke bestemme kandidat eller skrive en troværdig rapport. |
+| `0` | Alle krævede beviser og semantic gates er friske, releasebundne og grønne. |
+| `1` | Evidens mangler, er stale, mismatched, semantisk utilstrækkelig eller rød. |
+| `2` | Identitet eller rapportskrivning kunne ikke bestemmes troværdigt. |
 
-`gate.physical_campaign_complete=true` er den eneste kampagnestatus, der betyder
-at alle fysiske beviser er samlet. `prepare` kan have `gate.passed=true`, men vil
-altid have `physical_campaign_complete=false`, så længe en rapport mangler.
+Den samlede autoritative kvittering er:
 
-## Permanent evidens
-
-Når `verify` er grøn og rapporten er manuelt reviewet:
-
-```powershell
-Copy-Item `
-  validation\physical-validation-campaign-latest.json `
-  validation\physical-validation-campaign-2026-07-XX.json
+```text
+validation/stage-b-physical-final-latest.json
 ```
 
-Kontrollér før commit:
+Kræv:
 
-- candidate version, Git-SHA og code fingerprint;
-- alle seks evidence statuses er `pass`;
-- ingen `missing`, `failed` eller `candidate_errors`;
-- hver rapport- og lifecycle-artifact-SHA er udfyldt;
-- `physical_campaign_complete=true`;
-- `production_activation=false`.
+```text
+schema=kaliv-stage-b-physical-final/v1
+gate.passed=true
+release_freeze_complete=true
+updater_chain_complete=true
+physical_campaign_complete=true
+browser_peer_physical_complete=true
+all_physical_evidence_complete=true
+production_activation=false
+summary.total=8
+```
 
-Rolling-filer, lifecycle-arbejdsfilen, lifecycle-artifacts, rå voice-fixtures og
-manuelle work files forbliver lokale. Kun dateret, manuelt reviewet evidens må
-committes.
+Kontrollér før en senere beslutning, at alle syv evidence statuses i kampagnerapporten
+er `pass`, og review version, Git-SHA, worker-fingerprint, alle komponenthashes og
+T-032-browserattestationen. Rolling-filer og rå fixtures forbliver lokale. Kun
+dateret, manuelt reviewet evidens må committes. En senere aktivering kræver fortsat
+en særskilt eksplicit beslutning.

@@ -14,6 +14,17 @@ from __future__ import annotations
 import urllib.error
 
 
+# A cold Ollama embedding model can take materially longer than 15 seconds to
+# enter VRAM on the physical rig. The validation endpoint itself is bounded, so
+# this client timeout only avoids classifying a normal cold start as a crash.
+DEEP_HEALTH_TIMEOUT_SECONDS = 120.0
+
+
+def _reason(exc: BaseException) -> str:
+    value = getattr(exc, "reason", None)
+    return str(value if value is not None else exc)
+
+
 def check_substrate(get, Check, base_url: str, token: str, planner: str) -> list:
     """Prove the substrate the validation exercises is up.
 
@@ -29,11 +40,14 @@ def check_substrate(get, Check, base_url: str, token: str, planner: str) -> list
 
     c = Check("deep health (/health/full?deep=true)")
     try:
-        status, body = get(f"{base}/api/v1/health/full?deep=true", token=token,
-                           timeout=15.0)
-    except urllib.error.URLError as exc:
+        status, body = get(
+            f"{base}/api/v1/health/full?deep=true",
+            token=token,
+            timeout=DEEP_HEALTH_TIMEOUT_SECONDS,
+        )
+    except (urllib.error.URLError, TimeoutError) as exc:
         out.append(c.fail(
-            f"cannot reach ({exc.reason})",
+            f"cannot reach ({_reason(exc)})",
             "The worker did not answer /health/full. It may be down on :8099, "
             "or the backend cannot reach it."))
         return out
@@ -82,7 +96,7 @@ def check_substrate(get, Check, base_url: str, token: str, planner: str) -> list
             out.append(c.warn(
                 "could not list models",
                 "Could not read the model list to confirm; check manually."))
-    except urllib.error.URLError:
+    except (urllib.error.URLError, TimeoutError):
         out.append(c.warn(
             "could not list models",
             "Could not reach /api/v1/models to confirm the planner model."))

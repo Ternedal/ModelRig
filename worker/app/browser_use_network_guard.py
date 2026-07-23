@@ -4,22 +4,50 @@ Browser Use 0.13.4 validates NavigateToUrlEvent through an event watchdog, but
 that watchdog runs alongside the browser navigation handler. A rejected URL can
 therefore reach the network before the event error is observed. This module
 moves the decision to Chromium's Fetch.requestPaused boundary: every HTTP(S)
-request is paused and must be explicitly continued by ModelRig.
+request is paused and must be explicitly continued, failed or fulfilled by
+ModelRig.
 
-The guard is intentionally domain-only. Public-address pinning and live public
-network validation remain activation blockers; this closes the earlier and
-narrower leak where an explicitly disallowed URL could leave the browser at all.
+The default mode remains the delivered domain-only guard. An explicitly injected
+pinned fulfillment controller changes only allowlisted HTTP(S) requests: ModelRig
+performs the numeric-IP request outside Chromium, calls Fetch.fulfillRequest, and
+commits the pending peer receipt only after CDP accepts the response. Internal
+browser schemes remain local, and no controller is created or imported by the
+active Browser Use adapter in this slice.
 """
 from __future__ import annotations
 
 import asyncio
 import ipaddress
-from typing import Any, Iterable
+import time
+from collections.abc import Callable
+from typing import Any, Iterable, Protocol
 from urllib.parse import unquote, urlsplit
 
 
 class BrowserUseNetworkGuardError(RuntimeError):
     """The browser request guard could not be installed or stayed unhealthy."""
+
+
+class PendingPinnedFulfillment(Protocol):
+    def cdp_params(self) -> dict[str, Any]:
+        ...
+
+    def commit(self, *, now: int) -> None:
+        ...
+
+    def abort(self, *, error_code: str, now: int) -> None:
+        ...
+
+
+class PinnedFulfillmentController(Protocol):
+    def prepare(
+        self,
+        event: Any,
+        *,
+        now: int,
+        ttl_seconds: int = 30,
+    ) -> PendingPinnedFulfillment:
+        ...
 
 
 _INTERNAL_SCHEMES = frozenset({"about", "blob", "chrome", "data"})
@@ -54,7 +82,7 @@ def browser_request_allowed(
     *,
     allow_localhost: bool = False,
 ) -> bool:
-    """Return whether Chromium may send one request.
+    """Return whether Chromium may process one request.
 
     Only internal browser schemes and explicit HTTP(S) domain rules pass. URL
     credentials, IP literals, local/internal names and malformed hosts fail
@@ -103,7 +131,7 @@ def browser_request_allowed(
 
 
 class BrowserUseNetworkGuard:
-    """Pause every Chromium request and continue only allowlisted URLs."""
+    """Pause every Chromium request and resolve it through one explicit path."""
 
     def __init__(
         self,
@@ -111,13 +139,25 @@ class BrowserUseNetworkGuard:
         allowed_domains: Iterable[str],
         *,
         allow_localhost: bool = False,
+        fulfillment_controller: PinnedFulfillmentController | None = None,
+        now_factory: Callable[[], int] = lambda: int(time.time()),
     ) -> None:
         domains = tuple(str(value) for value in allowed_domains)
         if not domains:
             raise BrowserUseNetworkGuardError("browser request allowlist is empty")
+        if fulfillment_controller is not None and not callable(
+            getattr(fulfillment_controller, "prepare", None)
+        ):
+            raise BrowserUseNetworkGuardError(
+                "fulfillment_controller must provide prepare"
+            )
+        if not callable(now_factory):
+            raise BrowserUseNetworkGuardError("now_factory must be callable")
         self.browser_session = browser_session
         self.allowed_domains = domains
         self.allow_localhost = allow_localhost
+        self.fulfillment_controller = fulfillment_controller
+        self.now_factory = now_factory
         self.blocked_urls: list[str] = []
         self.blocked_urls_truncated = False
         self._client: Any = None
@@ -127,6 +167,19 @@ class BrowserUseNetworkGuard:
         self._request_budget_exceeded = False
         self._tasks: set[asyncio.Task[Any]] = set()
         self._errors: list[str] = []
+
+    def _now(self) -> int:
+        try:
+            value = self.now_factory()
+        except Exception as exc:
+            raise BrowserUseNetworkGuardError(
+                "browser request clock failed"
+            ) from exc
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise BrowserUseNetworkGuardError(
+                "browser request clock returned an invalid timestamp"
+            )
+        return value
 
     def _record_error(self, code: str) -> None:
         if len(self._errors) < _MAX_ERROR_CODES:
@@ -149,6 +202,19 @@ class BrowserUseNetworkGuard:
         task = asyncio.create_task(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+
+    async def _fail_request(
+        self,
+        request_id: Any,
+        session_id: Any,
+    ) -> None:
+        await self._client.send.Fetch.failRequest(
+            params={
+                "requestId": request_id,
+                "errorReason": "BlockedByClient",
+            },
+            session_id=session_id,
+        )
 
     def _on_request_paused(self, event: Any, session_id: Any = None) -> None:
         request_id = event.get("requestId") or event.get("request_id")
@@ -176,26 +242,69 @@ class BrowserUseNetworkGuard:
                 allow_localhost=self.allow_localhost,
             )
         )
+        try:
+            scheme = urlsplit(url).scheme.lower()
+        except ValueError:
+            scheme = ""
+        use_fulfillment = (
+            allowed
+            and scheme in {"http", "https"}
+            and self.fulfillment_controller is not None
+        )
         if not allowed:
             self._record_blocked_url(url)
 
         async def respond() -> None:
+            pending: PendingPinnedFulfillment | None = None
+            fulfilled = False
             try:
-                if allowed:
+                if not allowed:
+                    await self._fail_request(request_id, effective_session)
+                    return
+                if not use_fulfillment:
                     await self._client.send.Fetch.continueRequest(
                         params={"requestId": request_id},
                         session_id=effective_session,
                     )
-                else:
-                    await self._client.send.Fetch.failRequest(
-                        params={
-                            "requestId": request_id,
-                            "errorReason": "BlockedByClient",
-                        },
-                        session_id=effective_session,
+                    return
+
+                assert self.fulfillment_controller is not None
+                pending = await asyncio.to_thread(
+                    self.fulfillment_controller.prepare,
+                    event,
+                    now=self._now(),
+                )
+                params = pending.cdp_params()
+                if params.get("requestId") != request_id:
+                    raise BrowserUseNetworkGuardError(
+                        "fulfillment request id changed"
                     )
-            except Exception as exc:  # A paused request never gets a permissive fallback.
-                self._record_error(type(exc).__name__)
+                await self._client.send.Fetch.fulfillRequest(
+                    params=params,
+                    session_id=effective_session,
+                )
+                fulfilled = True
+                await asyncio.to_thread(pending.commit, now=self._now())
+            except Exception:
+                if pending is not None and not fulfilled:
+                    try:
+                        await asyncio.to_thread(
+                            pending.abort,
+                            error_code="cdp_fulfill_failed",
+                            now=self._now(),
+                        )
+                    except Exception:
+                        self._record_error("fulfillment_abort_failed")
+                self._record_error(
+                    "fulfillment_commit_failed"
+                    if fulfilled
+                    else "fulfillment_request_failed"
+                )
+                if not fulfilled:
+                    try:
+                        await self._fail_request(request_id, effective_session)
+                    except Exception:
+                        self._record_error("fail_request_failed")
 
         self._track(respond())
 

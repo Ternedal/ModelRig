@@ -58,18 +58,18 @@ for bad in ("", "hourly", "daily:24:00", "daily:3:00", "every:-1", "cron:* * * *
 # --- next_run ---------------------------------------------------------------
 
 base = time.mktime((2026, 7, 17, 10, 0, 0, 0, 0, -1))
-check(S.next_run(S.Cadence("every", seconds=900), base) == base + 900, "interval fires 900s later")
+check(S.next_run(S.Cadence("every", seconds=900), base, "UTC") == base + 900, "interval fires 900s later")
 
-nxt = S.next_run(S.Cadence("daily", hour=3, minute=0), base)
+nxt = S.next_run(S.Cadence("daily", hour=3, minute=0), base, "UTC")
 lt = time.localtime(nxt)
 check((lt.tm_hour, lt.tm_min) == (3, 0) and nxt > base,
       "daily:03:00 from 10:00 fires at 03:00 -- tomorrow, not in the past")
 
 early = time.mktime((2026, 7, 17, 1, 0, 0, 0, 0, -1))
-nxt2 = S.next_run(S.Cadence("daily", hour=3, minute=0), early)
+nxt2 = S.next_run(S.Cadence("daily", hour=3, minute=0), early, "UTC")
 check(time.localtime(nxt2).tm_mday == 17 and nxt2 - early == 7200,
       "daily:03:00 from 01:00 fires the SAME day, two hours later")
-check(raises(S.next_run, S.Cadence("mystery"), base) is not None,
+check(raises(S.next_run, S.Cadence("mystery"), base, "UTC") is not None,
       "an unknown cadence kind fails closed instead of being treated as daily")
 
 # --- the rig was off: missed runs are reported, never replayed --------------
@@ -77,7 +77,7 @@ check(raises(S.next_run, S.Cadence("mystery"), base) is not None,
 cad = S.Cadence("daily", hour=3, minute=0)
 due = time.mktime((2026, 7, 10, 3, 0, 0, 0, 0, -1))
 now = time.mktime((2026, 7, 17, 10, 0, 0, 0, 0, -1))
-missed, next_due = S.catch_up(cad, due, now)
+missed, next_due = S.catch_up(cad, due, now, "UTC")
 # 10/7 03:00 through 17/7 03:00 inclusive is EIGHT fire times, not seven: one
 # fires now, seven were missed. My first expectation here said six, and the
 # arithmetic was wrong, not the code -- which is the entire reason to compute

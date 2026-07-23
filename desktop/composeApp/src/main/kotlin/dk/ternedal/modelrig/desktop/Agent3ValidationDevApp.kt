@@ -32,6 +32,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.desktop.data.DesktopChatDb
+import dk.ternedal.modelrig.desktop.net.Agent3TaskReadiness
+import dk.ternedal.modelrig.desktop.net.Agent3TaskReadinessClient
 import dk.ternedal.modelrig.desktop.net.Agent3ValidationAssessment
 import dk.ternedal.modelrig.desktop.net.Agent3ValidationClient
 import dk.ternedal.modelrig.desktop.net.Agent3ValidationStatus
@@ -59,6 +61,7 @@ fun Agent3ValidationDevApp() {
         }
         var token by remember { mutableStateOf(setting("deviceToken", "MODELRIG_TOKEN", "")) }
         var status by remember { mutableStateOf<Agent3ValidationStatus?>(null) }
+        var readiness by remember { mutableStateOf<Agent3TaskReadiness?>(null) }
         var busy by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
 
@@ -68,11 +71,18 @@ fun Agent3ValidationDevApp() {
             error = null
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
-                    runCatching { Agent3ValidationClient(baseUrl.trim(), token.trim()).status() }
+                    runCatching {
+                        val base = baseUrl.trim()
+                        val bearer = token.trim()
+                        Agent3ValidationClient(base, bearer).status() to
+                            Agent3TaskReadinessClient(base, bearer).readiness()
+                    }
                 }
                 busy = false
-                result.onSuccess { status = it }
-                    .onFailure { error = it.message ?: "Validation status could not be loaded" }
+                result.onSuccess {
+                    status = it.first
+                    readiness = it.second
+                }.onFailure { error = it.message ?: "Validation status could not be loaded" }
             }
         }
 
@@ -112,7 +122,7 @@ fun Agent3ValidationDevApp() {
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = baseUrl,
-                    onValueChange = { baseUrl = it; status = null },
+                    onValueChange = { baseUrl = it; status = null; readiness = null },
                     label = { Text("ModelRig backend-URL") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -120,7 +130,7 @@ fun Agent3ValidationDevApp() {
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = token,
-                    onValueChange = { token = it; status = null },
+                    onValueChange = { token = it; status = null; readiness = null },
                     label = { Text("Device-token") },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
@@ -128,7 +138,7 @@ fun Agent3ValidationDevApp() {
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Skærmen udfører kun GET /api/v1/experimental/agent3/status. " +
+                    "Skærmen udfører kun GET status og task-readiness. " +
                         "Den kan ikke vælge rapport, godkende tools eller aktivere routing.",
                     color = KalivTheme.colors.TextMuted,
                     fontSize = 11.sp,
@@ -145,6 +155,11 @@ fun Agent3ValidationDevApp() {
             error?.let {
                 Spacer(Modifier.height(12.dp))
                 ValidationCard { Text(it, color = KalivTheme.colors.Danger, fontSize = 13.sp) }
+            }
+
+            readiness?.let {
+                Spacer(Modifier.height(12.dp))
+                TaskReadinessSummary(it)
             }
 
             status?.let {
@@ -175,6 +190,45 @@ private fun ValidationCard(content: @Composable ColumnScope.() -> Unit) {
             .padding(14.dp),
         content = content,
     )
+}
+
+@Composable
+private fun TaskReadinessSummary(value: Agent3TaskReadiness) {
+    val headline = if (value.eligibleForTaskUi) {
+        "Task-UI evidence ready"
+    } else {
+        "Task-UI evidence blocked"
+    }
+    ValidationCard {
+        Text(
+            headline,
+            color = if (value.eligibleForTaskUi) KalivTheme.colors.Signal else KalivTheme.colors.Amber,
+            fontSize = 19.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(8.dp))
+        ValueRow("Active surface", value.selectedSurface)
+        ValueRow("Candidate", value.candidateSurface)
+        ValueRow("Fallback", value.fallbackSurface)
+        ValueRow("Server reason", value.reason)
+        ValueRow("Pilot tasks", value.pilot.successes?.let { "$it/${value.pilot.tasks}" } ?: "unknown")
+        ValueRow("Replans", value.pilot.replans?.toString() ?: "unknown")
+        ValueRow("Retry events", value.pilot.retryEvents?.toString() ?: "unknown")
+        Spacer(Modifier.height(8.dp))
+        GateRow("Operator switch enabled", value.operatorEnabled)
+        GateRow("Pilot fresh", value.pilot.fresh)
+        GateRow("Version matches", value.pilot.versionMatch)
+        GateRow("Code matches", value.pilot.codeMatch)
+        GateRow("Stop + fallback proven", value.pilot.stopFallbackProven)
+        GateRow("Normal chat unchanged", value.normalChatRouteUnchanged)
+        GateRow("Production remains locked", !value.productionActivation)
+        if (value.reasons.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            value.reasons.distinct().forEach {
+                Text("• $it", color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
+            }
+        }
+    }
 }
 
 @Composable

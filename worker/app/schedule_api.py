@@ -33,12 +33,15 @@ from .schedule_approval import (
     verify_schedule_approval,
 )
 from .scheduler import DEFAULT_MAX_RUNS, DEFAULT_TTL_DAYS, ScheduleError, enabled
+from .scheduler_time import DEFAULT_TIMEZONE, MISFIRE_POLICY
 
 
 class PreviewScheduleReq(BaseModel):
     tool: str = Field(min_length=1, max_length=100)
     args: dict[str, Any] = Field(default_factory=dict)
     cadence: str = Field(min_length=1, max_length=100)
+    timezone: str = Field(default=DEFAULT_TIMEZONE, min_length=1, max_length=100)
+    misfire_policy: str = Field(default=MISFIRE_POLICY, min_length=1, max_length=32)
     ttl_days: int = Field(default=DEFAULT_TTL_DAYS, ge=1, le=MAX_TTL_DAYS)
     max_runs: int = Field(default=DEFAULT_MAX_RUNS, ge=0, le=MAX_RUN_BUDGET)
 
@@ -113,6 +116,11 @@ def _runtime_status(request: Request) -> dict[str, Any]:
             "running": False,
             "resources_open": False,
             "last_error": None,
+            "max_concurrency": 1,
+            "queue_capacity": 0,
+            "active_executions": 0,
+            "accepted_ticks": 0,
+            "overlap_rejections": 0,
         }
     try:
         state = runtime.status()
@@ -122,12 +130,22 @@ def _runtime_status(request: Request) -> dict[str, Any]:
             "running": False,
             "resources_open": True,
             "last_error": f"{type(exc).__name__}: {exc}"[:500],
+            "max_concurrency": 1,
+            "queue_capacity": 0,
+            "active_executions": 0,
+            "accepted_ticks": 0,
+            "overlap_rejections": 0,
         }
     return {
         "configured": bool(state.configured),
         "running": bool(state.running),
         "resources_open": bool(state.resources_open),
         "last_error": state.last_error,
+        "max_concurrency": int(getattr(state, "max_concurrency", 1)),
+        "queue_capacity": int(getattr(state, "queue_capacity", 0)),
+        "active_executions": int(getattr(state, "active_executions", 0)),
+        "accepted_ticks": int(getattr(state, "accepted_ticks", 0)),
+        "overlap_rejections": int(getattr(state, "overlap_rejections", 0)),
     }
 
 
@@ -194,6 +212,8 @@ def build_schedule_router(
                 req.cadence,
                 ttl_days=req.ttl_days,
                 max_runs=req.max_runs,
+                timezone_name=req.timezone,
+                misfire_policy=req.misfire_policy,
             )
         except (ScheduleAdminError, ScheduleError) as exc:
             _raise(exc)
@@ -220,6 +240,8 @@ def build_schedule_router(
                 req.cadence,
                 ttl_days=req.ttl_days,
                 max_runs=req.max_runs,
+                timezone_name=req.timezone,
+                misfire_policy=req.misfire_policy,
             )
             approved_fingerprint, receipt = _approval_for(
                 preview, req.approval_token)
@@ -229,6 +251,8 @@ def build_schedule_router(
                 req.cadence,
                 ttl_days=req.ttl_days,
                 max_runs=req.max_runs,
+                timezone_name=req.timezone,
+                misfire_policy=req.misfire_policy,
                 approved_fingerprint=approved_fingerprint,
                 receipt=receipt,
             )

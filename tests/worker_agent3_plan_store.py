@@ -12,21 +12,14 @@ from app.agent3.core import Agent3Orchestrator, AgentRunStore
 from app.agent3.integration import V2ToolAdapter
 from app.agent3.plan_store import PlanStore, PlanStoreError
 from app.agent3.planner import TypedPlanner, build_planner_router
-# The planner now plans against a rig it MEASURES (F-302, completed in 1.58.73:
-# the 1.58.67 fix reached api.py and capability_graph_api.py and missed this
-# one). There is no Ollama in CI, so an honest probe reports the rig
-# unreachable and the planner correctly refuses to plan rig work against it.
-# This test is about planning, not about whether Ollama is up -- so state the
-# assumption instead of inheriting it.
 from app.agent3 import capability_probe as _probe  # noqa: E402
 
-_probe.measure = lambda **kw: {  # type: ignore[assignment]
+_probe.measure = lambda **kw: {
     "worker_ready": True,
     "rig_reachable": True,
     "rag_ready": True,
     "measured_at": 0.0,
 }
-
 
 passed = failed = 0
 
@@ -44,8 +37,18 @@ def check(cond, name):
 class Tool:
     name = "note_append"
     risk = "write"
+    impact = "write"
     description = "Skriv en note"
     params = {"type": "object", "properties": {"text": {"type": "string"}}}
+    isolate = False
+    env_allow = ()
+    schedulable = True
+    unschedulable_because = ""
+    sensitivity = "private"
+    cancellation = "none"
+    idempotent = False
+    network = "none"
+    network_destinations = ()
 
     @staticmethod
     def human_summary(args):
@@ -66,8 +69,9 @@ class Gate:
 
 
 gate = Gate()
-fake = SimpleNamespace(REGISTRY={"note_append": Tool()}, GATE=gate)
-adapter = V2ToolAdapter(fake)
+adapter = V2ToolAdapter(
+    SimpleNamespace(REGISTRY={"note_append": Tool()}, GATE=gate)
+)
 
 
 async def planned(_messages, _model):
@@ -96,17 +100,20 @@ check(bool(plan_id), "preview returns a persistent plan_id")
 check(preview.json()["plan"][0]["args"]["text"] == "original", "reviewed args are visible")
 
 start = client.post(f"/experimental/agent3/plans/{plan_id}/start", json={"plan": "changed"})
-check(start.status_code == 200, "reviewed plan starts without accepting a replacement payload")
+check(start.status_code == 200, "reviewed plan starts without replacement payload")
 run = start.json()["run"]
-check(run["state"] == "waiting_confirmation", "write still waits for a fresh run confirmation")
-check(run["steps"][0]["args"]["text"] == "original", "stored reviewed args are the args in the run")
+check(run["state"] == "waiting_confirmation", "write still waits for confirmation")
+check(run["steps"][0]["args"]["text"] == "original", "stored reviewed args remain authoritative")
 
 reused = client.post(f"/experimental/agent3/plans/{plan_id}/start")
 check(reused.status_code == 409, "plan_id is single-use")
 
 expiry_store = PlanStore(os.path.join(root, "expiry.db"), ttl_seconds=30)
 expired_id, _ = expiry_store.save("payload")
-expiry_store._conn.execute("UPDATE agent_plans SET expires_at=? WHERE id=?", (time.time() - 1, expired_id))
+expiry_store._conn.execute(
+    "UPDATE agent_plans SET expires_at=? WHERE id=?",
+    (time.time() - 1, expired_id),
+)
 expiry_store._conn.commit()
 try:
     expiry_store.consume(expired_id)

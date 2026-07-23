@@ -51,10 +51,12 @@ version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 check(f"**Version:** {version}" in text, f"the doc names the real version ({version})")
 check("GENERATED — do not edit" in text, "the doc says loudly that it is generated")
 
-# The facts a reader most needs, straight from the registry. list_documents is
-# the private read: risk read, impact read, sensitivity private.
-check("| `list_documents` | read | read | private |" in text,
-      "the tool table carries the live risk, impact AND sensitivity")
+# The facts a reader most needs, straight from the canonical descriptor.
+# list_documents is the private read: access read, impact read, data class private.
+check(
+    "| `tool:list_documents` | `kaliv-capability/v2` | read | read | private |" in text,
+    "the capability table carries canonical id, schema, access, impact AND data class",
+)
 check("`KALIV_EGRESS_GATE`" in text and "`KALIV_TOOL_ISOLATION`" in text,
       "the dormant switches are listed with their real defaults")
 
@@ -88,6 +90,11 @@ import current_state as _CS  # noqa: E402
 _names = {n for n, _ in _CS._switches()}
 check("KALIV_SCHEDULER_API" in _names, "the generator finds it, not just the committed copy")
 check("KALIV_AGENT3_ENABLED" in _names, "and it did not lose the Python ones on the way")
+check("KALIV_AGENT3_TASK_UI" in _names,
+      "mapping-injected operator switches are visible, not hidden behind env.get")
+check("KALIV_AGENT3_PILOT_REPORT" in _names
+      and "KALIV_AGENT3_PILOT_MAX_AGE_HOURS" in _names,
+      "the configured pilot evidence inputs are visible in generated state")
 
 # Drive it: a Go switch that does not exist must not appear.
 check("KALIV_NOT_A_REAL_SWITCH" not in _names,
@@ -98,35 +105,43 @@ check("KALIV_NOT_A_REAL_SWITCH" not in _names,
 check("MODELRIG_ADMIN_KEY" not in _names,
       "a credential read from the Go environment is not listed as a switch")
 
-# --- the authoritative page shows every axis the registry owns (F-718) ------
-# It showed risk, sensitivity, isolation and hid impact, schedulable,
-# cancellation, idempotent -- so it could not say what runs unattended or
-# replays, which is exactly what those axes decide. A hand-picked column set
-# hides the next axis added, so assert the table against the tools that carry
-# the decisions.
+# --- the authoritative page shows every v2 descriptor axis -----------------
+# Static metadata now has one representation. The generated table must expose
+# the same versioned axes consumed by the API and clients rather than rebuilding
+# a second documentation-only Tool projection.
 
-for _needle in ("| impact |", "| sched |", "| stop |", "| replay |"):
+for _needle in (
+    "| schema |",
+    "| access |",
+    "| impact |",
+    "| data class |",
+    "| isolated |",
+    "| sched |",
+    "| network |",
+    "| stop |",
+    "| replay |",
+):
     check(_needle in text,
-          f"the tool table has a {_needle.strip(' |')} column")
+          f"the capability table has a {_needle.strip(' |')} column")
 
 # The dangerous tools must be legible as dangerous FROM THIS PAGE, not just in
 # code: delete_model destructive and unschedulable, pull_model cooperative.
 import re as _re2  # noqa: E402
 _row = {}
 for _line in text.splitlines():
-    _m = _re2.match(r"\| `([a-z_]+)` \|(.+)\|", _line)
+    _m = _re2.match(r"\| `(tool:[a-z_]+)` \|(.+)\|", _line)
     if _m:
         _row[_m.group(1)] = [c.strip() for c in _m.group(2).split("|")]
 
-check("destructive" in _row.get("delete_model", []),
+check("destructive" in _row.get("tool:delete_model", []),
       "delete_model reads as destructive on the page, not only in the registry")
-check("cooperative" in _row.get("pull_model", []),
+check("cooperative" in _row.get("tool:pull_model", []),
       "pull_model's cancellation is visible")
-# schedulable and replay are the columns a person scans before trusting a
-# schedule; they must carry the real answer.
-check(_row.get("delete_model", ["", "", "", "", "no"])[4] == "no",
+# Columns after the capability id are: schema, access, impact, data class,
+# isolated, sched, network, stop, replay.
+check(_row.get("tool:delete_model", ["", "", "", "", "", "yes"])[5] == "no",
       "delete_model shows it cannot be scheduled")
-check(_row.get("note_append", ["", "", "", "", "", "", "no"])[-1] == "no",
+check(_row.get("tool:note_append", ["yes"])[-1] == "no",
       "note_append shows re-running it is not free")
 
 # --- the page must not claim physical proof it cannot see (F-813) -----------
@@ -141,7 +156,7 @@ check("bevist på Windows-runner** | ja" not in text
       "the page no longer claims DPAPI is PROVEN from a job name and a filename")
 check("kan ikke verificeres offline" in text,
       "and it says plainly that passed-on-this-commit needs CI status the "
-      "offline generator does not have")
+      "offline generator cannot have")
 # The weaker, true claim is still made, so we did not just delete the signal.
 check("defineret og koblet i CI" in text,
       "the true, filesystem-checkable claim -- the test is defined and wired -- "

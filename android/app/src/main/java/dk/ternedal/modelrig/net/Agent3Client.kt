@@ -70,6 +70,41 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val updatedAt: Double?,
     )
 
+    data class TerminationPlan(
+        val state: String,
+        val canRequest: Boolean,
+        val requestScope: String,
+        val effect: String,
+        val reason: String,
+    )
+
+    data class TerminationModelStream(
+        val state: String,
+        val active: Boolean,
+        val canRequest: Boolean,
+        val handlePresent: Boolean,
+        val reason: String,
+    )
+
+    data class TerminationActiveTool(
+        val stepId: String,
+        val tool: String,
+        val state: String,
+        val semantics: String?,
+        val handlePresent: Boolean,
+        val canRequest: Boolean,
+        val requestState: String,
+        val reason: String,
+    )
+
+    data class TerminationReceipt(
+        val schema: String,
+        val plan: TerminationPlan,
+        val modelStream: TerminationModelStream,
+        val activeTool: TerminationActiveTool?,
+        val productionActivation: Boolean,
+    )
+
     data class PlanPreview(
         val planId: String?,
         val expiresInSeconds: Int?,
@@ -90,6 +125,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val steps: List<Step>,
         val answer: String?,
         val error: String?,
+        val termination: TerminationReceipt?,
     )
 
     data class RunEnvelope(
@@ -159,7 +195,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
 
     fun getRun(runId: String): Run {
         val root = get("/api/v1/experimental/agent3/runs/$runId")
-        return parseRun(root.requireObject("run"))
+        return parseRunEnvelope(root).run
     }
 
     fun listRuns(): List<Run> {
@@ -183,7 +219,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
     fun retry(runId: String, cloudReady: Boolean = false): Run {
         val payload = JSONObject().put("cloud_ready", cloudReady)
         val root = post("/api/v1/experimental/agent3/runs/$runId/retry", payload)
-        return parseRun(root.requireObject("run"))
+        return parseRunEnvelope(root).run
     }
 
     fun confirm(runId: String, stepId: String, digest: String, approve: Boolean): Run {
@@ -192,17 +228,17 @@ class Agent3Client(baseUrl: String, private val token: String) {
             .put("digest", digest)
             .put("decision", if (approve) "approve" else "deny")
         val root = post("/api/v1/experimental/agent3/runs/$runId/confirm", payload)
-        return parseRun(root.requireObject("run"))
+        return parseRunEnvelope(root).run
     }
 
     fun resume(runId: String): Run {
         val root = post("/api/v1/experimental/agent3/runs/$runId/resume", JSONObject())
-        return parseRun(root.requireObject("run"))
+        return parseRunEnvelope(root).run
     }
 
     fun cancel(runId: String): Run {
         val root = post("/api/v1/experimental/agent3/runs/$runId/cancel", JSONObject())
-        return parseRun(root.requireObject("run"))
+        return parseRunEnvelope(root).run
     }
 
     private fun get(path: String): JSONObject = execute(
@@ -232,12 +268,15 @@ class Agent3Client(baseUrl: String, private val token: String) {
         }
     }
 
-    private fun parseRunEnvelope(root: JSONObject): RunEnvelope = RunEnvelope(
-        run = parseRun(root.requireObject("run")),
-        reviewReads = root.optBoolean("review_reads", false),
-        readReview = parseReadReview(root.optJSONObject("read_review")),
-        capabilityReceipt = parseCapabilityReceipt(root.optJSONObject("capability_receipt")),
-    )
+    private fun parseRunEnvelope(root: JSONObject): RunEnvelope {
+        val termination = parseTerminationReceipt(root.optJSONObject("termination"))
+        return RunEnvelope(
+            run = parseRun(root.requireObject("run")).copy(termination = termination),
+            reviewReads = root.optBoolean("review_reads", false),
+            readReview = parseReadReview(root.optJSONObject("read_review")),
+            capabilityReceipt = parseCapabilityReceipt(root.optJSONObject("capability_receipt")),
+        )
+    }
 
     private fun parseRun(o: JSONObject): Run = Run(
         id = o.optString("id"),
@@ -247,7 +286,79 @@ class Agent3Client(baseUrl: String, private val token: String) {
         steps = parseSteps(o.optJSONArray("steps") ?: JSONArray()),
         answer = o.nullableString("answer"),
         error = o.nullableString("error"),
+        termination = null,
     )
+
+    private fun parseTerminationReceipt(o: JSONObject?): TerminationReceipt? {
+        val receipt = o ?: return null
+        val plan = receipt.optJSONObject("plan")
+            ?: throw ModelRigException("Ugyldigt termination receipt: plan mangler")
+        val modelStream = receipt.optJSONObject("model_stream")
+            ?: throw ModelRigException("Ugyldigt termination receipt: model_stream mangler")
+        val activeTool = receipt.optJSONObject("active_tool")?.let { active ->
+            TerminationActiveTool(
+                stepId = active.optString("step_id"),
+                tool = active.optString("tool"),
+                state = active.optString("state"),
+                semantics = active.nullableString("semantics"),
+                handlePresent = active.optBoolean("handle_present", false),
+                canRequest = active.optBoolean("can_request", false),
+                requestState = active.optString("request_state"),
+                reason = active.optString("reason"),
+            )
+        }
+        val parsed = TerminationReceipt(
+            schema = receipt.optString("schema"),
+            plan = TerminationPlan(
+                state = plan.optString("state"),
+                canRequest = plan.optBoolean("can_request", false),
+                requestScope = plan.optString("request_scope"),
+                effect = plan.optString("effect"),
+                reason = plan.optString("reason"),
+            ),
+            modelStream = TerminationModelStream(
+                state = modelStream.optString("state"),
+                active = modelStream.optBoolean("active", false),
+                canRequest = modelStream.optBoolean("can_request", false),
+                handlePresent = modelStream.optBoolean("handle_present", false),
+                reason = modelStream.optString("reason"),
+            ),
+            activeTool = activeTool,
+            productionActivation = receipt.optBoolean("production_activation", true),
+        )
+        validateTerminationReceipt(parsed)
+        return parsed
+    }
+
+    private fun validateTerminationReceipt(receipt: TerminationReceipt) {
+        if (receipt.schema != "kaliv-agent3-termination/v1") {
+            throw ModelRigException("Ukendt termination receipt-schema: ${receipt.schema}")
+        }
+        if (receipt.productionActivation) {
+            throw ModelRigException("Ugyldigt termination receipt: produktion må aldrig aktiveres")
+        }
+        if (receipt.plan.state !in setOf("available", "terminal") ||
+            receipt.plan.requestScope != "plan" ||
+            receipt.plan.effect.isBlank() || receipt.plan.reason.isBlank() ||
+            receipt.plan.canRequest != (receipt.plan.state == "available")
+        ) {
+            throw ModelRigException("Ugyldigt termination receipt: plan-scope er inkonsistent")
+        }
+        if (receipt.modelStream.state.isBlank() || receipt.modelStream.reason.isBlank() ||
+            (receipt.modelStream.canRequest && !receipt.modelStream.handlePresent)
+        ) {
+            throw ModelRigException("Ugyldigt termination receipt: model-stream er inkonsistent")
+        }
+        receipt.activeTool?.let { active ->
+            if (active.stepId.isBlank() || active.tool.isBlank() || active.state.isBlank() ||
+                active.requestState.isBlank() || active.reason.isBlank() ||
+                active.semantics !in setOf(null, "none", "cooperative", "runtime") ||
+                (active.canRequest && !active.handlePresent)
+            ) {
+                throw ModelRigException("Ugyldigt termination receipt: active_tool er inkonsistent")
+            }
+        }
+    }
 
     private fun parseMemoryReceipt(o: JSONObject?): MemoryReceipt {
         val receipt = o ?: JSONObject()

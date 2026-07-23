@@ -43,6 +43,12 @@ func (s *server) handleAgent3Status(w http.ResponseWriter, r *http.Request) {
 	s.Worker.Forward(w, r, agent3Target(r, "/experimental/agent3/status"))
 }
 
+func (s *server) handleAgent3TaskReadiness(w http.ResponseWriter, r *http.Request) {
+	// Evidence-only and read-only. The worker contract always selects Agent 2 in
+	// this dormant slice; it cannot mutate routing or invoke a model/tool.
+	s.Worker.Forward(w, r, agent3Target(r, "/experimental/agent3/task-readiness"))
+}
+
 func (s *server) handleAgent3Capabilities(w http.ResponseWriter, r *http.Request) {
 	// The graph is observational only: it cannot route, enable tools or promote Agent 3.0.
 	s.Worker.Forward(w, r, agent3Target(r, "/experimental/agent3/capabilities"))
@@ -110,8 +116,10 @@ func (s *server) handleAgent3ReplanPreviewApply(w http.ResponseWriter, r *http.R
 }
 
 func (s *server) handleAgent3RunConfirm(w http.ResponseWriter, r *http.Request) {
-	// Approval can execute a write and then advance the run.
-	s.WorkerSlow.Forward(w, r, agent3RunTarget(r, "/confirm"))
+	// Denials remain direct and side-effect free. An approval is rebound to the
+	// current worker checkpoint and authenticated device before the backend sends
+	// a short-lived one-use token over loopback.
+	s.handleAgent3ApprovalConfirm(w, r)
 }
 
 func (s *server) handleAgent3RunResume(w http.ResponseWriter, r *http.Request) {

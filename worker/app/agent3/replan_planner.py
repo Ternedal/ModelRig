@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from .. import ollama_client as oc
+from ..capability_schema import CapabilitySchemaError, descriptor_from_tool
 from .core import AgentRun, AgentStep, RiskClass
 from .integration import Agent3PlanError, PlannedToolCall, V2ToolAdapter
 from .replanner import ReadSuffixReplanner, ReplanError, ReplanWindow
@@ -76,15 +77,36 @@ class TypedReadReplanPlanner:
         return await oc.chat(messages, model=model)
 
     def _read_catalog(self) -> list[dict[str, Any]]:
-        catalog = []
-        for tool in self.adapter.tools.REGISTRY.values():
-            if tool.risk != "read" or not self.adapter.is_enabled(tool.name):
+        """Return the existing read-only prompt catalog from canonical metadata.
+
+        Enabled filtering, registry insertion order and the exact
+        `{name, description, params}` payload remain unchanged. Every enabled
+        candidate is validated through the v2 descriptor before it can enter a
+        prompt; richer policy and network fields remain omitted.
+        """
+        catalog: list[dict[str, Any]] = []
+        for name, tool in self.adapter.tools.REGISTRY.items():
+            if not self.adapter.is_enabled(name):
+                continue
+            try:
+                descriptor = descriptor_from_tool(tool)
+            except CapabilitySchemaError as exc:
+                raise ReplanPlannerError(
+                    f"invalid capability descriptor for {name}: {exc}"
+                ) from exc
+            expected_id = f"tool:{name}"
+            if descriptor.capability_id != expected_id:
+                raise ReplanPlannerError(
+                    f"registry key {name!r} does not match "
+                    f"{descriptor.capability_id!r}"
+                )
+            if descriptor.access != "read":
                 continue
             catalog.append(
                 {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "params": tool.params,
+                    "name": name,
+                    "description": descriptor.description,
+                    "params": descriptor.parameters,
                 }
             )
         return catalog

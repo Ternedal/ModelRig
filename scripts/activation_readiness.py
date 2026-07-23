@@ -638,7 +638,7 @@ def render() -> str:
         "læser i præcis det øjeblik hvor de beslutter at give software lov til at "
         "handle selv. Den fejler lukket: ingen rapport = ikke klar.",
         "",
-        f"**Version på main:** `{v}`  ",
+        f"**Version på main:** `{v}`",
         f"**Genereret:** {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}",
         "",
         "---",

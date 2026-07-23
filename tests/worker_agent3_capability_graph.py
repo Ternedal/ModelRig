@@ -2,29 +2,47 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from app.agent3 import capability_graph as capability_graph_module
 from app.agent3.capability_graph import (
     CapabilityNode,
-    ToolCapability,
+    RuntimeToolCapability,
     build_capability_graph,
     runtime_tool_capabilities,
 )
-from app.agent3.core import CapabilitySnapshot
-from app.agent3.integration import V2ToolAdapter
+from app.agent3.core import CapabilitySnapshot, RiskClass
+from app.agent3.integration import V2ToolAdapter, _V2_RISK
+from app.capability_schema import CapabilityDescriptorV2
 
 
 class Tool:
-    # impact is what the tool DOES; risk is whether it needs a card (F-614).
-    # This double used to declare delete_model as risk="read" and the graph
-    # called it DESTRUCTIVE anyway, because a table keyed by tool NAME said so.
-    # Right answer, wrong reason -- and the mirror image is the dangerous one: a
-    # destructive tool called anything else stayed a read. The name confers
-    # nothing now. The declaration does.
-    def __init__(self, name, risk, description, impact=None):
+    # The test double declares the same canonical axes as the real registry. The
+    # graph may no longer reconstruct or guess any of them in a parallel model.
+    def __init__(
+        self,
+        name,
+        risk,
+        description,
+        impact=None,
+        *,
+        network="none",
+        network_destinations=(),
+    ):
         self.name = name
         self.risk = risk
         self.impact = impact or risk
         self.description = description
         self.params = {"type": "object", "properties": {}}
+        self.isolate = False
+        self.env_allow = ()
+        self.schedulable = self.impact not in {"destructive", "admin"}
+        self.unschedulable_because = (
+            "requires an attended operator" if not self.schedulable else ""
+        )
+        self.sensitivity = "operational"
+        self.cancellation = "none"
+        self.idempotent = self.impact == "read"
+        self.network = network
+        self.network_destinations = network_destinations
 
 
 class Gate:
@@ -41,9 +59,22 @@ adapter = V2ToolAdapter(
         REGISTRY={
             "rig_status": Tool("rig_status", "read", "Rig status"),
             "note_append": Tool("note_append", "write", "Append note"),
-            "delete_model": Tool("delete_model", "write", "Delete model",
-                                 impact="destructive"),
-            "pull_model": Tool("pull_model", "write", "Pull model", impact="admin"),
+            "delete_model": Tool(
+                "delete_model",
+                "write",
+                "Delete model",
+                impact="destructive",
+                network="configured_service",
+                network_destinations=("ollama",),
+            ),
+            "pull_model": Tool(
+                "pull_model",
+                "write",
+                "Pull model",
+                impact="admin",
+                network="configured_service",
+                network_destinations=("ollama",),
+            ),
         },
         GATE=Gate(),
     )
@@ -56,6 +87,19 @@ assert [tool.name for tool in tools] == [
     "rig_status",
 ]
 assert {tool.name: tool.enabled for tool in tools}["note_append"] is False
+assert all(isinstance(tool, RuntimeToolCapability) for tool in tools)
+assert all(isinstance(tool.descriptor, CapabilityDescriptorV2) for tool in tools)
+legacy_constructor = capability_graph_module.ToolCapability(
+    "legacy_read", True, "read", "legacy compatibility"
+)
+assert isinstance(legacy_constructor, RuntimeToolCapability)
+assert isinstance(legacy_constructor.descriptor, CapabilityDescriptorV2)
+assert legacy_constructor.risk == RiskClass.READ
+assert not hasattr(legacy_constructor, "declared_risk")
+assert {
+    tool.name: (tool.descriptor.network.mode, tuple(tool.descriptor.network.destinations))
+    for tool in tools
+}["delete_model"] == ("configured_service", ("ollama",))
 
 graph = build_capability_graph(
     CapabilitySnapshot(
@@ -96,6 +140,34 @@ assert nodes["tool:note_append"]["state"] == "disabled"
 assert nodes["tool:delete_model"]["metadata"]["risk"] == "destructive"
 assert nodes["tool:pull_model"]["metadata"]["risk"] == "admin"
 
+# Byte/state parity with the pre-migration graph projection. The descriptor may
+# know more (network, scheduling, replay, data class), but graph/v1 must keep the
+# exact public metadata/state shape in this slice.
+legacy_tool_nodes = {}
+for name, tool in sorted(adapter.tools.REGISTRY.items()):
+    enabled = adapter.is_enabled(name)
+    legacy_tool_nodes[f"tool:{name}"] = {
+        "id": f"tool:{name}",
+        "kind": "tool",
+        "state": "ready" if enabled else "disabled",
+        "reason": (
+            "enabled by existing V2 ToolGate"
+            if enabled
+            else "disabled by existing V2 ToolGate"
+        ),
+        "metadata": {
+            "risk": _V2_RISK[tool.impact].value,
+            "cancellation": tool.cancellation,
+            "description": tool.description[:300],
+        },
+    }
+actual_tool_nodes = {
+    node_id: node for node_id, node in nodes.items() if node_id.startswith("tool:")
+}
+assert actual_tool_nodes == legacy_tool_nodes
+assert all(set(node["metadata"]) == {"risk", "cancellation", "description"}
+           for node in actual_tool_nodes.values())
+
 node_ids = set(nodes)
 for edge in payload["edges"]:
     assert edge["source"] in node_ids
@@ -129,10 +201,7 @@ else:
 try:
     build_capability_graph(
         CapabilitySnapshot(),
-        [
-            ToolCapability("duplicate", True, "read"),
-            ToolCapability("duplicate", True, "read"),
-        ],
+        [tools[0], tools[0]],
         planner_mounted=False,
         memory_mounted=False,
         replanner_mounted=False,
@@ -143,4 +212,11 @@ except ValueError as exc:
 else:
     raise AssertionError("duplicate capability nodes were accepted")
 
-print("31 passed, 0 failed")
+try:
+    RuntimeToolCapability(descriptor=tools[0].descriptor, enabled=1)
+except TypeError as exc:
+    assert "boolean" in str(exc)
+else:
+    raise AssertionError("non-boolean runtime enabled state was accepted")
+
+print("42 passed, 0 failed")
