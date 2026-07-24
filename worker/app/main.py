@@ -15,10 +15,16 @@ from __future__ import annotations
 import sys as _sys
 
 from . import main_impl as _impl
+from .browser_research_tool import register_browser_research_tool as _register_browser_research_tool
 
 VERSION = "1.58.145"
 _impl.VERSION = VERSION
 _impl.app.version = VERSION
+
+# Explicit feature-gated registration only.  The imported module has no Browser
+# Use dependency and performs no I/O; when KALIV_BROWSER_RESEARCH is unset the
+# registry and ToolGate remain byte-for-byte equivalent in behaviour.
+_register_browser_research_tool()
 
 # Return the implementation module for every import of app.main. This preserves
 # module-global monkeypatching and private helper access instead of copying names
