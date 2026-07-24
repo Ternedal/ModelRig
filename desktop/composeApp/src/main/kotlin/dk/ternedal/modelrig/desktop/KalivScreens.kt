@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -202,6 +203,134 @@ private val navItems = listOf(
 )
 
 /**
+ * The 40dp custom title bar from the mockup -- present on ALL three
+ * directions and the single strongest visual signature of the design.
+ * Layout: 24dp ankh, KALIV wordmark at 14sp, a per-screen subtitle, an
+ * optional live status (1c while running), then the window caps.
+ *
+ * The earlier build kept App.kt's tall Header instead of this, which put the
+ * KALIV wordmark on screen twice and made every direction read wrong.
+ */
+@Composable
+fun KalivTitleBar(
+    subtitle: String,
+    live: String? = null,
+    onClose: (() -> Unit)? = null,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .background(Color(0x990B0A09))
+            .padding(start = 14.dp),
+    ) {
+        KalivAnkh(24)
+        Spacer(Modifier.width(11.dp))
+        Text(
+            "KALIV",
+            fontFamily = FontFamily.Serif,
+            fontSize = 14.sp,
+            letterSpacing = 3.sp,
+            fontWeight = FontWeight.Medium,
+            color = Color(0xFFE9DFCE),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(subtitle, fontSize = 11.5.sp, color = Color(0xFF6F665C))
+        if (live != null) {
+            Spacer(Modifier.width(14.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(7.dp).clip(CircleShape)
+                        .background(KalivTheme.colors.Warning),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(live, fontSize = 11.sp, color = Color(0xFFD09A55))
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        TitleCap("\u2500", null)
+        TitleCap("\u25FB", null)
+        TitleCap("\u2715", onClose, danger = true)
+    }
+}
+
+@Composable
+private fun TitleCap(glyph: String, onClick: (() -> Unit)?, danger: Boolean = false) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .width(44.dp).height(40.dp)
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
+    ) {
+        Text(
+            glyph,
+            fontSize = 11.sp,
+            color = if (danger) Color(0xFFC47B70) else Color(0xFF8B8177),
+        )
+    }
+}
+
+/**
+ * The 70dp icon-only rail the mockup uses for 1b (and, as a small documented
+ * deviation, 1c -- the mockup drops the rail entirely there, which would trap
+ * the user with no way back). Items are 44x44 with the same bronze active
+ * treatment as the wide rail.
+ */
+@Composable
+fun KalivIconRail(active: KalivScreen, onSelect: (KalivScreen) -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(70.dp)
+            .fillMaxHeight()
+            .background(Color(0x8C14110E))
+            .padding(vertical = 16.dp),
+    ) {
+        val top = listOf(
+            KalivScreen.CHAT to "\u2709",
+            KalivScreen.AGENT to "\u25C6",
+            KalivScreen.COMPUTER to "\u25A3",
+            KalivScreen.MODELS to "\u25A4",
+        )
+        top.forEach { (screen, glyph) ->
+            IconRailItem(glyph, screen == active) { onSelect(screen) }
+            Spacer(Modifier.height(8.dp))
+        }
+        Spacer(Modifier.weight(1f))
+        IconRailItem("\u2699", false) { onSelect(KalivScreen.SETTINGS) }
+    }
+}
+
+@Composable
+private fun IconRailItem(glyph: String, on: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(44.dp)
+            .clip(shape)
+            .then(
+                if (on) Modifier
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color(0x479A7136), Color(0x149A7136)),
+                        ),
+                    )
+                    .border(1.dp, Color(0x669A7136), shape)
+                else Modifier,
+            )
+            .clickable { onClick() },
+    ) {
+        Text(
+            glyph,
+            fontSize = 18.sp,
+            color = if (on) KalivTheme.colors.TextHigh else Color(0xFFC3B8A8),
+        )
+    }
+}
+
+/**
  * The 246dp left navigation rail shared by 1a/1b/1c. Active item gets the
  * bronze gradient + border (handoff: linear-gradient(90°, rgba(154,113,54,.22)
  * → .06) + 1dp rgba(154,113,54,.35)). Bottom holds the active-model card
@@ -224,25 +353,9 @@ fun KalivNavRail(
             .background(Color(0x8C14110E)) // rgba(20,17,14,.55)
             .padding(horizontal = 14.dp, vertical = 16.dp),
     ) {
-        // Brand row (ankh + KALIV wordmark), same as the App header.
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp, bottom = 18.dp)) {
-            Box(
-                Modifier.size(34.dp).clip(RoundedCornerShape(11.dp))
-                    .background(KalivTheme.colors.SurfaceHigh)
-                    .border(1.dp, Color(0x80C69A4B), RoundedCornerShape(11.dp)),
-                contentAlignment = Alignment.Center,
-            ) { KalivAnkh(20) }
-            Spacer(Modifier.width(10.dp))
-            Text(
-                "KALIV",
-                color = KalivTheme.colors.TextHigh,
-                fontSize = 20.sp,
-                fontFamily = FontFamily.Serif,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 4.sp,
-            )
-        }
-
+        // No brand row here: the 40dp KalivTitleBar above owns the ankh and
+        // the KALIV wordmark. The mockup's rail starts straight at the nav
+        // items -- having both is what put the wordmark on screen twice.
         navItems.forEach { item ->
             NavRow(item = item, active = item.screen == active, onClick = { onSelect(item.screen) })
             Spacer(Modifier.height(4.dp))
@@ -666,14 +779,29 @@ fun KalivAgentCockpit(
                 .padding(horizontal = 22.dp, vertical = 18.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Text("Agent-plan", color = KalivTheme.colors.TextHigh, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Agent-plan",
+                    color = KalivTheme.colors.TextHigh,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    // Never let a squeezed panel break this one letter per
+                    // line, which is what happened at the old 1000dp window.
+                    softWrap = false,
+                    maxLines = 1,
+                )
                 Spacer(Modifier.width(10.dp))
                 val done = plan.count { it.status == StepStatus.DONE }
                 if (plan.isNotEmpty()) {
                     Text("$done af ${plan.size} trin", color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
                 }
                 Spacer(Modifier.weight(1f))
-                Text("\uD83D\uDD12 Menneske godkender hver skrivning", color = KalivTheme.colors.TextMuted, fontSize = 11.5.sp)
+                Text(
+                    "\uD83D\uDD12 Menneske godkender hver skrivning",
+                    color = KalivTheme.colors.TextMuted,
+                    fontSize = 11.5.sp,
+                    softWrap = false,
+                    maxLines = 1,
+                )
             }
             Spacer(Modifier.height(16.dp))
             errorText?.let { Text("Fejl: $it", color = KalivTheme.colors.Danger, fontSize = 12.sp) }

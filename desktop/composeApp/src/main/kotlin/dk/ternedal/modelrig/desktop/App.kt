@@ -353,10 +353,22 @@ fun App() {
             }
         }
 
-        // Overall shell (handoff 1a/1b/1c): a left nav-rail selects the screen;
-        // the center column carries the header + the active screen's content.
-        // The rail is shared by all three directions.
-        Row(Modifier.fillMaxSize().background(KalivTheme.colors.Graphite)) {
+        // Shell from the mockup: a 40dp custom title bar spans the FULL width,
+        // and the three columns live below it. Each direction carries its own
+        // chrome -- 1a a 246dp labelled rail, 1b/1c the 70dp icon rail -- and
+        // App.kt's old tall Header is gone (it duplicated the KALIV wordmark
+        // and was the reason none of the three screens read like the design).
+        Column(Modifier.fillMaxSize().background(KalivTheme.colors.Graphite)) {
+        KalivTitleBar(
+            subtitle = when (activeScreen) {
+                KalivScreen.AGENT -> "\u2014 agent"
+                KalivScreen.COMPUTER -> "\u2014 computer-use"
+                else -> "\u2014 lokal AI p\u00e5 din maskine"
+            },
+            live = null,
+        )
+        Row(Modifier.fillMaxWidth().weight(1f)) {
+            if (activeScreen == KalivScreen.CHAT) {
             KalivNavRail(
                 active = activeScreen,
                 onSelect = { screen ->
@@ -379,14 +391,33 @@ fun App() {
                 vramTotalGb = 12.0,
                 modelBackend = if (localPath.contains("/api/v1/")) "llama.cpp" else "Ollama",
             )
-        Column(Modifier.weight(1f).fillMaxHeight().background(KalivTheme.colors.Graphite).padding(24.dp)) {
-            Header(
-                dark = darkMode,
-                showConvos = showConvos, onConvos = { showConvos = !showConvos },
-                showModels = showModels, onModels = { showModels = !showModels },
-                showSettings = showSettings, onSettings = { showSettings = !showSettings },
-            )
-            Spacer(Modifier.height(12.dp))
+            } else {
+                KalivIconRail(
+                    active = activeScreen,
+                    onSelect = { screen ->
+                        activeScreen = screen
+                        when (screen) {
+                            KalivScreen.MODELS -> { showModels = true; activeScreen = KalivScreen.CHAT }
+                            KalivScreen.SETTINGS -> { showSettings = true; activeScreen = KalivScreen.CHAT }
+                            else -> {}
+                        }
+                    },
+                )
+            }
+        // 1b/1c run their columns flush against the rail (each column carries
+        // its own inner padding in the mockup). Only the 1a chat surface gets
+        // the outer gutter.
+        val flush = activeScreen == KalivScreen.AGENT || activeScreen == KalivScreen.COMPUTER
+        Column(
+            Modifier.weight(1f).fillMaxHeight().background(KalivTheme.colors.Graphite)
+                .padding(
+                    horizontal = if (flush) 0.dp else 24.dp,
+                    vertical = if (flush) 0.dp else 16.dp,
+                ),
+        ) {
+            // The tall Header is gone: the 40dp KalivTitleBar above now owns
+            // the brand, and the rail owns navigation. Keeping both put the
+            // wordmark on screen twice.
 
             // The AGENT (1b) and COMPUTER (1c) screens replace the chat surface
             // entirely; they carry their own composers and lifecycle. The chat
@@ -628,7 +659,8 @@ fun App() {
                     sparkline = listOf(3f, 5f, 4f, 7f, 6f, 9f, 7f, 10f, 8f, 11f),
                 )
             }
-        }
+        } // end Row (three columns)
+        } // end Column (title bar + columns)
 
         // The confirmation card -- V5's core promise, now on the desktop.
         // Rendering only: the gate lives in the worker, so a modified client
