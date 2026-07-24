@@ -73,6 +73,8 @@ kaliv-tools-state.json.tmp
 /validation/stage-a-easy-state.json
 /validation/stage-a-checkpoint-latest.json
 /validation/stage-a-checkpoint-latest.json.tmp
+/validation/stage-a-voice-observations-state.json
+/validation/stage-a-voice-observations-state.json.tmp
 /validation/stage-a-runtime/
 /validation/archive/
 /validation/scheduler-pilot-easy-state.json
