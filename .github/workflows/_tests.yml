@@ -110,3 +110,21 @@ jobs:
       - name: Appliance Go tests on real Windows
         working-directory: backend
         run: go test ./cmd/modelrig-updater/ ./cmd/modelrig-supervisor/ ./internal/heartbeat/
+
+  # Win32 desktop capture/input is dormant, but its ctypes ABI must be proven on
+  # a real Windows loader before it can become a candidate. This probe loads and
+  # binds the required DLL exports and validates structure widths only. It never
+  # asks for a foreground window, captures pixels, moves the cursor or sends input.
+  test-windows-desktop-abi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Bind Win32 desktop ABI without touching the desktop
+        env:
+          PYTHONPATH: worker
+        run: python tests/worker_desktop_win32_abi.py
