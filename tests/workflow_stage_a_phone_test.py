@@ -67,7 +67,7 @@ check(
     "the scheduler worker can write an unbuffered recovery log",
 )
 
-check('-BackendHost "0.0.0.0"' in phone,
+check('BackendHost = "0.0.0.0"' in phone,
       "the phone helper deliberately exposes only its test backend to LAN")
 check('-RemoteAddress LocalSubnet' in phone and '-LocalPort 8080' in phone,
       "the temporary firewall rule is restricted to the local subnet and port 8080")
