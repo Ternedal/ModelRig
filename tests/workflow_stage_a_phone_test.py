@@ -8,10 +8,12 @@ PHONE = ROOT / "scripts" / "stage-a-phone-test.ps1"
 STACK = ROOT / "scripts" / "start-stage-a-validation-stack.ps1"
 READ_HELPER = ROOT / "scripts" / "stage_a_scheduler_read.py"
 REVOCATION_HELPER = ROOT / "scripts" / "stage_a_scheduler_revocation.py"
+CRASH_HELPER = ROOT / "scripts" / "stage_a_scheduler_crash_recovery.py"
 START = ROOT / "START_STAGE_A_PHONE_TEST.cmd"
 SCHEDULER_START = ROOT / "START_STAGE_A_SCHEDULER_TEST.cmd"
 READ_START = ROOT / "PREPARE_STAGE_A_SCHEDULER_READ.cmd"
 REVOCATION_START = ROOT / "RUN_STAGE_A_SCHEDULER_REVOCATION.cmd"
+CRASH_START = ROOT / "RUN_STAGE_A_SCHEDULER_CRASH_RECOVERY.cmd"
 STOP = ROOT / "STOP_STAGE_A_PHONE_TEST.cmd"
 
 passed = failed = 0
@@ -34,10 +36,13 @@ read_helper = READ_HELPER.read_text(encoding="utf-8")
 read_helper_lower = read_helper.lower()
 revocation_helper = REVOCATION_HELPER.read_text(encoding="utf-8")
 revocation_helper_lower = revocation_helper.lower()
+crash_helper = CRASH_HELPER.read_text(encoding="utf-8")
+crash_helper_lower = crash_helper.lower()
 start = START.read_text(encoding="utf-8")
 scheduler_start = SCHEDULER_START.read_text(encoding="utf-8")
 read_start = READ_START.read_text(encoding="utf-8")
 revocation_start = REVOCATION_START.read_text(encoding="utf-8")
+crash_start = CRASH_START.read_text(encoding="utf-8")
 stop = STOP.read_text(encoding="utf-8")
 
 check('string]$BackendHost = "127.0.0.1"' in stack,
@@ -222,6 +227,55 @@ for forbidden in ("git push", "git tag", "gh release", "production_activation=tr
     check(forbidden not in revocation_helper_lower,
           f"revocation helper has no forbidden promotion action: {forbidden}")
 
+check('stage_a_scheduler_read.py' in crash_helper,
+      "crash recovery reuses the validated isolated stack binding")
+check(
+    'state.get("revocation_confirmed") is not True' in crash_helper
+    and 'state.get("write_pending") is not True' in crash_helper,
+    "crash recovery requires revocation and still-pending write state",
+)
+check(
+    'listener_pid(8099) != expected_pid' in crash_helper
+    and 'kill_recorded_worker(expected_pid)' in crash_helper
+    and 'Get-CimInstance Win32_Process' in crash_helper,
+    "only the stack-recorded uvicorn worker may be killed",
+)
+check(
+    'wizard.lock_job_store()' in crash_helper
+    and 'wizard.reserved_after(read_id, before)' in crash_helper
+    and 'kill_recorded_worker(expected_pid)' in crash_helper,
+    "the worker crash happens only after a real durable reserved claim",
+)
+check(
+    'wizard.wait_for_lease_expiry()' in crash_helper
+    and 'KALIV_SCHEDULER_APPROVAL_SECRET' in crash_helper
+    and 'wizard.wait_for_recovery_line(offset' in crash_helper
+    and 'wizard.wait_occurrence(claim_id, "abandoned"' in crash_helper,
+    "restart reuses the secret/stores and requires real recovery evidence",
+)
+check(
+    'phone["worker_pid"] = new_pid' in crash_helper
+    and 'save_json(common.PHONE_STATE, phone)' in crash_helper,
+    "safe cleanup follows the restarted worker PID",
+)
+check(
+    'crash_recovery_confirmed": True' in crash_helper
+    and 'write_pending": True' in crash_helper
+    and 'pilot_report_generated": False' in crash_helper,
+    "crash checkpoint leaves write and final report pending",
+)
+check(
+    'wait_for_write' not in crash_helper
+    and 'generate_report' not in crash_helper
+    and 'scheduler_pilot_report.py' not in crash_helper,
+    "crash helper cannot create write or final pilot evidence",
+)
+check('input(' not in crash_helper and 'getpass' not in crash_helper,
+      "crash recovery has no copy/paste or manual JSON prompt")
+for forbidden in ("git push", "git tag", "gh release", "production_activation=true"):
+    check(forbidden not in crash_helper_lower,
+          f"crash helper has no forbidden promotion action: {forbidden}")
+
 check('stage-a-phone-test.ps1' in start and '-EnableSchedulerPilot' not in start,
       "the ordinary phone/voice launcher keeps the scheduler off")
 check('stage-a-phone-test.ps1" -EnableSchedulerPilot' in scheduler_start,
@@ -236,6 +290,10 @@ check('stage_a_scheduler_revocation.py' in revocation_start,
       "the revocation launcher invokes only the bounded revocation helper")
 check('crash-recovery, write og samlet pilotrapport forbliver pending' in revocation_start.lower(),
       "the revocation launcher labels remaining work honestly")
+check('stage_a_scheduler_crash_recovery.py' in crash_start,
+      "the crash launcher invokes only the bounded crash-recovery helper")
+check('write-godkendelse og samlet pilotrapport forbliver pending' in crash_start.lower(),
+      "the crash launcher labels remaining work honestly")
 check('stage-a-phone-test.ps1" -Stop' in stop,
       "the stop launcher invokes the safe cleanup path")
 
