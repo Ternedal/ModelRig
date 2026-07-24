@@ -8,6 +8,13 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$ValidationReport,
 
+    [ValidateNotNullOrEmpty()]
+    [string]$BackendHost = "127.0.0.1",
+
+    [string]$PairingData,
+
+    [switch]$EnableSchedulerApi,
+
     [switch]$WorkerOnly
 )
 
@@ -60,6 +67,15 @@ function Wait-Endpoint {
 }
 
 function Find-PairingData {
+    if (-not [string]::IsNullOrWhiteSpace($PairingData)) {
+        $fullPath = [IO.Path]::GetFullPath($PairingData, $repoRoot)
+        $parent = Split-Path $fullPath -Parent
+        if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+            New-Item -ItemType Directory -Path $parent -Force | Out-Null
+        }
+        return $fullPath
+    }
+
     $candidates = New-Object System.Collections.Generic.List[string]
     if ($env:MODELRIG_DATA) { $candidates.Add($env:MODELRIG_DATA) }
     $candidates.Add((Join-Path $repoRoot "modelrig-data.json"))
@@ -84,7 +100,7 @@ function Find-PairingData {
             Select-Object -Unique
     )
     if ($existing.Count -eq 0) {
-        throw "Kunne ikke finde riggens modelrig-data.json med pairing-data. Start den sædvanlige backend, eller sæt MODELRIG_DATA til den eksisterende fil og kør igen."
+        throw "Kunne ikke finde riggens modelrig-data.json med pairing-data. Start den sædvanlige backend, sæt MODELRIG_DATA eller angiv -PairingData og kør igen."
     }
     return $existing[0]
 }
@@ -93,6 +109,11 @@ if ($env:OS -ne "Windows_NT") { throw "Validation-stacken må kun startes på Wi
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) { throw "Python blev ikke fundet på PATH." }
 if (-not $WorkerOnly -and -not (Get-Command go -ErrorAction SilentlyContinue)) {
     throw "Go blev ikke fundet på PATH; den eksakte backend kan derfor ikke bygges fra kandidatens checkout."
+}
+
+$parsedAddress = $null
+if (-not [Net.IPAddress]::TryParse($BackendHost, [ref]$parsedAddress)) {
+    throw "BackendHost skal være en gyldig IP-adresse."
 }
 
 New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
@@ -120,8 +141,10 @@ if ($WorkerOnly) {
     return
 }
 
-$pairingData = Find-PairingData
-$escapedData = $pairingData.Replace('%', '%%')
+$resolvedPairingData = Find-PairingData
+$escapedData = $resolvedPairingData.Replace('%', '%%')
+$escapedHost = $BackendHost.Replace('%', '%%')
+$schedulerValue = if ($EnableSchedulerApi) { "1" } else { "0" }
 Wait-PortFree -Port 8080 -Label "backend"
 Wait-PortFree -Port 8099 -Label "worker"
 
@@ -136,10 +159,11 @@ finally { Pop-Location }
 @"
 @echo off
 cd /d "$runtimeDir"
-set "MODELRIG_HOST=127.0.0.1"
+set "MODELRIG_HOST=$escapedHost"
 set "MODELRIG_PORT=8080"
 set "MODELRIG_DATA=$escapedData"
 set "KALIV_AGENT3_ENABLED=1"
+set "KALIV_SCHEDULER_API=$schedulerValue"
 "$backendExe"
 "@ | Set-Content -LiteralPath $backendCmd -Encoding ASCII
 
@@ -152,5 +176,6 @@ Wait-Endpoint -Url "http://127.0.0.1:8080/healthz"
 Wait-Endpoint -Url "http://127.0.0.1:8099/healthz"
 
 Write-Host "  Exact-head validation-stack er klar." -ForegroundColor Green
-Write-Host "  Pairing-data: $pairingData"
+Write-Host "  Backend-binding: $BackendHost"
+Write-Host "  Pairing-data: $resolvedPairingData"
 Write-Host "  Luk de to nye konsolvinduer efter testen."
