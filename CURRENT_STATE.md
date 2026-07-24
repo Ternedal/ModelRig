@@ -149,6 +149,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_browser_peer_adapter.py`
 - `tests/worker_browser_peer_fulfillment.py`
 - `tests/worker_browser_peer_runtime.py`
+- `tests/worker_browser_research_process.py`
 - `tests/worker_browser_research_tool.py`
 - `tests/worker_browser_use_adapter.py`
 - `tests/worker_browser_use_network_guard.py`
