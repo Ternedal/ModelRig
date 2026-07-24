@@ -81,6 +81,26 @@ Konfigurer i appen (eller via miljøvariabler før start):
 2. Send en besked → svaret **streamer** token-for-token ind i boblen.
 3. Badge viser LOCAL. Stop Ollama, send igen med cloud-nøgle sat → falder til CLOUD.
 
+**Designrunden (fra Windows-handoff'et, tre retninger — 010df63):**
+Vinduet åbner nu på **1240×820** (mockup-rammen er 1240×740; mindre gør at
+1b's plan-panel klemmes). Øverst en **40dp titelbjælke** i fuld bredde:
+ankh + KALIV + undertekst der skifter per skærm. Skift skærm i venstre rail.
+
+| Skærm | Rail | Hvad skal ses |
+|---|---|---|
+| **Chat (1a)** | 246dp m. labels | aktiv-model-kort m. VRAM-bar + "100 % lokal"-segl nederst; højre kontekstpanel 300dp (RAG-toggle, aktive dokumenter, ydelses-sparkline) |
+| **Agent (1b)** | 70dp kun ikoner | tre kolonner: opgave 360dp / plan-tidslinje / handlingslog 264dp; risiko-badges READ/WRITE/DESTRUCTIVE; godkendelseskort med arg-preview |
+| **Computer-use (1c)** | 70dp kun ikoner | venstre trin-panel 340dp + live-viewport; **viewporten er skjult indtil en opgave kører** (bevidst — ingen falsk side bag et scrim) |
+
+Lys/mørk følger app'ens egen toggle (`KalivTheme.colors`) — begge temaer er
+kørt og set. Kendte ikke-live tal, bevidst markeret i koden: VRAM 6,2/12 GB
+er RTX 3060-budgettet (live ville komme fra `/health/full`), og
+tokens/sek + svartid er referencetal fra handoff'et.
+
+**Ikke verificeret på Windows:** fontrendering og vinduesdekoration. Skærmene
+er kørt headless på Linux (Xvfb) — layout, farver og struktur er set, men
+typografien er din at bedømme.
+
 ## 3. Byg Android-klienten (uverificeret)
 Nemmest i Android Studio (åbn `android/`-mappen, lad den sync'e, kør på
 emulator/enhed). Eller CLI:
