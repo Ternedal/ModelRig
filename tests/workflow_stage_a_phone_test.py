@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PHONE = ROOT / "scripts" / "stage-a-phone-test.ps1"
 STACK = ROOT / "scripts" / "start-stage-a-validation-stack.ps1"
 START = ROOT / "START_STAGE_A_PHONE_TEST.cmd"
+SCHEDULER_START = ROOT / "START_STAGE_A_SCHEDULER_TEST.cmd"
 STOP = ROOT / "STOP_STAGE_A_PHONE_TEST.cmd"
 
 passed = failed = 0
@@ -26,6 +27,7 @@ phone = PHONE.read_text(encoding="utf-8")
 phone_lower = phone.lower()
 stack = STACK.read_text(encoding="utf-8")
 start = START.read_text(encoding="utf-8")
+scheduler_start = SCHEDULER_START.read_text(encoding="utf-8")
 stop = STOP.read_text(encoding="utf-8")
 
 check('string]$BackendHost = "127.0.0.1"' in stack,
@@ -86,8 +88,48 @@ check('192\\.168\\.' in phone and 'tailscale|vethernet|wsl|hyper-v|docker|loopba
 check('LAN-healthcheck' in phone and 'Invoke-RestMethod -Uri "$lanUrl/healthz"' in phone,
       "the advertised phone URL is verified before a pairing code is shown")
 
-check('stage-a-phone-test.ps1' in start and '-Stop' not in start,
-      "the start launcher invokes only the phone-test start path")
+check(
+    '[switch]$EnableSchedulerPilot' in phone
+    and 'if ($EnableSchedulerPilot)' in phone,
+    "scheduler mode is an explicit phone-helper opt-in",
+)
+check(
+    '$stackArgs["EnableSchedulerApi"] = $true' in phone
+    and '$stackArgs["EnableScheduler"] = $true' in phone
+    and '$stackArgs["HeadlessWorker"] = $true' in phone,
+    "the scheduler launcher composes the full isolated runtime only in opt-in mode",
+)
+check(
+    'New-SchedulerApprovalSecret' in phone
+    and 'RandomNumberGenerator]::Create()' in phone
+    and 'approval-secret.txt' in phone,
+    "the backend and worker receive one fresh per-run approval secret",
+)
+check(
+    'scheduler-pilot-$runId' in phone
+    and 'worker.log' in phone
+    and 'SchedulerDataDir' in phone,
+    "each scheduler run receives a fresh isolated data directory and log",
+)
+check(
+    'http://127.0.0.1:8099/schedules/status' in phone
+    and '$schedulerStatus.configured' in phone
+    and '$schedulerStatus.running' in phone
+    and '$schedulerStatus.resources_open' in phone,
+    "the scheduler is proven ready before the pairing code is shown",
+)
+check(
+    'approval_secret_file = $schedulerSecretPath' in phone
+    and 'scheduler = [ordered]@{' in phone,
+    "restart metadata stores only the secret path and scheduler runtime paths",
+)
+
+check('stage-a-phone-test.ps1' in start and '-EnableSchedulerPilot' not in start,
+      "the ordinary phone/voice launcher keeps the scheduler off")
+check('stage-a-phone-test.ps1" -EnableSchedulerPilot' in scheduler_start,
+      "the scheduler launcher selects the explicit scheduler path")
+check('gennemfoerer endnu ikke selve scheduler-pilotbeviset' in scheduler_start.lower(),
+      "the scheduler launcher does not claim that physical evidence already exists")
 check('stage-a-phone-test.ps1" -Stop' in stop,
       "the stop launcher invokes the safe cleanup path")
 
@@ -104,6 +146,8 @@ for forbidden in (
 
 check('token"' not in phone_lower and "token_hash" not in phone_lower,
       "the helper neither reads nor prints device tokens")
+check('Write-Host $schedulerSecret' not in phone,
+      "the scheduler approval secret is never printed")
 
 print(f"Stage A phone-test contracts: {passed} passed, {failed} failed")
 if failed:
