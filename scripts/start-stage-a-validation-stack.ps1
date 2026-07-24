@@ -68,7 +68,13 @@ function Wait-Endpoint {
 
 function Find-PairingData {
     if (-not [string]::IsNullOrWhiteSpace($PairingData)) {
-        $fullPath = [IO.Path]::GetFullPath($PairingData, $repoRoot)
+        $candidatePath = if ([IO.Path]::IsPathRooted($PairingData)) {
+            $PairingData
+        }
+        else {
+            Join-Path $repoRoot $PairingData
+        }
+        $fullPath = [IO.Path]::GetFullPath($candidatePath)
         $parent = Split-Path $fullPath -Parent
         if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
             New-Item -ItemType Directory -Path $parent -Force | Out-Null
