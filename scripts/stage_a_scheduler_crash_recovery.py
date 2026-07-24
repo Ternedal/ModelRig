@@ -240,18 +240,37 @@ def main() -> int:
         if not claim_id:
             raise CrashRecoveryError("Crash-occurrencen mangler claim_id.")
 
+        state.update(
+            {
+                "crash_claim_id": claim_id,
+                "crash_worker_stopped": True,
+                "crash_recovery_pending": True,
+                "write_pending": True,
+                "pilot_report_generated": False,
+                "production_activation": False,
+            }
+        )
+        wizard.save_state(state)
+        phone["worker_pid"] = 0
+        save_json(common.PHONE_STATE, phone)
+
         wait_port_free(8099)
         wizard.wait_for_lease_expiry()
         offset = wizard.LOG_PATH.stat().st_size if wizard.LOG_PATH.is_file() else 0
         new_pid, _process = start_worker(wizard, phone, data_dir)
+
+        phone["worker_pid"] = new_pid
+        save_json(common.PHONE_STATE, phone)
+        state["restarted_worker_pid"] = new_pid
+        wizard.save_state(state)
+
         recovery_line = wizard.wait_for_recovery_line(offset, timeout=120.0)
         wizard.wait_occurrence(claim_id, "abandoned", timeout=30.0)
         wizard.set_enabled(read_id, False)
 
-        phone["worker_pid"] = new_pid
-        save_json(common.PHONE_STATE, phone)
         state.update(
             {
+                "crash_worker_stopped": False,
                 "crash_recovery_pending": False,
                 "crash_recovery_confirmed": True,
                 "crash_claim_id": claim_id,
