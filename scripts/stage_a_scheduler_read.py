@@ -9,9 +9,9 @@ manual observations, generate a pilot report, merge, release, or activate.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -34,23 +34,25 @@ def load_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def save_json(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(path.suffix + ".tmp")
-    temp.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    temp.replace(path)
-
-
 def under_runtime(path: Path) -> bool:
     try:
-        return os.path.commonpath((str(RUNTIME.resolve()), str(path.resolve()))) == str(
-            RUNTIME.resolve()
-        )
+        runtime = str(RUNTIME.resolve())
+        return os.path.commonpath((runtime, str(path.resolve()))) == runtime
     except (OSError, ValueError):
         return False
+
+
+def load_wizard():
+    path = ROOT / "scripts" / "scheduler_pilot_wizard.py"
+    spec = importlib.util.spec_from_file_location("stage_a_scheduler_read_wizard", path)
+    if spec is None or spec.loader is None:
+        raise ReadPilotError("Scheduler-wizard'en kunne ikke indlæses.")
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        raise ReadPilotError(f"Scheduler-wizard'en kunne ikke indlæses: {exc}") from exc
+    return module
 
 
 def bind_wizard(phone: dict[str, Any]):
@@ -83,7 +85,11 @@ def bind_wizard(phone: dict[str, Any]):
     if worker_log.parent.resolve() != data_dir.resolve():
         raise ReadPilotError("Worker-log og scheduler-databaser tilhører ikke samme isolerede run.")
 
-    from scripts import scheduler_pilot_wizard as wizard
+    wizard = load_wizard()
+    if str(phone.get("version") or "") != str(wizard.VERSION):
+        raise ReadPilotError(
+            f"Telefon-stacken er version {phone.get('version')!r}, men wizard'en kræver {wizard.VERSION}."
+        )
 
     wizard.VALIDATION = data_dir
     wizard.STATE_PATH = data_dir / "scheduler-pilot-state.json"
@@ -96,10 +102,18 @@ def bind_wizard(phone: dict[str, Any]):
     return wizard, data_dir
 
 
+def expected_pilot_error(exc: Exception, wizard: Any | None) -> bool:
+    return isinstance(exc, ReadPilotError) or (
+        wizard is not None and isinstance(exc, wizard.PilotError)
+    )
+
+
 def main() -> int:
     if os.name != "nt":
         print("  STOP  Read-piloten må kun køres på Windows-riggen.")
         return 1
+
+    wizard = None
     try:
         phone = load_json(PHONE_STATE)
         if phone.get("schema") != "kaliv-stage-a-phone-test-state/v2":
@@ -160,7 +174,9 @@ def main() -> int:
         print("  Write, revocation og crash-recovery er fortsat pending.")
         print("  production_activation=false")
         return 0
-    except (ReadPilotError, wizard.PilotError if "wizard" in locals() else ReadPilotError) as exc:
+    except Exception as exc:
+        if not expected_pilot_error(exc, wizard):
+            raise
         print(f"\n  STOP  {exc}")
         print("  Der er ikke skrevet noget pilotresultat som bestået.")
         return 1
