@@ -37,6 +37,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Generate activation readiness artifact without masking drift
+        shell: bash
+        run: |
+          cp ACTIVATION_READINESS.md /tmp/committed-ACTIVATION_READINESS.md
+          python3 scripts/activation_readiness.py
+          cp ACTIVATION_READINESS.md /tmp/generated-ACTIVATION_READINESS.md
+          mv /tmp/committed-ACTIVATION_READINESS.md ACTIVATION_READINESS.md
+
+      - name: Upload generated activation readiness
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent3-generated-activation-readiness
+          path: /tmp/generated-ACTIVATION_READINESS.md
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Full repository test log
         env:
           MODELRIG_BIN: /tmp/modelrig-server
