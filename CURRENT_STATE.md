@@ -230,10 +230,13 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_rig_preflight.py`
 - `tests/workflow_scheduler_m2_composition.py`
 - `tests/workflow_scheduler_pilot_wizard.py`
+- `tests/workflow_stage_a_checkpoint.py`
 - `tests/workflow_stage_a_one_click.py`
 - `tests/workflow_stage_a_operator_surface.py`
+- `tests/workflow_stage_a_phone_test.py`
 - `tests/workflow_stage_a_physical_operator.py`
 - `tests/workflow_stage_a_resume_cleanup.py`
+- `tests/workflow_stage_a_voice_test.py`
 - `tests/workflow_stage_b_physical_gate.py`
 - `tests/workflow_staged_promotion_runbook.py`
 - `tests/workflow_test_coverage.py`
