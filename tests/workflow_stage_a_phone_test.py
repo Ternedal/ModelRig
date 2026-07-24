@@ -36,6 +36,10 @@ check('set "MODELRIG_HOST=$escapedHost"' in stack,
       "the selected binding reaches the candidate backend process")
 check('set "KALIV_SCHEDULER_API=$schedulerValue"' in stack,
       "the scheduler API remains disabled unless explicitly requested")
+check('GetFullPath($PairingData, $repoRoot)' not in stack,
+      "the stack avoids a .NET overload missing from Windows PowerShell 5.1")
+check('[IO.Path]::IsPathRooted($PairingData)' in stack,
+      "relative pairing stores are resolved compatibly on Windows PowerShell 5.1")
 
 check('-BackendHost "0.0.0.0"' in phone,
       "the phone helper deliberately exposes only its test backend to LAN")
@@ -53,6 +57,10 @@ check('Remove-TestFirewall' in phone,
       "the temporary firewall rule has an explicit cleanup path")
 check('production_activation = $false' in phone,
       "the runtime state records that production activation remains false")
+check('192\\.168\\.' in phone and 'tailscale|vethernet|wsl|hyper-v|docker|loopback' in phone,
+      "RFC1918 physical LAN addresses are preferred over virtual adapters")
+check('LAN-healthcheck' in phone and 'Invoke-RestMethod -Uri "$lanUrl/healthz"' in phone,
+      "the advertised phone URL is verified before a pairing code is shown")
 
 check('stage-a-phone-test.ps1' in start and '-Stop' not in start,
       "the start launcher invokes only the phone-test start path")
@@ -65,9 +73,9 @@ for forbidden in (
     "gh release",
     "merge_pull_request",
     "production_activation=true",
-    "modeLrig_admin_key",
+    "modelrig_admin_key",
 ):
-    check(forbidden.lower() not in phone_lower,
+    check(forbidden not in phone_lower,
           f"phone helper has no forbidden action or remote admin bypass: {forbidden}")
 
 check('token"' not in phone_lower and "token_hash" not in phone_lower,
