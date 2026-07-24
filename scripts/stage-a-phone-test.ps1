@@ -53,11 +53,17 @@ function Test-RecordedProcess {
     $process = Get-ProcessInfo -ProcessId $ProcessId
     if ($null -eq $process) { return $false }
     if ($Kind -eq "backend") {
-        return [string]::Equals(
-            [IO.Path]::GetFullPath([string]$process.ExecutablePath),
-            [IO.Path]::GetFullPath($backendExe),
-            [StringComparison]::OrdinalIgnoreCase
-        )
+        try {
+            if ([string]::IsNullOrWhiteSpace([string]$process.ExecutablePath)) { return $false }
+            return [string]::Equals(
+                [IO.Path]::GetFullPath([string]$process.ExecutablePath),
+                [IO.Path]::GetFullPath($backendExe),
+                [StringComparison]::OrdinalIgnoreCase
+            )
+        }
+        catch {
+            return $false
+        }
     }
     $commandLine = [string]$process.CommandLine
     return (
@@ -108,22 +114,40 @@ function Assert-PortFree {
 }
 
 function Resolve-LanAddress {
-    $routes = @(
+    $defaultInterfaces = @(
         Get-NetRoute -AddressFamily IPv4 -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue |
             Where-Object { $_.NextHop -ne "0.0.0.0" } |
-            Sort-Object RouteMetric, InterfaceMetric
+            Sort-Object RouteMetric |
+            ForEach-Object { [int]$_.InterfaceIndex }
     )
-    foreach ($route in $routes) {
-        $addresses = @(
-            Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $route.InterfaceIndex -ErrorAction SilentlyContinue |
-                Where-Object {
-                    $_.IPAddress -notmatch "^(127\.|169\.254\.)" -and
-                    $_.AddressState -eq "Preferred"
-                }
-        )
-        if ($addresses.Count -gt 0) {
-            return [string]$addresses[0].IPAddress
+    $candidates = foreach ($address in @(
+        Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.IPAddress -notmatch "^(127\.|169\.254\.)" -and
+                $_.AddressState -eq "Preferred"
+            }
+    )) {
+        $ip = [string]$address.IPAddress
+        $alias = [string]$address.InterfaceAlias
+        $score = 0
+        if ($ip -match "^10\." -or
+            $ip -match "^192\.168\." -or
+            $ip -match "^172\.(1[6-9]|2[0-9]|3[01])\.") {
+            $score += 200
         }
+        if ($defaultInterfaces -contains [int]$address.InterfaceIndex) { $score += 100 }
+        if ($alias -notmatch "(?i)tailscale|vethernet|wsl|hyper-v|docker|loopback") { $score += 50 }
+        if ([string]$address.PrefixOrigin -eq "Dhcp") { $score += 10 }
+        [pscustomobject]@{
+            Address = $ip
+            Alias = $alias
+            Score = $score
+        }
+    }
+    $selected = $candidates | Sort-Object Score -Descending | Select-Object -First 1
+    if ($null -ne $selected) {
+        Write-Host "  Valgt LAN-adresse: $($selected.Address) ($($selected.Alias))" -ForegroundColor DarkGray
+        return [string]$selected.Address
     }
     throw "Kunne ikke finde riggens aktive LAN-IP. Kontrollér at pc'en er på samme netværk som telefonen."
 }
