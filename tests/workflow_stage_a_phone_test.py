@@ -34,12 +34,36 @@ check('[switch]$EnableSchedulerApi' in stack and '[string]$PairingData' in stack
       "LAN/scheduler/pairing changes are explicit opt-ins")
 check('set "MODELRIG_HOST=$escapedHost"' in stack,
       "the selected binding reaches the candidate backend process")
-check('set "KALIV_SCHEDULER_API=$schedulerValue"' in stack,
-      "the scheduler API remains disabled unless explicitly requested")
+check(
+    '$schedulerApiValue = if ($EnableSchedulerApi) { "1" } else { "0" }' in stack
+    and 'set "KALIV_SCHEDULER_API=$schedulerApiValue"' in stack,
+    "the scheduler API remains disabled unless explicitly requested",
+)
 check('GetFullPath($PairingData, $repoRoot)' not in stack,
       "the stack avoids a .NET overload missing from Windows PowerShell 5.1")
-check('[IO.Path]::IsPathRooted($PairingData)' in stack,
-      "relative pairing stores are resolved compatibly on Windows PowerShell 5.1")
+check(
+    'function Resolve-RepoPath' in stack
+    and '[IO.Path]::IsPathRooted($Value)' in stack
+    and 'Resolve-RepoPath -Value $PairingData' in stack,
+    "relative pairing stores are resolved compatibly on Windows PowerShell 5.1",
+)
+check(
+    '$schedulerValue = if ($EnableScheduler) { "1" } else { "0" }' in stack
+    and 'set "KALIV_SCHEDULER=$schedulerValue"' in stack,
+    "the scheduler runtime remains disabled unless explicitly requested",
+)
+check(
+    'KALIV_SCHEDULES_DB=' in stack
+    and 'MODELRIG_JOBS_DB=' in stack
+    and 'KALIV_AUDIT_DB=' in stack,
+    "an enabled scheduler is bound to explicit isolated stores",
+)
+check(
+    '[string]$WorkerLog' in stack
+    and 'python -u -m uvicorn' in stack
+    and '2>&1' in stack,
+    "the scheduler worker can write an unbuffered recovery log",
+)
 
 check('-BackendHost "0.0.0.0"' in phone,
       "the phone helper deliberately exposes only its test backend to LAN")
