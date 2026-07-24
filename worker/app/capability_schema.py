@@ -80,7 +80,9 @@ class CapabilityDescriptorV2(StrictModel):
     capability_id: str = Field(pattern=r"^tool:[A-Za-z0-9._:-]{1,155}$")
     kind: Literal["tool"]
     description: str = Field(min_length=1)
-    access: Literal["read", "write", "desktop"]
+    # external = a read-only action that deliberately sends an exact, confirmed
+    # request to a public service.  It is neither a local read nor a remote write.
+    access: Literal["read", "write", "desktop", "external"]
     impact: Literal["read", "write", "desktop", "destructive", "admin"]
     data_class: Literal["public", "operational", "private", "secret"]
     parameters: dict[str, Any]
@@ -96,9 +98,15 @@ class CapabilityDescriptorV2(StrictModel):
     def validate_cross_fields(self) -> "CapabilityDescriptorV2":
         if not self.description.strip():
             raise ValueError("description must contain visible text")
-        expected = "required" if self.access in {"write", "desktop"} else "none"
+        expected = (
+            "required"
+            if self.access in {"write", "desktop", "external"}
+            else "none"
+        )
         if self.confirmation.mode != expected:
             raise ValueError("confirmation mode contradicts access")
+        if self.access == "external" and self.network.mode != "public":
+            raise ValueError("external access requires a public network declaration")
         return self
 
     def to_dict(self) -> dict[str, Any]:
@@ -176,7 +184,11 @@ def descriptor_from_tool(tool: object) -> CapabilityDescriptorV2:
                 ),
             ),
             confirmation=Confirmation(
-                mode="required" if risk in {"write", "desktop"} else "none"
+                mode=(
+                    "required"
+                    if risk in {"write", "desktop", "external"}
+                    else "none"
+                )
             ),
             network=Network(
                 mode=getattr(tool, "network", "undeclared"),
