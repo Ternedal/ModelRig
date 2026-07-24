@@ -263,7 +263,9 @@ type_backend.perform(
 check([len(chunk) for chunk in type_native.text_chunks] == [128, 3], "text is injected in bounded UTF-16 chunks")
 check(type_native.text_chunks[1][:2] == (0xD83D, 0xDE00), "surrogate pair is preserved across input contract")
 
-chunk_switch = FakeNative([TARGET, OTHER])
+# One initial target check, then one before each chunk. Keep the first chunk on
+# the original target and switch only before the second chunk.
+chunk_switch = FakeNative([TARGET, TARGET, OTHER])
 chunk_backend = W.Win32DesktopBackend(ALLOW, native=chunk_switch, input_enabled=True)
 refused(
     lambda: chunk_backend.perform(
