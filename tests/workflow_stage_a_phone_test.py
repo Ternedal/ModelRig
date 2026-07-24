@@ -7,9 +7,11 @@ ROOT = Path(__file__).resolve().parents[1]
 PHONE = ROOT / "scripts" / "stage-a-phone-test.ps1"
 STACK = ROOT / "scripts" / "start-stage-a-validation-stack.ps1"
 READ_HELPER = ROOT / "scripts" / "stage_a_scheduler_read.py"
+REVOCATION_HELPER = ROOT / "scripts" / "stage_a_scheduler_revocation.py"
 START = ROOT / "START_STAGE_A_PHONE_TEST.cmd"
 SCHEDULER_START = ROOT / "START_STAGE_A_SCHEDULER_TEST.cmd"
 READ_START = ROOT / "PREPARE_STAGE_A_SCHEDULER_READ.cmd"
+REVOCATION_START = ROOT / "RUN_STAGE_A_SCHEDULER_REVOCATION.cmd"
 STOP = ROOT / "STOP_STAGE_A_PHONE_TEST.cmd"
 
 passed = failed = 0
@@ -30,9 +32,12 @@ phone_lower = phone.lower()
 stack = STACK.read_text(encoding="utf-8")
 read_helper = READ_HELPER.read_text(encoding="utf-8")
 read_helper_lower = read_helper.lower()
+revocation_helper = REVOCATION_HELPER.read_text(encoding="utf-8")
+revocation_helper_lower = revocation_helper.lower()
 start = START.read_text(encoding="utf-8")
 scheduler_start = SCHEDULER_START.read_text(encoding="utf-8")
 read_start = READ_START.read_text(encoding="utf-8")
+revocation_start = REVOCATION_START.read_text(encoding="utf-8")
 stop = STOP.read_text(encoding="utf-8")
 
 check('string]$BackendHost = "127.0.0.1"' in stack,
@@ -175,6 +180,48 @@ for forbidden in ("git push", "git tag", "gh release", "production_activation=tr
     check(forbidden not in read_helper_lower,
           f"read helper has no forbidden promotion action: {forbidden}")
 
+check('stage_a_scheduler_read.py' in revocation_helper,
+      "revocation reuses the validated scheduler-stack binding")
+check(
+    'kaliv-stage-a-scheduler-read-checkpoint/v1' in revocation_helper
+    and 'state.get("read_executed") is not True' in revocation_helper,
+    "revocation refuses to run without the physical read checkpoint",
+)
+check(
+    'wizard.matches_manifest(detail, wizard.READ_SPEC)' in revocation_helper,
+    "revocation is bound to the exact canonical read plan",
+)
+check(
+    'wizard.prepare_aligned_schedule(read_id)' in revocation_helper
+    and 'wizard.catch_claim_and_pause(read_id, due, before)' in revocation_helper
+    and 'wizard.wait_occurrence(claim_id, "released")' in revocation_helper,
+    "revocation catches and resolves a real durable occurrence",
+)
+check(
+    'job.get("status") != "cancelled"' in revocation_helper
+    and '"pauset" not in reason_lower' in revocation_helper
+    and 'runs_after != prior_runs' in revocation_helper,
+    "revocation verifies cancelled job, Danish reason, and refunded budget",
+)
+check(
+    'revocation_confirmed": True' in revocation_helper
+    and 'crash_recovery_pending": True' in revocation_helper
+    and 'write_pending": True' in revocation_helper
+    and 'pilot_report_generated": False' in revocation_helper,
+    "revocation checkpoint leaves crash, write, and report pending",
+)
+check(
+    'wait_for_write' not in revocation_helper
+    and 'run_crash_recovery' not in revocation_helper
+    and 'generate_report' not in revocation_helper,
+    "revocation cannot create write, crash-recovery, or final evidence",
+)
+check('input(' not in revocation_helper and 'getpass' not in revocation_helper,
+      "revocation has no copy/paste or manual JSON prompt")
+for forbidden in ("git push", "git tag", "gh release", "production_activation=true"):
+    check(forbidden not in revocation_helper_lower,
+          f"revocation helper has no forbidden promotion action: {forbidden}")
+
 check('stage-a-phone-test.ps1' in start and '-EnableSchedulerPilot' not in start,
       "the ordinary phone/voice launcher keeps the scheduler off")
 check('stage-a-phone-test.ps1" -EnableSchedulerPilot' in scheduler_start,
@@ -185,6 +232,10 @@ check('stage_a_scheduler_read.py' in read_start,
       "the read launcher invokes only the bounded read helper")
 check('samlet pilotrapport forbliver pending' in read_start.lower(),
       "the read launcher labels the remaining pilot work honestly")
+check('stage_a_scheduler_revocation.py' in revocation_start,
+      "the revocation launcher invokes only the bounded revocation helper")
+check('crash-recovery, write og samlet pilotrapport forbliver pending' in revocation_start.lower(),
+      "the revocation launcher labels remaining work honestly")
 check('stage-a-phone-test.ps1" -Stop' in stop,
       "the stop launcher invokes the safe cleanup path")
 
