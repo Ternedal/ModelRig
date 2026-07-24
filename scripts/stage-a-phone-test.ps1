@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$PlannerModel,
+    [switch]$EnableSchedulerPilot,
     [switch]$Stop
 )
 
@@ -100,7 +101,7 @@ function Stop-TestStack {
         Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
     }
     Remove-TestFirewall
-    Write-Host "Telefon-teststacken er stoppet. Den isolerede pairing-store er bevaret." -ForegroundColor Green
+    Write-Host "Telefon-teststacken er stoppet. Isoleret pairing- og schedulerevidens er bevaret." -ForegroundColor Green
 }
 
 function Assert-PortFree {
@@ -172,6 +173,18 @@ function Resolve-PlannerModel {
     throw "Ollama svarer ikke, eller der findes ingen planner-model. Start Ollama og kør launcheren igen."
 }
 
+function New-SchedulerApprovalSecret {
+    $bytes = New-Object byte[] 48
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+    }
+    finally {
+        $rng.Dispose()
+    }
+    return [Convert]::ToBase64String($bytes)
+}
+
 Assert-WindowsAdministrator
 New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
 
@@ -191,6 +204,35 @@ Assert-PortFree -Port 8099 -Label "Worker"
 $model = Resolve-PlannerModel
 $lanAddress = Resolve-LanAddress
 $lanUrl = "http://${lanAddress}:8080"
+$schedulerDataDir = $null
+$schedulerLogPath = $null
+$schedulerSecretPath = $null
+$schedulerSecret = $null
+
+$stackArgs = @{
+    PlannerModel = $model
+    ValidationReport = (Join-Path $repoRoot "validation\agent3-rig-validation-latest.json")
+    BackendHost = "0.0.0.0"
+    PairingData = $pairingDataPath
+}
+
+if ($EnableSchedulerPilot) {
+    $runId = Get-Date -Format "yyyyMMdd-HHmmss"
+    $schedulerDataDir = Join-Path $runtimeDir "scheduler-pilot-$runId"
+    $schedulerLogPath = Join-Path $schedulerDataDir "worker.log"
+    $schedulerSecretPath = Join-Path $schedulerDataDir "approval-secret.txt"
+    New-Item -ItemType Directory -Path $schedulerDataDir -Force | Out-Null
+    $schedulerSecret = New-SchedulerApprovalSecret
+    [IO.File]::WriteAllText($schedulerSecretPath, $schedulerSecret, [Text.Encoding]::ASCII)
+
+    $stackArgs["EnableSchedulerApi"] = $true
+    $stackArgs["EnableScheduler"] = $true
+    $stackArgs["SchedulerDataDir"] = $schedulerDataDir
+    $stackArgs["SchedulerApprovalSecret"] = $schedulerSecret
+    $stackArgs["SchedulerPollSeconds"] = 5
+    $stackArgs["WorkerLog"] = $schedulerLogPath
+    $stackArgs["HeadlessWorker"] = $true
+}
 
 Remove-TestFirewall
 New-NetFirewallRule `
@@ -203,12 +245,7 @@ New-NetFirewallRule `
     -Profile Any | Out-Null
 
 try {
-    & (Join-Path $PSScriptRoot "start-stage-a-validation-stack.ps1") `
-        -PlannerModel $model `
-        -ValidationReport (Join-Path $repoRoot "validation\agent3-rig-validation-latest.json") `
-        -BackendHost "0.0.0.0" `
-        -PairingData $pairingDataPath `
-        -EnableSchedulerApi
+    & (Join-Path $PSScriptRoot "start-stage-a-validation-stack.ps1") @stackArgs
 
     $backendPid = Get-ListenerPid -Port 8080
     $workerPid = Get-ListenerPid -Port 8099
@@ -225,6 +262,17 @@ try {
     $health = Invoke-RestMethod -Uri "$lanUrl/healthz" -TimeoutSec 10
     if ($health.status -ne "ok") { throw "LAN-healthcheck returnerede ikke status=ok." }
 
+    $schedulerStatus = $null
+    if ($EnableSchedulerPilot) {
+        $schedulerStatus = Invoke-RestMethod -Uri "http://127.0.0.1:8099/schedules/status" -TimeoutSec 10
+        if (-not $schedulerStatus.configured -or
+            -not $schedulerStatus.running -or
+            -not $schedulerStatus.resources_open -or
+            -not [string]::IsNullOrWhiteSpace([string]$schedulerStatus.last_error)) {
+            throw "Scheduler-stacken blev ikke klar: $($schedulerStatus | ConvertTo-Json -Compress)"
+        }
+    }
+
     $pairing = Invoke-RestMethod `
         -Method Post `
         -Uri "http://127.0.0.1:8080/api/v1/pair/start" `
@@ -234,7 +282,7 @@ try {
     }
 
     $state = [ordered]@{
-        schema = "kaliv-stage-a-phone-test-state/v1"
+        schema = "kaliv-stage-a-phone-test-state/v2"
         started_at = (Get-Date).ToUniversalTime().ToString("o")
         version = [string]$health.version
         lan_url = $lanUrl
@@ -244,10 +292,38 @@ try {
         worker_pid = $workerPid
         pairing_data = $pairingDataPath
         firewall_rule = $firewallRule
+        scheduler = [ordered]@{
+            enabled = [bool]$EnableSchedulerPilot
+            configured = if ($schedulerStatus) { [bool]$schedulerStatus.configured } else { $false }
+            running = if ($schedulerStatus) { [bool]$schedulerStatus.running } else { $false }
+            resources_open = if ($schedulerStatus) { [bool]$schedulerStatus.resources_open } else { $false }
+            data_dir = $schedulerDataDir
+            worker_log = $schedulerLogPath
+            approval_secret_file = $schedulerSecretPath
+        }
         production_activation = $false
     }
-    $state | ConvertTo-Json -Depth 5 |
+    $state | ConvertTo-Json -Depth 8 |
         Set-Content -LiteralPath $statePath -Encoding UTF8
+
+    $schedulerInstructions = if ($EnableSchedulerPilot) {
+@"
+
+Scheduler-pilotstack: KLAR
+Isolerede data:       $schedulerDataDir
+Worker-log:           $schedulerLogPath
+
+Scheduleren og scheduler-API'et er kun aktiveret i denne isolerede teststack.
+Selve pilotbeviset er endnu ikke gennemført.
+"@
+    }
+    else {
+@"
+
+Scheduler-pilotstack: FRA
+Den almindelige telefon/voice-test starter ingen scheduler.
+"@
+    }
 
     $instructions = @"
 KALIV STAGE A - TELEFONFORBINDELSE
@@ -265,7 +341,7 @@ I Kaliv:
 
 Den nye kode er vigtig: den sikrer, at telefonens token hører til præcis
 telefon-teststackens isolerede device-store og fjerner 401-fejlen.
-
+$schedulerInstructions
 Når testen er færdig, dobbeltklik STOP_STAGE_A_PHONE_TEST.cmd.
 Ingen produktion er aktiveret.
 "@
@@ -279,6 +355,13 @@ Ingen produktion er aktiveret.
     Write-Host "  Server-URL:   $lanUrl" -ForegroundColor Cyan
     Write-Host "  Parringskode: $($pairing.code)" -ForegroundColor Yellow
     Write-Host "  Version:      $($health.version)"
+    if ($EnableSchedulerPilot) {
+        Write-Host "  Scheduler:    klar i isoleret testmappe" -ForegroundColor Green
+        Write-Host "  Worker-log:   $schedulerLogPath"
+    }
+    else {
+        Write-Host "  Scheduler:    fra" -ForegroundColor DarkGray
+    }
     Write-Host ""
     Write-Host "  Indtast koden i appen, også selv om den allerede siger 'parret'."
     Write-Host "  Derefter skal Forbind virke uden manuel tokenkopiering."
