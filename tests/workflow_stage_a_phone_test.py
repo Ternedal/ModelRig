@@ -6,8 +6,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PHONE = ROOT / "scripts" / "stage-a-phone-test.ps1"
 STACK = ROOT / "scripts" / "start-stage-a-validation-stack.ps1"
+READ_HELPER = ROOT / "scripts" / "stage_a_scheduler_read.py"
 START = ROOT / "START_STAGE_A_PHONE_TEST.cmd"
 SCHEDULER_START = ROOT / "START_STAGE_A_SCHEDULER_TEST.cmd"
+READ_START = ROOT / "PREPARE_STAGE_A_SCHEDULER_READ.cmd"
 STOP = ROOT / "STOP_STAGE_A_PHONE_TEST.cmd"
 
 passed = failed = 0
@@ -26,8 +28,11 @@ def check(condition: bool, message: str) -> None:
 phone = PHONE.read_text(encoding="utf-8")
 phone_lower = phone.lower()
 stack = STACK.read_text(encoding="utf-8")
+read_helper = READ_HELPER.read_text(encoding="utf-8")
+read_helper_lower = read_helper.lower()
 start = START.read_text(encoding="utf-8")
 scheduler_start = SCHEDULER_START.read_text(encoding="utf-8")
+read_start = READ_START.read_text(encoding="utf-8")
 stop = STOP.read_text(encoding="utf-8")
 
 check('string]$BackendHost = "127.0.0.1"' in stack,
@@ -124,12 +129,62 @@ check(
     "restart metadata stores only the secret path and scheduler runtime paths",
 )
 
+check('phone-test-state.json' in read_helper,
+      "the read helper consumes the phone stack's own runtime state")
+check(
+    'kaliv-stage-a-phone-test-state/v2' in read_helper
+    and 'scheduler.get("enabled") is True' in read_helper
+    and 'scheduler.get("configured") is True' in read_helper
+    and 'scheduler.get("running") is True' in read_helper,
+    "the read helper refuses a stale or inactive scheduler stack",
+)
+check(
+    'under_runtime(data_dir)' in read_helper
+    and 'under_runtime(worker_log)' in read_helper
+    and 'worker_log.parent.resolve() != data_dir.resolve()' in read_helper,
+    "the read helper accepts only one isolated runtime directory",
+)
+check(
+    'wizard.SCHEDULES_DB = data_dir / "kaliv-schedules.db"' in read_helper
+    and 'wizard.JOBS_DB = data_dir / "modelrig-jobs.db"' in read_helper
+    and 'wizard.AUDIT_DB = data_dir / "kaliv-audit.db"' in read_helper,
+    "the read helper reuses the exact stores started by the phone stack",
+)
+check(
+    'wizard.create_read(state)' in read_helper
+    and 'wizard.wait_runs(read_id, 1' in read_helper
+    and 'wizard.set_enabled(read_id, False)' in read_helper,
+    "the exact read plan must execute once and is then paused",
+)
+check(
+    'write_pending": True' in read_helper
+    and 'revocation_pending": True' in read_helper
+    and 'crash_recovery_pending": True' in read_helper
+    and 'pilot_report_generated": False' in read_helper,
+    "the read checkpoint keeps every remaining physical proof pending",
+)
+check(
+    'wait_for_write' not in read_helper
+    and 'generate_report' not in read_helper
+    and 'scheduler_pilot_report.py' not in read_helper,
+    "the read helper cannot create write evidence or a final pilot report",
+)
+check('input(' not in read_helper and 'getpass' not in read_helper,
+      "the read half has no copy/paste or manual JSON prompt")
+for forbidden in ("git push", "git tag", "gh release", "production_activation=true"):
+    check(forbidden not in read_helper_lower,
+          f"read helper has no forbidden promotion action: {forbidden}")
+
 check('stage-a-phone-test.ps1' in start and '-EnableSchedulerPilot' not in start,
       "the ordinary phone/voice launcher keeps the scheduler off")
 check('stage-a-phone-test.ps1" -EnableSchedulerPilot' in scheduler_start,
       "the scheduler launcher selects the explicit scheduler path")
 check('gennemfoerer endnu ikke selve scheduler-pilotbeviset' in scheduler_start.lower(),
       "the scheduler launcher does not claim that physical evidence already exists")
+check('stage_a_scheduler_read.py' in read_start,
+      "the read launcher invokes only the bounded read helper")
+check('samlet pilotrapport forbliver pending' in read_start.lower(),
+      "the read launcher labels the remaining pilot work honestly")
 check('stage-a-phone-test.ps1" -Stop' in stop,
       "the stop launcher invokes the safe cleanup path")
 
