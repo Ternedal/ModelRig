@@ -15,6 +15,19 @@ param(
 
     [switch]$EnableSchedulerApi,
 
+    [switch]$EnableScheduler,
+
+    [string]$SchedulerDataDir,
+
+    [string]$SchedulerApprovalSecret,
+
+    [ValidateRange(5, 3600)]
+    [double]$SchedulerPollSeconds = 15,
+
+    [string]$WorkerLog,
+
+    [switch]$HeadlessWorker,
+
     [switch]$WorkerOnly
 )
 
@@ -26,6 +39,29 @@ $runtimeDir = Join-Path $repoRoot "validation\stage-a-runtime"
 $backendExe = Join-Path $runtimeDir "modelrig-server-stage-a.exe"
 $backendCmd = Join-Path $runtimeDir "backend.cmd"
 $workerCmd = Join-Path $runtimeDir "worker.cmd"
+
+function Resolve-RepoPath {
+    param([string]$Value, [string]$Label, [switch]$CreateDirectory)
+    if ([string]::IsNullOrWhiteSpace($Value)) { throw "$Label mangler." }
+    $candidate = if ([IO.Path]::IsPathRooted($Value)) { $Value } else { Join-Path $repoRoot $Value }
+    $resolved = [IO.Path]::GetFullPath($candidate)
+    if ($CreateDirectory) {
+        New-Item -ItemType Directory -Path $resolved -Force | Out-Null
+    }
+    else {
+        $parent = Split-Path $resolved -Parent
+        if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+            New-Item -ItemType Directory -Path $parent -Force | Out-Null
+        }
+    }
+    return $resolved
+}
+
+function Escape-CmdValue {
+    param([string]$Value)
+    if ($Value -match '[\r\n"]') { throw "En runtime-værdi indeholder ugyldige tegn." }
+    return $Value.Replace('%', '%%')
+}
 
 function Get-ListenerPid {
     param([int]$Port)
@@ -66,20 +102,14 @@ function Wait-Endpoint {
     throw "Tjenesten blev ikke klar: $Url"
 }
 
+function Start-WorkerCommand {
+    $mode = if ($HeadlessWorker) { "/c" } else { "/k" }
+    Start-Process -FilePath "cmd.exe" -ArgumentList $mode, ('"' + $workerCmd + '"') -WorkingDirectory $repoRoot | Out-Null
+}
+
 function Find-PairingData {
     if (-not [string]::IsNullOrWhiteSpace($PairingData)) {
-        $candidatePath = if ([IO.Path]::IsPathRooted($PairingData)) {
-            $PairingData
-        }
-        else {
-            Join-Path $repoRoot $PairingData
-        }
-        $fullPath = [IO.Path]::GetFullPath($candidatePath)
-        $parent = Split-Path $fullPath -Parent
-        if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
-            New-Item -ItemType Directory -Path $parent -Force | Out-Null
-        }
-        return $fullPath
+        return Resolve-RepoPath -Value $PairingData -Label "PairingData"
     }
 
     $candidates = New-Object System.Collections.Generic.List[string]
@@ -121,10 +151,50 @@ $parsedAddress = $null
 if (-not [Net.IPAddress]::TryParse($BackendHost, [ref]$parsedAddress)) {
     throw "BackendHost skal være en gyldig IP-adresse."
 }
+if ($EnableScheduler -and [string]::IsNullOrWhiteSpace($SchedulerDataDir)) {
+    throw "SchedulerDataDir er påkrævet, når scheduleren aktiveres."
+}
+if (($EnableScheduler -or $EnableSchedulerApi) -and $SchedulerApprovalSecret.Length -lt 32) {
+    throw "SchedulerApprovalSecret skal være mindst 32 tegn for scheduler-testen."
+}
 
 New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
-$escapedRepo = $repoRoot.Replace('%', '%%')
-$escapedReport = ([IO.Path]::GetFullPath($ValidationReport)).Replace('%', '%%')
+$escapedRepo = Escape-CmdValue $repoRoot
+$escapedReport = Escape-CmdValue ([IO.Path]::GetFullPath($ValidationReport))
+$escapedSecret = Escape-CmdValue ([string]$SchedulerApprovalSecret)
+$schedulerValue = if ($EnableScheduler) { "1" } else { "0" }
+$schedulerApiValue = if ($EnableSchedulerApi) { "1" } else { "0" }
+$schedulerEnv = ""
+$workerCommand = 'python -u -m uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099'
+$resolvedWorkerLog = $null
+$resolvedSchedulerDir = $null
+
+if ($EnableScheduler) {
+    $resolvedSchedulerDir = Resolve-RepoPath -Value $SchedulerDataDir -Label "SchedulerDataDir" -CreateDirectory
+    $escapedSchedulerDir = Escape-CmdValue $resolvedSchedulerDir
+    $pollText = $SchedulerPollSeconds.ToString([Globalization.CultureInfo]::InvariantCulture)
+    $schedulerEnv = @"
+set "KALIV_SCHEDULER=1"
+set "KALIV_SCHEDULER_POLL_S=$pollText"
+set "KALIV_SCHEDULES_DB=$escapedSchedulerDir\kaliv-schedules.db"
+set "MODELRIG_JOBS_DB=$escapedSchedulerDir\modelrig-jobs.db"
+set "KALIV_AUDIT_DB=$escapedSchedulerDir\kaliv-audit.db"
+set "KALIV_TOOLS_STATE=$escapedSchedulerDir\kaliv-tools-state.json"
+set "KALIV_TOOLS_DIR=$escapedSchedulerDir\tools"
+set "KALIV_SCHEDULER_APPROVAL_SECRET=$escapedSecret"
+"@
+    if (-not [string]::IsNullOrWhiteSpace($WorkerLog)) {
+        $resolvedWorkerLog = Resolve-RepoPath -Value $WorkerLog -Label "WorkerLog"
+        $escapedLog = Escape-CmdValue $resolvedWorkerLog
+        $workerCommand += " >> `"$escapedLog`" 2>&1"
+    }
+}
+else {
+    $schedulerEnv = @"
+set "KALIV_SCHEDULER=0"
+set "KALIV_SCHEDULER_APPROVAL_SECRET="
+"@
+}
 
 @"
 @echo off
@@ -135,22 +205,22 @@ set "KALIV_AGENT3_ENABLED=1"
 set "KALIV_TOOLS_ENABLED=1"
 set "KALIV_AGENT3_PLANNER_MODEL=$PlannerModel"
 set "KALIV_AGENT3_VALIDATION_REPORT=$escapedReport"
-python -m uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099
+$schedulerEnv
+$workerCommand
 "@ | Set-Content -LiteralPath $workerCmd -Encoding ASCII
 
 if ($WorkerOnly) {
     Wait-PortFree -Port 8099 -Label "worker"
-    Write-Host "  Starter exact-head worker i et nyt vindue..." -ForegroundColor Cyan
-    Start-Process -FilePath "cmd.exe" -ArgumentList "/k", ('"' + $workerCmd + '"') -WorkingDirectory $repoRoot | Out-Null
+    Write-Host "  Starter exact-head worker..." -ForegroundColor Cyan
+    Start-WorkerCommand
     Wait-Endpoint -Url "http://127.0.0.1:8099/healthz"
     Write-Host "  Exact-head worker er klar." -ForegroundColor Green
     return
 }
 
 $resolvedPairingData = Find-PairingData
-$escapedData = $resolvedPairingData.Replace('%', '%%')
-$escapedHost = $BackendHost.Replace('%', '%%')
-$schedulerValue = if ($EnableSchedulerApi) { "1" } else { "0" }
+$escapedData = Escape-CmdValue $resolvedPairingData
+$escapedHost = Escape-CmdValue $BackendHost
 Wait-PortFree -Port 8080 -Label "backend"
 Wait-PortFree -Port 8099 -Label "worker"
 
@@ -169,14 +239,15 @@ set "MODELRIG_HOST=$escapedHost"
 set "MODELRIG_PORT=8080"
 set "MODELRIG_DATA=$escapedData"
 set "KALIV_AGENT3_ENABLED=1"
-set "KALIV_SCHEDULER_API=$schedulerValue"
+set "KALIV_SCHEDULER_API=$schedulerApiValue"
+set "KALIV_SCHEDULER_APPROVAL_SECRET=$escapedSecret"
 "$backendExe"
 "@ | Set-Content -LiteralPath $backendCmd -Encoding ASCII
 
-Write-Host "  Starter kandidatens backend og worker i to synlige vinduer..." -ForegroundColor Cyan
+Write-Host "  Starter kandidatens backend og worker..." -ForegroundColor Cyan
 Start-Process -FilePath "cmd.exe" -ArgumentList "/k", ('"' + $backendCmd + '"') -WorkingDirectory $runtimeDir | Out-Null
 Start-Sleep -Seconds 1
-Start-Process -FilePath "cmd.exe" -ArgumentList "/k", ('"' + $workerCmd + '"') -WorkingDirectory $repoRoot | Out-Null
+Start-WorkerCommand
 
 Wait-Endpoint -Url "http://127.0.0.1:8080/healthz"
 Wait-Endpoint -Url "http://127.0.0.1:8099/healthz"
@@ -184,4 +255,8 @@ Wait-Endpoint -Url "http://127.0.0.1:8099/healthz"
 Write-Host "  Exact-head validation-stack er klar." -ForegroundColor Green
 Write-Host "  Backend-binding: $BackendHost"
 Write-Host "  Pairing-data: $resolvedPairingData"
-Write-Host "  Luk de to nye konsolvinduer efter testen."
+if ($EnableScheduler) {
+    Write-Host "  Scheduler-data: $resolvedSchedulerDir"
+    if ($resolvedWorkerLog) { Write-Host "  Worker-log: $resolvedWorkerLog" }
+}
+Write-Host "  Luk de nye konsolvinduer efter testen."
