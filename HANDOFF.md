@@ -446,6 +446,34 @@ branch-ejer eller en beslutning.**
    ALDRIG autonomt** — PR'en forbyder det selv. De fleste andre åbne PRs
    stacker mod denne kæde; merge dem ikke enkeltvis udenom. PR #1/#3 er
    lukkede (agent3 kom ind via mount, 1.58.131–135).
+
+   **PROMOVERING — main er rykket (24/7, selvforskyldt):** main bar
+   `2e2a29a` da kandidaten blev frosset; den er nu `95c1014`+ (rene
+   docs-commits på HANDOFF.md, ingen kode). `--ff-only` er derfor IKKE
+   længere mulig. **Det rammer ikke rig-kørslen** — `freeze_check`
+   sammenligner checkout'ens egen HEAD mod tag-SHA'en (linje 273-274), så
+   en clean checkout af `8e40103` fryser grønt uanset hvor main står.
+   **Ren løsning: sæt tagget `v1.58.145` direkte på `8e40103`** (build-and-
+   release trigger er `v*` på enhver commit) — så peger tagget på præcis
+   det træ der blev fysisk testet, og main kan merges bagefter med en
+   almindelig merge-commit. Tag ALDRIG en merge-commit her: dens træ ville
+   indeholde docs-deltaet og fælde den byte-eksakte attestation (F-1802/
+   F-1503). **Lektie: push ikke til main mens en frossen kandidat venter
+   på rig-dag** — heller ikke docs.
+
+   **Model-eval-fixturen (gammel åben sag, nu LUKKET):** basis-fixturen
+   `eval/agent3_model_tasks.json` er byte-identisk på main og kandidaten.
+   Rig-kørslen viste at problemet IKKE var risk/impact-forveksling i
+   fixturen, men at basis-sættet **er ældre end Agent 3's finere
+   risk-vokabular**: planneren klassificerer `pull_model`→`admin` og
+   `delete_model`→`destructive` (`agent3/integration.py`), mens fixturen
+   forventer `write` (som matcher `tools.py`'s grovere `Risk`-type).
+   Kandidaten løser det med en versions-bundet, fail-closed override-fil
+   (`eval/agent3_model_tasks_stage_a_overrides.json`) der lader det frosne
+   basissæt være urørt. **Port den IKKE til main** — den hører til
+   kandidatens testede enhed. Den tidligere beslutning om ikke at gætte
+   var rigtig: gættet ville have været "skriv impact i fixturen", og det
+   er ikke svaret.
 4. **[KRÆVER RIG]** I0b: Windows-rettighedslaget (Job Object m. kill-on-close +
    grandchild-reaping, reduceret token, lav integritet). **Uden Job Object
    reaper subprocess-kill ikke børnebørn på Windows** — markeret i koden.
