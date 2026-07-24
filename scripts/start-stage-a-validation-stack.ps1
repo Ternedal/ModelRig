@@ -154,7 +154,7 @@ if (-not [Net.IPAddress]::TryParse($BackendHost, [ref]$parsedAddress)) {
 if ($EnableScheduler -and [string]::IsNullOrWhiteSpace($SchedulerDataDir)) {
     throw "SchedulerDataDir er påkrævet, når scheduleren aktiveres."
 }
-if (($EnableScheduler -or $EnableSchedulerApi) -and $SchedulerApprovalSecret.Length -lt 32) {
+if (($EnableScheduler -or $EnableSchedulerApi) -and ([string]$SchedulerApprovalSecret).Length -lt 32) {
     throw "SchedulerApprovalSecret skal være mindst 32 tegn for scheduler-testen."
 }
 
@@ -174,7 +174,7 @@ if ($EnableScheduler) {
     $escapedSchedulerDir = Escape-CmdValue $resolvedSchedulerDir
     $pollText = $SchedulerPollSeconds.ToString([Globalization.CultureInfo]::InvariantCulture)
     $schedulerEnv = @"
-set "KALIV_SCHEDULER=1"
+set "KALIV_SCHEDULER=$schedulerValue"
 set "KALIV_SCHEDULER_POLL_S=$pollText"
 set "KALIV_SCHEDULES_DB=$escapedSchedulerDir\kaliv-schedules.db"
 set "MODELRIG_JOBS_DB=$escapedSchedulerDir\modelrig-jobs.db"
@@ -191,7 +191,7 @@ set "KALIV_SCHEDULER_APPROVAL_SECRET=$escapedSecret"
 }
 else {
     $schedulerEnv = @"
-set "KALIV_SCHEDULER=0"
+set "KALIV_SCHEDULER=$schedulerValue"
 set "KALIV_SCHEDULER_APPROVAL_SECRET="
 "@
 }
