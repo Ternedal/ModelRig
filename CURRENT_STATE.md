@@ -40,8 +40,9 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_AGENT3_VALIDATION_MAX_AGE_HOURS` | `(unset)` |
 | `KALIV_AGENT3_VALIDATION_REPORT` | `(unset)` |
 | `KALIV_ALLOW_RAG_CLOUD` | `` |
+| `KALIV_BROWSER_RESEARCH` | `0` |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` |
-| `KALIV_DATA_DIR` | `(unset)` |
+| `KALIV_DATA_DIR` | `` |
 | `KALIV_EGRESS_GATE` | `` |
 | `KALIV_MAX_UPLOAD_MB` | `25` |
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` |
@@ -148,6 +149,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_browser_peer_adapter.py`
 - `tests/worker_browser_peer_fulfillment.py`
 - `tests/worker_browser_peer_runtime.py`
+- `tests/worker_browser_research_tool.py`
 - `tests/worker_browser_use_adapter.py`
 - `tests/worker_browser_use_network_guard.py`
 - `tests/worker_browser_use_runtime_guard.py`
