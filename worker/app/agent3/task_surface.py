@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from typing import Any, Callable
 
@@ -17,6 +19,7 @@ from .core import (
     EgressClass,
     RiskClass,
     RouteKind,
+    RunState,
     TurnRequest,
 )
 from .integration import Agent3PlanError, V2ToolAdapter
@@ -28,6 +31,46 @@ TASK_SURFACE = "agent3_readonly"
 TASK_REASON = "agent3_readonly_selected"
 ReadinessProvider = Callable[[], dict[str, Any]]
 CapabilityGraphProvider = Callable[[], CapabilityGraph]
+
+
+class TaskExecutionPool:
+    """Small, non-queuing executor for normal read-only task runs.
+
+    A normal client must receive a run id before execution so Stop can target the
+    rig rather than merely cancelling the phone's HTTP request. Capacity is
+    deliberately bounded and non-queuing: when all workers are occupied, start
+    fails before the single-use plan token is consumed.
+    """
+
+    def __init__(self, max_workers: int = 2) -> None:
+        workers = max(1, min(int(max_workers), 8))
+        self._slots = threading.BoundedSemaphore(workers)
+        self._pool = ThreadPoolExecutor(
+            max_workers=workers,
+            thread_name_prefix="kaliv-agent3-task",
+        )
+
+    def reserve(self) -> bool:
+        return self._slots.acquire(blocking=False)
+
+    def release_reserved(self) -> None:
+        self._slots.release()
+
+    def submit_reserved(self, fn: Callable[..., Any], *args: Any) -> None:
+        def run() -> None:
+            try:
+                fn(*args)
+            finally:
+                self._slots.release()
+
+        try:
+            self._pool.submit(run)
+        except Exception:
+            self._slots.release()
+            raise
+
+    def shutdown(self) -> None:
+        self._pool.shutdown(wait=True, cancel_futures=False)
 
 
 class TaskPlanReq(BaseModel):
@@ -135,6 +178,7 @@ def build_task_surface_router(
     orchestrator: Agent3Orchestrator,
     plan_store: PlanStore,
     readiness_provider: ReadinessProvider,
+    execution_pool: TaskExecutionPool,
     *,
     planner: TypedPlanner | None = None,
     capability_graph_provider: CapabilityGraphProvider | None = None,
@@ -164,6 +208,88 @@ def build_task_surface_router(
             ).to_dict()
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    def task_context(run_id: str) -> tuple[AgentRun, dict[str, str], dict[str, Any] | None, list[dict[str, Any]]]:
+        run = orchestrator.store.load(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="task run not found")
+        events = orchestrator.store.events(run_id)
+        bound = next(
+            (
+                event.get("payload")
+                for event in events
+                if event.get("kind") == "task_surface_bound"
+                and isinstance(event.get("payload"), dict)
+                and event["payload"].get("surface") == TASK_SURFACE
+            ),
+            None,
+        )
+        if not isinstance(bound, dict):
+            # A normal task route must not become a read door into generic Agent 3
+            # developer runs merely because somebody guessed an id.
+            raise HTTPException(status_code=404, detail="task run not found")
+        binding = bound.get("readiness_binding")
+        if not isinstance(binding, dict):
+            raise HTTPException(status_code=500, detail="task run lost its readiness binding")
+        receipt = bound.get("capability_receipt")
+        if receipt is not None and not isinstance(receipt, dict):
+            raise HTTPException(status_code=500, detail="task run has an invalid capability receipt")
+        _assert_readonly_template(run)
+        return run, {str(k): str(v) for k, v in binding.items()}, receipt, events
+
+    def task_response(run_id: str) -> dict[str, Any]:
+        run, binding, receipt, events = task_context(run_id)
+        if run.state == RunState.WAITING_CONFIRMATION:
+            orchestrator.cancel(run.id)
+            raise HTTPException(
+                status_code=500,
+                detail="read-only task unexpectedly requested confirmation",
+            )
+        response: dict[str, Any] = {
+            "task_surface": TASK_SURFACE,
+            "selected_surface": TASK_SURFACE,
+            "fallback_surface": "agent2",
+            "reason": TASK_REASON,
+            "run": json.loads(run.to_json()),
+            "events": events,
+            "readiness_binding": binding,
+            "terminal": run.state in {
+                RunState.COMPLETED,
+                RunState.FAILED,
+                RunState.CANCELLED,
+                RunState.BLOCKED,
+            },
+            "production_activation": False,
+            "normal_chat_route_unchanged": True,
+        }
+        if receipt is not None:
+            response["capability_receipt"] = receipt
+        return response
+
+    def execute_task(run_id: str) -> None:
+        try:
+            run = orchestrator.advance(run_id)
+            if run.state == RunState.WAITING_CONFIRMATION:
+                orchestrator.cancel(run.id)
+                orchestrator.store.event(
+                    run.id,
+                    "task_surface_violation",
+                    {"reason": "confirmation_requested"},
+                )
+        except Exception as exc:
+            run = orchestrator.store.load(run_id)
+            if run is not None and run.state not in {
+                RunState.COMPLETED,
+                RunState.FAILED,
+                RunState.CANCELLED,
+            }:
+                run.state = RunState.FAILED
+                run.error = f"Task execution failed: {exc}"
+                orchestrator.store.save_with_event(
+                    run,
+                    "task_execution_failed",
+                    {"error": str(exc)},
+                )
 
     @router.post("/plan")
     async def preview(req: TaskPlanReq) -> dict[str, Any]:
@@ -259,9 +385,15 @@ def build_task_surface_router(
             response["capability_receipt"] = receipt
         return response
 
-    @router.post("/plans/{plan_id}/start")
+    @router.post("/plans/{plan_id}/start", status_code=202)
     def start(plan_id: str) -> dict[str, Any]:
         _readiness, current_binding = _require_readiness(readiness_provider)
+        if not execution_pool.reserve():
+            raise HTTPException(
+                status_code=503,
+                detail="all read-only task workers are busy; retry the same plan token",
+            )
+        reserved = True
         try:
             envelope = json.loads(plan_store.consume(plan_id))
             if envelope.get("task_surface") != TASK_SURFACE:
@@ -270,88 +402,103 @@ def build_task_surface_router(
             template = AgentRun.from_json(envelope["run"])
             stored_caps = CapabilitySnapshot(**envelope["capabilities"])
             stored_receipt = envelope.get("capability_receipt")
+
+            if stored_binding != current_binding:
+                raise HTTPException(
+                    status_code=409,
+                    detail="task readiness evidence changed; preview the task again",
+                )
+            _assert_readonly_template(template)
+
+            current_receipt: dict[str, Any] | None = None
+            if stored_receipt is not None:
+                if not isinstance(stored_receipt, dict):
+                    raise HTTPException(status_code=409, detail="stored capability receipt is invalid")
+                if capability_graph_provider is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="capability receipt validation is not mounted",
+                    )
+                if stored_receipt.get("plan_sha256") != agent_run_plan_sha256(template):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="stored capability receipt does not match the task plan",
+                    )
+                current_receipt = capability_receipt(template)
+                if current_receipt != stored_receipt:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="capability receipt is stale; preview the task again",
+                    )
+                if not bool(current_receipt.get("allowed", False)):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="task plan is blocked by current capabilities",
+                    )
+
+            caps = CapabilitySnapshot(
+                rig_reachable=stored_caps.rig_reachable,
+                worker_ready=stored_caps.worker_ready,
+                tools_ready=bool(adapter.tools.GATE.enabled and not adapter.tools.GATE.state_error),
+                cloud_ready=False,
+                rag_ready=False,
+                voice_ready=False,
+            )
+            route = orchestrator.router.route(template.request, caps)
+            run = AgentRun(
+                request=template.request,
+                route=route,
+                steps=[step.cloned_for_retry() for step in template.steps],
+                proactive=False,
+                allow_private_cloud=False,
+            )
+            _assert_readonly_template(run)
+            if len(run.steps) > orchestrator.max_steps:
+                raise HTTPException(status_code=409, detail="task plan exceeds the execution limit")
+
+            orchestrator.store.save_with_event(
+                run,
+                "run_created",
+                {"route": route.kind.value, "steps": len(run.steps)},
+            )
+            bound_payload: dict[str, Any] = {
+                "surface": TASK_SURFACE,
+                "readiness_binding": current_binding,
+            }
+            if current_receipt is not None:
+                bound_payload["capability_receipt"] = current_receipt
+            orchestrator.store.event(run.id, "task_surface_bound", bound_payload)
+            try:
+                execution_pool.submit_reserved(execute_task, run.id)
+            except Exception as exc:
+                orchestrator.cancel(run.id)
+                raise HTTPException(
+                    status_code=503,
+                    detail="read-only task executor is unavailable",
+                ) from exc
+            reserved = False
+            return task_response(run.id)
         except PlanStoreError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (KeyError, TypeError, json.JSONDecodeError, ValueError) as exc:
             raise HTTPException(status_code=409, detail="stored task plan is invalid") from exc
+        finally:
+            if reserved:
+                execution_pool.release_reserved()
 
-        if stored_binding != current_binding:
-            raise HTTPException(
-                status_code=409,
-                detail="task readiness evidence changed; preview the task again",
-            )
-        _assert_readonly_template(template)
+    @router.get("/runs/{run_id}")
+    def get_run(run_id: str) -> dict[str, Any]:
+        # Outcome visibility remains available if readiness later falls back to
+        # Agent 2. A running task must never disappear merely because its evidence
+        # expired between start and poll.
+        return task_response(run_id)
 
-        current_receipt: dict[str, Any] | None = None
-        if stored_receipt is not None:
-            if not isinstance(stored_receipt, dict):
-                raise HTTPException(status_code=409, detail="stored capability receipt is invalid")
-            if capability_graph_provider is None:
-                raise HTTPException(
-                    status_code=409,
-                    detail="capability receipt validation is not mounted",
-                )
-            if stored_receipt.get("plan_sha256") != agent_run_plan_sha256(template):
-                raise HTTPException(
-                    status_code=409,
-                    detail="stored capability receipt does not match the task plan",
-                )
-            current_receipt = capability_receipt(template)
-            if current_receipt != stored_receipt:
-                raise HTTPException(
-                    status_code=409,
-                    detail="capability receipt is stale; preview the task again",
-                )
-            if not bool(current_receipt.get("allowed", False)):
-                raise HTTPException(
-                    status_code=409,
-                    detail="task plan is blocked by current capabilities",
-                )
-
-        caps = CapabilitySnapshot(
-            rig_reachable=stored_caps.rig_reachable,
-            worker_ready=stored_caps.worker_ready,
-            tools_ready=bool(adapter.tools.GATE.enabled and not adapter.tools.GATE.state_error),
-            cloud_ready=False,
-            rag_ready=False,
-            voice_ready=False,
-        )
-        run = orchestrator.start_with_steps(
-            template.request,
-            caps,
-            [step.cloned_for_retry() for step in template.steps],
-            proactive=False,
-            allow_private_cloud=False,
-        )
-        # The normal task client has no confirmation route. This assertion catches
-        # any future policy drift that turns a promoted read into a parked write.
-        if run.state.value == "waiting_confirmation":
-            orchestrator.cancel(run.id)
-            raise HTTPException(
-                status_code=500,
-                detail="read-only task unexpectedly requested confirmation",
-            )
-        orchestrator.store.event(
-            run.id,
-            "task_surface_bound",
-            {
-                "surface": TASK_SURFACE,
-                "readiness_binding": current_binding,
-            },
-        )
-        response: dict[str, Any] = {
-            "task_surface": TASK_SURFACE,
-            "selected_surface": TASK_SURFACE,
-            "fallback_surface": "agent2",
-            "reason": TASK_REASON,
-            "run": json.loads(run.to_json()),
-            "events": orchestrator.store.events(run.id),
-            "readiness_binding": current_binding,
-            "production_activation": False,
-            "normal_chat_route_unchanged": True,
-        }
-        if current_receipt is not None:
-            response["capability_receipt"] = current_receipt
-        return response
+    @router.post("/runs/{run_id}/cancel")
+    def cancel(run_id: str) -> dict[str, Any]:
+        # Stop has the same rule as status: it must remain reachable after a
+        # readiness/operator change. task_context prevents access to generic runs.
+        task_context(run_id)
+        orchestrator.cancel(run_id)
+        return task_response(run_id)
 
     return router
