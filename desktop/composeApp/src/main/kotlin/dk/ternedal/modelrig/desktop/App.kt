@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -179,6 +180,8 @@ fun App() {
         // the evolved App(); AGENT/COMPUTER are the new cockpit/computer-use
         // screens; MODELS/DOCS/SETTINGS route to the existing panels.
         var activeScreen by remember { mutableStateOf(KalivScreen.CHAT) }
+        // Lifted so the title bar can show the mockup's live badge (1c).
+        var computerRunning by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
         var convId by remember { mutableStateOf<Long?>(null) }
 
@@ -365,7 +368,13 @@ fun App() {
                 KalivScreen.COMPUTER -> "\u2014 computer-use"
                 else -> "\u2014 lokal AI p\u00e5 din maskine"
             },
-            live = null,
+            // Mockup 1c: an amber "Kaliv styrer skærmen" badge sits next to the
+            // subtitle while a computer-use task is actually running.
+            live = if (activeScreen == KalivScreen.COMPUTER && computerRunning) {
+                "Kaliv styrer sk\u00e6rmen"
+            } else {
+                null
+            },
         )
         Row(Modifier.fillMaxWidth().weight(1f)) {
             if (activeScreen == KalivScreen.CHAT) {
@@ -435,6 +444,7 @@ fun App() {
                     bearer = deviceToken.ifBlank { null },
                     model = localModel,
                     system = localSystem.trim().takeIf { it.isNotEmpty() },
+                    onRunningChange = { computerRunning = it },
                 )
             } else {
             // Panel toggles live ABOVE the panels and are never pushed out of
@@ -498,6 +508,28 @@ fun App() {
                     val next = !toolsMode; persist("toolsMode", next.toString()) { toolsMode = next }
                 }
                 Spacer(Modifier.weight(1f))
+                // Mockup 1a puts a status readout at the right end of the
+                // toolbar ("● RIG · 512 tok/s"). The dot + backend is a real
+                // signal (which side served the last reply), so it is shown;
+                // the throughput figure is NOT -- the app does not measure it
+                // yet, and printing the mockup's 512 would be a made-up number
+                // sitting where a live one belongs.
+                lastSource?.let { src ->
+                    val onRig = src == ChatResult.Source.LOCAL
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.size(7.dp).clip(CircleShape)
+                                .background(if (onRig) KalivTheme.colors.Success else KalivTheme.colors.Amber),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (onRig) "RIG" else "CLOUD",
+                            color = KalivTheme.colors.TextMuted,
+                            fontSize = 11.5.sp,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                }
                 ToolbarChip("Handlingslog", filled = false) { showAudit = true }
                 Spacer(Modifier.width(8.dp))
                 ToolbarChip(if (darkMode) "Lys tilstand" else "M\u00f8rk tilstand", filled = false) {

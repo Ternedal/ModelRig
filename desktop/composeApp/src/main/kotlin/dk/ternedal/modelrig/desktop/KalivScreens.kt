@@ -1117,9 +1117,14 @@ fun KalivComputerUse(
     model: String,
     system: String?,
     modifier: Modifier = Modifier,
+    // The mockup puts "● Kaliv styrer skærmen" in the title bar while a task
+    // runs, so the shell needs to know the run state -- hence this callback
+    // rather than keeping runState entirely private.
+    onRunningChange: (Boolean) -> Unit = {},
 ) {
     var input by remember { mutableStateOf("") }
     var runState by remember { mutableStateOf(RunState.IDLE) }
+    LaunchedEffect(runState) { onRunningChange(runState == RunState.RUNNING) }
     var taskText by remember { mutableStateOf("") }
     val steps = remember { mutableStateListOf<UseStep>() }
     var pendingAction by remember { mutableStateOf<String?>(null) }
