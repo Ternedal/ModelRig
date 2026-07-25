@@ -7,8 +7,8 @@ En importgraf beviser at et *modul* kan nås; den siger intet om hvorvidt
 en *rute* serveres. En router kan bygges og aldrig inkluderes.
 
 - **Host-overflade (Agent 3 slukket): 34 ruter**
-- **Agent 3 tilføjer, når `KALIV_AGENT3_ENABLED=1`: 24 ruter**
-- I alt tændt: 58
+- **Agent 3 tilføjer, når `KALIV_AGENT3_ENABLED=1`: 25 ruter**
+- I alt tændt: 59
 
 ## Dormans-invariant
 
@@ -79,3 +79,4 @@ og ingen af dem findes i host-overfladen.
 - `/experimental/agent3/runs/{run_id}/resume`
 - `/experimental/agent3/runs/{run_id}/retry`
 - `/experimental/agent3/status`
+- `/experimental/agent3/task-readiness`
