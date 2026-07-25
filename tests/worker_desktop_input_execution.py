@@ -177,7 +177,7 @@ planner = DesktopActionPlanner(
     secret=b"Q" * 32,
     ttl_s=10,
     clock=lambda: clock[0],
-    nonce_factory=lambda size: b"R" * size,
+    nonce_factory=os.urandom,
 )
 click = DesktopAction(
     kind="click",
