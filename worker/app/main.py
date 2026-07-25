@@ -17,9 +17,6 @@ import sys as _sys
 
 from . import main_impl as _impl
 from .browser_research_tool import register_browser_research_tool as _register_browser_research_tool
-from .desktop_screenshot_tool import (
-    register_desktop_screenshot_tool as _register_desktop_screenshot_tool,
-)
 
 VERSION = "1.58.145"
 _impl.VERSION = VERSION
@@ -42,6 +39,12 @@ if _os.getenv("KALIV_COMPUTER_USE", "0").strip().lower() in {
     "true",
     "on",
 }:
+    # Lazy on purpose: with the flag off, normal worker startup imports neither
+    # the screenshot tool nor the Win32 ABI adapter.
+    from .desktop_screenshot_tool import (
+        register_desktop_screenshot_tool as _register_desktop_screenshot_tool,
+    )
+
     _register_desktop_screenshot_tool()
 
 # Return the implementation module for every import of app.main. This preserves
