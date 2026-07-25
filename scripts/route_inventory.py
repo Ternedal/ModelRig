@@ -48,7 +48,7 @@ sys.path.insert(0, "worker")
 from app import main
 if os.environ.get("PROBE_AGENT3") == "1":
     os.environ["KALIV_AGENT3_ENABLED"] = "1"
-    from app.agent3.api import mount_agent3
+    from app.agent3.production_mount import mount_agent3
     mount_agent3(main.app)
     main.app.openapi_schema = None
 print(json.dumps(sorted(main.app.openapi().get("paths", {}))))
