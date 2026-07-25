@@ -1,4 +1,4 @@
-"""Fresh-process wiring contract for the dormant desktop screenshot capability."""
+"""Fresh-process wiring contract for dormant Computer Use see/preview capabilities."""
 from __future__ import annotations
 
 import json
@@ -30,10 +30,13 @@ sys.path.insert(0,{str(WORKER)!r})
 import app.main
 from app import tools
 print('DESKTOP_ENTRYPOINT=' + json.dumps({{
-    'registered': 'desktop_screenshot' in tools.REGISTRY,
+    'screenshot': 'desktop_screenshot' in tools.REGISTRY,
+    'preview': 'desktop_action_preview' in tools.REGISTRY,
     'click': 'desktop_click' in tools.REGISTRY,
     'type': 'desktop_type' in tools.REGISTRY,
-    'tool_module': 'app.desktop_screenshot_tool' in sys.modules,
+    'screenshot_module': 'app.desktop_screenshot_tool' in sys.modules,
+    'preview_module': 'app.desktop_action_preview_tool' in sys.modules,
+    'plan_module': 'app.desktop_action_plan' in sys.modules,
     'vision_module': 'app.desktop_vision_bridge' in sys.modules,
     'vision_wrapped': bool(getattr(app.main._run_tool_loop, '_kaliv_desktop_vision_bridge', False)),
     'win32_module': 'app.desktop_win32' in sys.modules or 'app.desktop_win32_v2' in sys.modules,
@@ -81,13 +84,15 @@ with tempfile.TemporaryDirectory(prefix="kaliv-desktop-entrypoint-") as tmp:
     on = probe(enabled)
 
 check(not off.get("process_failed") and not off.get("protocol_failed"), "default worker starts cleanly")
-check(off.get("registered") is False, "feature-off startup does not register desktop screenshot")
-check(off.get("tool_module") is False, "feature-off startup does not import the screenshot module")
+check(off.get("screenshot") is False and off.get("preview") is False, "feature-off startup registers no desktop capability")
+check(off.get("screenshot_module") is False, "feature-off startup does not import the screenshot module")
+check(off.get("preview_module") is False and off.get("plan_module") is False, "feature-off startup imports neither preview nor action-plan substrate")
 check(off.get("vision_module") is False and off.get("vision_wrapped") is False, "feature-off startup does not import or install the vision bridge")
 check(off.get("win32_module") is False, "feature-off startup does not bind or import the Win32 adapter")
 check(not on.get("process_failed") and not on.get("protocol_failed"), "feature-on worker starts cleanly")
-check(on.get("registered") is True, "explicit flag registers desktop screenshot at startup")
-check(on.get("tool_module") is True and on.get("win32_module") is True, "feature-on startup loads only the intended desktop boundary")
+check(on.get("screenshot") is True and on.get("preview") is True, "explicit flag registers screenshot and non-executing preview")
+check(on.get("screenshot_module") is True and on.get("preview_module") is True and on.get("plan_module") is True, "feature-on startup loads the intended see/preview boundary")
+check(on.get("win32_module") is True, "feature-on startup loads the foreground capture adapter")
 check(on.get("vision_module") is True and on.get("vision_wrapped") is True, "feature-on startup installs the local vision continuation")
 check(on.get("click") is False and on.get("type") is False, "startup still registers no click or type capability")
 
