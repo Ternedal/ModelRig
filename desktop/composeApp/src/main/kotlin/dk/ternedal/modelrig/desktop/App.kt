@@ -144,6 +144,7 @@ fun App() {
         var toolsMode by remember { mutableStateOf(db.getSetting("toolsMode") == "true") }
         var pendingCard by remember { mutableStateOf<ToolTurn?>(null) }
         var showAudit by remember { mutableStateOf(false) }
+        var showControlCenter by remember { mutableStateOf(false) }
         var auditRows by remember { mutableStateOf(listOf<AuditEntry>()) }
         var auditError by remember { mutableStateOf<String?>(null) }
         var pairStatus by remember { mutableStateOf<String?>(null) }
@@ -418,6 +419,12 @@ fun App() {
                     val next = !toolsMode; persist("toolsMode", next.toString()) { toolsMode = next }
                 }
                 Spacer(Modifier.weight(1f))
+                ToolbarChip(
+                    "Control Center",
+                    enabled = deviceToken.isNotBlank(),
+                    filled = false,
+                ) { showControlCenter = true }
+                Spacer(Modifier.width(8.dp))
                 ToolbarChip("Handlingslog", filled = false) { showAudit = true }
                 Spacer(Modifier.width(8.dp))
                 ToolbarChip(if (darkMode) "Lys tilstand" else "M\u00f8rk tilstand", filled = false) {
@@ -599,6 +606,14 @@ fun App() {
                 text = { Text(card.summary.ifBlank { card.tool }) },
                 confirmButton = { Button(onClick = { decide(true) }) { Text("Godkend") } },
                 dismissButton = { OutlinedButton(onClick = { decide(false) }) { Text("Afvis") } },
+            )
+        }
+
+        if (showControlCenter) {
+            DesktopControlCenterDialog(
+                baseUrl = localUrl,
+                token = deviceToken,
+                onDismiss = { showControlCenter = false },
             )
         }
 
