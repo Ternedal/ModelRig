@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -30,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.data.TokenStore
+import dk.ternedal.modelrig.net.Agent3TaskReadinessClient
 import dk.ternedal.modelrig.net.Agent3ValidationClient
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
@@ -37,20 +37,21 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
-/** Developer-only, read-only promotion evidence view. */
+/** Developer-only, read-only promotion and task-surface evidence view. */
 @Composable
 fun Agent3ValidationScreen(store: TokenStore, onClose: () -> Unit) {
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf<Agent3ValidationClient.Status?>(null) }
+    var readiness by remember { mutableStateOf<Agent3TaskReadinessClient.Readiness?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    fun client(): Agent3ValidationClient {
+    fun connection(): Pair<String, String> {
         val base = store.baseUrl?.takeIf { it.isNotBlank() }
             ?: error("Ingen rig-URL er gemt")
         val token = store.token?.takeIf { it.isNotBlank() }
             ?: error("Ingen device-token er gemt")
-        return Agent3ValidationClient(base, token)
+        return base to token
     }
 
     fun refresh() {
@@ -58,10 +59,18 @@ fun Agent3ValidationScreen(store: TokenStore, onClose: () -> Unit) {
         busy = true
         error = null
         scope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { client().status() } }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val (base, token) = connection()
+                    Agent3ValidationClient(base, token).status() to
+                        Agent3TaskReadinessClient(base, token).readiness()
+                }
+            }
             busy = false
-            result.onSuccess { status = it }
-                .onFailure { error = it.message ?: "Valideringsstatus kunne ikke hentes" }
+            result.onSuccess {
+                status = it.first
+                readiness = it.second
+            }.onFailure { error = it.message ?: "Valideringsstatus kunne ikke hentes" }
         }
     }
 
@@ -83,7 +92,7 @@ fun Agent3ValidationScreen(store: TokenStore, onClose: () -> Unit) {
                         color = KalivTheme.colors.textHigh,
                     )
                     Text(
-                        "Read-only promotionsstatus · ingen aktivering",
+                        "Read-only promotionsstatus · ingen klientstyret routing",
                         fontSize = 12.sp,
                         color = KalivTheme.colors.textMuted,
                     )
@@ -101,8 +110,9 @@ fun Agent3ValidationScreen(store: TokenStore, onClose: () -> Unit) {
                     )
                     Spacer(Modifier.height(5.dp))
                     Text(
-                        "Denne skærm kan kun læse den redigerede promotionsvurdering. " +
-                            "Den kan ikke vælge en rapport, godkende tools eller åbne normal chat-routing.",
+                        "Denne skærm kan kun læse validation og serverens valgte task-surface. " +
+                            "Den kan ikke vælge en rapport, starte et run, godkende tools eller " +
+                            "ændre normal chat-routing.",
                         color = KalivTheme.colors.textMuted,
                         fontSize = 12.sp,
                     )
@@ -125,6 +135,11 @@ fun Agent3ValidationScreen(store: TokenStore, onClose: () -> Unit) {
                 }
             }
 
+            readiness?.let {
+                Spacer(Modifier.height(12.dp))
+                TaskReadinessCard(it)
+            }
+
             status?.let {
                 Spacer(Modifier.height(12.dp))
                 ValidationSummaryCard(it)
@@ -140,6 +155,52 @@ fun Agent3ValidationScreen(store: TokenStore, onClose: () -> Unit) {
             }
 
             Spacer(Modifier.height(28.dp))
+        }
+    }
+}
+
+@Composable
+private fun TaskReadinessCard(readiness: Agent3TaskReadinessClient.Readiness) {
+    val headline = when {
+        readiness.agent3ReadonlySelected -> "Read-only taskflade valgt af serveren"
+        readiness.eligibleForTaskUi -> "Evidens klar · operatørkontakt slukket"
+        else -> "Taskflade falder tilbage til Agent 2"
+    }
+    val headlineColor = when {
+        readiness.agent3ReadonlySelected -> KalivTheme.colors.success
+        readiness.eligibleForTaskUi -> KalivTheme.colors.signal
+        else -> KalivTheme.colors.amber
+    }
+
+    Surface(color = KalivTheme.colors.surface, shape = RoundedCornerShape(14.dp)) {
+        Column(Modifier.fillMaxWidth().padding(14.dp)) {
+            Text(headline, color = headlineColor, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            StatusRow("Servervalgt surface", readiness.selectedSurface)
+            StatusRow("Kandidat", readiness.candidateSurface)
+            StatusRow("Fallback", readiness.fallbackSurface)
+            StatusRow("Serverårsag", readiness.reason)
+            StatusRow(
+                "Pilot-tasks",
+                readiness.pilot.successes?.let { "$it/${readiness.pilot.tasks}" } ?: "ukendt",
+            )
+            StatusRow("Replans", readiness.pilot.replans?.toString() ?: "ukendt")
+            StatusRow("Retry-events", readiness.pilot.retryEvents?.toString() ?: "ukendt")
+            Spacer(Modifier.height(8.dp))
+            GateRow("Task-UI-evidens gyldig", readiness.eligibleForTaskUi)
+            GateRow("Operatørkontakt slået til", readiness.operatorEnabled)
+            GateRow("Pilot frisk", readiness.pilot.fresh)
+            GateRow("Version matcher", readiness.pilot.versionMatch)
+            GateRow("Kode matcher", readiness.pilot.codeMatch)
+            GateRow("Stop + fallback bevist", readiness.pilot.stopFallbackProven)
+            GateRow("Normal chat urørt", readiness.normalChatRouteUnchanged)
+            GateRow("Produktion stadig låst", !readiness.productionActivation)
+            if (readiness.reasons.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                readiness.reasons.distinct().forEach {
+                    Text("• $it", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
+                }
+            }
         }
     }
 }
