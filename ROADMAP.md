@@ -176,9 +176,44 @@ manuelle trin efter genstart.
 
 ## Åbne beslutninger (kræver Anders)
 
-- **D3 — Write-invariant:** skal modelsletning m.m. også bag en server-side gate, eller
-  forbliver det klient-bekræftet? (Præcisér invarianten uanset.)
-- **D4 — Cloud-voice privacy:** regel for RAG-kontekst + auto-cloud før nogen automatisk routing.
+- **Research-sporet:** `research_contract` + `research_egress` +
+  `research_peer_binding` (1.564 linjer, 8 testfiler, nul produktionskaldere) er
+  en **vedtaget tillidsgrænse uden adapter** — modulets egen docstring siger at
+  en fremtidig BrowserUse/Playwright/HTTP-adapter skal opfylde kontrakten *i
+  stedet for selv at definere hvor grænsen går*. Beslutning: markér statussen i
+  koden, så den ikke læses som forfald. (Ikke: om den skal skæres væk — man
+  skærer ikke en tillidsgrænse væk fordi den mangler en bruger.)
+- **1.0:** anbefaling er at tagge `v1.0.0` på `1.58.146` umiddelbart efter
+  rig-dagen. 1.0 har konsistent betydet *"apparatet er bevist på hardware"* i
+  hele roadmap'en, og det er præcis hvad rig-dagen afgør.
+
+*Afgjort 25/7-2026:*
+
+**D3 — Write-invariant: klient-bekræftelse bevares på bruger-admin-stien.**
+Der er to veje til en destruktiv handling, og de er bevidst forskellige:
+*model-initierede* writes går gennem ToolGate og kræver et bekræftelseskort
+(`requires_confirmation`: `risk in ("write","desktop")`); *eksplicitte
+bruger-admin-kald* (`DELETE /api/v1/models/delete`) er bearer + klient-bekræftede.
+Invarianten skrevet ud: **server-side gates beskytter mod at MODELLEN handler
+uden dig — ikke mod at nogen har dit enhedstoken.** Tokenet ér autorisationen
+for dine egne admin-handlinger; rotation er svaret på et lækket token. En
+server-gate på brugerstien ville tilføje friktion mod den forkerte trussel: har
+nogen dit token, er slettede modeller ikke det største problem — de kan læse
+dine dokumenter gennem RAG. **Genbesøges hvis appen distribueres bredere end én
+ejer.** Se `SECURITY.md`.
+
+**D4 — Automatisk routing må ALDRIG sende RAG-kontekst til en cloud-model.**
+Reglen gælder en feature der ikke findes endnu (auto lokal/cloud-routing;
+`ChatRouter.autoFallback` er `false`, og `autoCloudFallback` er off som default
+i begge klienter). Samtykke kan kun komme fra to steder: eksplicit
+`allow_rag_cloud` på requesten, eller operatørens `KALIV_ALLOW_RAG_CLOUD`. **En
+router må aldrig være den tredje.** Begrundelse: produktet bæres af *"lyd
+forlader aldrig huset"*, og dens søster er *"dine dokumenter forlader ikke huset
+uden at du siger ja"* — en automatisk router er per definition et sted hvor du
+ikke sagde ja. Konsekvensen accepteres bevidst: matcher RAG, bliver turen lokal,
+også når det er langsommere. **Håndhævet som test**
+(`tests/worker_d4_auto_routing.py`), ikke kun som prosa — en regel der kun står
+i et dokument driver, og den her ville drive mod "det var vel også i orden".
 
 *Afgjort 13/7-2026: **D1** keystore = risiko accepteret (`SECURITY.md`) · **D2** VERSION-kilde
 + CI-gate = leveret · **D5** dokumentstruktur = lean (denne fil + `STATUS.md` + `SECURITY.md`)

@@ -141,6 +141,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_browser_use_runtime_guard.py`
 - `tests/worker_build_identity.py`
 - `tests/worker_confirmation_impact.py`
+- `tests/worker_d4_auto_routing.py`
 - `tests/worker_desktop_policy.py`
 - `tests/worker_eval.py`
 - `tests/worker_hardening.py`
