@@ -2,8 +2,8 @@
 
 The contract module can be perfectly tested and still be absent from the app a
 rig actually serves. This suite imports ``app.entrypoint`` in fresh processes,
-checks the real route table, calls the endpoint, and proves feature-off dormancy
-plus idempotent mounting.
+checks the real route table, calls the guarded production app, and proves
+feature-off dormancy plus idempotent mounting.
 """
 from __future__ import annotations
 
@@ -35,12 +35,12 @@ from fastapi.testclient import TestClient
 import app.entrypoint as entrypoint
 from app.agent3.production_mount import mount_agent3
 
-app = entrypoint.fastapi_app
-first = mount_agent3(app)
-second = mount_agent3(app)
+routing_app = entrypoint.fastapi_app
+first = mount_agent3(routing_app)
+second = mount_agent3(routing_app)
 
 pairs = []
-for route in app.routes:
+for route in routing_app.routes:
     if type(route).__name__ == "_IncludedRouter":
         original = getattr(route, "original_router", None)
         if original is not None:
@@ -56,22 +56,34 @@ for route in app.routes:
                 pairs.append(method + " " + path)
 
 route = "/experimental/agent3/task-readiness"
-paths = set(app.openapi().get("paths", {}))
+paths = set(routing_app.openapi().get("paths", {}))
 payload = None
 status = None
+raw = None
 if route in paths:
-    response = TestClient(app).get(route)
+    # Production serves the hardened outer ASGI app, not the inner FastAPI
+    # object whose route table is inspected above. Exercising the inner object
+    # directly measures a test-only surface and can bypass wrapper semantics.
+    response = TestClient(
+        entrypoint.app,
+        raise_server_exceptions=False,
+    ).get(route)
     status = response.status_code
-    payload = response.json()
+    raw = response.text[:1000]
+    try:
+        payload = response.json()
+    except Exception:
+        payload = None
 
 print(json.dumps({
     "first": first,
     "second": second,
-    "mounted": getattr(app.state, "agent3_task_readiness_mounted", False),
+    "mounted": getattr(routing_app.state, "agent3_task_readiness_mounted", False),
     "route_present": route in paths,
     "route_count": pairs.count("GET " + route),
     "status": status,
     "payload": payload,
+    "raw": raw,
 }))
 """
 
@@ -120,16 +132,18 @@ check(on["mounted"] is True and on["route_present"] is True,
 check(on["route_count"] == 1,
       "repeated mounting creates exactly one GET task-readiness route")
 check(on["status"] == 200,
-      "the mounted readiness endpoint is callable without invoking a model or tool")
+      "the guarded readiness endpoint is callable without invoking a model or "
+      f"tool (status={on['status']}, body={on['raw']!r})")
 payload = on["payload"] or {}
 check(payload.get("schema") == "kaliv-agent3-task-readiness/v1",
-      "the production route returns the typed readiness schema")
+      f"the production route returns the typed readiness schema (payload={payload!r})")
 check(payload.get("selected_surface") == "agent2"
       and payload.get("reason") == "pilot_report_path_not_configured",
-      "missing physical evidence fails closed to Agent 2")
+      f"missing physical evidence fails closed to Agent 2 (payload={payload!r})")
 check(payload.get("production_activation") is False
       and payload.get("normal_chat_route_unchanged") is True,
-      "mounting readiness cannot activate production or change normal chat")
+      f"mounting readiness cannot activate production or change normal chat "
+      f"(payload={payload!r})")
 
 off = probe("0")
 check(off["first"] is False and off["second"] is False,
