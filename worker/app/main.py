@@ -40,11 +40,15 @@ if _os.getenv("KALIV_COMPUTER_USE", "0").strip().lower() in {
     "on",
 }:
     # Lazy on purpose: with the flag off, normal worker startup imports neither
-    # the screenshot tool nor the Win32 ABI adapter.
+    # the screenshot/vision tools nor the Win32 ABI adapter.
     from .desktop_screenshot_tool import (
         register_desktop_screenshot_tool as _register_desktop_screenshot_tool,
     )
+    from .desktop_vision_bridge import (
+        install_desktop_vision_bridge as _install_desktop_vision_bridge,
+    )
 
+    _install_desktop_vision_bridge(_impl)
     _register_desktop_screenshot_tool()
 
 # Return the implementation module for every import of app.main. This preserves
