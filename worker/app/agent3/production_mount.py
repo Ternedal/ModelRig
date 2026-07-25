@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI
 
 from .. import paths as _paths
@@ -12,7 +14,18 @@ from .task_readiness import (
     build_task_readiness_router,
     evaluate_configured_task_readiness,
 )
-from .task_surface import build_task_surface_router
+from .task_surface import TaskExecutionPool, build_task_surface_router
+
+
+def _task_workers() -> int:
+    raw = os.getenv("KALIV_AGENT3_TASK_WORKERS", "2")
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError("KALIV_AGENT3_TASK_WORKERS must be an integer") from exc
+    if value < 1 or value > 8:
+        raise RuntimeError("KALIV_AGENT3_TASK_WORKERS must be between 1 and 8")
+    return value
 
 
 def mount_agent3(app: FastAPI) -> bool:
@@ -56,6 +69,7 @@ def mount_agent3(app: FastAPI) -> bool:
         env="KALIV_AGENT3_TASK_PLAN_DB",
     )
     task_plan_store = PlanStore(str(task_plan_path))
+    execution_pool = TaskExecutionPool(_task_workers())
 
     def graph_provider():
         return build_runtime_capability_graph(
@@ -69,9 +83,11 @@ def mount_agent3(app: FastAPI) -> bool:
             orchestrator,
             task_plan_store,
             readiness_provider,
+            execution_pool,
             capability_graph_provider=graph_provider,
         )
     )
     app.state.agent3_task_plan_store = task_plan_store
+    app.state.agent3_task_execution_pool = execution_pool
     app.state.agent3_task_surface_mounted = True
     return True
