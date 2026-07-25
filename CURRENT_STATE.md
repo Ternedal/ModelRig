@@ -158,6 +158,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_build_identity.py`
 - `tests/worker_capability_schema_v2.py`
 - `tests/worker_data_sharing_policy.py`
+- `tests/worker_desktop_action_plan.py`
 - `tests/worker_desktop_contract.py`
 - `tests/worker_desktop_policy.py`
 - `tests/worker_desktop_screenshot_entrypoint.py`
