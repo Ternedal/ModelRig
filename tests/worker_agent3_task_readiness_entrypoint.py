@@ -2,8 +2,8 @@
 
 The contract module can be perfectly tested and still be absent from the app a
 rig actually serves. This suite imports ``app.entrypoint`` in fresh processes,
-checks the real route table, calls the guarded production app from loopback, and
-proves feature-off dormancy plus idempotent mounting.
+checks the real route table, calls the guarded production app from a real ASGI
+loopback peer, and proves feature-off dormancy plus idempotent mounting.
 """
 from __future__ import annotations
 
@@ -30,8 +30,9 @@ def check(cond: bool, label: str) -> None:
 
 
 PROBE = r"""
+import asyncio
 import json
-from fastapi.testclient import TestClient
+import httpx
 import app.entrypoint as entrypoint
 from app.agent3.production_mount import mount_agent3
 
@@ -60,16 +61,23 @@ paths = set(routing_app.openapi().get("paths", {}))
 payload = None
 status = None
 raw = None
-if route in paths:
-    # Production serves the hardened outer ASGI app, not the inner FastAPI
-    # object whose route table is inspected above. The real worker is loopback-
-    # only, so the probe must also originate from loopback rather than TestClient's
-    # default synthetic host ("testclient"), which the netguard correctly rejects.
-    response = TestClient(
-        entrypoint.app,
+
+async def request():
+    # Production serves the hardened outer ASGI app. The netguard checks the
+    # actual ASGI peer, not the Host header; ASGITransport is the proven way the
+    # existing worker entrypoint suite supplies a genuine loopback client.
+    transport = httpx.ASGITransport(
+        app=entrypoint.app,
+        client=("127.0.0.1", 54321),
+    )
+    async with httpx.AsyncClient(
+        transport=transport,
         base_url="http://127.0.0.1",
-        raise_server_exceptions=False,
-    ).get(route)
+    ) as client:
+        return await client.get(route)
+
+if route in paths:
+    response = asyncio.run(request())
     status = response.status_code
     raw = response.text[:1000]
     try:
