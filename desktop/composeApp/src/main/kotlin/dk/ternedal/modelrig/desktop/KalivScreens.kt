@@ -937,7 +937,7 @@ private fun AgentBubble(role: String, text: String) {
 }
 
 @Composable
-private fun AgentComposer(value: String, onValue: (String) -> Unit, enabled: Boolean, placeholder: String, onSend: () -> Unit) {
+internal fun AgentComposer(value: String, onValue: (String) -> Unit, enabled: Boolean, placeholder: String, onSend: () -> Unit) {
     Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.fillMaxWidth()) {
         OutlinedTextField(
             value = value,
@@ -1032,7 +1032,7 @@ private fun PlanRow(
 }
 
 @Composable
-private fun StatusCircle(index: Int, status: StepStatus) {
+internal fun StatusCircle(index: Int, status: StepStatus) {
     val size = 26
     when (status) {
         StepStatus.DONE -> Box(

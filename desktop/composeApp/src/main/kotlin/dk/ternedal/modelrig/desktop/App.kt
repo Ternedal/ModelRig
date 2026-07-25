@@ -182,6 +182,9 @@ fun App() {
         var activeScreen by remember { mutableStateOf(KalivScreen.CHAT) }
         // Lifted so the title bar can show the mockup's live badge (1c).
         var computerRunning by remember { mutableStateOf(false) }
+        // Developer opt-in, persisted, default OFF: routes the AGENT screen to
+        // the Agent 3 cockpit instead of the V2 tools loop.
+        var agent3Cockpit by remember { mutableStateOf(db.getSetting("agent3Cockpit") == "true") }
         val scope = rememberCoroutineScope()
         var convId by remember { mutableStateOf<Long?>(null) }
 
@@ -432,12 +435,27 @@ fun App() {
             // entirely; they carry their own composers and lifecycle. The chat
             // screen (1a) keeps the existing toolbar + message list + composer.
             if (activeScreen == KalivScreen.AGENT) {
-                KalivAgentCockpit(
-                    baseUrl = localUrl,
-                    bearer = deviceToken.ifBlank { null },
-                    model = localModel,
-                    system = localSystem.trim().takeIf { it.isNotEmpty() },
-                )
+                // Two cockpits, one screen. The Agent 3 one is the surface the
+                // design actually describes -- it is the only one that can know
+                // a plan's total up front -- but Agent 3 is still served behind
+                // KALIV_AGENT3_ENABLED, sits under /experimental/, and the
+                // readiness page refuses activation without a physical report.
+                // So it is opt-in per Sol's line: build 1b against Agent 3 now,
+                // as a developer cockpit; do not move normal chat off V2 until
+                // the rig has validated it and Anders activates it explicitly.
+                if (agent3Cockpit) {
+                    KalivAgentCockpitA3(
+                        baseUrl = localUrl,
+                        bearer = deviceToken.ifBlank { null },
+                    )
+                } else {
+                    KalivAgentCockpit(
+                        baseUrl = localUrl,
+                        bearer = deviceToken.ifBlank { null },
+                        model = localModel,
+                        system = localSystem.trim().takeIf { it.isNotEmpty() },
+                    )
+                }
             } else if (activeScreen == KalivScreen.COMPUTER) {
                 KalivComputerUse(
                     baseUrl = localUrl,
@@ -610,6 +628,11 @@ fun App() {
                                 }
                             },
                             pairStatus = pairStatus,
+                            agent3Cockpit = agent3Cockpit,
+                            onAgent3Cockpit = {
+                                agent3Cockpit = it
+                                db.putSetting("agent3Cockpit", it.toString())
+                            },
                         )
                         Spacer(Modifier.height(8.dp))
                     }
@@ -1122,6 +1145,7 @@ private fun SettingsCard(
     db: DesktopChatDb,
     onPair: () -> Unit,
     pairStatus: String?,
+    agent3Cockpit: Boolean, onAgent3Cockpit: (Boolean) -> Unit,
 ) {
     Box(Modifier.clip(RoundedCornerShape(12.dp)).background(KalivTheme.colors.Surface).fillMaxWidth().padding(14.dp)) {
         Column {
@@ -1138,6 +1162,20 @@ private fun SettingsCard(
             Field("System-instruktion, lokal (valgfri)", localSystem, onLocalSystem)
             PresetRow(db, "rig", localSystem, onLocalSystem)
             Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                PillToggle(agent3Cockpit) { onAgent3Cockpit(!agent3Cockpit) }
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text("Agent-skaerm bruger Agent 3 (udvikler)", color = KalivTheme.colors.TextHigh, fontSize = 13.sp)
+                    Text(
+                        "Agent 3 kender hele planen paa forhaand. Kraever KALIV_AGENT3_ENABLED=1 " +
+                            "paa riggen; normal chat bliver paa V2 uanset.",
+                        color = KalivTheme.colors.TextMuted, fontSize = 11.sp,
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
             Text("Ollama Cloud-fallback", color = KalivTheme.colors.Amber, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
             Field("OLLAMA_API_KEY", cloudKey, onCloudKey)
