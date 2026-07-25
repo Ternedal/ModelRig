@@ -307,7 +307,7 @@ fun KalivAgentCockpitA3(
  * not recognised is treated as still in flight, never as finished. Guessing in
  * the other direction would let the UI claim work completed that did not.
  */
-private fun isTerminal(state: String?): Boolean = when (state?.lowercase()) {
+internal fun isTerminal(state: String?): Boolean = when (state?.lowercase()) {
     "done", "completed", "succeeded", "success",
     "denied", "cancelled", "canceled", "failed", "error",
     "completed_after_cancel",
@@ -315,7 +315,7 @@ private fun isTerminal(state: String?): Boolean = when (state?.lowercase()) {
     else -> false
 }
 
-private fun statusOf(step: Agent3Step, isCurrent: Boolean): StepStatus =
+internal fun statusOf(step: Agent3Step, isCurrent: Boolean): StepStatus =
     when (step.state?.lowercase()) {
         "done", "completed", "succeeded", "success" -> StepStatus.DONE
         "denied", "cancelled", "canceled", "failed", "error" -> StepStatus.CANCELLED
