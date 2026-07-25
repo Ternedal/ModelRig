@@ -50,6 +50,30 @@ git checkout 8e40103          # detached — det er meningen
 4. **Stop.** PR #161 siger det selv: *"Only after a separate explicit decision
    may the exact SHA be fast-forwarded, tagged and released."*
 
+### T-006 forced recovery — ét dobbeltklik, ~2 minutter
+
+**`START_FORCED_RECOVERY.cmd`** (ligger på main; kør den fra 1.58.146-checkouten
+i pas 2, ikke fra kandidaten — den findes ikke dér).
+
+Den kører hele forsøget selv: starter en proces, lader den claime en occurrence,
+**dræber den hårdt** med `taskkill /F`, genstarter hurtigt, venter lease-TTL'en
+ud, genstarter igen, og printer en dom. Du skal ikke gøre noget undervejs.
+
+Riggens egne schedules, jobs og audit røres **ikke** — alt kører i en
+midlertidig mappe der slettes bagefter.
+
+Forventet: **6/6 OK**. Den vigtigste linje er den næstsidste:
+
+```
+lease-vinduet er reelt: en genstart inden for 90s springer recovery over
+```
+
+Det er ikke en fejl — det er beskyttelsen mod at afskrive en *levende* workers
+kørsler. Men det betyder at en worker der dør og genstartes med det samme først
+får afklaret sin occurrence ved **næste** opstart. Kørt på Linux 25/7 (6/6);
+Windows-kørslen er det der mangler, fordi fillåse og NTFS opfører sig anderledes
+under abrupt død.
+
 ### Når du beslutter at promovere
 
 ```powershell
