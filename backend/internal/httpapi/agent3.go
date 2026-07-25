@@ -43,6 +43,13 @@ func (s *server) handleAgent3Status(w http.ResponseWriter, r *http.Request) {
 	s.Worker.Forward(w, r, agent3Target(r, "/experimental/agent3/status"))
 }
 
+func (s *server) handleAgent3TaskReadiness(w http.ResponseWriter, r *http.Request) {
+	// Observational and read-only. The worker owns the evidence evaluation and
+	// surface decision; this authenticated gateway cannot invoke a model/tool,
+	// alter normal chat or activate production.
+	s.Worker.Forward(w, r, agent3Target(r, "/experimental/agent3/task-readiness"))
+}
+
 func (s *server) handleAgent3Capabilities(w http.ResponseWriter, r *http.Request) {
 	// The graph is observational only: it cannot route, enable tools or promote Agent 3.0.
 	s.Worker.Forward(w, r, agent3Target(r, "/experimental/agent3/capabilities"))
