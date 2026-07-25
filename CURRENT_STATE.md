@@ -34,6 +34,7 @@ gate enforces another.
 | Env | Default |
 |---|---|
 | `KALIV_AGENT3_ENABLED` | `0` |
+| `KALIV_AGENT3_TASK_WORKERS` | `2` |
 | `KALIV_ALLOW_RAG_CLOUD` | `` |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` |
 | `KALIV_DATA_DIR` | `(unset)` |
