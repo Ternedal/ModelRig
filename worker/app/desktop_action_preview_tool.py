@@ -14,17 +14,19 @@ from typing import Any
 
 from . import desktop_action_preview_tool_legacy as _impl
 
+_ORIGINAL_DESKTOP_DENIED = _impl.DesktopDenied
+
 
 class _PreviewDenied(
-    _impl.DesktopDenied,
+    _ORIGINAL_DESKTOP_DENIED,
     _impl.DesktopActionPreviewConfigurationError,
 ):
     """One fail-closed preview refusal visible through both public contracts."""
 
 
-# Legacy functions resolve DesktopDenied through their module globals at call time.
-# Use one dual-contract refusal class so direct preview guards and ToolGate wrappers
-# preserve the same identity the original single-module implementation exposed.
+# Legacy preview functions resolve DesktopDenied through their module globals at
+# call time. Use one dual-contract refusal class for those paths while retaining
+# the original base so refusals raised by desktop_action_plan are caught too.
 _impl.DesktopDenied = _PreviewDenied
 
 
@@ -134,7 +136,7 @@ def _install_gate_extensions(tools_module: Any) -> None:
                         "desktop preview produced no trusted audit projection"
                     )
             except (
-                _impl.DesktopDenied,
+                _ORIGINAL_DESKTOP_DENIED,
                 _impl.DesktopActionPreviewConfigurationError,
             ) as exc:
                 self.audit.record(
