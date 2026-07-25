@@ -1,0 +1,69 @@
+name: fix-desktop-preview-closure
+
+on:
+  push:
+    branches:
+      - agent/browser-computer-use-v1
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: agent/browser-computer-use-v1
+          fetch-depth: 0
+
+      - name: Fix independent ToolGate closure bindings
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('worker/app/desktop_action_preview_tool.py')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = (
+              (
+                  '        previous_execute = execute\n\n        def bind_screenshot(',
+                  '        previous_bind_execute = execute\n\n        def bind_screenshot(',
+              ),
+              (
+                  '            result = previous_execute(self, tool, args, conv, cid, origin)\n            if getattr(tool, "name", None) == SCREENSHOT_TOOL:',
+                  '            result = previous_bind_execute(self, tool, args, conv, cid, origin)\n            if getattr(tool, "name", None) == SCREENSHOT_TOOL:',
+              ),
+              (
+                  '        previous_execute = execute\n\n        def confirmed_preview(',
+                  '        previous_preview_execute = execute\n\n        def confirmed_preview(',
+              ),
+              (
+                  '                return previous_execute(self, tool, args, conv, cid, origin)\n            if not cid or origin != "local":',
+                  '                return previous_preview_execute(self, tool, args, conv, cid, origin)\n            if not cid or origin != "local":',
+              ),
+          )
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one match, found {count}: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          python3 -m py_compile worker/app/desktop_action_preview_tool.py
+          PYTHONPATH=worker python3 tests/worker_desktop_action_preview_tool.py
+
+      - name: Commit proven fix and remove one-shot workflow
+        shell: bash
+        run: |
+          rm .github/workflows/fix-desktop-preview-closure.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add worker/app/desktop_action_preview_tool.py .github/workflows/fix-desktop-preview-closure.yml
+          git commit -m "desktop: fix preview gate closure recursion"
+          git push origin HEAD:agent/browser-computer-use-v1
