@@ -2,8 +2,8 @@
 
 The contract module can be perfectly tested and still be absent from the app a
 rig actually serves. This suite imports ``app.entrypoint`` in fresh processes,
-checks the real route table, calls the guarded production app, and proves
-feature-off dormancy plus idempotent mounting.
+checks the real route table, calls the guarded production app from loopback, and
+proves feature-off dormancy plus idempotent mounting.
 """
 from __future__ import annotations
 
@@ -62,10 +62,12 @@ status = None
 raw = None
 if route in paths:
     # Production serves the hardened outer ASGI app, not the inner FastAPI
-    # object whose route table is inspected above. Exercising the inner object
-    # directly measures a test-only surface and can bypass wrapper semantics.
+    # object whose route table is inspected above. The real worker is loopback-
+    # only, so the probe must also originate from loopback rather than TestClient's
+    # default synthetic host ("testclient"), which the netguard correctly rejects.
     response = TestClient(
         entrypoint.app,
+        base_url="http://127.0.0.1",
         raise_server_exceptions=False,
     ).get(route)
     status = response.status_code
