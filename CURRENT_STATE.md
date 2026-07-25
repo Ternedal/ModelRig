@@ -42,6 +42,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_ALLOW_RAG_CLOUD` | `` |
 | `KALIV_BROWSER_RESEARCH` | `0` |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` |
+| `KALIV_COMPUTER_USE` | `0` |
 | `KALIV_DATA_DIR` | `` |
 | `KALIV_EGRESS_GATE` | `` |
 | `KALIV_MAX_UPLOAD_MB` | `25` |
@@ -159,6 +160,10 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_data_sharing_policy.py`
 - `tests/worker_desktop_contract.py`
 - `tests/worker_desktop_policy.py`
+- `tests/worker_desktop_screenshot_entrypoint.py`
+- `tests/worker_desktop_screenshot_tool.py`
+- `tests/worker_desktop_win32.py`
+- `tests/worker_desktop_win32_abi.py`
 - `tests/worker_eval.py`
 - `tests/worker_hardening.py`
 - `tests/worker_jobs.py`
