@@ -149,5 +149,66 @@ o3 = to_observation(SPECS["W-08"], {"events": [], "status": "ok",
 check(o1["effects"][0]["evidence_sha256"] != o3["effects"][0]["evidence_sha256"],
       "samme maaling paa et ANDET trae giver anden evidens")
 
+
+# ============================================================================
+# Sols fejltilstand 6: genbrugt / scenarie-replayet evidens.
+#
+# Den var den sidste af hans syv jeg ikke kunne daekke, fordi den kraever hans
+# maalekontrakt -- en host kan ikke selv afgoere om en observation er "for
+# gammel til at betyde noget". Kontrakten landede i dag med evidence_freshness
+# (0 <= age <= max) og tre indholds-digests, saa den kan lukkes nu.
+#
+# Hvorfor det betyder noget: en completion rate er kun evidens hvis den blev
+# maalt paa DENNE koersel. En kvittering man kan genafspille er en kvittering
+# man kan samle op fra en groen dag og haefte paa en roed.
+# ============================================================================
+
+import time as _t  # noqa: E402
+
+fresh = {"events": [{"type": "tool_executed", "tool": "rig_status"},
+                    {"type": "answer", "text": "41 % disk fri, 3 modeller."}],
+         "status": "ok"}
+
+obs = to_observation(SPECS["W-01"], fresh, CAND)
+r = evaluate_workflow_completion(to_scenario(SPECS["W-01"]), obs)
+check(r.get("passed") is True, "en frisk observation bestaar")
+
+# --- genafspillet: samme observation, to timer gammel --------------------
+stale = dict(obs)
+stale["generated_at"] = _t.time() - 7200          # default-loftet er 3600 s
+r = evaluate_workflow_completion(to_scenario(SPECS["W-01"]), stale)
+fail_ids = [c["id"] for c in r.get("checks", []) if not c["passed"]]
+check(r.get("passed") is False and "evidence_freshness" in fail_ids,
+      "FANGER en genafspillet observation (2 timer gammel) -- en kvittering "
+      "kan ikke samles op fra en groen dag og haeftes paa en roed")
+
+# --- fremdateret: nogen har skruet paa uret ------------------------------
+future = dict(obs)
+future["generated_at"] = _t.time() + 3600
+r = evaluate_workflow_completion(to_scenario(SPECS["W-01"]), future)
+fail_ids = [c["id"] for c in r.get("checks", []) if not c["passed"]]
+check(r.get("passed") is False and "evidence_freshness" in fail_ids,
+      "fanger en FREMdateret observation -- age < 0 er lige saa forkert")
+
+# --- scenarie-replay: en groen koersel haeftet paa et andet scenarie -----
+swapped = dict(obs)
+swapped["scenario_id"] = SPECS["W-10"]["id"].lower()
+r = evaluate_workflow_completion(to_scenario(SPECS["W-01"]), swapped)
+fail_ids = [c["id"] for c in r.get("checks", []) if not c["passed"]]
+check(r.get("passed") is False and "scenario_binding" in fail_ids,
+      "FANGER en observation der paastaar at vaere fra et andet scenarie")
+
+# --- indholdsbinding: kvitteringen kan ikke flyttes ----------------------
+r1 = evaluate_workflow_completion(to_scenario(SPECS["W-01"]), obs)
+other = to_observation(SPECS["W-01"], fresh, {**CAND, "git_sha": "e" * 40})
+r2 = evaluate_workflow_completion(to_scenario(SPECS["W-01"]), other)
+check(r1["observation_sha256"] != r2["observation_sha256"],
+      "to observationer fra forskellige traeer har forskellig digest")
+check(r1["receipt_sha256"] != r2["receipt_sha256"],
+      "kvitteringen er indholdsbundet -- den kan ikke flyttes til et andet run")
+check(r1["scenario_sha256"] == r2["scenario_sha256"],
+      "samme scenarie giver samme scenarie-digest (sanity: digesterne er "
+      "ikke bare tilfaeldige)")
+
 print(f"\n===== WORKFLOW CONTRACT ADAPTER: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
