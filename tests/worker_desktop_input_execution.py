@@ -352,7 +352,8 @@ type_receipt = coordinator.execute(
     type_approval,
     session_id="desktop_session_1",
 ).to_dict()
-check(bytes(bytearray(native.units)).decode("utf-16-le") == typed, "the exact immutable Unicode text reaches the native adapter")
+encoded_units = b"".join(unit.to_bytes(2, "little") for unit in native.units)
+check(encoded_units.decode("utf-16-le") == typed, "the exact immutable Unicode text reaches the native adapter")
 check(typed not in json.dumps(type_receipt, ensure_ascii=False), "plaintext typed text never enters the receipt")
 check(type_receipt["text_chars"] == len(typed) and type_receipt["text_sha256"], "receipt retains bounded text evidence")
 
