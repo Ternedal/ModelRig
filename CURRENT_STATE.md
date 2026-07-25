@@ -128,6 +128,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_validation_gate.py`
 - `tests/worker_agent3_validation_path_contract.py`
 - `tests/worker_agent3_validation_status.py`
+- `tests/worker_agent3_workflow_completion.py`
+- `tests/worker_agent3_workflow_receipt_integrity.py`
 - `tests/worker_agent_continue.py`
 - `tests/worker_agent_multistep.py`
 - `tests/worker_approval_receipts.py`
