@@ -40,9 +40,12 @@ if _os.getenv("KALIV_COMPUTER_USE", "0").strip().lower() in {
     "on",
 }:
     # Lazy on purpose: with the flag off, normal worker startup imports neither
-    # the screenshot/vision tools nor the Win32 ABI adapter.
+    # screenshot, vision, preview/action-plan nor the Win32 ABI adapter.
     from .desktop_screenshot_tool import (
         register_desktop_screenshot_tool as _register_desktop_screenshot_tool,
+    )
+    from .desktop_action_preview_tool import (
+        register_desktop_action_preview_tool as _register_desktop_action_preview_tool,
     )
     from .desktop_vision_bridge import (
         install_desktop_vision_bridge as _install_desktop_vision_bridge,
@@ -50,6 +53,9 @@ if _os.getenv("KALIV_COMPUTER_USE", "0").strip().lower() in {
 
     _install_desktop_vision_bridge(_impl)
     _register_desktop_screenshot_tool()
+    # Must follow screenshot registration: the preview boundary wraps the exact
+    # approved capture result and binds its token to the issuing conversation.
+    _register_desktop_action_preview_tool()
 
 # Return the implementation module for every import of app.main. This preserves
 # module-global monkeypatching and private helper access instead of copying names
