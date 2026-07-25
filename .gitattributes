@@ -32,6 +32,11 @@
 # Windows batch files must KEEP CRLF or cmd.exe mis-parses them. Marked -text so
 # Git stores the bytes exactly and never renormalizes them to LF at staging.
 *.bat   -text
+# .cmd is the same thing to cmd.exe, and every rig launcher in this repo
+# uses that extension -- the rule above missed the files it was written
+# for. Pinned too, so a launcher cannot be checked out with LF and
+# mis-parse on the one machine it exists to run on.
+*.cmd   -text
 
 # Binary files Git must never touch.
 *.png   binary

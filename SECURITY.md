@@ -135,6 +135,33 @@ som `dk.ternedal.modelrig`.
 `server.host = 0.0.0.0` (uden Tailscale) eksponerer backenden på LAN. Bevidst convenience;
 Bearer-token kræves stadig. Foretræk Tailscale-IP.
 
+### 2b. Bruger-admin-handlinger er kun token-beskyttede — **ACCEPTERET (D3, 25/7-2026)**
+
+Der er to veje til en destruktiv handling som `delete_model`, og de er bevidst
+forskellige:
+
+| Vej | Gate |
+|---|---|
+| **Model-initieret** — modellen foreslår værktøjet | ToolGate → `requires_confirmation()` → `risk in ("write","desktop")` → **bekræftelseskort kræves** |
+| **Bruger-initieret** — du trykker slet i klienten | `DELETE /api/v1/models/delete` bag `authMW` — **kun bearer-token**, klienten bekræfter selv |
+
+**Invarianten, skrevet ud:** *server-side gates beskytter mod at MODELLEN handler
+uden dig — ikke mod at nogen har dit enhedstoken.*
+
+Enhedstokenet **ér** autorisationen for dine egne admin-handlinger. Det er den
+samme grænse som resten af API'et: har man tokenet, er man dig. Rotation
+(`modelrig rotate`) er svaret på et lækket token, ikke en ekstra dialog.
+
+**Hvorfor ikke også gate brugerstien:** det ville tilføje friktion mod den
+forkerte trussel. Har nogen dit enhedstoken, er slettede modeller ikke det
+største problem — de kan læse indholdet af dine dokumenter gennem RAG. Den
+gate der betyder noget, er den der står mellem modellen og en skrivning, og
+den er der.
+
+**Genbesøges hvis:** appen distribueres bredere end én ejer, eller der
+introduceres roller/multi-bruger. Begge dele ændrer forudsætningen om at
+"token = ejeren".
+
 ### 3. Ingen TLS på backenden — **ACCEPTERET (for nu)**
 
 Tailscale/WireGuard leverer den krypterede transport. Egen TLS er et **NEXT/apparat**-punkt

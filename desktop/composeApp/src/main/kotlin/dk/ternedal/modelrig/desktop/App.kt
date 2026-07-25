@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -179,6 +180,11 @@ fun App() {
         // the evolved App(); AGENT/COMPUTER are the new cockpit/computer-use
         // screens; MODELS/DOCS/SETTINGS route to the existing panels.
         var activeScreen by remember { mutableStateOf(KalivScreen.CHAT) }
+        // Lifted so the title bar can show the mockup's live badge (1c).
+        var computerRunning by remember { mutableStateOf(false) }
+        // Developer opt-in, persisted, default OFF: routes the AGENT screen to
+        // the Agent 3 cockpit instead of the V2 tools loop.
+        var agent3Cockpit by remember { mutableStateOf(db.getSetting("agent3Cockpit") == "true") }
         val scope = rememberCoroutineScope()
         var convId by remember { mutableStateOf<Long?>(null) }
 
@@ -353,10 +359,28 @@ fun App() {
             }
         }
 
-        // Overall shell (handoff 1a/1b/1c): a left nav-rail selects the screen;
-        // the center column carries the header + the active screen's content.
-        // The rail is shared by all three directions.
-        Row(Modifier.fillMaxSize().background(KalivTheme.colors.Graphite)) {
+        // Shell from the mockup: a 40dp custom title bar spans the FULL width,
+        // and the three columns live below it. Each direction carries its own
+        // chrome -- 1a a 246dp labelled rail, 1b/1c the 70dp icon rail -- and
+        // App.kt's old tall Header is gone (it duplicated the KALIV wordmark
+        // and was the reason none of the three screens read like the design).
+        Column(Modifier.fillMaxSize().background(KalivTheme.colors.Graphite)) {
+        KalivTitleBar(
+            subtitle = when (activeScreen) {
+                KalivScreen.AGENT -> "\u2014 agent"
+                KalivScreen.COMPUTER -> "\u2014 computer-use"
+                else -> "\u2014 lokal AI p\u00e5 din maskine"
+            },
+            // Mockup 1c: an amber "Kaliv styrer skærmen" badge sits next to the
+            // subtitle while a computer-use task is actually running.
+            live = if (activeScreen == KalivScreen.COMPUTER && computerRunning) {
+                "Kaliv styrer sk\u00e6rmen"
+            } else {
+                null
+            },
+        )
+        Row(Modifier.fillMaxWidth().weight(1f)) {
+            if (activeScreen == KalivScreen.CHAT) {
             KalivNavRail(
                 active = activeScreen,
                 onSelect = { screen ->
@@ -379,31 +403,66 @@ fun App() {
                 vramTotalGb = 12.0,
                 modelBackend = if (localPath.contains("/api/v1/")) "llama.cpp" else "Ollama",
             )
-        Column(Modifier.weight(1f).fillMaxHeight().background(KalivTheme.colors.Graphite).padding(24.dp)) {
-            Header(
-                dark = darkMode,
-                showConvos = showConvos, onConvos = { showConvos = !showConvos },
-                showModels = showModels, onModels = { showModels = !showModels },
-                showSettings = showSettings, onSettings = { showSettings = !showSettings },
-            )
-            Spacer(Modifier.height(12.dp))
+            } else {
+                KalivIconRail(
+                    active = activeScreen,
+                    onSelect = { screen ->
+                        activeScreen = screen
+                        when (screen) {
+                            KalivScreen.MODELS -> { showModels = true; activeScreen = KalivScreen.CHAT }
+                            KalivScreen.SETTINGS -> { showSettings = true; activeScreen = KalivScreen.CHAT }
+                            else -> {}
+                        }
+                    },
+                )
+            }
+        // 1b/1c run their columns flush against the rail (each column carries
+        // its own inner padding in the mockup). Only the 1a chat surface gets
+        // the outer gutter.
+        val flush = activeScreen == KalivScreen.AGENT || activeScreen == KalivScreen.COMPUTER
+        Column(
+            Modifier.weight(1f).fillMaxHeight().background(KalivTheme.colors.Graphite)
+                .padding(
+                    horizontal = if (flush) 0.dp else 24.dp,
+                    vertical = if (flush) 0.dp else 16.dp,
+                ),
+        ) {
+            // The tall Header is gone: the 40dp KalivTitleBar above now owns
+            // the brand, and the rail owns navigation. Keeping both put the
+            // wordmark on screen twice.
 
             // The AGENT (1b) and COMPUTER (1c) screens replace the chat surface
             // entirely; they carry their own composers and lifecycle. The chat
             // screen (1a) keeps the existing toolbar + message list + composer.
             if (activeScreen == KalivScreen.AGENT) {
-                KalivAgentCockpit(
-                    baseUrl = localUrl,
-                    bearer = deviceToken.ifBlank { null },
-                    model = localModel,
-                    system = localSystem.trim().takeIf { it.isNotEmpty() },
-                )
+                // Two cockpits, one screen. The Agent 3 one is the surface the
+                // design actually describes -- it is the only one that can know
+                // a plan's total up front -- but Agent 3 is still served behind
+                // KALIV_AGENT3_ENABLED, sits under /experimental/, and the
+                // readiness page refuses activation without a physical report.
+                // So it is opt-in per Sol's line: build 1b against Agent 3 now,
+                // as a developer cockpit; do not move normal chat off V2 until
+                // the rig has validated it and Anders activates it explicitly.
+                if (agent3Cockpit) {
+                    KalivAgentCockpitA3(
+                        baseUrl = localUrl,
+                        bearer = deviceToken.ifBlank { null },
+                    )
+                } else {
+                    KalivAgentCockpit(
+                        baseUrl = localUrl,
+                        bearer = deviceToken.ifBlank { null },
+                        model = localModel,
+                        system = localSystem.trim().takeIf { it.isNotEmpty() },
+                    )
+                }
             } else if (activeScreen == KalivScreen.COMPUTER) {
                 KalivComputerUse(
                     baseUrl = localUrl,
                     bearer = deviceToken.ifBlank { null },
                     model = localModel,
                     system = localSystem.trim().takeIf { it.isNotEmpty() },
+                    onRunningChange = { computerRunning = it },
                 )
             } else {
             // Panel toggles live ABOVE the panels and are never pushed out of
@@ -467,6 +526,28 @@ fun App() {
                     val next = !toolsMode; persist("toolsMode", next.toString()) { toolsMode = next }
                 }
                 Spacer(Modifier.weight(1f))
+                // Mockup 1a puts a status readout at the right end of the
+                // toolbar ("● RIG · 512 tok/s"). The dot + backend is a real
+                // signal (which side served the last reply), so it is shown;
+                // the throughput figure is NOT -- the app does not measure it
+                // yet, and printing the mockup's 512 would be a made-up number
+                // sitting where a live one belongs.
+                lastSource?.let { src ->
+                    val onRig = src == ChatResult.Source.LOCAL
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.size(7.dp).clip(CircleShape)
+                                .background(if (onRig) KalivTheme.colors.Success else KalivTheme.colors.Amber),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (onRig) "RIG" else "CLOUD",
+                            color = KalivTheme.colors.TextMuted,
+                            fontSize = 11.5.sp,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                }
                 ToolbarChip("Handlingslog", filled = false) { showAudit = true }
                 Spacer(Modifier.width(8.dp))
                 ToolbarChip(if (darkMode) "Lys tilstand" else "M\u00f8rk tilstand", filled = false) {
@@ -547,6 +628,11 @@ fun App() {
                                 }
                             },
                             pairStatus = pairStatus,
+                            agent3Cockpit = agent3Cockpit,
+                            onAgent3Cockpit = {
+                                agent3Cockpit = it
+                                db.putSetting("agent3Cockpit", it.toString())
+                            },
                         )
                         Spacer(Modifier.height(8.dp))
                     }
@@ -628,7 +714,8 @@ fun App() {
                     sparkline = listOf(3f, 5f, 4f, 7f, 6f, 9f, 7f, 10f, 8f, 11f),
                 )
             }
-        }
+        } // end Row (three columns)
+        } // end Column (title bar + columns)
 
         // The confirmation card -- V5's core promise, now on the desktop.
         // Rendering only: the gate lives in the worker, so a modified client
@@ -933,7 +1020,10 @@ private fun MessageBubble(m: UiMessage) {
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
     ) {
         Column(
-            Modifier.widthIn(max = if (isUser) 620.dp else 780.dp),
+            // Mockup 1a: user bubble caps at 460, assistant at 620. The app
+            // ran 620/780, which let lines stretch far wider than the design
+            // and made the chat column read much denser than the handoff.
+            Modifier.widthIn(max = if (isUser) 460.dp else 620.dp),
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
         ) {
             if (!isUser) {
@@ -1055,6 +1145,7 @@ private fun SettingsCard(
     db: DesktopChatDb,
     onPair: () -> Unit,
     pairStatus: String?,
+    agent3Cockpit: Boolean, onAgent3Cockpit: (Boolean) -> Unit,
 ) {
     Box(Modifier.clip(RoundedCornerShape(12.dp)).background(KalivTheme.colors.Surface).fillMaxWidth().padding(14.dp)) {
         Column {
@@ -1071,6 +1162,20 @@ private fun SettingsCard(
             Field("System-instruktion, lokal (valgfri)", localSystem, onLocalSystem)
             PresetRow(db, "rig", localSystem, onLocalSystem)
             Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                PillToggle(agent3Cockpit) { onAgent3Cockpit(!agent3Cockpit) }
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text("Agent-skaerm bruger Agent 3 (udvikler)", color = KalivTheme.colors.TextHigh, fontSize = 13.sp)
+                    Text(
+                        "Agent 3 kender hele planen paa forhaand. Kraever KALIV_AGENT3_ENABLED=1 " +
+                            "paa riggen; normal chat bliver paa V2 uanset.",
+                        color = KalivTheme.colors.TextMuted, fontSize = 11.sp,
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
             Text("Ollama Cloud-fallback", color = KalivTheme.colors.Amber, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
             Field("OLLAMA_API_KEY", cloudKey, onCloudKey)

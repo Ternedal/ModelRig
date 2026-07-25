@@ -139,6 +139,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_validation_gate.py`
 - `tests/worker_agent3_validation_path_contract.py`
 - `tests/worker_agent3_validation_status.py`
+- `tests/worker_agent3_workflow_completion.py`
+- `tests/worker_agent3_workflow_receipt_integrity.py`
 - `tests/worker_agent_continue.py`
 - `tests/worker_agent_multistep.py`
 - `tests/worker_approval_receipts.py`
@@ -153,6 +155,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_browser_use_runtime_guard.py`
 - `tests/worker_build_identity.py`
 - `tests/worker_capability_schema_v2.py`
+- `tests/worker_confirmation_impact.py`
+- `tests/worker_d4_auto_routing.py`
 - `tests/worker_data_sharing_policy.py`
 - `tests/worker_desktop_policy.py`
 - `tests/worker_eval.py`
@@ -219,6 +223,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_candidate_campaign.py`
 - `tests/workflow_candidate_freeze.py`
 - `tests/workflow_candidate_gate.py`
+- `tests/workflow_contract_adapter.py`
 - `tests/workflow_current_state.py`
 - `tests/workflow_dep_pins.py`
 - `tests/workflow_doc_authority.py`
@@ -228,6 +233,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_release.py`
 - `tests/workflow_remaining_physical_pilots.py`
 - `tests/workflow_rig_preflight.py`
+- `tests/workflow_route_inventory.py`
+- `tests/workflow_runner_offline.py`
 - `tests/workflow_scheduler_m2_composition.py`
 - `tests/workflow_scheduler_pilot_wizard.py`
 - `tests/workflow_stage_a_one_click.py`
@@ -236,5 +243,6 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_stage_a_resume_cleanup.py`
 - `tests/workflow_stage_b_physical_gate.py`
 - `tests/workflow_staged_promotion_runbook.py`
+- `tests/workflow_success_harness.py`
 - `tests/workflow_test_coverage.py`
 - `tests/workflow_worker_entrypoints.py`

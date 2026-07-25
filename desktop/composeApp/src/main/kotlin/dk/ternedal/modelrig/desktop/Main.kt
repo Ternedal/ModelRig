@@ -15,8 +15,12 @@ fun main(args: Array<String>) = application {
     val agent3Review = args.contains("--agent3-review")
     val experimental = agent3 || agent3Memory || agent3Validation ||
         agent3Capabilities || agent3Replan || agent3Review
+    // The design frames every direction at 1240x740 (.win in the mockup).
+    // At the old 1000dp the 1b cockpit had rail 70 + chat 360 + log 264 = 694
+    // and left the plan panel ~250dp, which wrapped "Agent-plan" one letter
+    // per line. 1240 gives the plan panel the ~546dp the mockup assumes.
     val state = rememberWindowState(
-        width = if (experimental) 900.dp else 1000.dp,
+        width = if (experimental) 900.dp else 1240.dp,
         height = 820.dp,
     )
     Window(

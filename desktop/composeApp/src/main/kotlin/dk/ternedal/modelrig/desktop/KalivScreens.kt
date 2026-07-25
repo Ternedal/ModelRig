@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,6 +31,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
@@ -202,6 +209,134 @@ private val navItems = listOf(
 )
 
 /**
+ * The 40dp custom title bar from the mockup -- present on ALL three
+ * directions and the single strongest visual signature of the design.
+ * Layout: 24dp ankh, KALIV wordmark at 14sp, a per-screen subtitle, an
+ * optional live status (1c while running), then the window caps.
+ *
+ * The earlier build kept App.kt's tall Header instead of this, which put the
+ * KALIV wordmark on screen twice and made every direction read wrong.
+ */
+@Composable
+fun KalivTitleBar(
+    subtitle: String,
+    live: String? = null,
+    onClose: (() -> Unit)? = null,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .background(Color(0x990B0A09))
+            .padding(start = 14.dp),
+    ) {
+        KalivAnkh(24)
+        Spacer(Modifier.width(11.dp))
+        Text(
+            "KALIV",
+            fontFamily = FontFamily.Serif,
+            fontSize = 14.sp,
+            letterSpacing = 3.sp,
+            fontWeight = FontWeight.Medium,
+            color = Color(0xFFE9DFCE),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(subtitle, fontSize = 11.5.sp, color = Color(0xFF6F665C))
+        if (live != null) {
+            Spacer(Modifier.width(14.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(7.dp).clip(CircleShape)
+                        .background(KalivTheme.colors.Warning),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(live, fontSize = 11.sp, color = Color(0xFFD09A55))
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        TitleCap("\u2500", null)
+        TitleCap("\u25FB", null)
+        TitleCap("\u2715", onClose, danger = true)
+    }
+}
+
+@Composable
+private fun TitleCap(glyph: String, onClick: (() -> Unit)?, danger: Boolean = false) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .width(44.dp).height(40.dp)
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
+    ) {
+        Text(
+            glyph,
+            fontSize = 11.sp,
+            color = if (danger) Color(0xFFC47B70) else Color(0xFF8B8177),
+        )
+    }
+}
+
+/**
+ * The 70dp icon-only rail the mockup uses for 1b (and, as a small documented
+ * deviation, 1c -- the mockup drops the rail entirely there, which would trap
+ * the user with no way back). Items are 44x44 with the same bronze active
+ * treatment as the wide rail.
+ */
+@Composable
+fun KalivIconRail(active: KalivScreen, onSelect: (KalivScreen) -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(70.dp)
+            .fillMaxHeight()
+            .background(Color(0x8C14110E))
+            .padding(vertical = 16.dp),
+    ) {
+        val top = listOf(
+            KalivScreen.CHAT to "\u2709",
+            KalivScreen.AGENT to "\u25C6",
+            KalivScreen.COMPUTER to "\u25A3",
+            KalivScreen.MODELS to "\u25A4",
+        )
+        top.forEach { (screen, glyph) ->
+            IconRailItem(glyph, screen == active) { onSelect(screen) }
+            Spacer(Modifier.height(8.dp))
+        }
+        Spacer(Modifier.weight(1f))
+        IconRailItem("\u2699", false) { onSelect(KalivScreen.SETTINGS) }
+    }
+}
+
+@Composable
+private fun IconRailItem(glyph: String, on: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(44.dp)
+            .clip(shape)
+            .then(
+                if (on) Modifier
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color(0x479A7136), Color(0x149A7136)),
+                        ),
+                    )
+                    .border(1.dp, Color(0x669A7136), shape)
+                else Modifier,
+            )
+            .clickable { onClick() },
+    ) {
+        Text(
+            glyph,
+            fontSize = 18.sp,
+            color = if (on) KalivTheme.colors.TextHigh else Color(0xFFC3B8A8),
+        )
+    }
+}
+
+/**
  * The 246dp left navigation rail shared by 1a/1b/1c. Active item gets the
  * bronze gradient + border (handoff: linear-gradient(90°, rgba(154,113,54,.22)
  * → .06) + 1dp rgba(154,113,54,.35)). Bottom holds the active-model card
@@ -224,25 +359,9 @@ fun KalivNavRail(
             .background(Color(0x8C14110E)) // rgba(20,17,14,.55)
             .padding(horizontal = 14.dp, vertical = 16.dp),
     ) {
-        // Brand row (ankh + KALIV wordmark), same as the App header.
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp, bottom = 18.dp)) {
-            Box(
-                Modifier.size(34.dp).clip(RoundedCornerShape(11.dp))
-                    .background(KalivTheme.colors.SurfaceHigh)
-                    .border(1.dp, Color(0x80C69A4B), RoundedCornerShape(11.dp)),
-                contentAlignment = Alignment.Center,
-            ) { KalivAnkh(20) }
-            Spacer(Modifier.width(10.dp))
-            Text(
-                "KALIV",
-                color = KalivTheme.colors.TextHigh,
-                fontSize = 20.sp,
-                fontFamily = FontFamily.Serif,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 4.sp,
-            )
-        }
-
+        // No brand row here: the 40dp KalivTitleBar above owns the ankh and
+        // the KALIV wordmark. The mockup's rail starts straight at the nav
+        // items -- having both is what put the wordmark on screen twice.
         navItems.forEach { item ->
             NavRow(item = item, active = item.screen == active, onClick = { onSelect(item.screen) })
             Spacer(Modifier.height(4.dp))
@@ -514,10 +633,29 @@ data class PlanStep(
     val resultSummary: String = "",
 )
 
-enum class StepStatus { DONE, ACTIVE, PENDING }
+enum class StepStatus { DONE, ACTIVE, PENDING, CANCELLED }
 
 /** Map a worker risk string / tool name to the badge level. */
-internal fun riskOf(risk: String, tool: String): RiskLevel {
+/**
+ * Classify a tool call for the badge.
+ *
+ * The worker now states `impact` on the confirmation card and in the audit log
+ * (write / destructive / admin), which is the finer question the badge is
+ * actually asking -- `risk` alone makes note_append, delete_model and
+ * pull_model identical. Prefer what the server said.
+ *
+ * The tool-name fallback below is only for entries that predate the field, and
+ * it is deliberately last: a name table is a second copy of a risk
+ * classification, and a stale copy fails toward "probably harmless".
+ */
+internal fun riskOf(risk: String, tool: String, impact: String = ""): RiskLevel {
+    val i = impact.lowercase()
+    when {
+        i == "destructive" -> return RiskLevel.DESTRUCTIVE
+        i == "admin" -> return RiskLevel.DESTRUCTIVE
+        i == "write" || i == "desktop" -> return RiskLevel.WRITE
+        i == "read" -> return RiskLevel.READ
+    }
     val r = risk.lowercase()
     val t = tool.lowercase()
     return when {
@@ -566,7 +704,7 @@ fun KalivAgentCockpit(
         when (turn.status) {
             "confirmation_required" -> {
                 // The active write step waits for approval; mark it ACTIVE.
-                val lvl = riskOf("", turn.tool)
+                val lvl = riskOf(turn.risk, turn.tool, turn.impact)
                 // Replace any existing ACTIVE with this, else append.
                 val idx = plan.indexOfFirst { it.status == StepStatus.ACTIVE }
                 val step = PlanStep(turn.tool, lvl, StepStatus.ACTIVE, turn.summary)
@@ -608,7 +746,18 @@ fun KalivAgentCockpit(
         busy = true
         // Mark the active step's outcome.
         val idx = plan.indexOfFirst { it.status == StepStatus.ACTIVE }
-        if (idx >= 0 && !approve) plan[idx] = plan[idx].copy(status = StepStatus.DONE, resultSummary = "Afvist \u2014 intet \u00e6ndret")
+        if (idx >= 0 && !approve) {
+            plan[idx] = plan[idx].copy(status = StepStatus.DONE, resultSummary = "Afvist \u2014 intet \u00e6ndret")
+            // The prototype halts the whole run on a rejection (agentPhase
+            // "stopped"), and that matches the project's posture: a declined
+            // write should not leave the plan looking like the remaining steps
+            // are still coming. Mark them cancelled rather than pending.
+            for (i in plan.indices) {
+                if (plan[i].status == StepStatus.PENDING) {
+                    plan[i] = plan[i].copy(status = StepStatus.CANCELLED, resultSummary = "Ikke udf\u00f8rt \u2014 kørslen blev stoppet")
+                }
+            }
+        }
         scope.launch {
             val res = withContext(Dispatchers.IO) {
                 runCatching { ToolsClient(baseUrl, bearer).toolsConfirm(card.confirmation_id, approve) }
@@ -666,14 +815,29 @@ fun KalivAgentCockpit(
                 .padding(horizontal = 22.dp, vertical = 18.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Text("Agent-plan", color = KalivTheme.colors.TextHigh, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Agent-plan",
+                    color = KalivTheme.colors.TextHigh,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    // Never let a squeezed panel break this one letter per
+                    // line, which is what happened at the old 1000dp window.
+                    softWrap = false,
+                    maxLines = 1,
+                )
                 Spacer(Modifier.width(10.dp))
                 val done = plan.count { it.status == StepStatus.DONE }
                 if (plan.isNotEmpty()) {
                     Text("$done af ${plan.size} trin", color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
                 }
                 Spacer(Modifier.weight(1f))
-                Text("\uD83D\uDD12 Menneske godkender hver skrivning", color = KalivTheme.colors.TextMuted, fontSize = 11.5.sp)
+                Text(
+                    "\uD83D\uDD12 Menneske godkender hver skrivning",
+                    color = KalivTheme.colors.TextMuted,
+                    fontSize = 11.5.sp,
+                    softWrap = false,
+                    maxLines = 1,
+                )
             }
             Spacer(Modifier.height(16.dp))
             errorText?.let { Text("Fejl: $it", color = KalivTheme.colors.Danger, fontSize = 12.sp) }
@@ -773,12 +937,29 @@ private fun AgentBubble(role: String, text: String) {
 }
 
 @Composable
-private fun AgentComposer(value: String, onValue: (String) -> Unit, enabled: Boolean, placeholder: String, onSend: () -> Unit) {
+internal fun AgentComposer(value: String, onValue: (String) -> Unit, enabled: Boolean, placeholder: String, onSend: () -> Unit) {
     Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.fillMaxWidth()) {
         OutlinedTextField(
             value = value,
             onValueChange = onValue,
-            modifier = Modifier.weight(1f).heightIn(min = 52.dp),
+            modifier = Modifier.weight(1f).heightIn(min = 52.dp)
+                // Prototype: Enter runs the task, Shift+Enter inserts a
+                // newline (onCTaskKey / onTaskKey). Without this the composer
+                // could only be sent by hitting the 44dp button, which is a
+                // poor fit for a text-first surface -- and it is exactly how
+                // I failed to start a task while capturing screenshots.
+                .onPreviewKeyEvent { ev ->
+                    if (ev.type == KeyEventType.KeyDown &&
+                        ev.key == Key.Enter &&
+                        !ev.isShiftPressed &&
+                        enabled && value.isNotBlank()
+                    ) {
+                        onSend()
+                        true
+                    } else {
+                        false
+                    }
+                },
             placeholder = { Text(placeholder, color = KalivTheme.colors.TextMuted, fontSize = 13.sp) },
             enabled = enabled,
             maxLines = 4,
@@ -825,7 +1006,11 @@ private fun PlanRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     step.tool,
-                    color = if (step.status == StepStatus.PENDING) KalivTheme.colors.TextMuted else KalivTheme.colors.TextHigh,
+                    color = if (step.status == StepStatus.PENDING || step.status == StepStatus.CANCELLED) {
+                        KalivTheme.colors.TextMuted
+                    } else {
+                        KalivTheme.colors.TextHigh
+                    },
                     fontSize = 13.5.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Medium,
@@ -847,7 +1032,7 @@ private fun PlanRow(
 }
 
 @Composable
-private fun StatusCircle(index: Int, status: StepStatus) {
+internal fun StatusCircle(index: Int, status: StepStatus) {
     val size = 26
     when (status) {
         StepStatus.DONE -> Box(
@@ -868,6 +1053,14 @@ private fun StatusCircle(index: Int, status: StepStatus) {
                 .border(1.dp, Color(0x4D785A37), RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
         ) { Text("$index", color = KalivTheme.colors.TextMuted, fontSize = 12.sp) }
+        // A run halted by a rejection: the step will not happen, so it must
+        // not keep looking like it is merely waiting its turn.
+        StepStatus.CANCELLED -> Box(
+            Modifier.size(size.dp).clip(RoundedCornerShape(999.dp))
+                .background(Color(0x22000000))
+                .border(1.dp, Color(0x4D9C564C), RoundedCornerShape(999.dp)),
+            contentAlignment = Alignment.Center,
+        ) { Text("\u2715", color = Color(0xFFC47B70), fontSize = 12.sp) }
     }
 }
 
@@ -890,7 +1083,7 @@ internal fun ApprovalCard(card: ToolTurn, onApprove: () -> Unit, onDeny: () -> U
             Spacer(Modifier.width(8.dp))
             Text("Kaliv vil bruge et v\u00e6rkt\u00f8j", color = KalivTheme.colors.TextHigh, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.weight(1f))
-            RiskBadge(riskOf("", card.tool))
+            RiskBadge(riskOf(card.risk, card.tool, card.impact))
         }
         Spacer(Modifier.height(8.dp))
         Text(
@@ -989,9 +1182,14 @@ fun KalivComputerUse(
     model: String,
     system: String?,
     modifier: Modifier = Modifier,
+    // The mockup puts "● Kaliv styrer skærmen" in the title bar while a task
+    // runs, so the shell needs to know the run state -- hence this callback
+    // rather than keeping runState entirely private.
+    onRunningChange: (Boolean) -> Unit = {},
 ) {
     var input by remember { mutableStateOf("") }
     var runState by remember { mutableStateOf(RunState.IDLE) }
+    LaunchedEffect(runState) { onRunningChange(runState == RunState.RUNNING) }
     var taskText by remember { mutableStateOf("") }
     val steps = remember { mutableStateListOf<UseStep>() }
     var pendingAction by remember { mutableStateOf<String?>(null) }
@@ -1172,6 +1370,11 @@ private fun StatusCircleSmall(index: Int, status: StepStatus) {
                 .border(1.dp, Color(0x4D785A37), RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
         ) { Text("$index", color = KalivTheme.colors.TextMuted, fontSize = 11.sp) }
+        StepStatus.CANCELLED -> Box(
+            Modifier.size(22.dp).clip(RoundedCornerShape(999.dp)).background(Color(0x22000000))
+                .border(1.dp, Color(0x4D9C564C), RoundedCornerShape(999.dp)),
+            contentAlignment = Alignment.Center,
+        ) { Text("\u2715", color = Color(0xFFC47B70), fontSize = 11.sp) }
     }
 }
 

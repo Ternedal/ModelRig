@@ -405,13 +405,113 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 20. **To sessioner kan være varme samtidig.** 16/7 landede den anden JobStore
     på main mens denne læste analysen; opdaget sekunder før dobbeltarbejde.
     Fetch/rebase + kig på `origin/main` FØR hvert push.
+21c. **Brug `bash scripts/ci_local.sh`** i stedet for at samle kommandoerne
+    selv. Den kører hvad `ci.yml` + `_tests.yml` kører, og — vigtigere — den
+    NAVNGIVER hvad den ikke kan køre (Android SDK, Windows-DPAPI) i stedet for
+    at springe det over i stilhed. Et tjek der tier om sine huller rapporterer
+    grønt for noget mindre end du tror du målte. Den siger selv "grønt her
+    betyder grønt for 8 af 10 kontroller".
+21b. **Verificér med den task CI faktisk kører — ikke en svagere.** 25/7
+    brugte jeg `./gradlew :composeApp:compileKotlin` hele dagen til at godkende
+    desktop-ændringer. CI's `desktop-compile` kører `:composeApp:test`, som
+    ogsaa kompilerer `src/test` og eksekverer unit-testene. Mit arbejde bestod
+    begge (efterprøvet), saa der skete ingen skade — men jeg havde et svagere
+    net end jeg troede, og en test-only-fejl ville være sluppet igennem lokalt.
+    Samme klasse som probe-fejlene: læs workflow-filen, gæt ikke kommandoen.
+21. **En reachability-graf er kun så god som sit entrypoint.** 24/7: målt
+    "70% af workeren er død" fra `app.main` — men CI pakker
+    `worker/run_worker.py`, som monterer agent3 ovenpå. Rigtigt tal: **24%**
+    (~4.900 linjer, browser/research-klyngerne — bevidst staged, se §0/§9).
+    Verificér entrypointet i PyInstaller-kommandoen i workflowet FØR du
+    tegner grafen. Samme fælde som probe-fejlene: mål mod det der faktisk
+    kører.
+22. **Tagget skal selv bære sine regenererede docs.** v1.58.143 fejlede i
+    build-and-release fordi `ACTIVATION_READINESS.md`-regenereringen lå i en
+    commit EFTER tagget — readiness-gaten så en driftet fil (36/2) og
+    stoppede alt; draft med 0 assets. Bump + `activation_readiness.py` +
+    `current_state.py` skal i SAMME commit som tagget peger på (144 gjorde
+    det; genudsendelse, ikke ny kode).
 
 ---
+
+23. **En måling finder ting læsning ikke gør.** 25/7 blev workflow-succes-
+    harnessen bygget (`scripts/workflow_eval.py` + `workflow_runner.py` +
+    `eval/workflows_v1.json`, 14 workflows). Den fandt med det samme at
+    **bekræftelseskortet ikke bar `impact`** — kun `risk`, som er for grov:
+    note_append, delete_model og pull_model er alle `risk=write`. Desktop-
+    klienten kompenserede med en værktøjsnavn-tabel, altså en anden kopi af en
+    risikoklassifikation, der bliver forældet næste gang et værktøj tilføjes —
+    samme fejlklasse som `desktop`-klassen der fik et skærmbillede til at
+    ligne en READ. Lukket i 1.58.144+ (`961fd61`): kortet bærer nu `impact`,
+    og `riskOf` foretrækker serverens ord.
+    **Mønsteret er værd at gentage: byg måleinstrumentet, og det peger på
+    huller i det målte.** Kodelæsning havde ikke fundet den — feltet manglede
+    et sted ingen ledte.
+24. **Harnessen er selv sabotage-testet.** Før den blev troet: ordre-tjekket
+    blev fjernet → gate-bypass-testen blev rød; side-effect-tjekket fjernet →
+    fantom-skrivnings-testen blev rød; gendannet → 25/25 grøn. Gør det samme
+    med enhver ny probe i dette repo. Grønt fra en probe der ikke er
+    kontrolleret imod en kendt fejl betyder ingenting.
 
 ## 9. Kø — hvem har bolden (16/7)
 
 **Ingen af disse er blokeret på kode. De er blokeret på rig, telefon,
 branch-ejer eller en beslutning.**
+
+**[25/7 — LÆS `RIGDAG.md` FØRST.]** Kørebogen for rig-dagen ligger nu i repoet
+og sekvenserer alt hardware-arbejdet i to pas i samme session. Det afgørende
+fund den bygger på, som ikke er indlysende:
+
+> **Kandidaten `8e40103` indeholder IKKE dagens arbejde.** Målt: workflow-
+> harnessen, Sols completion-kontrakt, Agent 3-cockpittet og desktop-designet
+> (titelbjælke/ikon-rail/1240dp) findes ingen af dem på den. Den bærer stadig
+> den gamle `KalivScreens.kt` og `1000.dp`.
+
+Ikke en fejl — kandidaten blev frosset 24/7 og alt fra 25/7 landede på main
+bagefter. Men rig-dagen på `8e40103` kan altså **kun** validere kandidaten;
+dagens arbejde skal med i 1.58.146 og testes i pas 2. To separate rig-dage
+ville koste dobbelt, så pas 2 hører til samme session.
+
+**Leveret 25/7, alt på main og CI-grønt:**
+- `eval/workflows_v1.json` + `scripts/workflow_{runner,eval,contract_adapter}.py`
+  — måler om et workflow bliver FÆRDIGT, ikke om værktøjet blev valgt. Sols
+  kontrakt (`worker/app/agent3/workflow_completion.py`) er den autoritative
+  dommer; adapteren producerer evidensen. Første baseline kræver riggen.
+- `ROUTE_INVENTORY.md` + `scripts/route_inventory.py` — ruteoverfladen aflæst
+  fra OpenAPI, ikke fra importgrafer. Dormans-invarianten er nu en test:
+  ingen `/experimental/agent3`-rute må serveres uden flaget.
+- `KalivAgentCockpitA3.kt` — 1b på Agent 3 bag en persisteret udvikler-kontakt,
+  default fra. V2-cockpittet er urørt og stadig standard.
+- Desktop-designet genskabt efter mockup'en (titelbjælke 40dp, per-skærm rail,
+  1240dp ramme, boblebredder 460/620, Enter sender).
+- `impact` på bekræftelseskortet, så klienter ikke gætter DESTRUCTIVE ud fra
+  værktøjsnavne.
+
+**PR #135 (T-018 single-flight): PAUSED, besluttet 25/7.** Ikke kvaliteten —
+rækkefølgen. T-018 er P2; T-019 er P0 og skal måle præcis den
+`schedule_runner.py`/`schedule_runtime.py` som #135 ændrer. Adopteres af
+Claude som host-ejer EFTER promoveringen. Se `SOL-CLAUDE-SAMARBEJDE.md`.
+
+**⚠ PR #163 MÅ IKKE MERGES FØR RIG-DAGEN — uanset at den er grøn.** Den hedder
+*"browser: activate confirmed read-only research boundary"*, men er reelt hele
+computer-use-stakken: **8.671 linjer over 34 filer** (`desktop_action_plan`,
+`desktop_capture`, `desktop_contract`, `desktop_input_execution`,
+`desktop_physical_gate`, `desktop_vision_bridge`, `desktop_win32` m.fl.). Og
+dens base er `agent/unified-candidate-1.58.145` — **den frosne kandidat**.
+
+Tre uafhængige grunde: (1) 8.671 nye linjer i kandidaten ville gøre enhver
+rapport fra rig-dagen til evidens for kode der ikke længere findes
+(F-1802/F-1503). (2) Computer-use er gated bag T-031 (isolation, `[RIG]`), som
+afhænger af T-030 og T-005 — og T-005 er en åben P0; HANDOFF §9 pkt. 5 siger
+*"efter gates 1+2"*. (3) `desktop_policy.py`'s tolerance (6) er stadig et gæt.
+
+Samme fejlklasse som #135 — arbejde der ændrer præcis det en ikke-kørt
+validering skal måle — bare 14 gange større. **CI-farve er ikke
+merge-kriteriet, når basen er frossen.**
+
+**Arbejdsdelingen med Sol er skrevet ned og accepteret** i
+`SOL-CLAUDE-SAMARBEJDE.md`: Sol ejer `worker/app/agent3/**`, Claude ejer host,
+klienter, scripts og CI. Fem kontraktpunkter kræver paritetstest FØR ændring.
 
 1. **[ANDERS — PORTEN]** Valideringsrunden: `VALIDATION-1.58.49.md` +
    `deploy\validate-rig.ps1` (mekaniske tjek → `logs\validate-rig-latest.md`)
@@ -422,10 +522,66 @@ branch-ejer eller en beslutning.**
    overlever genstart, egress kun når TIL) · **E6–E9: klienten er nu STRENGERE
    — fejler noget højlydt, er det et fund, ikke en regression** · #2a trin 3–5
    kun via "test jeg" (to blinde forsøg fejlede før).
-3. **[BRANCH-EJER]** Agent 3 (PR #1): gate 1 = rebase til clean. Gate 2 ✅
-   (linjegennemgang), gate 3 ✅ (CI på main). Merge som ÉN dormant enhed →
-   rig-harness → developer preview → write-pilot. **Aldrig auto-produktion.**
-   PR #3 kan lukkes: alt nyt derfra er portet til main (1.58.46).
+3. **[ANDERS — kandidatkæden]** PR #161 `agent/unified-candidate-1.58.145`
+   (head `8e40103`, 424 foran / 0 bagud main, alle 4 gates grønne på exact
+   head, mergeable clean) er den rig-testede kandidat: preflight ✅, Agent 3
+   fysisk ✅, model-eval 30/30+30/30, RAG ✅. **Udestår fysisk:** voice
+   (Pixel fik `401 invalid token`) + scheduler-pilot. PR #162 (Stage A
+   ét-klik, base=#161) fixer netop operatør-frictionen. Flow:
+   `START_STAGE_A_TEST.cmd` → `START_REMAINING_PHYSICAL_TESTS.cmd` → review
+   → SEPARAT eksplicit beslutning → ff-merge + tag v1.58.145. **Merges
+   ALDRIG autonomt** — PR'en forbyder det selv. De fleste andre åbne PRs
+   stacker mod denne kæde; merge dem ikke enkeltvis udenom. PR #1/#3 er
+   lukkede (agent3 kom ind via mount, 1.58.131–135).
+
+   **PROMOVERING — main er rykket (24/7, selvforskyldt):** main bar
+   `2e2a29a` da kandidaten blev frosset; den er nu `95c1014`+ (rene
+   docs-commits på HANDOFF.md, ingen kode). `--ff-only` er derfor IKKE
+   længere mulig. **Det rammer ikke rig-kørslen** — `freeze_check`
+   sammenligner checkout'ens egen HEAD mod tag-SHA'en (linje 273-274), så
+   en clean checkout af `8e40103` fryser grønt uanset hvor main står.
+   **Ren løsning: sæt tagget `v1.58.145` direkte på `8e40103`** (build-and-
+   release trigger er `v*` på enhver commit) — så peger tagget på præcis
+   det træ der blev fysisk testet, og main kan merges bagefter med en
+   almindelig merge-commit. Tag ALDRIG en merge-commit her: dens træ ville
+   indeholde docs-deltaet og fælde den byte-eksakte attestation (F-1802/
+   F-1503). **Lektie: push ikke til main mens en frossen kandidat venter
+   på rig-dag** — heller ikke docs. *(Den lektie er brudt igen 25/7:
+   main står nu på `961fd61`, ca. 8 commits foran kandidatens base — desktop-
+   design, workflow-harness og impact-fixet. Vurderingen hver gang: kørslen
+   på riggen er upåvirket, og tag-på-`8e40103` er stadig den rene vej. Men
+   omkostningen er reel — merge-arbejdet efter promoveringen vokser, og
+   normen bør være at bygge på branches til kandidaten er landet.)*
+
+   **[NÆSTE RIG-HANDLING efter promoveringen] Kør workflow-harnessen.**
+   `scripts/workflow_runner.py` kører de 14 workflows i
+   `eval/workflows_v1.json` mod en levende worker og optager transcripts;
+   `scripts/workflow_eval.py` scorer dem. Første kørsel giver et
+   **baseline completion rate** — første gang projektet har et tal for om
+   Kaliv faktisk *løser* opgaver, ikke bare vælger rigtigt værktøj:
+   ```
+   PYTHONPATH=worker python3 scripts/workflow_runner.py \
+       --model hermes3:8b --out validation/workflow-run-latest.json
+   python3 scripts/workflow_eval.py \
+       --transcripts validation/workflow-run-latest.json
+   ```
+   W-10 godkender aldrig (`never_approve`) — den beviser gaten, den sletter
+   ingen model. W-08/W-09/W-11 skriver kun til
+   `~/kaliv/workflow-eval-scratch.md`.
+
+   **Model-eval-fixturen (gammel åben sag, nu LUKKET):** basis-fixturen
+   `eval/agent3_model_tasks.json` er byte-identisk på main og kandidaten.
+   Rig-kørslen viste at problemet IKKE var risk/impact-forveksling i
+   fixturen, men at basis-sættet **er ældre end Agent 3's finere
+   risk-vokabular**: planneren klassificerer `pull_model`→`admin` og
+   `delete_model`→`destructive` (`agent3/integration.py`), mens fixturen
+   forventer `write` (som matcher `tools.py`'s grovere `Risk`-type).
+   Kandidaten løser det med en versions-bundet, fail-closed override-fil
+   (`eval/agent3_model_tasks_stage_a_overrides.json`) der lader det frosne
+   basissæt være urørt. **Port den IKKE til main** — den hører til
+   kandidatens testede enhed. Den tidligere beslutning om ikke at gætte
+   var rigtig: gættet ville have været "skriv impact i fixturen", og det
+   er ikke svaret.
 4. **[KRÆVER RIG]** I0b: Windows-rettighedslaget (Job Object m. kill-on-close +
    grandchild-reaping, reduceret token, lav integritet). **Uden Job Object
    reaper subprocess-kill ikke børnebørn på Windows** — markeret i koden.
@@ -437,9 +593,13 @@ branch-ejer eller en beslutning.**
    ærligt). Agent 3 er svaret. F-007: desktop-credentials i klartekst
    (DPAPI-handoff klar). F-011: MCP read-only spike — **først efter
    valideringen** (ny capability).
-7. **[GÆLD]** Notion-status for 1.58.44–52 er IKKE afleveret: connectoren
-   forsvandt midt i sessionen (auth-fejl, dukker ikke op i tool-søgning).
-   Post dem samlet når Anders re-autentificerer.
+7. **[GÆLD]** Notion-status for 1.58.44–52 OG 1.58.141/142/144 er IKKE
+   afleveret. 44–52: connectoren forsvandt (auth-fejl). 141–144: connectoren
+   LÆSER fint men afviser ALLE skrivninger med "No approval received" —
+   7 forsøg over 2 sessioner (23–24/7), selv en enkelt property-opdatering.
+   Paste-klar tekst ligger i outputs (`notion-gaeld-141-144.md`). Prøv ikke
+   flere skrivninger før Anders har bekræftet at connectoren virker igen —
+   test med en lille property-opdatering før du bygger lange poster.
 8. **[SELV-DISCIPLIN — VIGTIG]** **Der er ÉN session. Der er aldrig en
    "parallel session".** Anders retryer timeout'ede svar; containeren beholder
    arbejdet (commits, filer, endda pushes), mens den nye kontekst ikke har det.

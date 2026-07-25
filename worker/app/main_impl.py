@@ -666,6 +666,17 @@ def _rag_cloud_allowed(req: "ToolChatReq") -> bool:
     True only on explicit consent -- per request (allow_rag_cloud) or a global
     operator opt-in (KALIV_ALLOW_RAG_CLOUD, same opt-out style as the other
     KALIV_* privacy/security switches). Default is secure: no consent, no send.
+
+    D4, decided 2026-07-25: **automatic routing may never be a third source of
+    consent here.** If someone later builds automatic local/cloud routing, it
+    does not get to satisfy this gate -- when RAG matches, the turn stays local,
+    even when that is slower. A router is by definition a place where the human
+    did not say yes, and consent given in one context must not be carried onto
+    a decision software makes in another.
+
+    Pinned by tests/worker_d4_auto_routing.py: it asserts this function reads
+    exactly one request attribute and exactly one env flag. Add a third and it
+    goes red -- deliberately, so the decision gets faced rather than slipped past.
     """
     if req.allow_rag_cloud:
         return True

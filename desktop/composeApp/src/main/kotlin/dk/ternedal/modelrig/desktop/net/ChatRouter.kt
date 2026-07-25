@@ -21,6 +21,12 @@ class ChatRouter(
     private val cloud: OllamaClient?,
     private val cloudModel: String,
     private val preferLocal: Boolean = true,
+    // D4 (25/07-2026): if this ever becomes automatic, it still may not carry
+    // RAG document content to a cloud model. Consent has exactly two sources --
+    // an explicit per-request allow_rag_cloud, or the operator's
+    // KALIV_ALLOW_RAG_CLOUD -- and a router is not allowed to be a third.
+    // When RAG matches, the turn stays local. See ROADMAP + the worker gate in
+    // main.py (_rag_cloud_allowed), pinned by tests/worker_d4_auto_routing.py.
     private val autoFallback: Boolean = false,
 ) {
     private enum class Target { LOCAL, CLOUD }
