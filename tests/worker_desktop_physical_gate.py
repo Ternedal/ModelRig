@@ -91,7 +91,8 @@ raw = valid_report()
 report = DesktopPhysicalGateReport.from_dict(raw)
 check(report.to_dict() == raw, "round-trip preserves the exact report contract")
 check(len(report.sha256) == 64, "canonical report has a stable SHA-256 digest")
-evidence = report.evidence(expires_at_ms=1_060_000 + 86_400_000)
+evidence_expiry = 1_060_000 + 86_400_000
+evidence = report.evidence(expires_at_ms=evidence_expiry)
 check(evidence.candidate_sha == "a" * 40 and evidence.evidence_sha256 == report.sha256, "evidence binds candidate and report digest")
 check(evidence.low_integrity_verified and evidence.uipi_verified and evidence.kill_switch_verified, "all three physical gates reach the execution evidence")
 check(evidence.production_activation is False, "physical evidence never activates production")
@@ -144,17 +145,17 @@ with tempfile.TemporaryDirectory() as tmp:
         candidate_sha="a" * 40,
         report_sha256=loaded.sha256,
     )
-    check(verifier(loaded.evidence(expires_at_ms=1_146_400_000)), "exact file, candidate and digest verify")
+    check(verifier(loaded.evidence(expires_at_ms=evidence_expiry)), "exact file, candidate and digest verify")
     wrong_candidate = PhysicalGateFileVerifier(
         path,
         candidate_sha="d" * 40,
         report_sha256=loaded.sha256,
     )
-    check(not wrong_candidate(loaded.evidence(expires_at_ms=1_146_400_000)), "same report cannot authorize another candidate")
+    check(not wrong_candidate(loaded.evidence(expires_at_ms=evidence_expiry)), "same report cannot authorize another candidate")
     mutated = copy.deepcopy(raw)
     mutated["host"]["windows_build"] = "10.0.99999"
     path.write_text(json.dumps(mutated, ensure_ascii=False), encoding="utf-8")
-    check(not verifier(loaded.evidence(expires_at_ms=1_146_400_000)), "post-validation file mutation invalidates the digest binding")
+    check(not verifier(loaded.evidence(expires_at_ms=evidence_expiry)), "post-validation file mutation invalidates the digest binding")
     check(
         rejected(valid_report()) is None,
         "mutation test did not alter the canonical valid fixture",
