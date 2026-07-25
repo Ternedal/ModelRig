@@ -1,3 +1,11 @@
+"""Parked Agent 3 routing contract probe.
+
+This module is deliberately not a runtime router. It models the future routing
+boundary while normal chat remains on Agent v2, and it must stay unmounted until
+a separate integration change adds route parity, physical evidence and explicit
+production approval.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -7,6 +15,9 @@ from typing import Any
 from .capability_graph import CapabilityGraph
 from .core import CapabilitySnapshot, RouteKind, TurnRequest, TurnRouter
 
+
+ROUTING_PREVIEW_STATUS = "future_integration_contract_not_runtime_feature"
+ROUTING_PREVIEW_ROUTE_PATH: str | None = None
 
 _AGENT3_CANDIDATE_ROUTES = {
     RouteKind.RIG_TOOLS_LOCAL,
