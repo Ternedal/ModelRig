@@ -49,6 +49,12 @@ data class ToolTurn(
     val confirmation_id: String = "",
     val summary: String = "",
     val tool: String = "",
+    // The card's own classification. `risk` is too coarse to warn with --
+    // note_append, delete_model and pull_model are all risk=write -- so the
+    // worker states `impact` (write / destructive / admin) and the client no
+    // longer has to keep a tool-name table that goes stale.
+    val risk: String = "",
+    val impact: String = "",
 )
 
 @Serializable

@@ -138,6 +138,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_browser_use_network_guard.py`
 - `tests/worker_browser_use_runtime_guard.py`
 - `tests/worker_build_identity.py`
+- `tests/worker_confirmation_impact.py`
 - `tests/worker_desktop_policy.py`
 - `tests/worker_eval.py`
 - `tests/worker_hardening.py`
@@ -186,5 +187,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_physical_validation_campaign.py`
 - `tests/workflow_release.py`
 - `tests/workflow_rig_preflight.py`
+- `tests/workflow_runner_offline.py`
+- `tests/workflow_success_harness.py`
 - `tests/workflow_test_coverage.py`
 - `tests/workflow_worker_entrypoints.py`

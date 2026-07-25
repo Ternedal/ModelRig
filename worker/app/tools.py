@@ -1131,6 +1131,16 @@ class ToolGate:
             # action (screenshot/click/type) is not a write and must not be
             # labelled as one on the card the human approves.
             "risk": tool.risk,
+            # ...and its IMPACT, which is the finer question the human is
+            # actually being asked. risk=write covers note_append, delete_model
+            # and pull_model alike; only impact separates "append a line to a
+            # note" from "irreversibly remove a model". Without this on the
+            # card, a client that wants to warn appropriately has to hardcode a
+            # tool-name -> impact table and re-derive what the registry already
+            # knows -- which is exactly what the desktop client was doing, and
+            # such a table goes stale the moment a tool is added.
+            # Always populated: __post_init__ falls impact back to risk.
+            "impact": tool.impact,
             "origin": origin,
             # The card says who asked, and what KIND of thing it is. A cloud
             # model suggesting a write to your notes is not the same event as

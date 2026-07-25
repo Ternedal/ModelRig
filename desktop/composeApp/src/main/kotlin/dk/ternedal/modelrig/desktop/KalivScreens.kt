@@ -636,7 +636,26 @@ data class PlanStep(
 enum class StepStatus { DONE, ACTIVE, PENDING, CANCELLED }
 
 /** Map a worker risk string / tool name to the badge level. */
-internal fun riskOf(risk: String, tool: String): RiskLevel {
+/**
+ * Classify a tool call for the badge.
+ *
+ * The worker now states `impact` on the confirmation card and in the audit log
+ * (write / destructive / admin), which is the finer question the badge is
+ * actually asking -- `risk` alone makes note_append, delete_model and
+ * pull_model identical. Prefer what the server said.
+ *
+ * The tool-name fallback below is only for entries that predate the field, and
+ * it is deliberately last: a name table is a second copy of a risk
+ * classification, and a stale copy fails toward "probably harmless".
+ */
+internal fun riskOf(risk: String, tool: String, impact: String = ""): RiskLevel {
+    val i = impact.lowercase()
+    when {
+        i == "destructive" -> return RiskLevel.DESTRUCTIVE
+        i == "admin" -> return RiskLevel.DESTRUCTIVE
+        i == "write" || i == "desktop" -> return RiskLevel.WRITE
+        i == "read" -> return RiskLevel.READ
+    }
     val r = risk.lowercase()
     val t = tool.lowercase()
     return when {
@@ -685,7 +704,7 @@ fun KalivAgentCockpit(
         when (turn.status) {
             "confirmation_required" -> {
                 // The active write step waits for approval; mark it ACTIVE.
-                val lvl = riskOf("", turn.tool)
+                val lvl = riskOf(turn.risk, turn.tool, turn.impact)
                 // Replace any existing ACTIVE with this, else append.
                 val idx = plan.indexOfFirst { it.status == StepStatus.ACTIVE }
                 val step = PlanStep(turn.tool, lvl, StepStatus.ACTIVE, turn.summary)
@@ -1064,7 +1083,7 @@ internal fun ApprovalCard(card: ToolTurn, onApprove: () -> Unit, onDeny: () -> U
             Spacer(Modifier.width(8.dp))
             Text("Kaliv vil bruge et v\u00e6rkt\u00f8j", color = KalivTheme.colors.TextHigh, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.weight(1f))
-            RiskBadge(riskOf("", card.tool))
+            RiskBadge(riskOf(card.risk, card.tool, card.impact))
         }
         Spacer(Modifier.height(8.dp))
         Text(
