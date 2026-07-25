@@ -162,6 +162,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_desktop_policy.py`
 - `tests/worker_desktop_screenshot_entrypoint.py`
 - `tests/worker_desktop_screenshot_tool.py`
+- `tests/worker_desktop_vision_bridge.py`
 - `tests/worker_desktop_win32.py`
 - `tests/worker_desktop_win32_abi.py`
 - `tests/worker_eval.py`
