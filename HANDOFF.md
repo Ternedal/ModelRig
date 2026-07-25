@@ -405,6 +405,13 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 20. **To sessioner kan være varme samtidig.** 16/7 landede den anden JobStore
     på main mens denne læste analysen; opdaget sekunder før dobbeltarbejde.
     Fetch/rebase + kig på `origin/main` FØR hvert push.
+21b. **Verificér med den task CI faktisk kører — ikke en svagere.** 25/7
+    brugte jeg `./gradlew :composeApp:compileKotlin` hele dagen til at godkende
+    desktop-ændringer. CI's `desktop-compile` kører `:composeApp:test`, som
+    ogsaa kompilerer `src/test` og eksekverer unit-testene. Mit arbejde bestod
+    begge (efterprøvet), saa der skete ingen skade — men jeg havde et svagere
+    net end jeg troede, og en test-only-fejl ville være sluppet igennem lokalt.
+    Samme klasse som probe-fejlene: læs workflow-filen, gæt ikke kommandoen.
 21. **En reachability-graf er kun så god som sit entrypoint.** 24/7: målt
     "70% af workeren er død" fra `app.main` — men CI pakker
     `worker/run_worker.py`, som monterer agent3 ovenpå. Rigtigt tal: **24%**
