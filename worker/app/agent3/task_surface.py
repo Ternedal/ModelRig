@@ -20,6 +20,7 @@ from .core import (
     RiskClass,
     RouteKind,
     RunState,
+    StepState,
     TurnRequest,
 )
 from .integration import Agent3PlanError, V2ToolAdapter
@@ -266,15 +267,88 @@ def build_task_surface_router(
         return response
 
     def execute_task(run_id: str) -> None:
+        """Advance only the promoted read path and stop immediately on cancel.
+
+        The generic orchestrator also owns write confirmations and recovery. Its
+        broad advance loop historically continued after `_execute()` had marked a
+        late read as COMPLETED_AFTER_CANCEL, incremented the step and wrote a
+        contradictory run_completed event. The normal task surface has a smaller
+        authority, so its executor is smaller too: pending, local, idempotent reads
+        only, with an explicit cancellation check before every step and before the
+        terminal completion write.
+        """
         try:
-            run = orchestrator.advance(run_id)
-            if run.state == RunState.WAITING_CONFIRMATION:
-                orchestrator.cancel(run.id)
+            run = orchestrator.store.load(run_id)
+            if run is None or run.state in {
+                RunState.COMPLETED,
+                RunState.FAILED,
+                RunState.CANCELLED,
+                RunState.BLOCKED,
+            }:
+                return
+            _assert_readonly_template(run)
+
+            while run.current_step < len(run.steps):
+                fresh = orchestrator.store.load(run.id)
+                if fresh is None or fresh.state == RunState.CANCELLED:
+                    return
+                step = run.steps[run.current_step]
+                if step.state != StepState.PENDING:
+                    raise RuntimeError("read-only task step left the pending state")
+
+                decision = orchestrator.policy.evaluate(
+                    step,
+                    proactive=False,
+                    allow_private_cloud=False,
+                )
                 orchestrator.store.event(
                     run.id,
-                    "task_surface_violation",
-                    {"reason": "confirmation_requested"},
+                    "policy_decision",
+                    {
+                        "step_id": step.id,
+                        "tool": step.tool,
+                        "action": decision.action,
+                        "reason": decision.reason,
+                    },
                 )
+                if decision.action != "execute":
+                    step.state = StepState.BLOCKED
+                    step.error = "Read-only task policy drifted outside execute"
+                    run.state = RunState.BLOCKED
+                    run.error = step.error
+                    orchestrator.store.save_with_event(
+                        run,
+                        "task_surface_violation",
+                        {
+                            "step_id": step.id,
+                            "tool": step.tool,
+                            "action": decision.action,
+                        },
+                    )
+                    return
+
+                # Reuse the shared execution primitive for atomic step events and
+                # COMPLETED_AFTER_CANCEL detection, but own the surrounding loop
+                # so CANCELLED is terminal here rather than falling through.
+                orchestrator._execute(run, step)
+                if run.state in {RunState.FAILED, RunState.CANCELLED}:
+                    return
+                if step.state != StepState.SUCCEEDED:
+                    raise RuntimeError("read-only task step did not finish successfully")
+                run.current_step += 1
+                run.state = RunState.RUNNING
+                orchestrator.store.save(run)
+
+            fresh = orchestrator.store.load(run.id)
+            if fresh is None or fresh.state == RunState.CANCELLED:
+                return
+            run.state = RunState.COMPLETED
+            run.answer = orchestrator.answerer(run)
+            orchestrator.store.save_with_event(
+                run,
+                "run_completed",
+                {"steps": len(run.steps)},
+            )
         except Exception as exc:
             run = orchestrator.store.load(run_id)
             if run is not None and run.state not in {
