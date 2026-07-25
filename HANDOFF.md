@@ -445,6 +445,44 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 **Ingen af disse er blokeret på kode. De er blokeret på rig, telefon,
 branch-ejer eller en beslutning.**
 
+**[25/7 — LÆS `RIGDAG.md` FØRST.]** Kørebogen for rig-dagen ligger nu i repoet
+og sekvenserer alt hardware-arbejdet i to pas i samme session. Det afgørende
+fund den bygger på, som ikke er indlysende:
+
+> **Kandidaten `8e40103` indeholder IKKE dagens arbejde.** Målt: workflow-
+> harnessen, Sols completion-kontrakt, Agent 3-cockpittet og desktop-designet
+> (titelbjælke/ikon-rail/1240dp) findes ingen af dem på den. Den bærer stadig
+> den gamle `KalivScreens.kt` og `1000.dp`.
+
+Ikke en fejl — kandidaten blev frosset 24/7 og alt fra 25/7 landede på main
+bagefter. Men rig-dagen på `8e40103` kan altså **kun** validere kandidaten;
+dagens arbejde skal med i 1.58.146 og testes i pas 2. To separate rig-dage
+ville koste dobbelt, så pas 2 hører til samme session.
+
+**Leveret 25/7, alt på main og CI-grønt:**
+- `eval/workflows_v1.json` + `scripts/workflow_{runner,eval,contract_adapter}.py`
+  — måler om et workflow bliver FÆRDIGT, ikke om værktøjet blev valgt. Sols
+  kontrakt (`worker/app/agent3/workflow_completion.py`) er den autoritative
+  dommer; adapteren producerer evidensen. Første baseline kræver riggen.
+- `ROUTE_INVENTORY.md` + `scripts/route_inventory.py` — ruteoverfladen aflæst
+  fra OpenAPI, ikke fra importgrafer. Dormans-invarianten er nu en test:
+  ingen `/experimental/agent3`-rute må serveres uden flaget.
+- `KalivAgentCockpitA3.kt` — 1b på Agent 3 bag en persisteret udvikler-kontakt,
+  default fra. V2-cockpittet er urørt og stadig standard.
+- Desktop-designet genskabt efter mockup'en (titelbjælke 40dp, per-skærm rail,
+  1240dp ramme, boblebredder 460/620, Enter sender).
+- `impact` på bekræftelseskortet, så klienter ikke gætter DESTRUCTIVE ud fra
+  værktøjsnavne.
+
+**PR #135 (T-018 single-flight): PAUSED, besluttet 25/7.** Ikke kvaliteten —
+rækkefølgen. T-018 er P2; T-019 er P0 og skal måle præcis den
+`schedule_runner.py`/`schedule_runtime.py` som #135 ændrer. Adopteres af
+Claude som host-ejer EFTER promoveringen. Se `SOL-CLAUDE-SAMARBEJDE.md`.
+
+**Arbejdsdelingen med Sol er skrevet ned og accepteret** i
+`SOL-CLAUDE-SAMARBEJDE.md`: Sol ejer `worker/app/agent3/**`, Claude ejer host,
+klienter, scripts og CI. Fem kontraktpunkter kræver paritetstest FØR ændring.
+
 1. **[ANDERS — PORTEN]** Valideringsrunden: `VALIDATION-1.58.49.md` +
    `deploy\validate-rig.ps1` (mekaniske tjek → `logs\validate-rig-latest.md`)
    + RAG-kalibrering (RAG_DESIGN §5: 5 spørgsmål du kender svaret på + 3 du
