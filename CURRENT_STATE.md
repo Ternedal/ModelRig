@@ -187,6 +187,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_physical_validation_campaign.py`
 - `tests/workflow_release.py`
 - `tests/workflow_rig_preflight.py`
+- `tests/workflow_route_inventory.py`
 - `tests/workflow_runner_offline.py`
 - `tests/workflow_success_harness.py`
 - `tests/workflow_test_coverage.py`
