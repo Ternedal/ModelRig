@@ -997,7 +997,10 @@ private fun MessageBubble(m: UiMessage) {
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
     ) {
         Column(
-            Modifier.widthIn(max = if (isUser) 620.dp else 780.dp),
+            // Mockup 1a: user bubble caps at 460, assistant at 620. The app
+            // ran 620/780, which let lines stretch far wider than the design
+            // and made the chat column read much denser than the handoff.
+            Modifier.widthIn(max = if (isUser) 460.dp else 620.dp),
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
         ) {
             if (!isUser) {

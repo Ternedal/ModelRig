@@ -627,7 +627,7 @@ data class PlanStep(
     val resultSummary: String = "",
 )
 
-enum class StepStatus { DONE, ACTIVE, PENDING }
+enum class StepStatus { DONE, ACTIVE, PENDING, CANCELLED }
 
 /** Map a worker risk string / tool name to the badge level. */
 internal fun riskOf(risk: String, tool: String): RiskLevel {
@@ -721,7 +721,18 @@ fun KalivAgentCockpit(
         busy = true
         // Mark the active step's outcome.
         val idx = plan.indexOfFirst { it.status == StepStatus.ACTIVE }
-        if (idx >= 0 && !approve) plan[idx] = plan[idx].copy(status = StepStatus.DONE, resultSummary = "Afvist \u2014 intet \u00e6ndret")
+        if (idx >= 0 && !approve) {
+            plan[idx] = plan[idx].copy(status = StepStatus.DONE, resultSummary = "Afvist \u2014 intet \u00e6ndret")
+            // The prototype halts the whole run on a rejection (agentPhase
+            // "stopped"), and that matches the project's posture: a declined
+            // write should not leave the plan looking like the remaining steps
+            // are still coming. Mark them cancelled rather than pending.
+            for (i in plan.indices) {
+                if (plan[i].status == StepStatus.PENDING) {
+                    plan[i] = plan[i].copy(status = StepStatus.CANCELLED, resultSummary = "Ikke udf\u00f8rt \u2014 kørslen blev stoppet")
+                }
+            }
+        }
         scope.launch {
             val res = withContext(Dispatchers.IO) {
                 runCatching { ToolsClient(baseUrl, bearer).toolsConfirm(card.confirmation_id, approve) }
@@ -953,7 +964,11 @@ private fun PlanRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     step.tool,
-                    color = if (step.status == StepStatus.PENDING) KalivTheme.colors.TextMuted else KalivTheme.colors.TextHigh,
+                    color = if (step.status == StepStatus.PENDING || step.status == StepStatus.CANCELLED) {
+                        KalivTheme.colors.TextMuted
+                    } else {
+                        KalivTheme.colors.TextHigh
+                    },
                     fontSize = 13.5.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Medium,
@@ -996,6 +1011,14 @@ private fun StatusCircle(index: Int, status: StepStatus) {
                 .border(1.dp, Color(0x4D785A37), RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
         ) { Text("$index", color = KalivTheme.colors.TextMuted, fontSize = 12.sp) }
+        // A run halted by a rejection: the step will not happen, so it must
+        // not keep looking like it is merely waiting its turn.
+        StepStatus.CANCELLED -> Box(
+            Modifier.size(size.dp).clip(RoundedCornerShape(999.dp))
+                .background(Color(0x22000000))
+                .border(1.dp, Color(0x4D9C564C), RoundedCornerShape(999.dp)),
+            contentAlignment = Alignment.Center,
+        ) { Text("\u2715", color = Color(0xFFC47B70), fontSize = 12.sp) }
     }
 }
 
@@ -1305,6 +1328,11 @@ private fun StatusCircleSmall(index: Int, status: StepStatus) {
                 .border(1.dp, Color(0x4D785A37), RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
         ) { Text("$index", color = KalivTheme.colors.TextMuted, fontSize = 11.sp) }
+        StepStatus.CANCELLED -> Box(
+            Modifier.size(22.dp).clip(RoundedCornerShape(999.dp)).background(Color(0x22000000))
+                .border(1.dp, Color(0x4D9C564C), RoundedCornerShape(999.dp)),
+            contentAlignment = Alignment.Center,
+        ) { Text("\u2715", color = Color(0xFFC47B70), fontSize = 11.sp) }
     }
 }
 
