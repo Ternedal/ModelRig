@@ -3,7 +3,7 @@
 The implementation remains byte-for-byte in ``desktop_action_preview_tool_legacy``.
 This facade repairs one Python closure-binding bug in the ToolGate extension
 installer: the screenshot and preview wrappers must retain independent previous
-``_execute`` callables.  The original function reused one closure cell and the
+``_execute`` callables. The original function reused one closure cell and the
 second assignment made the screenshot wrapper call itself recursively.
 """
 from __future__ import annotations
@@ -13,6 +13,19 @@ import time
 from typing import Any
 
 from . import desktop_action_preview_tool_legacy as _impl
+
+
+class _PreviewDenied(
+    _impl.DesktopDenied,
+    _impl.DesktopActionPreviewConfigurationError,
+):
+    """One fail-closed preview refusal visible through both public contracts."""
+
+
+# Legacy functions resolve DesktopDenied through their module globals at call time.
+# Use one dual-contract refusal class so direct preview guards and ToolGate wrappers
+# preserve the same identity the original single-module implementation exposed.
+_impl.DesktopDenied = _PreviewDenied
 
 
 def _install_gate_extensions(tools_module: Any) -> None:
