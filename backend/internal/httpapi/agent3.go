@@ -28,6 +28,11 @@ func agent3PlanTarget(r *http.Request) string {
 	return agent3Target(r, "/experimental/agent3/plans/"+id+"/start")
 }
 
+func agent3TaskPlanTarget(r *http.Request) string {
+	id := url.PathEscape(r.PathValue("id"))
+	return agent3Target(r, "/experimental/agent3/task/plans/"+id+"/start")
+}
+
 func agent3ReplanPreviewTarget(r *http.Request) string {
 	id := url.PathEscape(r.PathValue("id"))
 	return agent3Target(r, "/experimental/agent3/replan-previews/"+id+"/apply")
@@ -48,6 +53,19 @@ func (s *server) handleAgent3TaskReadiness(w http.ResponseWriter, r *http.Reques
 	// surface decision; this authenticated gateway cannot invoke a model/tool,
 	// alter normal chat or activate production.
 	s.Worker.Forward(w, r, agent3Target(r, "/experimental/agent3/task-readiness"))
+}
+
+func (s *server) handleAgent3TaskPlan(w http.ResponseWriter, r *http.Request) {
+	// The worker owns readiness, route, risk and evidence binding. Planning may
+	// cold-load the local model but never executes a tool, so use the long worker
+	// timeout without adding any backend interpretation or fallback.
+	s.WorkerSlow.Forward(w, r, agent3Target(r, "/experimental/agent3/task/plan"))
+}
+
+func (s *server) handleAgent3TaskPlanStart(w http.ResponseWriter, r *http.Request) {
+	// A single-use, evidence-bound token may synchronously execute local reads.
+	// The dedicated worker route has no confirmation or write surface.
+	s.WorkerSlow.Forward(w, r, agent3TaskPlanTarget(r))
 }
 
 func (s *server) handleAgent3Capabilities(w http.ResponseWriter, r *http.Request) {
