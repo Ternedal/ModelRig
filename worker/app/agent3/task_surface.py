@@ -63,11 +63,10 @@ class TaskExecutionPool:
             finally:
                 self._slots.release()
 
-        try:
-            self._pool.submit(run)
-        except Exception:
-            self._slots.release()
-            raise
+        # The caller owns the reservation until submit succeeds. If submit
+        # raises, the caller's finally block releases it exactly once; after a
+        # successful submit, the worker wrapper owns and releases it.
+        self._pool.submit(run)
 
     def shutdown(self) -> None:
         self._pool.shutdown(wait=True, cancel_futures=False)
