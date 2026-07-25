@@ -517,12 +517,12 @@ def register_desktop_action_preview_tool() -> bool:
         return False
     from . import tools
 
-    _install_gate_extensions(tools)
     existing = tools.REGISTRY.get(TOOL_NAME)
     if existing is not None:
         if isinstance(existing, DesktopActionPreviewTool):
             return True
         raise RuntimeError(f"{TOOL_NAME} is already registered by another component")
+    _install_gate_extensions(tools)
     tools.REGISTRY[TOOL_NAME] = DesktopActionPreviewTool()
     return True
 
