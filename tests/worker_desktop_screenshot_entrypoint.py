@@ -34,6 +34,8 @@ print('DESKTOP_ENTRYPOINT=' + json.dumps({{
     'click': 'desktop_click' in tools.REGISTRY,
     'type': 'desktop_type' in tools.REGISTRY,
     'tool_module': 'app.desktop_screenshot_tool' in sys.modules,
+    'vision_module': 'app.desktop_vision_bridge' in sys.modules,
+    'vision_wrapped': bool(getattr(app.main._run_tool_loop, '_kaliv_desktop_vision_bridge', False)),
     'win32_module': 'app.desktop_win32' in sys.modules or 'app.desktop_win32_v2' in sys.modules,
 }}, sort_keys=True))
 """
@@ -75,15 +77,18 @@ with tempfile.TemporaryDirectory(prefix="kaliv-desktop-entrypoint-") as tmp:
     enabled = dict(base)
     enabled["KALIV_COMPUTER_USE"] = "1"
     enabled["KALIV_DESKTOP_ALLOWLIST_FILE"] = str(allowlist)
+    enabled["KALIV_VISION_MODEL"] = "qwen2.5vl:7b"
     on = probe(enabled)
 
 check(not off.get("process_failed") and not off.get("protocol_failed"), "default worker starts cleanly")
 check(off.get("registered") is False, "feature-off startup does not register desktop screenshot")
 check(off.get("tool_module") is False, "feature-off startup does not import the screenshot module")
+check(off.get("vision_module") is False and off.get("vision_wrapped") is False, "feature-off startup does not import or install the vision bridge")
 check(off.get("win32_module") is False, "feature-off startup does not bind or import the Win32 adapter")
 check(not on.get("process_failed") and not on.get("protocol_failed"), "feature-on worker starts cleanly")
 check(on.get("registered") is True, "explicit flag registers desktop screenshot at startup")
 check(on.get("tool_module") is True and on.get("win32_module") is True, "feature-on startup loads only the intended desktop boundary")
+check(on.get("vision_module") is True and on.get("vision_wrapped") is True, "feature-on startup installs the local vision continuation")
 check(on.get("click") is False and on.get("type") is False, "startup still registers no click or type capability")
 
 print(f"\n===== DESKTOP SCREENSHOT ENTRYPOINT: {passed} passed, {failed} failed =====")
