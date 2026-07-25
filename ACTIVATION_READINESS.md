@@ -4,7 +4,7 @@
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
 **Version på main:** `1.58.145`
-**Genereret:** 2026-07-24 20:12 UTC
+**Genereret:** 2026-07-25 06:19 UTC
 
 ---
 
@@ -70,7 +70,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 14 feature-switches er tændt som default.** (12 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 15 feature-switches er tændt som default.** (12 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -78,6 +78,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_ALLOW_RAG_CLOUD` | `(tom)` | slukket |
 | `KALIV_BROWSER_RESEARCH` | `0` | slukket |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` | slukket |
+| `KALIV_COMPUTER_USE` | `0` | slukket |
 | `KALIV_DATA_DIR` | `(tom)` | slukket |
 | `KALIV_EGRESS_GATE` | `(tom)` | slukket |
 | `KALIV_MAX_UPLOAD_MB` | `25` | indstilling |
