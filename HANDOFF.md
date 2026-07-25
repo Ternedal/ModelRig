@@ -492,6 +492,23 @@ rækkefølgen. T-018 er P2; T-019 er P0 og skal måle præcis den
 `schedule_runner.py`/`schedule_runtime.py` som #135 ændrer. Adopteres af
 Claude som host-ejer EFTER promoveringen. Se `SOL-CLAUDE-SAMARBEJDE.md`.
 
+**⚠ PR #163 MÅ IKKE MERGES FØR RIG-DAGEN — uanset at den er grøn.** Den hedder
+*"browser: activate confirmed read-only research boundary"*, men er reelt hele
+computer-use-stakken: **8.671 linjer over 34 filer** (`desktop_action_plan`,
+`desktop_capture`, `desktop_contract`, `desktop_input_execution`,
+`desktop_physical_gate`, `desktop_vision_bridge`, `desktop_win32` m.fl.). Og
+dens base er `agent/unified-candidate-1.58.145` — **den frosne kandidat**.
+
+Tre uafhængige grunde: (1) 8.671 nye linjer i kandidaten ville gøre enhver
+rapport fra rig-dagen til evidens for kode der ikke længere findes
+(F-1802/F-1503). (2) Computer-use er gated bag T-031 (isolation, `[RIG]`), som
+afhænger af T-030 og T-005 — og T-005 er en åben P0; HANDOFF §9 pkt. 5 siger
+*"efter gates 1+2"*. (3) `desktop_policy.py`'s tolerance (6) er stadig et gæt.
+
+Samme fejlklasse som #135 — arbejde der ændrer præcis det en ikke-kørt
+validering skal måle — bare 14 gange større. **CI-farve er ikke
+merge-kriteriet, når basen er frossen.**
+
 **Arbejdsdelingen med Sol er skrevet ned og accepteret** i
 `SOL-CLAUDE-SAMARBEJDE.md`: Sol ejer `worker/app/agent3/**`, Claude ejer host,
 klienter, scripts og CI. Fem kontraktpunkter kræver paritetstest FØR ændring.
