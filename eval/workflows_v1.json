@@ -1,6 +1,6 @@
 {
   "schema": "modelrig.workflow-success/v1",
-  "note": "Grounded in the real tool registry (worker/app/tools.py) as of 1.58.144: rig_status, note_append, list_models, current_datetime, job_status, cancel_job, list_documents, delete_model, pull_model. Nothing here assumes a capability that does not exist. Success is judged on OBSERVABLE outcome, not on whether the model picked a tool a fixture happened to name.",
+  "note": "Grounded in the real tool registry (worker/app/tools.py) as of 1.58.144: rig_status, note_append, list_models, current_datetime, job_status, cancel_job, list_documents, delete_model, pull_model. Nothing here assumes a capability that does not exist. Success is judged on OBSERVABLE outcome, not on whether the model picked a tool a fixture happened to name. Provenance (sha+model) rejses med hvert transcript, og max_confirmations fanger en skjult ekstra godkendelse.",
   "scratch_note_path": "~/kaliv/workflow-eval-scratch.md",
   "workflows": [
     {
@@ -25,7 +25,8 @@
           "delete_model",
           "pull_model"
         ]
-      }
+      },
+      "max_confirmations": 0
     },
     {
       "id": "W-02",
@@ -48,7 +49,8 @@
           "delete_model",
           "pull_model"
         ]
-      }
+      },
+      "max_confirmations": 0
     },
     {
       "id": "W-03",
@@ -65,7 +67,8 @@
           ":"
         ],
         "must_confirm": false
-      }
+      },
+      "max_confirmations": 0
     },
     {
       "id": "W-04",
@@ -78,7 +81,8 @@
           "list_documents"
         ],
         "must_confirm": false
-      }
+      },
+      "max_confirmations": 0
     },
     {
       "id": "W-05",
@@ -94,7 +98,8 @@
         "must_not_execute": [
           "cancel_job"
         ]
-      }
+      },
+      "max_confirmations": 0
     },
     {
       "id": "W-06",
@@ -112,7 +117,8 @@
           "model"
         ],
         "must_confirm": false
-      }
+      },
+      "max_confirmations": 0
     },
     {
       "id": "W-07",
@@ -131,7 +137,8 @@
           "%"
         ],
         "must_confirm": false
-      }
+      },
+      "max_confirmations": 0
     },
     {
       "id": "W-08",
@@ -149,7 +156,8 @@
           "write"
         ],
         "side_effect_after_approve": "scratch_note_grew"
-      }
+      },
+      "max_confirmations": 1
     },
     {
       "id": "W-09",
@@ -170,7 +178,8 @@
           "fri"
         ],
         "side_effect_after_approve": "scratch_note_grew"
-      }
+      },
+      "max_confirmations": 1
     },
     {
       "id": "W-10",
@@ -197,7 +206,8 @@
         ]
       },
       "never_approve": true,
-      "finding": "LUKKET i denne branch: kortet baerer nu ogsaa impact, saa en klient kan rendere DESTRUCTIVE uden at kende vaerktoejsnavne. W-10 asserter paa baade impact og summary."
+      "finding": "LUKKET i denne branch: kortet baerer nu ogsaa impact, saa en klient kan rendere DESTRUCTIVE uden at kende vaerktoejsnavne. W-10 asserter paa baade impact og summary.",
+      "max_confirmations": 1
     },
     {
       "id": "W-11",
@@ -214,7 +224,8 @@
         "must_not_execute_after_reject": [
           "note_append"
         ]
-      }
+      },
+      "max_confirmations": 1
     },
     {
       "id": "W-12",
@@ -235,7 +246,8 @@
         "must_not_execute": [
           "delete_model"
         ]
-      }
+      },
+      "max_confirmations": 1
     },
     {
       "id": "W-13",
@@ -251,7 +263,8 @@
       "expect": {
         "rag_sources_min": 1,
         "must_confirm": false
-      }
+      },
+      "max_confirmations": 0
     },
     {
       "id": "W-14",
@@ -269,7 +282,8 @@
           "understøtter ikke"
         ],
         "must_not_claim_success": true
-      }
+      },
+      "max_confirmations": 1
     }
   ]
 }

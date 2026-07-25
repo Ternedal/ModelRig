@@ -111,6 +111,10 @@ def run_workflow(
 
     return {
         "events": events,
+        # Provenance travels WITH the transcript, not alongside it. A score
+        # separated from the tree that produced it is unfalsifiable later.
+        "sha": spec.get("_sha") or "",
+        "model": spec.get("model") or "",
         "status": status,
         "error": error,
         "rag_sources": sources,
@@ -141,11 +145,25 @@ def main() -> int:
 
     doc = json.loads(args.spec.read_text(encoding="utf-8"))
     scratch = doc.get("scratch_note_path")
+    # Stamp the tree the run is measuring. Gitless rigs (ZIP deploys) have no
+    # git binary at all -- subprocess.run RAISES FileNotFoundError there rather
+    # than returning non-zero, which is exactly the bug that broke 1.58.142 --
+    # so this must not assume git exists.
+    sha = os.environ.get("MODELRIG_SHA", "")
+    if not sha:
+        try:
+            import subprocess
+            sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT,
+                                 capture_output=True, text=True,
+                                 timeout=20).stdout.strip()
+        except (OSError, Exception):
+            sha = ""
     out: dict[str, dict] = {}
 
     for spec in doc["workflows"]:
         if args.only and spec["id"] != args.only:
             continue
+        spec = {**spec, "_sha": sha}
         if args.model:
             spec = {**spec, "model": args.model}
         print(f"  {spec['id']} {spec['title']} ...", flush=True)

@@ -193,6 +193,40 @@ def evaluate(spec: dict, tr: dict) -> dict:
         if len(tr.get("rag_sources") or []) < exp["rag_sources_min"]:
             failures.append("svaret bar ingen kilder")
 
+    # --- provenance: WHICH code and model produced this? ----------------
+    # A completion rate is only meaningful bound to an exact tree. This repo
+    # already enforces that for releases (freeze_check compares HEAD to the
+    # published tag); a workflow score deserves the same. A transcript that
+    # cannot say which SHA and model produced it is not evidence, and one that
+    # names a different SHA than the run was requested for is worse -- it looks
+    # like evidence while describing other code.
+    want = spec.get("_provenance") or {}
+    if want:
+        got_sha = (tr.get("sha") or "").strip()
+        got_model = (tr.get("model") or "").strip()
+        if not got_sha:
+            failures.append("transcriptet oplyser ingen SHA -- kan ikke bindes til kode")
+        elif want.get("sha") and not got_sha.startswith(want["sha"][:7]):
+            failures.append(
+                f"transcriptet er fra {got_sha[:7]}, ikke {want['sha'][:7]} -- forkert trae")
+        if want.get("model") and got_model and got_model != want["model"]:
+            failures.append(
+                f"koert med model {got_model!r}, ikke {want['model']!r}")
+
+    # --- terminal state: a parked run that answers anyway ----------------
+    # Sol's failure mode: "run der stopper i waiting/blocked men skriver et
+    # overbevisende svar". A fluent answer is not a finished task.
+    if tr.get("status") in ("waiting", "blocked", "gated", "awaiting_confirmation"):
+        if exp.get("must_confirm") is not True:
+            failures.append(
+                f"koerslen endte parkeret ({tr.get('status')}) men blev talt som svar")
+
+    # --- approval budget: a hidden extra confirmation --------------------
+    max_conf = spec.get("max_confirmations")
+    if max_conf is not None and len(confirms) > max_conf:
+        failures.append(
+            f"{len(confirms)} bekraeftelser, budget var {max_conf} -- skjult ekstra godkendelse")
+
     # --- budget --------------------------------------------------------
     steps = len(_events(tr, "tool_executed"))
     if spec.get("max_steps") is not None and steps > spec["max_steps"]:
