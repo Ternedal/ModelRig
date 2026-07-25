@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import tempfile
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,7 +14,7 @@ from app.agent3.core import Agent3Orchestrator, AgentRunStore
 from app.agent3.integration import V2ToolAdapter
 from app.agent3.plan_store import PlanStore
 from app.agent3.planner import TypedPlanner
-from app.agent3.task_surface import build_task_surface_router
+from app.agent3.task_surface import TaskExecutionPool, build_task_surface_router
 
 capability_probe.measure = lambda **_kw: {  # type: ignore[assignment]
     "worker_ready": True,
@@ -54,12 +56,24 @@ class Gate:
 
     def __init__(self) -> None:
         self.proposals: list[str] = []
+        self.slow_started = threading.Event()
+        self.slow_release = threading.Event()
+
+    def reset(self) -> None:
+        self.proposals.clear()
+        self.slow_started.clear()
+        self.slow_release.clear()
 
     def is_enabled(self, name: str) -> bool:
         return self.enabled and name in tools.REGISTRY
 
     def propose(self, name, _args, _conversation_id, **_kwargs):
         self.proposals.append(name)
+        if name == "slow_read":
+            self.slow_started.set()
+            if not self.slow_release.wait(timeout=10):
+                raise RuntimeError("slow read test was not released")
+            return {"status": "executed", "result": {"ok": True, "slow": True}}
         if name == "rig_status":
             return {"status": "executed", "result": {"ok": True}}
         return {
@@ -75,6 +89,7 @@ gate = Gate()
 tools = SimpleNamespace(
     REGISTRY={
         "rig_status": Tool("rig_status", "read", idempotent=True),
+        "slow_read": Tool("slow_read", "read", idempotent=True),
         "note_append": Tool("note_append", "write", idempotent=False),
         "volatile_read": Tool("volatile_read", "read", idempotent=False),
     },
@@ -123,33 +138,64 @@ class PlannerChat:
         return self.response
 
 
-def fixture(response: str):
-    temp = tempfile.TemporaryDirectory(prefix="kaliv-task-surface-")
-    root = Path(temp.name)
-    store = AgentRunStore(str(root / "runs.db"))
-    orchestrator = Agent3Orchestrator(store, adapter.execute)
-    plans = PlanStore(str(root / "plans.db"))
-    state = Readiness()
-    chat = PlannerChat(response)
-    app = FastAPI()
-    app.include_router(
-        build_task_surface_router(
-            adapter,
-            orchestrator,
-            plans,
-            state,
-            planner=TypedPlanner(adapter, chat_fn=chat),
+class Fixture:
+    def __init__(self, response: str, *, workers: int = 1) -> None:
+        self.temp = tempfile.TemporaryDirectory(prefix="kaliv-task-surface-")
+        root = Path(self.temp.name)
+        self.store = AgentRunStore(str(root / "runs.db"))
+        self.orchestrator = Agent3Orchestrator(self.store, adapter.execute)
+        self.plans = PlanStore(str(root / "plans.db"))
+        self.state = Readiness()
+        self.chat = PlannerChat(response)
+        self.pool = TaskExecutionPool(workers)
+        app = FastAPI()
+        app.include_router(
+            build_task_surface_router(
+                adapter,
+                self.orchestrator,
+                self.plans,
+                self.state,
+                self.pool,
+                planner=TypedPlanner(adapter, chat_fn=self.chat),
+            )
         )
+        self.client = TestClient(app)
+
+    def close(self) -> None:
+        gate.slow_release.set()
+        self.pool.shutdown()
+        self.temp.cleanup()
+
+
+def plan(fixture: Fixture, tool: str = "rig_status") -> str:
+    response = fixture.client.post(
+        "/experimental/agent3/task/plan",
+        json={"message": tool},
     )
-    return temp, TestClient(app), state, chat
+    check(response.status_code == 200, f"{tool} receives a read-only preview")
+    return response.json()["plan_id"]
 
 
-# Exact, local, idempotent read plan: preview then one single-use start.
-gate.proposals.clear()
-temp, client, state, chat = fixture(
+def wait_terminal(fixture: Fixture, run_id: str, timeout: float = 5.0) -> dict:
+    deadline = time.time() + timeout
+    latest: dict = {}
+    while time.time() < deadline:
+        response = fixture.client.get(f"/experimental/agent3/task/runs/{run_id}")
+        if response.status_code != 200:
+            return {"status_code": response.status_code, "body": response.json()}
+        latest = response.json()
+        if latest.get("terminal") is True:
+            return latest
+        time.sleep(0.02)
+    return latest
+
+
+# Exact, local, idempotent read plan: preview, accepted run, poll outcome.
+gate.reset()
+fixture = Fixture(
     '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"read status"}'
 )
-preview = client.post("/experimental/agent3/task/plan", json={"message": "status"})
+preview = fixture.client.post("/experimental/agent3/task/plan", json={"message": "status"})
 body = preview.json()
 check(preview.status_code == 200, "ready task surface accepts a local read preview")
 check(body["executed"] is False and gate.proposals == [], "preview never executes a tool")
@@ -161,75 +207,74 @@ check(
     "preview exposes only the promoted route and read contract",
 )
 plan_id = body["plan_id"]
-started = client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
+started = fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
 started_body = started.json()
-check(started.status_code == 200, "single-use task start succeeds while readiness is unchanged")
-check(
-    started_body["run"]["state"] == "completed"
-    and gate.proposals == ["rig_status"],
-    "start executes exactly the reviewed read step",
-)
+check(started.status_code == 202, "start accepts the reviewed task without waiting for completion")
+run_id = started_body["run"]["id"]
 check(
     any(event["kind"] == "task_surface_bound" for event in started_body["events"]),
-    "run journal records its readiness-bound task surface",
+    "run journal records its readiness-bound task surface before execution",
+)
+completed = wait_terminal(fixture, run_id)
+check(
+    completed.get("run", {}).get("state") == "completed"
+    and gate.proposals == ["rig_status"],
+    "polling observes exactly the reviewed read step complete",
 )
 check(
-    started_body["production_activation"] is False
-    and started_body["normal_chat_route_unchanged"] is True,
+    completed["production_activation"] is False
+    and completed["normal_chat_route_unchanged"] is True,
     "task execution cannot claim activation or normal-chat changes",
 )
-reused = client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
+reused = fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
 check(reused.status_code == 409, "task plan token is single-use")
-temp.cleanup()
+fixture.close()
 
 
 # Readiness is checked before the model and before consuming a plan token.
-gate.proposals.clear()
-temp, client, state, chat = fixture(
+gate.reset()
+fixture = Fixture(
     '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"read status"}'
 )
-state.value = readiness(
+fixture.state.value = readiness(
     selected_surface="agent2",
     eligible_for_task_ui=False,
     reason="pilot_report_stale",
     reasons=["pilot_report_stale"],
 )
-blocked_preview = client.post("/experimental/agent3/task/plan", json={"message": "status"})
-check(blocked_preview.status_code == 409 and chat.calls == 0, "Agent 2 fallback blocks before planner invocation")
-state.value = readiness()
-preview = client.post("/experimental/agent3/task/plan", json={"message": "status"})
-plan_id = preview.json()["plan_id"]
-state.value = readiness(
+blocked_preview = fixture.client.post("/experimental/agent3/task/plan", json={"message": "status"})
+check(blocked_preview.status_code == 409 and fixture.chat.calls == 0, "Agent 2 fallback blocks before planner invocation")
+fixture.state.value = readiness()
+plan_id = plan(fixture)
+fixture.state.value = readiness(
     selected_surface="agent2",
     eligible_for_task_ui=False,
     reason="operator_disabled",
     reasons=["operator_disabled"],
 )
-blocked_start = client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
+blocked_start = fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
 check(blocked_start.status_code == 409 and gate.proposals == [], "fallback blocks start before token consumption")
-state.value = readiness()
-restored_start = client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
-check(restored_start.status_code == 200, "unconsumed plan may start after exact readiness is restored")
-temp.cleanup()
+fixture.state.value = readiness()
+restored_start = fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
+check(restored_start.status_code == 202, "unconsumed plan may start after exact readiness is restored")
+wait_terminal(fixture, restored_start.json()["run"]["id"])
+fixture.close()
 
 
 # Same selected surface but changed physical evidence invalidates the reviewed token.
-gate.proposals.clear()
-temp, client, state, _chat = fixture(
+gate.reset()
+fixture = Fixture(
     '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"read status"}'
 )
-plan_id = client.post(
-    "/experimental/agent3/task/plan",
-    json={"message": "status"},
-).json()["plan_id"]
+plan_id = plan(fixture)
 changed = readiness()
 changed["pilot"] = dict(changed["pilot"], report_sha256="d" * 64)
-state.value = changed
-changed_start = client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
+fixture.state.value = changed
+changed_start = fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
 check(changed_start.status_code == 409 and gate.proposals == [], "plan is bound to the exact physical pilot report")
-consumed_after_mismatch = client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
+consumed_after_mismatch = fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
 check(consumed_after_mismatch.status_code == 409, "evidence-mismatched plan fails closed as consumed")
-temp.cleanup()
+fixture.close()
 
 
 # A write and a non-idempotent read are rejected after code-owned classification.
@@ -237,25 +282,80 @@ for tool_name, label in (
     ("note_append", "write"),
     ("volatile_read", "non-idempotent read"),
 ):
-    gate.proposals.clear()
-    temp, client, _state, _chat = fixture(
+    gate.reset()
+    fixture = Fixture(
         '{"steps":[{"tool":"' + tool_name + '","args":{}}],"rationale":"unsafe"}'
     )
-    response = client.post("/experimental/agent3/task/plan", json={"message": "unsafe"})
+    response = fixture.client.post("/experimental/agent3/task/plan", json={"message": "unsafe"})
     check(response.status_code == 409 and gate.proposals == [], f"{label} never receives a task plan token")
-    temp.cleanup()
+    fixture.close()
 
 
 # The request shape has no hidden routing knobs to escalate the pilot.
-temp, client, _state, chat = fixture(
+gate.reset()
+fixture = Fixture(
     '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"read"}'
 )
-extra = client.post(
+extra = fixture.client.post(
     "/experimental/agent3/task/plan",
     json={"message": "status", "mode": "cloud", "allow_rag_cloud": True},
 )
-check(extra.status_code == 422 and chat.calls == 0, "cloud and RAG knobs are forbidden by the task schema")
-temp.cleanup()
+check(extra.status_code == 422 and fixture.chat.calls == 0, "cloud and RAG knobs are forbidden by the task schema")
+fixture.close()
+
+
+# Stop targets the rig run and remains reachable after readiness falls back.
+gate.reset()
+fixture = Fixture(
+    '{"steps":[{"tool":"slow_read","args":{}}],"rationale":"slow read"}'
+)
+plan_id = plan(fixture, "slow_read")
+started = fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
+check(started.status_code == 202, "slow read returns a run id before the tool completes")
+run_id = started.json()["run"]["id"]
+check(gate.slow_started.wait(timeout=2), "background worker actually entered the slow read")
+fixture.state.value = readiness(
+    selected_surface="agent2",
+    eligible_for_task_ui=False,
+    reason="pilot_report_stale",
+    reasons=["pilot_report_stale"],
+)
+cancelled = fixture.client.post(f"/experimental/agent3/task/runs/{run_id}/cancel")
+check(
+    cancelled.status_code == 200 and cancelled.json()["run"]["state"] == "cancelled",
+    "Stop remains reachable and cancels the task after readiness fallback",
+)
+gate.slow_release.set()
+terminal = wait_terminal(fixture, run_id)
+check(
+    terminal.get("run", {}).get("state") == "cancelled"
+    and any(event["kind"] == "run_cancelled" for event in terminal.get("events", [])),
+    "late read completion cannot resurrect a cancelled task",
+)
+fixture.close()
+
+
+# Capacity is non-queuing and does not burn the next reviewed token.
+gate.reset()
+fixture = Fixture(
+    '{"steps":[{"tool":"slow_read","args":{}}],"rationale":"slow read"}',
+    workers=1,
+)
+first_plan = plan(fixture, "slow_read")
+first = fixture.client.post(f"/experimental/agent3/task/plans/{first_plan}/start")
+first_run = first.json()["run"]["id"]
+check(gate.slow_started.wait(timeout=2), "the only task worker is occupied")
+second_plan = plan(fixture, "slow_read")
+busy = fixture.client.post(f"/experimental/agent3/task/plans/{second_plan}/start")
+check(busy.status_code == 503, "busy task workers reject instead of queueing hidden work")
+fixture.client.post(f"/experimental/agent3/task/runs/{first_run}/cancel")
+gate.slow_release.set()
+wait_terminal(fixture, first_run)
+second = fixture.client.post(f"/experimental/agent3/task/plans/{second_plan}/start")
+check(second.status_code == 202, "busy rejection preserves the single-use task token")
+wait_terminal(fixture, second.json()["run"]["id"])
+fixture.close()
+
 
 print(f"\n===== AGENT3 READONLY TASK SURFACE: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
