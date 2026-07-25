@@ -31,6 +31,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
@@ -917,7 +923,24 @@ private fun AgentComposer(value: String, onValue: (String) -> Unit, enabled: Boo
         OutlinedTextField(
             value = value,
             onValueChange = onValue,
-            modifier = Modifier.weight(1f).heightIn(min = 52.dp),
+            modifier = Modifier.weight(1f).heightIn(min = 52.dp)
+                // Prototype: Enter runs the task, Shift+Enter inserts a
+                // newline (onCTaskKey / onTaskKey). Without this the composer
+                // could only be sent by hitting the 44dp button, which is a
+                // poor fit for a text-first surface -- and it is exactly how
+                // I failed to start a task while capturing screenshots.
+                .onPreviewKeyEvent { ev ->
+                    if (ev.type == KeyEventType.KeyDown &&
+                        ev.key == Key.Enter &&
+                        !ev.isShiftPressed &&
+                        enabled && value.isNotBlank()
+                    ) {
+                        onSend()
+                        true
+                    } else {
+                        false
+                    }
+                },
             placeholder = { Text(placeholder, color = KalivTheme.colors.TextMuted, fontSize = 13.sp) },
             enabled = enabled,
             maxLines = 4,
