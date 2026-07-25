@@ -405,6 +405,12 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 20. **To sessioner kan være varme samtidig.** 16/7 landede den anden JobStore
     på main mens denne læste analysen; opdaget sekunder før dobbeltarbejde.
     Fetch/rebase + kig på `origin/main` FØR hvert push.
+21c. **Brug `bash scripts/ci_local.sh`** i stedet for at samle kommandoerne
+    selv. Den kører hvad `ci.yml` + `_tests.yml` kører, og — vigtigere — den
+    NAVNGIVER hvad den ikke kan køre (Android SDK, Windows-DPAPI) i stedet for
+    at springe det over i stilhed. Et tjek der tier om sine huller rapporterer
+    grønt for noget mindre end du tror du målte. Den siger selv "grønt her
+    betyder grønt for 8 af 10 kontroller".
 21b. **Verificér med den task CI faktisk kører — ikke en svagere.** 25/7
     brugte jeg `./gradlew :composeApp:compileKotlin` hele dagen til at godkende
     desktop-ændringer. CI's `desktop-compile` kører `:composeApp:test`, som
