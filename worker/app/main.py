@@ -17,22 +17,32 @@ import sys as _sys
 
 from . import main_impl as _impl
 from .browser_research_tool import register_browser_research_tool as _register_browser_research_tool
+from .desktop_screenshot_tool import (
+    register_desktop_screenshot_tool as _register_desktop_screenshot_tool,
+)
 
 VERSION = "1.58.145"
 _impl.VERSION = VERSION
 _impl.app.version = VERSION
 
-# Explicit feature-gated registration only. The literal getenv is intentional:
-# scripts/activation_readiness.py reads feature switches from code, so this new
-# power must appear on the generated readiness page rather than hide behind a
-# constant name. The registration function repeats the same check and remains
-# fail-closed when called from any other import path.
+# Explicit feature-gated registration only. The literal getenv calls are
+# intentional: scripts/activation_readiness.py reads feature switches from code,
+# so new power must appear on the generated readiness page rather than hide behind
+# a constant name. Each registration function repeats its own check and remains
+# fail-closed when called from another import path.
 if _os.getenv("KALIV_BROWSER_RESEARCH", "0").strip().lower() in {
     "1",
     "true",
     "on",
 }:
     _register_browser_research_tool()
+
+if _os.getenv("KALIV_COMPUTER_USE", "0").strip().lower() in {
+    "1",
+    "true",
+    "on",
+}:
+    _register_desktop_screenshot_tool()
 
 # Return the implementation module for every import of app.main. This preserves
 # module-global monkeypatching and private helper access instead of copying names
