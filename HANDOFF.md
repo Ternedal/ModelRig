@@ -421,6 +421,25 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 
 ---
 
+23. **En måling finder ting læsning ikke gør.** 25/7 blev workflow-succes-
+    harnessen bygget (`scripts/workflow_eval.py` + `workflow_runner.py` +
+    `eval/workflows_v1.json`, 14 workflows). Den fandt med det samme at
+    **bekræftelseskortet ikke bar `impact`** — kun `risk`, som er for grov:
+    note_append, delete_model og pull_model er alle `risk=write`. Desktop-
+    klienten kompenserede med en værktøjsnavn-tabel, altså en anden kopi af en
+    risikoklassifikation, der bliver forældet næste gang et værktøj tilføjes —
+    samme fejlklasse som `desktop`-klassen der fik et skærmbillede til at
+    ligne en READ. Lukket i 1.58.144+ (`961fd61`): kortet bærer nu `impact`,
+    og `riskOf` foretrækker serverens ord.
+    **Mønsteret er værd at gentage: byg måleinstrumentet, og det peger på
+    huller i det målte.** Kodelæsning havde ikke fundet den — feltet manglede
+    et sted ingen ledte.
+24. **Harnessen er selv sabotage-testet.** Før den blev troet: ordre-tjekket
+    blev fjernet → gate-bypass-testen blev rød; side-effect-tjekket fjernet →
+    fantom-skrivnings-testen blev rød; gendannet → 25/25 grøn. Gør det samme
+    med enhver ny probe i dette repo. Grønt fra en probe der ikke er
+    kontrolleret imod en kendt fejl betyder ingenting.
+
 ## 9. Kø — hvem har bolden (16/7)
 
 **Ingen af disse er blokeret på kode. De er blokeret på rig, telefon,
@@ -459,7 +478,28 @@ branch-ejer eller en beslutning.**
    almindelig merge-commit. Tag ALDRIG en merge-commit her: dens træ ville
    indeholde docs-deltaet og fælde den byte-eksakte attestation (F-1802/
    F-1503). **Lektie: push ikke til main mens en frossen kandidat venter
-   på rig-dag** — heller ikke docs.
+   på rig-dag** — heller ikke docs. *(Den lektie er brudt igen 25/7:
+   main står nu på `961fd61`, ca. 8 commits foran kandidatens base — desktop-
+   design, workflow-harness og impact-fixet. Vurderingen hver gang: kørslen
+   på riggen er upåvirket, og tag-på-`8e40103` er stadig den rene vej. Men
+   omkostningen er reel — merge-arbejdet efter promoveringen vokser, og
+   normen bør være at bygge på branches til kandidaten er landet.)*
+
+   **[NÆSTE RIG-HANDLING efter promoveringen] Kør workflow-harnessen.**
+   `scripts/workflow_runner.py` kører de 14 workflows i
+   `eval/workflows_v1.json` mod en levende worker og optager transcripts;
+   `scripts/workflow_eval.py` scorer dem. Første kørsel giver et
+   **baseline completion rate** — første gang projektet har et tal for om
+   Kaliv faktisk *løser* opgaver, ikke bare vælger rigtigt værktøj:
+   ```
+   PYTHONPATH=worker python3 scripts/workflow_runner.py \
+       --model hermes3:8b --out validation/workflow-run-latest.json
+   python3 scripts/workflow_eval.py \
+       --transcripts validation/workflow-run-latest.json
+   ```
+   W-10 godkender aldrig (`never_approve`) — den beviser gaten, den sletter
+   ingen model. W-08/W-09/W-11 skriver kun til
+   `~/kaliv/workflow-eval-scratch.md`.
 
    **Model-eval-fixturen (gammel åben sag, nu LUKKET):** basis-fixturen
    `eval/agent3_model_tasks.json` er byte-identisk på main og kandidaten.
