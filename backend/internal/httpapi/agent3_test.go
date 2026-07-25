@@ -26,6 +26,8 @@ func TestAgent3RoutesRequireFeatureFlagAndAuth(t *testing.T) {
 
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/status", http.StatusNotFound)
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/task-readiness", http.StatusNotFound)
+		assertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/task/plan", http.StatusNotFound)
+		assertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/task/plans/example/start", http.StatusNotFound)
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/capabilities", http.StatusNotFound)
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/memory", http.StatusNotFound)
 		assertStatus(t, s.mux, http.MethodDelete, "/api/v1/experimental/agent3/memory/example", http.StatusNotFound)
@@ -44,6 +46,8 @@ func TestAgent3RoutesRequireFeatureFlagAndAuth(t *testing.T) {
 
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/status", http.StatusUnauthorized)
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/task-readiness", http.StatusUnauthorized)
+		assertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/task/plan", http.StatusUnauthorized)
+		assertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/task/plans/example/start", http.StatusUnauthorized)
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/capabilities", http.StatusUnauthorized)
 		assertStatus(t, s.mux, http.MethodGet, "/api/v1/experimental/agent3/memory", http.StatusUnauthorized)
 		assertStatus(t, s.mux, http.MethodPost, "/api/v1/experimental/agent3/memory/example/correct", http.StatusUnauthorized)
@@ -85,6 +89,57 @@ func TestAgent3TaskReadinessProxiesToWorkerOnly(t *testing.T) {
 	}
 	if len(*ollamaHits) != 0 {
 		t.Fatalf("task readiness bypassed worker and reached Ollama: %v", *ollamaHits)
+	}
+}
+
+func TestAgent3ReadonlyTaskPlanProxiesToWorkerOnly(t *testing.T) {
+	t.Setenv("KALIV_AGENT3_ENABLED", "1")
+	h, workerHits, ollamaHits := upstreams(t)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/experimental/agent3/task/plan",
+		strings.NewReader(`{"message":"vis rigstatus"}`),
+	)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("task plan: got %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	want := "/experimental/agent3/task/plan"
+	if len(*workerHits) != 1 || (*workerHits)[0] != want {
+		t.Fatalf("worker hits = %v, want %s", *workerHits, want)
+	}
+	if len(*ollamaHits) != 0 {
+		t.Fatalf("task plan bypassed worker and reached Ollama: %v", *ollamaHits)
+	}
+}
+
+func TestAgent3ReadonlyTaskStartProxiesToWorkerOnly(t *testing.T) {
+	t.Setenv("KALIV_AGENT3_ENABLED", "1")
+	h, workerHits, ollamaHits := upstreams(t)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/experimental/agent3/task/plans/plan-123/start?source=android",
+		nil,
+	)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("task start: got %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	want := "/experimental/agent3/task/plans/plan-123/start"
+	if len(*workerHits) != 1 || (*workerHits)[0] != want {
+		t.Fatalf("worker hits = %v, want %s", *workerHits, want)
+	}
+	if len(*ollamaHits) != 0 {
+		t.Fatalf("task start bypassed worker and reached Ollama: %v", *ollamaHits)
 	}
 }
 
