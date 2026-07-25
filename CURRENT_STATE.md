@@ -163,6 +163,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_desktop_capture.py`
 - `tests/worker_desktop_contract.py`
 - `tests/worker_desktop_input_execution.py`
+- `tests/worker_desktop_physical_gate.py`
 - `tests/worker_desktop_policy.py`
 - `tests/worker_desktop_screenshot_entrypoint.py`
 - `tests/worker_desktop_screenshot_tool.py`
