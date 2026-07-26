@@ -132,11 +132,30 @@ class HardenedWorkerApp:
             delivered = False
 
             async def replay_receive() -> dict[str, Any]:
+                """Hand the buffered body over once, then get out of the way.
+
+                The second half matters more than it looks. This wrapper used to
+                keep answering `http.request` forever, which is harmless for an
+                ordinary request -- nobody calls receive again -- but fatal for a
+                StreamingResponse: Starlette parks a task on receive() waiting
+                for `http.disconnect` so it can notice the client leaving, and a
+                surprise `http.request` makes it raise
+                `Unexpected message received`. The task group unwinds and the
+                stream is aborted.
+
+                That is what broke every interrupted voice turn on the rig
+                (26/07): stop, barge-in and lost-wifi all died server-side, and
+                the phone reported "forbindelsen lukkede før riggen var færdig".
+
+                So after the replay we delegate to the real receive(). A
+                disconnect is not ours to invent or to swallow -- it is the one
+                message a streaming response exists to hear.
+                """
                 nonlocal delivered
-                if delivered:
-                    return {"type": "http.request", "body": b"", "more_body": False}
-                delivered = True
-                return {"type": "http.request", "body": bytes(body), "more_body": False}
+                if not delivered:
+                    delivered = True
+                    return {"type": "http.request", "body": bytes(body), "more_body": False}
+                return await receive()
 
             # ASGI app completion means a StreamingResponse has emitted its final
             # body frame (or the request was cancelled), which is exactly when

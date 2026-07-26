@@ -411,6 +411,13 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     at springe det over i stilhed. Et tjek der tier om sine huller rapporterer
     grønt for noget mindre end du tror du målte. Den siger selv "grønt her
     betyder grønt for 8 af 10 kontroller".
+21c. **En afkortet skærmvisning er ikke en måling.** 26/07 læste jeg
+    `Invoke-RestMethod`s standardformatering af en array — `{@{...; misfire_policy=ru...`
+    — som en komplet liste, konkluderede at en godkendt plan manglede, og
+    sendte Anders ud at lede efter en fejl der formentlig ikke fandtes.
+    PowerShell afkorter objekter i visningen. Brug
+    `... | Format-Table felt1, felt2` eller `ConvertTo-Json`, aldrig
+    standardvisningen, når svaret skal bruges som evidens.
 21b. **Verificér med den task CI faktisk kører — ikke en svagere.** 25/7
     brugte jeg `./gradlew :composeApp:compileKotlin` hele dagen til at godkende
     desktop-ændringer. CI's `desktop-compile` kører `:composeApp:test`, som
