@@ -410,12 +410,38 @@ def schedule_id(row: dict[str, Any]) -> str:
     return str(row.get("schedule_id") or row.get("id") or "")
 
 
+def _ttl_window_ok(row: dict[str, Any], ttl_days: int) -> bool:
+    """Does this grant die roughly when the pilot asked it to?
+
+    ttl_days is a CREATION argument, not a schedule field. The store uses it
+    once to compute expires_at = now + ttl_days * 86400 and then forgets it
+    (scheduler.py:447). No schedule row has ever carried it, so the old check --
+    int(row.get("ttl_days") or -1) == ttl_days -- compared -1 against 1 and
+    failed for every plan that could exist. The pilot asked the operator five
+    times for a plan it was structurally incapable of recognising (26/07).
+
+    What is observable is expires_at, and it is the thing that matters anyway:
+    a standing write grant that dies tomorrow is what was requested; one that
+    lives ninety days is a materially different permission, and that is the
+    confusion worth catching. The window is generous on the low side because
+    the plan is created before it is measured -- minutes can pass, and a pilot
+    restart can measure a plan approved much earlier.
+    """
+    expires = row.get("expires_at")
+    if not isinstance(expires, (int, float)):
+        return False
+    remaining = float(expires) - time.time()
+    if remaining <= 0:
+        return False                      # already dead: not a live grant
+    return remaining <= ttl_days * 86400 + 3600
+
+
 def matches_manifest(row: dict[str, Any], spec: dict[str, Any]) -> bool:
     return (
         row.get("tool") == spec["tool"]
         and row.get("args") == spec["args"]
         and row.get("cadence") == spec["cadence"]
-        and int(row.get("ttl_days") or -1) == int(spec["ttl_days"])
+        and _ttl_window_ok(row, int(spec["ttl_days"]))
         and int(row.get("max_runs") or -1) == int(spec["max_runs"])
         and row.get("timezone") == spec["timezone"]
         and row.get("misfire_policy") == spec["misfire_policy"]

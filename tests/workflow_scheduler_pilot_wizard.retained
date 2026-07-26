@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import time
 import json
 import sqlite3
 import tempfile
@@ -30,12 +31,19 @@ def check(value, message):
         print(f"  FAIL: {message}")
 
 
+# These rows mirror what the worker actually serialises. It does NOT emit
+# ttl_days -- that is a creation argument the store spends on expires_at and
+# forgets (scheduler.py:447). The old fixtures carried ttl_days and no
+# expires_at, which is the wrong shape, and that is exactly why the impossible
+# manifest check survived review: the test agreed with the bug instead of with
+# the worker. A fixture that does not look like production is a fixture that
+# certifies fiction.
 read = {
     "schedule_id": "read1",
     "tool": "rig_status",
     "args": {},
     "cadence": "every:60",
-    "ttl_days": 1,
+    "expires_at": time.time() + 86400,
     "max_runs": 3,
     "timezone": "Europe/Copenhagen",
     "misfire_policy": "run_once",
@@ -45,7 +53,7 @@ write = {
     "tool": "note_append",
     "args": {"text": "pilot"},
     "cadence": "every:60",
-    "ttl_days": 1,
+    "expires_at": time.time() + 86400,
     "max_runs": 2,
     "timezone": "Europe/Copenhagen",
     "misfire_policy": "run_once",
@@ -84,9 +92,18 @@ check(
     ),
     "write misfire drift is rejected",
 )
+# TTL drift means the GRANT lives longer than asked -- expressed as expires_at,
+# because that is the only place the worker records it. Setting a phantom
+# ttl_days field proved nothing: no schedule has ever carried one.
 check(
-    not module.matches_manifest({**write, "ttl_days": 2}, module.WRITE_SPEC),
-    "write TTL drift is rejected",
+    not module.matches_manifest(
+        {**write, "expires_at": time.time() + 90 * 86400}, module.WRITE_SPEC),
+    "write TTL drift is rejected (a 90-day standing grant is not a 1-day one)",
+)
+check(
+    not module.matches_manifest(
+        {**write, "expires_at": time.time() - 60}, module.WRITE_SPEC),
+    "an already-expired grant is rejected",
 )
 check(module.schedule_view({"schedule": write}) == write, "nested API schedule is unwrapped")
 check(module.schedule_id({"schedule_id": "abc"}) == "abc", "schedule id is read")
