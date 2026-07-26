@@ -33,6 +33,11 @@ func agent3TaskPlanTarget(r *http.Request) string {
 	return agent3Target(r, "/experimental/agent3/task/plans/"+id+"/start")
 }
 
+func agent3TaskRunTarget(r *http.Request, suffix string) string {
+	id := url.PathEscape(r.PathValue("id"))
+	return agent3Target(r, "/experimental/agent3/task/runs/"+id+suffix)
+}
+
 func agent3ReplanPreviewTarget(r *http.Request) string {
 	id := url.PathEscape(r.PathValue("id"))
 	return agent3Target(r, "/experimental/agent3/replan-previews/"+id+"/apply")
@@ -63,9 +68,21 @@ func (s *server) handleAgent3TaskPlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleAgent3TaskPlanStart(w http.ResponseWriter, r *http.Request) {
-	// A single-use, evidence-bound token may synchronously execute local reads.
-	// The dedicated worker route has no confirmation or write surface.
+	// Start now returns a persisted run id before the read completes. The worker
+	// owns the bounded execution pool and the single-use evidence-bound token.
 	s.WorkerSlow.Forward(w, r, agent3TaskPlanTarget(r))
+}
+
+func (s *server) handleAgent3TaskRunGet(w http.ResponseWriter, r *http.Request) {
+	// Status remains reachable after readiness falls back to Agent 2. The worker
+	// exposes only runs carrying its task_surface_bound journal event.
+	s.Worker.Forward(w, r, agent3TaskRunTarget(r, ""))
+}
+
+func (s *server) handleAgent3TaskRunCancel(w http.ResponseWriter, r *http.Request) {
+	// Stop targets the persisted rig run and must stay fast even while a read is
+	// in flight. The dedicated worker route refuses generic Agent 3 run ids.
+	s.Worker.Forward(w, r, agent3TaskRunTarget(r, "/cancel"))
 }
 
 func (s *server) handleAgent3Capabilities(w http.ResponseWriter, r *http.Request) {
