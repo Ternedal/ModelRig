@@ -139,9 +139,26 @@ def synthesize_to_wav(text: str, out_path: str) -> dict:
     voice = _get_voice()
     with wave.open(out_path, "wb") as wav_file:
         voice.synthesize_wav(text, wav_file)
-        # Read back the params we just wrote for an honest duration/sample-rate.
-        sr = wav_file.getframerate() or 22050
-        frames = wav_file.getnframes()
+        try:
+            sr = wav_file.getframerate() or 22050
+            frames = wav_file.getnframes()
+        except wave.Error:
+            # Piper produced nothing for this text -- it happens when a
+            # "sentence" survives markdown stripping but has no words in it, a
+            # lone em-dash or "...". Nothing was written, so the file has no
+            # header, and the failure used to arrive doubly disguised: first
+            # "frame rate not set" here, then "# channels not specified" from
+            # close() while that exception unwound. The second one surfaced and
+            # named neither the cause nor the sentence.
+            #
+            # One unspeakable sentence in a forty-turn baseline was enough to
+            # fail a rig day (26/07). Silence is a legitimate outcome, so give
+            # the file a valid empty header and report zero frames; the caller
+            # decides whether a chunk with no audio is worth emitting.
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(22050)
+            sr, frames = 22050, 0
     duration = round(frames / sr, 2) if sr else 0.0
     return {
         "out_path": out_path,

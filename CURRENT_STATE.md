@@ -211,6 +211,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_voice_baseline.py`
 - `tests/worker_voice_stream.py`
 - `tests/worker_voice_strip.py`
+- `tests/worker_voice_tts_empty_synthesis.py`
 - `tests/worker_web_fetch_adapter.py`
 - `tests/workflow_action_pins.py`
 - `tests/workflow_activation_readiness.py`

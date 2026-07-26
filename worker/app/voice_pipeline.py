@@ -108,6 +108,22 @@ _ASR_LOCK = asyncio.Lock()
 _TTS_LOCK = asyncio.Lock()
 
 
+def has_speech(text: str) -> bool:
+    """Is there anything here a voice could actually say?
+
+    `strip_markdown` removes markup, not punctuation, so a "sentence" can
+    survive it as a lone em-dash or "..." -- non-empty, and completely
+    unspeakable. Piper then writes no frames, and the failure used to arrive as
+    "# channels not specified" from deep inside the wave module, naming neither
+    the cause nor the sentence. One such sentence in a forty-turn baseline was
+    enough to fail a rig day (26/07).
+
+    A letter or a digit is the bar. Punctuation, dashes and bullets are not
+    speech, and asking a TTS voice to read them aloud produces silence at best.
+    """
+    return any(ch.isalnum() for ch in text)
+
+
 def strip_markdown(text: str) -> str:
     """Turn markdown into something a TTS voice can read naturally.
 
@@ -217,14 +233,23 @@ async def converse(
         # ENTIRELY markup (a table row, a code fence) strips to nothing -- skip
         # it rather than synthesize an empty WAV.
         speakable = strip_markdown(sentence)
-        if not speakable:
+        if not has_speech(speakable):
             return
         wav = os.path.join(out_dir, f"chunk_{idx:03d}.wav")
         s0 = time.time()
         # Piper is a subprocess and a loaded model: same reasoning as ASR.
         # Serialized so sentences still reach the phone in order.
         async with _TTS_LOCK:
-            await asyncio.to_thread(voice_tts.synthesize_to_wav, speakable, wav)
+            result = await asyncio.to_thread(voice_tts.synthesize_to_wav, speakable, wav)
+        # Belt and braces: even with the guard above, TTS may hand back silence
+        # for text it cannot voice. Emitting a chunk with no audio would make
+        # the client show a bubble it can never play.
+        #
+        # Act on positive evidence only. A backend that reports a duration of
+        # zero is telling us it produced nothing; one that reports nothing at
+        # all is not, and second-guessing it would drop good audio.
+        if isinstance(result, dict) and not result.get("duration"):
+            return
         synth_s = round(time.time() - s0, 2)
         if first_audio_at is None:
             first_audio_at = time.time()
