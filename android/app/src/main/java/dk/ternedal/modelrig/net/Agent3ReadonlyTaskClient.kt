@@ -11,8 +11,9 @@ import java.util.concurrent.TimeUnit
 /**
  * Normal-client transport for the readiness-bound Agent 3 read-only task surface.
  *
- * Deliberately exposes only preview and single-use start. It has no generic run,
- * confirmation, retry, resume, cloud, RAG, memory or client-authored-plan API.
+ * Deliberately exposes only preview, single-use start, task-scoped status and
+ * task-scoped cancellation. It has no generic run, confirmation, retry, resume,
+ * cloud, RAG, memory or client-authored-plan API.
  */
 class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
     private val base = baseUrl.trimEnd('/')
@@ -92,6 +93,7 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
         val events: List<Event>,
         val evidence: EvidenceBinding,
         val capabilityReceipt: CapabilityReceipt?,
+        val terminal: Boolean,
     )
 
     fun preview(message: String, conversationId: String? = null): Preview {
@@ -101,10 +103,18 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
     }
 
     fun start(planId: String): Started {
-        if (!PLAN_ID.matches(planId)) {
-            throw ModelRigException("Ugyldigt read-only task plan-id")
-        }
+        requireOpaqueId(planId, "read-only task plan-id")
         return parseStarted(post("$PLAN_PREFIX/$planId/start", JSONObject()))
+    }
+
+    fun status(runId: String): Started {
+        requireOpaqueId(runId, "read-only task run-id")
+        return parseStarted(get("$RUN_PREFIX/$runId")).requireRunId(runId)
+    }
+
+    fun cancel(runId: String): Started {
+        requireOpaqueId(runId, "read-only task run-id")
+        return parseStarted(post("$RUN_PREFIX/$runId/cancel", JSONObject())).requireRunId(runId)
     }
 
     internal fun parsePreview(root: JSONObject): Preview {
@@ -126,7 +136,7 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
         val steps = parseSteps(root.optJSONArray("plan") ?: JSONArray())
         validateSteps(steps)
         val planId = root.nullableString("plan_id")
-        if (steps.isNotEmpty() && (planId == null || !PLAN_ID.matches(planId))) {
+        if (steps.isNotEmpty() && (planId == null || !OPAQUE_ID.matches(planId))) {
             throw ModelRigException("Ugyldig task-preview: executable plan mangler single-use id")
         }
         if (steps.isEmpty() && planId != null) {
@@ -152,12 +162,24 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
             throw ModelRigException("Ugyldigt read-only task-run: route er ændret")
         }
         validateSteps(run.steps)
+        val terminal = root.requireBoolean("terminal")
+        if (terminal != (run.state in TERMINAL_STATES)) {
+            throw ModelRigException("Ugyldigt read-only task-run: terminal-status matcher ikke run-state")
+        }
         return Started(
             run = run,
             events = parseEvents(root.optJSONArray("events") ?: JSONArray()),
             evidence = parseEvidence(root.requireObject("readiness_binding")),
             capabilityReceipt = parseCapabilityReceipt(root.optJSONObject("capability_receipt")),
+            terminal = terminal,
         )
+    }
+
+    private fun Started.requireRunId(expected: String): Started {
+        if (run.id != expected) {
+            throw ModelRigException("Ugyldigt read-only task-run: serveren returnerede et andet run-id")
+        }
+        return this
     }
 
     private fun validateEnvelope(root: JSONObject) {
@@ -186,8 +208,8 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
         answer = value.nullableString("answer"),
         error = value.nullableString("error"),
     ).also {
-        if (it.id.isBlank() || it.state.isBlank()) {
-            throw ModelRigException("Ugyldigt read-only task-run: run-identitet mangler")
+        if (it.id.isBlank() || it.state !in RUN_STATES) {
+            throw ModelRigException("Ugyldigt read-only task-run: run-identitet eller state er ugyldig")
         }
     }
 
@@ -293,12 +315,23 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
         }
     }
 
-    private fun post(path: String, payload: JSONObject): JSONObject {
-        val request = Request.Builder()
+    private fun get(path: String): JSONObject = execute(
+        Request.Builder()
+            .url(base + path)
+            .get()
+            .header("Authorization", "Bearer $token")
+            .build(),
+    )
+
+    private fun post(path: String, payload: JSONObject): JSONObject = execute(
+        Request.Builder()
             .url(base + path)
             .post(payload.toString().toRequestBody(jsonType))
             .header("Authorization", "Bearer $token")
-            .build()
+            .build(),
+    )
+
+    private fun execute(request: Request): JSONObject {
         http.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
@@ -316,8 +349,21 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
         }
     }
 
+    private fun requireOpaqueId(value: String, label: String) {
+        if (!OPAQUE_ID.matches(value)) {
+            throw ModelRigException("Ugyldigt $label")
+        }
+    }
+
     private fun JSONObject.requireObject(name: String): JSONObject =
         optJSONObject(name) ?: throw ModelRigException("Read-only task mangler $name")
+
+    private fun JSONObject.requireBoolean(name: String): Boolean {
+        if (!has(name) || isNull(name) || get(name) !is Boolean) {
+            throw ModelRigException("Read-only task mangler gyldig $name")
+        }
+        return getBoolean(name)
+    }
 
     private fun JSONObject.nullableString(name: String): String? =
         if (!has(name) || isNull(name)) null else optString(name).ifBlank { null }
@@ -328,12 +374,22 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
     companion object {
         private const val PLAN_PATH = "/api/v1/experimental/agent3/task/plan"
         private const val PLAN_PREFIX = "/api/v1/experimental/agent3/task/plans"
+        private const val RUN_PREFIX = "/api/v1/experimental/agent3/task/runs"
         private const val SURFACE = "agent3_readonly"
         private const val FALLBACK = "agent2"
         private const val SELECTED_REASON = "agent3_readonly_selected"
         private const val ROUTE = "rig_tools_local"
-        private val PLAN_ID = Regex("^[A-Za-z0-9_-]{1,200}$")
+        private val OPAQUE_ID = Regex("^[A-Za-z0-9_-]{1,200}$")
         private val SHA256 = Regex("^[0-9a-f]{64}$")
         private val GIT_SHA = Regex("^[0-9a-f]{40}$")
+        private val RUN_STATES = setOf(
+            "running",
+            "blocked",
+            "waiting_confirmation",
+            "completed",
+            "failed",
+            "cancelled",
+        )
+        private val TERMINAL_STATES = setOf("blocked", "completed", "failed", "cancelled")
     }
 }
