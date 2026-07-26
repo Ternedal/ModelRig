@@ -1,181 +1,221 @@
-# Rig-dag — kørebog
+# RIGDAG.md — kørebog
 
-**Skrevet 25/07-2026 mod `main @ a7f2495` og kandidat `8e40103`.**
+**Skrevet ud fra hvad der faktisk står i koden**, ikke hvad jeg troede. Hvert
+krav herunder er slået op i den gate der håndhæver det.
 
-Din tid ved maskinen er projektets knappe ressource — fem P0-opgaver er åbne og
-alle fem er `[RIG]`. Der er kommet mere at teste i dag, så det her er
-rækkefølgen, og hvorfor den er sådan.
-
----
-
-## Det du skal vide først
-
-**Kandidaten `8e40103` indeholder ikke dagens arbejde.** Målt:
-
-| | På kandidaten? |
-|---|---|
-| Workflow-harness (runner, adapter, specs) | **nej** |
-| Sols completion-kontrakt | **nej** |
-| Agent 3-cockpittet | **nej** |
-| Desktop-designet (titelbjælke, ikon-rail, 1240dp) | **nej** — den har den gamle `KalivScreens.kt` og `1000.dp` |
-
-Det er ikke en fejl. Kandidaten blev frosset i går, og alt fra i dag er landet
-på `main` bagefter. Men det betyder:
-
-> **Rig-dagen på `8e40103` kan ikke teste noget af det jeg har bygget i dag.**
-> Den validerer kandidaten. Dagens arbejde skal med i næste udgivelse.
-
-Derfor er kørebogen delt i to pas i **samme** session. Du er allerede ved
-maskinen; to separate rig-dage ville koste dobbelt.
+Kandidat: **`60f9b00`** (1.58.145, inkl. voice-fixet). Alle fire CI-gates grønne.
 
 ---
 
-## Pas 1 — luk kandidaten (P0, det der blokerer alt)
+## Det du skal vide før du starter
 
-Clean checkout af **præcis** `8e40103`. Ikke main, ikke en merge.
+**Seks beviser skal i hus**, alle bundet til kandidatens SHA:
+
+```
+preflight · agent3 · model_eval · voice · rag · scheduler_pilot
+```
+
+**De holder i 7 dage.** `--max-age-hours` er 168 som default, så du behøver ikke
+klare det i én session. Men **alle seks skal bære samme `git_sha`** —
+kampagnen sammenligner hvert bevis mod kandidaten
+(`_expect_equal(..., "candidate.git_sha", ...)`). Ændres koden, dør de alle.
+
+**Derfor er alt fra 25/7 ugyldigt.** Voice-fixet gav ny SHA. Det er prisen for
+fejlen, ikke for noget du gjorde.
+
+---
+
+## Opsætning — én gang, i rækkefølge
+
+### 1. Checkout kandidaten
 
 ```powershell
+cd C:\Users\admin\Desktop\ModelRig-git
 git fetch origin agent/unified-candidate-1.58.145
-git checkout 8e40103          # detached — det er meningen
+git checkout 60f9b00
+git rev-parse --short HEAD     # skal sige 60f9b00
 ```
 
-1. **`START_STAGE_A_TEST.cmd`**
-2. **`START_REMAINING_PHYSICAL_TESTS.cmd`** — voice + scheduler-pilot er det
-   udestående. Voice fejlede sidst med `401 invalid token` på Pixel'en; hav en
-   frisk parring klar.
-3. **Gennemgå beviserne** før du beslutter noget:
-   - `validation/physical-validation-candidate-final-latest.json`
-   - `validation/agent3-readonly-pilot-latest.json`
-   - `validation/scheduler-pilot-latest.json`
-4. **Stop.** PR #161 siger det selv: *"Only after a separate explicit decision
-   may the exact SHA be fast-forwarded, tagged and released."*
+"detached HEAD" er meningen.
 
-### T-006 forced recovery — ét dobbeltklik, ~2 minutter
+### 2. Byg backenden fra checkouten
 
-**`START_FORCED_RECOVERY.cmd`** (ligger på main; kør den fra 1.58.146-checkouten
-i pas 2, ikke fra kandidaten — den findes ikke dér).
-
-Den kører hele forsøget selv: starter en proces, lader den claime en occurrence,
-**dræber den hårdt** med `taskkill /F`, genstarter hurtigt, venter lease-TTL'en
-ud, genstarter igen, og printer en dom. Du skal ikke gøre noget undervejs.
-
-Riggens egne schedules, jobs og audit røres **ikke** — alt kører i en
-midlertidig mappe der slettes bagefter.
-
-Forventet: **6/6 OK**. Den vigtigste linje er den næstsidste:
-
-```
-lease-vinduet er reelt: en genstart inden for 90s springer recovery over
-```
-
-Det er ikke en fejl — det er beskyttelsen mod at afskrive en *levende* workers
-kørsler. Men det betyder at en worker der dør og genstartes med det samme først
-får afklaret sin occurrence ved **næste** opstart. Kørt på Linux 25/7 (6/6);
-Windows-kørslen er det der mangler, fordi fillåse og NTFS opfører sig anderledes
-under abrupt død.
-
-### Når du beslutter at promovere
+**Springes dette over, validerer du forkert kode.** 25/7 kørte riggen 1.58.141
+mens kandidaten var 1.58.145.
 
 ```powershell
-git tag -a v1.58.145 8e40103 -m "v1.58.145"
+go build -C backend -trimpath -o modelrig-server.exe .\cmd\modelrig-server
+```
+
+### 3. Start riggen — med alle flag
+
+```powershell
+cd deploy
+$env:PYTHONDONTWRITEBYTECODE = "1"
+$env:KALIV_SCHEDULER_API = "1"
+$env:KALIV_SCHEDULER = "1"
+$env:KALIV_SCHEDULER_APPROVAL_SECRET = "kaliv-pilot-approval-secret-2026-07-26-abcdef"
+powershell -ExecutionPolicy Bypass -File .\run-windows.ps1
+```
+
+**Læs opstartslinjen: skal sige `1.58.145`.** Lad vinduet stå.
+
+Om flagene:
+- `PYTHONDONTWRITEBYTECODE` — `.pyc` i træet fælder freeze-gaten (F-1502)
+- `KALIV_SCHEDULER_API` — uden den er `/api/v1/schedules` **404** (`server.go:87`)
+- `KALIV_SCHEDULER_APPROVAL_SECRET` — **mindst 32 tegn**, ellers 503
+  (`schedule_approvals.go:137`). Samme værdi i alle vinduer.
+
+### 4. Hent et token — nyt vindue
+
+```powershell
+cd C:\Users\admin\Desktop\ModelRig-git
+$env:PYTHONDONTWRITEBYTECODE = "1"
+$env:KALIV_SCHEDULER_APPROVAL_SECRET = "kaliv-pilot-approval-secret-2026-07-26-abcdef"
+$c = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8080/api/v1/pair/start"
+$r = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8080/api/v1/pair/claim" `
+     -ContentType "application/json" `
+     -Body (@{ code = $c.code; device_name = "stage-a" } | ConvertTo-Json)
+$env:MODELRIG_TOKEN = ([string]$r.token).Trim()
+"$($env:MODELRIG_TOKEN.Length)"
+```
+
+**SKAL vise 64.** Et token er 32 bytes hex (`auth.NewToken`). Viser den noget
+andet, så stop — alt autentificeret fejler derefter med **400**, ikke 401, fordi
+headeren er malformet.
+
+At sætte variablen her betyder at wizard'en **springer token-prompten over**.
+Den prompt er `getpass` og tager ikke pålideligt imod indsæt i konsollen.
+
+---
+
+## Kør beviserne
+
+**Alt i vinduet fra trin 4**, hvor token og hemmelighed er sat.
+
+```powershell
+.\START_STAGE_A_TEST.cmd
+```
+
+Den tager preflight, agent3, model_eval og rag automatisk. Forventet tid:
+model_eval ~3 min, **RAG ~40 min** (10.000 chunks; embedding går ét HTTP-kald
+ad gangen, GPU'en ligger på ~39% — det er kaldsmønsteret der er flaskehalsen,
+ikke modellen).
+
+### Voice — det manuelle pausepunkt
+
+Fem Pixel-trials. **Kriterierne er eksakte** (`_manual_trial_passes`):
+
+```
+recognized          = true
+playback_stopped    = true
+stale_audio_resumed = false
+ui_terminal_state   = "cancelled" ELLER "idle"     ← ikke "stopped", ikke "error"
+stop_latency_ms     = et tal mellem 0 og 30000     ← ikke null
+```
+
+De fem triggere:
+
+| Trial | Handling |
+|---|---|
+| `manual-01` | stop-tryk under **første** lydstykke |
+| `manual-02` | stop-tryk **mellem** to lydstykker |
+| `manual-03` | begynd at tale under første lydstykke |
+| `manual-04` | begynd at tale mellem to lydstykker |
+| `manual-05` | afbryd netværket midt i afspilningen |
+
+Brug samme spørgsmål hver gang, så stykkerne er lige lange. Noget rent
+forklarende uden værktøjer eller RAG:
+
+> *"Forklar hvordan en forbrændingsmotor virker, trin for trin."*
+
+**Skriv hvad der faktisk sker.** Filen er evidens, ikke en formular. Resumer
+gammel lyd, så skriv `true` — det er netop det, øvelsen findes for at fange.
+
+**Efter dine fem trials kører den selv fire automatiserede cancellation-probes**
+plus 40 gennemløb (20 fraser × 2). Alle fire probes skal afbryde rent, rydde op
+og efterlade workeren sund. **Det er den sti voice-fejlen sad i** — de ville have
+fældet dig 25/7 uanset hvad du gjorde med telefonen.
+
+---
+
+## Scheduler-piloten — kør den separat
+
+Stage A's egen scheduler-del kræver at du indsætter schedule-id'er og
+recovery-linjer manuelt. **Den selvstændige pilot gør det samme automatisk og
+skriver til samme rapportfil** (`validation/scheduler-pilot-latest.json`), som er
+den kampagnen læser.
+
+```powershell
+.\START_SCHEDULER_PILOT.cmd
+```
+
+Den starter sin egen worker og dræber den hårdt for at bevise recovery.
+
+**Beder den om port 8099:**
+
+```powershell
+Get-NetTCPConnection -LocalPort 8099 -State Listen |
+  ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+```
+
+Piloten rydder ikke op efter sig selv, så en afbrudt kørsel blokerer den næste.
+Backenden lytter på 8080 og røres ikke.
+
+**Én manuel handling:** opret præcis denne plan i appen og tryk Godkend.
+
+```
+note_append · {"text":"pilot"} · every:60 · max_runs=2 · ttl_days=1
+```
+
+Du skal ikke kopiere noget tilbage.
+
+**Tjek af planer skal bruge `Format-Table`** — PowerShell afkorter
+standardvisningen med `...`, og det ligner en tom liste:
+
+```powershell
+(Invoke-RestMethod -Uri "http://127.0.0.1:8099/schedules").schedules |
+  Format-Table schedule_id, tool, cadence
+```
+
+---
+
+## Til sidst
+
+Når alle seks ligger i `validation\`, kører du `verify`. Den er grøn kun når
+hvert bevis er **present, fresh, candidate-bound og green** — og
+`min-model-exact` er 1.0, så model_eval skal være 30/30 præcis.
+
+### Promovering
+
+```powershell
+git tag -a v1.58.145 60f9b00 -m "v1.58.145"
 git push origin v1.58.145
 ```
 
-**Tagget skal sidde direkte på `8e40103`.** Ikke på en merge-commit — dens træ
-ville indeholde dagens docs-delta og fælde den byte-eksakte attestation
-(F-1802/F-1503). `--ff-only` er ikke længere mulig, fordi main er rykket; det er
-selvforskyldt, og det er derfor tagget går direkte på SHA'en i stedet.
+**Tagget skal sidde direkte på `60f9b00`.** Aldrig på en merge-commit — dens træ
+ville afvige fra det validerede og fælde den byte-eksakte attestation
+(F-1802/F-1503).
+
+### Derefter
+
+1. Skær `1.58.146` fra main med desktop-designet og workflow-harnessen
+2. Overvej `v1.0.0` — 1.0 har konsistent betydet *"apparatet er bevist på
+   hardware"*, og det er præcis hvad rig-dagen afgør
+3. Merge #157, #13, så #5/#7/#9
+4. **Rør ikke #163** — 8.671 linjer computer-use på den frosne kandidat
+5. **Rør ikke #135** før T-019 er kørt — den ændrer den kode piloten måler
 
 ---
 
-## Pas 2 — dagens arbejde, samme session
+## Hvis noget stopper
 
-Først nu giver det mening at skære `1.58.146` fra main, som **har** alt.
-
-```powershell
-git checkout main && git pull
-python scripts\version_tool.py set 1.58.146
-python scripts\activation_readiness.py
-python scripts\current_state.py
-python scripts\route_inventory.py
-# bump + regenerering SKAL i samme commit som tagget peger på — det var
-# præcis fejlen der gjorde v1.58.143 til en draft med 0 assets
-```
-
-### 2a. Første workflow-baseline — projektets første rigtige tal
-
-```powershell
-set MODELRIG_TOKEN=<token>
-python scripts\workflow_runner.py --model hermes3:8b ^
-    --out validation\workflow-run-latest.json
-python scripts\workflow_eval.py --transcripts validation\workflow-run-latest.json
-```
-
-14 workflows. Det du får ud er en **completion rate** — første gang projektet
-har et tal for om Kaliv faktisk *løser* opgaver, ikke om den vælger det rigtige
-værktøj. Forvent ikke 14/14. Tallet er interessant fordi det er ærligt.
-
-**Kig især på W-10.** Den beviser at `delete_model` ikke kan køre uden et kort.
-Den godkender aldrig — den skal ende `blocked`. Hvis den nogensinde ender
-`completed` med værktøjet udført, så stop og sig til.
-
-### 2b. Desktop-designet
-
-```powershell
-cd desktop && .\gradlew run
-```
-
-Vindue **1240×820**, 40dp titelbjælke øverst i fuld bredde. Tre skærme i
-venstre rail: chat (246dp rail m. labels) · agent (70dp ikon-rail) ·
-computer-use (70dp ikon-rail). `CLIENT_BUILD_AND_TEST.md` har tabellen over hvad
-der skal ses.
-
-Jeg har kørt alle tre headless på Linux og målt kolonnegrænserne, men
-**fontrendering og vinduesdekoration på Windows har jeg aldrig set.**
-
-### 2c. Agent 3-cockpittet (valgfrit, kræver flaget)
-
-```powershell
-set KALIV_AGENT3_ENABLED=1
-```
-Slå så **"Agent-skærm bruger Agent 3 (udvikler)"** til i Indstillinger. Uden
-flaget siger cockpittet det selv i stedet for at fejle kryptisk.
-
-Det er det eneste sted `"Agent-plan · 2 af 4 trin"` kan virke — V2-loopet kender
-ikke totalen. Er flaget slukket, er V2-cockpittet stadig standard, og normal
-chat er urørt uanset.
-
----
-
-## Pas 3 — efter tagget
-
-1. Merge **#157** (fastapi, verificeret lokalt) og **#13** (sqlite-jdbc)
-2. Så **#5/#7/#9** (Actions-bumps) — og lad næste release-kørsel følge lige
-   efter, for `build-and-release.yml` bruger de samme actions og kører **kun på
-   tags**, så en breaking change dér er ikke fanget endnu
-3. **#135** adopterer jeg som host-ejer, rebaser og kører gennem globben
-4. **#156** blokerer hele den 6-lag dybe control-center-kæde
-
----
-
-## Beslutninger kun du kan tage
-
-- **T-006:** accepter DB-evidens for recovery, eller kør de tre minutters
-  forced recovery. Det er den sidste 1.0-blocker.
-- **1.0:** 145 patches på 1.58 gør versionsnummeret informationsløst.
-- **Research-sporet** (1.564 linjer): staged eller skæres væk? Der er intet
-  beslutningsspor ud over én linje i ROADMAP.
-- **D3/D4** fra ROADMAP's åbne beslutninger.
-
----
-
-## Hvis noget fejler
-
-`TROUBLESHOOTING.md` har mønstrene. To fra nyere tid der er værd at huske:
-
-- **Git-løs rig:** `subprocess.run` **kaster** FileNotFoundError når git slet
-  ikke findes — den fejler ikke med en returkode. Rettet i 1.58.142, men sæt
-  `MODELRIG_SHA` hvis noget alligevel klager over proveniens.
-- **Readiness-drift:** hvis en release fejler på `ACTIVATION_READINESS.md`, er
-  bump og regenerering ikke i samme commit som tagget. Det gjorde v1.58.143 til
-  en draft med 0 assets.
+| Symptom | Årsag |
+|---|---|
+| `does not contain current origin/main` | main er rykket; kandidaten skal merges op **før** rig-dagen |
+| Alt autentificeret giver **400** | tokenet er ikke 64 tegn |
+| `/api/v1/schedules` giver **404** | `KALIV_SCHEDULER_API=1` mangler |
+| `approve` giver **503** | hemmeligheden er under 32 tegn, eller ikke ens i begge vinduer |
+| `NOT FROZEN — bytecode` | `.pyc` i træet; sæt `PYTHONDONTWRITEBYTECODE=1` og ryd |
+| `Errno 10048` på 8099 | efterladt worker fra en afbrudt pilot |
+| Konsollen tager ikke imod tastetryk | mark-mode; titlen siger "Vælg" — tryk **Esc** |
