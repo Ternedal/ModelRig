@@ -105,45 +105,6 @@ data class Agent3ReadonlyTaskEvent(
 )
 
 @Serializable
-data class Agent3PlanTermination(
-    val state: String = "",
-    @SerialName("can_request") val canRequest: Boolean = false,
-    @SerialName("request_scope") val requestScope: String = "",
-    val effect: String = "",
-    val reason: String = "",
-)
-
-@Serializable
-data class Agent3ModelStreamTermination(
-    val state: String = "",
-    val active: Boolean = false,
-    @SerialName("can_request") val canRequest: Boolean = false,
-    @SerialName("handle_present") val handlePresent: Boolean = false,
-    val reason: String = "",
-)
-
-@Serializable
-data class Agent3ActiveToolTermination(
-    @SerialName("step_id") val stepId: String = "",
-    val tool: String = "",
-    val state: String = "",
-    val semantics: String? = null,
-    @SerialName("handle_present") val handlePresent: Boolean = false,
-    @SerialName("can_request") val canRequest: Boolean = false,
-    @SerialName("request_state") val requestState: String = "",
-    val reason: String = "",
-)
-
-@Serializable
-data class Agent3TerminationReceipt(
-    val schema: String = "",
-    val plan: Agent3PlanTermination = Agent3PlanTermination(),
-    @SerialName("model_stream") val modelStream: Agent3ModelStreamTermination = Agent3ModelStreamTermination(),
-    @SerialName("active_tool") val activeTool: Agent3ActiveToolTermination? = null,
-    @SerialName("production_activation") val productionActivation: Boolean = true,
-)
-
-@Serializable
 data class Agent3ReadonlyTaskSnapshot(
     @SerialName("task_surface") val taskSurface: String = "",
     @SerialName("selected_surface") val selectedSurface: String = "",
