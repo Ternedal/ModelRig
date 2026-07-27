@@ -66,9 +66,18 @@ checks = {
         "ANDROID_AGENT3_EXTRA" in script
         and '"--args=--agent3"' in script
     ),
-    "positive preview phrase is exact": "PREVIEW MATCHER ORDINAL {ordinal}" in script,
-    "positive approval phrase is exact": "APPROVAL GIVET ORDINAL {ordinal}" in script,
-    "positive completion phrase is exact": "RUN COMPLETED ORDINAL {ordinal}" in script,
+    "positive preview phrase is exact": (
+        'PREVIEW_PHRASE = "PREVIEW MATCHER"' in script
+        and 'require_phrase(f"{PREVIEW_PHRASE} ORDINAL {ordinal}")' in script
+    ),
+    "positive approval phrase is exact": (
+        'APPROVAL_PHRASE = "APPROVAL GIVET"' in script
+        and 'require_phrase(f"{APPROVAL_PHRASE} ORDINAL {ordinal}")' in script
+    ),
+    "positive completion phrase is exact": (
+        'COMPLETED_PHRASE = "RUN COMPLETED"' in script
+        and 'require_phrase(f"{COMPLETED_PHRASE} ORDINAL {ordinal}")' in script
+    ),
     "plain yes cannot close a positive run": (
         "require_phrase(f\"{PREVIEW_PHRASE} ORDINAL {ordinal}\")" in script
         and "require_phrase(f\"{APPROVAL_PHRASE} ORDINAL {ordinal}\")" in script
@@ -83,7 +92,8 @@ checks = {
     ),
     "unbound successful append is recovered without replay": (
         "def recover_unbound_positive(" in script
-        and "RECOVERED EVIDENCE REVIEWED ORDINAL {ordinal}" in script
+        and 'RECOVERY_PHRASE = "RECOVERED EVIDENCE REVIEWED"' in script
+        and 'require_phrase(f"{RECOVERY_PHRASE} ORDINAL {ordinal}")' in script
         and "len(matching) != 1" in script
     ),
     "journal cannot coexist with partial positive binding": (
@@ -145,7 +155,7 @@ checks = {
         and "Ingen case er auto-godkendt" in script
     ),
     "runbook states physical non-activation boundary": (
-        "kan ikke godkende en write" in runbook
+        "cannot approve a write" in runbook
         and '"production_activation": false' in runbook
     ),
 }
