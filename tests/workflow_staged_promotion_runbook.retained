@@ -31,7 +31,19 @@ def load(name: str, path: Path):
 
 version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 runbook_path = ROOT / "STAGED_PHYSICAL_PROMOTION.md"
-check(version == "1.58.143", "staged candidate has the exact unified release version")
+def _semver(value: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in value.strip().lstrip("v").split("."))
+
+
+# The staged promotion this runbook documents is a COMPLETED episode. The tree
+# must never be behind it -- that would mean the runbook describes a promotion
+# that has not happened. But it must be free to move past it: an equality lock
+# pins VERSION to the promoted candidate forever and turns every later bump into
+# a red release gate (server-tests blocks all four build jobs -> draft, 0 assets).
+check(
+    _semver(version) >= _semver("1.58.143"),
+    "tree is at or past the staged candidate version",
+)
 check(runbook_path.exists(), "one authoritative staged promotion runbook exists")
 
 if runbook_path.exists():
@@ -96,7 +108,7 @@ version_check = subprocess.run(
     capture_output=True,
     text=True,
 )
-check(version_check.returncode == 0, "all lockstep version sites match 1.58.143")
+check(version_check.returncode == 0, "all lockstep version sites match VERSION")
 
 device = (ROOT / "DEVICE_TEST.md").read_text(encoding="utf-8")
 physical = (ROOT / "PHYSICAL_VALIDATION_CAMPAIGN.md").read_text(encoding="utf-8")
