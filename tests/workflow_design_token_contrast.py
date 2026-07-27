@@ -28,8 +28,10 @@ AA_TEXT = 4.5   # almindelig tekst
 AA_UI = 3.0     # stor tekst, ikoner og UI-komponenter
 
 # Maalt 27/07-2026. Hver linje er en KENDT defekt, ikke en accept.
+# light.muted er RETTET 27/07 (#776D62 -> #6F665C): en neutral, ikke brandet,
+# saa den kunne moerknes til 4,50 uden at roere Kalivs udtryk. De tre der staar
+# tilbage ER brandfarver eller semantik, og at flytte dem er en designbeslutning.
 KNOWN_BELOW_AA = {
-    "light.muted on light.surface",
     "brand.gold on light.surface",
     "brand.highlight on light.surface",
     "semantic.warning on light.surface",

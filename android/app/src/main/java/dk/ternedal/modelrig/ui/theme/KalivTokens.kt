@@ -30,7 +30,7 @@ object KalivTokens {
         val elevated: Color = Color(0xFFFFFDF9)
         val border: Color = Color(0xFFD7C9B4)
         val text: Color = Color(0xFF231E19)
-        val muted: Color = Color(0xFF776D62)
+        val muted: Color = Color(0xFF6F665C)
     }
 
     object Brand {

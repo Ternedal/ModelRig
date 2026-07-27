@@ -176,21 +176,28 @@ manuelle trin efter genstart.
 
 ## Åbne beslutninger (kræver Anders)
 
-- **Fire tokenpar er under WCAG AA i lyst tema.** Målt 27/7 direkte på
+- **Tre tokenpar er under WCAG AA i lyst tema.** Målt 27/7 direkte på
   `kaliv-ui-tokens.json`; det kræver ingen skærm, kun udregning.
 
   | Par | ratio | krav |
   |---|---|---|
-  | `light.muted` på `light.surface` | 4,05 | 4,5 |
   | `brand.gold` på `light.surface` | 2,07 | 3,0 |
   | `brand.highlight` på `light.surface` | 1,55 | 3,0 |
   | `semantic.warning` på `light.surface` | 2,66 | 3,0 |
 
   Mørkt tema er rent hele vejen — laveste er `semantic.danger` på 3,36.
 
-  `light.muted` er den der gør ondt i praksis: den bærer meta-rækken og
-  statusteksten ved thinking-animationen, altså tekst brugeren faktisk læser.
-  Den kan formentlig rettes uden at røre brandet — den skal blot mørkere.
+  `light.muted` var den fjerde og er **rettet 27/7**: `#776D62` → `#6F665C`,
+  samme kulør og mætning, kun lysheden fra 42,5% til 39,7%. Den er en neutral,
+  ikke brandet, så den kunne mørknes uden at røre Kalivs udtryk. Nu 4,50 på
+  `surface`, 5,09 på `canvas`, 5,54 på `elevated`. Den bar meta-rækken og
+  statusteksten ved thinking-animationen — tekst brugeren faktisk læser.
+
+  Bemærk at Android **ikke** var ramt: dens lyse palet i `theme/Theme.kt` er
+  håndbygget med egne værdier (`textMuted` = `#5A4831`, 7,28 på surface) og
+  bruger slet ikke tokenet. Det er godt for kontrasten og dårligt for
+  konsistensen — det er den divergens tokengeneratoren findes for at lukke,
+  og kaldestederne er ikke migreret endnu.
 
   `brand.gold` og `brand.highlight` er en anden sag. De **er** brandet, og at
   flytte dem for at nå 3,0 er en designbeslutning, ikke en oprydning.
