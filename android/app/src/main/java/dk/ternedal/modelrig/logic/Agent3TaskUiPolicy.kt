@@ -4,9 +4,10 @@ package dk.ternedal.modelrig.logic
  * Pure policy for the normal read-only task screen.
  *
  * The server surface is the only routing input. Missing, stale or unknown values
- * normalize to Agent 2. An already-started task is different: status and Stop
- * remain available even if readiness later falls back, because the rig run
- * already exists and must not disappear from the human control surface.
+ * normalize to Agent 2. An already-started task is different: status and the
+ * server-authorized plan Stop remain visible even if readiness later falls back.
+ * Cancelling a terminal plan is not the same as stopping an executing tool, so
+ * polling continues until the active-tool receipt is no longer pending/running.
  */
 object Agent3TaskUiPolicy {
     const val AGENT2 = "agent2"
@@ -35,8 +36,14 @@ object Agent3TaskUiPolicy {
         !busy &&
         !hasRun
 
-    fun canStop(runTerminal: Boolean?, busy: Boolean): Boolean =
-        runTerminal == false && !busy
+    fun canStopPlan(planCanRequest: Boolean?, busy: Boolean): Boolean =
+        planCanRequest == true && !busy
 
-    fun shouldPoll(runTerminal: Boolean?): Boolean = runTerminal == false
+    fun shouldPoll(
+        runTerminal: Boolean?,
+        activeToolState: String?,
+        activeToolRequestState: String?,
+    ): Boolean = runTerminal == false ||
+        activeToolState == "executing" ||
+        activeToolRequestState == "pending"
 }
