@@ -196,6 +196,20 @@ m,n,r,a,u,notes = fixture()
 errors=judge_all(m,n,r,a,u,notes)
 check(errors == [], "complete exact evidence is green")
 
+# The real CLI supplies no synthetic clock. Exercise that branch so a missing
+# default-time import cannot hide behind deterministic fixtures.
+try:
+    mod.judge(
+        manifest=m, negative=n, run_records=r, approval_rows=a, audit_rows=u,
+        notes_text=notes, identity=copy.deepcopy(IDENTITY),
+        rig_validation_assessment={"eligible_for_write_pilot": True},
+        rig_validation_sha256=RIG_SHA, now=None,
+    )
+    default_clock_ok = True
+except NameError:
+    default_clock_ok = False
+check(default_clock_ok, "collector default clock path is wired")
+
 m2,n2,r2,a2,u2,notes2 = fixture()
 errors=judge_all(m2,n2,r2,a2,u2,notes2 + m2["runs"][0]["marker"] + "\n")
 check(any("marker occurs 2" in e or "duplicated" in e for e in errors), "duplicate append is red")
