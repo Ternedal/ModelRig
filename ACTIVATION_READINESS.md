@@ -4,7 +4,7 @@
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
 **Version på main:** `1.58.146`
-**Genereret:** 2026-07-27 07:32 UTC
+**Genereret:** 2026-07-27 09:04 UTC
 
 ---
 
@@ -70,11 +70,12 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 13 feature-switches er tændt som default.** (12 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 13 feature-switches er tændt som default.** (13 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
 | `KALIV_AGENT3_ENABLED` | `0` | slukket |
+| `KALIV_AGENT3_TASK_WORKERS` | `2` | indstilling |
 | `KALIV_ALLOW_RAG_CLOUD` | `(tom)` | slukket |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` | slukket |
 | `KALIV_DATA_DIR` | `(unset)` | slukket |
