@@ -49,8 +49,9 @@ import kotlinx.coroutines.withContext
  *
  * This screen never chooses Agent 3 itself. It reads the authoritative readiness
  * contract first. Missing, stale or unknown readiness is shown as Agent 2
- * fallback, while status and Stop remain available for a run that was already
- * persisted before readiness changed.
+ * fallback, while status and the server-authorized plan Stop remain available
+ * for a run that was already persisted before readiness changed. Plan, model
+ * stream and active-tool termination are always shown as separate scopes.
  */
 @Composable
 fun Agent3TaskScreen(
@@ -165,10 +166,15 @@ fun Agent3TaskScreen(
         }
     }
 
-    fun stopTask() {
-        val runId = snapshot?.run?.id ?: return
-        if (!Agent3TaskUiPolicy.canStop(snapshot?.terminal, busy != TaskBusy.NONE)) return
-        busy = TaskBusy.STOP
+    fun stopPlan() {
+        val current = snapshot ?: return
+        val runId = current.run.id
+        if (!Agent3TaskUiPolicy.canStopPlan(
+                planCanRequest = current.termination.plan.canRequest,
+                busy = busy != TaskBusy.NONE,
+            )
+        ) return
+        busy = TaskBusy.STOP_PLAN
         error = null
         scope.launch {
             val result = withContext(Dispatchers.IO) {
@@ -179,7 +185,7 @@ fun Agent3TaskScreen(
             }
             busy = TaskBusy.NONE
             result.onSuccess { snapshot = it }
-                .onFailure { error = it.message ?: "Opgaven kunne ikke stoppes" }
+                .onFailure { error = it.message ?: "Planen kunne ikke stoppes" }
         }
     }
 
@@ -187,9 +193,22 @@ fun Agent3TaskScreen(
 
     // The screen owns phone-side polling. Leaving it cancels this coroutine, but
     // never pretends that cancelling the HTTP poll stopped the persisted rig run.
-    LaunchedEffect(snapshot?.run?.id, snapshot?.terminal) {
+    // A cancelled plan may still have a synchronous tool executing, so the tool
+    // receipt — not only run.terminal — decides when polling may stop.
+    LaunchedEffect(
+        snapshot?.run?.id,
+        snapshot?.terminal,
+        snapshot?.termination?.activeTool?.state,
+        snapshot?.termination?.activeTool?.requestState,
+    ) {
         val runId = snapshot?.run?.id ?: return@LaunchedEffect
-        while (isActive && Agent3TaskUiPolicy.shouldPoll(snapshot?.terminal)) {
+        while (
+            isActive && Agent3TaskUiPolicy.shouldPoll(
+                runTerminal = snapshot?.terminal,
+                activeToolState = snapshot?.termination?.activeTool?.state,
+                activeToolRequestState = snapshot?.termination?.activeTool?.requestState,
+            )
+        ) {
             delay(1_000)
             if (busy != TaskBusy.NONE) continue
             val result = withContext(Dispatchers.IO) {
@@ -362,13 +381,13 @@ fun Agent3TaskScreen(
                     snapshot = run,
                     busy = busy,
                     onRefresh = { refreshRun() },
-                    onStop = { stopTask() },
+                    onStopPlan = { stopPlan() },
                 )
             }
 
             Spacer(Modifier.height(24.dp))
             Text(
-                "Normal chat er urørt. Denne skærm kan ikke bekræfte writes, genoptage generiske Agent 3-runs eller ændre routing.",
+                "Normal chat er urørt. Denne skærm kan stoppe fremtidige plan-steps, men viser ingen direkte tool-kontrol uden et serverbundet runtime-handle.",
                 color = KalivTheme.colors.textMuted,
                 fontSize = 10.sp,
             )
@@ -416,9 +435,15 @@ private fun TaskRunCard(
     snapshot: Agent3ReadonlyTaskClient.Started,
     busy: TaskBusy,
     onRefresh: () -> Unit,
-    onStop: () -> Unit,
+    onStopPlan: () -> Unit,
 ) {
     val run = snapshot.run
+    val activeTool = snapshot.termination.activeTool
+    val shouldPoll = Agent3TaskUiPolicy.shouldPoll(
+        runTerminal = snapshot.terminal,
+        activeToolState = activeTool?.state,
+        activeToolRequestState = activeTool?.requestState,
+    )
     SurfaceCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -433,22 +458,31 @@ private fun TaskRunCard(
             )
         }
         Spacer(Modifier.height(8.dp))
-        if (!snapshot.terminal) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        if (shouldPoll) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         MetaRow("Route", run.routeKind)
         MetaRow("Step", "${run.currentStep}/${run.steps.size}")
-        MetaRow("Terminal", if (snapshot.terminal) "ja" else "nej")
+        MetaRow("Plan terminal", if (snapshot.terminal) "ja" else "nej")
+        MetaRow("Statuspolling", if (shouldPoll) "aktiv" else "afsluttet")
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = busy == TaskBusy.NONE, onClick = onRefresh) {
                 Text(if (busy == TaskBusy.STATUS) "Henter…" else "Opdatér")
             }
-            Button(
-                enabled = Agent3TaskUiPolicy.canStop(snapshot.terminal, busy != TaskBusy.NONE),
-                onClick = onStop,
-            ) {
-                Text(if (busy == TaskBusy.STOP) "Stopper…" else "Stop")
+            if (snapshot.termination.plan.canRequest) {
+                Button(
+                    enabled = Agent3TaskUiPolicy.canStopPlan(
+                        planCanRequest = snapshot.termination.plan.canRequest,
+                        busy = busy != TaskBusy.NONE,
+                    ),
+                    onClick = onStopPlan,
+                ) {
+                    Text(if (busy == TaskBusy.STOP_PLAN) "Stopper plan…" else "Stop plan")
+                }
             }
         }
+
+        Spacer(Modifier.height(12.dp))
+        TerminationCard(snapshot.termination)
 
         run.answer?.takeIf { it.isNotBlank() }?.let {
             Spacer(Modifier.height(10.dp))
@@ -485,6 +519,52 @@ private fun TaskRunCard(
                 if (event.payload.isNotBlank()) {
                     Text(event.payload.take(320), color = KalivTheme.colors.textMuted, fontSize = 10.sp)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TerminationCard(receipt: Agent3ReadonlyTaskClient.TerminationReceipt) {
+    val plan = receipt.plan
+    val stream = receipt.modelStream
+    val tool = receipt.activeTool
+
+    Text("Afslutningsstatus", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.SemiBold)
+    Spacer(Modifier.height(6.dp))
+    Surface(color = KalivTheme.colors.surfaceHigh, shape = RoundedCornerShape(10.dp)) {
+        Column(Modifier.fillMaxWidth().padding(10.dp)) {
+            Text("Plan", color = KalivTheme.colors.textHigh, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            MetaRow("Status", plan.state)
+            MetaRow("Kan stoppes", if (plan.canRequest) "ja" else "nej")
+            MetaRow("Effekt", plan.effect)
+            if (plan.effect == "prevent_future_steps_active_tool_continues") {
+                Text(
+                    "Plan-stop forhindrer nye steps, men det aktive tool fortsætter.",
+                    color = KalivTheme.colors.amber,
+                    fontSize = 10.sp,
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Text("Modelstream", color = KalivTheme.colors.textHigh, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            MetaRow("Status", stream.state)
+            MetaRow("Aktiv", if (stream.active) "ja" else "nej")
+            MetaRow("Runtime-handle", if (stream.handlePresent) "ja" else "nej")
+            MetaRow("Kan stoppes", if (stream.canRequest) "ja" else "nej")
+
+            Spacer(Modifier.height(8.dp))
+            Text("Aktivt tool", color = KalivTheme.colors.textHigh, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            if (tool == null) {
+                Text("Intet aktivt tool", color = KalivTheme.colors.textMuted, fontSize = 10.sp)
+            } else {
+                MetaRow("Tool", tool.tool)
+                MetaRow("Step-state", tool.state)
+                MetaRow("Semantik", terminationSemanticsLabel(tool.semantics))
+                MetaRow("Request-state", tool.requestState)
+                MetaRow("Runtime-handle", if (tool.handlePresent) "ja" else "nej")
+                MetaRow("Direkte kontrol", if (tool.canRequest && tool.handlePresent) "tilgængelig" else "ingen")
+                Text(tool.reason, color = KalivTheme.colors.textMuted, fontSize = 10.sp)
             }
         }
     }
@@ -573,6 +653,13 @@ private fun runStateColor(state: String): Color = when (state) {
     else -> KalivTheme.colors.signal
 }
 
+private fun terminationSemanticsLabel(value: String?): String = when (value) {
+    "none" -> "ikke-afbrydelig"
+    "cooperative" -> "kooperativ"
+    "runtime" -> "runtime-håndteret"
+    else -> "ukendt / fail-closed"
+}
+
 private fun String.shortHash(): String = if (length <= 14) this else take(12) + "…"
 
 private enum class TaskBusy {
@@ -581,5 +668,5 @@ private enum class TaskBusy {
     PREVIEW,
     START,
     STATUS,
-    STOP,
+    STOP_PLAN,
 }
