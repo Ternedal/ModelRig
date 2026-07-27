@@ -10,6 +10,7 @@ push, tag, release or activate production.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -30,16 +31,19 @@ OPERATORS = (
         "T-020 read-only developer-pilot",
         SCRIPTS / "agent3_readonly_pilot_one_click.py",
         ROOT / "validation" / "agent3-readonly-pilot-latest.json",
+        "kaliv-agent3-readonly-pilot/v1",
     ),
     (
         "T-022 append-only write-pilot",
         SCRIPTS / "agent3_write_pilot_physical_one_click.py",
         ROOT / "validation" / "agent3-write-pilot-latest.json",
+        "kaliv-agent3-write-pilot-report/v1",
     ),
     (
         "T-023 termination UI-pilot",
         SCRIPTS / "agent3_termination_ui_physical_one_click.py",
         ROOT / "validation" / "agent3-termination-ui-physical-latest.json",
+        "kaliv-agent3-termination-ui-physical-report/v1",
     ),
 )
 
@@ -117,30 +121,54 @@ def run_operator(label: str, path: Path) -> int:
     return int(result.returncode)
 
 
-def report_status(path: Path, expected_sha: str) -> dict[str, Any]:
+def report_status(path: Path, expected_sha: str, expected_schema: str) -> dict[str, Any]:
     if not path.is_file() or path.is_symlink():
-        return {"path": str(path), "present": False, "success": False, "candidate_match": False}
+        return {
+            "path": str(path),
+            "present": False,
+            "success": False,
+            "candidate_match": False,
+            "schema_match": False,
+            "production_activation": None,
+        }
     try:
-        import json
-
         value = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {"path": str(path), "present": True, "success": False, "candidate_match": False}
-    candidate = value.get("candidate") if isinstance(value, dict) else None
-    if not isinstance(candidate, dict):
-        candidate = value.get("target") if isinstance(value, dict) else None
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {
+            "path": str(path),
+            "present": True,
+            "success": False,
+            "candidate_match": False,
+            "schema_match": False,
+            "production_activation": None,
+        }
+    if not isinstance(value, dict):
+        return {
+            "path": str(path),
+            "present": True,
+            "success": False,
+            "candidate_match": False,
+            "schema_match": False,
+            "production_activation": None,
+        }
+
+    candidate = value.get("candidate")
     if not isinstance(candidate, dict):
         candidate = {}
-    success = bool(value.get("success")) if isinstance(value, dict) else False
-    if path.name == "agent3-readonly-pilot-latest.json" and isinstance(value, dict):
-        gate = value.get("gate") if isinstance(value.get("gate"), dict) else {}
-        success = success or gate.get("passed") is True
+    target = value.get("target")
+    if not isinstance(target, dict):
+        target = {}
+    activation = value.get("production_activation")
+    if activation is None:
+        activation = target.get("production_activation")
+
     return {
         "path": str(path.relative_to(ROOT)),
         "present": True,
-        "success": success,
+        "success": value.get("success") is True,
         "candidate_match": candidate.get("git_sha") == expected_sha,
-        "production_activation": value.get("production_activation") if isinstance(value, dict) else None,
+        "schema_match": value.get("schema") == expected_schema,
+        "production_activation": activation,
     }
 
 
@@ -162,22 +190,23 @@ def main() -> int:
         )
         return stage_code
 
-    for label, path, report in OPERATORS:
+    for label, path, report, schema in OPERATORS:
         code = run_operator(label, path)
         if code != 0:
             print(f"\n  SIKKERT STOP: {label} returnerede {code}.", file=sys.stderr)
             print("  Ret den viste fysiske blocker og start samme launcher igen.", file=sys.stderr)
             return code
-        status = report_status(report, sha)
+        status = report_status(report, sha, schema)
         if (
             status.get("present") is not True
             or status.get("success") is not True
             or status.get("candidate_match") is not True
+            or status.get("schema_match") is not True
             or status.get("production_activation") is not False
         ):
             print(
                 f"\n  SIKKERT STOP: {label} returnerede 0, men rapporten er ikke "
-                "grøn, exact-SHA-bundet og non-activating.",
+                "grøn, schema-korrekt, exact-SHA-bundet og non-activating.",
                 file=sys.stderr,
             )
             return 2
@@ -185,7 +214,7 @@ def main() -> int:
 
     heading("MILESTONE 3 FYSISK EVIDENS ER KOMPLET PÅ ÉN KANDIDAT")
     print(f"  Kandidat: {sha}")
-    for _label, _path, report in OPERATORS:
+    for _label, _path, report, _schema in OPERATORS:
         print(f"  - {report.relative_to(ROOT)}")
     print("  production_activation=false; integration kræver fortsat separat review.")
     return 0
