@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """Version-bound loader for the retained Stage A one-click implementation."""
+# ruff: noqa: F821 -- denne fil er en shim. Den exec'er sin .retained-soester
+# ind i globals(), saa navne som ROOT, REPORT_PATH, SCHEMA og main defineres
+# ved koersel og er usynlige for statisk analyse. Undtagelsen staar her frem
+# for i CI-kommandoen, saa den kan laeses sammen med sin aarsag.
 from pathlib import Path as _Path
 
 BRANCH = "agent/unified-candidate-1.58.145"

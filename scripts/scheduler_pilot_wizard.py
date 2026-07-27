@@ -5,6 +5,10 @@ The retained physical operator remains byte-identical. This wrapper also owns th
 fail-closed resume gate so an incomplete or hand-written local JSON can never
 skip the physical pilot.
 """
+# ruff: noqa: F821 -- denne fil er en shim. Den exec'er sin .retained-soester
+# ind i globals(), saa navne som ROOT, REPORT_PATH, SCHEMA og main defineres
+# ved koersel og er usynlige for statisk analyse. Undtagelsen staar her frem
+# for i CI-kommandoen, saa den kan laeses sammen med sin aarsag.
 import importlib.util as _importlib_util
 import json as _json
 import re as _re

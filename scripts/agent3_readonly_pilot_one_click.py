@@ -4,6 +4,10 @@
 The retained operator remains byte-identical. This wrapper owns the fail-closed
 resume verdict so only a fresh, complete, exact-candidate report can skip a rerun.
 """
+# ruff: noqa: F821 -- denne fil er en shim. Den exec'er sin .retained-soester
+# ind i globals(), saa navne som ROOT, REPORT_PATH, SCHEMA og main defineres
+# ved koersel og er usynlige for statisk analyse. Undtagelsen staar her frem
+# for i CI-kommandoen, saa den kan laeses sammen med sin aarsag.
 import importlib.util as _importlib_util
 import re as _re
 import sys as _sys
