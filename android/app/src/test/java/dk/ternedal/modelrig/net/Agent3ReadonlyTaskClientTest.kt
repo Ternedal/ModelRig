@@ -5,6 +5,7 @@ import okhttp3.mockwebserver.MockWebServer
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -36,7 +37,7 @@ class Agent3ReadonlyTaskClientTest {
     }
 
     @Test
-    fun startUsesSinglePurposeRouteAndReturnsPollableRun() {
+    fun startUsesSinglePurposeRouteAndReturnsPollableRunWithTerminationReceipt() {
         val server = MockWebServer()
         server.enqueue(jsonResponse(snapshotJson(state = "running", terminal = false), 202))
         server.start()
@@ -48,6 +49,13 @@ class Agent3ReadonlyTaskClientTest {
             assertEquals("running", started.run.state)
             assertEquals("rig_tools_local", started.run.routeKind)
             assertFalse(started.terminal)
+            assertTrue(started.termination.plan.canRequest)
+            assertEquals(
+                "prevent_future_steps_active_tool_continues",
+                started.termination.plan.effect,
+            )
+            assertEquals("none", started.termination.activeTool?.semantics)
+            assertFalse(started.termination.activeTool?.canRequest ?: true)
             assertTrue(started.events.any { it.kind == "task_surface_bound" })
 
             val request = server.takeRequest()
@@ -72,6 +80,9 @@ class Agent3ReadonlyTaskClientTest {
             assertTrue(status.terminal)
             assertEquals("completed", status.run.state)
             assertEquals("Rig is ready", status.run.answer)
+            assertFalse(status.termination.plan.canRequest)
+            assertEquals("terminal", status.termination.plan.state)
+            assertNull(status.termination.activeTool)
 
             val request = server.takeRequest()
             assertEquals("GET", request.method)
@@ -83,9 +94,17 @@ class Agent3ReadonlyTaskClientTest {
     }
 
     @Test
-    fun cancelUsesTaskScopedPostAndParsesCancellation() {
+    fun cancelUsesTaskScopedPostAndKeepsPollingTruthForLateCompletion() {
         val server = MockWebServer()
-        server.enqueue(jsonResponse(snapshotJson(state = "cancelled", terminal = true)))
+        server.enqueue(
+            jsonResponse(
+                snapshotJson(
+                    state = "cancelled",
+                    terminal = true,
+                    stepState = "executing",
+                ),
+            ),
+        )
         server.start()
         try {
             val client = Agent3ReadonlyTaskClient(server.url("/").toString(), "device-token")
@@ -93,6 +112,10 @@ class Agent3ReadonlyTaskClientTest {
 
             assertTrue(cancelled.terminal)
             assertEquals("cancelled", cancelled.run.state)
+            assertFalse(cancelled.termination.plan.canRequest)
+            assertEquals("executing", cancelled.termination.activeTool?.state)
+            assertEquals("unavailable", cancelled.termination.activeTool?.requestState)
+            assertFalse(cancelled.termination.activeTool?.canRequest ?: true)
 
             val request = server.takeRequest()
             assertEquals("POST", request.method)
@@ -102,6 +125,46 @@ class Agent3ReadonlyTaskClientTest {
         } finally {
             server.shutdown()
         }
+    }
+
+    @Test
+    fun completedAfterCancelIsTerminalToolTruth() {
+        val client = Agent3ReadonlyTaskClient("http://127.0.0.1", "token")
+        val snapshot = client.parseStarted(
+            JSONObject(
+                snapshotJson(
+                    state = "cancelled",
+                    terminal = true,
+                    stepState = "completed_after_cancel",
+                ),
+            ),
+        )
+
+        assertEquals("completed_after_cancel", snapshot.run.steps.single().state)
+        assertEquals("terminal", snapshot.termination.activeTool?.requestState)
+        assertEquals(
+            "tool_completed_after_plan_cancel",
+            snapshot.termination.activeTool?.reason,
+        )
+    }
+
+    @Test
+    fun blockedRunNeverOffersPlanStop() {
+        val client = Agent3ReadonlyTaskClient("http://127.0.0.1", "token")
+        val blocked = client.parseStarted(
+            JSONObject(
+                snapshotJson(
+                    state = "blocked",
+                    terminal = true,
+                    stepState = "blocked",
+                ),
+            ),
+        )
+
+        assertTrue(blocked.terminal)
+        assertEquals("terminal", blocked.termination.plan.state)
+        assertFalse(blocked.termination.plan.canRequest)
+        assertEquals("not_active", blocked.termination.activeTool?.requestState)
     }
 
     @Test
@@ -124,15 +187,40 @@ class Agent3ReadonlyTaskClientTest {
     }
 
     @Test
-    fun confirmationWriteOrTerminalDriftFailsClosed() {
+    fun confirmationWriteTerminalOrTerminationDriftFailsClosed() {
         val client = Agent3ReadonlyTaskClient("http://127.0.0.1", "token")
         val confirmation = JSONObject(snapshotJson(state = "waiting_confirmation", terminal = false))
         val write = JSONObject(snapshotJson(state = "completed", terminal = true)).also {
             it.getJSONObject("run").getJSONArray("steps").getJSONObject(0).put("risk", "write")
         }
         val terminalMismatch = JSONObject(snapshotJson(state = "completed", terminal = false))
+        val missingTermination = JSONObject(snapshotJson(state = "running", terminal = false)).also {
+            it.remove("termination")
+        }
+        val falseHandle = JSONObject(snapshotJson(state = "running", terminal = false)).also {
+            it.getJSONObject("termination").getJSONObject("active_tool")
+                .put("can_request", true)
+                .put("handle_present", false)
+                .put("request_state", "available")
+        }
+        val wrongPlanEffect = JSONObject(snapshotJson(state = "running", terminal = false)).also {
+            it.getJSONObject("termination").getJSONObject("plan")
+                .put("effect", "prevent_future_steps")
+        }
+        val mismatchedStep = JSONObject(snapshotJson(state = "running", terminal = false)).also {
+            it.getJSONObject("termination").getJSONObject("active_tool")
+                .put("step_id", "other-step")
+        }
 
-        listOf(confirmation, write, terminalMismatch).forEach { value ->
+        listOf(
+            confirmation,
+            write,
+            terminalMismatch,
+            missingTermination,
+            falseHandle,
+            wrongPlanEffect,
+            mismatchedStep,
+        ).forEach { value ->
             assertTrue(runCatching { client.parseStarted(value) }.exceptionOrNull() is ModelRigException)
         }
     }
@@ -235,12 +323,15 @@ class Agent3ReadonlyTaskClientTest {
         state: String,
         terminal: Boolean,
         runId: String = "run-1",
+        stepState: String? = null,
     ): String {
-        val stepState = when (state) {
+        val resolvedStepState = stepState ?: when (state) {
             "running" -> "executing"
             "cancelled" -> "completed_after_cancel"
+            "blocked" -> "blocked"
             else -> "succeeded"
         }
+        val currentStep = if (state == "completed" || state == "failed") 1 else 0
         return envelope()
             .put(
                 "run",
@@ -248,8 +339,8 @@ class Agent3ReadonlyTaskClientTest {
                     .put("id", runId)
                     .put("state", state)
                     .put("route", JSONObject().put("kind", "rig_tools_local"))
-                    .put("current_step", if (state == "running") 0 else 1)
-                    .put("steps", org.json.JSONArray().put(readStep(stepState)))
+                    .put("current_step", currentStep)
+                    .put("steps", org.json.JSONArray().put(readStep(resolvedStepState)))
                     .put("answer", if (state == "completed") "Rig is ready" else JSONObject.NULL)
                     .put("error", if (state == "cancelled") "Cancelled by user" else JSONObject.NULL),
             )
@@ -262,7 +353,74 @@ class Agent3ReadonlyTaskClientTest {
                         .put("payload", JSONObject().put("surface", "agent3_readonly")),
                 ),
             )
+            .put("termination", terminationJson(state, terminal, resolvedStepState, currentStep))
             .put("terminal", terminal)
             .toString()
+    }
+
+    private fun terminationJson(
+        runState: String,
+        terminal: Boolean,
+        stepState: String,
+        currentStep: Int,
+    ): JSONObject {
+        val executing = stepState == "executing"
+        val active = if (currentStep == 0) {
+            val completedAfterCancel = stepState == "completed_after_cancel"
+            JSONObject()
+                .put("step_id", "step-1")
+                .put("tool", "rig_status")
+                .put("state", stepState)
+                .put("semantics", "none")
+                .put("handle_present", false)
+                .put("can_request", false)
+                .put(
+                    "request_state",
+                    when {
+                        completedAfterCancel -> "terminal"
+                        executing -> "unavailable"
+                        else -> "not_active"
+                    },
+                )
+                .put(
+                    "reason",
+                    when {
+                        completedAfterCancel -> "tool_completed_after_plan_cancel"
+                        executing -> "synchronous_tool_has_no_cancellation_handle"
+                        else -> "tool_is_not_executing"
+                    },
+                )
+        } else {
+            JSONObject.NULL
+        }
+        return JSONObject()
+            .put("schema", "kaliv-agent3-termination/v1")
+            .put(
+                "plan",
+                JSONObject()
+                    .put("state", if (terminal) "terminal" else "available")
+                    .put("can_request", !terminal)
+                    .put("request_scope", "plan")
+                    .put(
+                        "effect",
+                        if (executing) {
+                            "prevent_future_steps_active_tool_continues"
+                        } else {
+                            "prevent_future_steps"
+                        },
+                    )
+                    .put("reason", if (terminal) "run_is_terminal" else "plan_stop_is_available"),
+            )
+            .put(
+                "model_stream",
+                JSONObject()
+                    .put("state", "not_active")
+                    .put("active", false)
+                    .put("can_request", false)
+                    .put("handle_present", false)
+                    .put("reason", "agent3_run_has_no_model_stream_handle"),
+            )
+            .put("active_tool", active)
+            .put("production_activation", false)
     }
 }
