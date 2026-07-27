@@ -162,3 +162,40 @@ går ét HTTP-kald ad gangen uden batching, så flaskehalsen er kaldsmønsteret,
 modellen.
 
 ROADMAP siger Qdrant kun aktiveres ved **målt** behov. Det her er målingen.
+
+---
+
+## Hvad der er strukturelt rettet efter 27/07 — fire af punkterne ovenfor kan ikke gentage sig
+
+Loggen findes for at friktionen ikke gør det igen. Fire af posterne er nu fanget
+*før* noget kører, af preflighten i `scripts/workflow_baseline_one_click.py`.
+Den kører intet, skriver intet og rører ingen port — og hver blokering bærer
+rettelsen i beskeden frem for i en gate-tabel man skal huske at slå op.
+
+| Friktion ovenfor | Hvad der nu fanger den |
+|---|---|
+| **2.** Backend kørte forkert version | rent arbejdstræ kræves, og SHA'en skrives i kvitteringen |
+| **3.** Token-prompten — 45 min | `MODELRIG_TOKEN` skal være sat og være 64 hex, ellers blokeres der med `auth.NewToken = 32 bytes hex` i beskeden |
+| **5.** Efterladt worker på 8099 | workeren skal svare på `/healthz`, og beskeden nævner at `run-windows.ps1` dræber den i sin `finally` |
+| Bytecode i træet blokerer freeze | `PYTHONDONTWRITEBYTECODE=1` kræves, og enhver `.pyc` i `worker/` blokerer med en copy/paste-klar oprydning |
+
+Preflighten er selv testet uden rig: `tests/workflow_baseline_one_click.py`
+driver hver check ind i sin fejltilstand og kræver at beskeden nævner
+rettelsen. Bytecode-checket er en sabotage-cyklus — plant en `.pyc`, kræv rødt,
+fjern den, kræv grønt.
+
+**To ting er rettet i kode frem for i preflight:**
+
+- `scripts/start-stage-a-validation-stack.ps1` hardkodede `MODELRIG_HOST=127.0.0.1`,
+  som telefonen ikke kan nå. Den kan nu overstyres, og den valgte adresse
+  skrives ud med en advarsel ved loopback — så en unåelig backend fejler
+  synligt i stedet for at ligne at appen holdt op med at virke.
+- `schedule_runner_impl.py` sagde `(levende worker)` når lease'en var optaget.
+  Det følger ikke: hver proces får et frisk `owner_id`, så en worker der døde og
+  genstartede kan ikke generobre sin egen lease. Beskeden hævdede en tilstand
+  den ikke havde observeret, og nævner nu begge muligheder.
+
+**Stadig ikke løst:** punkt 1 (containment-gaten) er ikke et værktøjsproblem —
+det er reglen om ikke at røre main mens en frossen kandidat venter. Den regel
+er i øvrigt mindre relevant nu, fordi kandidat-modellen er ovre: kandidaten
+blev fast-forwardet ind i main 27/7, og `RIGDAG.md` §1 er rettet derefter.

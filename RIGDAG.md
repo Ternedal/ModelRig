@@ -27,16 +27,23 @@ fejlen, ikke for noget du gjorde.
 
 ## Opsætning — én gang, i rækkefølge
 
-### 1. Checkout kandidaten
+### 1. Checkout det du vil validere
+
+**[27/7 — kandidat-modellen er ovre.]** `agent/unified-candidate-1.58.145` blev
+fast-forwardet ind i main, og main er siden gået 35+ commits videre. Checkout
+`60f9b00` validerer nu gammel kode. Tag i stedet det tag du vil have beviser
+for:
 
 ```powershell
 cd C:\Users\admin\Desktop\ModelRig-git
-git fetch origin agent/unified-candidate-1.58.145
-git checkout 60f9b00
-git rev-parse --short HEAD     # skal sige 60f9b00
+git fetch origin --tags
+git checkout <tag>             # fx det seneste, se VERSION eller GitHub releases
+git rev-parse --short HEAD     # skriv den ned; beviserne bindes til den
+git status --porcelain         # SKAL være tom
 ```
 
-"detached HEAD" er meningen.
+"detached HEAD" er meningen. Er arbejdstræet ikke rent, kan beviset ikke
+reproduceres — one-click'en i "Kør beviserne" blokerer på netop det.
 
 ### 2. Byg backenden fra checkouten
 
@@ -101,6 +108,40 @@ Den tager preflight, agent3, model_eval og rag automatisk. Forventet tid:
 model_eval ~3 min, **RAG ~40 min** (10.000 chunks; embedding går ét HTTP-kald
 ad gangen, GPU'en ligger på ~39% — det er kaldsmønsteret der er flaskehalsen,
 ikke modellen).
+
+### Workflow-baseline — projektets første completion rate
+
+`START_STAGE_A_TEST.cmd` dækker den ikke. Den er aldrig kørt, så der findes
+ikke et tal at sammenligne med endnu — det er hele pointen med at køre den.
+
+Svar først på om riggen overhovedet er klar. Det tager sekunder, kører intet og
+rører ingen port:
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE = "1"
+$env:MODELRIG_TOKEN = "<64 hex>"
+python scripts\workflow_baseline_one_click.py --check --model hermes3:8b
+```
+
+Preflight blokerer på de seks ting der plejer at koste en formiddag, og hver
+besked bærer rettelsen: `.pyc` i træet, beskidt arbejdstræ, token der ikke er 64
+hex, worker der ikke svarer (med `run-windows.ps1`-fælden nævnt), 401 fra et
+token fra før en genstart, og en model Ollama ikke har hentet.
+
+Siger den at riggen er klar:
+
+```powershell
+python scripts\workflow_baseline_one_click.py --model hermes3:8b
+```
+
+14 workflows. Kvitteringen lander i `validation\workflow-baseline-latest.json`
+med `completion_rate`, transcripts i `validation\workflow-run-latest.json`.
+Fejler ét workflow, kan det gentages alene med `--only W-05` uden at køre
+sættet om.
+
+Specen er i forvejen tjekket: `tests/workflow_spec_contract.py` holder de 14
+internt konsistente, så en tastefejl i et forventet værktøjsnavn ikke opdages
+her men i CI.
 
 ### Voice — det manuelle pausepunkt
 
