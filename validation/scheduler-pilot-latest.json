@@ -1,0 +1,243 @@
+{
+  "schema": "kaliv-scheduler-pilot/v4",
+  "generated_at": "2026-07-26T21:50:30.901756+00:00",
+  "candidate": {
+    "version": "1.58.145",
+    "git_sha": "8e92f34d86ff238357f408b33f6acaebd485b1d4",
+    "code_sha256": "cb67f686bccc543306fe156d5335f87166a2584c346f3f5ac50f2f210422d4b2"
+  },
+  "worker": {
+    "base_url": "http://127.0.0.1:8099"
+  },
+  "read_schedule": {
+    "schedule_id": "a04badaadddf",
+    "runs_used": 3,
+    "receipts_count": 0
+  },
+  "write_schedule": {
+    "schedule_id": "60f6f7dcbb6e",
+    "runs_used": 1,
+    "revision": null,
+    "approved_fingerprint": "29fc74665772a566d712cfb0f4f123e7",
+    "receipts_count": 1,
+    "first_receipt": {
+      "kind": "create",
+      "device_id": "410385542435599e",
+      "issued_at": 1785102521,
+      "consumed_at": 1785102521.9904463,
+      "revision": 0,
+      "fingerprint": "29fc74665772a566d712cfb0f4f123e7"
+    }
+  },
+  "forensics": {
+    "read": {
+      "schedule": {
+        "tool": "rig_status",
+        "args": "{}",
+        "cadence": "every:60",
+        "max_runs": 3,
+        "runs_used": 3,
+        "revision": 9,
+        "enabled": 0,
+        "approved_fingerprint": null
+      },
+      "occurrences": [
+        {
+          "claim_id": "ed4a5d45da0d45238a2670a5b1d721e0",
+          "status": "executed",
+          "occurrence_due_at": 1785101041.1327553,
+          "created": 1785101045.710822,
+          "resolved": 1785101047.3975499,
+          "job_id": "2667c691c17d",
+          "job": {
+            "status": "completed",
+            "detail": "rig_status gennemført via ToolGate (1622 ms)"
+          },
+          "audit_outcomes": [
+            "attempt",
+            "executed"
+          ]
+        },
+        {
+          "claim_id": "472107fe17f74d7db17511a7f8ad01e2",
+          "status": "released",
+          "occurrence_due_at": 1785101108.5437593,
+          "created": 1785101113.1467817,
+          "resolved": 1785101113.246368,
+          "job_id": "877973f57778",
+          "job": {
+            "status": "cancelled",
+            "detail": "planen blev pauset, ændret eller slettet efter claim; occurrence annulleret og budget-slot refunderet"
+          },
+          "audit_outcomes": []
+        },
+        {
+          "claim_id": "0c88c5b5585d463c86335e492fdd0f20",
+          "status": "abandoned",
+          "occurrence_due_at": 1785101174.8195214,
+          "created": 1785101179.381577,
+          "resolved": 1785101271.084891,
+          "job_id": null,
+          "audit_outcomes": []
+        },
+        {
+          "claim_id": "634ece02a7624c269a4bdfc73a0e44f8",
+          "status": "executed",
+          "occurrence_due_at": 1785101234.8195214,
+          "created": 1785101271.1005569,
+          "resolved": 1785101271.4357276,
+          "job_id": "d73afaea7f36",
+          "job": {
+            "status": "completed",
+            "detail": "rig_status gennemført via ToolGate (300 ms)"
+          },
+          "audit_outcomes": [
+            "attempt",
+            "executed"
+          ]
+        },
+        {
+          "claim_id": "d1d0fa0d10eb479f8de90caba172de7c",
+          "status": "released",
+          "occurrence_due_at": 1785101881.6492703,
+          "created": 1785101886.257253,
+          "resolved": 1785101886.3537812,
+          "job_id": "5b3349527f90",
+          "job": {
+            "status": "cancelled",
+            "detail": "planen blev pauset, ændret eller slettet efter claim; occurrence annulleret og budget-slot refunderet"
+          },
+          "audit_outcomes": []
+        },
+        {
+          "claim_id": "b8163817ba7a4ac5bfa55ce92276c3a5",
+          "status": "abandoned",
+          "occurrence_due_at": 1785101947.9003587,
+          "created": 1785101952.462771,
+          "resolved": 1785102044.1733541,
+          "job_id": null,
+          "audit_outcomes": []
+        },
+        {
+          "claim_id": "a70655cf75b04c9993ff9e76f768d28e",
+          "status": "executed",
+          "occurrence_due_at": 1785102007.9003587,
+          "created": 1785102044.1885664,
+          "resolved": 1785102044.5213654,
+          "job_id": "e60e501b29aa",
+          "job": {
+            "status": "completed",
+            "detail": "rig_status gennemført via ToolGate (292 ms)"
+          },
+          "audit_outcomes": [
+            "attempt",
+            "executed"
+          ]
+        }
+      ],
+      "receipts": [],
+      "window": {
+        "first_created": 1785101045.710822,
+        "last_resolved": 1785102044.5213654
+      }
+    },
+    "write": {
+      "schedule": {
+        "tool": "note_append",
+        "args": "{\"text\": \"pilot\"}",
+        "cadence": "every:60",
+        "max_runs": 2,
+        "runs_used": 1,
+        "revision": 0,
+        "enabled": 1,
+        "approved_fingerprint": "29fc74665772a566d712cfb0f4f123e7"
+      },
+      "occurrences": [
+        {
+          "claim_id": "f38d8ddad321429489e23d3b66a377f0",
+          "status": "executed",
+          "occurrence_due_at": 1785102581.9904463,
+          "created": 1785102629.7486968,
+          "resolved": 1785102629.7952092,
+          "job_id": "7de8964bea7a",
+          "job": {
+            "status": "completed",
+            "detail": "note_append gennemført via ToolGate (0 ms)"
+          },
+          "audit_outcomes": [
+            "attempt",
+            "executed"
+          ]
+        }
+      ],
+      "receipts": [
+        {
+          "kind": "create",
+          "device_id": "410385542435599e",
+          "nonce": "sLs9NEEufrb9EJkXlv--69K6-FrhBjdzOP0Mocz-jWo",
+          "issued_at": 1785102521,
+          "consumed_at": 1785102521.9904463,
+          "revision": 0,
+          "fingerprint": "29fc74665772a566d712cfb0f4f123e7"
+        }
+      ],
+      "window": {
+        "first_created": 1785102629.7486968,
+        "last_resolved": 1785102629.7952092
+      }
+    }
+  },
+  "pilot_window": {
+    "start": 1785101045.710822,
+    "end": "2026-07-26T21:50:30.901756+00:00"
+  },
+  "manifest": {
+    "read": {
+      "tool": "rig_status",
+      "args": {},
+      "cadence": "every:60",
+      "max_runs": 3
+    },
+    "write": {
+      "tool": "note_append",
+      "args": {
+        "text": "pilot"
+      },
+      "cadence": "every:60",
+      "max_runs": 2
+    }
+  },
+  "inventory": {
+    "schedules_in_window": [
+      {
+        "id": "60f6f7dcbb6e",
+        "tool": "note_append",
+        "cadence": "every:60"
+      }
+    ],
+    "unlisted_in_window": [],
+    "preexisting_count": 15,
+    "executions_in_window": [
+      {
+        "id": "60f6f7dcbb6e",
+        "tool": "note_append",
+        "occurrences": 1
+      },
+      {
+        "id": "a04badaadddf",
+        "tool": "rig_status",
+        "occurrences": 7
+      }
+    ],
+    "executions_unlisted": []
+  },
+  "manual": {
+    "revocation_confirmed": true,
+    "recovery_line": "scheduler: recovered 0 executed / 1 abandoned / 0 unknown occurrence(s) at startup",
+    "operator": "admin"
+  },
+  "pilot": {
+    "passed": true,
+    "problems": []
+  }
+}

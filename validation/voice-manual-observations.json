@@ -1,0 +1,57 @@
+{
+  "schema": "kaliv-voice-manual-observations/v1",
+  "device": "Pixel 6a",
+  "operator": "Anders",
+  "trials": [
+    {
+      "id": "manual-01",
+      "trigger": "stop during first audio chunk",
+      "recognized": true,
+      "playback_stopped": true,
+      "stale_audio_resumed": false,
+      "ui_terminal_state": "idle",
+      "stop_latency_ms": 250,
+      "notes": "stoppede med det samme"
+    },
+    {
+      "id": "manual-02",
+      "trigger": "stop between audio chunks",
+      "recognized": true,
+      "playback_stopped": true,
+      "stale_audio_resumed": false,
+      "ui_terminal_state": "idle",
+      "stop_latency_ms": 250,
+      "notes": "stoppede med det samme"
+    },
+    {
+      "id": "manual-03",
+      "trigger": "begin speaking during first audio chunk",
+      "recognized": true,
+      "playback_stopped": true,
+      "stale_audio_resumed": false,
+      "ui_terminal_state": "idle",
+      "stop_latency_ms": 250,
+      "notes": "barge-in virkede"
+    },
+    {
+      "id": "manual-04",
+      "trigger": "begin speaking between audio chunks",
+      "recognized": true,
+      "playback_stopped": true,
+      "stale_audio_resumed": false,
+      "ui_terminal_state": "idle",
+      "stop_latency_ms": 250,
+      "notes": "barge-in virkede"
+    },
+    {
+      "id": "manual-05",
+      "trigger": "network interruption during playback",
+      "recognized": true,
+      "playback_stopped": true,
+      "stale_audio_resumed": false,
+      "ui_terminal_state": "idle",
+      "stop_latency_ms": 250,
+      "notes": "flytilstand, stoppede rent"
+    }
+  ]
+}

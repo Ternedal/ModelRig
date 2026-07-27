@@ -1,0 +1,80 @@
+{
+  "candidate": {
+    "branch": "agent/unified-candidate-1.58.145",
+    "code_sha256": "cb67f686bccc543306fe156d5335f87166a2584c346f3f5ac50f2f210422d4b2",
+    "dirty_entries": 0,
+    "git_sha": "8e92f34d86ff238357f408b33f6acaebd485b1d4",
+    "identity_source": "git",
+    "version": "1.58.145",
+    "version_check_detail": null,
+    "version_stamps_consistent": true,
+    "working_tree_clean": true
+  },
+  "configuration": {
+    "max_age_hours": 168.0
+  },
+  "evidence": {
+    "browser_peer_physical_attestation": {
+      "bytes": 2546,
+      "path": "validation\\browser-peer-public-validation-physical-latest.json",
+      "receipt_bytes": 2446,
+      "receipt_path": "validation\\browser-peer-public-validation-latest.json",
+      "receipt_sha256": "4e3c388e2d56813f7add811f4ecc008da1c34932806d88e757dfe9b76dc95162",
+      "sha256": "ee9614e2989dcb03e56a83b08772625876d6cf3ed6e449eb8ae9e4d8ad6e0b7d",
+      "status": "pass",
+      "summary": {
+        "bytes_sent": 202,
+        "citation_adapter": "deterministic-web-fetch",
+        "connected_address": "104.20.23.154",
+        "content_sha256": "ff67a9d764d6a2367a187734e697f6a53217db9a21c101d410a113ca871a299d",
+        "response_body_bytes": 559,
+        "response_status": 200,
+        "selected_address": "104.20.23.154",
+        "target_host": "example.com",
+        "target_url_sha256": "0f115db062b7c0dd030b16878c99dea5c354b49dc37b38eb8846179c7783e9d7"
+      }
+    },
+    "candidate_campaign": {
+      "bytes": 5653,
+      "path": "validation\\physical-validation-candidate-campaign-latest.json",
+      "sha256": "145a9b2e05b8792ad66c875a4f416e2684a5497b3fd7a7735ccf839af7050634",
+      "status": "pass",
+      "summary": {
+        "passed": [
+          "preflight",
+          "agent3",
+          "model_eval",
+          "voice",
+          "rag",
+          "scheduler_pilot"
+        ],
+        "total": 6
+      }
+    }
+  },
+  "gate": {
+    "all_physical_evidence_complete": false,
+    "browser_peer_physical_complete": true,
+    "candidate_campaign_complete": true,
+    "candidate_ready_for_fast_forward": true,
+    "passed": true,
+    "production_activation": false,
+    "release_complete": false,
+    "release_validation_pending": true
+  },
+  "generated_at": "2026-07-26T21:56:39.640426Z",
+  "schema": "kaliv-physical-validation-candidate-final/v1",
+  "summary": {
+    "errors": [],
+    "passed": [
+      "preflight",
+      "agent3",
+      "model_eval",
+      "voice",
+      "rag",
+      "scheduler_pilot",
+      "browser_peer_physical"
+    ],
+    "total": 7
+  }
+}

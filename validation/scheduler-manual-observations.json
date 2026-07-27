@@ -1,0 +1,5 @@
+{
+  "operator": "admin",
+  "recovery_line": "scheduler: recovered 0 executed / 1 abandoned / 0 unknown occurrence(s) at startup",
+  "revocation_confirmed": true
+}

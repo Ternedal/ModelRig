@@ -1,0 +1,34 @@
+{
+  "candidate": {
+    "branch": "agent/unified-candidate-1.58.145",
+    "code_sha256": "cb67f686bccc543306fe156d5335f87166a2584c346f3f5ac50f2f210422d4b2",
+    "dirty_entries": 0,
+    "git_sha": "8e92f34d86ff238357f408b33f6acaebd485b1d4",
+    "version": "1.58.145",
+    "version_check_detail": null,
+    "version_stamps_consistent": true,
+    "working_tree_clean": true
+  },
+  "challenge_sha256": "42194f5a85384ee060dfced51ad07e586a59a2c6e0f31075da78daa06b289152",
+  "expires_at": "2026-07-26T22:06:03Z",
+  "expires_at_unix": 1785103563,
+  "generated_at": "2026-07-26T21:56:03Z",
+  "generated_at_unix": 1785102963,
+  "limits": {
+    "max_outbound_bytes": 4096,
+    "max_response_bytes": 262144,
+    "method": "GET",
+    "redirects_followed": false,
+    "timeout_seconds": 15.0
+  },
+  "plan_id": "bpv_caf3b4e197214bc7b16b307339db893a",
+  "production_activation": false,
+  "public_network_contacted": false,
+  "schema": "kaliv-browser-peer-public-validation-plan/v1",
+  "state": "prepared",
+  "target": {
+    "host": "example.com",
+    "port": 443,
+    "url_sha256": "0f115db062b7c0dd030b16878c99dea5c354b49dc37b38eb8846179c7783e9d7"
+  }
+}

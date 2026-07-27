@@ -1,0 +1,174 @@
+{
+  "candidate": {
+    "branch": "agent/unified-candidate-1.58.145",
+    "code_sha256": "48da1da6b59a99b6045d691537ea1df5335b8ca02c6fbb04055bbf8c21756133",
+    "dirty_entries": 0,
+    "git_sha": "4930209a82b87fd56a433fc05f47885e2f23df33",
+    "identity_source": "git",
+    "version": "1.58.145",
+    "version_check_detail": null,
+    "version_stamps_consistent": true,
+    "working_tree_clean": true
+  },
+  "configuration": {
+    "max_age_hours": 168.0,
+    "min_model_exact": 1.0
+  },
+  "evidence": {
+    "agent3": {
+      "age_hours": 0.042,
+      "bytes": 4047,
+      "errors": [],
+      "name": "agent3",
+      "path": "validation\\agent3-rig-validation-latest.json",
+      "present": true,
+      "sha256": "41a27f236c197b41b3d4611b77d86c5a8d1abee798873741a72a4e773bf8d509",
+      "status": "pass",
+      "summary": {
+        "eligible_for_developer_preview": true,
+        "eligible_for_write_pilot": false,
+        "planner_model": "qwen3:14b",
+        "production_activation": false,
+        "success": true,
+        "write_decision": "deny"
+      },
+      "warnings": []
+    },
+    "model_eval": {
+      "age_hours": 0.0,
+      "bytes": 25379,
+      "errors": [
+        "backend.version mismatch: expected '1.58.145', got None"
+      ],
+      "name": "model_eval",
+      "path": "validation\\agent3-model-eval-latest.json",
+      "present": true,
+      "sha256": "59644e179a2505e08e475485c27ce41b4d7de95dfe7b3ca6bb9a384a9be6c2a0",
+      "status": "fail",
+      "summary": {
+        "discipline_rate": 1.0,
+        "exact_match_rate": 1.0,
+        "latency_ms": {
+          "max": 9049.235,
+          "mean": 5031.879,
+          "min": 3347.093,
+          "p50": 4887.405,
+          "p95": 6413.529
+        },
+        "planner_model": "qwen3:14b",
+        "request_errors": 0,
+        "tasks": 30
+      },
+      "warnings": []
+    },
+    "preflight": {
+      "age_hours": 0.048,
+      "bytes": 2973,
+      "errors": [],
+      "name": "preflight",
+      "path": "validation\\rig-preflight-latest.json",
+      "present": true,
+      "sha256": "510ad1d5c7db03fde9ece442c01b8f77ab7e8c04aa498201f1e9b4664f4b6e9c",
+      "status": "pass",
+      "summary": {
+        "already_validated": false,
+        "failed_checks": 0,
+        "ready": true,
+        "warning_checks": 1
+      },
+      "warnings": []
+    },
+    "rag": {
+      "age_hours": null,
+      "bytes": 0,
+      "errors": [
+        "evidence file is missing"
+      ],
+      "name": "rag",
+      "path": "validation\\rag-benchmark-latest.json",
+      "present": false,
+      "sha256": null,
+      "status": "missing",
+      "summary": {},
+      "warnings": []
+    },
+    "scheduler_pilot": {
+      "age_hours": null,
+      "bytes": 0,
+      "errors": [
+        "evidence file is missing"
+      ],
+      "name": "scheduler_pilot",
+      "path": "validation\\scheduler-pilot-latest.json",
+      "present": false,
+      "sha256": null,
+      "status": "missing",
+      "summary": {},
+      "warnings": []
+    },
+    "voice": {
+      "age_hours": null,
+      "bytes": 0,
+      "errors": [
+        "evidence file is missing"
+      ],
+      "name": "voice",
+      "path": "validation\\voice-baseline-latest.json",
+      "present": false,
+      "sha256": null,
+      "status": "missing",
+      "summary": {},
+      "warnings": []
+    }
+  },
+  "freeze": {
+    "generated_at": "2026-07-23T19:33:49.047911Z",
+    "main_anchor": {
+      "ancestor_of_candidate": true,
+      "git_sha": "2e2a29a241c0540b118a7f937bdf3bdd1cc23cbe"
+    },
+    "path": "validation\\pre-release-candidate-freeze-latest.json",
+    "schema": "kaliv-pre-release-candidate-freeze/v1",
+    "sha256": "92ebfba18a25c61a3059f5bc158c44687ac571debaf26a48041d777dcf7f28f3",
+    "software_checks": {
+      "agent3-diagnostics": "success",
+      "agent3-full-diagnostics": "success",
+      "ci": "success",
+      "codeql": "success"
+    }
+  },
+  "gate": {
+    "candidate_campaign_complete": false,
+    "passed": false,
+    "production_activation": false,
+    "release_complete": false,
+    "release_validation_pending": true
+  },
+  "generated_at": "2026-07-23T19:36:58.433513Z",
+  "mode": "prepare",
+  "proof_allowlist": [
+    "preflight",
+    "agent3",
+    "model_eval",
+    "voice",
+    "rag",
+    "scheduler_pilot"
+  ],
+  "schema": "kaliv-physical-validation-candidate-campaign/v1",
+  "summary": {
+    "candidate_errors": [],
+    "failed": [
+      "model_eval"
+    ],
+    "missing": [
+      "voice",
+      "rag",
+      "scheduler_pilot"
+    ],
+    "passed": [
+      "preflight",
+      "agent3"
+    ],
+    "total": 6
+  }
+}

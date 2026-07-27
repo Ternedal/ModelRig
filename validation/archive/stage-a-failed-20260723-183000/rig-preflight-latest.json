@@ -1,0 +1,52 @@
+{
+  "already_validated": false,
+  "backend": {
+    "base_url": "http://127.0.0.1:8080"
+  },
+  "candidate": {
+    "code_sha256": "48da1da6b59a99b6045d691537ea1df5335b8ca02c6fbb04055bbf8c21756133",
+    "git_sha": "26d0886d2e103dbbe7a2f044d8fbc1562af26771",
+    "version": "1.58.145"
+  },
+  "checks": [
+    {
+      "detail": "set (64 chars)",
+      "fix": "",
+      "name": "paired-device token (MODELRIG_TOKEN)",
+      "status": "ok"
+    },
+    {
+      "detail": "qwen3:14b",
+      "fix": "",
+      "name": "planner model (KALIV_AGENT3_PLANNER_MODEL)",
+      "status": "ok"
+    },
+    {
+      "detail": "C:\\Users\\admin\\Desktop\\ModelRig-git\\validation\\agent3-rig-validation-latest.json",
+      "fix": "",
+      "name": "report path wired for the worker (KALIV_AGENT3_VALIDATION_REPORT)",
+      "status": "ok"
+    },
+    {
+      "detail": "cannot connect ([WinError 10061] Der kunne ikke oprettes forbindelse, fordi destinationscomputeren aktivt nægtede det)",
+      "fix": "The Go backend is not answering on this address. Start the appliance\n(scripts\\kaliv-autostart.ps1 keeps server+worker alive at logon), or\npass the right address with --base-url. If you use Tailscale to reach\nthe rig, use the Tailscale address here.",
+      "name": "backend reachable (http://127.0.0.1:8080/healthz)",
+      "status": "fail"
+    },
+    {
+      "detail": "skipped -- backend not reachable",
+      "fix": "Bring the backend up, then re-run.",
+      "name": "authenticated + report checks",
+      "status": "warn"
+    }
+  ],
+  "generated_at": "2026-07-23T16:29:10.825455+00:00",
+  "ready": false,
+  "schema": "kaliv-rig-preflight/v1",
+  "summary": {
+    "checks": 5,
+    "failures": 1,
+    "ok": 3,
+    "warnings": 1
+  }
+}

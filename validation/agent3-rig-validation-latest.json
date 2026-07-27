@@ -1,0 +1,129 @@
+{
+  "checks": {
+    "confirmation_card": {
+      "digest_sha256": "72896cf2ee29d2e88f513fbe96b0e46c8e082401de86cbf2fc4b960992342782",
+      "expires_at": 1785093772.1636913,
+      "pre_confirmation_events": [
+        "run_created",
+        "policy_decision",
+        "confirmation_required"
+      ],
+      "run_id": "c3ddc973-f589-4148-923d-5bd0ecf74c48",
+      "step_id": "e22e0f93-444f-426b-abb8-a329ed469919",
+      "summary": "Kaliv vil tilføje 56 tegn til C:\\Users\\admin\\Documents\\Kaliv\\notes.md. Filen findes og udvides — intet overskrives."
+    },
+    "context_preview": {
+      "character_count": 737,
+      "excluded_ids": [],
+      "included_ids": [
+        "08b745eb-dc5c-4098-beaa-c881e8d5c3f6"
+      ],
+      "sent_to_model": false,
+      "sha256": "b031cb54c1af34328b2c199e52bb670a0f050f9a68a9f46154dc4d36a8835bec"
+    },
+    "memory_created": {
+      "lifecycle_status": "active",
+      "memory_id": "08b745eb-dc5c-4098-beaa-c881e8d5c3f6",
+      "review_status": "confirmed",
+      "sensitivity": "operational"
+    },
+    "read_run": {
+      "event_count": 5,
+      "event_kinds": [
+        "run_created",
+        "policy_decision",
+        "step_started",
+        "step_succeeded",
+        "run_completed"
+      ],
+      "plan_id": "68ee3e5f-991e-4e2b-83af-72326be6d099",
+      "receipt": {
+        "character_count": 737,
+        "excluded_ids": [],
+        "included_ids": [
+          "08b745eb-dc5c-4098-beaa-c881e8d5c3f6"
+        ],
+        "requested": true,
+        "sent_to_model": true,
+        "sha256": "b031cb54c1af34328b2c199e52bb670a0f050f9a68a9f46154dc4d36a8835bec",
+        "target": "local"
+      },
+      "run_id": "9c70724c-0754-48b1-81c9-20456f2bf5f0",
+      "state": "completed"
+    },
+    "single_use": {
+      "replay_blocked": true
+    },
+    "status": {
+      "enabled": true,
+      "experimental": true,
+      "production_tools_path_untouched": true
+    },
+    "version_binding": {
+      "match": true,
+      "modelrig_version": "1.58.145",
+      "worker_version": "1.58.145"
+    },
+    "write_confirmation": {
+      "decision": "deny",
+      "event_count": 4,
+      "event_kinds": [
+        "run_created",
+        "policy_decision",
+        "confirmation_required",
+        "confirmation_denied"
+      ],
+      "mutation_expected": false,
+      "run_id": "c3ddc973-f589-4148-923d-5bd0ecf74c48",
+      "state": "cancelled"
+    },
+    "write_preview": {
+      "egress": "local",
+      "plan_id": "d3de3edd-d743-4d6a-b1e0-7171abc61873",
+      "receipt": {
+        "character_count": 737,
+        "excluded_ids": [],
+        "included_ids": [
+          "08b745eb-dc5c-4098-beaa-c881e8d5c3f6"
+        ],
+        "requested": true,
+        "sent_to_model": true,
+        "sha256": "b031cb54c1af34328b2c199e52bb670a0f050f9a68a9f46154dc4d36a8835bec",
+        "target": "local"
+      },
+      "risk": "write",
+      "sensitivity": "private",
+      "tool": "note_append"
+    }
+  },
+  "cleanup": {
+    "content_erased": true,
+    "deleted": true,
+    "lifecycle_status": "deleted",
+    "memory_id": "08b745eb-dc5c-4098-beaa-c881e8d5c3f6",
+    "source_ref_erased": true
+  },
+  "error": null,
+  "finished_at": "2026-07-26T19:21:52.311264+00:00",
+  "host": {
+    "hostname": "DESKTOP-N7OVNF0",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python": "3.11.9"
+  },
+  "schema": "kaliv-agent3-rig-validation/v1",
+  "started_at": "2026-07-26T19:21:28.027156+00:00",
+  "success": true,
+  "target": {
+    "base_url": "http://127.0.0.1:8080",
+    "code_sha256": "cb67f686bccc543306fe156d5335f87166a2584c346f3f5ac50f2f210422d4b2",
+    "modelrig_version": "1.58.145",
+    "planner_model": "qwen3:14b",
+    "worker_version": "1.58.145",
+    "write_decision": "deny"
+  },
+  "validation": {
+    "id": "5abf572daffa45e298925a8b08c0a4b1",
+    "marker_sha256": "b03b1be3b26c4586f1f72537131116691f9e7064e1f1fd795ef4285ba19ce63e",
+    "memory_subject": "agent3-rig-validation-5abf572daffa"
+  }
+}

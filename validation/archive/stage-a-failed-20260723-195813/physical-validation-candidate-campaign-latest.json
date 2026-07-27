@@ -1,0 +1,158 @@
+{
+  "candidate": {
+    "branch": "agent/unified-candidate-1.58.145",
+    "code_sha256": "48da1da6b59a99b6045d691537ea1df5335b8ca02c6fbb04055bbf8c21756133",
+    "dirty_entries": 0,
+    "git_sha": "26d0886d2e103dbbe7a2f044d8fbc1562af26771",
+    "identity_source": "git",
+    "version": "1.58.145",
+    "version_check_detail": null,
+    "version_stamps_consistent": true,
+    "working_tree_clean": true
+  },
+  "configuration": {
+    "max_age_hours": 168.0,
+    "min_model_exact": 1.0
+  },
+  "evidence": {
+    "agent3": {
+      "age_hours": null,
+      "bytes": 0,
+      "errors": [
+        "evidence file is missing"
+      ],
+      "name": "agent3",
+      "path": "validation\\agent3-rig-validation-latest.json",
+      "present": false,
+      "sha256": null,
+      "status": "missing",
+      "summary": {},
+      "warnings": []
+    },
+    "model_eval": {
+      "age_hours": null,
+      "bytes": 0,
+      "errors": [
+        "evidence file is missing"
+      ],
+      "name": "model_eval",
+      "path": "validation\\agent3-model-eval-latest.json",
+      "present": false,
+      "sha256": null,
+      "status": "missing",
+      "summary": {},
+      "warnings": []
+    },
+    "preflight": {
+      "age_hours": 0.104,
+      "bytes": 1770,
+      "errors": [
+        "preflight does not report ready=true",
+        "preflight contains 1 failed check(s)"
+      ],
+      "name": "preflight",
+      "path": "validation\\rig-preflight-latest.json",
+      "present": true,
+      "sha256": "2018aa1d59151f8a78cd36a5ce930b5bf56eed9ef23854e8570e9c90bdf73079",
+      "status": "fail",
+      "summary": {
+        "already_validated": false,
+        "failed_checks": 1,
+        "ready": false,
+        "warning_checks": 1
+      },
+      "warnings": []
+    },
+    "rag": {
+      "age_hours": null,
+      "bytes": 0,
+      "errors": [
+        "evidence file is missing"
+      ],
+      "name": "rag",
+      "path": "validation\\rag-benchmark-latest.json",
+      "present": false,
+      "sha256": null,
+      "status": "missing",
+      "summary": {},
+      "warnings": []
+    },
+    "scheduler_pilot": {
+      "age_hours": null,
+      "bytes": 0,
+      "errors": [
+        "evidence file is missing"
+      ],
+      "name": "scheduler_pilot",
+      "path": "validation\\scheduler-pilot-latest.json",
+      "present": false,
+      "sha256": null,
+      "status": "missing",
+      "summary": {},
+      "warnings": []
+    },
+    "voice": {
+      "age_hours": null,
+      "bytes": 0,
+      "errors": [
+        "evidence file is missing"
+      ],
+      "name": "voice",
+      "path": "validation\\voice-baseline-latest.json",
+      "present": false,
+      "sha256": null,
+      "status": "missing",
+      "summary": {},
+      "warnings": []
+    }
+  },
+  "freeze": {
+    "generated_at": "2026-07-23T17:58:12.321713Z",
+    "main_anchor": {
+      "ancestor_of_candidate": true,
+      "git_sha": "2e2a29a241c0540b118a7f937bdf3bdd1cc23cbe"
+    },
+    "path": "validation\\pre-release-candidate-freeze-latest.json",
+    "schema": "kaliv-pre-release-candidate-freeze/v1",
+    "sha256": "088d12121baf668a7003642da6d928fe12c67ec82415eac303b45dc897f1398b",
+    "software_checks": {
+      "agent3-diagnostics": "success",
+      "agent3-full-diagnostics": "success",
+      "ci": "success",
+      "codeql": "success"
+    }
+  },
+  "gate": {
+    "candidate_campaign_complete": false,
+    "passed": false,
+    "production_activation": false,
+    "release_complete": false,
+    "release_validation_pending": true
+  },
+  "generated_at": "2026-07-23T17:58:12.454945Z",
+  "mode": "prepare",
+  "proof_allowlist": [
+    "preflight",
+    "agent3",
+    "model_eval",
+    "voice",
+    "rag",
+    "scheduler_pilot"
+  ],
+  "schema": "kaliv-physical-validation-candidate-campaign/v1",
+  "summary": {
+    "candidate_errors": [],
+    "failed": [
+      "preflight"
+    ],
+    "missing": [
+      "agent3",
+      "model_eval",
+      "voice",
+      "rag",
+      "scheduler_pilot"
+    ],
+    "passed": [],
+    "total": 6
+  }
+}

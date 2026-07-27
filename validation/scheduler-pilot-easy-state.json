@@ -1,0 +1,23 @@
+{
+  "candidate_sha": "8e92f34d86ff238357f408b33f6acaebd485b1d4",
+  "pilot_started_at": 1785100734.7361112,
+  "preexisting_ids": [
+    "b4e8c99e153d",
+    "010fbc193d29",
+    "2147ffd8f846",
+    "459acb73b63a",
+    "9b2dd27a386e",
+    "6aa5082bf33f",
+    "e07e93eec0aa",
+    "1e6bdb2f42b0",
+    "a0dbf78cf5cb",
+    "e0f50fd163f7",
+    "fd0b04143ca9",
+    "a93e0b276901",
+    "c7c028ac5463",
+    "18cd6b9e9beb"
+  ],
+  "preexisting_paused": [],
+  "read_schedule_id": "a04badaadddf",
+  "write_schedule_id": "60f6f7dcbb6e"
+}

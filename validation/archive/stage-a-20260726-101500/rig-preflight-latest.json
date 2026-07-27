@@ -1,0 +1,112 @@
+{
+  "already_validated": false,
+  "backend": {
+    "base_url": "http://127.0.0.1:8080"
+  },
+  "candidate": {
+    "code_sha256": "f89ac5da4c8639ef83eb28a69f0a94dd66a92a0eb3853f50fa439a67fedebfae",
+    "git_sha": "2798255616328495934cfa9f8921a6e93ce7dd97",
+    "version": "1.58.145"
+  },
+  "checks": [
+    {
+      "detail": "set (64 chars)",
+      "fix": "",
+      "name": "paired-device token (MODELRIG_TOKEN)",
+      "status": "ok"
+    },
+    {
+      "detail": "qwen3:14b",
+      "fix": "",
+      "name": "planner model (KALIV_AGENT3_PLANNER_MODEL)",
+      "status": "ok"
+    },
+    {
+      "detail": "C:\\Users\\admin\\Desktop\\ModelRig-git\\validation\\agent3-rig-validation-latest.json",
+      "fix": "",
+      "name": "report path wired for the worker (KALIV_AGENT3_VALIDATION_REPORT)",
+      "status": "ok"
+    },
+    {
+      "detail": "200",
+      "fix": "",
+      "name": "backend reachable (http://127.0.0.1:8080/healthz)",
+      "status": "ok"
+    },
+    {
+      "detail": "200",
+      "fix": "",
+      "name": "token accepted (http://127.0.0.1:8080/api/v1/status)",
+      "status": "ok"
+    },
+    {
+      "detail": "200",
+      "fix": "",
+      "name": "Agent 3 status endpoint (/experimental/agent3/status)",
+      "status": "ok"
+    },
+    {
+      "detail": "f89ac5da4c8639ef...",
+      "fix": "",
+      "name": "rig reports code identity (code_sha256)",
+      "status": "ok"
+    },
+    {
+      "detail": "false",
+      "fix": "",
+      "name": "production_activation is false",
+      "status": "ok"
+    },
+    {
+      "detail": "configured",
+      "fix": "",
+      "name": "worker was STARTED with the report path (rig_validation.configured)",
+      "status": "ok"
+    },
+    {
+      "detail": "no report yet at the configured path (reasons: report_not_found)",
+      "fix": "Expected before the first run -- the validation writes the report.\nAfter a successful run this becomes present. Nothing to fix now.",
+      "name": "worker can SEE a report at its path (rig_validation.present)",
+      "status": "warn"
+    },
+    {
+      "detail": "200",
+      "fix": "",
+      "name": "deep health (/health/full?deep=true)",
+      "status": "ok"
+    },
+    {
+      "detail": "embed_dims=768",
+      "fix": "",
+      "name": "Ollama answers (embedding round-trip)",
+      "status": "ok"
+    },
+    {
+      "detail": "present",
+      "fix": "",
+      "name": "planner model pulled (qwen3:14b)",
+      "status": "ok"
+    },
+    {
+      "detail": "819.1 GB free",
+      "fix": "",
+      "name": "disk has room",
+      "status": "ok"
+    },
+    {
+      "detail": "cuda",
+      "fix": "",
+      "name": "ASR device (advisory)",
+      "status": "ok"
+    }
+  ],
+  "generated_at": "2026-07-25T20:52:33.425326+00:00",
+  "ready": true,
+  "schema": "kaliv-rig-preflight/v1",
+  "summary": {
+    "checks": 15,
+    "failures": 0,
+    "ok": 14,
+    "warnings": 1
+  }
+}

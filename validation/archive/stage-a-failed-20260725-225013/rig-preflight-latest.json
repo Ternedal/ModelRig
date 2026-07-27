@@ -1,0 +1,70 @@
+{
+  "already_validated": false,
+  "backend": {
+    "base_url": "http://127.0.0.1:8080"
+  },
+  "candidate": {
+    "code_sha256": "f89ac5da4c8639ef83eb28a69f0a94dd66a92a0eb3853f50fa439a67fedebfae",
+    "git_sha": "2798255616328495934cfa9f8921a6e93ce7dd97",
+    "version": "1.58.145"
+  },
+  "checks": [
+    {
+      "detail": "set (287 chars)",
+      "fix": "",
+      "name": "paired-device token (MODELRIG_TOKEN)",
+      "status": "ok"
+    },
+    {
+      "detail": "qwen3:14b",
+      "fix": "",
+      "name": "planner model (KALIV_AGENT3_PLANNER_MODEL)",
+      "status": "ok"
+    },
+    {
+      "detail": "C:\\Users\\admin\\Desktop\\ModelRig-git\\validation\\agent3-rig-validation-latest.json",
+      "fix": "",
+      "name": "report path wired for the worker (KALIV_AGENT3_VALIDATION_REPORT)",
+      "status": "ok"
+    },
+    {
+      "detail": "200",
+      "fix": "",
+      "name": "backend reachable (http://127.0.0.1:8080/healthz)",
+      "status": "ok"
+    },
+    {
+      "detail": "HTTP 400",
+      "fix": "Unexpected status; check the server log.",
+      "name": "token accepted (http://127.0.0.1:8080/api/v1/status)",
+      "status": "warn"
+    },
+    {
+      "detail": "HTTP 400",
+      "fix": "The worker did not return an Agent 3 status. Backend or worker is\nnot the expected build, or the worker is not up on :8099.",
+      "name": "Agent 3 status endpoint (/experimental/agent3/status)",
+      "status": "fail"
+    },
+    {
+      "detail": "not available -- earlier check failed",
+      "fix": "Fix the failures above first; this depends on them.",
+      "name": "worker's report view (rig_validation)",
+      "status": "warn"
+    },
+    {
+      "detail": "HTTP 400",
+      "fix": "Unexpected health response.",
+      "name": "deep health (/health/full?deep=true)",
+      "status": "fail"
+    }
+  ],
+  "generated_at": "2026-07-25T20:45:52.400146+00:00",
+  "ready": false,
+  "schema": "kaliv-rig-preflight/v1",
+  "summary": {
+    "checks": 8,
+    "failures": 2,
+    "ok": 4,
+    "warnings": 2
+  }
+}

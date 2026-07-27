@@ -1,0 +1,1049 @@
+{
+  "backend": {
+    "code_sha256": "cb67f686bccc543306fe156d5335f87166a2584c346f3f5ac50f2f210422d4b2",
+    "enabled": true,
+    "experimental": true,
+    "version": "1.58.145"
+  },
+  "finished_at": "2026-07-26T19:24:25.709515+00:00",
+  "host": {
+    "hostname": "DESKTOP-N7OVNF0",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python": "3.11.9"
+  },
+  "results": [
+    {
+      "category": "read/rig-status",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "rig_status"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "rig_status"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 5840.227,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "01-rig_status"
+    },
+    {
+      "category": "read/rig-status",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "rig_status"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "rig_status"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 4448.835,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "02-rig_status"
+    },
+    {
+      "category": "read/rig-status",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "rig_status"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "rig_status"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 4416.133,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "03-rig_status"
+    },
+    {
+      "category": "read/rig-status",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "rig_status"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "rig_status"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 4643.861,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "04-rig_status"
+    },
+    {
+      "category": "read/models",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_models"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_models"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 3789.813,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "05-list_models"
+    },
+    {
+      "category": "read/models",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_models"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_models"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 5254.604,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "06-list_models"
+    },
+    {
+      "category": "read/models",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_models"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_models"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 4209.442,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "07-list_models"
+    },
+    {
+      "category": "read/time",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "current_datetime"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "current_datetime"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 3944.329,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "08-current_datetime"
+    },
+    {
+      "category": "read/time",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "current_datetime"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "current_datetime"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 4519.279,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "09-current_datetime"
+    },
+    {
+      "category": "read/time",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "current_datetime"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "current_datetime"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 3598.523,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "10-current_datetime"
+    },
+    {
+      "category": "read/documents",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_documents"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_documents"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 5146.735,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "11-list_documents"
+    },
+    {
+      "category": "read/documents",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_documents"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_documents"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 5235.971,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "12-list_documents"
+    },
+    {
+      "category": "read/documents",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_documents"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "list_documents"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 5186.96,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "13-list_documents"
+    },
+    {
+      "category": "read/jobs",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "job_status"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {},
+            "risk": "read",
+            "tool": "job_status"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 6228.413,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "14-job_status"
+    },
+    {
+      "category": "read/jobs",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {
+              "job_id": "1234567890abcdef"
+            },
+            "risk": "read",
+            "tool": "job_status"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {
+              "job_id": "1234567890abcdef"
+            },
+            "risk": "read",
+            "tool": "job_status"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 8614.842,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "15-job_status"
+    },
+    {
+      "category": "read/jobs",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {
+              "job_id": "abcdef0123456789"
+            },
+            "risk": "read",
+            "tool": "job_status"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {
+              "job_id": "abcdef0123456789"
+            },
+            "risk": "read",
+            "tool": "job_status"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 6758.576,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "16-job_status"
+    },
+    {
+      "category": "write/note",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {
+              "text": "Husk at rense brygkedlen"
+            },
+            "risk": "write",
+            "tool": "note_append"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {
+              "text": "Husk at rense brygkedlen"
+            },
+            "risk": "write",
+            "tool": "note_append"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 4920.451,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "17-note_append"
+    },
+    {
+      "category": "write/note",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {
+              "text": "Køb CO2 på fredag"
+            },
+            "risk": "write",
+            "tool": "note_append"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {
+              "text": "Køb CO2 på fredag"
+            },
+            "risk": "write",
+            "tool": "note_append"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 4418.138,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "18-note_append"
+    },
+    {
+      "category": "write/note",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {
+              "text": "Kalibrér temperaturføleren"
+            },
+            "risk": "write",
+            "tool": "note_append"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {
+              "text": "Kalibrér temperaturføleren"
+            },
+            "risk": "write",
+            "tool": "note_append"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 4833.723,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "19-note_append"
+    },
+    {
+      "category": "write/note",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {
+              "text": "Test af lokal planner 20."
+            },
+            "risk": "write",
+            "tool": "note_append"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {
+              "text": "Test af lokal planner 20."
+            },
+            "risk": "write",
+            "tool": "note_append"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 5763.926,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "20-note_append"
+    },
+    {
+      "category": "write/cancel",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {
+              "job_id": "1111222233334444"
+            },
+            "risk": "write",
+            "tool": "cancel_job"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {
+              "job_id": "1111222233334444"
+            },
+            "risk": "write",
+            "tool": "cancel_job"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 4911.743,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "21-cancel_job"
+    },
+    {
+      "category": "write/cancel",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {
+              "job_id": "deadbeefcafebabe"
+            },
+            "risk": "write",
+            "tool": "cancel_job"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {
+              "job_id": "deadbeefcafebabe"
+            },
+            "risk": "write",
+            "tool": "cancel_job"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 5147.253,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "22-cancel_job"
+    },
+    {
+      "category": "write/cancel",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {
+              "job_id": "9999aaaabbbbcccc"
+            },
+            "risk": "write",
+            "tool": "cancel_job"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {
+              "job_id": "9999aaaabbbbcccc"
+            },
+            "risk": "write",
+            "tool": "cancel_job"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 5070.077,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "23-cancel_job"
+    },
+    {
+      "category": "write/pull-model",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {
+              "name": "qwen3:8b"
+            },
+            "risk": "admin",
+            "tool": "pull_model"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {
+              "name": "qwen3:8b"
+            },
+            "risk": "admin",
+            "tool": "pull_model"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 4955.851,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "24-pull_model"
+    },
+    {
+      "category": "write/pull-model",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {
+              "name": "nomic-embed-text"
+            },
+            "risk": "admin",
+            "tool": "pull_model"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {
+              "name": "nomic-embed-text"
+            },
+            "risk": "admin",
+            "tool": "pull_model"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 5066.552,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "25-pull_model"
+    },
+    {
+      "category": "write/pull-model",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {
+              "name": "gemma3:12b"
+            },
+            "risk": "admin",
+            "tool": "pull_model"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {
+              "name": "gemma3:12b"
+            },
+            "risk": "admin",
+            "tool": "pull_model"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 6853.311,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "26-pull_model"
+    },
+    {
+      "category": "write/delete-model",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {
+              "name": "qwen3:8b"
+            },
+            "risk": "destructive",
+            "tool": "delete_model"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {
+              "name": "qwen3:8b"
+            },
+            "risk": "destructive",
+            "tool": "delete_model"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 4738.091,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "27-delete_model"
+    },
+    {
+      "category": "write/delete-model",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {
+              "name": "old/model:test"
+            },
+            "risk": "destructive",
+            "tool": "delete_model"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {
+              "name": "old/model:test"
+            },
+            "risk": "destructive",
+            "tool": "delete_model"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 4303.302,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "28-delete_model"
+    },
+    {
+      "category": "write/delete-model",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {
+              "name": "nomic-embed-text"
+            },
+            "risk": "destructive",
+            "tool": "delete_model"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {
+              "name": "nomic-embed-text"
+            },
+            "risk": "destructive",
+            "tool": "delete_model"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 5242.715,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "29-delete_model"
+    },
+    {
+      "category": "write/delete-model",
+      "evaluation": {
+        "actual_steps": [
+          {
+            "args": {
+              "name": "gemma3:12b"
+            },
+            "risk": "destructive",
+            "tool": "delete_model"
+          }
+        ],
+        "args_score": 1.0,
+        "discipline_pass": true,
+        "exact_match": true,
+        "expected_steps": [
+          {
+            "args": {
+              "name": "gemma3:12b"
+            },
+            "risk": "destructive",
+            "tool": "delete_model"
+          }
+        ],
+        "findings": [],
+        "risk_score": 1.0,
+        "tool_score": 1.0
+      },
+      "latency_ms": 4432.481,
+      "plan_id_present": true,
+      "repetition": 1,
+      "request_error": null,
+      "task_id": "30-delete_model"
+    }
+  ],
+  "schema": "kaliv-agent3-model-eval/v1",
+  "started_at": "2026-07-26T19:21:53.194892+00:00",
+  "summary": {
+    "categories": {
+      "read/documents": {
+        "exact": 3,
+        "total": 3
+      },
+      "read/jobs": {
+        "exact": 3,
+        "total": 3
+      },
+      "read/models": {
+        "exact": 3,
+        "total": 3
+      },
+      "read/rig-status": {
+        "exact": 4,
+        "total": 4
+      },
+      "read/time": {
+        "exact": 3,
+        "total": 3
+      },
+      "write/cancel": {
+        "exact": 3,
+        "total": 3
+      },
+      "write/delete-model": {
+        "exact": 4,
+        "total": 4
+      },
+      "write/note": {
+        "exact": 4,
+        "total": 4
+      },
+      "write/pull-model": {
+        "exact": 3,
+        "total": 3
+      }
+    },
+    "discipline_passes": 30,
+    "discipline_rate": 1.0,
+    "exact_match_rate": 1.0,
+    "exact_matches": 30,
+    "latency_ms": {
+      "max": 8614.842,
+      "mean": 5083.139,
+      "min": 3598.523,
+      "p50": 4920.451,
+      "p95": 6853.311
+    },
+    "request_errors": 0,
+    "requests_completed": 30,
+    "tasks": 30
+  },
+  "target": {
+    "executes_tools": false,
+    "execution_mode": "plan-only",
+    "planner_model": "qwen3:14b",
+    "repetitions": 1,
+    "starts_plans": false
+  },
+  "task_set": {
+    "name": "agent3-local-planner-baseline-da",
+    "schema": "kaliv-agent3-model-eval-task-set/v1",
+    "task_count": 30,
+    "version": "2026-07-23.1"
+  }
+}

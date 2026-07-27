@@ -1,0 +1,7020 @@
+{
+  "build": {
+    "git_sha": "51c381a09aa76e44dd2a501b837e6b5daff7379d",
+    "version": "1.58.145"
+  },
+  "cancellation_probes": [
+    {
+      "aborted": true,
+      "cleanup": {
+        "clean": true,
+        "remaining": [],
+        "wait_ms": 250.0
+      },
+      "error": null,
+      "index": 1,
+      "latency_ms": 770.896,
+      "trigger": "transcript",
+      "worker_healthy": true
+    },
+    {
+      "aborted": true,
+      "cleanup": {
+        "clean": true,
+        "remaining": [],
+        "wait_ms": 250.0
+      },
+      "error": null,
+      "index": 2,
+      "latency_ms": 13469.083,
+      "trigger": "first_chunk",
+      "worker_healthy": true
+    },
+    {
+      "aborted": true,
+      "cleanup": {
+        "clean": true,
+        "remaining": [],
+        "wait_ms": 250.0
+      },
+      "error": null,
+      "index": 3,
+      "latency_ms": 789.112,
+      "trigger": "transcript",
+      "worker_healthy": true
+    },
+    {
+      "aborted": true,
+      "cleanup": {
+        "clean": true,
+        "remaining": [],
+        "wait_ms": 250.0
+      },
+      "error": null,
+      "index": 4,
+      "latency_ms": 13083.961,
+      "trigger": "first_chunk",
+      "worker_healthy": true
+    }
+  ],
+  "cold_probe": {
+    "audio": {
+      "bytes": 115278,
+      "channels": 1,
+      "duration_s": 3.6,
+      "frames": 57600,
+      "sample_rate_hz": 16000,
+      "sample_width_bytes": 2,
+      "sha256": "64ffa542e747078c50c85c27b16ce0e7bea778644a572879c5d41711af68a73f"
+    },
+    "category": "kort spørgsmål",
+    "chunks": [
+      {
+        "audio_bytes": 213548,
+        "index": 0,
+        "received_ms": 20303.474,
+        "server_ttfa_s": 20.25,
+        "synth_s": 2.02,
+        "text_characters": 95
+      },
+      {
+        "audio_bytes": 173100,
+        "index": 1,
+        "received_ms": 20445.34,
+        "server_ttfa_s": 20.39,
+        "synth_s": 0.13,
+        "text_characters": 60
+      },
+      {
+        "audio_bytes": 250412,
+        "index": 2,
+        "received_ms": 20642.525,
+        "server_ttfa_s": 20.59,
+        "synth_s": 0.19,
+        "text_characters": 101
+      }
+    ],
+    "error": null,
+    "id": "turn-01",
+    "latency_ms": {
+      "done": 20643.355,
+      "first_audio": 20303.474,
+      "response_headers": 53.841,
+      "transcript": 6484.851
+    },
+    "phase": "cold_probe",
+    "pipeline": {
+      "language": "da",
+      "model": "qwen3:14b",
+      "pipeline_time_to_first_audio_s": 13.98,
+      "pipeline_total_s": 20.59,
+      "reply_characters": 258,
+      "reply_sha256": "bd60db3ad0f0227a9b2cac867955861079e81aa4ea26359e708a8256f80bc76d",
+      "via_cloud": false
+    },
+    "repetition": 1,
+    "reply_audio_bytes": 637060,
+    "score": {
+      "cer": 0.0,
+      "char_distance": 0,
+      "deletions": 0,
+      "distance": 0,
+      "hypothesis_normalized": "hvad er klokken lige nu",
+      "hypothesis_words": 5,
+      "insertions": 0,
+      "reference_characters": 19,
+      "reference_normalized": "hvad er klokken lige nu",
+      "reference_words": 5,
+      "substitutions": 0,
+      "wer": 0.0
+    },
+    "transcript_characters": 24,
+    "transcript_sha256": "e50c48cfb124860ae1b6d2c580d8b2de3445d303624daa7a688778b5561474da"
+  },
+  "configuration": {
+    "cancellation_probes": 4,
+    "cleanup_timeout_s": 15.0,
+    "cold_start_confirmed": true,
+    "cold_turn": "turn-01",
+    "language": "da",
+    "max_warm_first_audio_ms": null,
+    "max_wer": null,
+    "model": "qwen3:14b",
+    "repetitions": 2,
+    "timeout_s": 180.0
+  },
+  "error": null,
+  "gate": {
+    "manual_required": true,
+    "max_warm_first_audio_ms": null,
+    "max_wer": null,
+    "passed": false
+  },
+  "generated_at": "2026-07-26T10:22:58.008130+00:00",
+  "host": {
+    "nvidia": [
+      {
+        "driver_version": "610.62",
+        "index": 0,
+        "memory_total_bytes": 12884901888,
+        "memory_used_bytes": 857735168,
+        "name": "NVIDIA GeForce RTX 3060"
+      }
+    ],
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python": "3.11.9"
+  },
+  "manifest": {
+    "dataset_version": "2026-07-19.1",
+    "path": "eval\\voice_baseline_manifest.v1.json",
+    "schema": "kaliv-voice-baseline-manifest/v1",
+    "sha256": "6235595f3099f5cb52e58c821b40adf7e030b545abcc907086cd5273d89c953e",
+    "turns": 20
+  },
+  "manual_observations": {
+    "device": {
+      "app_version": "FILL_ME",
+      "model": "Pixel 6a",
+      "os_version": "FILL_ME"
+    },
+    "schema": "kaliv-voice-manual-observations/v1",
+    "trials": [
+      {
+        "id": "manual-01",
+        "notes": "FILL_ME",
+        "playback_stopped": false,
+        "recognized": false,
+        "stale_audio_resumed": false,
+        "stop_latency_ms": null,
+        "trigger": "tap stop during first audio chunk",
+        "ui_terminal_state": "pending"
+      },
+      {
+        "id": "manual-02",
+        "notes": "FILL_ME",
+        "playback_stopped": false,
+        "recognized": false,
+        "stale_audio_resumed": false,
+        "stop_latency_ms": null,
+        "trigger": "tap stop between audio chunks",
+        "ui_terminal_state": "pending"
+      },
+      {
+        "id": "manual-03",
+        "notes": "FILL_ME",
+        "playback_stopped": false,
+        "recognized": false,
+        "stale_audio_resumed": false,
+        "stop_latency_ms": null,
+        "trigger": "begin speaking during first audio chunk",
+        "ui_terminal_state": "pending"
+      },
+      {
+        "id": "manual-04",
+        "notes": "FILL_ME",
+        "playback_stopped": false,
+        "recognized": false,
+        "stale_audio_resumed": false,
+        "stop_latency_ms": null,
+        "trigger": "begin speaking between audio chunks",
+        "ui_terminal_state": "pending"
+      },
+      {
+        "id": "manual-05",
+        "notes": "FILL_ME",
+        "playback_stopped": false,
+        "recognized": false,
+        "stale_audio_resumed": false,
+        "stop_latency_ms": null,
+        "trigger": "network interruption during playback",
+        "ui_terminal_state": "pending"
+      }
+    ]
+  },
+  "missing_audio": [],
+  "runs": [
+    {
+      "audio": {
+        "bytes": 115278,
+        "channels": 1,
+        "duration_s": 3.6,
+        "frames": 57600,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "64ffa542e747078c50c85c27b16ce0e7bea778644a572879c5d41711af68a73f"
+      },
+      "category": "kort spørgsmål",
+      "chunks": [
+        {
+          "audio_bytes": 278060,
+          "index": 0,
+          "received_ms": 11913.406,
+          "server_ttfa_s": 11.91,
+          "synth_s": 0.55,
+          "text_characters": 125
+        },
+        {
+          "audio_bytes": 77868,
+          "index": 1,
+          "received_ms": 12018.138,
+          "server_ttfa_s": 12.01,
+          "synth_s": 0.1,
+          "text_characters": 38
+        }
+      ],
+      "error": null,
+      "id": "turn-01",
+      "latency_ms": {
+        "done": 12018.427,
+        "first_audio": 11913.406,
+        "response_headers": 4.848,
+        "transcript": 881.448
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 11.19,
+        "pipeline_total_s": 12.01,
+        "reply_characters": 166,
+        "reply_sha256": "1908790e45b8f36011cc86c9473a41da8f1df48e00a8fc425c40584764c277eb",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 355928,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "hvad er klokken lige nu",
+        "hypothesis_words": 5,
+        "insertions": 0,
+        "reference_characters": 19,
+        "reference_normalized": "hvad er klokken lige nu",
+        "reference_words": 5,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 24,
+      "transcript_sha256": "e50c48cfb124860ae1b6d2c580d8b2de3445d303624daa7a688778b5561474da"
+    },
+    {
+      "audio": {
+        "bytes": 101518,
+        "channels": 1,
+        "duration_s": 3.17,
+        "frames": 50720,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "7dbc68f62413789eee871c5558f7f648cc411f0e104438b423ac6f440d597861"
+      },
+      "category": "tal og tidsenhed",
+      "chunks": [
+        {
+          "audio_bytes": 201260,
+          "index": 0,
+          "received_ms": 10081.117,
+          "server_ttfa_s": 10.07,
+          "synth_s": 0.38,
+          "text_characters": 91
+        },
+        {
+          "audio_bytes": 399404,
+          "index": 1,
+          "received_ms": 12771.908,
+          "server_ttfa_s": 12.76,
+          "synth_s": 0.57,
+          "text_characters": 106
+        },
+        {
+          "audio_bytes": 319020,
+          "index": 2,
+          "received_ms": 15375.255,
+          "server_ttfa_s": 15.36,
+          "synth_s": 0.58,
+          "text_characters": 150
+        },
+        {
+          "audio_bytes": 105516,
+          "index": 3,
+          "received_ms": 15752.57,
+          "server_ttfa_s": 15.75,
+          "synth_s": 0.28,
+          "text_characters": 40
+        },
+        {
+          "audio_bytes": 37420,
+          "index": 4,
+          "received_ms": 15823.837,
+          "server_ttfa_s": 15.82,
+          "synth_s": 0.06,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 269868,
+          "index": 5,
+          "received_ms": 17167.18,
+          "server_ttfa_s": 17.16,
+          "synth_s": 0.53,
+          "text_characters": 79
+        },
+        {
+          "audio_bytes": 85548,
+          "index": 6,
+          "received_ms": 17751.729,
+          "server_ttfa_s": 17.75,
+          "synth_s": 0.19,
+          "text_characters": 46
+        }
+      ],
+      "error": null,
+      "id": "turn-02",
+      "latency_ms": {
+        "done": 17752.088,
+        "first_audio": 10081.117,
+        "response_headers": 4.688,
+        "transcript": 823.175
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 9.41,
+        "pipeline_total_s": 17.75,
+        "reply_characters": 530,
+        "reply_sha256": "ede3e9f6149e0b6d9de31ee59f34004323cc8c7c9e835c7a8f78d4ad5ef975ee",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 1418036,
+      "score": {
+        "cer": 0.130435,
+        "char_distance": 3,
+        "deletions": 0,
+        "distance": 1,
+        "hypothesis_normalized": "sæt en timer på 5 minutter",
+        "hypothesis_words": 6,
+        "insertions": 0,
+        "reference_characters": 23,
+        "reference_normalized": "sæt en timer på fem minutter",
+        "reference_words": 6,
+        "substitutions": 1,
+        "wer": 0.166667
+      },
+      "transcript_characters": 27,
+      "transcript_sha256": "ad4a7ca72e224fea1f8b121f78af330424e0ba966ab275e919b90b790efab3d0"
+    },
+    {
+      "audio": {
+        "bytes": 126798,
+        "channels": 1,
+        "duration_s": 3.96,
+        "frames": 63360,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "3cc7c371bf7eb0e7f71da5efed7c9bb61ab77a9bcf37d0d51d19eed16e7a94e1"
+      },
+      "category": "kalenderformulering",
+      "chunks": [
+        {
+          "audio_bytes": 319020,
+          "index": 0,
+          "received_ms": 11223.006,
+          "server_ttfa_s": 11.22,
+          "synth_s": 0.56,
+          "text_characters": 147
+        },
+        {
+          "audio_bytes": 103980,
+          "index": 1,
+          "received_ms": 11526.828,
+          "server_ttfa_s": 11.52,
+          "synth_s": 0.25,
+          "text_characters": 42
+        },
+        {
+          "audio_bytes": 27692,
+          "index": 2,
+          "received_ms": 11608.525,
+          "server_ttfa_s": 11.6,
+          "synth_s": 0.08,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 301612,
+          "index": 3,
+          "received_ms": 13319.462,
+          "server_ttfa_s": 13.31,
+          "synth_s": 0.61,
+          "text_characters": 112
+        },
+        {
+          "audio_bytes": 124460,
+          "index": 4,
+          "received_ms": 13925.145,
+          "server_ttfa_s": 13.92,
+          "synth_s": 0.17,
+          "text_characters": 69
+        }
+      ],
+      "error": null,
+      "id": "turn-03",
+      "latency_ms": {
+        "done": 13925.606,
+        "first_audio": 11223.006,
+        "response_headers": 6.497,
+        "transcript": 1059.625
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 10.33,
+        "pipeline_total_s": 13.92,
+        "reply_characters": 379,
+        "reply_sha256": "69f4254334bd4d7ce6db8969447754d1d1411b87d66ed016d985692b6db6d55e",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 876764,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "hvilke møder har jeg i morgen formiddag",
+        "hypothesis_words": 7,
+        "insertions": 0,
+        "reference_characters": 33,
+        "reference_normalized": "hvilke møder har jeg i morgen formiddag",
+        "reference_words": 7,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 40,
+      "transcript_sha256": "c6c40af6c85bf7c666b92e236bfc2b38cfb2f486ac6c7d99e963ae96d6a45367"
+    },
+    {
+      "audio": {
+        "bytes": 112718,
+        "channels": 1,
+        "duration_s": 3.52,
+        "frames": 56320,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "6e90c4346d600d1ab73879895417f3074ce459ca9965144339cf2464983fb28c"
+      },
+      "category": "teknisk status",
+      "chunks": [
+        {
+          "audio_bytes": 275500,
+          "index": 0,
+          "received_ms": 16368.572,
+          "server_ttfa_s": 16.36,
+          "synth_s": 0.4,
+          "text_characters": 137
+        },
+        {
+          "audio_bytes": 70188,
+          "index": 1,
+          "received_ms": 16535.426,
+          "server_ttfa_s": 16.53,
+          "synth_s": 0.16,
+          "text_characters": 28
+        },
+        {
+          "audio_bytes": 428588,
+          "index": 2,
+          "received_ms": 19053.487,
+          "server_ttfa_s": 19.05,
+          "synth_s": 0.56,
+          "text_characters": 184
+        },
+        {
+          "audio_bytes": 310316,
+          "index": 3,
+          "received_ms": 20456.614,
+          "server_ttfa_s": 20.45,
+          "synth_s": 0.37,
+          "text_characters": 124
+        },
+        {
+          "audio_bytes": 246828,
+          "index": 4,
+          "received_ms": 21377.527,
+          "server_ttfa_s": 21.37,
+          "synth_s": 0.31,
+          "text_characters": 105
+        },
+        {
+          "audio_bytes": 15916,
+          "index": 5,
+          "received_ms": 21442.83,
+          "server_ttfa_s": 21.44,
+          "synth_s": 0.06,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 455212,
+          "index": 6,
+          "received_ms": 24008.247,
+          "server_ttfa_s": 24.0,
+          "synth_s": 0.56,
+          "text_characters": 199
+        },
+        {
+          "audio_bytes": 149036,
+          "index": 7,
+          "received_ms": 24278.54,
+          "server_ttfa_s": 24.27,
+          "synth_s": 0.25,
+          "text_characters": 57
+        },
+        {
+          "audio_bytes": 26668,
+          "index": 8,
+          "received_ms": 24335.66,
+          "server_ttfa_s": 24.33,
+          "synth_s": 0.05,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 283692,
+          "index": 9,
+          "received_ms": 25419.851,
+          "server_ttfa_s": 25.41,
+          "synth_s": 0.4,
+          "text_characters": 102
+        },
+        {
+          "audio_bytes": 18476,
+          "index": 10,
+          "received_ms": 25460.69,
+          "server_ttfa_s": 25.46,
+          "synth_s": 0.03,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 271404,
+          "index": 11,
+          "received_ms": 27021.578,
+          "server_ttfa_s": 27.02,
+          "synth_s": 0.33,
+          "text_characters": 111
+        },
+        {
+          "audio_bytes": 26156,
+          "index": 12,
+          "received_ms": 27059.082,
+          "server_ttfa_s": 27.06,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 167468,
+          "index": 13,
+          "received_ms": 27510.807,
+          "server_ttfa_s": 27.51,
+          "synth_s": 0.21,
+          "text_characters": 62
+        },
+        {
+          "audio_bytes": 115244,
+          "index": 14,
+          "received_ms": 28113.517,
+          "server_ttfa_s": 28.11,
+          "synth_s": 0.16,
+          "text_characters": 48
+        }
+      ],
+      "error": null,
+      "id": "turn-04",
+      "latency_ms": {
+        "done": 28114.0,
+        "first_audio": 16368.572,
+        "response_headers": 9.454,
+        "transcript": 981.67
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 15.57,
+        "pipeline_total_s": 28.11,
+        "reply_characters": 1186,
+        "reply_sha256": "6d694ab386a2fe656b5e0260316827d3a62217c90823c6ab30c0c6662b9e527e",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 2860692,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 2,
+        "hypothesis_normalized": "hvor meget ledig plads er der på model rig",
+        "hypothesis_words": 9,
+        "insertions": 1,
+        "reference_characters": 34,
+        "reference_normalized": "hvor meget ledig plads er der på modelrig",
+        "reference_words": 8,
+        "substitutions": 1,
+        "wer": 0.25
+      },
+      "transcript_characters": 43,
+      "transcript_sha256": "e501c0835d020174000bd223c6f521f79f52aba06c8709145c8be9f81ae6e84f"
+    },
+    {
+      "audio": {
+        "bytes": 138638,
+        "channels": 1,
+        "duration_s": 4.33,
+        "frames": 69280,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "dcd1c8fa556c1fbd975aa037452f7e0eb0ae5a8ae2f38b0816630a497b48893e"
+      },
+      "category": "sammensat opgave",
+      "chunks": [
+        {
+          "audio_bytes": 87084,
+          "index": 0,
+          "received_ms": 10749.234,
+          "server_ttfa_s": 10.75,
+          "synth_s": 0.15,
+          "text_characters": 34
+        },
+        {
+          "audio_bytes": 202796,
+          "index": 1,
+          "received_ms": 12105.761,
+          "server_ttfa_s": 12.1,
+          "synth_s": 0.32,
+          "text_characters": 76
+        },
+        {
+          "audio_bytes": 14892,
+          "index": 2,
+          "received_ms": 12166.606,
+          "server_ttfa_s": 12.16,
+          "synth_s": 0.05,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 151596,
+          "index": 3,
+          "received_ms": 12975.476,
+          "server_ttfa_s": 12.97,
+          "synth_s": 0.31,
+          "text_characters": 67
+        },
+        {
+          "audio_bytes": 17452,
+          "index": 4,
+          "received_ms": 13014.838,
+          "server_ttfa_s": 13.01,
+          "synth_s": 0.03,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 150060,
+          "index": 5,
+          "received_ms": 13730.279,
+          "server_ttfa_s": 13.73,
+          "synth_s": 0.18,
+          "text_characters": 56
+        },
+        {
+          "audio_bytes": 19500,
+          "index": 6,
+          "received_ms": 13765.591,
+          "server_ttfa_s": 13.76,
+          "synth_s": 0.03,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 173612,
+          "index": 7,
+          "received_ms": 14731.472,
+          "server_ttfa_s": 14.73,
+          "synth_s": 0.24,
+          "text_characters": 71
+        },
+        {
+          "audio_bytes": 20012,
+          "index": 8,
+          "received_ms": 14769.548,
+          "server_ttfa_s": 14.77,
+          "synth_s": 0.03,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 171564,
+          "index": 9,
+          "received_ms": 15591.16,
+          "server_ttfa_s": 15.59,
+          "synth_s": 0.19,
+          "text_characters": 68
+        },
+        {
+          "audio_bytes": 134700,
+          "index": 10,
+          "received_ms": 16251.03,
+          "server_ttfa_s": 16.24,
+          "synth_s": 0.21,
+          "text_characters": 51
+        }
+      ],
+      "error": null,
+      "id": "turn-05",
+      "latency_ms": {
+        "done": 16251.564,
+        "first_audio": 10749.234,
+        "response_headers": 15.605,
+        "transcript": 957.183
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 9.96,
+        "pipeline_total_s": 16.25,
+        "reply_characters": 455,
+        "reply_sha256": "3a57a35a45f0979db2c6816b886f9d64e9ecdb5e69a9793815ad0fc085113247",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 1143268,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "lav en kort opsummering af dagens vigtigste opgaver",
+        "hypothesis_words": 8,
+        "insertions": 0,
+        "reference_characters": 44,
+        "reference_normalized": "lav en kort opsummering af dagens vigtigste opgaver",
+        "reference_words": 8,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 52,
+      "transcript_sha256": "7fb91c474777c9c7545be1b9029ed68f56460e30a6aab7bb30b546f6d6955249"
+    },
+    {
+      "audio": {
+        "bytes": 131278,
+        "channels": 1,
+        "duration_s": 4.1,
+        "frames": 65600,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "f5ad07528385bd23e58cd658663751297e934245bdc526872b2110e7ea1ff12a"
+      },
+      "category": "liste og fødevarer",
+      "chunks": [
+        {
+          "audio_bytes": 122924,
+          "index": 0,
+          "received_ms": 16025.427,
+          "server_ttfa_s": 16.0,
+          "synth_s": 0.13,
+          "text_characters": 41
+        },
+        {
+          "audio_bytes": 395820,
+          "index": 1,
+          "received_ms": 18881.816,
+          "server_ttfa_s": 18.85,
+          "synth_s": 0.5,
+          "text_characters": 169
+        },
+        {
+          "audio_bytes": 183852,
+          "index": 2,
+          "received_ms": 19498.45,
+          "server_ttfa_s": 19.47,
+          "synth_s": 0.27,
+          "text_characters": 63
+        },
+        {
+          "audio_bytes": 294444,
+          "index": 3,
+          "received_ms": 21419.416,
+          "server_ttfa_s": 21.39,
+          "synth_s": 0.42,
+          "text_characters": 106
+        },
+        {
+          "audio_bytes": 93740,
+          "index": 4,
+          "received_ms": 21578.757,
+          "server_ttfa_s": 21.55,
+          "synth_s": 0.14,
+          "text_characters": 31
+        },
+        {
+          "audio_bytes": 255020,
+          "index": 5,
+          "received_ms": 23238.689,
+          "server_ttfa_s": 23.21,
+          "synth_s": 0.4,
+          "text_characters": 92
+        },
+        {
+          "audio_bytes": 24108,
+          "index": 6,
+          "received_ms": 23280.707,
+          "server_ttfa_s": 23.26,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 84524,
+          "index": 7,
+          "received_ms": 23487.265,
+          "server_ttfa_s": 23.46,
+          "synth_s": 0.13,
+          "text_characters": 28
+        },
+        {
+          "audio_bytes": 155180,
+          "index": 8,
+          "received_ms": 24404.152,
+          "server_ttfa_s": 24.38,
+          "synth_s": 0.2,
+          "text_characters": 67
+        }
+      ],
+      "error": null,
+      "id": "turn-06",
+      "latency_ms": {
+        "done": 24404.776,
+        "first_audio": 16025.427,
+        "response_headers": 28.545,
+        "transcript": 1017.755
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 15.17,
+        "pipeline_total_s": 24.38,
+        "reply_characters": 617,
+        "reply_sha256": "e4aaf252325abde6ce5e988c90dfb5d84c031c5424fdecf9226ed66c7d974f57",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 1609612,
+      "score": {
+        "cer": 0.057143,
+        "char_distance": 2,
+        "deletions": 0,
+        "distance": 1,
+        "hypothesis_normalized": "husk at jeg skal købe kaffe mælk og robrød",
+        "hypothesis_words": 9,
+        "insertions": 0,
+        "reference_characters": 35,
+        "reference_normalized": "husk at jeg skal købe kaffe mælk og rugbrød",
+        "reference_words": 9,
+        "substitutions": 1,
+        "wer": 0.111111
+      },
+      "transcript_characters": 45,
+      "transcript_sha256": "c983688671a715aa5ada24a83481086966228315ebf81ad85f9b3f445b20a50d"
+    },
+    {
+      "audio": {
+        "bytes": 129038,
+        "channels": 1,
+        "duration_s": 4.03,
+        "frames": 64480,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "3939ac2156be3cc272b1c0009b1e4a7ab6e92d89c508023c0c0bd86199b3587b"
+      },
+      "category": "faglig forklaring",
+      "chunks": [
+        {
+          "audio_bytes": 271404,
+          "index": 0,
+          "received_ms": 16605.743,
+          "server_ttfa_s": 16.58,
+          "synth_s": 0.44,
+          "text_characters": 116
+        },
+        {
+          "audio_bytes": 141868,
+          "index": 1,
+          "received_ms": 16875.61,
+          "server_ttfa_s": 16.85,
+          "synth_s": 0.22,
+          "text_characters": 44
+        },
+        {
+          "audio_bytes": 523820,
+          "index": 2,
+          "received_ms": 19585.705,
+          "server_ttfa_s": 19.55,
+          "synth_s": 0.62,
+          "text_characters": 203
+        },
+        {
+          "audio_bytes": 386604,
+          "index": 3,
+          "received_ms": 21409.473,
+          "server_ttfa_s": 21.38,
+          "synth_s": 0.46,
+          "text_characters": 171
+        },
+        {
+          "audio_bytes": 56876,
+          "index": 4,
+          "received_ms": 21491.232,
+          "server_ttfa_s": 21.46,
+          "synth_s": 0.08,
+          "text_characters": 25
+        },
+        {
+          "audio_bytes": 26156,
+          "index": 5,
+          "received_ms": 21523.561,
+          "server_ttfa_s": 21.5,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 134188,
+          "index": 6,
+          "received_ms": 22320.116,
+          "server_ttfa_s": 22.29,
+          "synth_s": 0.18,
+          "text_characters": 57
+        },
+        {
+          "audio_bytes": 26668,
+          "index": 7,
+          "received_ms": 22354.621,
+          "server_ttfa_s": 22.33,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 51244,
+          "index": 8,
+          "received_ms": 22458.646,
+          "server_ttfa_s": 22.43,
+          "synth_s": 0.06,
+          "text_characters": 18
+        },
+        {
+          "audio_bytes": 159788,
+          "index": 9,
+          "received_ms": 23411.906,
+          "server_ttfa_s": 23.38,
+          "synth_s": 0.24,
+          "text_characters": 71
+        },
+        {
+          "audio_bytes": 53804,
+          "index": 10,
+          "received_ms": 23569.793,
+          "server_ttfa_s": 23.54,
+          "synth_s": 0.09,
+          "text_characters": 18
+        },
+        {
+          "audio_bytes": 26668,
+          "index": 11,
+          "received_ms": 23609.365,
+          "server_ttfa_s": 23.58,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 208428,
+          "index": 12,
+          "received_ms": 24187.285,
+          "server_ttfa_s": 24.16,
+          "synth_s": 0.22,
+          "text_characters": 47
+        },
+        {
+          "audio_bytes": 82476,
+          "index": 13,
+          "received_ms": 24731.634,
+          "server_ttfa_s": 24.7,
+          "synth_s": 0.13,
+          "text_characters": 41
+        },
+        {
+          "audio_bytes": 27180,
+          "index": 14,
+          "received_ms": 24772.268,
+          "server_ttfa_s": 24.75,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 138796,
+          "index": 15,
+          "received_ms": 25324.719,
+          "server_ttfa_s": 25.3,
+          "synth_s": 0.21,
+          "text_characters": 49
+        },
+        {
+          "audio_bytes": 113196,
+          "index": 16,
+          "received_ms": 26027.232,
+          "server_ttfa_s": 26.0,
+          "synth_s": 0.16,
+          "text_characters": 50
+        },
+        {
+          "audio_bytes": 23084,
+          "index": 17,
+          "received_ms": 26071.42,
+          "server_ttfa_s": 26.04,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 98348,
+          "index": 18,
+          "received_ms": 26421.406,
+          "server_ttfa_s": 26.39,
+          "synth_s": 0.14,
+          "text_characters": 32
+        },
+        {
+          "audio_bytes": 70700,
+          "index": 19,
+          "received_ms": 26590.633,
+          "server_ttfa_s": 26.56,
+          "synth_s": 0.09,
+          "text_characters": 13
+        },
+        {
+          "audio_bytes": 293932,
+          "index": 20,
+          "received_ms": 28153.115,
+          "server_ttfa_s": 28.12,
+          "synth_s": 0.36,
+          "text_characters": 105
+        },
+        {
+          "audio_bytes": 24620,
+          "index": 21,
+          "received_ms": 28204.195,
+          "server_ttfa_s": 28.18,
+          "synth_s": 0.05,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 167468,
+          "index": 22,
+          "received_ms": 28684.518,
+          "server_ttfa_s": 28.66,
+          "synth_s": 0.19,
+          "text_characters": 65
+        },
+        {
+          "audio_bytes": 27692,
+          "index": 23,
+          "received_ms": 28731.142,
+          "server_ttfa_s": 28.7,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 37932,
+          "index": 24,
+          "received_ms": 28792.867,
+          "server_ttfa_s": 28.77,
+          "synth_s": 0.06,
+          "text_characters": 11
+        },
+        {
+          "audio_bytes": 326700,
+          "index": 25,
+          "received_ms": 30851.308,
+          "server_ttfa_s": 30.82,
+          "synth_s": 0.4,
+          "text_characters": 149
+        },
+        {
+          "audio_bytes": 58924,
+          "index": 26,
+          "received_ms": 30942.951,
+          "server_ttfa_s": 30.91,
+          "synth_s": 0.07,
+          "text_characters": 22
+        },
+        {
+          "audio_bytes": 24620,
+          "index": 27,
+          "received_ms": 30984.216,
+          "server_ttfa_s": 30.96,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 157740,
+          "index": 28,
+          "received_ms": 31522.668,
+          "server_ttfa_s": 31.5,
+          "synth_s": 0.17,
+          "text_characters": 49
+        },
+        {
+          "audio_bytes": 181292,
+          "index": 29,
+          "received_ms": 32697.623,
+          "server_ttfa_s": 32.67,
+          "synth_s": 0.29,
+          "text_characters": 88
+        },
+        {
+          "audio_bytes": 185388,
+          "index": 30,
+          "received_ms": 33458.393,
+          "server_ttfa_s": 33.43,
+          "synth_s": 0.23,
+          "text_characters": 70
+        },
+        {
+          "audio_bytes": 71212,
+          "index": 31,
+          "received_ms": 33998.512,
+          "server_ttfa_s": 33.97,
+          "synth_s": 0.14,
+          "text_characters": 39
+        },
+        {
+          "audio_bytes": 27180,
+          "index": 32,
+          "received_ms": 34073.494,
+          "server_ttfa_s": 34.05,
+          "synth_s": 0.07,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 114220,
+          "index": 33,
+          "received_ms": 34721.805,
+          "server_ttfa_s": 34.69,
+          "synth_s": 0.28,
+          "text_characters": 46
+        },
+        {
+          "audio_bytes": 57388,
+          "index": 34,
+          "received_ms": 35130.234,
+          "server_ttfa_s": 35.1,
+          "synth_s": 0.07,
+          "text_characters": 24
+        },
+        {
+          "audio_bytes": 25644,
+          "index": 35,
+          "received_ms": 35230.301,
+          "server_ttfa_s": 35.2,
+          "synth_s": 0.08,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 182828,
+          "index": 36,
+          "received_ms": 36130.488,
+          "server_ttfa_s": 36.1,
+          "synth_s": 0.19,
+          "text_characters": 74
+        },
+        {
+          "audio_bytes": 286764,
+          "index": 37,
+          "received_ms": 45984.24,
+          "server_ttfa_s": 45.95,
+          "synth_s": 0.37,
+          "text_characters": 935
+        },
+        {
+          "audio_bytes": 264748,
+          "index": 38,
+          "received_ms": 47376.337,
+          "server_ttfa_s": 47.35,
+          "synth_s": 0.27,
+          "text_characters": 127
+        },
+        {
+          "audio_bytes": 186412,
+          "index": 39,
+          "received_ms": 48326.481,
+          "server_ttfa_s": 48.3,
+          "synth_s": 0.28,
+          "text_characters": 86
+        },
+        {
+          "audio_bytes": 264236,
+          "index": 40,
+          "received_ms": 49768.699,
+          "server_ttfa_s": 49.73,
+          "synth_s": 0.29,
+          "text_characters": 124
+        },
+        {
+          "audio_bytes": 30252,
+          "index": 41,
+          "received_ms": 49818.347,
+          "server_ttfa_s": 49.79,
+          "synth_s": 0.05,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 128044,
+          "index": 42,
+          "received_ms": 50281.636,
+          "server_ttfa_s": 50.25,
+          "synth_s": 0.16,
+          "text_characters": 45
+        },
+        {
+          "audio_bytes": 196140,
+          "index": 43,
+          "received_ms": 51308.598,
+          "server_ttfa_s": 51.28,
+          "synth_s": 0.21,
+          "text_characters": 82
+        },
+        {
+          "audio_bytes": 105004,
+          "index": 44,
+          "received_ms": 51649.083,
+          "server_ttfa_s": 51.62,
+          "synth_s": 0.1,
+          "text_characters": 40
+        },
+        {
+          "audio_bytes": 162348,
+          "index": 45,
+          "received_ms": 52403.323,
+          "server_ttfa_s": 52.38,
+          "synth_s": 0.14,
+          "text_characters": 66
+        },
+        {
+          "audio_bytes": 203820,
+          "index": 46,
+          "received_ms": 53316.052,
+          "server_ttfa_s": 53.29,
+          "synth_s": 0.24,
+          "text_characters": 78
+        },
+        {
+          "audio_bytes": 207404,
+          "index": 47,
+          "received_ms": 54279.42,
+          "server_ttfa_s": 54.25,
+          "synth_s": 0.3,
+          "text_characters": 83
+        },
+        {
+          "audio_bytes": 377900,
+          "index": 48,
+          "received_ms": 56294.344,
+          "server_ttfa_s": 56.26,
+          "synth_s": 0.27,
+          "text_characters": 167
+        }
+      ],
+      "error": null,
+      "id": "turn-07",
+      "latency_ms": {
+        "done": 56295.69,
+        "first_audio": 16605.743,
+        "response_headers": 27.998,
+        "transcript": 987.481
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 15.78,
+        "pipeline_total_s": 56.26,
+        "reply_characters": 3665,
+        "reply_sha256": "e2948a1308d5e553527a1adfb710e546477a2e9be1e43a355eb713c633455028",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 6999148,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "hvad er forskellen på en backup og en synkronisering",
+        "hypothesis_words": 9,
+        "insertions": 0,
+        "reference_characters": 44,
+        "reference_normalized": "hvad er forskellen på en backup og en synkronisering",
+        "reference_words": 9,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 53,
+      "transcript_sha256": "4d2498a59e8e63d7579e6523317dd618a374f2a5036ad05914b22c2d27fe19c9"
+    },
+    {
+      "audio": {
+        "bytes": 110158,
+        "channels": 1,
+        "duration_s": 3.44,
+        "frames": 55040,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "de39828f821122219439d2738a16e9f0ed0d33728d8c500929820865445466d0"
+      },
+      "category": "sted og ugedag",
+      "chunks": [
+        {
+          "audio_bytes": 229420,
+          "index": 0,
+          "received_ms": 14738.633,
+          "server_ttfa_s": 14.73,
+          "synth_s": 0.24,
+          "text_characters": 108
+        },
+        {
+          "audio_bytes": 177196,
+          "index": 1,
+          "received_ms": 15735.334,
+          "server_ttfa_s": 15.71,
+          "synth_s": 0.26,
+          "text_characters": 85
+        },
+        {
+          "audio_bytes": 405036,
+          "index": 2,
+          "received_ms": 18844.936,
+          "server_ttfa_s": 18.84,
+          "synth_s": 0.49,
+          "text_characters": 274
+        },
+        {
+          "audio_bytes": 139308,
+          "index": 3,
+          "received_ms": 19062.33,
+          "server_ttfa_s": 19.06,
+          "synth_s": 0.16,
+          "text_characters": 50
+        },
+        {
+          "audio_bytes": 26156,
+          "index": 4,
+          "received_ms": 19114.238,
+          "server_ttfa_s": 19.11,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 539692,
+          "index": 5,
+          "received_ms": 22342.754,
+          "server_ttfa_s": 22.33,
+          "synth_s": 0.43,
+          "text_characters": 252
+        }
+      ],
+      "error": null,
+      "id": "turn-08",
+      "latency_ms": {
+        "done": 22344.495,
+        "first_audio": 14738.633,
+        "response_headers": 6.011,
+        "transcript": 1044.65
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 13.87,
+        "pipeline_total_s": 22.33,
+        "reply_characters": 782,
+        "reply_sha256": "010d04020d884796206709ce357c48bf7f4ff5932c113c1a866038d791c34d2b",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 1516808,
+      "score": {
+        "cer": 0.151515,
+        "char_distance": 5,
+        "deletions": 0,
+        "distance": 3,
+        "hypothesis_normalized": "fortæl mig hvad er det i københavn på fredag",
+        "hypothesis_words": 9,
+        "insertions": 2,
+        "reference_characters": 33,
+        "reference_normalized": "fortæl mig vejret i københavn på fredag",
+        "reference_words": 7,
+        "substitutions": 1,
+        "wer": 0.428571
+      },
+      "transcript_characters": 46,
+      "transcript_sha256": "adbb833171f7329f54db871610e3a4b06d2915354ba5e3ddb5d2abdc2658d7d7"
+    },
+    {
+      "audio": {
+        "bytes": 175438,
+        "channels": 1,
+        "duration_s": 5.48,
+        "frames": 87680,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "ca70b0be49fda80b04cf54415eac54861fa955d82bb656ed55b9536d8d575352"
+      },
+      "category": "engelsk fagterm",
+      "chunks": [
+        {
+          "audio_bytes": 280108,
+          "index": 0,
+          "received_ms": 21203.705,
+          "server_ttfa_s": 21.18,
+          "synth_s": 0.42,
+          "text_characters": 121
+        },
+        {
+          "audio_bytes": 51756,
+          "index": 1,
+          "received_ms": 21288.693,
+          "server_ttfa_s": 21.27,
+          "synth_s": 0.08,
+          "text_characters": 17
+        },
+        {
+          "audio_bytes": 143404,
+          "index": 2,
+          "received_ms": 21747.426,
+          "server_ttfa_s": 21.73,
+          "synth_s": 0.14,
+          "text_characters": 55
+        },
+        {
+          "audio_bytes": 29740,
+          "index": 3,
+          "received_ms": 21798.62,
+          "server_ttfa_s": 21.78,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 191532,
+          "index": 4,
+          "received_ms": 22703.644,
+          "server_ttfa_s": 22.68,
+          "synth_s": 0.31,
+          "text_characters": 65
+        },
+        {
+          "audio_bytes": 12844,
+          "index": 5,
+          "received_ms": 22726.441,
+          "server_ttfa_s": 22.71,
+          "synth_s": 0.02,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 86572,
+          "index": 6,
+          "received_ms": 23057.62,
+          "server_ttfa_s": 23.04,
+          "synth_s": 0.09,
+          "text_characters": 39
+        },
+        {
+          "audio_bytes": 23596,
+          "index": 7,
+          "received_ms": 23119.144,
+          "server_ttfa_s": 23.1,
+          "synth_s": 0.06,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 193580,
+          "index": 8,
+          "received_ms": 24046.931,
+          "server_ttfa_s": 24.03,
+          "synth_s": 0.32,
+          "text_characters": 65
+        },
+        {
+          "audio_bytes": 23596,
+          "index": 9,
+          "received_ms": 24082.887,
+          "server_ttfa_s": 24.06,
+          "synth_s": 0.03,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 144428,
+          "index": 10,
+          "received_ms": 24629.378,
+          "server_ttfa_s": 24.61,
+          "synth_s": 0.25,
+          "text_characters": 63
+        },
+        {
+          "audio_bytes": 24620,
+          "index": 11,
+          "received_ms": 24678.223,
+          "server_ttfa_s": 24.66,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 49708,
+          "index": 12,
+          "received_ms": 24778.489,
+          "server_ttfa_s": 24.76,
+          "synth_s": 0.09,
+          "text_characters": 20
+        },
+        {
+          "audio_bytes": 278060,
+          "index": 13,
+          "received_ms": 26090.371,
+          "server_ttfa_s": 26.07,
+          "synth_s": 0.21,
+          "text_characters": 136
+        }
+      ],
+      "error": null,
+      "id": "turn-09",
+      "latency_ms": {
+        "done": 26091.277,
+        "first_audio": 21203.705,
+        "response_headers": 21.189,
+        "transcript": 858.649
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 20.51,
+        "pipeline_total_s": 26.07,
+        "reply_characters": 608,
+        "reply_sha256": "42786b1121562a593e9c5648f96183c5883ed9a0381b7c154bd59dfeec7153f1",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 1533544,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "kan du finde dokumentet om schedulerens approval tokens",
+        "hypothesis_words": 8,
+        "insertions": 0,
+        "reference_characters": 48,
+        "reference_normalized": "kan du finde dokumentet om schedulerens approval tokens",
+        "reference_words": 8,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 56,
+      "transcript_sha256": "c180daddec40e36d81e087d3954db9c0da3f6fb0d5eeaabbc44f662b2078be57"
+    },
+    {
+      "audio": {
+        "bytes": 126158,
+        "channels": 1,
+        "duration_s": 3.94,
+        "frames": 63040,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "1dc3d597befdda5cd1de936878991a04b062466efb2b05313d082dacd0e06aa4"
+      },
+      "category": "tal og log",
+      "chunks": [
+        {
+          "audio_bytes": 250924,
+          "index": 0,
+          "received_ms": 12840.433,
+          "server_ttfa_s": 12.81,
+          "synth_s": 0.35,
+          "text_characters": 98
+        },
+        {
+          "audio_bytes": 120876,
+          "index": 1,
+          "received_ms": 13227.461,
+          "server_ttfa_s": 13.2,
+          "synth_s": 0.16,
+          "text_characters": 43
+        },
+        {
+          "audio_bytes": 114732,
+          "index": 2,
+          "received_ms": 13690.818,
+          "server_ttfa_s": 13.67,
+          "synth_s": 0.11,
+          "text_characters": 41
+        },
+        {
+          "audio_bytes": 24108,
+          "index": 3,
+          "received_ms": 13733.852,
+          "server_ttfa_s": 13.71,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 225836,
+          "index": 4,
+          "received_ms": 14593.477,
+          "server_ttfa_s": 14.57,
+          "synth_s": 0.26,
+          "text_characters": 77
+        },
+        {
+          "audio_bytes": 15404,
+          "index": 5,
+          "received_ms": 14623.122,
+          "server_ttfa_s": 14.6,
+          "synth_s": 0.02,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 146476,
+          "index": 6,
+          "received_ms": 15384.526,
+          "server_ttfa_s": 15.36,
+          "synth_s": 0.16,
+          "text_characters": 68
+        },
+        {
+          "audio_bytes": 20524,
+          "index": 7,
+          "received_ms": 15436.29,
+          "server_ttfa_s": 15.41,
+          "synth_s": 0.04,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 82476,
+          "index": 8,
+          "received_ms": 15782.907,
+          "server_ttfa_s": 15.76,
+          "synth_s": 0.08,
+          "text_characters": 31
+        },
+        {
+          "audio_bytes": 27180,
+          "index": 9,
+          "received_ms": 15844.51,
+          "server_ttfa_s": 15.82,
+          "synth_s": 0.06,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 196140,
+          "index": 10,
+          "received_ms": 17090.323,
+          "server_ttfa_s": 17.07,
+          "synth_s": 0.33,
+          "text_characters": 75
+        },
+        {
+          "audio_bytes": 239148,
+          "index": 11,
+          "received_ms": 18044.141,
+          "server_ttfa_s": 18.02,
+          "synth_s": 0.19,
+          "text_characters": 105
+        }
+      ],
+      "error": null,
+      "id": "turn-10",
+      "latency_ms": {
+        "done": 18045.01,
+        "first_audio": 12840.433,
+        "response_headers": 24.047,
+        "transcript": 962.562
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 12.05,
+        "pipeline_total_s": 18.02,
+        "reply_characters": 562,
+        "reply_sha256": "cc454c268826193de1fc6705ac2fc8c2e9163f9ebab62a2536c75008302dc3a5",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 1463824,
+      "score": {
+        "cer": 0.151515,
+        "char_distance": 5,
+        "deletions": 0,
+        "distance": 2,
+        "hypothesis_normalized": "læs de tre nyeste fejl i workernes log",
+        "hypothesis_words": 8,
+        "insertions": 0,
+        "reference_characters": 33,
+        "reference_normalized": "læs de tre nyeste fejl fra workerens log",
+        "reference_words": 8,
+        "substitutions": 2,
+        "wer": 0.25
+      },
+      "transcript_characters": 39,
+      "transcript_sha256": "87eefb7a7ef21cd5e65036e7c7143ba3df423f07a262bec0df669742bd95d7b3"
+    },
+    {
+      "audio": {
+        "bytes": 145038,
+        "channels": 1,
+        "duration_s": 4.53,
+        "frames": 72480,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "50e210dbfb2a80907f40764e9a129f95f2e9bee95affce2965a60f36e468ea17"
+      },
+      "category": "negation og instruks",
+      "chunks": [
+        {
+          "audio_bytes": 194604,
+          "index": 0,
+          "received_ms": 15854.424,
+          "server_ttfa_s": 15.85,
+          "synth_s": 0.21,
+          "text_characters": 99
+        },
+        {
+          "audio_bytes": 249388,
+          "index": 1,
+          "received_ms": 17216.766,
+          "server_ttfa_s": 17.21,
+          "synth_s": 0.38,
+          "text_characters": 108
+        },
+        {
+          "audio_bytes": 305708,
+          "index": 2,
+          "received_ms": 18875.491,
+          "server_ttfa_s": 18.87,
+          "synth_s": 0.39,
+          "text_characters": 146
+        },
+        {
+          "audio_bytes": 192044,
+          "index": 3,
+          "received_ms": 19535.499,
+          "server_ttfa_s": 19.53,
+          "synth_s": 0.15,
+          "text_characters": 84
+        }
+      ],
+      "error": null,
+      "id": "turn-11",
+      "latency_ms": {
+        "done": 19536.21,
+        "first_audio": 15854.424,
+        "response_headers": 5.643,
+        "transcript": 910.855
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 15.11,
+        "pipeline_total_s": 19.53,
+        "reply_characters": 440,
+        "reply_sha256": "bdcbd88c7ff1f91aab5ddea8f77c81fc0f3d9167b92ee50549e01fa4429eede9",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 941744,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "planlæg ikke noget forklar bare hvad du ville gøre",
+        "hypothesis_words": 9,
+        "insertions": 0,
+        "reference_characters": 42,
+        "reference_normalized": "planlæg ikke noget forklar bare hvad du ville gøre",
+        "reference_words": 9,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 53,
+      "transcript_sha256": "842ef07871351a207f5124d4f489b7bd4feccc255bf3c723ad19fc523ad0766f"
+    },
+    {
+      "audio": {
+        "bytes": 135438,
+        "channels": 1,
+        "duration_s": 4.23,
+        "frames": 67680,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "98cba00e1e8ec571b355a7a67df0ad49307d9a9752b3c917d90cd42a7e14a234"
+      },
+      "category": "følsomt begreb",
+      "chunks": [
+        {
+          "audio_bytes": 281644,
+          "index": 0,
+          "received_ms": 27028.362,
+          "server_ttfa_s": 27.02,
+          "synth_s": 0.34,
+          "text_characters": 122
+        },
+        {
+          "audio_bytes": 357932,
+          "index": 1,
+          "received_ms": 28906.475,
+          "server_ttfa_s": 28.9,
+          "synth_s": 0.44,
+          "text_characters": 136
+        },
+        {
+          "audio_bytes": 76332,
+          "index": 2,
+          "received_ms": 29002.079,
+          "server_ttfa_s": 29.0,
+          "synth_s": 0.09,
+          "text_characters": 5
+        },
+        {
+          "audio_bytes": 164908,
+          "index": 3,
+          "received_ms": 29705.333,
+          "server_ttfa_s": 29.7,
+          "synth_s": 0.24,
+          "text_characters": 62
+        },
+        {
+          "audio_bytes": 24108,
+          "index": 4,
+          "received_ms": 29744.688,
+          "server_ttfa_s": 29.74,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 180268,
+          "index": 5,
+          "received_ms": 30857.875,
+          "server_ttfa_s": 30.85,
+          "synth_s": 0.29,
+          "text_characters": 78
+        },
+        {
+          "audio_bytes": 13356,
+          "index": 6,
+          "received_ms": 30888.996,
+          "server_ttfa_s": 30.89,
+          "synth_s": 0.03,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 213036,
+          "index": 7,
+          "received_ms": 31898.624,
+          "server_ttfa_s": 31.89,
+          "synth_s": 0.26,
+          "text_characters": 87
+        },
+        {
+          "audio_bytes": 128044,
+          "index": 8,
+          "received_ms": 32377.091,
+          "server_ttfa_s": 32.37,
+          "synth_s": 0.15,
+          "text_characters": 55
+        },
+        {
+          "audio_bytes": 169516,
+          "index": 9,
+          "received_ms": 33201.27,
+          "server_ttfa_s": 33.2,
+          "synth_s": 0.24,
+          "text_characters": 55
+        },
+        {
+          "audio_bytes": 75308,
+          "index": 10,
+          "received_ms": 33343.502,
+          "server_ttfa_s": 33.34,
+          "synth_s": 0.14,
+          "text_characters": 5
+        },
+        {
+          "audio_bytes": 98860,
+          "index": 11,
+          "received_ms": 33630.278,
+          "server_ttfa_s": 33.63,
+          "synth_s": 0.12,
+          "text_characters": 35
+        },
+        {
+          "audio_bytes": 26668,
+          "index": 12,
+          "received_ms": 33662.411,
+          "server_ttfa_s": 33.66,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 130604,
+          "index": 13,
+          "received_ms": 34277.026,
+          "server_ttfa_s": 34.27,
+          "synth_s": 0.28,
+          "text_characters": 38
+        },
+        {
+          "audio_bytes": 171052,
+          "index": 14,
+          "received_ms": 35145.433,
+          "server_ttfa_s": 35.14,
+          "synth_s": 0.21,
+          "text_characters": 79
+        },
+        {
+          "audio_bytes": 15404,
+          "index": 15,
+          "received_ms": 35196.83,
+          "server_ttfa_s": 35.19,
+          "synth_s": 0.05,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 277036,
+          "index": 16,
+          "received_ms": 36503.792,
+          "server_ttfa_s": 36.5,
+          "synth_s": 0.28,
+          "text_characters": 92
+        },
+        {
+          "audio_bytes": 26668,
+          "index": 17,
+          "received_ms": 36540.331,
+          "server_ttfa_s": 36.54,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 192556,
+          "index": 18,
+          "received_ms": 37321.305,
+          "server_ttfa_s": 37.32,
+          "synth_s": 0.33,
+          "text_characters": 60
+        },
+        {
+          "audio_bytes": 17964,
+          "index": 19,
+          "received_ms": 37363.558,
+          "server_ttfa_s": 37.36,
+          "synth_s": 0.04,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 159276,
+          "index": 20,
+          "received_ms": 38096.837,
+          "server_ttfa_s": 38.09,
+          "synth_s": 0.21,
+          "text_characters": 62
+        },
+        {
+          "audio_bytes": 27180,
+          "index": 21,
+          "received_ms": 38156.437,
+          "server_ttfa_s": 38.15,
+          "synth_s": 0.05,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 106540,
+          "index": 22,
+          "received_ms": 38616.055,
+          "server_ttfa_s": 38.61,
+          "synth_s": 0.1,
+          "text_characters": 38
+        },
+        {
+          "audio_bytes": 123436,
+          "index": 23,
+          "received_ms": 39233.657,
+          "server_ttfa_s": 39.23,
+          "synth_s": 0.17,
+          "text_characters": 36
+        },
+        {
+          "audio_bytes": 244268,
+          "index": 24,
+          "received_ms": 40048.165,
+          "server_ttfa_s": 40.04,
+          "synth_s": 0.22,
+          "text_characters": 58
+        },
+        {
+          "audio_bytes": 219180,
+          "index": 25,
+          "received_ms": 40719.121,
+          "server_ttfa_s": 40.7,
+          "synth_s": 0.32,
+          "text_characters": 51
+        },
+        {
+          "audio_bytes": 169004,
+          "index": 26,
+          "received_ms": 40997.924,
+          "server_ttfa_s": 40.99,
+          "synth_s": 0.23,
+          "text_characters": 34
+        },
+        {
+          "audio_bytes": 325676,
+          "index": 27,
+          "received_ms": 42602.46,
+          "server_ttfa_s": 42.58,
+          "synth_s": 0.49,
+          "text_characters": 89
+        },
+        {
+          "audio_bytes": 122412,
+          "index": 28,
+          "received_ms": 42883.504,
+          "server_ttfa_s": 42.88,
+          "synth_s": 0.16,
+          "text_characters": 39
+        },
+        {
+          "audio_bytes": 211500,
+          "index": 29,
+          "received_ms": 43916.898,
+          "server_ttfa_s": 43.91,
+          "synth_s": 0.23,
+          "text_characters": 80
+        },
+        {
+          "audio_bytes": 273452,
+          "index": 30,
+          "received_ms": 45419.843,
+          "server_ttfa_s": 45.41,
+          "synth_s": 0.24,
+          "text_characters": 130
+        }
+      ],
+      "error": null,
+      "id": "turn-12",
+      "latency_ms": {
+        "done": 45420.752,
+        "first_audio": 27028.362,
+        "response_headers": 5.292,
+        "transcript": 871.474
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 26.32,
+        "pipeline_total_s": 45.41,
+        "reply_characters": 1572,
+        "reply_sha256": "9ba8fb612666705a29f9ced71dac00829a334b9cde48aa1798776b60d64400b0",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 4623188,
+      "score": {
+        "cer": 0.0625,
+        "char_distance": 2,
+        "deletions": 0,
+        "distance": 1,
+        "hypothesis_normalized": "min adgangskode må aldrig stå i lokken",
+        "hypothesis_words": 7,
+        "insertions": 0,
+        "reference_characters": 32,
+        "reference_normalized": "min adgangskode må aldrig stå i loggen",
+        "reference_words": 7,
+        "substitutions": 1,
+        "wer": 0.142857
+      },
+      "transcript_characters": 39,
+      "transcript_sha256": "2063ce75447ac37f199ca1b189c01934b3ad6de2af1bfda9cf013fdee11aa1c5"
+    },
+    {
+      "audio": {
+        "bytes": 182478,
+        "channels": 1,
+        "duration_s": 5.7,
+        "frames": 91200,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "e86902ce93ade0755a9a29b6be14e94864dff019a8e1c3b271aeb88529200232"
+      },
+      "category": "dato og klokkeslæt",
+      "chunks": [
+        {
+          "audio_bytes": 251948,
+          "index": 0,
+          "received_ms": 9023.689,
+          "server_ttfa_s": 9.02,
+          "synth_s": 0.26,
+          "text_characters": 65
+        },
+        {
+          "audio_bytes": 180780,
+          "index": 1,
+          "received_ms": 9358.354,
+          "server_ttfa_s": 9.35,
+          "synth_s": 0.15,
+          "text_characters": 56
+        }
+      ],
+      "error": null,
+      "id": "turn-13",
+      "latency_ms": {
+        "done": 9359.007,
+        "first_audio": 9023.689,
+        "response_headers": 10.104,
+        "transcript": 963.027
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 8.22,
+        "pipeline_total_s": 9.35,
+        "reply_characters": 124,
+        "reply_sha256": "f606b216075851a94ff26dc7dc4b04380a47f4fc53a4cb8ee5a1d5a954b527cd",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 432728,
+      "score": {
+        "cer": 0.508197,
+        "char_distance": 31,
+        "deletions": 0,
+        "distance": 5,
+        "hypothesis_normalized": "næste vedligeholdelse er den 21 juni kl 13 30",
+        "hypothesis_words": 9,
+        "insertions": 0,
+        "reference_characters": 61,
+        "reference_normalized": "næste vedligeholdelse er den enogtyvende juli klokken tretten tredive",
+        "reference_words": 9,
+        "substitutions": 5,
+        "wer": 0.555556
+      },
+      "transcript_characters": 48,
+      "transcript_sha256": "6e366e08a5d783af3d682bba643354ff6004f26002c7d5173c7b64fed4471644"
+    },
+    {
+      "audio": {
+        "bytes": 142798,
+        "channels": 1,
+        "duration_s": 4.46,
+        "frames": 71360,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "346f7c2d472f8782009749acfe9c38cb6afdcfa705ed04770221339ba339265b"
+      },
+      "category": "ciffersekvens",
+      "error": {
+        "message": "voice stream error 500: # channels not specified",
+        "type": "VoiceBaselineError"
+      },
+      "id": "turn-14",
+      "phase": "warm",
+      "repetition": 1
+    },
+    {
+      "audio": {
+        "bytes": 150478,
+        "channels": 1,
+        "duration_s": 4.7,
+        "frames": 75200,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "2ab6cfc8f1416b289d519a31870d4f6f9a2673c1bb4f49cb4b9404ec93985563"
+      },
+      "category": "teknisk sammensætning",
+      "chunks": [
+        {
+          "audio_bytes": 221740,
+          "index": 0,
+          "received_ms": 16609.772,
+          "server_ttfa_s": 16.59,
+          "synth_s": 0.31,
+          "text_characters": 73
+        },
+        {
+          "audio_bytes": 316460,
+          "index": 1,
+          "received_ms": 17568.623,
+          "server_ttfa_s": 17.54,
+          "synth_s": 0.34,
+          "text_characters": 79
+        },
+        {
+          "audio_bytes": 205868,
+          "index": 2,
+          "received_ms": 18022.513,
+          "server_ttfa_s": 17.98,
+          "synth_s": 0.23,
+          "text_characters": 43
+        },
+        {
+          "audio_bytes": 142892,
+          "index": 3,
+          "received_ms": 18492.21,
+          "server_ttfa_s": 18.47,
+          "synth_s": 0.23,
+          "text_characters": 38
+        },
+        {
+          "audio_bytes": 131628,
+          "index": 4,
+          "received_ms": 19235.0,
+          "server_ttfa_s": 19.21,
+          "synth_s": 0.22,
+          "text_characters": 48
+        },
+        {
+          "audio_bytes": 135212,
+          "index": 5,
+          "received_ms": 19855.239,
+          "server_ttfa_s": 19.83,
+          "synth_s": 0.19,
+          "text_characters": 57
+        },
+        {
+          "audio_bytes": 116780,
+          "index": 6,
+          "received_ms": 20424.52,
+          "server_ttfa_s": 20.4,
+          "synth_s": 0.14,
+          "text_characters": 51
+        },
+        {
+          "audio_bytes": 116268,
+          "index": 7,
+          "received_ms": 20766.047,
+          "server_ttfa_s": 20.74,
+          "synth_s": 0.14,
+          "text_characters": 25
+        },
+        {
+          "audio_bytes": 153132,
+          "index": 8,
+          "received_ms": 21284.668,
+          "server_ttfa_s": 21.26,
+          "synth_s": 0.21,
+          "text_characters": 43
+        },
+        {
+          "audio_bytes": 161324,
+          "index": 9,
+          "received_ms": 21870.774,
+          "server_ttfa_s": 21.85,
+          "synth_s": 0.18,
+          "text_characters": 52
+        },
+        {
+          "audio_bytes": 124460,
+          "index": 10,
+          "received_ms": 22419.792,
+          "server_ttfa_s": 22.4,
+          "synth_s": 0.15,
+          "text_characters": 47
+        },
+        {
+          "audio_bytes": 68652,
+          "index": 11,
+          "received_ms": 22591.906,
+          "server_ttfa_s": 22.57,
+          "synth_s": 0.11,
+          "text_characters": 13
+        },
+        {
+          "audio_bytes": 165420,
+          "index": 12,
+          "received_ms": 23353.982,
+          "server_ttfa_s": 23.33,
+          "synth_s": 0.15,
+          "text_characters": 51
+        },
+        {
+          "audio_bytes": 95276,
+          "index": 13,
+          "received_ms": 23681.382,
+          "server_ttfa_s": 23.66,
+          "synth_s": 0.17,
+          "text_characters": 18
+        },
+        {
+          "audio_bytes": 28716,
+          "index": 14,
+          "received_ms": 23730.714,
+          "server_ttfa_s": 23.71,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 149036,
+          "index": 15,
+          "received_ms": 24353.823,
+          "server_ttfa_s": 24.33,
+          "synth_s": 0.23,
+          "text_characters": 54
+        },
+        {
+          "audio_bytes": 157740,
+          "index": 16,
+          "received_ms": 25167.619,
+          "server_ttfa_s": 25.14,
+          "synth_s": 0.22,
+          "text_characters": 73
+        },
+        {
+          "audio_bytes": 112172,
+          "index": 17,
+          "received_ms": 25704.6,
+          "server_ttfa_s": 25.68,
+          "synth_s": 0.1,
+          "text_characters": 46
+        },
+        {
+          "audio_bytes": 27692,
+          "index": 18,
+          "received_ms": 25761.024,
+          "server_ttfa_s": 25.74,
+          "synth_s": 0.05,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 162348,
+          "index": 19,
+          "received_ms": 26314.639,
+          "server_ttfa_s": 26.29,
+          "synth_s": 0.23,
+          "text_characters": 35
+        },
+        {
+          "audio_bytes": 370732,
+          "index": 20,
+          "received_ms": 28101.377,
+          "server_ttfa_s": 28.08,
+          "synth_s": 0.44,
+          "text_characters": 138
+        },
+        {
+          "audio_bytes": 82476,
+          "index": 21,
+          "received_ms": 28266.963,
+          "server_ttfa_s": 28.24,
+          "synth_s": 0.16,
+          "text_characters": 13
+        },
+        {
+          "audio_bytes": 226860,
+          "index": 22,
+          "received_ms": 29048.601,
+          "server_ttfa_s": 29.02,
+          "synth_s": 0.3,
+          "text_characters": 62
+        },
+        {
+          "audio_bytes": 24620,
+          "index": 23,
+          "received_ms": 29112.228,
+          "server_ttfa_s": 29.09,
+          "synth_s": 0.06,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 122924,
+          "index": 24,
+          "received_ms": 29277.372,
+          "server_ttfa_s": 29.25,
+          "synth_s": 0.11,
+          "text_characters": 44
+        },
+        {
+          "audio_bytes": 217132,
+          "index": 25,
+          "received_ms": 30649.62,
+          "server_ttfa_s": 30.63,
+          "synth_s": 0.31,
+          "text_characters": 93
+        },
+        {
+          "audio_bytes": 131116,
+          "index": 26,
+          "received_ms": 31208.95,
+          "server_ttfa_s": 31.19,
+          "synth_s": 0.18,
+          "text_characters": 56
+        },
+        {
+          "audio_bytes": 267820,
+          "index": 27,
+          "received_ms": 32665.73,
+          "server_ttfa_s": 32.64,
+          "synth_s": 0.33,
+          "text_characters": 111
+        },
+        {
+          "audio_bytes": 78380,
+          "index": 28,
+          "received_ms": 32801.704,
+          "server_ttfa_s": 32.78,
+          "synth_s": 0.13,
+          "text_characters": 13
+        },
+        {
+          "audio_bytes": 296492,
+          "index": 29,
+          "received_ms": 34227.11,
+          "server_ttfa_s": 34.19,
+          "synth_s": 0.45,
+          "text_characters": 91
+        },
+        {
+          "audio_bytes": 79404,
+          "index": 30,
+          "received_ms": 34389.694,
+          "server_ttfa_s": 34.37,
+          "synth_s": 0.17,
+          "text_characters": 15
+        },
+        {
+          "audio_bytes": 180780,
+          "index": 31,
+          "received_ms": 35104.728,
+          "server_ttfa_s": 35.08,
+          "synth_s": 0.36,
+          "text_characters": 51
+        },
+        {
+          "audio_bytes": 233004,
+          "index": 32,
+          "received_ms": 36186.806,
+          "server_ttfa_s": 36.16,
+          "synth_s": 0.2,
+          "text_characters": 88
+        },
+        {
+          "audio_bytes": 98860,
+          "index": 33,
+          "received_ms": 36706.832,
+          "server_ttfa_s": 36.69,
+          "synth_s": 0.13,
+          "text_characters": 45
+        },
+        {
+          "audio_bytes": 106028,
+          "index": 34,
+          "received_ms": 37161.487,
+          "server_ttfa_s": 37.14,
+          "synth_s": 0.13,
+          "text_characters": 40
+        },
+        {
+          "audio_bytes": 116780,
+          "index": 35,
+          "received_ms": 37716.726,
+          "server_ttfa_s": 37.69,
+          "synth_s": 0.17,
+          "text_characters": 46
+        },
+        {
+          "audio_bytes": 170028,
+          "index": 36,
+          "received_ms": 38813.52,
+          "server_ttfa_s": 38.79,
+          "synth_s": 0.33,
+          "text_characters": 76
+        },
+        {
+          "audio_bytes": 25644,
+          "index": 37,
+          "received_ms": 38876.873,
+          "server_ttfa_s": 38.86,
+          "synth_s": 0.06,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 121388,
+          "index": 38,
+          "received_ms": 39271.79,
+          "server_ttfa_s": 39.25,
+          "synth_s": 0.23,
+          "text_characters": 40
+        },
+        {
+          "audio_bytes": 87084,
+          "index": 39,
+          "received_ms": 39562.082,
+          "server_ttfa_s": 39.54,
+          "synth_s": 0.1,
+          "text_characters": 30
+        },
+        {
+          "audio_bytes": 76332,
+          "index": 40,
+          "received_ms": 39733.917,
+          "server_ttfa_s": 39.71,
+          "synth_s": 0.07,
+          "text_characters": 13
+        },
+        {
+          "audio_bytes": 213548,
+          "index": 41,
+          "received_ms": 40861.753,
+          "server_ttfa_s": 40.82,
+          "synth_s": 0.23,
+          "text_characters": 75
+        },
+        {
+          "audio_bytes": 102956,
+          "index": 42,
+          "received_ms": 41298.137,
+          "server_ttfa_s": 41.27,
+          "synth_s": 0.13,
+          "text_characters": 34
+        },
+        {
+          "audio_bytes": 181292,
+          "index": 43,
+          "received_ms": 42335.52,
+          "server_ttfa_s": 42.31,
+          "synth_s": 0.2,
+          "text_characters": 81
+        },
+        {
+          "audio_bytes": 58412,
+          "index": 44,
+          "received_ms": 42532.713,
+          "server_ttfa_s": 42.51,
+          "synth_s": 0.05,
+          "text_characters": 22
+        },
+        {
+          "audio_bytes": 91180,
+          "index": 45,
+          "received_ms": 43294.814,
+          "server_ttfa_s": 43.27,
+          "synth_s": 0.12,
+          "text_characters": 48
+        },
+        {
+          "audio_bytes": 133676,
+          "index": 46,
+          "received_ms": 43778.783,
+          "server_ttfa_s": 43.76,
+          "synth_s": 0.16,
+          "text_characters": 35
+        },
+        {
+          "audio_bytes": 86060,
+          "index": 47,
+          "received_ms": 44330.686,
+          "server_ttfa_s": 44.31,
+          "synth_s": 0.15,
+          "text_characters": 34
+        },
+        {
+          "audio_bytes": 128044,
+          "index": 48,
+          "received_ms": 44686.447,
+          "server_ttfa_s": 44.66,
+          "synth_s": 0.12,
+          "text_characters": 31
+        },
+        {
+          "audio_bytes": 87084,
+          "index": 49,
+          "received_ms": 44922.998,
+          "server_ttfa_s": 44.9,
+          "synth_s": 0.14,
+          "text_characters": 13
+        },
+        {
+          "audio_bytes": 306732,
+          "index": 50,
+          "received_ms": 46441.084,
+          "server_ttfa_s": 46.42,
+          "synth_s": 0.42,
+          "text_characters": 102
+        },
+        {
+          "audio_bytes": 96812,
+          "index": 51,
+          "received_ms": 46718.882,
+          "server_ttfa_s": 46.7,
+          "synth_s": 0.17,
+          "text_characters": 35
+        },
+        {
+          "audio_bytes": 24620,
+          "index": 52,
+          "received_ms": 46765.084,
+          "server_ttfa_s": 46.74,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 138796,
+          "index": 53,
+          "received_ms": 47299.463,
+          "server_ttfa_s": 47.28,
+          "synth_s": 0.16,
+          "text_characters": 46
+        },
+        {
+          "audio_bytes": 126508,
+          "index": 54,
+          "received_ms": 48128.601,
+          "server_ttfa_s": 48.11,
+          "synth_s": 0.12,
+          "text_characters": 62
+        },
+        {
+          "audio_bytes": 226348,
+          "index": 55,
+          "received_ms": 49363.626,
+          "server_ttfa_s": 49.34,
+          "synth_s": 0.49,
+          "text_characters": 80
+        },
+        {
+          "audio_bytes": 148524,
+          "index": 56,
+          "received_ms": 50231.868,
+          "server_ttfa_s": 50.21,
+          "synth_s": 0.25,
+          "text_characters": 76
+        },
+        {
+          "audio_bytes": 31788,
+          "index": 57,
+          "received_ms": 50288.386,
+          "server_ttfa_s": 50.27,
+          "synth_s": 0.05,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 68140,
+          "index": 58,
+          "received_ms": 50400.619,
+          "server_ttfa_s": 50.38,
+          "synth_s": 0.1,
+          "text_characters": 19
+        },
+        {
+          "audio_bytes": 65580,
+          "index": 59,
+          "received_ms": 50880.097,
+          "server_ttfa_s": 50.86,
+          "synth_s": 0.06,
+          "text_characters": 23
+        },
+        {
+          "audio_bytes": 28204,
+          "index": 60,
+          "received_ms": 50913.529,
+          "server_ttfa_s": 50.89,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 62508,
+          "index": 61,
+          "received_ms": 51151.051,
+          "server_ttfa_s": 51.13,
+          "synth_s": 0.05,
+          "text_characters": 17
+        },
+        {
+          "audio_bytes": 92204,
+          "index": 62,
+          "received_ms": 51559.507,
+          "server_ttfa_s": 51.54,
+          "synth_s": 0.09,
+          "text_characters": 24
+        },
+        {
+          "audio_bytes": 26156,
+          "index": 63,
+          "received_ms": 51620.992,
+          "server_ttfa_s": 51.6,
+          "synth_s": 0.05,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 78892,
+          "index": 64,
+          "received_ms": 52040.915,
+          "server_ttfa_s": 52.02,
+          "synth_s": 0.08,
+          "text_characters": 28
+        },
+        {
+          "audio_bytes": 73772,
+          "index": 65,
+          "received_ms": 52389.316,
+          "server_ttfa_s": 52.37,
+          "synth_s": 0.18,
+          "text_characters": 16
+        },
+        {
+          "audio_bytes": 135724,
+          "index": 66,
+          "received_ms": 53375.355,
+          "server_ttfa_s": 53.35,
+          "synth_s": 0.23,
+          "text_characters": 66
+        },
+        {
+          "audio_bytes": 24108,
+          "index": 67,
+          "received_ms": 53405.319,
+          "server_ttfa_s": 53.38,
+          "synth_s": 0.02,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 63020,
+          "index": 68,
+          "received_ms": 53805.773,
+          "server_ttfa_s": 53.78,
+          "synth_s": 0.05,
+          "text_characters": 26
+        },
+        {
+          "audio_bytes": 41004,
+          "index": 69,
+          "received_ms": 53953.115,
+          "server_ttfa_s": 53.93,
+          "synth_s": 0.05,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 303660,
+          "index": 70,
+          "received_ms": 55440.937,
+          "server_ttfa_s": 55.42,
+          "synth_s": 0.27,
+          "text_characters": 118
+        }
+      ],
+      "error": null,
+      "id": "turn-15",
+      "latency_ms": {
+        "done": 55441.907,
+        "first_audio": 16609.772,
+        "response_headers": 21.935,
+        "transcript": 911.998
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 15.87,
+        "pipeline_total_s": 55.42,
+        "reply_characters": 3250,
+        "reply_sha256": "e1118f334d388133de21a464257fced70baeb0cc699d55a17116d7ee08f055af",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 9152052,
+      "score": {
+        "cer": 0.318182,
+        "char_distance": 14,
+        "deletions": 1,
+        "distance": 5,
+        "hypothesis_normalized": "rackindexet skal testes med 10 000 tekstykker",
+        "hypothesis_words": 7,
+        "insertions": 0,
+        "reference_characters": 44,
+        "reference_normalized": "rag indekset skal testes med ti tusind tekststykker",
+        "reference_words": 8,
+        "substitutions": 4,
+        "wer": 0.625
+      },
+      "transcript_characters": 46,
+      "transcript_sha256": "b40d4fb6f3027aa8d705b5424ef153c5127bf73e36c7dcc5e6e6d75953043107"
+    },
+    {
+      "audio": {
+        "bytes": 127758,
+        "channels": 1,
+        "duration_s": 3.99,
+        "frames": 63840,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "b5433afdf6c37a63d832f201bafe44211042034e090128a6f369ebf8eb69b648"
+      },
+      "category": "talminimalpar",
+      "chunks": [
+        {
+          "audio_bytes": 269356,
+          "index": 0,
+          "received_ms": 35031.43,
+          "server_ttfa_s": 35.01,
+          "synth_s": 0.32,
+          "text_characters": 90
+        },
+        {
+          "audio_bytes": 97324,
+          "index": 1,
+          "received_ms": 35316.285,
+          "server_ttfa_s": 35.3,
+          "synth_s": 0.09,
+          "text_characters": 41
+        },
+        {
+          "audio_bytes": 296492,
+          "index": 2,
+          "received_ms": 37160.765,
+          "server_ttfa_s": 37.13,
+          "synth_s": 0.53,
+          "text_characters": 95
+        },
+        {
+          "audio_bytes": 225324,
+          "index": 3,
+          "received_ms": 37508.826,
+          "server_ttfa_s": 37.49,
+          "synth_s": 0.22,
+          "text_characters": 33
+        },
+        {
+          "audio_bytes": 133164,
+          "index": 4,
+          "received_ms": 37997.36,
+          "server_ttfa_s": 37.98,
+          "synth_s": 0.15,
+          "text_characters": 48
+        },
+        {
+          "audio_bytes": 193068,
+          "index": 5,
+          "received_ms": 38884.839,
+          "server_ttfa_s": 38.87,
+          "synth_s": 0.2,
+          "text_characters": 61
+        },
+        {
+          "audio_bytes": 63020,
+          "index": 6,
+          "received_ms": 38993.469,
+          "server_ttfa_s": 38.98,
+          "synth_s": 0.09,
+          "text_characters": 6
+        },
+        {
+          "audio_bytes": 133164,
+          "index": 7,
+          "received_ms": 39773.47,
+          "server_ttfa_s": 39.76,
+          "synth_s": 0.16,
+          "text_characters": 61
+        },
+        {
+          "audio_bytes": 27180,
+          "index": 8,
+          "received_ms": 39836.089,
+          "server_ttfa_s": 39.82,
+          "synth_s": 0.06,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 172588,
+          "index": 9,
+          "received_ms": 40626.852,
+          "server_ttfa_s": 40.61,
+          "synth_s": 0.21,
+          "text_characters": 70
+        },
+        {
+          "audio_bytes": 437292,
+          "index": 10,
+          "received_ms": 42966.035,
+          "server_ttfa_s": 42.95,
+          "synth_s": 0.4,
+          "text_characters": 170
+        },
+        {
+          "audio_bytes": 16940,
+          "index": 11,
+          "received_ms": 43029.029,
+          "server_ttfa_s": 43.01,
+          "synth_s": 0.06,
+          "text_characters": 6
+        },
+        {
+          "audio_bytes": 109100,
+          "index": 12,
+          "received_ms": 43189.134,
+          "server_ttfa_s": 43.17,
+          "synth_s": 0.14,
+          "text_characters": 23
+        },
+        {
+          "audio_bytes": 25132,
+          "index": 13,
+          "received_ms": 43253.136,
+          "server_ttfa_s": 43.24,
+          "synth_s": 0.06,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 474156,
+          "index": 14,
+          "received_ms": 45403.279,
+          "server_ttfa_s": 45.38,
+          "synth_s": 0.51,
+          "text_characters": 124
+        },
+        {
+          "audio_bytes": 170540,
+          "index": 15,
+          "received_ms": 45808.137,
+          "server_ttfa_s": 45.79,
+          "synth_s": 0.21,
+          "text_characters": 45
+        },
+        {
+          "audio_bytes": 123436,
+          "index": 16,
+          "received_ms": 46230.651,
+          "server_ttfa_s": 46.21,
+          "synth_s": 0.11,
+          "text_characters": 28
+        },
+        {
+          "audio_bytes": 24620,
+          "index": 17,
+          "received_ms": 46262.809,
+          "server_ttfa_s": 46.25,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 333356,
+          "index": 18,
+          "received_ms": 47917.595,
+          "server_ttfa_s": 47.9,
+          "synth_s": 0.41,
+          "text_characters": 95
+        },
+        {
+          "audio_bytes": 88108,
+          "index": 19,
+          "received_ms": 48058.909,
+          "server_ttfa_s": 48.04,
+          "synth_s": 0.14,
+          "text_characters": 20
+        },
+        {
+          "audio_bytes": 18476,
+          "index": 20,
+          "received_ms": 48111.421,
+          "server_ttfa_s": 48.1,
+          "synth_s": 0.05,
+          "text_characters": 6
+        },
+        {
+          "audio_bytes": 83500,
+          "index": 21,
+          "received_ms": 48756.753,
+          "server_ttfa_s": 48.74,
+          "synth_s": 0.13,
+          "text_characters": 45
+        },
+        {
+          "audio_bytes": 25644,
+          "index": 22,
+          "received_ms": 48787.915,
+          "server_ttfa_s": 48.77,
+          "synth_s": 0.02,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 259628,
+          "index": 23,
+          "received_ms": 50314.309,
+          "server_ttfa_s": 50.3,
+          "synth_s": 0.38,
+          "text_characters": 111
+        },
+        {
+          "audio_bytes": 431148,
+          "index": 24,
+          "received_ms": 52817.613,
+          "server_ttfa_s": 52.8,
+          "synth_s": 0.59,
+          "text_characters": 193
+        },
+        {
+          "audio_bytes": 191532,
+          "index": 25,
+          "received_ms": 53122.491,
+          "server_ttfa_s": 53.1,
+          "synth_s": 0.3,
+          "text_characters": 31
+        },
+        {
+          "audio_bytes": 271916,
+          "index": 26,
+          "received_ms": 54042.729,
+          "server_ttfa_s": 54.02,
+          "synth_s": 0.45,
+          "text_characters": 56
+        },
+        {
+          "audio_bytes": 116268,
+          "index": 27,
+          "received_ms": 54284.658,
+          "server_ttfa_s": 54.27,
+          "synth_s": 0.23,
+          "text_characters": 27
+        },
+        {
+          "audio_bytes": 25132,
+          "index": 28,
+          "received_ms": 54365.459,
+          "server_ttfa_s": 54.35,
+          "synth_s": 0.08,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 73260,
+          "index": 29,
+          "received_ms": 54476.67,
+          "server_ttfa_s": 54.46,
+          "synth_s": 0.11,
+          "text_characters": 7
+        },
+        {
+          "audio_bytes": 279084,
+          "index": 30,
+          "received_ms": 55311.637,
+          "server_ttfa_s": 55.29,
+          "synth_s": 0.31,
+          "text_characters": 43
+        },
+        {
+          "audio_bytes": 75308,
+          "index": 31,
+          "received_ms": 55523.709,
+          "server_ttfa_s": 55.51,
+          "synth_s": 0.08,
+          "text_characters": 32
+        }
+      ],
+      "error": null,
+      "id": "turn-16",
+      "latency_ms": {
+        "done": 55547.264,
+        "first_audio": 35031.43,
+        "response_headers": 17.561,
+        "transcript": 797.541
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 34.39,
+        "pipeline_total_s": 55.53,
+        "reply_characters": 1628,
+        "reply_sha256": "a77b7f3ab580a63b373848ebbda6663cc97ffab8fcf0b105ff52a7778918b196",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 5264256,
+      "score": {
+        "cer": 0.444444,
+        "char_distance": 16,
+        "deletions": 0,
+        "distance": 2,
+        "hypothesis_normalized": "kan du høre forskel på 40 og 44",
+        "hypothesis_words": 8,
+        "insertions": 0,
+        "reference_characters": 36,
+        "reference_normalized": "kan du høre forskel på fyrre og fireogfyrre",
+        "reference_words": 8,
+        "substitutions": 2,
+        "wer": 0.25
+      },
+      "transcript_characters": 32,
+      "transcript_sha256": "26fafa93702a0699d4d2d9ed18bf8276ce3736da8281c6a384104d809356025a"
+    },
+    {
+      "audio": {
+        "bytes": 118478,
+        "channels": 1,
+        "duration_s": 3.7,
+        "frames": 59200,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "ca0e0ab86052a967e09142b067684aa570dc2d7d111e5034a9d91de7e612568d"
+      },
+      "category": "danske stednavne",
+      "chunks": [
+        {
+          "audio_bytes": 411692,
+          "index": 0,
+          "received_ms": 16347.004,
+          "server_ttfa_s": 16.32,
+          "synth_s": 0.45,
+          "text_characters": 166
+        },
+        {
+          "audio_bytes": 577068,
+          "index": 1,
+          "received_ms": 19048.559,
+          "server_ttfa_s": 19.0,
+          "synth_s": 0.63,
+          "text_characters": 214
+        },
+        {
+          "audio_bytes": 157228,
+          "index": 2,
+          "received_ms": 19384.195,
+          "server_ttfa_s": 19.36,
+          "synth_s": 0.26,
+          "text_characters": 60
+        },
+        {
+          "audio_bytes": 288812,
+          "index": 3,
+          "received_ms": 20685.483,
+          "server_ttfa_s": 20.66,
+          "synth_s": 0.33,
+          "text_characters": 104
+        },
+        {
+          "audio_bytes": 24108,
+          "index": 4,
+          "received_ms": 20723.625,
+          "server_ttfa_s": 20.7,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 98860,
+          "index": 5,
+          "received_ms": 20922.283,
+          "server_ttfa_s": 20.9,
+          "synth_s": 0.09,
+          "text_characters": 30
+        },
+        {
+          "audio_bytes": 274988,
+          "index": 6,
+          "received_ms": 22554.348,
+          "server_ttfa_s": 22.53,
+          "synth_s": 0.39,
+          "text_characters": 96
+        },
+        {
+          "audio_bytes": 208428,
+          "index": 7,
+          "received_ms": 23321.479,
+          "server_ttfa_s": 23.3,
+          "synth_s": 0.23,
+          "text_characters": 82
+        },
+        {
+          "audio_bytes": 255020,
+          "index": 8,
+          "received_ms": 24629.441,
+          "server_ttfa_s": 24.61,
+          "synth_s": 0.44,
+          "text_characters": 86
+        },
+        {
+          "audio_bytes": 27180,
+          "index": 9,
+          "received_ms": 24686.059,
+          "server_ttfa_s": 24.66,
+          "synth_s": 0.05,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 228908,
+          "index": 10,
+          "received_ms": 25742.515,
+          "server_ttfa_s": 25.72,
+          "synth_s": 0.23,
+          "text_characters": 89
+        },
+        {
+          "audio_bytes": 277036,
+          "index": 11,
+          "received_ms": 26849.97,
+          "server_ttfa_s": 26.83,
+          "synth_s": 0.25,
+          "text_characters": 107
+        },
+        {
+          "audio_bytes": 274476,
+          "index": 12,
+          "received_ms": 28553.153,
+          "server_ttfa_s": 28.53,
+          "synth_s": 0.47,
+          "text_characters": 103
+        },
+        {
+          "audio_bytes": 96300,
+          "index": 13,
+          "received_ms": 28732.246,
+          "server_ttfa_s": 28.71,
+          "synth_s": 0.17,
+          "text_characters": 40
+        },
+        {
+          "audio_bytes": 159788,
+          "index": 14,
+          "received_ms": 29633.928,
+          "server_ttfa_s": 29.61,
+          "synth_s": 0.27,
+          "text_characters": 65
+        },
+        {
+          "audio_bytes": 198188,
+          "index": 15,
+          "received_ms": 30534.933,
+          "server_ttfa_s": 30.51,
+          "synth_s": 0.2,
+          "text_characters": 89
+        },
+        {
+          "audio_bytes": 164908,
+          "index": 16,
+          "received_ms": 31146.032,
+          "server_ttfa_s": 31.12,
+          "synth_s": 0.15,
+          "text_characters": 57
+        },
+        {
+          "audio_bytes": 269356,
+          "index": 17,
+          "received_ms": 32497.055,
+          "server_ttfa_s": 32.46,
+          "synth_s": 0.38,
+          "text_characters": 102
+        },
+        {
+          "audio_bytes": 311852,
+          "index": 18,
+          "received_ms": 34175.368,
+          "server_ttfa_s": 34.15,
+          "synth_s": 0.45,
+          "text_characters": 135
+        },
+        {
+          "audio_bytes": 305708,
+          "index": 19,
+          "received_ms": 35509.267,
+          "server_ttfa_s": 35.47,
+          "synth_s": 0.37,
+          "text_characters": 117
+        },
+        {
+          "audio_bytes": 165932,
+          "index": 20,
+          "received_ms": 36078.771,
+          "server_ttfa_s": 36.06,
+          "synth_s": 0.24,
+          "text_characters": 68
+        },
+        {
+          "audio_bytes": 135212,
+          "index": 21,
+          "received_ms": 36647.899,
+          "server_ttfa_s": 36.63,
+          "synth_s": 0.19,
+          "text_characters": 47
+        },
+        {
+          "audio_bytes": 27180,
+          "index": 22,
+          "received_ms": 36692.687,
+          "server_ttfa_s": 36.67,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 126508,
+          "index": 23,
+          "received_ms": 37154.439,
+          "server_ttfa_s": 37.13,
+          "synth_s": 0.14,
+          "text_characters": 42
+        }
+      ],
+      "error": null,
+      "id": "turn-17",
+      "latency_ms": {
+        "done": 37154.835,
+        "first_audio": 16347.004,
+        "response_headers": 45.694,
+        "transcript": 923.249
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 15.58,
+        "pipeline_total_s": 37.12,
+        "reply_characters": 1938,
+        "reply_sha256": "e34f00749795b77f2160bc285c413410c90cb0d9aeadd472d5a51e421b83fd99",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 5064736,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "jeg bor på nørrebro i københavn",
+        "hypothesis_words": 6,
+        "insertions": 0,
+        "reference_characters": 26,
+        "reference_normalized": "jeg bor på nørrebro i københavn",
+        "reference_words": 6,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 32,
+      "transcript_sha256": "308ed7eb3e6c56fc3c3810eae3cc8f4ed9b9b0bc1d1bde4bee060dc9d96aec51"
+    },
+    {
+      "audio": {
+        "bytes": 171918,
+        "channels": 1,
+        "duration_s": 5.37,
+        "frames": 85920,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "42fd66841667afabbd99445e3f4125ef7914d727032daf107efd92262ee69af8"
+      },
+      "category": "danske særtegn",
+      "chunks": [
+        {
+          "audio_bytes": 144940,
+          "index": 0,
+          "received_ms": 13772.452,
+          "server_ttfa_s": 13.77,
+          "synth_s": 0.23,
+          "text_characters": 56
+        },
+        {
+          "audio_bytes": 30764,
+          "index": 1,
+          "received_ms": 13807.023,
+          "server_ttfa_s": 13.8,
+          "synth_s": 0.03,
+          "text_characters": 11
+        },
+        {
+          "audio_bytes": 203820,
+          "index": 2,
+          "received_ms": 14574.587,
+          "server_ttfa_s": 14.57,
+          "synth_s": 0.21,
+          "text_characters": 66
+        },
+        {
+          "audio_bytes": 52268,
+          "index": 3,
+          "received_ms": 14620.317,
+          "server_ttfa_s": 14.61,
+          "synth_s": 0.04,
+          "text_characters": 15
+        },
+        {
+          "audio_bytes": 40492,
+          "index": 4,
+          "received_ms": 14657.465,
+          "server_ttfa_s": 14.65,
+          "synth_s": 0.03,
+          "text_characters": 2
+        }
+      ],
+      "error": null,
+      "id": "turn-18",
+      "latency_ms": {
+        "done": 14657.7,
+        "first_audio": 13772.452,
+        "response_headers": 6.112,
+        "transcript": 951.001
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 12.99,
+        "pipeline_total_s": 14.65,
+        "reply_characters": 153,
+        "reply_sha256": "14c6278e6dc8ac532a86ddb3c3de7f96804a33996dde029594025d992d7e88ad",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 472284,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "skriv en note med ordene øl æble og åben",
+        "hypothesis_words": 9,
+        "insertions": 0,
+        "reference_characters": 32,
+        "reference_normalized": "skriv en note med ordene øl æble og åben",
+        "reference_words": 9,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 42,
+      "transcript_sha256": "b9985a1402550fe27a2e3b0235757a415e9fe2230a42f5a20cebb1c0de0405fc"
+    },
+    {
+      "audio": {
+        "bytes": 135118,
+        "channels": 1,
+        "duration_s": 4.22,
+        "frames": 67520,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "6f7562841abbeb483c42c93042d8d5defabf09992a5acecdc2232a40cbd1829f"
+      },
+      "category": "barge-in formulering",
+      "chunks": [
+        {
+          "audio_bytes": 58924,
+          "index": 0,
+          "received_ms": 10274.301,
+          "server_ttfa_s": 10.27,
+          "synth_s": 0.05,
+          "text_characters": 18
+        },
+        {
+          "audio_bytes": 189996,
+          "index": 1,
+          "received_ms": 11351.484,
+          "server_ttfa_s": 11.35,
+          "synth_s": 0.14,
+          "text_characters": 89
+        }
+      ],
+      "error": null,
+      "id": "turn-19",
+      "latency_ms": {
+        "done": 11352.175,
+        "first_audio": 10274.301,
+        "response_headers": 5.374,
+        "transcript": 845.304
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 9.59,
+        "pipeline_total_s": 11.35,
+        "reply_characters": 108,
+        "reply_sha256": "955793bdaf39ceb8a751e5c5f42ec453ac523d149ba7065992d7a71dd1e6d5df",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 248920,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "stop svaret hvis jeg begynder at tale igen",
+        "hypothesis_words": 8,
+        "insertions": 0,
+        "reference_characters": 35,
+        "reference_normalized": "stop svaret hvis jeg begynder at tale igen",
+        "reference_words": 8,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 44,
+      "transcript_sha256": "731b4ce6ad0b8b8220bebac642bdf89d1aa00aebcbcfc460ec11d826aa689092"
+    },
+    {
+      "audio": {
+        "bytes": 127758,
+        "channels": 1,
+        "duration_s": 3.99,
+        "frames": 63840,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "0c65bbe83f957f6794de2ee79880d87295435bc372354809eed438f8ebf3f41b"
+      },
+      "category": "afsluttende kontrol",
+      "chunks": [
+        {
+          "audio_bytes": 659500,
+          "index": 0,
+          "received_ms": 13184.446,
+          "server_ttfa_s": 13.17,
+          "synth_s": 0.47,
+          "text_characters": 289
+        }
+      ],
+      "error": null,
+      "id": "turn-20",
+      "latency_ms": {
+        "done": 13186.494,
+        "first_audio": 13184.446,
+        "response_headers": 5.35,
+        "transcript": 914.072
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 12.42,
+        "pipeline_total_s": 13.18,
+        "reply_characters": 291,
+        "reply_sha256": "83d3df243aba78f039ae31220ba01342d235789cca319138fd008eebfab689e0",
+        "via_cloud": false
+      },
+      "repetition": 1,
+      "reply_audio_bytes": 659500,
+      "score": {
+        "cer": 0.025641,
+        "char_distance": 1,
+        "deletions": 0,
+        "distance": 1,
+        "hypothesis_normalized": "det her er den sidste sætning i voice baseline",
+        "hypothesis_words": 9,
+        "insertions": 0,
+        "reference_characters": 39,
+        "reference_normalized": "det her er den sidste sætning i voice baselinen",
+        "reference_words": 9,
+        "substitutions": 1,
+        "wer": 0.111111
+      },
+      "transcript_characters": 47,
+      "transcript_sha256": "9821e9d1c6afbe6ecbdc33fc9e34517c39551ff8de68464de60b15f829bb5014"
+    },
+    {
+      "audio": {
+        "bytes": 115278,
+        "channels": 1,
+        "duration_s": 3.6,
+        "frames": 57600,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "64ffa542e747078c50c85c27b16ce0e7bea778644a572879c5d41711af68a73f"
+      },
+      "category": "kort spørgsmål",
+      "chunks": [
+        {
+          "audio_bytes": 245292,
+          "index": 0,
+          "received_ms": 15409.437,
+          "server_ttfa_s": 15.4,
+          "synth_s": 0.29,
+          "text_characters": 109
+        },
+        {
+          "audio_bytes": 173612,
+          "index": 1,
+          "received_ms": 15968.418,
+          "server_ttfa_s": 15.96,
+          "synth_s": 0.2,
+          "text_characters": 67
+        },
+        {
+          "audio_bytes": 310316,
+          "index": 2,
+          "received_ms": 17616.921,
+          "server_ttfa_s": 17.61,
+          "synth_s": 0.27,
+          "text_characters": 137
+        }
+      ],
+      "error": null,
+      "id": "turn-01",
+      "latency_ms": {
+        "done": 17618.053,
+        "first_audio": 15409.437,
+        "response_headers": 5.394,
+        "transcript": 768.965
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 14.8,
+        "pipeline_total_s": 17.61,
+        "reply_characters": 317,
+        "reply_sha256": "cf9946da42efe2ad6c879dab6b0b4e5cb4eb872a69ce166f5967c82cfba0290c",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 729220,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "hvad er klokken lige nu",
+        "hypothesis_words": 5,
+        "insertions": 0,
+        "reference_characters": 19,
+        "reference_normalized": "hvad er klokken lige nu",
+        "reference_words": 5,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 24,
+      "transcript_sha256": "e50c48cfb124860ae1b6d2c580d8b2de3445d303624daa7a688778b5561474da"
+    },
+    {
+      "audio": {
+        "bytes": 101518,
+        "channels": 1,
+        "duration_s": 3.17,
+        "frames": 50720,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "7dbc68f62413789eee871c5558f7f648cc411f0e104438b423ac6f440d597861"
+      },
+      "category": "tal og tidsenhed",
+      "chunks": [
+        {
+          "audio_bytes": 175660,
+          "index": 0,
+          "received_ms": 11796.496,
+          "server_ttfa_s": 11.78,
+          "synth_s": 0.2,
+          "text_characters": 87
+        },
+        {
+          "audio_bytes": 130604,
+          "index": 1,
+          "received_ms": 12386.315,
+          "server_ttfa_s": 12.38,
+          "synth_s": 0.12,
+          "text_characters": 56
+        },
+        {
+          "audio_bytes": 58412,
+          "index": 2,
+          "received_ms": 12667.813,
+          "server_ttfa_s": 12.66,
+          "synth_s": 0.05,
+          "text_characters": 22
+        },
+        {
+          "audio_bytes": 13356,
+          "index": 3,
+          "received_ms": 12798.995,
+          "server_ttfa_s": 12.8,
+          "synth_s": 0.02,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 60972,
+          "index": 4,
+          "received_ms": 13189.425,
+          "server_ttfa_s": 13.18,
+          "synth_s": 0.07,
+          "text_characters": 24
+        },
+        {
+          "audio_bytes": 17452,
+          "index": 5,
+          "received_ms": 13326.327,
+          "server_ttfa_s": 13.32,
+          "synth_s": 0.03,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 94252,
+          "index": 6,
+          "received_ms": 13889.484,
+          "server_ttfa_s": 13.89,
+          "synth_s": 0.08,
+          "text_characters": 41
+        },
+        {
+          "audio_bytes": 48684,
+          "index": 7,
+          "received_ms": 14235.87,
+          "server_ttfa_s": 14.23,
+          "synth_s": 0.05,
+          "text_characters": 24
+        },
+        {
+          "audio_bytes": 54828,
+          "index": 8,
+          "received_ms": 14572.524,
+          "server_ttfa_s": 14.57,
+          "synth_s": 0.05,
+          "text_characters": 22
+        },
+        {
+          "audio_bytes": 15916,
+          "index": 9,
+          "received_ms": 14727.423,
+          "server_ttfa_s": 14.72,
+          "synth_s": 0.03,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 106540,
+          "index": 10,
+          "received_ms": 15400.998,
+          "server_ttfa_s": 15.4,
+          "synth_s": 0.09,
+          "text_characters": 47
+        },
+        {
+          "audio_bytes": 14892,
+          "index": 11,
+          "received_ms": 15500.63,
+          "server_ttfa_s": 15.5,
+          "synth_s": 0.02,
+          "text_characters": 6
+        },
+        {
+          "audio_bytes": 140844,
+          "index": 12,
+          "received_ms": 16253.885,
+          "server_ttfa_s": 16.25,
+          "synth_s": 0.16,
+          "text_characters": 54
+        },
+        {
+          "audio_bytes": 25132,
+          "index": 13,
+          "received_ms": 16327.629,
+          "server_ttfa_s": 16.32,
+          "synth_s": 0.07,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 425004,
+          "index": 14,
+          "received_ms": 17842.569,
+          "server_ttfa_s": 17.81,
+          "synth_s": 0.42,
+          "text_characters": 133
+        },
+        {
+          "audio_bytes": 21036,
+          "index": 15,
+          "received_ms": 17851.728,
+          "server_ttfa_s": 17.85,
+          "synth_s": 0.03,
+          "text_characters": 6
+        },
+        {
+          "audio_bytes": 114732,
+          "index": 16,
+          "received_ms": 18423.085,
+          "server_ttfa_s": 18.42,
+          "synth_s": 0.13,
+          "text_characters": 47
+        },
+        {
+          "audio_bytes": 26156,
+          "index": 17,
+          "received_ms": 18454.876,
+          "server_ttfa_s": 18.45,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 111660,
+          "index": 18,
+          "received_ms": 18910.384,
+          "server_ttfa_s": 18.91,
+          "synth_s": 0.11,
+          "text_characters": 45
+        },
+        {
+          "audio_bytes": 24620,
+          "index": 19,
+          "received_ms": 19053.234,
+          "server_ttfa_s": 19.05,
+          "synth_s": 0.07,
+          "text_characters": 6
+        },
+        {
+          "audio_bytes": 498732,
+          "index": 20,
+          "received_ms": 21705.984,
+          "server_ttfa_s": 21.7,
+          "synth_s": 0.4,
+          "text_characters": 207
+        }
+      ],
+      "error": null,
+      "id": "turn-02",
+      "latency_ms": {
+        "done": 21707.658,
+        "first_audio": 11796.496,
+        "response_headers": 5.431,
+        "transcript": 827.782
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 11.12,
+        "pipeline_total_s": 21.7,
+        "reply_characters": 896,
+        "reply_sha256": "b5f456e5e8d1b8b9610415f8ea9a4af5c47c98ffcd6bee7ce793fe9c9d2bb808",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 2179484,
+      "score": {
+        "cer": 0.130435,
+        "char_distance": 3,
+        "deletions": 0,
+        "distance": 1,
+        "hypothesis_normalized": "sæt en timer på 5 minutter",
+        "hypothesis_words": 6,
+        "insertions": 0,
+        "reference_characters": 23,
+        "reference_normalized": "sæt en timer på fem minutter",
+        "reference_words": 6,
+        "substitutions": 1,
+        "wer": 0.166667
+      },
+      "transcript_characters": 27,
+      "transcript_sha256": "ad4a7ca72e224fea1f8b121f78af330424e0ba966ab275e919b90b790efab3d0"
+    },
+    {
+      "audio": {
+        "bytes": 126798,
+        "channels": 1,
+        "duration_s": 3.96,
+        "frames": 63360,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "3cc7c371bf7eb0e7f71da5efed7c9bb61ab77a9bcf37d0d51d19eed16e7a94e1"
+      },
+      "category": "kalenderformulering",
+      "chunks": [
+        {
+          "audio_bytes": 268332,
+          "index": 0,
+          "received_ms": 9451.09,
+          "server_ttfa_s": 9.43,
+          "synth_s": 0.36,
+          "text_characters": 135
+        },
+        {
+          "audio_bytes": 106028,
+          "index": 1,
+          "received_ms": 9740.675,
+          "server_ttfa_s": 9.72,
+          "synth_s": 0.09,
+          "text_characters": 42
+        },
+        {
+          "audio_bytes": 23084,
+          "index": 2,
+          "received_ms": 9819.736,
+          "server_ttfa_s": 9.8,
+          "synth_s": 0.07,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 259628,
+          "index": 3,
+          "received_ms": 10997.926,
+          "server_ttfa_s": 10.97,
+          "synth_s": 0.23,
+          "text_characters": 100
+        },
+        {
+          "audio_bytes": 127020,
+          "index": 4,
+          "received_ms": 11763.234,
+          "server_ttfa_s": 11.74,
+          "synth_s": 0.1,
+          "text_characters": 69
+        }
+      ],
+      "error": null,
+      "id": "turn-03",
+      "latency_ms": {
+        "done": 11763.726,
+        "first_audio": 9451.09,
+        "response_headers": 24.111,
+        "transcript": 868.759
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 8.75,
+        "pipeline_total_s": 11.74,
+        "reply_characters": 353,
+        "reply_sha256": "ae180053e3f09698b9c11e141c98159b522a8340e1e0be78916b03468ff81bc7",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 784092,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "hvilke møder har jeg i morgen formiddag",
+        "hypothesis_words": 7,
+        "insertions": 0,
+        "reference_characters": 33,
+        "reference_normalized": "hvilke møder har jeg i morgen formiddag",
+        "reference_words": 7,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 40,
+      "transcript_sha256": "c6c40af6c85bf7c666b92e236bfc2b38cfb2f486ac6c7d99e963ae96d6a45367"
+    },
+    {
+      "audio": {
+        "bytes": 112718,
+        "channels": 1,
+        "duration_s": 3.52,
+        "frames": 56320,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "6e90c4346d600d1ab73879895417f3074ce459ca9965144339cf2464983fb28c"
+      },
+      "category": "teknisk status",
+      "chunks": [
+        {
+          "audio_bytes": 137772,
+          "index": 0,
+          "received_ms": 10353.517,
+          "server_ttfa_s": 10.33,
+          "synth_s": 0.22,
+          "text_characters": 56
+        },
+        {
+          "audio_bytes": 144940,
+          "index": 1,
+          "received_ms": 11020.151,
+          "server_ttfa_s": 11.0,
+          "synth_s": 0.2,
+          "text_characters": 63
+        },
+        {
+          "audio_bytes": 233004,
+          "index": 2,
+          "received_ms": 12306.639,
+          "server_ttfa_s": 12.28,
+          "synth_s": 0.29,
+          "text_characters": 100
+        },
+        {
+          "audio_bytes": 189484,
+          "index": 3,
+          "received_ms": 12909.908,
+          "server_ttfa_s": 12.88,
+          "synth_s": 0.4,
+          "text_characters": 52
+        },
+        {
+          "audio_bytes": 26156,
+          "index": 4,
+          "received_ms": 12982.308,
+          "server_ttfa_s": 12.96,
+          "synth_s": 0.07,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 284716,
+          "index": 5,
+          "received_ms": 14065.224,
+          "server_ttfa_s": 14.04,
+          "synth_s": 0.27,
+          "text_characters": 103
+        },
+        {
+          "audio_bytes": 27180,
+          "index": 6,
+          "received_ms": 14125.548,
+          "server_ttfa_s": 14.1,
+          "synth_s": 0.05,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 73260,
+          "index": 7,
+          "received_ms": 14272.278,
+          "server_ttfa_s": 14.25,
+          "synth_s": 0.14,
+          "text_characters": 21
+        },
+        {
+          "audio_bytes": 27692,
+          "index": 8,
+          "received_ms": 14318.292,
+          "server_ttfa_s": 14.29,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 119852,
+          "index": 9,
+          "received_ms": 14757.57,
+          "server_ttfa_s": 14.73,
+          "synth_s": 0.1,
+          "text_characters": 48
+        },
+        {
+          "audio_bytes": 54828,
+          "index": 10,
+          "received_ms": 15084.868,
+          "server_ttfa_s": 15.06,
+          "synth_s": 0.06,
+          "text_characters": 21
+        },
+        {
+          "audio_bytes": 28716,
+          "index": 11,
+          "received_ms": 15133.83,
+          "server_ttfa_s": 15.11,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 108076,
+          "index": 12,
+          "received_ms": 15634.864,
+          "server_ttfa_s": 15.61,
+          "synth_s": 0.09,
+          "text_characters": 34
+        },
+        {
+          "audio_bytes": 93228,
+          "index": 13,
+          "received_ms": 16139.685,
+          "server_ttfa_s": 16.11,
+          "synth_s": 0.08,
+          "text_characters": 31
+        },
+        {
+          "audio_bytes": 25132,
+          "index": 14,
+          "received_ms": 16200.985,
+          "server_ttfa_s": 16.18,
+          "synth_s": 0.05,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 88620,
+          "index": 15,
+          "received_ms": 16579.167,
+          "server_ttfa_s": 16.55,
+          "synth_s": 0.11,
+          "text_characters": 29
+        },
+        {
+          "audio_bytes": 15916,
+          "index": 16,
+          "received_ms": 16607.344,
+          "server_ttfa_s": 16.58,
+          "synth_s": 0.02,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 135212,
+          "index": 17,
+          "received_ms": 17264.624,
+          "server_ttfa_s": 17.24,
+          "synth_s": 0.22,
+          "text_characters": 33
+        },
+        {
+          "audio_bytes": 23596,
+          "index": 18,
+          "received_ms": 17306.453,
+          "server_ttfa_s": 17.28,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 231980,
+          "index": 19,
+          "received_ms": 18388.799,
+          "server_ttfa_s": 18.36,
+          "synth_s": 0.44,
+          "text_characters": 77
+        },
+        {
+          "audio_bytes": 26156,
+          "index": 20,
+          "received_ms": 18422.714,
+          "server_ttfa_s": 18.4,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 178220,
+          "index": 21,
+          "received_ms": 19003.607,
+          "server_ttfa_s": 18.96,
+          "synth_s": 0.23,
+          "text_characters": 62
+        },
+        {
+          "audio_bytes": 108076,
+          "index": 22,
+          "received_ms": 19451.611,
+          "server_ttfa_s": 19.43,
+          "synth_s": 0.1,
+          "text_characters": 37
+        },
+        {
+          "audio_bytes": 25132,
+          "index": 23,
+          "received_ms": 19500.941,
+          "server_ttfa_s": 19.48,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 59948,
+          "index": 24,
+          "received_ms": 19819.836,
+          "server_ttfa_s": 19.79,
+          "synth_s": 0.06,
+          "text_characters": 28
+        },
+        {
+          "audio_bytes": 16428,
+          "index": 25,
+          "received_ms": 19910.099,
+          "server_ttfa_s": 19.89,
+          "synth_s": 0.08,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 267308,
+          "index": 26,
+          "received_ms": 21501.897,
+          "server_ttfa_s": 21.48,
+          "synth_s": 0.26,
+          "text_characters": 120
+        },
+        {
+          "audio_bytes": 24108,
+          "index": 27,
+          "received_ms": 21556.948,
+          "server_ttfa_s": 21.53,
+          "synth_s": 0.05,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 76844,
+          "index": 28,
+          "received_ms": 21715.315,
+          "server_ttfa_s": 21.69,
+          "synth_s": 0.11,
+          "text_characters": 31
+        },
+        {
+          "audio_bytes": 101932,
+          "index": 29,
+          "received_ms": 22369.191,
+          "server_ttfa_s": 22.34,
+          "synth_s": 0.18,
+          "text_characters": 40
+        },
+        {
+          "audio_bytes": 136748,
+          "index": 30,
+          "received_ms": 23074.825,
+          "server_ttfa_s": 23.05,
+          "synth_s": 0.13,
+          "text_characters": 62
+        }
+      ],
+      "error": null,
+      "id": "turn-04",
+      "latency_ms": {
+        "done": 23075.243,
+        "first_audio": 10353.517,
+        "response_headers": 26.104,
+        "transcript": 838.191
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 9.68,
+        "pipeline_total_s": 23.05,
+        "reply_characters": 1134,
+        "reply_sha256": "012d6459cd26bfff75f629a2d67cfbd08919f2987d65dc3a68aecbf9fe84ba54",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 3090260,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 2,
+        "hypothesis_normalized": "hvor meget ledig plads er der på model rig",
+        "hypothesis_words": 9,
+        "insertions": 1,
+        "reference_characters": 34,
+        "reference_normalized": "hvor meget ledig plads er der på modelrig",
+        "reference_words": 8,
+        "substitutions": 1,
+        "wer": 0.25
+      },
+      "transcript_characters": 43,
+      "transcript_sha256": "e501c0835d020174000bd223c6f521f79f52aba06c8709145c8be9f81ae6e84f"
+    },
+    {
+      "audio": {
+        "bytes": 138638,
+        "channels": 1,
+        "duration_s": 4.33,
+        "frames": 69280,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "dcd1c8fa556c1fbd975aa037452f7e0eb0ae5a8ae2f38b0816630a497b48893e"
+      },
+      "category": "sammensat opgave",
+      "chunks": [
+        {
+          "audio_bytes": 154668,
+          "index": 0,
+          "received_ms": 18159.921,
+          "server_ttfa_s": 18.15,
+          "synth_s": 0.21,
+          "text_characters": 60
+        },
+        {
+          "audio_bytes": 128556,
+          "index": 1,
+          "received_ms": 18437.148,
+          "server_ttfa_s": 18.43,
+          "synth_s": 0.17,
+          "text_characters": 22
+        },
+        {
+          "audio_bytes": 241196,
+          "index": 2,
+          "received_ms": 19401.614,
+          "server_ttfa_s": 19.39,
+          "synth_s": 0.24,
+          "text_characters": 57
+        },
+        {
+          "audio_bytes": 15404,
+          "index": 3,
+          "received_ms": 19430.037,
+          "server_ttfa_s": 19.42,
+          "synth_s": 0.02,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 186412,
+          "index": 4,
+          "received_ms": 20180.638,
+          "server_ttfa_s": 20.17,
+          "synth_s": 0.23,
+          "text_characters": 72
+        },
+        {
+          "audio_bytes": 50220,
+          "index": 5,
+          "received_ms": 20275.136,
+          "server_ttfa_s": 20.27,
+          "synth_s": 0.07,
+          "text_characters": 6
+        },
+        {
+          "audio_bytes": 18988,
+          "index": 6,
+          "received_ms": 20340.522,
+          "server_ttfa_s": 20.33,
+          "synth_s": 0.03,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 229932,
+          "index": 7,
+          "received_ms": 21594.351,
+          "server_ttfa_s": 21.59,
+          "synth_s": 0.27,
+          "text_characters": 94
+        },
+        {
+          "audio_bytes": 197676,
+          "index": 8,
+          "received_ms": 22405.238,
+          "server_ttfa_s": 22.4,
+          "synth_s": 0.15,
+          "text_characters": 81
+        }
+      ],
+      "error": null,
+      "id": "turn-05",
+      "latency_ms": {
+        "done": 22405.956,
+        "first_audio": 18159.921,
+        "response_headers": 6.974,
+        "transcript": 929.298
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 17.39,
+        "pipeline_total_s": 22.4,
+        "reply_characters": 411,
+        "reply_sha256": "ae6fff18d8fa5acf2ff0b93dd14a233fc6638108ee59ea432a3d888aa38afe10",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 1223052,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "lav en kort opsummering af dagens vigtigste opgaver",
+        "hypothesis_words": 8,
+        "insertions": 0,
+        "reference_characters": 44,
+        "reference_normalized": "lav en kort opsummering af dagens vigtigste opgaver",
+        "reference_words": 8,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 52,
+      "transcript_sha256": "7fb91c474777c9c7545be1b9029ed68f56460e30a6aab7bb30b546f6d6955249"
+    },
+    {
+      "audio": {
+        "bytes": 131278,
+        "channels": 1,
+        "duration_s": 4.1,
+        "frames": 65600,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "f5ad07528385bd23e58cd658663751297e934245bdc526872b2110e7ea1ff12a"
+      },
+      "category": "liste og fødevarer",
+      "chunks": [
+        {
+          "audio_bytes": 44076,
+          "index": 0,
+          "received_ms": 13266.03,
+          "server_ttfa_s": 13.26,
+          "synth_s": 0.05,
+          "text_characters": 13
+        },
+        {
+          "audio_bytes": 594988,
+          "index": 1,
+          "received_ms": 17622.345,
+          "server_ttfa_s": 17.61,
+          "synth_s": 0.86,
+          "text_characters": 274
+        },
+        {
+          "audio_bytes": 25132,
+          "index": 2,
+          "received_ms": 17651.092,
+          "server_ttfa_s": 17.65,
+          "synth_s": 0.02,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 106540,
+          "index": 3,
+          "received_ms": 17827.032,
+          "server_ttfa_s": 17.82,
+          "synth_s": 0.17,
+          "text_characters": 37
+        },
+        {
+          "audio_bytes": 169516,
+          "index": 4,
+          "received_ms": 18650.392,
+          "server_ttfa_s": 18.65,
+          "synth_s": 0.23,
+          "text_characters": 85
+        },
+        {
+          "audio_bytes": 132652,
+          "index": 5,
+          "received_ms": 19322.446,
+          "server_ttfa_s": 19.32,
+          "synth_s": 0.16,
+          "text_characters": 64
+        },
+        {
+          "audio_bytes": 27180,
+          "index": 6,
+          "received_ms": 19362.979,
+          "server_ttfa_s": 19.36,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 91692,
+          "index": 7,
+          "received_ms": 19591.723,
+          "server_ttfa_s": 19.59,
+          "synth_s": 0.12,
+          "text_characters": 26
+        },
+        {
+          "audio_bytes": 187948,
+          "index": 8,
+          "received_ms": 20706.593,
+          "server_ttfa_s": 20.7,
+          "synth_s": 0.2,
+          "text_characters": 78
+        },
+        {
+          "audio_bytes": 143916,
+          "index": 9,
+          "received_ms": 21800.866,
+          "server_ttfa_s": 21.79,
+          "synth_s": 0.2,
+          "text_characters": 71
+        },
+        {
+          "audio_bytes": 27180,
+          "index": 10,
+          "received_ms": 21833.902,
+          "server_ttfa_s": 21.83,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 186412,
+          "index": 11,
+          "received_ms": 23023.59,
+          "server_ttfa_s": 23.02,
+          "synth_s": 0.31,
+          "text_characters": 70
+        },
+        {
+          "audio_bytes": 195628,
+          "index": 12,
+          "received_ms": 24311.709,
+          "server_ttfa_s": 24.31,
+          "synth_s": 0.22,
+          "text_characters": 104
+        },
+        {
+          "audio_bytes": 174636,
+          "index": 13,
+          "received_ms": 25498.299,
+          "server_ttfa_s": 25.49,
+          "synth_s": 0.24,
+          "text_characters": 81
+        },
+        {
+          "audio_bytes": 281132,
+          "index": 14,
+          "received_ms": 27087.556,
+          "server_ttfa_s": 27.08,
+          "synth_s": 0.39,
+          "text_characters": 107
+        },
+        {
+          "audio_bytes": 24620,
+          "index": 15,
+          "received_ms": 27117.151,
+          "server_ttfa_s": 27.11,
+          "synth_s": 0.02,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 75308,
+          "index": 16,
+          "received_ms": 27245.018,
+          "server_ttfa_s": 27.24,
+          "synth_s": 0.12,
+          "text_characters": 20
+        },
+        {
+          "audio_bytes": 170028,
+          "index": 17,
+          "received_ms": 28405.263,
+          "server_ttfa_s": 28.4,
+          "synth_s": 0.18,
+          "text_characters": 72
+        },
+        {
+          "audio_bytes": 170540,
+          "index": 18,
+          "received_ms": 29477.35,
+          "server_ttfa_s": 29.47,
+          "synth_s": 0.22,
+          "text_characters": 76
+        },
+        {
+          "audio_bytes": 139820,
+          "index": 19,
+          "received_ms": 30457.524,
+          "server_ttfa_s": 30.45,
+          "synth_s": 0.26,
+          "text_characters": 66
+        },
+        {
+          "audio_bytes": 238124,
+          "index": 20,
+          "received_ms": 31720.223,
+          "server_ttfa_s": 31.72,
+          "synth_s": 0.25,
+          "text_characters": 120
+        },
+        {
+          "audio_bytes": 25644,
+          "index": 21,
+          "received_ms": 31752.142,
+          "server_ttfa_s": 31.75,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 138284,
+          "index": 22,
+          "received_ms": 32332.606,
+          "server_ttfa_s": 32.33,
+          "synth_s": 0.13,
+          "text_characters": 58
+        }
+      ],
+      "error": null,
+      "id": "turn-06",
+      "latency_ms": {
+        "done": 32333.09,
+        "first_audio": 13266.03,
+        "response_headers": 5.374,
+        "transcript": 955.164
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 12.47,
+        "pipeline_total_s": 32.33,
+        "reply_characters": 1486,
+        "reply_sha256": "de439b0a5a915a1c4f7893f4077a814f07d10871d8667f87c4e4cf9db4b050df",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 3370996,
+      "score": {
+        "cer": 0.057143,
+        "char_distance": 2,
+        "deletions": 0,
+        "distance": 1,
+        "hypothesis_normalized": "husk at jeg skal købe kaffe mælk og robrød",
+        "hypothesis_words": 9,
+        "insertions": 0,
+        "reference_characters": 35,
+        "reference_normalized": "husk at jeg skal købe kaffe mælk og rugbrød",
+        "reference_words": 9,
+        "substitutions": 1,
+        "wer": 0.111111
+      },
+      "transcript_characters": 45,
+      "transcript_sha256": "c983688671a715aa5ada24a83481086966228315ebf81ad85f9b3f445b20a50d"
+    },
+    {
+      "audio": {
+        "bytes": 129038,
+        "channels": 1,
+        "duration_s": 4.03,
+        "frames": 64480,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "3939ac2156be3cc272b1c0009b1e4a7ab6e92d89c508023c0c0bd86199b3587b"
+      },
+      "category": "faglig forklaring",
+      "chunks": [
+        {
+          "audio_bytes": 283180,
+          "index": 0,
+          "received_ms": 14205.346,
+          "server_ttfa_s": 14.2,
+          "synth_s": 0.34,
+          "text_characters": 112
+        },
+        {
+          "audio_bytes": 184364,
+          "index": 1,
+          "received_ms": 14785.661,
+          "server_ttfa_s": 14.78,
+          "synth_s": 0.25,
+          "text_characters": 62
+        },
+        {
+          "audio_bytes": 418860,
+          "index": 2,
+          "received_ms": 16469.612,
+          "server_ttfa_s": 16.46,
+          "synth_s": 0.41,
+          "text_characters": 135
+        },
+        {
+          "audio_bytes": 236076,
+          "index": 3,
+          "received_ms": 17722.396,
+          "server_ttfa_s": 17.7,
+          "synth_s": 0.46,
+          "text_characters": 99
+        },
+        {
+          "audio_bytes": 332332,
+          "index": 4,
+          "received_ms": 19124.167,
+          "server_ttfa_s": 19.12,
+          "synth_s": 0.43,
+          "text_characters": 132
+        },
+        {
+          "audio_bytes": 328748,
+          "index": 5,
+          "received_ms": 20565.936,
+          "server_ttfa_s": 20.56,
+          "synth_s": 0.47,
+          "text_characters": 135
+        },
+        {
+          "audio_bytes": 261676,
+          "index": 6,
+          "received_ms": 21753.911,
+          "server_ttfa_s": 21.75,
+          "synth_s": 0.36,
+          "text_characters": 106
+        },
+        {
+          "audio_bytes": 337452,
+          "index": 7,
+          "received_ms": 23211.392,
+          "server_ttfa_s": 23.2,
+          "synth_s": 0.48,
+          "text_characters": 131
+        },
+        {
+          "audio_bytes": 73772,
+          "index": 8,
+          "received_ms": 23303.363,
+          "server_ttfa_s": 23.3,
+          "synth_s": 0.09,
+          "text_characters": 13
+        },
+        {
+          "audio_bytes": 445484,
+          "index": 9,
+          "received_ms": 25132.727,
+          "server_ttfa_s": 25.12,
+          "synth_s": 0.58,
+          "text_characters": 154
+        },
+        {
+          "audio_bytes": 161324,
+          "index": 10,
+          "received_ms": 25682.083,
+          "server_ttfa_s": 25.68,
+          "synth_s": 0.23,
+          "text_characters": 72
+        },
+        {
+          "audio_bytes": 192044,
+          "index": 11,
+          "received_ms": 26828.311,
+          "server_ttfa_s": 26.82,
+          "synth_s": 0.21,
+          "text_characters": 88
+        },
+        {
+          "audio_bytes": 260140,
+          "index": 12,
+          "received_ms": 28267.062,
+          "server_ttfa_s": 28.26,
+          "synth_s": 0.33,
+          "text_characters": 105
+        },
+        {
+          "audio_bytes": 83500,
+          "index": 13,
+          "received_ms": 28389.627,
+          "server_ttfa_s": 28.38,
+          "synth_s": 0.12,
+          "text_characters": 13
+        },
+        {
+          "audio_bytes": 376876,
+          "index": 14,
+          "received_ms": 30105.304,
+          "server_ttfa_s": 30.1,
+          "synth_s": 0.55,
+          "text_characters": 130
+        },
+        {
+          "audio_bytes": 178220,
+          "index": 15,
+          "received_ms": 30828.258,
+          "server_ttfa_s": 30.82,
+          "synth_s": 0.16,
+          "text_characters": 83
+        },
+        {
+          "audio_bytes": 346668,
+          "index": 16,
+          "received_ms": 32529.782,
+          "server_ttfa_s": 32.52,
+          "synth_s": 0.34,
+          "text_characters": 143
+        },
+        {
+          "audio_bytes": 186924,
+          "index": 17,
+          "received_ms": 33252.947,
+          "server_ttfa_s": 33.25,
+          "synth_s": 0.24,
+          "text_characters": 68
+        },
+        {
+          "audio_bytes": 78380,
+          "index": 18,
+          "received_ms": 33360.501,
+          "server_ttfa_s": 33.35,
+          "synth_s": 0.1,
+          "text_characters": 13
+        },
+        {
+          "audio_bytes": 343596,
+          "index": 19,
+          "received_ms": 34583.816,
+          "server_ttfa_s": 34.58,
+          "synth_s": 0.39,
+          "text_characters": 93
+        },
+        {
+          "audio_bytes": 124972,
+          "index": 20,
+          "received_ms": 34928.055,
+          "server_ttfa_s": 34.92,
+          "synth_s": 0.18,
+          "text_characters": 49
+        },
+        {
+          "audio_bytes": 261164,
+          "index": 21,
+          "received_ms": 36275.699,
+          "server_ttfa_s": 36.27,
+          "synth_s": 0.34,
+          "text_characters": 108
+        },
+        {
+          "audio_bytes": 191532,
+          "index": 22,
+          "received_ms": 37017.367,
+          "server_ttfa_s": 37.01,
+          "synth_s": 0.22,
+          "text_characters": 80
+        },
+        {
+          "audio_bytes": 76332,
+          "index": 23,
+          "received_ms": 37129.099,
+          "server_ttfa_s": 37.12,
+          "synth_s": 0.11,
+          "text_characters": 13
+        },
+        {
+          "audio_bytes": 232492,
+          "index": 24,
+          "received_ms": 43486.48,
+          "server_ttfa_s": 43.46,
+          "synth_s": 0.23,
+          "text_characters": 700
+        },
+        {
+          "audio_bytes": 395820,
+          "index": 25,
+          "received_ms": 45308.867,
+          "server_ttfa_s": 45.3,
+          "synth_s": 0.5,
+          "text_characters": 135
+        },
+        {
+          "audio_bytes": 267308,
+          "index": 26,
+          "received_ms": 46299.977,
+          "server_ttfa_s": 46.29,
+          "synth_s": 0.28,
+          "text_characters": 109
+        },
+        {
+          "audio_bytes": 198700,
+          "index": 27,
+          "received_ms": 47543.451,
+          "server_ttfa_s": 47.54,
+          "synth_s": 0.24,
+          "text_characters": 100
+        },
+        {
+          "audio_bytes": 130092,
+          "index": 28,
+          "received_ms": 48113.589,
+          "server_ttfa_s": 48.11,
+          "synth_s": 0.11,
+          "text_characters": 59
+        }
+      ],
+      "error": null,
+      "id": "turn-07",
+      "latency_ms": {
+        "done": 48114.119,
+        "first_audio": 14205.346,
+        "response_headers": 9.749,
+        "transcript": 889.035
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 13.48,
+        "pipeline_total_s": 48.11,
+        "reply_characters": 3324,
+        "reply_sha256": "a4ab258ecde52c6f6f8589a66f65845e93b6c066b4e9ab15309d2deb897b8644",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 6988028,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "hvad er forskellen på en backup og en synkronisering",
+        "hypothesis_words": 9,
+        "insertions": 0,
+        "reference_characters": 44,
+        "reference_normalized": "hvad er forskellen på en backup og en synkronisering",
+        "reference_words": 9,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 53,
+      "transcript_sha256": "4d2498a59e8e63d7579e6523317dd618a374f2a5036ad05914b22c2d27fe19c9"
+    },
+    {
+      "audio": {
+        "bytes": 110158,
+        "channels": 1,
+        "duration_s": 3.44,
+        "frames": 55040,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "de39828f821122219439d2738a16e9f0ed0d33728d8c500929820865445466d0"
+      },
+      "category": "sted og ugedag",
+      "chunks": [
+        {
+          "audio_bytes": 300076,
+          "index": 0,
+          "received_ms": 16840.938,
+          "server_ttfa_s": 16.83,
+          "synth_s": 0.42,
+          "text_characters": 121
+        },
+        {
+          "audio_bytes": 101420,
+          "index": 1,
+          "received_ms": 17020.889,
+          "server_ttfa_s": 17.02,
+          "synth_s": 0.17,
+          "text_characters": 36
+        },
+        {
+          "audio_bytes": 260652,
+          "index": 2,
+          "received_ms": 18650.545,
+          "server_ttfa_s": 18.64,
+          "synth_s": 0.35,
+          "text_characters": 116
+        },
+        {
+          "audio_bytes": 305196,
+          "index": 3,
+          "received_ms": 20282.939,
+          "server_ttfa_s": 20.28,
+          "synth_s": 0.38,
+          "text_characters": 143
+        },
+        {
+          "audio_bytes": 18988,
+          "index": 4,
+          "received_ms": 20309.756,
+          "server_ttfa_s": 20.31,
+          "synth_s": 0.02,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 86060,
+          "index": 5,
+          "received_ms": 20554.624,
+          "server_ttfa_s": 20.55,
+          "synth_s": 0.08,
+          "text_characters": 40
+        },
+        {
+          "audio_bytes": 26668,
+          "index": 6,
+          "received_ms": 20596.329,
+          "server_ttfa_s": 20.59,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 105004,
+          "index": 7,
+          "received_ms": 21120.234,
+          "server_ttfa_s": 21.12,
+          "synth_s": 0.13,
+          "text_characters": 36
+        },
+        {
+          "audio_bytes": 194604,
+          "index": 8,
+          "received_ms": 21853.444,
+          "server_ttfa_s": 21.85,
+          "synth_s": 0.24,
+          "text_characters": 79
+        },
+        {
+          "audio_bytes": 18476,
+          "index": 9,
+          "received_ms": 21907.562,
+          "server_ttfa_s": 21.9,
+          "synth_s": 0.05,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 282156,
+          "index": 10,
+          "received_ms": 23499.656,
+          "server_ttfa_s": 23.49,
+          "synth_s": 0.38,
+          "text_characters": 131
+        },
+        {
+          "audio_bytes": 150572,
+          "index": 11,
+          "received_ms": 24031.281,
+          "server_ttfa_s": 24.03,
+          "synth_s": 0.22,
+          "text_characters": 61
+        },
+        {
+          "audio_bytes": 20524,
+          "index": 12,
+          "received_ms": 24105.142,
+          "server_ttfa_s": 24.1,
+          "synth_s": 0.07,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 291372,
+          "index": 13,
+          "received_ms": 25586.134,
+          "server_ttfa_s": 25.58,
+          "synth_s": 0.48,
+          "text_characters": 119
+        },
+        {
+          "audio_bytes": 127532,
+          "index": 14,
+          "received_ms": 25919.425,
+          "server_ttfa_s": 25.91,
+          "synth_s": 0.12,
+          "text_characters": 58
+        },
+        {
+          "audio_bytes": 972332,
+          "index": 15,
+          "received_ms": 30422.988,
+          "server_ttfa_s": 30.41,
+          "synth_s": 0.72,
+          "text_characters": 365
+        }
+      ],
+      "error": null,
+      "id": "turn-08",
+      "latency_ms": {
+        "done": 30426.243,
+        "first_audio": 16840.938,
+        "response_headers": 7.442,
+        "transcript": 935.217
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 16.06,
+        "pipeline_total_s": 30.41,
+        "reply_characters": 1363,
+        "reply_sha256": "cf0122dbc7c9840dbaeebd55365df1c01ef2aeaa5b6be56f78e6e2315b2cf005",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 3261632,
+      "score": {
+        "cer": 0.151515,
+        "char_distance": 5,
+        "deletions": 0,
+        "distance": 3,
+        "hypothesis_normalized": "fortæl mig hvad er det i københavn på fredag",
+        "hypothesis_words": 9,
+        "insertions": 2,
+        "reference_characters": 33,
+        "reference_normalized": "fortæl mig vejret i københavn på fredag",
+        "reference_words": 7,
+        "substitutions": 1,
+        "wer": 0.428571
+      },
+      "transcript_characters": 46,
+      "transcript_sha256": "adbb833171f7329f54db871610e3a4b06d2915354ba5e3ddb5d2abdc2658d7d7"
+    },
+    {
+      "audio": {
+        "bytes": 175438,
+        "channels": 1,
+        "duration_s": 5.48,
+        "frames": 87680,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "ca70b0be49fda80b04cf54415eac54861fa955d82bb656ed55b9536d8d575352"
+      },
+      "category": "engelsk fagterm",
+      "chunks": [
+        {
+          "audio_bytes": 525356,
+          "index": 0,
+          "received_ms": 15200.818,
+          "server_ttfa_s": 15.18,
+          "synth_s": 0.6,
+          "text_characters": 203
+        },
+        {
+          "audio_bytes": 107564,
+          "index": 1,
+          "received_ms": 15528.847,
+          "server_ttfa_s": 15.51,
+          "synth_s": 0.31,
+          "text_characters": 45
+        },
+        {
+          "audio_bytes": 333868,
+          "index": 2,
+          "received_ms": 16741.304,
+          "server_ttfa_s": 16.71,
+          "synth_s": 0.5,
+          "text_characters": 102
+        },
+        {
+          "audio_bytes": 12844,
+          "index": 3,
+          "received_ms": 16795.385,
+          "server_ttfa_s": 16.77,
+          "synth_s": 0.06,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 291372,
+          "index": 4,
+          "received_ms": 17816.306,
+          "server_ttfa_s": 17.79,
+          "synth_s": 0.41,
+          "text_characters": 103
+        },
+        {
+          "audio_bytes": 20012,
+          "index": 5,
+          "received_ms": 17873.757,
+          "server_ttfa_s": 17.85,
+          "synth_s": 0.05,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 260140,
+          "index": 6,
+          "received_ms": 18848.742,
+          "server_ttfa_s": 18.83,
+          "synth_s": 0.41,
+          "text_characters": 102
+        },
+        {
+          "audio_bytes": 219180,
+          "index": 7,
+          "received_ms": 19597.853,
+          "server_ttfa_s": 19.57,
+          "synth_s": 0.16,
+          "text_characters": 107
+        }
+      ],
+      "error": null,
+      "id": "turn-09",
+      "latency_ms": {
+        "done": 19598.611,
+        "first_audio": 15200.818,
+        "response_headers": 21.779,
+        "transcript": 826.419
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 14.53,
+        "pipeline_total_s": 19.58,
+        "reply_characters": 674,
+        "reply_sha256": "ce91de99394eb3a1acd367825fe79203ba59587bf6d2dfcba32df003d4978bd4",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 1770336,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "kan du finde dokumentet om schedulerens approval tokens",
+        "hypothesis_words": 8,
+        "insertions": 0,
+        "reference_characters": 48,
+        "reference_normalized": "kan du finde dokumentet om schedulerens approval tokens",
+        "reference_words": 8,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 56,
+      "transcript_sha256": "c180daddec40e36d81e087d3954db9c0da3f6fb0d5eeaabbc44f662b2078be57"
+    },
+    {
+      "audio": {
+        "bytes": 126158,
+        "channels": 1,
+        "duration_s": 3.94,
+        "frames": 63040,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "1dc3d597befdda5cd1de936878991a04b062466efb2b05313d082dacd0e06aa4"
+      },
+      "category": "tal og log",
+      "chunks": [
+        {
+          "audio_bytes": 294444,
+          "index": 0,
+          "received_ms": 8023.222,
+          "server_ttfa_s": 8.0,
+          "synth_s": 0.4,
+          "text_characters": 129
+        },
+        {
+          "audio_bytes": 434732,
+          "index": 1,
+          "received_ms": 9886.81,
+          "server_ttfa_s": 9.86,
+          "synth_s": 0.31,
+          "text_characters": 182
+        }
+      ],
+      "error": null,
+      "id": "turn-10",
+      "latency_ms": {
+        "done": 9888.263,
+        "first_audio": 8023.222,
+        "response_headers": 25.506,
+        "transcript": 915.618
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 7.27,
+        "pipeline_total_s": 9.86,
+        "reply_characters": 312,
+        "reply_sha256": "d572ca9b96472fe66a974530c1faee2be779b38ea1fc0126d87645b8a122fa91",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 729176,
+      "score": {
+        "cer": 0.151515,
+        "char_distance": 5,
+        "deletions": 0,
+        "distance": 2,
+        "hypothesis_normalized": "læs de tre nyeste fejl i workernes log",
+        "hypothesis_words": 8,
+        "insertions": 0,
+        "reference_characters": 33,
+        "reference_normalized": "læs de tre nyeste fejl fra workerens log",
+        "reference_words": 8,
+        "substitutions": 2,
+        "wer": 0.25
+      },
+      "transcript_characters": 39,
+      "transcript_sha256": "87eefb7a7ef21cd5e65036e7c7143ba3df423f07a262bec0df669742bd95d7b3"
+    },
+    {
+      "audio": {
+        "bytes": 145038,
+        "channels": 1,
+        "duration_s": 4.53,
+        "frames": 72480,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "50e210dbfb2a80907f40764e9a129f95f2e9bee95affce2965a60f36e468ea17"
+      },
+      "category": "negation og instruks",
+      "chunks": [
+        {
+          "audio_bytes": 364076,
+          "index": 0,
+          "received_ms": 12373.507,
+          "server_ttfa_s": 12.37,
+          "synth_s": 0.41,
+          "text_characters": 161
+        },
+        {
+          "audio_bytes": 176172,
+          "index": 1,
+          "received_ms": 13308.297,
+          "server_ttfa_s": 13.3,
+          "synth_s": 0.29,
+          "text_characters": 92
+        },
+        {
+          "audio_bytes": 121900,
+          "index": 2,
+          "received_ms": 13879.356,
+          "server_ttfa_s": 13.87,
+          "synth_s": 0.17,
+          "text_characters": 51
+        },
+        {
+          "audio_bytes": 13868,
+          "index": 3,
+          "received_ms": 13915.935,
+          "server_ttfa_s": 13.91,
+          "synth_s": 0.03,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 188972,
+          "index": 4,
+          "received_ms": 14951.176,
+          "server_ttfa_s": 14.95,
+          "synth_s": 0.22,
+          "text_characters": 72
+        },
+        {
+          "audio_bytes": 19500,
+          "index": 5,
+          "received_ms": 14993.519,
+          "server_ttfa_s": 14.99,
+          "synth_s": 0.04,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 179244,
+          "index": 6,
+          "received_ms": 16058.818,
+          "server_ttfa_s": 16.05,
+          "synth_s": 0.27,
+          "text_characters": 76
+        },
+        {
+          "audio_bytes": 15916,
+          "index": 7,
+          "received_ms": 16083.746,
+          "server_ttfa_s": 16.08,
+          "synth_s": 0.02,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 169516,
+          "index": 8,
+          "received_ms": 16862.499,
+          "server_ttfa_s": 16.86,
+          "synth_s": 0.19,
+          "text_characters": 65
+        },
+        {
+          "audio_bytes": 194604,
+          "index": 9,
+          "received_ms": 17982.503,
+          "server_ttfa_s": 17.97,
+          "synth_s": 0.17,
+          "text_characters": 89
+        }
+      ],
+      "error": null,
+      "id": "turn-11",
+      "latency_ms": {
+        "done": 17983.172,
+        "first_audio": 12373.507,
+        "response_headers": 5.482,
+        "transcript": 900.633
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 11.64,
+        "pipeline_total_s": 17.98,
+        "reply_characters": 632,
+        "reply_sha256": "b749ee9484882b8e563ba428efd8313bc3170a6484988553bbfd0891cc560a66",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 1443768,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "planlæg ikke noget forklar bare hvad du ville gøre",
+        "hypothesis_words": 9,
+        "insertions": 0,
+        "reference_characters": 42,
+        "reference_normalized": "planlæg ikke noget forklar bare hvad du ville gøre",
+        "reference_words": 9,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 53,
+      "transcript_sha256": "842ef07871351a207f5124d4f489b7bd4feccc255bf3c723ad19fc523ad0766f"
+    },
+    {
+      "audio": {
+        "bytes": 135438,
+        "channels": 1,
+        "duration_s": 4.23,
+        "frames": 67680,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "98cba00e1e8ec571b355a7a67df0ad49307d9a9752b3c917d90cd42a7e14a234"
+      },
+      "category": "følsomt begreb",
+      "chunks": [
+        {
+          "audio_bytes": 372268,
+          "index": 0,
+          "received_ms": 24959.712,
+          "server_ttfa_s": 24.93,
+          "synth_s": 0.42,
+          "text_characters": 157
+        },
+        {
+          "audio_bytes": 231468,
+          "index": 1,
+          "received_ms": 25912.938,
+          "server_ttfa_s": 25.89,
+          "synth_s": 0.31,
+          "text_characters": 92
+        },
+        {
+          "audio_bytes": 137772,
+          "index": 2,
+          "received_ms": 26116.478,
+          "server_ttfa_s": 26.09,
+          "synth_s": 0.2,
+          "text_characters": 16
+        },
+        {
+          "audio_bytes": 222764,
+          "index": 3,
+          "received_ms": 26887.153,
+          "server_ttfa_s": 26.86,
+          "synth_s": 0.21,
+          "text_characters": 62
+        },
+        {
+          "audio_bytes": 21548,
+          "index": 4,
+          "received_ms": 26923.553,
+          "server_ttfa_s": 26.9,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 357932,
+          "index": 5,
+          "received_ms": 28912.971,
+          "server_ttfa_s": 28.87,
+          "synth_s": 0.49,
+          "text_characters": 142
+        },
+        {
+          "audio_bytes": 233516,
+          "index": 6,
+          "received_ms": 29745.848,
+          "server_ttfa_s": 29.72,
+          "synth_s": 0.23,
+          "text_characters": 98
+        },
+        {
+          "audio_bytes": 195116,
+          "index": 7,
+          "received_ms": 30710.252,
+          "server_ttfa_s": 30.68,
+          "synth_s": 0.26,
+          "text_characters": 70
+        },
+        {
+          "audio_bytes": 192044,
+          "index": 8,
+          "received_ms": 31514.173,
+          "server_ttfa_s": 31.49,
+          "synth_s": 0.26,
+          "text_characters": 62
+        },
+        {
+          "audio_bytes": 169004,
+          "index": 9,
+          "received_ms": 32254.969,
+          "server_ttfa_s": 32.23,
+          "synth_s": 0.21,
+          "text_characters": 60
+        },
+        {
+          "audio_bytes": 14380,
+          "index": 10,
+          "received_ms": 32279.503,
+          "server_ttfa_s": 32.25,
+          "synth_s": 0.02,
+          "text_characters": 11
+        },
+        {
+          "audio_bytes": 210988,
+          "index": 11,
+          "received_ms": 33524.954,
+          "server_ttfa_s": 33.47,
+          "synth_s": 0.28,
+          "text_characters": 85
+        },
+        {
+          "audio_bytes": 25132,
+          "index": 12,
+          "received_ms": 33536.771,
+          "server_ttfa_s": 33.51,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 330284,
+          "index": 13,
+          "received_ms": 35566.021,
+          "server_ttfa_s": 35.54,
+          "synth_s": 0.47,
+          "text_characters": 136
+        },
+        {
+          "audio_bytes": 27180,
+          "index": 14,
+          "received_ms": 35632.2,
+          "server_ttfa_s": 35.61,
+          "synth_s": 0.06,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 92204,
+          "index": 15,
+          "received_ms": 35795.889,
+          "server_ttfa_s": 35.77,
+          "synth_s": 0.08,
+          "text_characters": 35
+        },
+        {
+          "audio_bytes": 51244,
+          "index": 16,
+          "received_ms": 36012.792,
+          "server_ttfa_s": 35.99,
+          "synth_s": 0.05,
+          "text_characters": 19
+        },
+        {
+          "audio_bytes": 181804,
+          "index": 17,
+          "received_ms": 37063.314,
+          "server_ttfa_s": 37.04,
+          "synth_s": 0.17,
+          "text_characters": 78
+        },
+        {
+          "audio_bytes": 21548,
+          "index": 18,
+          "received_ms": 37137.868,
+          "server_ttfa_s": 37.11,
+          "synth_s": 0.02,
+          "text_characters": 11
+        },
+        {
+          "audio_bytes": 123948,
+          "index": 19,
+          "received_ms": 38010.723,
+          "server_ttfa_s": 37.98,
+          "synth_s": 0.18,
+          "text_characters": 54
+        },
+        {
+          "audio_bytes": 26156,
+          "index": 20,
+          "received_ms": 38064.005,
+          "server_ttfa_s": 38.04,
+          "synth_s": 0.05,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 170540,
+          "index": 21,
+          "received_ms": 38957.184,
+          "server_ttfa_s": 38.93,
+          "synth_s": 0.23,
+          "text_characters": 64
+        },
+        {
+          "audio_bytes": 227372,
+          "index": 22,
+          "received_ms": 40141.938,
+          "server_ttfa_s": 40.11,
+          "synth_s": 0.29,
+          "text_characters": 76
+        },
+        {
+          "audio_bytes": 127020,
+          "index": 23,
+          "received_ms": 40725.044,
+          "server_ttfa_s": 40.7,
+          "synth_s": 0.21,
+          "text_characters": 51
+        },
+        {
+          "audio_bytes": 124972,
+          "index": 24,
+          "received_ms": 41523.81,
+          "server_ttfa_s": 41.5,
+          "synth_s": 0.21,
+          "text_characters": 58
+        },
+        {
+          "audio_bytes": 27180,
+          "index": 25,
+          "received_ms": 41603.414,
+          "server_ttfa_s": 41.58,
+          "synth_s": 0.07,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 187948,
+          "index": 26,
+          "received_ms": 42338.91,
+          "server_ttfa_s": 42.31,
+          "synth_s": 0.16,
+          "text_characters": 75
+        }
+      ],
+      "error": null,
+      "id": "turn-12",
+      "latency_ms": {
+        "done": 42339.578,
+        "first_audio": 24959.712,
+        "response_headers": 27.712,
+        "transcript": 886.112
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 24.24,
+        "pipeline_total_s": 42.31,
+        "reply_characters": 1574,
+        "reply_sha256": "97a8c56e1c252ba28fd4455ad90a26c9f0ef24dbda4daf19e8fa305b72369bab",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 4103332,
+      "score": {
+        "cer": 0.0625,
+        "char_distance": 2,
+        "deletions": 0,
+        "distance": 1,
+        "hypothesis_normalized": "min adgangskode må aldrig stå i lokken",
+        "hypothesis_words": 7,
+        "insertions": 0,
+        "reference_characters": 32,
+        "reference_normalized": "min adgangskode må aldrig stå i loggen",
+        "reference_words": 7,
+        "substitutions": 1,
+        "wer": 0.142857
+      },
+      "transcript_characters": 39,
+      "transcript_sha256": "2063ce75447ac37f199ca1b189c01934b3ad6de2af1bfda9cf013fdee11aa1c5"
+    },
+    {
+      "audio": {
+        "bytes": 182478,
+        "channels": 1,
+        "duration_s": 5.7,
+        "frames": 91200,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "e86902ce93ade0755a9a29b6be14e94864dff019a8e1c3b271aeb88529200232"
+      },
+      "category": "dato og klokkeslæt",
+      "chunks": [
+        {
+          "audio_bytes": 216620,
+          "index": 0,
+          "received_ms": 17932.479,
+          "server_ttfa_s": 17.92,
+          "synth_s": 0.19,
+          "text_characters": 63
+        },
+        {
+          "audio_bytes": 171564,
+          "index": 1,
+          "received_ms": 18284.222,
+          "server_ttfa_s": 18.28,
+          "synth_s": 0.17,
+          "text_characters": 54
+        }
+      ],
+      "error": null,
+      "id": "turn-13",
+      "latency_ms": {
+        "done": 18284.829,
+        "first_audio": 17932.479,
+        "response_headers": 6.876,
+        "transcript": 950.771
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 17.15,
+        "pipeline_total_s": 18.28,
+        "reply_characters": 120,
+        "reply_sha256": "f2cdaf859d6bbd6569b31d7ccbc4fcaf64c7196d859aa7f44f451f507271d1cf",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 388184,
+      "score": {
+        "cer": 0.508197,
+        "char_distance": 31,
+        "deletions": 0,
+        "distance": 5,
+        "hypothesis_normalized": "næste vedligeholdelse er den 21 juni kl 13 30",
+        "hypothesis_words": 9,
+        "insertions": 0,
+        "reference_characters": 61,
+        "reference_normalized": "næste vedligeholdelse er den enogtyvende juli klokken tretten tredive",
+        "reference_words": 9,
+        "substitutions": 5,
+        "wer": 0.555556
+      },
+      "transcript_characters": 48,
+      "transcript_sha256": "6e366e08a5d783af3d682bba643354ff6004f26002c7d5173c7b64fed4471644"
+    },
+    {
+      "audio": {
+        "bytes": 142798,
+        "channels": 1,
+        "duration_s": 4.46,
+        "frames": 71360,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "346f7c2d472f8782009749acfe9c38cb6afdcfa705ed04770221339ba339265b"
+      },
+      "category": "ciffersekvens",
+      "chunks": [
+        {
+          "audio_bytes": 188972,
+          "index": 0,
+          "received_ms": 11281.237,
+          "server_ttfa_s": 11.27,
+          "synth_s": 0.2,
+          "text_characters": 49
+        },
+        {
+          "audio_bytes": 133164,
+          "index": 1,
+          "received_ms": 11973.447,
+          "server_ttfa_s": 11.97,
+          "synth_s": 0.16,
+          "text_characters": 59
+        },
+        {
+          "audio_bytes": 451116,
+          "index": 2,
+          "received_ms": 14042.698,
+          "server_ttfa_s": 14.04,
+          "synth_s": 0.56,
+          "text_characters": 169
+        },
+        {
+          "audio_bytes": 425004,
+          "index": 3,
+          "received_ms": 15384.023,
+          "server_ttfa_s": 15.38,
+          "synth_s": 0.4,
+          "text_characters": 134
+        },
+        {
+          "audio_bytes": 119852,
+          "index": 4,
+          "received_ms": 15656.952,
+          "server_ttfa_s": 15.65,
+          "synth_s": 0.27,
+          "text_characters": 23
+        },
+        {
+          "audio_bytes": 28204,
+          "index": 5,
+          "received_ms": 15692.307,
+          "server_ttfa_s": 15.69,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 382508,
+          "index": 6,
+          "received_ms": 16958.616,
+          "server_ttfa_s": 16.95,
+          "synth_s": 0.51,
+          "text_characters": 88
+        },
+        {
+          "audio_bytes": 14892,
+          "index": 7,
+          "received_ms": 16987.644,
+          "server_ttfa_s": 16.98,
+          "synth_s": 0.02,
+          "text_characters": 11
+        },
+        {
+          "audio_bytes": 430124,
+          "index": 8,
+          "received_ms": 19428.19,
+          "server_ttfa_s": 19.39,
+          "synth_s": 0.69,
+          "text_characters": 162
+        },
+        {
+          "audio_bytes": 132140,
+          "index": 9,
+          "received_ms": 19617.772,
+          "server_ttfa_s": 19.61,
+          "synth_s": 0.15,
+          "text_characters": 48
+        },
+        {
+          "audio_bytes": 17964,
+          "index": 10,
+          "received_ms": 19648.749,
+          "server_ttfa_s": 19.65,
+          "synth_s": 0.03,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 18476,
+          "index": 11,
+          "received_ms": 19702.022,
+          "server_ttfa_s": 19.7,
+          "synth_s": 0.05,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 120876,
+          "index": 12,
+          "received_ms": 20055.702,
+          "server_ttfa_s": 20.05,
+          "synth_s": 0.11,
+          "text_characters": 10
+        },
+        {
+          "audio_bytes": 18476,
+          "index": 13,
+          "received_ms": 20088.704,
+          "server_ttfa_s": 20.09,
+          "synth_s": 0.03,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 14380,
+          "index": 14,
+          "received_ms": 20126.314,
+          "server_ttfa_s": 20.12,
+          "synth_s": 0.03,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 88620,
+          "index": 15,
+          "received_ms": 20676.412,
+          "server_ttfa_s": 20.67,
+          "synth_s": 0.11,
+          "text_characters": 33
+        },
+        {
+          "audio_bytes": 588332,
+          "index": 16,
+          "received_ms": 25608.347,
+          "server_ttfa_s": 25.6,
+          "synth_s": 0.74,
+          "text_characters": 431
+        },
+        {
+          "audio_bytes": 271916,
+          "index": 17,
+          "received_ms": 26569.142,
+          "server_ttfa_s": 26.56,
+          "synth_s": 0.4,
+          "text_characters": 125
+        },
+        {
+          "audio_bytes": 186412,
+          "index": 18,
+          "received_ms": 27344.178,
+          "server_ttfa_s": 27.34,
+          "synth_s": 0.19,
+          "text_characters": 87
+        },
+        {
+          "audio_bytes": 480812,
+          "index": 19,
+          "received_ms": 29867.821,
+          "server_ttfa_s": 29.86,
+          "synth_s": 0.63,
+          "text_characters": 152
+        },
+        {
+          "audio_bytes": 21548,
+          "index": 20,
+          "received_ms": 29923.564,
+          "server_ttfa_s": 29.92,
+          "synth_s": 0.05,
+          "text_characters": 11
+        },
+        {
+          "audio_bytes": 423468,
+          "index": 21,
+          "received_ms": 31596.743,
+          "server_ttfa_s": 31.58,
+          "synth_s": 0.59,
+          "text_characters": 119
+        },
+        {
+          "audio_bytes": 177708,
+          "index": 22,
+          "received_ms": 31858.101,
+          "server_ttfa_s": 31.85,
+          "synth_s": 0.25,
+          "text_characters": 50
+        },
+        {
+          "audio_bytes": 140844,
+          "index": 23,
+          "received_ms": 32539.907,
+          "server_ttfa_s": 32.54,
+          "synth_s": 0.16,
+          "text_characters": 58
+        },
+        {
+          "audio_bytes": 199724,
+          "index": 24,
+          "received_ms": 33589.381,
+          "server_ttfa_s": 33.57,
+          "synth_s": 0.25,
+          "text_characters": 81
+        },
+        {
+          "audio_bytes": 28204,
+          "index": 25,
+          "received_ms": 33624.28,
+          "server_ttfa_s": 33.62,
+          "synth_s": 0.05,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 124972,
+          "index": 26,
+          "received_ms": 34013.785,
+          "server_ttfa_s": 34.01,
+          "synth_s": 0.1,
+          "text_characters": 48
+        }
+      ],
+      "error": null,
+      "id": "turn-14",
+      "latency_ms": {
+        "done": 34014.189,
+        "first_audio": 11281.237,
+        "response_headers": 5.447,
+        "transcript": 763.625
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 10.65,
+        "pipeline_total_s": 34.01,
+        "reply_characters": 2006,
+        "reply_sha256": "4f8f20e8c9f13e0ea70e0177b5046be49ff465977007e0eae686f02824172ab3",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 5228708,
+      "score": {
+        "cer": 0.37931,
+        "char_distance": 11,
+        "deletions": 3,
+        "distance": 4,
+        "hypothesis_normalized": "serveren bruger port 8099",
+        "hypothesis_words": 4,
+        "insertions": 0,
+        "reference_characters": 29,
+        "reference_normalized": "serveren bruger port otte nul ni ni",
+        "reference_words": 7,
+        "substitutions": 1,
+        "wer": 0.571429
+      },
+      "transcript_characters": 26,
+      "transcript_sha256": "e29d5692f68a7650e9f9ac26e820cf38e15f96e1eb9091430197945c18550ea3"
+    },
+    {
+      "audio": {
+        "bytes": 150478,
+        "channels": 1,
+        "duration_s": 4.7,
+        "frames": 75200,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "2ab6cfc8f1416b289d519a31870d4f6f9a2673c1bb4f49cb4b9404ec93985563"
+      },
+      "category": "teknisk sammensætning",
+      "chunks": [
+        {
+          "audio_bytes": 89132,
+          "index": 0,
+          "received_ms": 19219.737,
+          "server_ttfa_s": 19.21,
+          "synth_s": 0.09,
+          "text_characters": 35
+        },
+        {
+          "audio_bytes": 280620,
+          "index": 1,
+          "received_ms": 20409.343,
+          "server_ttfa_s": 20.4,
+          "synth_s": 0.37,
+          "text_characters": 78
+        },
+        {
+          "audio_bytes": 363052,
+          "index": 2,
+          "received_ms": 21864.636,
+          "server_ttfa_s": 21.86,
+          "synth_s": 0.49,
+          "text_characters": 120
+        },
+        {
+          "audio_bytes": 27692,
+          "index": 3,
+          "received_ms": 21904.532,
+          "server_ttfa_s": 21.9,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 147500,
+          "index": 4,
+          "received_ms": 22158.011,
+          "server_ttfa_s": 22.15,
+          "synth_s": 0.22,
+          "text_characters": 46
+        },
+        {
+          "audio_bytes": 183340,
+          "index": 5,
+          "received_ms": 23071.573,
+          "server_ttfa_s": 23.06,
+          "synth_s": 0.23,
+          "text_characters": 84
+        },
+        {
+          "audio_bytes": 24108,
+          "index": 6,
+          "received_ms": 23101.168,
+          "server_ttfa_s": 23.09,
+          "synth_s": 0.02,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 100396,
+          "index": 7,
+          "received_ms": 23273.519,
+          "server_ttfa_s": 23.27,
+          "synth_s": 0.09,
+          "text_characters": 27
+        },
+        {
+          "audio_bytes": 225836,
+          "index": 8,
+          "received_ms": 24463.129,
+          "server_ttfa_s": 24.46,
+          "synth_s": 0.28,
+          "text_characters": 96
+        },
+        {
+          "audio_bytes": 192556,
+          "index": 9,
+          "received_ms": 25238.563,
+          "server_ttfa_s": 25.23,
+          "synth_s": 0.23,
+          "text_characters": 68
+        },
+        {
+          "audio_bytes": 74284,
+          "index": 10,
+          "received_ms": 25378.256,
+          "server_ttfa_s": 25.37,
+          "synth_s": 0.13,
+          "text_characters": 13
+        },
+        {
+          "audio_bytes": 169004,
+          "index": 11,
+          "received_ms": 26033.26,
+          "server_ttfa_s": 26.03,
+          "synth_s": 0.31,
+          "text_characters": 41
+        },
+        {
+          "audio_bytes": 143916,
+          "index": 12,
+          "received_ms": 26666.042,
+          "server_ttfa_s": 26.66,
+          "synth_s": 0.26,
+          "text_characters": 42
+        },
+        {
+          "audio_bytes": 25132,
+          "index": 13,
+          "received_ms": 26751.501,
+          "server_ttfa_s": 26.74,
+          "synth_s": 0.08,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 22572,
+          "index": 14,
+          "received_ms": 26794.491,
+          "server_ttfa_s": 26.79,
+          "synth_s": 0.04,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 182316,
+          "index": 15,
+          "received_ms": 27405.55,
+          "server_ttfa_s": 27.4,
+          "synth_s": 0.19,
+          "text_characters": 57
+        },
+        {
+          "audio_bytes": 43564,
+          "index": 16,
+          "received_ms": 27558.539,
+          "server_ttfa_s": 27.55,
+          "synth_s": 0.04,
+          "text_characters": 18
+        },
+        {
+          "audio_bytes": 27180,
+          "index": 17,
+          "received_ms": 27622.219,
+          "server_ttfa_s": 27.62,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 17964,
+          "index": 18,
+          "received_ms": 27715.974,
+          "server_ttfa_s": 27.71,
+          "synth_s": 0.02,
+          "text_characters": 2
+        },
+        {
+          "audio_bytes": 236076,
+          "index": 19,
+          "received_ms": 28926.753,
+          "server_ttfa_s": 28.92,
+          "synth_s": 0.37,
+          "text_characters": 69
+        },
+        {
+          "audio_bytes": 265772,
+          "index": 20,
+          "received_ms": 30038.967,
+          "server_ttfa_s": 30.03,
+          "synth_s": 0.44,
+          "text_characters": 100
+        },
+        {
+          "audio_bytes": 22060,
+          "index": 21,
+          "received_ms": 30066.846,
+          "server_ttfa_s": 30.06,
+          "synth_s": 0.02,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 80940,
+          "index": 22,
+          "received_ms": 30184.299,
+          "server_ttfa_s": 30.18,
+          "synth_s": 0.1,
+          "text_characters": 35
+        },
+        {
+          "audio_bytes": 78380,
+          "index": 23,
+          "received_ms": 30322.179,
+          "server_ttfa_s": 30.32,
+          "synth_s": 0.07,
+          "text_characters": 13
+        },
+        {
+          "audio_bytes": 303148,
+          "index": 24,
+          "received_ms": 31581.071,
+          "server_ttfa_s": 31.57,
+          "synth_s": 0.29,
+          "text_characters": 95
+        },
+        {
+          "audio_bytes": 239148,
+          "index": 25,
+          "received_ms": 32781.971,
+          "server_ttfa_s": 32.77,
+          "synth_s": 0.35,
+          "text_characters": 102
+        },
+        {
+          "audio_bytes": 112684,
+          "index": 26,
+          "received_ms": 33252.139,
+          "server_ttfa_s": 33.25,
+          "synth_s": 0.16,
+          "text_characters": 50
+        },
+        {
+          "audio_bytes": 154668,
+          "index": 27,
+          "received_ms": 33868.875,
+          "server_ttfa_s": 33.86,
+          "synth_s": 0.25,
+          "text_characters": 44
+        },
+        {
+          "audio_bytes": 203308,
+          "index": 28,
+          "received_ms": 34716.664,
+          "server_ttfa_s": 34.71,
+          "synth_s": 0.17,
+          "text_characters": 68
+        },
+        {
+          "audio_bytes": 79404,
+          "index": 29,
+          "received_ms": 34813.801,
+          "server_ttfa_s": 34.81,
+          "synth_s": 0.09,
+          "text_characters": 13
+        },
+        {
+          "audio_bytes": 326700,
+          "index": 30,
+          "received_ms": 36229.776,
+          "server_ttfa_s": 36.22,
+          "synth_s": 0.42,
+          "text_characters": 95
+        },
+        {
+          "audio_bytes": 30252,
+          "index": 31,
+          "received_ms": 36266.318,
+          "server_ttfa_s": 36.26,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 115244,
+          "index": 32,
+          "received_ms": 36498.994,
+          "server_ttfa_s": 36.49,
+          "synth_s": 0.2,
+          "text_characters": 38
+        },
+        {
+          "audio_bytes": 228908,
+          "index": 33,
+          "received_ms": 37855.547,
+          "server_ttfa_s": 37.85,
+          "synth_s": 0.32,
+          "text_characters": 97
+        },
+        {
+          "audio_bytes": 27692,
+          "index": 34,
+          "received_ms": 37919.913,
+          "server_ttfa_s": 37.91,
+          "synth_s": 0.06,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 52268,
+          "index": 35,
+          "received_ms": 37980.331,
+          "server_ttfa_s": 37.97,
+          "synth_s": 0.05,
+          "text_characters": 18
+        },
+        {
+          "audio_bytes": 60972,
+          "index": 36,
+          "received_ms": 38178.744,
+          "server_ttfa_s": 38.17,
+          "synth_s": 0.05,
+          "text_characters": 19
+        },
+        {
+          "audio_bytes": 31276,
+          "index": 37,
+          "received_ms": 38260.445,
+          "server_ttfa_s": 38.25,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 55852,
+          "index": 38,
+          "received_ms": 38532.385,
+          "server_ttfa_s": 38.53,
+          "synth_s": 0.06,
+          "text_characters": 26
+        },
+        {
+          "audio_bytes": 134188,
+          "index": 39,
+          "received_ms": 39244.148,
+          "server_ttfa_s": 39.24,
+          "synth_s": 0.21,
+          "text_characters": 52
+        },
+        {
+          "audio_bytes": 77356,
+          "index": 40,
+          "received_ms": 39333.279,
+          "server_ttfa_s": 39.33,
+          "synth_s": 0.08,
+          "text_characters": 13
+        },
+        {
+          "audio_bytes": 306732,
+          "index": 41,
+          "received_ms": 40649.808,
+          "server_ttfa_s": 40.64,
+          "synth_s": 0.44,
+          "text_characters": 104
+        },
+        {
+          "audio_bytes": 92204,
+          "index": 42,
+          "received_ms": 40830.882,
+          "server_ttfa_s": 40.82,
+          "synth_s": 0.08,
+          "text_characters": 34
+        },
+        {
+          "audio_bytes": 42540,
+          "index": 43,
+          "received_ms": 41091.384,
+          "server_ttfa_s": 41.09,
+          "synth_s": 0.08,
+          "text_characters": 14
+        },
+        {
+          "audio_bytes": 80428,
+          "index": 44,
+          "received_ms": 41528.084,
+          "server_ttfa_s": 41.52,
+          "synth_s": 0.14,
+          "text_characters": 30
+        },
+        {
+          "audio_bytes": 806444,
+          "index": 45,
+          "received_ms": 45403.098,
+          "server_ttfa_s": 45.39,
+          "synth_s": 1.04,
+          "text_characters": 281
+        },
+        {
+          "audio_bytes": 519212,
+          "index": 46,
+          "received_ms": 46538.651,
+          "server_ttfa_s": 46.53,
+          "synth_s": 0.72,
+          "text_characters": 158
+        },
+        {
+          "audio_bytes": 26156,
+          "index": 47,
+          "received_ms": 46586.971,
+          "server_ttfa_s": 46.58,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 470060,
+          "index": 48,
+          "received_ms": 48285.681,
+          "server_ttfa_s": 48.28,
+          "synth_s": 0.59,
+          "text_characters": 176
+        },
+        {
+          "audio_bytes": 295980,
+          "index": 49,
+          "received_ms": 49077.468,
+          "server_ttfa_s": 49.07,
+          "synth_s": 0.44,
+          "text_characters": 85
+        },
+        {
+          "audio_bytes": 23596,
+          "index": 50,
+          "received_ms": 49113.49,
+          "server_ttfa_s": 49.11,
+          "synth_s": 0.03,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 161324,
+          "index": 51,
+          "received_ms": 49487.603,
+          "server_ttfa_s": 49.48,
+          "synth_s": 0.3,
+          "text_characters": 53
+        },
+        {
+          "audio_bytes": 138284,
+          "index": 52,
+          "received_ms": 49694.101,
+          "server_ttfa_s": 49.69,
+          "synth_s": 0.16,
+          "text_characters": 26
+        },
+        {
+          "audio_bytes": 230956,
+          "index": 53,
+          "received_ms": 50538.965,
+          "server_ttfa_s": 50.53,
+          "synth_s": 0.27,
+          "text_characters": 66
+        },
+        {
+          "audio_bytes": 136236,
+          "index": 54,
+          "received_ms": 51179.929,
+          "server_ttfa_s": 51.17,
+          "synth_s": 0.11,
+          "text_characters": 63
+        }
+      ],
+      "error": null,
+      "id": "turn-15",
+      "latency_ms": {
+        "done": 51180.464,
+        "first_audio": 19219.737,
+        "response_headers": 7.215,
+        "transcript": 936.345
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 18.44,
+        "pipeline_total_s": 51.17,
+        "reply_characters": 2860,
+        "reply_sha256": "0834b26b6591c19ea57b94663de482e8692c9b116a12c945881b73c92f3c22f5",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 8586612,
+      "score": {
+        "cer": 0.318182,
+        "char_distance": 14,
+        "deletions": 1,
+        "distance": 5,
+        "hypothesis_normalized": "rackindexet skal testes med 10 000 tekstykker",
+        "hypothesis_words": 7,
+        "insertions": 0,
+        "reference_characters": 44,
+        "reference_normalized": "rag indekset skal testes med ti tusind tekststykker",
+        "reference_words": 8,
+        "substitutions": 4,
+        "wer": 0.625
+      },
+      "transcript_characters": 46,
+      "transcript_sha256": "b40d4fb6f3027aa8d705b5424ef153c5127bf73e36c7dcc5e6e6d75953043107"
+    },
+    {
+      "audio": {
+        "bytes": 127758,
+        "channels": 1,
+        "duration_s": 3.99,
+        "frames": 63840,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "b5433afdf6c37a63d832f201bafe44211042034e090128a6f369ebf8eb69b648"
+      },
+      "category": "talminimalpar",
+      "chunks": [
+        {
+          "audio_bytes": 238124,
+          "index": 0,
+          "received_ms": 17897.194,
+          "server_ttfa_s": 17.86,
+          "synth_s": 0.26,
+          "text_characters": 92
+        },
+        {
+          "audio_bytes": 67628,
+          "index": 1,
+          "received_ms": 18113.096,
+          "server_ttfa_s": 18.1,
+          "synth_s": 0.09,
+          "text_characters": 29
+        },
+        {
+          "audio_bytes": 24620,
+          "index": 2,
+          "received_ms": 18170.804,
+          "server_ttfa_s": 18.16,
+          "synth_s": 0.05,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 243244,
+          "index": 3,
+          "received_ms": 19715.429,
+          "server_ttfa_s": 19.7,
+          "synth_s": 0.5,
+          "text_characters": 76
+        },
+        {
+          "audio_bytes": 261164,
+          "index": 4,
+          "received_ms": 20846.746,
+          "server_ttfa_s": 20.83,
+          "synth_s": 0.21,
+          "text_characters": 121
+        }
+      ],
+      "error": null,
+      "id": "turn-16",
+      "latency_ms": {
+        "done": 20847.628,
+        "first_audio": 17897.194,
+        "response_headers": 11.744,
+        "transcript": 825.609
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 17.21,
+        "pipeline_total_s": 20.84,
+        "reply_characters": 327,
+        "reply_sha256": "edc8f345c6bc2e71e081e54f0b170c7cba5b60166f425a754fc0da060d11eb1d",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 834780,
+      "score": {
+        "cer": 0.444444,
+        "char_distance": 16,
+        "deletions": 0,
+        "distance": 2,
+        "hypothesis_normalized": "kan du høre forskel på 40 og 44",
+        "hypothesis_words": 8,
+        "insertions": 0,
+        "reference_characters": 36,
+        "reference_normalized": "kan du høre forskel på fyrre og fireogfyrre",
+        "reference_words": 8,
+        "substitutions": 2,
+        "wer": 0.25
+      },
+      "transcript_characters": 32,
+      "transcript_sha256": "26fafa93702a0699d4d2d9ed18bf8276ce3736da8281c6a384104d809356025a"
+    },
+    {
+      "audio": {
+        "bytes": 118478,
+        "channels": 1,
+        "duration_s": 3.7,
+        "frames": 59200,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "ca0e0ab86052a967e09142b067684aa570dc2d7d111e5034a9d91de7e612568d"
+      },
+      "category": "danske stednavne",
+      "chunks": [
+        {
+          "audio_bytes": 59948,
+          "index": 0,
+          "received_ms": 7801.248,
+          "server_ttfa_s": 7.78,
+          "synth_s": 0.06,
+          "text_characters": 23
+        },
+        {
+          "audio_bytes": 319532,
+          "index": 1,
+          "received_ms": 9439.436,
+          "server_ttfa_s": 9.42,
+          "synth_s": 0.43,
+          "text_characters": 126
+        },
+        {
+          "audio_bytes": 128044,
+          "index": 2,
+          "received_ms": 9891.331,
+          "server_ttfa_s": 9.87,
+          "synth_s": 0.24,
+          "text_characters": 49
+        },
+        {
+          "audio_bytes": 27692,
+          "index": 3,
+          "received_ms": 9937.135,
+          "server_ttfa_s": 9.92,
+          "synth_s": 0.04,
+          "text_characters": 4
+        },
+        {
+          "audio_bytes": 194092,
+          "index": 4,
+          "received_ms": 10843.372,
+          "server_ttfa_s": 10.82,
+          "synth_s": 0.16,
+          "text_characters": 78
+        }
+      ],
+      "error": null,
+      "id": "turn-17",
+      "latency_ms": {
+        "done": 10843.958,
+        "first_audio": 7801.248,
+        "response_headers": 21.524,
+        "transcript": 881.599
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 7.09,
+        "pipeline_total_s": 10.82,
+        "reply_characters": 285,
+        "reply_sha256": "c6f75ca3c705a621863b25c169b7ac9902c34e39906fd88468ffefcfb42854be",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 729308,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "jeg bor på nørrebro i københavn",
+        "hypothesis_words": 6,
+        "insertions": 0,
+        "reference_characters": 26,
+        "reference_normalized": "jeg bor på nørrebro i københavn",
+        "reference_words": 6,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 32,
+      "transcript_sha256": "308ed7eb3e6c56fc3c3810eae3cc8f4ed9b9b0bc1d1bde4bee060dc9d96aec51"
+    },
+    {
+      "audio": {
+        "bytes": 171918,
+        "channels": 1,
+        "duration_s": 5.37,
+        "frames": 85920,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "42fd66841667afabbd99445e3f4125ef7914d727032daf107efd92262ee69af8"
+      },
+      "category": "danske særtegn",
+      "chunks": [
+        {
+          "audio_bytes": 46636,
+          "index": 0,
+          "received_ms": 10534.964,
+          "server_ttfa_s": 10.53,
+          "synth_s": 0.08,
+          "text_characters": 16
+        },
+        {
+          "audio_bytes": 180268,
+          "index": 1,
+          "received_ms": 11615.36,
+          "server_ttfa_s": 11.61,
+          "synth_s": 0.2,
+          "text_characters": 68
+        },
+        {
+          "audio_bytes": 157228,
+          "index": 2,
+          "received_ms": 12455.081,
+          "server_ttfa_s": 12.45,
+          "synth_s": 0.21,
+          "text_characters": 71
+        },
+        {
+          "audio_bytes": 32812,
+          "index": 3,
+          "received_ms": 12511.054,
+          "server_ttfa_s": 12.51,
+          "synth_s": 0.05,
+          "text_characters": 8
+        },
+        {
+          "audio_bytes": 195628,
+          "index": 4,
+          "received_ms": 13656.19,
+          "server_ttfa_s": 13.65,
+          "synth_s": 0.15,
+          "text_characters": 87
+        }
+      ],
+      "error": null,
+      "id": "turn-18",
+      "latency_ms": {
+        "done": 13656.836,
+        "first_audio": 10534.964,
+        "response_headers": 5.68,
+        "transcript": 915.411
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 9.78,
+        "pipeline_total_s": 13.65,
+        "reply_characters": 256,
+        "reply_sha256": "c22e53251a49acefe0fcf8cfb7ada15986423bd9e8aa3d05f54f5a217c73733c",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 612572,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "skriv en note med ordene øl æble og åben",
+        "hypothesis_words": 9,
+        "insertions": 0,
+        "reference_characters": 32,
+        "reference_normalized": "skriv en note med ordene øl æble og åben",
+        "reference_words": 9,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 42,
+      "transcript_sha256": "b9985a1402550fe27a2e3b0235757a415e9fe2230a42f5a20cebb1c0de0405fc"
+    },
+    {
+      "audio": {
+        "bytes": 135118,
+        "channels": 1,
+        "duration_s": 4.22,
+        "frames": 67520,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "6f7562841abbeb483c42c93042d8d5defabf09992a5acecdc2232a40cbd1829f"
+      },
+      "category": "barge-in formulering",
+      "chunks": [
+        {
+          "audio_bytes": 63020,
+          "index": 0,
+          "received_ms": 13778.059,
+          "server_ttfa_s": 13.75,
+          "synth_s": 0.08,
+          "text_characters": 18
+        },
+        {
+          "audio_bytes": 128556,
+          "index": 1,
+          "received_ms": 14492.382,
+          "server_ttfa_s": 14.46,
+          "synth_s": 0.21,
+          "text_characters": 53
+        },
+        {
+          "audio_bytes": 97324,
+          "index": 2,
+          "received_ms": 14981.192,
+          "server_ttfa_s": 14.95,
+          "synth_s": 0.08,
+          "text_characters": 47
+        }
+      ],
+      "error": null,
+      "id": "turn-19",
+      "latency_ms": {
+        "done": 14981.507,
+        "first_audio": 13778.059,
+        "response_headers": 28.438,
+        "transcript": 836.858
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 13.11,
+        "pipeline_total_s": 14.95,
+        "reply_characters": 120,
+        "reply_sha256": "f3aadbca8db184b707db6115c44be6b311f385dd9d5561aef1e302156758e53e",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 288900,
+      "score": {
+        "cer": 0.0,
+        "char_distance": 0,
+        "deletions": 0,
+        "distance": 0,
+        "hypothesis_normalized": "stop svaret hvis jeg begynder at tale igen",
+        "hypothesis_words": 8,
+        "insertions": 0,
+        "reference_characters": 35,
+        "reference_normalized": "stop svaret hvis jeg begynder at tale igen",
+        "reference_words": 8,
+        "substitutions": 0,
+        "wer": 0.0
+      },
+      "transcript_characters": 44,
+      "transcript_sha256": "731b4ce6ad0b8b8220bebac642bdf89d1aa00aebcbcfc460ec11d826aa689092"
+    },
+    {
+      "audio": {
+        "bytes": 127758,
+        "channels": 1,
+        "duration_s": 3.99,
+        "frames": 63840,
+        "sample_rate_hz": 16000,
+        "sample_width_bytes": 2,
+        "sha256": "0c65bbe83f957f6794de2ee79880d87295435bc372354809eed438f8ebf3f41b"
+      },
+      "category": "afsluttende kontrol",
+      "chunks": [
+        {
+          "audio_bytes": 71212,
+          "index": 0,
+          "received_ms": 8729.814,
+          "server_ttfa_s": 8.71,
+          "synth_s": 0.13,
+          "text_characters": 28
+        },
+        {
+          "audio_bytes": 345132,
+          "index": 1,
+          "received_ms": 10441.253,
+          "server_ttfa_s": 10.42,
+          "synth_s": 0.28,
+          "text_characters": 153
+        }
+      ],
+      "error": null,
+      "id": "turn-20",
+      "latency_ms": {
+        "done": 10442.328,
+        "first_audio": 8729.814,
+        "response_headers": 24.092,
+        "transcript": 914.149
+      },
+      "phase": "warm",
+      "pipeline": {
+        "language": "da",
+        "model": "qwen3:14b",
+        "pipeline_time_to_first_audio_s": 7.98,
+        "pipeline_total_s": 10.42,
+        "reply_characters": 184,
+        "reply_sha256": "70f5f6f540a5ecd267227fb6d189d2ec3e6649e62dfdc9df1f1f3cd9d62df38a",
+        "via_cloud": false
+      },
+      "repetition": 2,
+      "reply_audio_bytes": 416344,
+      "score": {
+        "cer": 0.025641,
+        "char_distance": 1,
+        "deletions": 0,
+        "distance": 1,
+        "hypothesis_normalized": "det her er den sidste sætning i voice baseline",
+        "hypothesis_words": 9,
+        "insertions": 0,
+        "reference_characters": 39,
+        "reference_normalized": "det her er den sidste sætning i voice baselinen",
+        "reference_words": 9,
+        "substitutions": 1,
+        "wer": 0.111111
+      },
+      "transcript_characters": 47,
+      "transcript_sha256": "9821e9d1c6afbe6ecbdc33fc9e34517c39551ff8de68464de60b15f829bb5014"
+    }
+  ],
+  "schema": "kaliv-voice-baseline/v1",
+  "summary": {
+    "cancellation": {
+      "errors": 0,
+      "passed": 4,
+      "probes": 4
+    },
+    "cer_micro": 0.119435,
+    "cold_probe_completed": true,
+    "completed": 39,
+    "errors": 1,
+    "latency_ms": {
+      "done": {
+        "max": 56295.69,
+        "mean": 24830.89,
+        "min": 9359.007,
+        "p50": 19598.611,
+        "p95": 55547.264
+      },
+      "first_audio": {
+        "max": 35031.43,
+        "mean": 14771.536,
+        "min": 7801.248,
+        "p50": 13778.059,
+        "p95": 27028.362
+      },
+      "response_headers": {
+        "max": 45.694,
+        "mean": 14.206,
+        "min": 4.688,
+        "p50": 9.454,
+        "p95": 28.545
+      },
+      "transcript": {
+        "max": 1059.625,
+        "mean": 903.289,
+        "min": 763.625,
+        "p50": 911.998,
+        "p95": 1044.65
+      }
+    },
+    "manual": {
+      "passed": false,
+      "provided": true,
+      "stop_latency_ms": {
+        "max": null,
+        "mean": null,
+        "min": null,
+        "p50": null,
+        "p95": null
+      },
+      "trials": 5
+    },
+    "pipeline_time_to_first_audio_s": {
+      "max": 34.39,
+      "mean": 14.03,
+      "min": 7.09,
+      "p50": 13.11,
+      "p95": 26.32
+    },
+    "pipeline_total_s": {
+      "max": 56.26,
+      "mean": 24.817,
+      "min": 9.35,
+      "p50": 19.58,
+      "p95": 55.53
+    },
+    "runs": 40,
+    "wer_macro": 0.162902,
+    "wer_micro": 0.165017
+  },
+  "worker": {
+    "asr_status": {
+      "available": true,
+      "compute_type": "int8",
+      "cuda_dll_dirs": [],
+      "device": "cuda",
+      "legacy_env": [],
+      "model": "large-v3"
+    },
+    "health": {
+      "documents": 0,
+      "service": "modelrig-worker",
+      "status": "ok",
+      "version": "1.58.145"
+    },
+    "tts_status": {
+      "available": true,
+      "legacy_env": [],
+      "voice": "da_DK-talesyntese-medium",
+      "voices_dir": "C:\\Users\\admin/.alva/piper-voices"
+    },
+    "url": "http://127.0.0.1:8099"
+  }
+}

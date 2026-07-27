@@ -1,0 +1,64 @@
+{
+  "already_validated": false,
+  "backend": {
+    "base_url": "http://127.0.0.1:8080"
+  },
+  "candidate": {
+    "code_sha256": "34b0e7f61104e10d86b62404e34537a176a55df87db9ac7d43ffb9fe44c93642",
+    "git_sha": "51c381a09aa76e44dd2a501b837e6b5daff7379d",
+    "version": "1.58.145"
+  },
+  "checks": [
+    {
+      "detail": "set (64 chars)",
+      "fix": "",
+      "name": "paired-device token (MODELRIG_TOKEN)",
+      "status": "ok"
+    },
+    {
+      "detail": "qwen3:14b",
+      "fix": "",
+      "name": "planner model (KALIV_AGENT3_PLANNER_MODEL)",
+      "status": "ok"
+    },
+    {
+      "detail": "C:\\Users\\admin\\Desktop\\ModelRig-git\\validation\\agent3-rig-validation-latest.json",
+      "fix": "",
+      "name": "report path wired for the worker (KALIV_AGENT3_VALIDATION_REPORT)",
+      "status": "ok"
+    },
+    {
+      "detail": "200",
+      "fix": "",
+      "name": "backend reachable (http://127.0.0.1:8080/healthz)",
+      "status": "ok"
+    },
+    {
+      "detail": "HTTP 401 -- token rejected",
+      "fix": "The token in MODELRIG_TOKEN is not accepted. Use a current\npaired-device token; a rotated or expired one fails here.",
+      "name": "token accepted (http://127.0.0.1:8080/api/v1/status)",
+      "status": "fail"
+    },
+    {
+      "detail": "not available -- earlier check failed",
+      "fix": "Fix the failures above first; this depends on them.",
+      "name": "worker's report view (rig_validation)",
+      "status": "warn"
+    },
+    {
+      "detail": "HTTP 401",
+      "fix": "Unexpected health response.",
+      "name": "deep health (/health/full?deep=true)",
+      "status": "fail"
+    }
+  ],
+  "generated_at": "2026-07-26T08:16:39.203160+00:00",
+  "ready": false,
+  "schema": "kaliv-rig-preflight/v1",
+  "summary": {
+    "checks": 7,
+    "failures": 2,
+    "ok": 4,
+    "warnings": 1
+  }
+}

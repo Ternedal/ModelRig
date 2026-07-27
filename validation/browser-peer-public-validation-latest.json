@@ -1,0 +1,71 @@
+{
+  "candidate": {
+    "branch": "agent/unified-candidate-1.58.145",
+    "code_sha256": "cb67f686bccc543306fe156d5335f87166a2584c346f3f5ac50f2f210422d4b2",
+    "dirty_entries": 0,
+    "git_sha": "8e92f34d86ff238357f408b33f6acaebd485b1d4",
+    "version": "1.58.145",
+    "version_check_detail": null,
+    "version_stamps_consistent": true,
+    "working_tree_clean": true
+  },
+  "citation": {
+    "adapter": "deterministic-web-fetch",
+    "bytes_read": 559,
+    "content_sha256": "ff67a9d764d6a2367a187734e697f6a53217db9a21c101d410a113ca871a299d",
+    "media_type": "text/html"
+  },
+  "dns": {
+    "addresses": [
+      "104.20.23.154",
+      "172.66.147.243"
+    ],
+    "answer_count": 2,
+    "dns_sha256": "a3aaed53049ccb407be9eb0d180be3e21d022e36969e06c6489fd53ffea87bc3",
+    "selected_address": "104.20.23.154"
+  },
+  "error": null,
+  "evidence": {
+    "bytes_sent": 202,
+    "connected_port": 443,
+    "production_activation": false,
+    "response_body_bytes": 559,
+    "response_body_sha256": "ff67a9d764d6a2367a187734e697f6a53217db9a21c101d410a113ca871a299d",
+    "schema": "kaliv-browser-peer-runtime/v1",
+    "selected_address": "104.20.23.154",
+    "status": 200,
+    "url_sha256": "0f115db062b7c0dd030b16878c99dea5c354b49dc37b38eb8846179c7783e9d7"
+  },
+  "generated_at": "2026-07-26T21:56:42Z",
+  "limits": {
+    "max_outbound_bytes": 4096,
+    "max_response_bytes": 262144,
+    "method": "GET",
+    "redirects_followed": false,
+    "timeout_seconds": 15.0
+  },
+  "passed": true,
+  "plan": {
+    "consumed_path": "validation\\browser-peer-public-validation-plan.consumed-bpv_caf3b4e197214bc7b16b307339db893a.json",
+    "consumed_sha256": "8128b237d6ccb4f09a9d11ecd3e9a450880b6ecd7816032d0ad4d42de9e85c1f",
+    "plan_id": "bpv_caf3b4e197214bc7b16b307339db893a"
+  },
+  "production_activation": false,
+  "public_network_contacted": true,
+  "redirects_followed": false,
+  "schema": "kaliv-browser-peer-public-validation/v1",
+  "target": {
+    "host": "example.com",
+    "port": 443,
+    "url_sha256": "0f115db062b7c0dd030b16878c99dea5c354b49dc37b38eb8846179c7783e9d7"
+  },
+  "transport": {
+    "bytes_sent": 202,
+    "connected_address": "104.20.23.154",
+    "connected_port": 443,
+    "response_body_bytes": 559,
+    "response_body_sha256": "ff67a9d764d6a2367a187734e697f6a53217db9a21c101d410a113ca871a299d",
+    "response_status": 200
+  },
+  "validation_only": true
+}

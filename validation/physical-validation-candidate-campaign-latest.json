@@ -1,0 +1,203 @@
+{
+  "candidate": {
+    "branch": "agent/unified-candidate-1.58.145",
+    "code_sha256": "cb67f686bccc543306fe156d5335f87166a2584c346f3f5ac50f2f210422d4b2",
+    "dirty_entries": 0,
+    "git_sha": "8e92f34d86ff238357f408b33f6acaebd485b1d4",
+    "identity_source": "git",
+    "version": "1.58.145",
+    "version_check_detail": null,
+    "version_stamps_consistent": true,
+    "working_tree_clean": true
+  },
+  "configuration": {
+    "max_age_hours": 168.0,
+    "min_model_exact": 1.0
+  },
+  "evidence": {
+    "agent3": {
+      "age_hours": 2.569,
+      "bytes": 4047,
+      "errors": [],
+      "name": "agent3",
+      "path": "validation\\agent3-rig-validation-latest.json",
+      "present": true,
+      "sha256": "5171c41a94a503a26a71ab5c56a791029d3dcdd04bf86ecfcfa7491b35d24aa2",
+      "status": "pass",
+      "summary": {
+        "eligible_for_developer_preview": true,
+        "eligible_for_write_pilot": false,
+        "planner_model": "qwen3:14b",
+        "production_activation": false,
+        "success": true,
+        "write_decision": "deny"
+      },
+      "warnings": []
+    },
+    "model_eval": {
+      "age_hours": 2.527,
+      "bytes": 25388,
+      "errors": [],
+      "name": "model_eval",
+      "path": "validation\\agent3-model-eval-latest.json",
+      "present": true,
+      "sha256": "b078249247e75c422bfef24b4b1688c05c33dc18c85454a474a64283e1b2cb91",
+      "status": "pass",
+      "summary": {
+        "discipline_rate": 1.0,
+        "exact_match_rate": 1.0,
+        "latency_ms": {
+          "max": 8614.842,
+          "mean": 5083.139,
+          "min": 3598.523,
+          "p50": 4920.451,
+          "p95": 6853.311
+        },
+        "planner_model": "qwen3:14b",
+        "request_errors": 0,
+        "tasks": 30
+      },
+      "warnings": []
+    },
+    "preflight": {
+      "age_hours": 2.576,
+      "bytes": 2973,
+      "errors": [],
+      "name": "preflight",
+      "path": "validation\\rig-preflight-latest.json",
+      "present": true,
+      "sha256": "1841950a646255ca71ed127e628195941115997db1d518a5626cec3b81648a18",
+      "status": "pass",
+      "summary": {
+        "already_validated": false,
+        "failed_checks": 0,
+        "ready": true,
+        "warning_checks": 1
+      },
+      "warnings": []
+    },
+    "rag": {
+      "age_hours": 1.671,
+      "bytes": 61401,
+      "errors": [],
+      "name": "rag",
+      "path": "validation\\rag-benchmark-latest.json",
+      "present": true,
+      "sha256": "8ecb94e2c47b15c305f2ee23d70d11924c8de9d8165b9a5976b889c15aa3bb96",
+      "status": "pass",
+      "summary": {
+        "embedding_model": "nomic-embed-text",
+        "errors": 0,
+        "maximum_query_p95_ms": 3767.287,
+        "minimum_recall_at_5": 1.0,
+        "scales": [
+          1000,
+          10000
+        ]
+      },
+      "warnings": []
+    },
+    "scheduler_pilot": {
+      "age_hours": 0.092,
+      "bytes": 7148,
+      "errors": [],
+      "name": "scheduler_pilot",
+      "path": "validation\\scheduler-pilot-latest.json",
+      "present": true,
+      "sha256": "b8a77688e85f043f46385a1f269b8c03fd757b7db76a542a3cdf89d7c91882ef",
+      "status": "pass",
+      "summary": {},
+      "warnings": []
+    },
+    "voice": {
+      "age_hours": 1.663,
+      "bytes": 214094,
+      "errors": [],
+      "name": "voice",
+      "path": "validation\\voice-baseline-latest.json",
+      "present": true,
+      "sha256": "d37e9efcdc176cd853764515b19774d89203920f7c5ecd31217becfed1e71b90",
+      "status": "pass",
+      "summary": {
+        "cancellation": {
+          "errors": 0,
+          "passed": 4,
+          "probes": 4
+        },
+        "cer_micro": 0.124654,
+        "cold_probe_completed": true,
+        "completed": 40,
+        "errors": 0,
+        "first_audio_ms": {
+          "max": 34904.563,
+          "mean": 15552.043,
+          "min": 6039.848,
+          "p50": 12873.796,
+          "p95": 29349.095
+        },
+        "manual": {
+          "passed": true,
+          "provided": true,
+          "stop_latency_ms": {
+            "max": 250.0,
+            "mean": 250.0,
+            "min": 250.0,
+            "p50": 250.0,
+            "p95": 250.0
+          },
+          "trials": 5
+        },
+        "wer_micro": 0.174194
+      },
+      "warnings": []
+    }
+  },
+  "freeze": {
+    "generated_at": "2026-07-26T21:56:01.548357Z",
+    "main_anchor": {
+      "ancestor_of_candidate": true,
+      "git_sha": "608afed23761b1bb2de5308198f8da27063f76dc"
+    },
+    "path": "validation\\pre-release-candidate-freeze-latest.json",
+    "schema": "kaliv-pre-release-candidate-freeze/v1",
+    "sha256": "88295d59118a6028e73889a70aa74f14d2fd994688b212c7bc90501aa43d90b1",
+    "software_checks": {
+      "agent3-diagnostics": "success",
+      "agent3-full-diagnostics": "success",
+      "ci": "success",
+      "codeql": "success"
+    }
+  },
+  "gate": {
+    "candidate_campaign_complete": true,
+    "passed": true,
+    "production_activation": false,
+    "release_complete": false,
+    "release_validation_pending": true
+  },
+  "generated_at": "2026-07-26T21:56:01.676162Z",
+  "mode": "verify",
+  "proof_allowlist": [
+    "preflight",
+    "agent3",
+    "model_eval",
+    "voice",
+    "rag",
+    "scheduler_pilot"
+  ],
+  "schema": "kaliv-physical-validation-candidate-campaign/v1",
+  "summary": {
+    "candidate_errors": [],
+    "failed": [],
+    "missing": [],
+    "passed": [
+      "preflight",
+      "agent3",
+      "model_eval",
+      "voice",
+      "rag",
+      "scheduler_pilot"
+    ],
+    "total": 6
+  }
+}

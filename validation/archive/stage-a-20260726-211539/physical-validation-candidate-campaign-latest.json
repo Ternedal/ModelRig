@@ -1,0 +1,206 @@
+{
+  "candidate": {
+    "branch": "agent/unified-candidate-1.58.145",
+    "code_sha256": "cb67f686bccc543306fe156d5335f87166a2584c346f3f5ac50f2f210422d4b2",
+    "dirty_entries": 0,
+    "git_sha": "326b9f8e8fe6377918ccd7e7b2f79a1a14c97b82",
+    "identity_source": "git",
+    "version": "1.58.145",
+    "version_check_detail": null,
+    "version_stamps_consistent": true,
+    "working_tree_clean": true
+  },
+  "configuration": {
+    "max_age_hours": 168.0,
+    "min_model_exact": 1.0
+  },
+  "evidence": {
+    "agent3": {
+      "age_hours": 1.245,
+      "bytes": 4047,
+      "errors": [],
+      "name": "agent3",
+      "path": "validation\\agent3-rig-validation-latest.json",
+      "present": true,
+      "sha256": "6e586affc64b6d2355adcca55f43d4c8a8583fb6e4a17999cc7e6d59b20519ef",
+      "status": "pass",
+      "summary": {
+        "eligible_for_developer_preview": true,
+        "eligible_for_write_pilot": false,
+        "planner_model": "qwen3:14b",
+        "production_activation": false,
+        "success": true,
+        "write_decision": "deny"
+      },
+      "warnings": []
+    },
+    "model_eval": {
+      "age_hours": 1.203,
+      "bytes": 25387,
+      "errors": [],
+      "name": "model_eval",
+      "path": "validation\\agent3-model-eval-latest.json",
+      "present": true,
+      "sha256": "deeea6d776a6cbc41782c9659f0f55fbc9e914ff87cb543a7015d96ffc3c0302",
+      "status": "pass",
+      "summary": {
+        "discipline_rate": 1.0,
+        "exact_match_rate": 1.0,
+        "latency_ms": {
+          "max": 7998.209,
+          "mean": 5084.37,
+          "min": 3243.834,
+          "p50": 4797.686,
+          "p95": 6613.347
+        },
+        "planner_model": "qwen3:14b",
+        "request_errors": 0,
+        "tasks": 30
+      },
+      "warnings": []
+    },
+    "preflight": {
+      "age_hours": 1.251,
+      "bytes": 2973,
+      "errors": [],
+      "name": "preflight",
+      "path": "validation\\rig-preflight-latest.json",
+      "present": true,
+      "sha256": "37fc6e0ffcf1b541c4b44ec730778886a19e64a00e63b196f36144fd860c9e14",
+      "status": "pass",
+      "summary": {
+        "already_validated": false,
+        "failed_checks": 0,
+        "ready": true,
+        "warning_checks": 1
+      },
+      "warnings": []
+    },
+    "rag": {
+      "age_hours": 0.337,
+      "bytes": 61395,
+      "errors": [],
+      "name": "rag",
+      "path": "validation\\rag-benchmark-latest.json",
+      "present": true,
+      "sha256": "9eaed5a8179976bf64c318e13e90d193f8f0243dd9ca05bbd0478eca830a7539",
+      "status": "pass",
+      "summary": {
+        "embedding_model": "nomic-embed-text",
+        "errors": 0,
+        "maximum_query_p95_ms": 3809.793,
+        "minimum_recall_at_5": 1.0,
+        "scales": [
+          1000,
+          10000
+        ]
+      },
+      "warnings": []
+    },
+    "scheduler_pilot": {
+      "age_hours": null,
+      "bytes": 0,
+      "errors": [
+        "evidence file is missing"
+      ],
+      "name": "scheduler_pilot",
+      "path": "validation\\scheduler-pilot-latest.json",
+      "present": false,
+      "sha256": null,
+      "status": "missing",
+      "summary": {},
+      "warnings": []
+    },
+    "voice": {
+      "age_hours": 0.326,
+      "bytes": 206501,
+      "errors": [],
+      "name": "voice",
+      "path": "validation\\voice-baseline-latest.json",
+      "present": true,
+      "sha256": "2b79899e7c10c3387d995d81e2d86b87b77747f0e1663b1e880ef0b1774b3278",
+      "status": "pass",
+      "summary": {
+        "cancellation": {
+          "errors": 0,
+          "passed": 4,
+          "probes": 4
+        },
+        "cer_micro": 0.124654,
+        "cold_probe_completed": true,
+        "completed": 40,
+        "errors": 0,
+        "first_audio_ms": {
+          "max": 35413.879,
+          "mean": 16253.232,
+          "min": 6377.501,
+          "p50": 15144.639,
+          "p95": 28940.522
+        },
+        "manual": {
+          "passed": true,
+          "provided": true,
+          "stop_latency_ms": {
+            "max": 250.0,
+            "mean": 250.0,
+            "min": 250.0,
+            "p50": 250.0,
+            "p95": 250.0
+          },
+          "trials": 5
+        },
+        "wer_micro": 0.174194
+      },
+      "warnings": []
+    }
+  },
+  "freeze": {
+    "generated_at": "2026-07-26T12:23:57.942912Z",
+    "main_anchor": {
+      "ancestor_of_candidate": true,
+      "git_sha": "608afed23761b1bb2de5308198f8da27063f76dc"
+    },
+    "path": "validation\\pre-release-candidate-freeze-latest.json",
+    "schema": "kaliv-pre-release-candidate-freeze/v1",
+    "sha256": "3254bc45e53ab5172419afbe592ccbf6e622b173db0e3d9cd063f1a48b2c2f41",
+    "software_checks": {
+      "agent3-diagnostics": "success",
+      "agent3-full-diagnostics": "success",
+      "ci": "success",
+      "codeql": "success"
+    }
+  },
+  "gate": {
+    "candidate_campaign_complete": false,
+    "passed": true,
+    "production_activation": false,
+    "release_complete": false,
+    "release_validation_pending": true
+  },
+  "generated_at": "2026-07-26T13:40:04.905669Z",
+  "mode": "prepare",
+  "proof_allowlist": [
+    "preflight",
+    "agent3",
+    "model_eval",
+    "voice",
+    "rag",
+    "scheduler_pilot"
+  ],
+  "schema": "kaliv-physical-validation-candidate-campaign/v1",
+  "summary": {
+    "candidate_errors": [],
+    "failed": [],
+    "missing": [
+      "scheduler_pilot"
+    ],
+    "passed": [
+      "preflight",
+      "agent3",
+      "model_eval",
+      "voice",
+      "rag"
+    ],
+    "total": 6
+  }
+}

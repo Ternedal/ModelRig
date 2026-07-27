@@ -1,0 +1,73 @@
+{
+  "candidate": {
+    "branch": "agent/unified-candidate-1.58.145",
+    "code_sha256": "cb67f686bccc543306fe156d5335f87166a2584c346f3f5ac50f2f210422d4b2",
+    "dirty_entries": 0,
+    "git_sha": "8e92f34d86ff238357f408b33f6acaebd485b1d4",
+    "version": "1.58.145",
+    "version_check_detail": null,
+    "version_stamps_consistent": true,
+    "working_tree_clean": true
+  },
+  "gate": {
+    "candidate_bound": true,
+    "interactive_operator": true,
+    "passed": true,
+    "production_activation": false,
+    "public_network_contacted": true,
+    "receipt_integrity": true,
+    "windows_host": true
+  },
+  "generated_at": "2026-07-26T21:56:39.488671Z",
+  "host": {
+    "hostname": "DESKTOP-N7OVNF0",
+    "machine": "AMD64",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python": "3.11.9",
+    "release": "10",
+    "system": "Windows",
+    "version": "10.0.26200"
+  },
+  "operator": {
+    "ci": false,
+    "github_actions": false,
+    "interactive_terminal": true,
+    "typed_confirmation": true
+  },
+  "receipt": {
+    "citation": {
+      "adapter": "deterministic-web-fetch",
+      "bytes_read": 559,
+      "content_sha256": "ff67a9d764d6a2367a187734e697f6a53217db9a21c101d410a113ca871a299d",
+      "media_type": "text/html"
+    },
+    "dns": {
+      "answer_count": 2,
+      "dns_sha256": "a3aaed53049ccb407be9eb0d180be3e21d022e36969e06c6489fd53ffea87bc3",
+      "selected_address": "104.20.23.154"
+    },
+    "generated_at": "2026-07-26T21:56:42Z",
+    "path": "validation\\browser-peer-public-validation-latest.json",
+    "plan": {
+      "consumed_path": "validation\\browser-peer-public-validation-plan.consumed-bpv_caf3b4e197214bc7b16b307339db893a.json",
+      "consumed_sha256": "8128b237d6ccb4f09a9d11ecd3e9a450880b6ecd7816032d0ad4d42de9e85c1f",
+      "plan_id": "bpv_caf3b4e197214bc7b16b307339db893a"
+    },
+    "schema": "kaliv-browser-peer-public-validation/v1",
+    "sha256": "4e3c388e2d56813f7add811f4ecc008da1c34932806d88e757dfe9b76dc95162",
+    "target": {
+      "host": "example.com",
+      "port": 443,
+      "url_sha256": "0f115db062b7c0dd030b16878c99dea5c354b49dc37b38eb8846179c7783e9d7"
+    },
+    "transport": {
+      "bytes_sent": 202,
+      "connected_address": "104.20.23.154",
+      "connected_port": 443,
+      "response_body_bytes": 559,
+      "response_body_sha256": "ff67a9d764d6a2367a187734e697f6a53217db9a21c101d410a113ca871a299d",
+      "response_status": 200
+    }
+  },
+  "schema": "kaliv-browser-peer-public-validation-physical/v1"
+}

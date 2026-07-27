@@ -1,0 +1,61 @@
+{
+  "build": {
+    "git_sha": "8e92f34d86ff238357f408b33f6acaebd485b1d4",
+    "version": "1.58.145"
+  },
+  "cancellation_probes": [],
+  "cold_probe": null,
+  "configuration": {
+    "cancellation_probes": 4,
+    "cleanup_timeout_s": 15.0,
+    "cold_start_confirmed": false,
+    "cold_turn": "turn-01",
+    "language": "da",
+    "max_warm_first_audio_ms": null,
+    "max_wer": null,
+    "model": null,
+    "repetitions": 2,
+    "timeout_s": 180.0
+  },
+  "error": null,
+  "gate": {
+    "mode": "validate_only",
+    "passed": true
+  },
+  "generated_at": "2026-07-26T20:15:47.547098+00:00",
+  "host": {
+    "nvidia": [
+      {
+        "driver_version": "610.62",
+        "index": 0,
+        "memory_total_bytes": 12884901888,
+        "memory_used_bytes": 2026897408,
+        "name": "NVIDIA GeForce RTX 3060"
+      }
+    ],
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python": "3.11.9"
+  },
+  "manifest": {
+    "dataset_version": "2026-07-19.1",
+    "path": "eval\\voice_baseline_manifest.v1.json",
+    "schema": "kaliv-voice-baseline-manifest/v1",
+    "sha256": "6235595f3099f5cb52e58c821b40adf7e030b545abcc907086cd5273d89c953e",
+    "turns": 20
+  },
+  "manual_observations": null,
+  "missing_audio": [],
+  "runs": [],
+  "schema": "kaliv-voice-baseline/v1",
+  "summary": {
+    "audio_missing": 0,
+    "audio_present": 20,
+    "manifest_valid": true
+  },
+  "worker": {
+    "asr_status": null,
+    "health": null,
+    "tts_status": null,
+    "url": "http://127.0.0.1:8099"
+  }
+}
