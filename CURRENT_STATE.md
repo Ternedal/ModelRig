@@ -227,6 +227,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_candidate_campaign.py`
 - `tests/workflow_candidate_freeze.py`
 - `tests/workflow_candidate_gate.py`
+- `tests/workflow_client_microcopy_parity.py`
 - `tests/workflow_contract_adapter.py`
 - `tests/workflow_current_state.py`
 - `tests/workflow_dep_pins.py`

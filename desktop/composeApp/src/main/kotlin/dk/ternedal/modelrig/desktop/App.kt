@@ -85,9 +85,9 @@ import java.util.Date
 import java.util.Locale
 
 private object KalivStatus {
-    const val THINKING = "Kaliv t\u00e6nker \u2026"
-    const val RAG = "S\u00f8ger i din viden \u2026"
-    const val TOOLS = "K\u00f8rer v\u00e6rkt\u00f8j \u2026"
+    const val THINKING = "Kaliv tænker …"
+    const val RAG = "Søger i din viden …"
+    const val TOOLS = "Kører værktøj …"
 }
 
 private data class UiMessage(
