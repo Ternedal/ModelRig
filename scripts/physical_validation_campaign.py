@@ -36,12 +36,13 @@ COMMANDS["task_ui"] = (
     "--report validation\\agent3-task-ui-validation-latest.json"
 )
 
-VALIDATORS = dict(_core.VALIDATORS)
-VALIDATORS["task_ui"] = (validate_task_ui, (("generated_at",),))
-# core.validate_evidence resolves its validator table in the core module's
-# globals. Point it at the additive table while leaving every old validator
-# function untouched.
-_core.VALIDATORS = VALIDATORS
+# Keep the public legacy table unchanged so the existing regression suite proves
+# exactly the historical seven-domain contract. Extended orchestration swaps in
+# the additive table only for the duration of a T-021-aware call.
+LEGACY_VALIDATORS = dict(_core.VALIDATORS)
+VALIDATORS = LEGACY_VALIDATORS
+EXTENDED_VALIDATORS = dict(LEGACY_VALIDATORS)
+EXTENDED_VALIDATORS["task_ui"] = (validate_task_ui, (("generated_at",),))
 
 candidate_identity = _core.candidate_identity
 _load_agent3_assessor = _core._load_agent3_assessor
@@ -50,7 +51,19 @@ _write_json_atomic = _core._write_json_atomic
 _safe_error = _core._safe_error
 
 
+def _legacy_campaign_report(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    # The historical test monkey-patches these names on this wrapper. Mirror the
+    # current bindings into the untouched core before delegating.
+    _core.candidate_identity = candidate_identity
+    _core._load_agent3_assessor = _load_agent3_assessor
+    _core.VALIDATORS = LEGACY_VALIDATORS
+    return _core.campaign_report(args)
+
+
 def campaign_report(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    if not hasattr(args, "task_ui_report"):
+        return _legacy_campaign_report(args)
+
     root = Path(__file__).resolve().parents[1]
     now = datetime.now(timezone.utc)
     candidate = candidate_identity(root)
@@ -70,18 +83,22 @@ def campaign_report(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         "scheduler_pilot": args.scheduler_pilot_report,
         "task_ui": args.task_ui_report,
     }
-    evidence = {
-        name: validate_evidence(
-            root,
-            name,
-            path,
-            candidate=candidate,
-            thresholds=thresholds,
-            now=now,
-            max_age_hours=args.max_age_hours,
-        )
-        for name, path in paths.items()
-    }
+    _core.VALIDATORS = EXTENDED_VALIDATORS
+    try:
+        evidence = {
+            name: validate_evidence(
+                root,
+                name,
+                path,
+                candidate=candidate,
+                thresholds=thresholds,
+                now=now,
+                max_age_hours=args.max_age_hours,
+            )
+            for name, path in paths.items()
+        }
+    finally:
+        _core.VALIDATORS = LEGACY_VALIDATORS
 
     candidate_errors: list[str] = []
     if candidate["working_tree_clean"] is False:
