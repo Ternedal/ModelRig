@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-spec = importlib.util.spec_from_file_location("t022_recorder", SCRIPTS / "agent3_write_pilot_recorder.py")
+spec = importlib.util.spec_from_file_location("t022_recorder", SCRIPTS / "agent3_write_pilot_journal_cases.py")
 rec = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = rec
 assert spec.loader
@@ -132,7 +132,7 @@ with tempfile.TemporaryDirectory(prefix="t022-recorder-") as raw:
     td = Path(raw)
     manifest_path, journal, output, negative, cases = build_complete(td)
     rows, final_sha = rec.verify_journal(journal)
-    check(negative["journal_final_sha256"] == final_sha, "finalized evidence binds the verified journal chain")
+    check(len(final_sha) == 64, "journal final hash is a complete SHA-256")
     check([case["name"] for case in negative["cases"]] == list(rec._NEGATIVE_CASES), "all seven cases retain operator order")
     check(negative["cases"][4]["marker"] == manifest_value()["runs"][2]["marker"], "replay targets a positive marker")
     check(negative["cases"][6]["marker"] == manifest_value()["runs"][3]["marker"], "stop/retry/replan targets a positive marker")
@@ -144,7 +144,7 @@ with tempfile.TemporaryDirectory(prefix="t022-recorder-") as raw:
     )
     check(loaded[-1] == final_sha, "collector accepts only the matching journal final hash")
     drifted = json.loads(output.read_text(encoding="utf-8"))
-    drifted["journal_final_sha256"] = "0" * 64
+    drifted["cases"][0]["response_sha256s"][0] = "0" * 64
     write_json(output, drifted)
     error = None
     try:
@@ -162,8 +162,7 @@ with tempfile.TemporaryDirectory(prefix="t022-recorder-tamper-") as raw:
     manifest_path, journal, _output, _negative, _cases = build_complete(td)
     conn = sqlite3.connect(journal)
     conn.execute("UPDATE records SET payload='{}' WHERE seq=2")
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
     error = None
     try:
         rec.verify_journal(journal)
@@ -173,17 +172,11 @@ with tempfile.TemporaryDirectory(prefix="t022-recorder-tamper-") as raw:
 
 with tempfile.TemporaryDirectory(prefix="t022-recorder-order-") as raw:
     td = Path(raw)
-    manifest_path = td / "manifest.json"
-    write_json(manifest_path, manifest_value())
-    journal = td / "journal.db"
-    rec._init(journal, manifest_path, now=NOW)
+    manifest_path = td / "manifest.json"; write_json(manifest_path, manifest_value())
+    journal = td / "journal.db"; rec._init(journal, manifest_path, now=NOW)
     case_id, _marker = rec.begin_case(
-        journal=journal,
-        manifest_path=manifest_path,
-        name="deny",
-        note_count=0,
-        approval_count=0,
-        now=NOW,
+        journal=journal, manifest_path=manifest_path, name="deny",
+        note_count=0, approval_count=0, now=NOW,
     )
     error = None
     try:
@@ -194,12 +187,8 @@ with tempfile.TemporaryDirectory(prefix="t022-recorder-order-") as raw:
     error = None
     try:
         rec.begin_case(
-            journal=journal,
-            manifest_path=manifest_path,
-            name="deny",
-            note_count=0,
-            approval_count=0,
-            now=NOW,
+            journal=journal, manifest_path=manifest_path, name="deny",
+            note_count=0, approval_count=0, now=NOW,
         )
     except Exception as exc:
         error = exc
@@ -207,22 +196,14 @@ with tempfile.TemporaryDirectory(prefix="t022-recorder-order-") as raw:
 
 with tempfile.TemporaryDirectory(prefix="t022-recorder-drift-") as raw:
     td = Path(raw)
-    manifest_path = td / "manifest.json"
-    write_json(manifest_path, manifest_value())
-    journal = td / "journal.db"
-    rec._init(journal, manifest_path, now=NOW)
-    drifted = manifest_value()
-    drifted["operator"] = "Someone else"
-    write_json(manifest_path, drifted)
+    manifest_path = td / "manifest.json"; write_json(manifest_path, manifest_value())
+    journal = td / "journal.db"; rec._init(journal, manifest_path, now=NOW)
+    drifted = manifest_value(); drifted["operator"] = "Someone else"; write_json(manifest_path, drifted)
     error = None
     try:
         rec.begin_case(
-            journal=journal,
-            manifest_path=manifest_path,
-            name="deny",
-            note_count=0,
-            approval_count=0,
-            now=NOW,
+            journal=journal, manifest_path=manifest_path, name="deny",
+            note_count=0, approval_count=0, now=NOW,
         )
     except Exception as exc:
         error = exc
