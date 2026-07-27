@@ -64,11 +64,16 @@ data class Agent3TaskReadiness(
     val pilot: Agent3TaskPilot = Agent3TaskPilot(),
     @SerialName("rig_validation") val rigValidation: Agent3TaskRigValidation = Agent3TaskRigValidation(),
     @SerialName("ui_contract") val uiContract: Agent3TaskUiContract = Agent3TaskUiContract(),
-)
+) {
+    val agent3ReadonlySelected: Boolean
+        get() = selectedSurface == "agent3_readonly"
+}
 
 /**
- * Read-only task-readiness transport. Unknown schema/surface values fail closed;
- * the dormant contract may only select Agent 2 and cannot mutate routing.
+ * Read-only transport for the server-authoritative Agent 3 task surface.
+ *
+ * It can observe the selected surface but has no plan, run, tool or confirmation
+ * methods. Unknown or internally inconsistent contracts fail closed.
  */
 class Agent3TaskReadinessClient(baseUrl: String, private val bearer: String) {
     private val base = baseUrl.trimEnd('/')
@@ -78,9 +83,7 @@ class Agent3TaskReadinessClient(baseUrl: String, private val bearer: String) {
         .build()
 
     fun readiness(): Agent3TaskReadiness {
-        val request = HttpRequest.newBuilder(
-            URI.create(base + "/api/v1/experimental/agent3/task-readiness")
-        )
+        val request = HttpRequest.newBuilder(URI.create(base + ENDPOINT))
             .header("Authorization", "Bearer $bearer")
             .timeout(Duration.ofSeconds(20))
             .GET()
@@ -89,30 +92,62 @@ class Agent3TaskReadinessClient(baseUrl: String, private val bearer: String) {
         if (response.statusCode() !in 200..299) {
             throw Agent3Exception(
                 "Agent 3.0 task-readiness failed (${response.statusCode()}): " +
-                    response.body().take(500)
+                    response.body().take(500),
             )
         }
+        return parse(response.body())
+    }
+
+    internal fun parse(body: String): Agent3TaskReadiness {
         val value = try {
-            json.decodeFromString<Agent3TaskReadiness>(response.body())
+            json.decodeFromString<Agent3TaskReadiness>(body)
         } catch (e: Exception) {
             throw Agent3Exception("Agent 3.0 task-readiness returned invalid JSON: ${e.message}")
         }
-        if (value.schema != "kaliv-agent3-task-readiness/v1") {
+        if (value.schema != SCHEMA) {
             throw Agent3Exception("Unknown Agent 3.0 task-readiness contract")
         }
         if (
-            value.selectedSurface != "agent2" ||
-            value.candidateSurface != "agent3_readonly" ||
-            value.fallbackSurface != "agent2"
+            value.selectedSurface !in setOf(AGENT2, AGENT3_READONLY) ||
+            value.candidateSurface != AGENT3_READONLY ||
+            value.fallbackSurface != AGENT2
         ) {
-            throw Agent3Exception("Invalid Agent 3.0 task-readiness: unknown or active surface")
+            throw Agent3Exception("Invalid Agent 3.0 task-readiness: unknown surface")
         }
         if (value.productionActivation || !value.normalChatRouteUnchanged) {
             throw Agent3Exception("Invalid Agent 3.0 task-readiness: normal chat must remain unchanged")
         }
-        if (value.uiContract.routeSource != "server_authoritative") {
-            throw Agent3Exception("Invalid Agent 3.0 task-readiness: routing is not server-authoritative")
+        if (
+            value.agent3ReadonlySelected &&
+            (!value.eligibleForTaskUi ||
+                !value.operatorEnabled ||
+                value.reason != AGENT3_SELECTED_REASON ||
+                value.reasons.isNotEmpty())
+        ) {
+            throw Agent3Exception("Invalid Agent 3.0 task-readiness: Agent 3 requires exact readiness")
+        }
+        if (!value.agent3ReadonlySelected && value.reason == AGENT3_SELECTED_REASON) {
+            throw Agent3Exception("Invalid Agent 3.0 task-readiness: surface and reason disagree")
+        }
+        val ui = value.uiContract
+        if (
+            ui.routeSource != "server_authoritative" ||
+            !ui.stopVisible ||
+            !ui.fallbackVisible ||
+            !ui.receiptsVisible ||
+            !ui.replansVisible ||
+            !ui.outcomesVisible
+        ) {
+            throw Agent3Exception("Invalid Agent 3.0 task-readiness: incomplete UI safety contract")
         }
         return value
+    }
+
+    companion object {
+        private const val ENDPOINT = "/api/v1/experimental/agent3/task-readiness"
+        private const val SCHEMA = "kaliv-agent3-task-readiness/v1"
+        private const val AGENT2 = "agent2"
+        private const val AGENT3_READONLY = "agent3_readonly"
+        private const val AGENT3_SELECTED_REASON = "agent3_readonly_selected"
     }
 }
