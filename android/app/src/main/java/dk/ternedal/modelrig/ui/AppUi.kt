@@ -2221,7 +2221,7 @@ private fun ChatScreen(
                     OutlinedTextField(
                         value = input, onValueChange = { input = it },
                         modifier = Modifier.weight(1f), enabled = !busy, maxLines = 5,
-                        placeholder = { Text("Skriv til modellen…") },
+                        placeholder = { Text("Skriv til Kaliv …") },
                         shape = RoundedCornerShape(24.dp),
                     )
                     Spacer(Modifier.width(6.dp))
