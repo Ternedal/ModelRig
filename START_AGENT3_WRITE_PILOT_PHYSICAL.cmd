@@ -10,6 +10,14 @@ if errorlevel 1 (
   exit /b 1
 )
 
+rem A fresh rig may not have a notes file yet. The operator's default target is
+rem this path; create only the missing directory/file and never truncate an
+rem existing note. Custom paths are still selected and validated in the wizard.
+set "DEFAULT_NOTES_DIR=%USERPROFILE%\Documents\Kaliv"
+set "DEFAULT_NOTES=%DEFAULT_NOTES_DIR%\notes.md"
+if not exist "%DEFAULT_NOTES_DIR%" mkdir "%DEFAULT_NOTES_DIR%"
+if not exist "%DEFAULT_NOTES%" type nul > "%DEFAULT_NOTES%"
+
 py -3 scripts\agent3_write_pilot_physical_one_click.py
 set "RC=%ERRORLEVEL%"
 
