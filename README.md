@@ -103,6 +103,30 @@ Ollama Cloud (https://ollama.com, model `:cloud`) with `OLLAMA_API_KEY`.
   end-to-end integration test. `sh tests/run_tests.sh` runs the full suite (see CI for the current counts).
 - **deploy/** — env reference, a Windows launcher (`run-windows.ps1`), and systemd
   units for running the worker + backend as services.
+- **scripts/** — the tooling CI depends on. Generators that own a document
+  (`activation_readiness.py`, `current_state.py`, `route_inventory.py`,
+  `design_tokens.py`) each have a `--check` that fails on drift, so the
+  generated files cannot silently diverge from their source. Also the one-click
+  operators for rig days, including `workflow_baseline_one_click.py --check`,
+  which answers "is the rig ready" without running or writing anything.
+- **eval/** — the specs the harnesses measure against: workflow completion
+  (`workflows_v1.json`, 14 workflows), Agent 3 model tasks, the voice baseline
+  manifest. `tests/workflow_spec_contract.py` keeps them internally consistent
+  — a typo in an expected tool name means a workflow can never pass, and that
+  should not be discovered on a rig day.
+- **assets/design/kaliv-ui-guide/** — the design authority. `kaliv-ui-tokens.json`
+  is the **single** source for colours, spacing, radii and motion; it is
+  generated into `KalivTokens.kt` for both clients, and desktop's `Brand.kt`
+  reads those rather than keeping its own copies. Two gates hold the chain:
+  drift between JSON and the generated files, and any colour literal that
+  duplicates a token.
+- **brand/** — logo system, app icons and brand guidelines.
+  `brand/KALIV_BRAND_HANDOFF.md` is current. **`brand/05_handoff-docs/` is
+  superseded**: it describes ModelRig with sapphire blue as the primary action
+  colour, and the shipping Kaliv system is brass with no blue in it at all.
+  Each of those four files carries a banner saying so.
+- **contracts/** — the versioned capability schema and its fixtures, shared by
+  the worker and both clients.
 
 ## Scheduler (delivery model)
 
@@ -151,7 +175,7 @@ MODELRIG_HOST=0.0.0.0 ./modelrig-server
 curl -X POST http://localhost:8080/api/v1/pair/start   # (server running)
 
 # 4a. Desktop
-cd ../desktop && gradle run
+cd ../desktop && ./gradlew run   # use the wrapper; a system gradle may be a different version
 
 # 4b. Android
 cd ../android && ./gradlew assembleDebug
