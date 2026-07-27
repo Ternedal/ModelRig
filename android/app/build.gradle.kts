@@ -19,7 +19,7 @@ val ksProps = Properties().apply {
 
 android {
     namespace = "dk.ternedal.modelrig"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "dk.ternedal.modelrig"
@@ -73,12 +73,12 @@ dependencies {
     // Scheduler client contracts need a real HTTP boundary without relying on
     // JDK-only com.sun.net.httpserver, which is absent from AGP's test compiler.
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
-    val composeBom = platform("androidx.compose:compose-bom:2024.09.03")
+    val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
     implementation(composeBom)
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.activity:activity-compose:1.9.2")
+    implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
