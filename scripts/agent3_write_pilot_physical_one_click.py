@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""One-click Windows operator for the physical T-022 append-only write pilot.
+"""Resumable Windows operator for the physical T-022 append-only write pilot.
 
-The wizard automates reproducible setup and forensic bookkeeping only. It cannot
-approve a write, observe a screen, invent an HTTP response, or make a physical
-pilot green. Positive runs require exact operator attestations and are verified
-against notes.md, the Agent 3 ledger, approval-use DB and ToolGate audit before
-continuing. Negative requests are captured in the append-only hash-chained
-journal and cannot be edited away later.
+The wizard automates reproducible setup, candidate binding, ledger counts,
+manifest binding, journal lifecycle and final collection. It cannot approve a
+write or decide what was visible on Android/desktop. Every positive run and every
+negative case requires exact operator attestations and is independently checked
+against durable run, approval, audit and notes evidence.
 
-It never merges, pushes, tags, releases, changes normal routing or activates
-production.
+Sequence is deliberately fixed:
+    exact candidate -> rig report -> manifest -> GET-only preflight
+    -> 20 positive bindings -> journal init -> 7 negative cases -> collection
+
+It never merges, pushes, tags, releases or activates production.
 """
 from __future__ import annotations
 
 import getpass
-import hashlib
 import importlib.util
 import json
 import os
@@ -22,8 +23,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -35,32 +34,53 @@ SCRIPTS = ROOT / "scripts"
 VALIDATION = ROOT / "validation"
 MANIFEST = VALIDATION / "agent3-write-pilot-manifest.json"
 PREFLIGHT_REPORT = VALIDATION / "agent3-write-pilot-preflight.json"
-NEGATIVE_JOURNAL = VALIDATION / "agent3-write-pilot-negative-journal.db"
-NEGATIVE_JSON = VALIDATION / "agent3-write-pilot-negative.json"
-FINAL_REPORT = VALIDATION / "agent3-write-pilot-latest.json"
-OPERATOR_STATE = VALIDATION / "agent3-write-pilot-operator-state.json"
-RESPONSE_DIR = VALIDATION / "agent3-write-pilot-responses"
+JOURNAL = VALIDATION / "agent3-write-pilot-negative-journal.db"
+NEGATIVE = VALIDATION / "agent3-write-pilot-negative.json"
+REPORT = VALIDATION / "agent3-write-pilot-latest.json"
 RIG_REPORT = VALIDATION / "agent3-rig-validation-latest.json"
-BRANCH = "agent/t022-write-pilot-physical-operator"
+TOOLS_STATE = VALIDATION / "agent3-write-pilot-tools-state.json"
+RESPONSES = VALIDATION / "agent3-write-pilot-responses"
+BRANCH = "agent/t022-current-main-physical-operator"
 VERSION = "1.58.146"
 BASE_URL = "http://127.0.0.1:8080"
 ANDROID_PACKAGE = "dk.ternedal.modelrig"
 ANDROID_ACTIVITY = f"{ANDROID_PACKAGE}/.MainActivity"
 ANDROID_AGENT3_EXTRA = "dk.ternedal.modelrig.extra.AGENT3"
-STATE_SCHEMA = "kaliv-agent3-write-pilot-operator-state/v1"
-NEGATIVE_CASES = (
-    "deny",
-    "timeout",
-    "changed_args",
-    "stale_revision",
-    "replay",
-    "concurrent_approval",
-    "stop_retry_replan",
-)
-POSITIVE_ATTEST_PREFIX = "PREVIEWET T-022"
-APPROVAL_ATTEST_PREFIX = "GODKENDT T-022"
-NEGATIVE_ATTEST_PREFIX = "OBSERVERET T-022"
-NEGATIVE_RECEIPT_PREFIX = "KVITTERING T-022"
+
+PREVIEW_PHRASE = "PREVIEW MATCHER"
+APPROVAL_PHRASE = "APPROVAL GIVET"
+COMPLETED_PHRASE = "RUN COMPLETED"
+RECOVERY_PHRASE = "RECOVERED EVIDENCE REVIEWED"
+NEGATIVE_START_PHRASE = "NEGATIV CASE UDFØRT"
+NEGATIVE_FINISH_PHRASE = "NEGATIV DELTA BEKRÆFTET"
+
+NEGATIVE_MIN_OBSERVATIONS = {
+    "deny": 1,
+    "timeout": 1,
+    "changed_args": 1,
+    "stale_revision": 1,
+    "replay": 1,
+    "concurrent_approval": 2,
+    "stop_retry_replan": 3,
+}
+NEGATIVE_EXPECTED_DELTAS = {
+    "deny": (0, 0),
+    "timeout": (0, 0),
+    "changed_args": (0, 0),
+    "stale_revision": (0, 0),
+    "replay": (0, 0),
+    "concurrent_approval": (1, 1),
+    "stop_retry_replan": (0, 0),
+}
+NEGATIVE_GUIDANCE = {
+    "deny": "Opret en frisk note_append-confirmation og vælg Afvis på den parrede enhed.",
+    "timeout": "Opret en frisk confirmation og lad både confirmation og approval-token udløbe.",
+    "changed_args": "Få approval til den viste marker, men send derefter ændrede args; requesten skal afvises.",
+    "stale_revision": "Godkend den viste revision, ændr/replan revisionen og forsøg derefter den gamle approval.",
+    "replay": "Genbrug en allerede forbrugt approval fra det valgte positive run; ingen ny append må ske.",
+    "concurrent_approval": "Send samme exact approval samtidigt to gange; præcis én må lykkes og appende én gang.",
+    "stop_retry_replan": "Stop, retry og replan omkring den valgte positive marker; ingen ekstra append må ske.",
+}
 
 sys.path.insert(0, str(SCRIPTS))
 import stage_a_one_click as stage  # noqa: E402
@@ -80,46 +100,38 @@ def _load_module(name: str, path: Path):
     return module
 
 
-pilot = _load_module("t022_operator_report", SCRIPTS / "agent3_write_pilot_report.py")
-preflight = _load_module(
-    "t022_operator_preflight", SCRIPTS / "agent3_write_pilot_preflight.py"
-)
-recorder = _load_module("t022_operator_recorder", SCRIPTS / "agent3_write_pilot_recorder.py")
-journal = _load_module(
-    "t022_operator_journal", SCRIPTS / "agent3_write_pilot_journal_cases.py"
+common = _load_module("t022_operator_common", SCRIPTS / "agent3_write_pilot_common.py")
+reporter = _load_module("t022_operator_report", SCRIPTS / "agent3_write_pilot_report.py")
+preflight = _load_module("t022_operator_preflight", SCRIPTS / "agent3_write_pilot_preflight.py")
+journal_cases = _load_module(
+    "t022_operator_journal_cases", SCRIPTS / "agent3_write_pilot_journal_cases.py"
 )
 journal_store = _load_module(
     "t022_operator_journal_store", SCRIPTS / "agent3_write_pilot_journal_store.py"
 )
-
-
-def iso_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def sha256_bytes(raw: bytes) -> str:
-    return hashlib.sha256(raw).hexdigest()
+forensics = _load_module(
+    "t022_operator_forensics", SCRIPTS / "agent3_write_pilot_forensics.py"
+)
 
 
 def atomic_json(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(payload, encoding="utf-8")
+    temporary.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     temporary.replace(path)
 
 
-def load_json(path: Path) -> tuple[dict[str, Any], bytes]:
-    if path.is_symlink() or not path.is_file():
-        raise OperatorError(f"JSON-filen mangler eller er uregelmæssig: {path}")
-    raw = path.read_bytes()
+def load_json(path: Path) -> dict[str, Any]:
     try:
-        value = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise OperatorError(f"Ugyldig UTF-8 JSON: {path}") from exc
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise OperatorError(f"Kan ikke læse {path}: {exc}") from exc
     if not isinstance(value, dict):
-        raise OperatorError(f"JSON-roden er ikke et objekt: {path}")
-    return value, raw
+        raise OperatorError(f"{path} indeholder ikke et JSON-objekt.")
+    return value
 
 
 def run(
@@ -128,32 +140,24 @@ def run(
     cwd: Path = ROOT,
     check: bool = True,
     capture: bool = False,
-    binary: bool = False,
-    timeout: int = 900,
-) -> subprocess.CompletedProcess[Any]:
+) -> subprocess.CompletedProcess[str]:
     try:
         result = subprocess.run(
             args,
             cwd=cwd,
             env=os.environ.copy(),
-            text=not binary,
+            text=True,
             capture_output=capture,
             check=False,
-            timeout=timeout,
+            timeout=900,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise OperatorError(f"Kunne ikke køre {args[0]}: {exc}") from exc
     if check and result.returncode != 0:
-        detail = ""
-        if capture:
-            output = result.stderr or result.stdout
-            if isinstance(output, bytes):
-                detail = output.decode("utf-8", errors="replace")
-            else:
-                detail = output or ""
+        output = (result.stderr or result.stdout) if capture else ""
         raise OperatorError(
             f"Kommandoen fejlede ({result.returncode}): {' '.join(args)}"
-            + (f"\n{detail[-1200:]}" if detail else "")
+            + (f"\n{output[-1000:]}" if output else "")
         )
     return result
 
@@ -164,21 +168,56 @@ def prompt(message: str, default: str | None = None) -> str:
     return value or (default or "")
 
 
-def require_exact(expected: str) -> None:
+def require_phrase(expected: str) -> None:
     entered = input(f"  Skriv præcis '{expected}' for at fortsætte: ").strip()
     if entered != expected:
-        raise OperatorError("Attesteringen matchede ikke; evidensen forbliver rød.")
+        raise OperatorError("Attesteringen matchede ikke; evidensen blev ikke lukket.")
 
 
-def path_prompt(label: str, default: Path) -> Path:
-    return Path(prompt(label, str(default))).expanduser().resolve()
+def data_root() -> Path:
+    explicit = os.environ.get("KALIV_DATA_DIR", "").strip()
+    if explicit:
+        return Path(explicit)
+    base = os.environ.get("LOCALAPPDATA", "").strip()
+    if not base:
+        base = str(Path.home() / "AppData" / "Local")
+    return Path(base) / "Kaliv"
 
 
-def ensure_candidate() -> dict[str, Any]:
+def evidence_paths() -> dict[str, Path]:
+    root = data_root()
+    tools_dir = Path(
+        os.environ.get("KALIV_TOOLS_DIR", "").strip()
+        or str(Path.home() / "Documents" / "Kaliv")
+    )
+    defaults = {
+        "agent_db": Path(os.environ.get("KALIV_AGENT3_DB", "") or root / "kaliv-agent3.db"),
+        "approval_db": Path(
+            os.environ.get("KALIV_AGENT3_APPROVAL_DB", "")
+            or root / "kaliv-agent3-approvals.db"
+        ),
+        "audit_db": Path(os.environ.get("KALIV_AUDIT_DB", "") or root / "kaliv-audit.db"),
+        "notes": tools_dir / "notes.md",
+    }
+    labels = {
+        "agent_db": "Agent 3 run-database",
+        "approval_db": "Approval-use-database",
+        "audit_db": "ToolGate audit-database",
+        "notes": "notes.md",
+    }
+    resolved = {
+        key: Path(prompt(labels[key], str(defaults[key]))).expanduser()
+        for key in labels
+    }
+    resolved["tools_dir"] = resolved["notes"].parent
+    return resolved
+
+
+def ensure_candidate() -> str:
     stage.BRANCH = BRANCH
     stage.VERSION = VERSION
     sha = stage.ensure_candidate()
-    identity = pilot.candidate_identity(ROOT)
+    identity = common.candidate_identity(ROOT)
     if (
         identity.get("git_sha") != sha
         or identity.get("version") != VERSION
@@ -186,307 +225,117 @@ def ensure_candidate() -> dict[str, Any]:
         or identity.get("version_stamps_consistent") is not True
     ):
         raise OperatorError("Kandidatidentiteten er ikke ren og exact-head-bundet.")
-    return identity
+    return sha
 
 
-def ensure_token() -> str:
+def ensure_secrets() -> None:
     token = os.environ.get("MODELRIG_TOKEN", "").strip()
     if not token:
-        token = getpass.getpass("  Indsæt MODELRIG_TOKEN (skjult, gemmes ikke): ").strip()
+        token = getpass.getpass("  MODELRIG_TOKEN (skjult, gemmes ikke): ").strip()
     if not token:
         raise OperatorError("MODELRIG_TOKEN er tomt.")
-    os.environ["MODELRIG_TOKEN"] = token
-    return token
-
-
-def ensure_approval_secret() -> str:
-    secret = os.environ.get("KALIV_AGENT3_APPROVAL_SECRET", "")
+    secret = os.environ.get("KALIV_AGENT3_APPROVAL_SECRET", "").strip()
     if not secret:
         secret = getpass.getpass(
-            "  Indsæt fælles KALIV_AGENT3_APPROVAL_SECRET (skjult, gemmes ikke): "
-        )
+            "  KALIV_AGENT3_APPROVAL_SECRET (skjult, mindst 32 tegn): "
+        ).strip()
     if len(secret.encode("utf-8")) < 32:
-        raise OperatorError("Approval-secret skal være mindst 32 UTF-8-bytes.")
+        raise OperatorError("Approval-secret skal være mindst 32 bytes.")
+    os.environ["MODELRIG_TOKEN"] = token
     os.environ["KALIV_AGENT3_APPROVAL_SECRET"] = secret
-    os.environ["KALIV_AGENT3_APPROVAL_REQUIRED"] = "1"
-    return secret
 
 
-def configure_paths(existing_state: Mapping[str, Any] | None = None) -> dict[str, Path]:
-    saved = existing_state.get("paths") if isinstance(existing_state, Mapping) else {}
-    if not isinstance(saved, Mapping):
-        saved = {}
-    data_default = Path(
-        str(saved.get("data_dir") or os.environ.get("KALIV_DATA_DIR") or ROOT / "data")
-    )
-    data_dir = path_prompt("KALIV_DATA_DIR", data_default)
-    tools_default = Path(
-        str(saved.get("tools_dir") or os.environ.get("KALIV_TOOLS_DIR") or data_dir / "tools")
-    )
-    tools_dir = path_prompt("KALIV_TOOLS_DIR", tools_default)
-    paths = {
-        "data_dir": data_dir,
-        "tools_dir": tools_dir,
-        "agent_db": path_prompt(
-            "Agent 3-run database",
-            Path(
-                str(
-                    saved.get("agent_db")
-                    or os.environ.get("KALIV_AGENT3_DB")
-                    or data_dir / "kaliv-agent3.db"
-                )
-            ),
-        ),
-        "approval_db": path_prompt(
-            "Approval-use database",
-            Path(
-                str(
-                    saved.get("approval_db")
-                    or os.environ.get("KALIV_AGENT3_APPROVAL_DB")
-                    or data_dir / "kaliv-agent3-approvals.db"
-                )
-            ),
-        ),
-        "audit_db": path_prompt(
-            "ToolGate audit database",
-            Path(
-                str(
-                    saved.get("audit_db")
-                    or os.environ.get("KALIV_AUDIT_DB")
-                    or data_dir / "kaliv-audit.db"
-                )
-            ),
-        ),
-        "notes": path_prompt(
-            "notes.md",
-            Path(str(saved.get("notes") or tools_dir / "notes.md")),
-        ),
-    }
-    data_dir.mkdir(parents=True, exist_ok=True)
-    tools_dir.mkdir(parents=True, exist_ok=True)
+def candidate_write_tools() -> list[str]:
+    with tempfile.TemporaryDirectory(prefix="kaliv-t022-registry-") as tmp:
+        env = os.environ.copy()
+        env.update(
+            {
+                "PYTHONPATH": str(ROOT / "worker"),
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "KALIV_DATA_DIR": tmp,
+                "KALIV_AUDIT_DB": str(Path(tmp) / "audit.db"),
+                "KALIV_TOOLS_STATE": str(Path(tmp) / "tools-state.json"),
+                "KALIV_JOBS_DB": str(Path(tmp) / "jobs.db"),
+                "KALIV_TOOLS_DIR": str(Path(tmp) / "tools"),
+            }
+        )
+        code = (
+            "import json\n"
+            "from app.tools import REGISTRY\n"
+            "print(json.dumps(sorted(name for name, tool in REGISTRY.items() "
+            "if tool.risk != 'read')))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=ROOT / "worker",
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=60,
+        )
+    if result.returncode != 0:
+        raise OperatorError(
+            "Kunne ikke læse kandidatens write-tool inventory: " + result.stderr[-500:]
+        )
+    try:
+        tools = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OperatorError("Write-tool inventory var ikke gyldig JSON.") from exc
+    if not isinstance(tools, list) or "note_append" not in tools:
+        raise OperatorError("Kandidaten eksponerer ikke den forventede note_append capability.")
+    return sorted(str(item) for item in tools)
+
+
+def configure_environment(paths: Mapping[str, Path]) -> None:
+    writes = candidate_write_tools()
+    disabled = [name for name in writes if name != "note_append"]
+    atomic_json(TOOLS_STATE, {"enabled": True, "disabled_tools": disabled})
     os.environ.update(
         {
-            "KALIV_DATA_DIR": str(data_dir),
-            "KALIV_TOOLS_DIR": str(tools_dir),
-            "KALIV_AGENT3_DB": str(paths["agent_db"]),
-            "KALIV_AGENT3_APPROVAL_DB": str(paths["approval_db"]),
-            "KALIV_AUDIT_DB": str(paths["audit_db"]),
             "KALIV_AGENT3_ENABLED": "1",
+            "KALIV_AGENT3_APPROVAL_REQUIRED": "1",
             "KALIV_TOOLS_ENABLED": "1",
-            "KALIV_AGENT3_TASK_UI": "0",
-            "KALIV_AGENT3_VALIDATION_REPORT": str(RIG_REPORT),
+            "KALIV_TOOLS_STATE": str(TOOLS_STATE.resolve()),
+            "KALIV_TOOLS_DIR": str(paths["tools_dir"].resolve()),
+            "KALIV_AGENT3_DB": str(paths["agent_db"].resolve()),
+            "KALIV_AGENT3_APPROVAL_DB": str(paths["approval_db"].resolve()),
+            "KALIV_AUDIT_DB": str(paths["audit_db"].resolve()),
+            "KALIV_AGENT3_VALIDATION_REPORT": str(RIG_REPORT.resolve()),
         }
     )
-    return paths
+    stage.ok(
+        "Isoleret tool-state: note_append er eneste aktive write-capability; "
+        f"deaktiveret={disabled}"
+    )
 
 
-def ensure_stack_and_rig(identity: Mapping[str, Any]) -> None:
+def ensure_stack() -> str:
     planner = stage.ensure_models()
     stage.ensure_device_token()
     stage.heading("Start exact-head backend og worker til T-022")
-    stage.note("Approval-required=1; normal task-routing forbliver slået fra.")
     stage.start_stack(planner)
-
-    assessment: dict[str, Any] | None = None
-    if RIG_REPORT.is_file():
-        try:
-            assessment, _digest = pilot.assess_rig_validation(
-                RIG_REPORT, dict(identity), now=time.time()
-            )
-        except Exception:
-            assessment = None
-    if not assessment or assessment.get("eligible_for_write_pilot") is not True:
-        stage.heading("Kør frisk kandidatbundet rig-validation")
-        run(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(SCRIPTS / "run-agent3-rig-validation.ps1"),
-                "-BaseUrl",
-                BASE_URL,
-                "-PlannerModel",
-                planner,
-            ]
-        )
-        assessment, _digest = pilot.assess_rig_validation(
-            RIG_REPORT, dict(identity), now=time.time()
-        )
-    if assessment.get("eligible_for_write_pilot") is not True:
-        raise OperatorError("Rig-validation er ikke eligible_for_write_pilot.")
-    stage.ok("Rig-validation er frisk og kandidatbundet til write-piloten.")
+    return planner
 
 
-def archive_session() -> None:
-    candidates = [
-        MANIFEST,
-        PREFLIGHT_REPORT,
-        NEGATIVE_JOURNAL,
-        NEGATIVE_JSON,
-        FINAL_REPORT,
-        OPERATOR_STATE,
-    ]
-    existing = [path for path in candidates if path.exists() or path.is_symlink()]
-    if RESPONSE_DIR.exists():
-        existing.append(RESPONSE_DIR)
-    if not existing:
-        return
-    archive = VALIDATION / "archive" / time.strftime("t022-write-pilot-%Y%m%d-%H%M%S")
-    archive.mkdir(parents=True, exist_ok=True)
-    for source in existing:
-        source.replace(archive / source.name)
-    stage.note(f"Tidligere T-022-session er bevaret i {archive}")
-
-
-def session_state(identity: Mapping[str, Any]) -> dict[str, Any] | None:
-    if not OPERATOR_STATE.is_file():
-        return None
-    state, _raw = load_json(OPERATOR_STATE)
-    if state.get("schema") != STATE_SCHEMA or state.get("production_activation") is not False:
-        raise OperatorError("Operator-state har forkert schema eller activation-boundary.")
-    target = state.get("candidate") if isinstance(state.get("candidate"), Mapping) else {}
-    for field in ("version", "git_sha", "code_sha256", "identity_source"):
-        if target.get(field) != identity.get(field):
-            raise OperatorError(f"Operator-state tilhører en anden kandidat ({field}).")
-    return state
-
-
-def save_state(
-    *,
-    identity: Mapping[str, Any],
-    pilot_id: str,
-    prepared_manifest_sha256: str,
-    paths: Mapping[str, Path],
-    preflight_sha256: str | None = None,
-    status: str = "prepared",
-) -> dict[str, Any]:
-    current = session_state(identity) or {}
-    value = {
-        "schema": STATE_SCHEMA,
-        "updated_at": iso_now(),
-        "candidate": {
-            key: identity.get(key)
-            for key in ("version", "git_sha", "code_sha256", "identity_source")
-        },
-        "pilot_id": pilot_id,
-        "prepared_manifest_sha256": prepared_manifest_sha256,
-        "preflight_sha256": preflight_sha256 or current.get("preflight_sha256"),
-        "paths": {key: str(path) for key, path in paths.items()},
-        "status": status,
-        "production_activation": False,
-    }
-    atomic_json(OPERATOR_STATE, value)
-    return value
-
-
-def prepare_or_resume(
-    identity: Mapping[str, Any], paths: Mapping[str, Path]
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    state = session_state(identity)
-    if MANIFEST.is_file():
-        manifest, raw = load_json(MANIFEST)
-        errors = pilot.validate_manifest(manifest, require_bound=False)
-        if errors:
-            raise OperatorError("Eksisterende manifest er ugyldigt: " + "; ".join(errors))
-        target = manifest.get("target") if isinstance(manifest.get("target"), Mapping) else {}
-        for field in ("version", "git_sha", "code_sha256", "identity_source"):
-            if target.get(field) != identity.get(field):
-                raise OperatorError(f"Manifestet tilhører en anden kandidat ({field}).")
-        if state is None:
-            raise OperatorError(
-                "Manifest findes uden kandidatbundet operator-state; arkivér manuelt eller start nyt."
-            )
-        expected = f"FORTSÆT T-022 {manifest.get('pilot_id')}"
-        alternative = "NY T-022 KAMPAGNE"
-        entered = input(
-            f"  Skriv præcis '{expected}' for resume eller '{alternative}' for ny session: "
-        ).strip()
-        if entered == alternative:
-            archive_session()
-            return prepare_or_resume(identity, paths)
-        if entered != expected:
-            raise OperatorError("Session-valget matchede ikke; intet blev ændret.")
-        if state.get("pilot_id") != manifest.get("pilot_id"):
-            raise OperatorError("Operator-state og manifest har forskelligt pilot-id.")
-        if state.get("prepared_manifest_sha256") is None:
-            raise OperatorError("Operator-state mangler det oprindelige manifest-digest.")
-        stage.ok(
-            f"Genoptager pilot {manifest.get('pilot_id')} med "
-            f"{sum(1 for item in manifest['runs'] if item.get('run_id'))}/20 bundne runs."
-        )
-        return manifest, state
-
-    manifest = pilot.prepare_manifest(
-        operator=prompt("Operatørnavn", os.environ.get("USERNAME", "Anders")),
-        rig_validation_path=RIG_REPORT,
+def regenerate_rig_validation(planner: str) -> None:
+    stage.heading("Regenerér kandidatbundet rig-validation")
+    run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(SCRIPTS / "run-agent3-rig-validation.ps1"),
+            "-BaseUrl",
+            BASE_URL,
+            "-PlannerModel",
+            planner,
+        ]
     )
-    pilot._atomic_json(MANIFEST, manifest)
-    raw = MANIFEST.read_bytes()
-    state = save_state(
-        identity=identity,
-        pilot_id=str(manifest["pilot_id"]),
-        prepared_manifest_sha256=sha256_bytes(raw),
-        paths=paths,
-        status="manifest_prepared",
-    )
-    stage.ok(f"Forberedte 20 uforudsigelige markers i {MANIFEST}.")
-    return manifest, state
-
-
-def ensure_preflight(
-    *,
-    manifest: Mapping[str, Any],
-    state: Mapping[str, Any],
-    identity: Mapping[str, Any],
-    paths: Mapping[str, Path],
-    token: str,
-) -> None:
-    bound = [item for item in manifest["runs"] if item.get("run_id")]
-    if bound:
-        if not PREFLIGHT_REPORT.is_file() or not state.get("preflight_sha256"):
-            raise OperatorError("En startet pilot mangler den oprindelige grønne preflight.")
-        report, raw = load_json(PREFLIGHT_REPORT)
-        if (
-            report.get("success") is not True
-            or report.get("pilot_id") != manifest.get("pilot_id")
-            or report.get("production_activation") is not False
-            or sha256_bytes(raw) != state.get("preflight_sha256")
-            or report.get("evidence", {}).get("manifest_sha256")
-            != state.get("prepared_manifest_sha256")
-        ):
-            raise OperatorError("Den gemte preflight matcher ikke den startede session.")
-        stage.ok("Genbruger den immutable grønne preflight fra før første append.")
-        return
-
-    report = preflight.run_preflight(
-        manifest_path=MANIFEST,
-        rig_validation_path=RIG_REPORT,
-        agent_db=paths["agent_db"],
-        approval_db=paths["approval_db"],
-        audit_db=paths["audit_db"],
-        notes_path=paths["notes"],
-        negative_journal_path=NEGATIVE_JOURNAL,
-        base_url=BASE_URL,
-        token=token,
-    )
-    preflight._atomic_json(PREFLIGHT_REPORT, report)
-    if report.get("success") is not True:
-        print("\n  T-022 PREFLIGHT: BLOKERET")
-        for blocker in report.get("blockers", []):
-            print(f"    - {blocker}")
-        raise OperatorError("Preflight er rød; ingen fysisk append må startes.")
-    raw = PREFLIGHT_REPORT.read_bytes()
-    save_state(
-        identity=identity,
-        pilot_id=str(manifest["pilot_id"]),
-        prepared_manifest_sha256=str(state["prepared_manifest_sha256"]),
-        paths=paths,
-        preflight_sha256=sha256_bytes(raw),
-        status="preflight_green",
-    )
-    stage.ok("Read-only preflight er grøn; journalen findes endnu ikke.")
+    if not RIG_REPORT.is_file():
+        raise OperatorError("Rig-validation-rapporten blev ikke oprettet.")
 
 
 def find_adb() -> str:
@@ -496,7 +345,7 @@ def find_adb() -> str:
     return adb
 
 
-def android_device(adb: str) -> tuple[str, str]:
+def one_android_device(adb: str) -> None:
     result = run([adb, "devices"], capture=True)
     devices = [
         line.split("\t", 1)[0]
@@ -505,27 +354,21 @@ def android_device(adb: str) -> tuple[str, str]:
     ]
     if len(devices) != 1:
         raise OperatorError(f"Der skal være præcis én ADB-enhed; fandt {len(devices)}.")
-    model = run([adb, "shell", "getprop", "ro.product.model"], capture=True).stdout.strip()
-    release = run(
-        [adb, "shell", "getprop", "ro.build.version.release"], capture=True
-    ).stdout.strip()
-    return model or devices[0], release or "unknown"
 
 
 def build_install_android(adb: str) -> None:
     gradlew = ROOT / "android" / "gradlew.bat"
     if not gradlew.is_file():
         raise OperatorError("android\\gradlew.bat mangler.")
-    stage.heading("Byg og installer exact-head approval-klienten")
+    stage.heading("Byg og installer exact-head Android-klienten")
     run([str(gradlew), ":app:assembleDebug"], cwd=ROOT / "android")
     apk = ROOT / "android" / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"
     if not apk.is_file():
         raise OperatorError(f"APK mangler efter build: {apk}")
     run([adb, "install", "-r", str(apk)])
-    stage.ok(f"Installeret {apk.name} på den tilsluttede Android-enhed.")
 
 
-def launch_android_agent3(adb: str) -> None:
+def launch_surfaces(adb: str) -> None:
     run(
         [
             adb,
@@ -540,9 +383,6 @@ def launch_android_agent3(adb: str) -> None:
             "true",
         ]
     )
-
-
-def launch_desktop_agent3() -> None:
     gradlew = ROOT / "desktop" / "gradlew.bat"
     if not gradlew.is_file():
         raise OperatorError("desktop\\gradlew.bat mangler.")
@@ -554,410 +394,465 @@ def launch_desktop_agent3() -> None:
     )
 
 
-def evidence_snapshot(paths: Mapping[str, Path]) -> dict[str, Any]:
+def run_preflight(paths: Mapping[str, Path]) -> None:
+    result = preflight.run_preflight(
+        manifest_path=MANIFEST,
+        rig_validation_path=RIG_REPORT,
+        agent_db=paths["agent_db"],
+        approval_db=paths["approval_db"],
+        audit_db=paths["audit_db"],
+        notes_path=paths["notes"],
+        negative_journal_path=JOURNAL,
+        base_url=BASE_URL,
+        token=os.environ["MODELRIG_TOKEN"],
+    )
+    common._atomic_json(PREFLIGHT_REPORT, result)
+    if result.get("success") is not True:
+        blockers = "\n".join(f"    - {item}" for item in result.get("blockers", []))
+        raise OperatorError("T-022 preflight er rød:\n" + blockers)
+    stage.ok("T-022 preflight er grøn og GET-only.")
+
+
+def validate_resume_manifest(manifest: dict[str, Any], raw: bytes) -> None:
+    errors = common.validate_manifest(manifest, require_bound=False)
+    identity = common.candidate_identity(ROOT)
+    target = manifest.get("target") if isinstance(manifest.get("target"), dict) else {}
+    for field in ("version", "git_sha", "code_sha256", "identity_source"):
+        if target.get(field) != identity.get(field):
+            errors.append(f"manifestets {field} matcher ikke den aktuelle kandidat")
+    if not RIG_REPORT.is_file():
+        errors.append("manifestets rig-validation-rapport mangler")
+    elif target.get("rig_validation_report_sha256") != common._sha_bytes(RIG_REPORT.read_bytes()):
+        errors.append("rig-validation-rapporten har ændret sig efter manifest preparation")
+    if errors:
+        raise OperatorError("Eksisterende manifest kan ikke genoptages: " + "; ".join(errors))
+    preflight_value = load_json(PREFLIGHT_REPORT) if PREFLIGHT_REPORT.is_file() else {}
+    if preflight_value.get("success") is not True:
+        raise OperatorError("Eksisterende manifest mangler en grøn preflight.")
+    if preflight_value.get("evidence", {}).get("manifest_sha256") != common._sha_bytes(raw):
+        # The preflight binds the unbound manifest. Once positive run ids are added,
+        # that digest legitimately changes; only require equality before first bind.
+        if not any(item.get("run_id") for item in manifest.get("runs", []) if isinstance(item, dict)):
+            raise OperatorError("Preflightens manifest-hash matcher ikke det ubrugte manifest.")
+
+
+def prepare_or_resume(paths: Mapping[str, Path], planner: str) -> dict[str, Any]:
+    if MANIFEST.exists():
+        manifest, raw = common._load_json(MANIFEST)
+        validate_resume_manifest(manifest, raw)
+        bound = sum(
+            1 for item in manifest.get("runs", [])
+            if isinstance(item, dict) and item.get("run_id")
+        )
+        if JOURNAL.exists() and bound != common.RUN_COUNT:
+            raise OperatorError("Negativ journal findes, før alle 20 positive runs er bundet.")
+        stage.ok(f"Eksisterende manifest genoptages: {bound}/20 positive runs bundet.")
+        return manifest
+
+    if any(path.exists() for path in (JOURNAL, NEGATIVE, REPORT, PREFLIGHT_REPORT)):
+        raise OperatorError("T-022-evidens findes uden manifest; arkivér validation-filerne før start.")
+    regenerate_rig_validation(planner)
+    operator = prompt("Operatørnavn", os.environ.get("USERNAME", "Anders"))
+    manifest = common.prepare_manifest(operator=operator, rig_validation_path=RIG_REPORT)
+    common._atomic_json(MANIFEST, manifest)
+    run_preflight(paths)
+    stage.ok("20-run manifest er forberedt; journalen oprettes først efter alle binds.")
+    return manifest
+
+
+def snapshot_rows(paths: Mapping[str, Path]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     snapshots = [
-        pilot.snapshot_sqlite(paths["agent_db"]),
-        pilot.snapshot_sqlite(paths["approval_db"]),
-        pilot.snapshot_sqlite(paths["audit_db"]),
+        forensics.snapshot_sqlite(paths["agent_db"]),
+        forensics.snapshot_sqlite(paths["approval_db"]),
+        forensics.snapshot_sqlite(paths["audit_db"]),
     ]
     try:
-        agent_snapshot, approval_snapshot, audit_snapshot = snapshots
-        notes_raw = paths["notes"].read_bytes() if paths["notes"].is_file() else b""
-        try:
-            notes = notes_raw.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise OperatorError("notes.md er ikke UTF-8.") from exc
-        return {
-            "runs": pilot.load_run_records(agent_snapshot),
-            "approvals": pilot.load_approval_rows(approval_snapshot),
-            "audits": pilot.load_audit_rows(audit_snapshot),
-            "notes": notes,
-        }
+        return (
+            forensics.load_run_records(snapshots[0]),
+            forensics.load_approval_rows(snapshots[1]),
+            forensics.load_audit_rows(snapshots[2]),
+        )
     finally:
-        for snapshot in snapshots:
-            snapshot.unlink(missing_ok=True)
+        for item in snapshots:
+            item.unlink(missing_ok=True)
 
 
-def marker_count(snapshot: Mapping[str, Any], marker: str) -> int:
-    return str(snapshot.get("notes") or "").splitlines().count(marker)
+def read_notes(path: Path) -> str:
+    if not path.is_file() or path.is_symlink():
+        raise OperatorError(f"Notesfilen er ikke en regulær fil: {path}")
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise OperatorError(f"Kan ikke læse notesfilen: {exc}") from exc
 
 
-def approval_count(snapshot: Mapping[str, Any]) -> int:
-    approvals = snapshot.get("approvals")
-    return len(approvals) if isinstance(approvals, list) else 0
-
-
-def verify_positive_run(
+def validate_positive_record(
     *,
     ordinal: int,
-    run_id: str,
+    marker: str,
+    record: dict[str, Any],
+    approvals: list[dict[str, Any]],
+    audits: list[dict[str, Any]],
+    notes: str,
+) -> None:
+    errors: list[str] = []
+    forensics._validate_success_run(
+        record=record,
+        marker=marker,
+        approval_rows=approvals,
+        audit_rows=audits,
+        errors=errors,
+        label=f"positive run {ordinal}",
+    )
+    count = notes.splitlines().count(marker)
+    if count != 1:
+        errors.append(f"marker forekommer {count} gange i notes.md")
+    if errors:
+        raise OperatorError("Positivt run er ikke forensisk grønt: " + "; ".join(errors))
+
+
+def recover_unbound_positive(
+    *,
+    ordinal: int,
     marker: str,
     paths: Mapping[str, Path],
-    timeout_seconds: int = 120,
-) -> None:
-    deadline = time.monotonic() + timeout_seconds
-    last_reason = "run er endnu ikke synlig"
-    while time.monotonic() < deadline:
-        snapshot = evidence_snapshot(paths)
-        record = next(
-            (item for item in snapshot["runs"] if item.get("id") == run_id), None
+) -> str | None:
+    notes = read_notes(paths["notes"])
+    count = notes.splitlines().count(marker)
+    if count == 0:
+        return None
+    if count != 1:
+        raise OperatorError(f"Ubundet ordinal {ordinal} forekommer {count} gange i notes.md.")
+    runs, approvals, audits = snapshot_rows(paths)
+    matching = [
+        record for record in runs
+        if forensics._marker_from_run(record) == marker
+    ]
+    if len(matching) != 1:
+        raise OperatorError(
+            f"Ubundet ordinal {ordinal} har {len(matching)} matchende run-records; kan ikke recover sikkert."
         )
-        if record is None:
-            last_reason = "run-id findes ikke i Agent 3-ledgeren"
-        elif record.get("state") != "completed":
-            last_reason = f"run-state er {record.get('state')!r}, ikke 'completed'"
-        else:
-            errors: list[str] = []
-            result = pilot._validate_success_run(
-                record=record,
-                marker=marker,
-                approval_rows=snapshot["approvals"],
-                audit_rows=snapshot["audits"],
-                errors=errors,
-                label=f"positive run {ordinal}",
-            )
-            count = marker_count(snapshot, marker)
-            if result and not errors and count == 1:
-                stage.ok(
-                    f"Run {ordinal:02d} er forensisk grøn: én note, én approval og én audit."
-                )
-                return
-            last_reason = "; ".join(errors + [f"note-count={count}"])
-        time.sleep(2)
-    raise OperatorError(f"Run {ordinal:02d} blev ikke forensisk grøn: {last_reason}")
+    validate_positive_record(
+        ordinal=ordinal,
+        marker=marker,
+        record=matching[0],
+        approvals=approvals,
+        audits=audits,
+        notes=notes,
+    )
+    require_phrase(f"{RECOVERY_PHRASE} ORDINAL {ordinal}")
+    return str(matching[0]["id"])
 
 
-def run_positive_cases(
-    manifest: dict[str, Any], paths: Mapping[str, Path], adb: str
-) -> None:
-    launch_desktop_agent3()
-    launch_android_agent3(adb)
-    stage.heading("20 FYSISKE NOTE_APPEND-RUNS")
-    for item in manifest["runs"]:
+def positive_runs(manifest: dict[str, Any], paths: Mapping[str, Path]) -> dict[str, Any]:
+    for item in manifest.get("runs", []):
+        if not isinstance(item, dict) or item.get("run_id"):
+            continue
         ordinal = int(item["ordinal"])
         marker = str(item["marker"])
-        existing_run = item.get("run_id")
-        if existing_run:
-            verify_positive_run(
-                ordinal=ordinal,
-                run_id=str(existing_run),
-                marker=marker,
-                paths=paths,
-            )
-            continue
-
-        print(f"\n  RUN {ordinal:02d}/20")
-        print("  Brug desktop Agent 3-developerfladen til en server-authoritativ preview.")
-        print("  Previewet skal indeholde præcis ét note_append-step og denne komplette tekst:")
-        print(f"\n    {marker}\n")
-        print("  Kontrollér target, append-only konsekvens, exact args og confirmation digest.")
-        require_exact(f"{POSITIVE_ATTEST_PREFIX} {ordinal:02d}")
-        print("  Godkend nu fysisk fra den parrede Android-enhed og vent på completed.")
-        require_exact(f"{APPROVAL_ATTEST_PREFIX} {ordinal:02d}")
-        run_id = getpass.getpass(
-            "  Indsæt completed run-id (skjult; gemmes kandidatbundet i manifestet): "
-        ).strip()
-        if not run_id:
-            raise OperatorError("Run-id var tomt.")
-        pilot.bind_run(manifest, ordinal, run_id)
-        pilot._atomic_json(MANIFEST, manifest)
-        verify_positive_run(
+        recovered = recover_unbound_positive(
             ordinal=ordinal,
-            run_id=run_id,
             marker=marker,
             paths=paths,
         )
+        if recovered:
+            reporter.bind_run(manifest, ordinal, recovered)
+            common._atomic_json(MANIFEST, manifest)
+            stage.ok(f"Ordinal {ordinal} blev sikkert recovered og bundet.")
+            continue
+
+        stage.heading(f"POSITIV T-022 RUN {ordinal}/20")
+        print(f"  Exact marker (hele note_append.text):\n\n    {marker}\n")
+        print("  1. Opret server-authoriseret preview med præcis ét note_append-step.")
+        print("  2. Kontrollér target, append-only konsekvens og den komplette marker.")
+        require_phrase(f"{PREVIEW_PHRASE} ORDINAL {ordinal}")
+        print("  3. Godkend fra den parrede Android-enhed; wizard'en kan ikke gøre det.")
+        require_phrase(f"{APPROVAL_PHRASE} ORDINAL {ordinal}")
+        print("  4. Vent til den synlige run-state er completed.")
+        require_phrase(f"{COMPLETED_PHRASE} ORDINAL {ordinal}")
+        run_id = getpass.getpass("  Indsæt run-id (skjult; bindes i manifestet): ").strip()
+        if not common._OPAQUE_ID.fullmatch(run_id):
+            raise OperatorError("Run-id er tomt eller ugyldigt.")
+        runs, approvals, audits = snapshot_rows(paths)
+        record = next((entry for entry in runs if entry.get("id") == run_id), None)
+        if record is None:
+            raise OperatorError(f"Run {run_id} findes ikke i Agent 3-ledgeren.")
+        validate_positive_record(
+            ordinal=ordinal,
+            marker=marker,
+            record=record,
+            approvals=approvals,
+            audits=audits,
+            notes=read_notes(paths["notes"]),
+        )
+        reporter.bind_run(manifest, ordinal, run_id)
+        common._atomic_json(MANIFEST, manifest)
+        stage.ok(f"Ordinal {ordinal} er bundet og forensisk grøn.")
+    return manifest
 
 
-def negative_contract(name: str) -> dict[str, Any]:
-    contracts = {
-        "deny": {"observations": 1, "statuses": [200], "note_delta": 0, "approval_delta": 0},
-        "timeout": {"observations": 1, "statuses": [409], "note_delta": 0, "approval_delta": 0},
-        "changed_args": {"observations": 1, "statuses": [409], "note_delta": 0, "approval_delta": 0},
-        "stale_revision": {"observations": 1, "statuses": [409], "note_delta": 0, "approval_delta": 0},
-        "replay": {"observations": 1, "statuses": [409], "note_delta": 0, "approval_delta": 0},
-        "concurrent_approval": {
-            "observations": 2,
-            "statuses": [200, 409],
-            "note_delta": 1,
-            "approval_delta": 1,
-        },
-        "stop_retry_replan": {
-            "observations": 3,
-            "allowed_statuses": {200, 202, 409},
-            "note_delta": 0,
-            "approval_delta": 0,
-        },
-    }
-    if name not in contracts:
-        raise OperatorError(f"Ukendt negativ case: {name}")
-    return contracts[name]
+def ensure_journal(manifest: dict[str, Any]) -> None:
+    if sum(
+        1 for item in manifest.get("runs", [])
+        if isinstance(item, dict) and item.get("run_id")
+    ) != common.RUN_COUNT:
+        raise OperatorError("Journalen må først initialiseres efter 20/20 positive binds.")
+    if not JOURNAL.exists():
+        journal_store._init(JOURNAL, MANIFEST)
+        stage.ok("Negativ hashkædet journal er bundet til det færdige 20-run manifest.")
+        return
+    current, raw = common._load_json(MANIFEST)
+    journal_store.verify_journal_binding(JOURNAL, current, raw)
 
 
-def negative_instructions(name: str, marker: str) -> list[str]:
-    instructions = {
-        "deny": [
-            "Opret preview med marker og vælg Deny på den parrede enhed.",
-            "Run skal ende med confirmation_denied og ingen side-effekt.",
-        ],
-        "timeout": [
-            "Opret preview med marker og lad confirmation udløbe uden approval.",
-            "Forsøg derefter approval; HTTP-resultatet skal være 409.",
-        ],
-        "changed_args": [
-            "Opret confirmation for marker, men send approval mod ændrede text-args.",
-            "Backend/worker skal afvise med 409 før note eller approval-use.",
-        ],
-        "stale_revision": [
-            "Opret confirmation, fremprovokér en ny planrevision og brug den gamle approval.",
-            "Stale revision skal afvises med 409.",
-        ],
-        "replay": [
-            "Genbrug approval/action fra det allerede succesfulde positive run.",
-            "Replay skal afvises med 409 og marker-count må forblive én.",
-        ],
-        "concurrent_approval": [
-            "Send to samtidige approve-requests for samme nye confirmation.",
-            "Præcis én skal lykkes (200), én skal afvises (409), og der må komme én note.",
-        ],
-        "stop_retry_replan": [
-            "Brug den eksisterende positive marker gennem Stop, retry og replan-forsøg.",
-            "Registrér mindst tre HTTP-observationer; marker-count må forblive én.",
-        ],
-    }[name]
-    return [*instructions, f"Exact marker: {marker}"]
+def journal_state(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    current, raw = common._load_json(MANIFEST)
+    rows, _final = journal_store.verify_journal_binding(JOURNAL, current, raw)
+    _meta, cases = journal_store._state(rows)
+    result: dict[str, dict[str, Any]] = {}
+    for case_id, value in cases.items():
+        begin = value.get("begin")
+        if not isinstance(begin, dict):
+            continue
+        name = begin.get("payload", {}).get("name")
+        if isinstance(name, str):
+            result[name] = {"case_id": case_id, **value}
+    return result
+
+
+def approval_count(paths: Mapping[str, Path]) -> int:
+    snapshot = forensics.snapshot_sqlite(paths["approval_db"])
+    try:
+        return len(forensics.load_approval_rows(snapshot))
+    finally:
+        snapshot.unlink(missing_ok=True)
+
+
+def marker_count(path: Path, marker: str) -> int:
+    if not path.exists():
+        return 0
+    return path.read_text(encoding="utf-8").splitlines().count(marker)
 
 
 def response_file(case_name: str, index: int) -> Path:
-    RESPONSE_DIR.mkdir(parents=True, exist_ok=True)
-    path = RESPONSE_DIR / f"{case_name}-{index:02d}.json"
-    if path.exists() or path.is_symlink():
-        raise OperatorError(f"Response-filen findes allerede: {path}")
-    path.write_bytes(b"")
-    stage.note(
-        "Notepad åbnes nu. Indsæt den EKSAKTE HTTP-response body, gem og luk vinduet."
-    )
-    run(["notepad.exe", str(path)], timeout=3600)
-    if path.is_symlink() or not path.is_file():
-        raise OperatorError("Response-filen blev ikke gemt som en regulær fil.")
-    if path.stat().st_size > journal_store.MAX_RESPONSE_BYTES:
-        raise OperatorError("Response body overskrider recorderens størrelsesgrænse.")
-    return path
+    RESPONSES.mkdir(parents=True, exist_ok=True)
+    mode = prompt("Response-kilde (paste/file)", "paste").lower()
+    destination = RESPONSES / f"{case_name}-{index:02d}.body"
+    if mode == "file":
+        source = Path(prompt("Sti til fil med exact response body")).expanduser()
+        if source.is_symlink() or not source.is_file():
+            raise OperatorError("Response-filen findes ikke eller er ikke regulær.")
+        destination.write_bytes(source.read_bytes())
+    elif mode == "paste":
+        body = input("  Indsæt exact response body på én linje: ")
+        destination.write_bytes(body.encode("utf-8"))
+    else:
+        raise OperatorError("Response-kilde skal være paste eller file.")
+    return destination
 
 
-def journal_state(manifest: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    manifest_value, manifest_raw = load_json(MANIFEST)
-    if manifest_value.get("pilot_id") != manifest.get("pilot_id"):
-        raise OperatorError("Manifest ændrede pilot-id under journalbehandlingen.")
-    rows, _final = journal_store.verify_journal_binding(
-        NEGATIVE_JOURNAL, manifest_value, manifest_raw
-    )
-    meta, cases = journal_store._state(rows)
-    return meta, cases
+def observed_statuses(case: Mapping[str, Any]) -> list[int]:
+    statuses: list[int] = []
+    for row in case.get("observations", []):
+        value = row.get("payload", {}).get("status") if isinstance(row, dict) else None
+        if isinstance(value, int) and not isinstance(value, bool):
+            statuses.append(value)
+    return statuses
 
 
-def verify_negative_result(
+def validate_status_contract(name: str, statuses: list[int]) -> None:
+    valid = False
+    if name == "deny":
+        valid = statuses == [200]
+    elif name in {"timeout", "changed_args", "stale_revision", "replay"}:
+        valid = statuses == [409]
+    elif name == "concurrent_approval":
+        valid = len(statuses) == 2 and sorted(statuses) == [200, 409]
+    elif name == "stop_retry_replan":
+        valid = len(statuses) >= 3 and all(value in {200, 202, 409} for value in statuses)
+    if not valid:
+        raise OperatorError(f"Negativ case {name} har ugyldig statussekvens: {statuses}")
+
+
+def begin_or_resume_negative(
     *,
     name: str,
-    begin_payload: Mapping[str, Any],
-    finish_payload: Mapping[str, Any],
-    statuses: list[int],
-) -> list[str]:
-    contract = negative_contract(name)
-    errors: list[str] = []
-    if name == "stop_retry_replan":
-        if len(statuses) < int(contract["observations"]):
-            errors.append("stop_retry_replan har færre end tre observationer")
-        if any(status not in contract["allowed_statuses"] for status in statuses):
-            errors.append("stop_retry_replan indeholder en ikke-tilladt HTTP-status")
-    elif sorted(statuses) != sorted(contract["statuses"]):
-        errors.append(f"HTTP-statusser er {statuses}, forventet {contract['statuses']}")
-    note_delta = int(finish_payload["note_count_after"]) - int(
-        begin_payload["note_count_before"]
-    )
-    approval_delta = int(finish_payload["approval_use_count_after"]) - int(
-        begin_payload["approval_use_count_before"]
-    )
-    if note_delta != contract["note_delta"]:
-        errors.append(f"note-delta er {note_delta}, forventet {contract['note_delta']}")
-    if approval_delta != contract["approval_delta"]:
-        errors.append(
-            f"approval-delta er {approval_delta}, forventet {contract['approval_delta']}"
-        )
-    return errors
-
-
-def run_negative_cases(manifest: dict[str, Any], paths: Mapping[str, Path]) -> None:
-    if not NEGATIVE_JOURNAL.exists():
-        recorder._init(NEGATIVE_JOURNAL, MANIFEST)
-        stage.ok("Initialiserede kandidatbundet append-only negativ journal.")
-
-    for name in NEGATIVE_CASES:
-        _meta, cases = journal_state(manifest)
-        matching = [
-            case
-            for case in cases.values()
-            if case.get("begin") is not None
-            and case["begin"]["payload"].get("name") == name
-        ]
-        if len(matching) > 1:
-            raise OperatorError(f"Journalen har flere {name}-cases.")
-        case = matching[0] if matching else None
-        if case and case.get("finish") is not None:
-            stage.ok(f"Negativ case {name} er allerede afsluttet i hashkæden.")
-            continue
-
-        if case is None:
-            before = evidence_snapshot(paths)
-            positive_ordinal = 1 if name == "replay" else 2 if name == "stop_retry_replan" else None
-            initial_note_count = (
-                marker_count(before, manifest["runs"][positive_ordinal - 1]["marker"])
-                if positive_ordinal is not None
-                else 0
-            )
-            case_id, marker = journal.begin_case(
-                journal=NEGATIVE_JOURNAL,
-                manifest_path=MANIFEST,
-                name=name,
-                note_count=initial_note_count,
-                approval_count=approval_count(before),
-                positive_ordinal=positive_ordinal,
-            )
-            _meta, cases = journal_state(manifest)
-            case = cases[case_id]
-        else:
-            case_id = str(case["begin"]["case_id"])
-            marker = str(case["begin"]["payload"]["marker"])
-            stage.note(f"Genoptager åben negativ case {name}.")
-
-        stage.heading(f"NEGATIV FYSISK CASE — {name}")
-        for line in negative_instructions(name, marker):
-            print(f"  - {line}")
-        require_exact(f"{NEGATIVE_ATTEST_PREFIX} {name}")
-
-        contract = negative_contract(name)
-        observations = list(case.get("observations") or [])
-        target = int(contract["observations"])
-        while len(observations) < target:
-            index = len(observations) + 1
-            status_raw = prompt(f"HTTP-status for observation {index}")
-            try:
-                status = int(status_raw)
-            except ValueError as exc:
-                raise OperatorError("HTTP-status skal være et heltal.") from exc
-            raw_run_id = getpass.getpass(
-                f"  Run-id for observation {index} (skjult; journalen kræver rå id): "
-            ).strip()
-            if not raw_run_id:
-                raise OperatorError("Run-id var tomt.")
-            response = response_file(name, index)
-            journal.observe_request(
-                journal=NEGATIVE_JOURNAL,
-                case_id=case_id,
-                status=status,
-                response_path=response,
-                run_id=raw_run_id,
-            )
-            _meta, cases = journal_state(manifest)
-            case = cases[case_id]
-            observations = list(case.get("observations") or [])
-
-        require_exact(f"{NEGATIVE_RECEIPT_PREFIX} {name}")
-        after = evidence_snapshot(paths)
-        journal.finish_case(
-            journal=NEGATIVE_JOURNAL,
-            case_id=case_id,
-            note_count=marker_count(after, marker),
-            approval_count=approval_count(after),
-        )
-        _meta, cases = journal_state(manifest)
-        completed = cases[case_id]
-        statuses = [int(item["payload"]["status"]) for item in completed["observations"]]
-        errors = verify_negative_result(
-            name=name,
-            begin_payload=completed["begin"]["payload"],
-            finish_payload=completed["finish"]["payload"],
-            statuses=statuses,
-        )
-        if errors:
-            raise OperatorError(
-                f"Negativ case {name} er sandfærdigt gemt, men RØD: " + "; ".join(errors)
-            )
-        stage.ok(f"Negativ case {name} har korrekt status- og delta-kontrakt.")
-
-    negative = recorder.finalize(NEGATIVE_JOURNAL, MANIFEST)
-    pilot._atomic_json(NEGATIVE_JSON, negative)
-    stage.ok(f"Kompilerede immutable negative evidence til {NEGATIVE_JSON}.")
-
-
-def collect_final(
-    *,
-    identity: Mapping[str, Any],
-    state: Mapping[str, Any],
+    manifest: dict[str, Any],
     paths: Mapping[str, Path],
-) -> int:
-    report = pilot.collect_report(
+) -> tuple[str, str, int, int, int]:
+    existing = journal_state(manifest).get(name)
+    if existing:
+        if existing.get("finish") is not None:
+            raise OperatorError(f"Case {name} er allerede lukket.")
+        begin = existing["begin"]["payload"]
+        stage.ok(
+            f"Genoptager åben case {name} efter {len(existing['observations'])} observationer."
+        )
+        return (
+            str(existing["case_id"]),
+            str(begin["marker"]),
+            int(begin["note_count_before"]),
+            int(begin["approval_use_count_before"]),
+            len(existing["observations"]),
+        )
+
+    positive_ordinal: int | None = None
+    marker_hint: str | None = None
+    if name in {"replay", "stop_retry_replan"}:
+        default = "1" if name == "replay" else "2"
+        raw = prompt("Positiv ordinal som casen skal målrette", default)
+        try:
+            positive_ordinal = int(raw)
+            target = manifest["runs"][positive_ordinal - 1]
+            marker_hint = str(target["marker"])
+        except (ValueError, IndexError, KeyError, TypeError) as exc:
+            raise OperatorError("Positiv ordinal er ugyldig.") from exc
+        if not target.get("run_id"):
+            raise OperatorError("Den valgte positive ordinal er endnu ikke fysisk bundet.")
+
+    note_before = marker_count(paths["notes"], marker_hint) if marker_hint else 0
+    approval_before = approval_count(paths)
+    case_id, marker = journal_cases.begin_case(
+        journal=JOURNAL,
         manifest_path=MANIFEST,
-        negative_path=NEGATIVE_JSON,
-        negative_journal_path=NEGATIVE_JOURNAL,
+        name=name,
+        note_count=note_before,
+        approval_count=approval_before,
+        positive_ordinal=positive_ordinal,
+    )
+    return case_id, marker, note_before, approval_before, 0
+
+
+def record_negative_case(
+    *,
+    name: str,
+    manifest: dict[str, Any],
+    paths: Mapping[str, Path],
+) -> None:
+    case_id, marker, note_before, approval_before, existing_count = begin_or_resume_negative(
+        name=name,
+        manifest=manifest,
+        paths=paths,
+    )
+    stage.heading(f"NEGATIV T-022 CASE — {name}")
+    print(f"  {NEGATIVE_GUIDANCE[name]}")
+    print(f"  Exact marker/target:\n\n    {marker}\n")
+    if existing_count == 0:
+        require_phrase(f"{NEGATIVE_START_PHRASE} {name}")
+
+    minimum = NEGATIVE_MIN_OBSERVATIONS[name]
+    observation = existing_count
+    add_more = observation < minimum
+    if observation >= minimum:
+        answer = prompt("Tilføj flere request-observationer? (ja/nej)", "nej").lower()
+        if answer not in {"ja", "nej"}:
+            raise OperatorError("Svar skal være ja eller nej.")
+        add_more = answer == "ja"
+    while add_more:
+        observation += 1
+        try:
+            status = int(prompt(f"HTTP-status for observation {observation}"))
+        except ValueError as exc:
+            raise OperatorError("HTTP-status skal være et heltal.") from exc
+        body_path = response_file(name, observation)
+        run_id = getpass.getpass("  Run-id for observationen (skjult): ").strip()
+        journal_cases.observe_request(
+            journal=JOURNAL,
+            case_id=case_id,
+            status=status,
+            response_path=body_path,
+            run_id=run_id,
+        )
+        if observation < minimum:
+            continue
+        answer = prompt("Flere request-observationer? (ja/nej)", "nej").lower()
+        if answer not in {"ja", "nej"}:
+            raise OperatorError("Svar skal være ja eller nej.")
+        add_more = answer == "ja"
+
+    current_case = journal_state(manifest)[name]
+    validate_status_contract(name, observed_statuses(current_case))
+    note_after = marker_count(paths["notes"], marker)
+    approval_after = approval_count(paths)
+    expected = NEGATIVE_EXPECTED_DELTAS[name]
+    actual = (note_after - note_before, approval_after - approval_before)
+    print(
+        f"  Målte deltas: note={actual[0]}, approval-use={actual[1]} "
+        f"(forventet {expected})"
+    )
+    if actual != expected:
+        raise OperatorError(
+            f"Negativ case {name} har forkerte deltas {actual}; journalcasen forbliver åben."
+        )
+    require_phrase(f"{NEGATIVE_FINISH_PHRASE} {name}")
+    journal_cases.finish_case(
+        journal=JOURNAL,
+        case_id=case_id,
+        note_count=note_after,
+        approval_count=approval_after,
+    )
+    stage.ok(f"Negativ case {name} er append-only journalført og lukket.")
+
+
+def negative_cases(manifest: dict[str, Any], paths: Mapping[str, Path]) -> None:
+    for name in common._NEGATIVE_CASES:
+        state = journal_state(manifest).get(name)
+        if state and state.get("finish") is not None:
+            continue
+        record_negative_case(name=name, manifest=manifest, paths=paths)
+    negative = journal_cases.finalize(JOURNAL, MANIFEST)
+    common._atomic_json(NEGATIVE, negative)
+    stage.ok("Alle syv negative cases er finaliseret fra den verificerede hashkæde.")
+
+
+def collect(paths: Mapping[str, Path]) -> int:
+    report = reporter.collect_report(
+        manifest_path=MANIFEST,
+        negative_path=NEGATIVE,
+        negative_journal_path=JOURNAL,
         rig_validation_path=RIG_REPORT,
         agent_db=paths["agent_db"],
         approval_db=paths["approval_db"],
         audit_db=paths["audit_db"],
         notes_path=paths["notes"],
     )
-    pilot._atomic_json(FINAL_REPORT, report)
+    common._atomic_json(REPORT, report)
     if report.get("success") is not True:
-        print("\n  T-022 FORENSISK RAPPORT: BLOKERET")
+        print("\n  T-022-RAPPORT: BLOKERET")
         for blocker in report.get("blockers", []):
             print(f"    - {blocker}")
         return 2
-    save_state(
-        identity=identity,
-        pilot_id=str(report["pilot_id"]),
-        prepared_manifest_sha256=str(state["prepared_manifest_sha256"]),
-        paths=paths,
-        preflight_sha256=str(state["preflight_sha256"]),
-        status="physical_report_green",
-    )
     stage.heading("T-022 FYSISK WRITE-PILOT BESTÅET")
-    stage.ok("20/20 positive appends og 7/7 negative cases er forensisk bundet.")
-    stage.ok(f"Rapport: {FINAL_REPORT}")
-    stage.ok("production_activation=false; normal routing er fortsat uændret.")
+    stage.ok("20/20 positive runs og 7/7 negative cases er forensisk grønne.")
+    stage.ok(f"Rapport: {REPORT}")
+    stage.ok("production_activation=false")
     return 0
 
 
 def main() -> int:
+    if os.name != "nt":
+        raise OperatorError("T-022 one-click-operatoren skal køres på Windows-riggen.")
     os.chdir(ROOT)
     stage.heading("Kaliv T-022 — fysisk append-only write-pilot")
-    print("  Wizard'en kan ikke selv approve, se UI eller opfinde responses.")
-    print("  Hvert positivt run verificeres i fire faktiske sandhedskilder.")
-    print("  Negative observations gemmes append-only og kan ikke redigeres væk.")
-    print("  Ingen merge, push, tag, release eller production activation udføres.")
+    print("  Wizard'en kan ikke selv godkende en write eller se confirmation-kortet.")
+    print("  Alle 20 approvals kræver præcise operatørfraser og durable ledger-beviser.")
+    print("  Negative cases lukkes kun ved de kontraktmæssige statusser og deltas.")
+    print("  Den kan ikke merge, pushe, tagge, release eller aktivere produktion.")
 
-    identity = ensure_candidate()
-    existing_state = session_state(identity)
-    paths = configure_paths(existing_state)
-    ensure_approval_secret()
-    token = ensure_token()
-    ensure_stack_and_rig(identity)
-    manifest, state = prepare_or_resume(identity, paths)
-    ensure_preflight(
-        manifest=manifest,
-        state=state,
-        identity=identity,
-        paths=paths,
-        token=token,
-    )
-    state = session_state(identity) or state
-
+    ensure_candidate()
+    ensure_secrets()
+    paths = evidence_paths()
+    configure_environment(paths)
+    planner = ensure_stack()
     adb = find_adb()
-    device_name, android_version = android_device(adb)
-    stage.ok(f"Parret Android-enhed: {device_name} · Android {android_version}")
+    one_android_device(adb)
     build_install_android(adb)
-    run_positive_cases(manifest, paths, adb)
-    run_negative_cases(manifest, paths)
-    return collect_final(identity=identity, state=state, paths=paths)
+    launch_surfaces(adb)
+    manifest = prepare_or_resume(paths, planner)
+    manifest = positive_runs(manifest, paths)
+    ensure_journal(manifest)
+    negative_cases(manifest, paths)
+    return collect(paths)
 
 
 if __name__ == "__main__":
@@ -965,17 +860,14 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except KeyboardInterrupt:
         print(
-            "\n  SIKKERT STOP: afbrudt af operatøren; manifest/journal er bevaret.",
+            "\n  SIKKERT STOP: afbrudt; manifest, journal og responses er bevaret.",
             file=sys.stderr,
         )
         raise SystemExit(1)
     except Exception as exc:
         print(
-            f"\n  SIKKERT STOP: {type(exc).__name__}: {str(exc)[:1200]}",
+            f"\n  SIKKERT STOP: {type(exc).__name__}: {str(exc)[:1500]}",
             file=sys.stderr,
         )
-        print(
-            "  Ingen evidens er auto-godkendt. Delvis kandidatbundet state er bevaret.",
-            file=sys.stderr,
-        )
+        print("  Ingen case er auto-godkendt; eksisterende evidens er bevaret.", file=sys.stderr)
         raise SystemExit(1)

@@ -1,150 +1,151 @@
-# T-022 fysisk append-only write-pilot
+# T-022 physical append-only write-pilot operator
 
-**Status:** dormant operator-flow. Det gør den fysiske T-022-ceremoni reproducerbar, men det kan ikke selv godkende en write, observere en UI eller gøre en rapport grøn.
+**Status:** dormant physical operator. It prepares and records the real pilot but
+cannot approve a write, invent an observation, merge a branch, publish a build or
+activate production.
 
-Start på Windows-riggen fra den eksakte kandidat:
+Start it on the Windows rig from the exact repository checkout:
 
 ```text
 START_AGENT3_WRITE_PILOT_PHYSICAL.cmd
 ```
 
-## Hvad wizard'en automatiserer
+## What the operator automates
 
-- fast-forward-only checkout af sin eksakte versionsbundne branch;
-- ren candidate identity og konsistente version stamps;
-- skjult `MODELRIG_TOKEN` og skjult fælles approval-secret;
-- `KALIV_AGENT3_APPROVAL_REQUIRED=1` i både backend/worker-processerne;
-- `KALIV_AGENT3_ENABLED=1`, tool-host aktiv og normal task-routing fortsat slået fra;
-- frisk candidate-bound rig-validation med `eligible_for_write_pilot=true`;
-- forberedelse af 20 uforudsigelige markers;
-- read-only preflight før første preview;
-- exact-head Android-build og `adb install -r`;
-- åbning af desktop/Android Agent 3 developer-surfaces;
-- enkeltvis binding af de 20 faktiske run-id'er;
-- umiddelbar krydskontrol af hvert positivt run mod:
-  - `notes.md`;
-  - Agent 3 run/event ledger;
-  - approval-use databasen;
-  - ToolGate audit-databasen;
-- append-only registrering af de syv negative cases;
-- automatisk før/efter-tælling af note og approval-use;
-- SHA-256 af de eksakte HTTP-response bodies;
-- endelig forensic collector og kandidatbundet JSON-rapport.
+- checks out the exact candidate branch and verifies a clean candidate identity;
+- obtains `MODELRIG_TOKEN` and `KALIV_AGENT3_APPROVAL_SECRET` through hidden input;
+- derives every non-read capability from the candidate registry;
+- writes an isolated pilot-only tool-state file where `note_append` is the only
+  active write capability;
+- starts backend/worker with approval-required enabled;
+- rebuilds and installs the exact Android APK on exactly one ADB device;
+- opens Android and desktop Agent 3 developer surfaces;
+- prepares the 20 unpredictable positive markers;
+- runs the authenticated GET-only T-022 preflight;
+- guides and binds each positive run only after exact operator attestations;
+- immediately verifies each positive run against the run ledger, approval-use DB,
+  ToolGate audit and `notes.md`;
+- initializes the append-only negative journal **after** all 20 run IDs are bound;
+- guides the seven negative cases and records exact status/response hashes;
+- measures note and approval-use deltas directly from durable stores;
+- finalizes the negative JSON from the verified hash chain;
+- runs the existing forensic collector and writes the final T-022 report.
 
-## Hvad wizard'en **ikke** kan gøre
+## Fixed order
 
-- den kan ikke trykke Approve eller Deny;
-- den kan ikke se, hvad Android- eller desktop-UI'en viser;
-- den kan ikke opfinde en HTTP-response, statuskode eller run-id;
-- den kan ikke ændre en allerede registreret negativ observation;
-- den kan ikke merge, pushe, tagge, release eller aktivere produktion;
-- den kan ikke gøre normal Agent 3-routing til standard.
+The wizard enforces this sequence:
 
-## Session og resume
+1. exact candidate and isolated write-tool state;
+2. candidate-bound rig-validation;
+3. unbound 20-run manifest;
+4. read-only preflight;
+5. 20 positive approvals and manifest bindings;
+6. negative journal initialization against the **fully bound** manifest;
+7. seven negative cases;
+8. forensic collection.
 
-En session gemmer kun ikke-hemmelig operator-state i:
+The journal is not initialized before step 5. Binding a run ID changes the
+manifest hash, so creating the journal earlier would make the evidence chain
+belong to an obsolete manifest.
 
-```text
-validation\agent3-write-pilot-operator-state.json
-```
+## Human boundary
 
-Manifest, preflight, negativ journal og slutrapport er kandidatbundne. Ved resume skal operatøren skrive den præcise phrase:
-
-```text
-FORTSÆT T-022 <pilot-id>
-```
-
-En ny kampagne kræver den præcise phrase:
+The wizard cannot see the confirmation card and cannot approve it. Every positive
+run requires these exact phrases, including its ordinal:
 
 ```text
-NY T-022 KAMPAGNE
+PREVIEW MATCHER ORDINAL <n>
+APPROVAL GIVET ORDINAL <n>
+RUN COMPLETED ORDINAL <n>
 ```
 
-Tidligere filer flyttes da til en tidsstemplet mappe under `validation\archive`; de slettes ikke.
+These phrases are attestations, not substitutes for durable evidence. Immediately
+after the phrases, the wizard verifies that:
 
-Preflight må kun køre, mens alle 20 manifest-runs er ubundne og den negative journal endnu ikke findes. Efter første append genbruges den oprindelige immutable preflight, hvis dens SHA-256 og oprindelige manifest-digest matcher operator-state.
+- the run exists and contains the exact marker;
+- the complete approval/confirmation/execution event chain exists;
+- one device-bound approval-use row exists;
+- one executed ToolGate audit row exists;
+- the marker occurs exactly once in `notes.md`.
 
-## 20 positive runs
+A plain `ja`, Enter or a guessed run ID cannot close the run.
 
-For hvert ordinal viser wizard'en den komplette marker. Brug desktopens Agent 3 developer-surface til en server-authoritativ preview med præcis ét `note_append`-step og marker-strengen som hele `text`-argumentet.
+## Resume behavior
 
-Før godkendelse kræves:
+The manifest and journal are the state machines; no editable progress JSON is
+trusted.
 
-```text
-PREVIEWET T-022 01
-```
+- Bound positive ordinals are skipped.
+- If an append completed but the process stopped before manifest binding, the
+  wizard searches the durable ledger and note for the exact marker. It only
+  recovers when exactly one run is independently green, and requires:
 
-Efter fysisk approval fra den parrede Android-enhed og synlig `completed` kræves:
+  ```text
+  RECOVERED EVIDENCE REVIEWED ORDINAL <n>
+  ```
 
-```text
-GODKENDT T-022 01
-```
+- A negative case interrupted after `begin` or one or more observations resumes
+  from the same case ID and next journal sequence.
+- Closed negative cases are skipped.
+- A failed delta check leaves the case open; it is never rewritten or marked
+  passed.
 
-Run-id indtastes skjult og bindes til det rigtige ordinal. Wizard'en fortsætter først, når den kan bevise:
+## Negative cases
 
-- run-state `completed`;
-- præcis én `approval_consumed` med korrekt device/revision/action-binding;
-- præcis én udført ToolGate-audit for markeren;
-- præcis én markerlinje i `notes.md`;
-- den fulde confirmation/approval/execution-eventkæde.
+Exactly these cases are required:
 
-Et delvist eller inkonsistent run stopper sessionen sikkert. Det allerede bundne manifest bevares til undersøgelse; wizard'en omskriver ikke evidensen.
-
-## Syv negative cases
-
-Efter 20/20 positive runs initialiseres den hashkædede SQLite-journal. Cases køres i denne rækkefølge:
-
-1. `deny`
-2. `timeout`
-3. `changed_args`
-4. `stale_revision`
-5. `replay`
-6. `concurrent_approval`
-7. `stop_retry_replan`
-
-Hver case kræver begge præcise phrases:
-
-```text
-OBSERVERET T-022 <case>
-KVITTERING T-022 <case>
-```
-
-Wizard'en åbner en separat response-fil i Notepad for hver HTTP-observation. Indsæt den **eksakte** response body, gem og luk. Statuskode og run-id registreres sammen med response-hash og før/efter-tællinger.
-
-Forventet kontrakt:
-
-| Case | HTTP-observationer | Note-delta | Approval-delta |
+| Case | Required response statuses | Note delta | Approval-use delta |
 |---|---|---:|---:|
-| `deny` | `200` | 0 | 0 |
-| `timeout` | `409` | 0 | 0 |
-| `changed_args` | `409` | 0 | 0 |
-| `stale_revision` | `409` | 0 | 0 |
-| `replay` | `409` | 0 | 0 |
-| `concurrent_approval` | én `200`, én `409` | +1 | +1 |
-| `stop_retry_replan` | mindst tre af `200/202/409` | 0 | 0 |
+| `deny` | `[200]` | 0 | 0 |
+| `timeout` | `[409]` | 0 | 0 |
+| `changed_args` | `[409]` | 0 | 0 |
+| `stale_revision` | `[409]` | 0 | 0 |
+| `replay` | `[409]` | 0 | 0 |
+| `concurrent_approval` | one `200`, one `409` | 1 | 1 |
+| `stop_retry_replan` | at least three of `200/202/409` | 0 | 0 |
 
-`replay` bruger positiv marker 1; `stop_retry_replan` bruger positiv marker 2. Det gør de eksisterende note-counts målbare og forhindrer en skjult ekstra append.
-
-Hvis en faktisk response ikke matcher kontrakten, bliver den stadig sandfærdigt skrevet til journalen, og sessionen stopper rød. Den må ikke håndredigeres til den forventede værdi.
-
-## Slutrapport
-
-Når alle cases er færdige, kompileres journalen til:
+Each case requires the exact start and finish attestations:
 
 ```text
-validation\agent3-write-pilot-negative.json
+NEGATIV CASE UDFØRT <case>
+NEGATIV DELTA BEKRÆFTET <case>
 ```
 
-Derefter krydstjekker collectoren manifest, note, run-ledger, approval-use, audit og journal og skriver:
+The operator copies an exact HTTP response body or pastes it as a single line.
+The append-only recorder stores its SHA-256, byte length, status and run ID. It
+never edits a prior observation.
+
+## Required local inputs
+
+The wizard proposes the stable defaults under `%LOCALAPPDATA%\Kaliv` and
+`%USERPROFILE%\Documents\Kaliv`, but shows each path before use:
+
+- `kaliv-agent3.db`;
+- `kaliv-agent3-approvals.db`;
+- `kaliv-audit.db`;
+- `notes.md`.
+
+The approval secret and device token remain environment-only and are never written
+to the evidence files.
+
+## Safe stop
+
+Ctrl+C, a wrong phrase, a mismatched delta, a stale candidate or any unreadable
+store stops the process. Existing manifest, journal and response artifacts remain
+for review/resume. The operator never auto-corrects evidence.
+
+## Result boundary
+
+A successful run writes:
 
 ```text
-validation\agent3-write-pilot-latest.json
+validation/agent3-write-pilot-latest.json
 ```
 
-Kun collectorens `success=true` og exitkode 0 er en grøn T-022-rapport. Rapporten indeholder altid:
+A green report proves the 20 positive and seven negative cases for one exact
+candidate. It still does not merge, release or enable normal routing, and always
+contains:
 
 ```json
 "production_activation": false
 ```
-
-En grøn rapport beviser den eksakte fysiske session. Den merger eller promoverer stadig ikke kandidaten automatisk.
