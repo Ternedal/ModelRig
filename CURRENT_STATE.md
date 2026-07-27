@@ -128,6 +128,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_task_readiness.py`
 - `tests/worker_agent3_task_readiness_entrypoint.py`
 - `tests/worker_agent3_task_surface.py`
+- `tests/worker_agent3_task_ui_validation.py`
 - `tests/worker_agent3_unattended_execution.py`
 - `tests/worker_agent3_validation_gate.py`
 - `tests/worker_agent3_validation_path_contract.py`
