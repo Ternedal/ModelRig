@@ -1,9 +1,9 @@
 # Physical validation campaign — én kandidat, ét samlet bevis
 
 Denne runbook samler de fysiske **Prove**-opgaver T-004, T-005, T-006,
-T-007, T-040 og T-043. De enkelte harnesses har fortsat deres egne detaljerede
-runbooks; denne kampagne sørger for, at deres rapporter faktisk beskriver den
-samme version, Git-commit og worker-kode.
+T-007, T-019, T-021, T-040 og T-043. De enkelte harnesses har fortsat deres
+egne detaljerede runbooks; denne kampagne sørger for, at deres rapporter faktisk
+beskriver den samme version, Git-commit og worker-kode.
 
 `scripts/physical_validation_campaign.py` er read-only. Det starter ikke
 services, bruger ingen token, udfører ingen update/reboot og ændrer ingen
@@ -20,7 +20,8 @@ RAG-måling fra commit C er ikke en valideret kandidat. Kampagnen kræver:
 - samme worker `code_sha256`, hvor rapporten måler runtime-koden;
 - friske, timezone-aware timestamps;
 - grønne individuelle gates og cleanup-resultater;
-- komplette typed observations for reboot, supervisor, update og rollback.
+- komplette typed observations for reboot, supervisor, update og rollback;
+- candidate-bundne Android- og Windows-observationer af den normale taskflade.
 
 ## Kandidat-checkout må ikke flytte sig under kampagnen
 
@@ -227,7 +228,7 @@ observationer):
 python scripts\scheduler_pilot_report.py --read-schedule-id <ID> --write-schedule-id <ID> --manual-observations validation\scheduler-manual-observations.json --report validation\scheduler-pilot-latest.json
 ```
 
-Produceren fælder selv dom (`pilot.passed`) og skriver rapporten uanset —
+Producenten fælder selv dom (`pilot.passed`) og skriver rapporten uanset —
 aggregatoren genvaliderer alt mod den frosne kandidat.
 
 **Forensik (v2):** rapporten pinner det *konkrete* forløb direkte fra storene
@@ -238,7 +239,41 @@ og tidsvinduet. Pausens bevis er en `released`-occurrence bundet til et
 `--schedules-db`/`--jobs-db`/`--audit-db` på dens filer — aggregater tæller,
 forensikken beviser.
 
-## 8. Verificér hele kampagnen
+## 8. T-021 — normal read-only task-UI på Android og Windows
+
+Følg `AGENT3_TASK_UI_VALIDATION.md`. Den forventede fil er:
+
+```text
+validation/agent3-task-ui-validation-latest.json
+```
+
+Fasen kræver en **ny frossen kandidat**, der faktisk indeholder T-021-stakken.
+Den må ikke bruges til at eftermontere bevis på en tidligere frossen candidate.
+
+Rapporten kombinerer:
+
+- ét live read-only task-run gennem readiness → preview → start → status;
+- exact pilot-, candidate- og rig-validation-binding;
+- Android-observationer af surface, serverårsag, plan/review, tool-status, Stop,
+  fallback, receipts, replans, outcome og normal Agent 2-chat;
+- samme observationsmatrix på Windows desktop;
+- to repository-lokale, SHA-256-bundne artifacts.
+
+Producenten køres med token kun i miljøet:
+
+```powershell
+$env:MODELRIG_TOKEN = "<paired device token>"
+python scripts\agent3_task_ui_validation.py `
+  --base-url http://127.0.0.1:8080 `
+  --manual-observations validation\agent3-task-ui-observations.json `
+  --report validation\agent3-task-ui-validation-latest.json
+```
+
+Kampagnen genvaliderer rapportens candidate, bindings, receipts, terminale run,
+alle 13 klientchecks og begge artifact-filer. Manglende, stale eller ændret
+klientevidens gør `verify` rød.
+
+## 9. Verificér hele kampagnen
 
 ```powershell
 python scripts\physical_validation_campaign.py `
@@ -252,7 +287,7 @@ Exit codes:
 
 | Exit | Betydning |
 |---:|---|
-| `0` | I `verify`: alle seks fysiske beviser er present, friske, candidate-bound og grønne. |
+| `0` | I `verify`: alle otte fysiske beviser er present, friske, candidate-bound og grønne. |
 | `1` | En rapport mangler, er stale, mismatched eller har en rød individuel gate. |
 | `2` | Kampagneværktøjet kunne ikke bestemme kandidat eller skrive en troværdig rapport. |
 
@@ -273,12 +308,12 @@ Copy-Item `
 Kontrollér før commit:
 
 - candidate version, Git-SHA og code fingerprint;
-- alle seks evidence statuses er `pass`;
+- alle otte evidence statuses er `pass`;
 - ingen `missing`, `failed` eller `candidate_errors`;
-- hver rapport- og lifecycle-artifact-SHA er udfyldt;
+- hver rapport-, lifecycle- og task-UI-artifact-SHA er udfyldt;
 - `physical_campaign_complete=true`;
 - `production_activation=false`.
 
-Rolling-filer, lifecycle-arbejdsfilen, lifecycle-artifacts, rå voice-fixtures og
-manuelle work files forbliver lokale. Kun dateret, manuelt reviewet evidens må
-committes.
+Rolling-filer, lifecycle-arbejdsfilen, lifecycle-artifacts, task-UI-observationer,
+task-UI-artifacts, rå voice-fixtures og manuelle work files forbliver lokale. Kun
+dateret, manuelt reviewet evidens må committes.
