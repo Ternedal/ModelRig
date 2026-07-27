@@ -24,14 +24,17 @@ if str(_SCRIPT_DIR) not in sys.path:
 from agent3_write_pilot_common import (  # noqa: E402
     MANIFEST_SCHEMA, NEGATIVE_SCHEMA, REPORT_SCHEMA, RUN_COUNT,
     PILOT_WINDOW_MAX_HOURS, REPORT_MAX_AGE_HOURS, _NEGATIVE_CASES,
-    _OPAQUE_ID, _SHA256, PilotEvidenceError, _atomic_json, _iso, _load_json,
-    _parse_time, _sha_bytes, _sha_text, _utc_now, assess_rig_validation,
-    bind_run, candidate_identity, prepare_manifest, validate_manifest,
+    _OPAQUE_ID, _SHA256, PilotEvidenceError, _atomic_json, _canonical_json, _iso, _load_json,
+    _parse_time, _sha_bytes, _sha_text, _utc_now, assess_rig_validation, bind_run,
+    candidate_identity, prepare_manifest, validate_manifest,
     validate_negative_evidence,
 )
 from agent3_write_pilot_forensics import (  # noqa: E402
     _action_sha, _marker_from_run, _validate_success_run, load_approval_rows,
     load_audit_rows, load_run_records, snapshot_sqlite,
+)
+from agent3_write_pilot_journal_cases import (  # noqa: E402
+    compile_negative, verify_journal_binding,
 )
 
 def judge(
@@ -129,6 +132,9 @@ def judge(
         for case in negative.get("cases", [])
         if isinstance(case, dict) and isinstance(case.get("name"), str)
     }
+    replay_case = cases.get("replay")
+    if replay_case and replay_case.get("marker") not in positive_markers:
+        errors.append("negative case replay must target one of the 20 positive markers")
     for name, case in cases.items():
         for run_id in case.get("run_ids") or []:
             if run_id not in by_run:
@@ -226,10 +232,30 @@ def judge(
     return errors, details
 
 
+def load_bound_negative_evidence(
+    *,
+    manifest_path: Path,
+    negative_path: Path,
+    negative_journal_path: Path,
+) -> tuple[dict[str, Any], bytes, dict[str, Any], bytes, str]:
+    manifest, manifest_raw = _load_json(manifest_path)
+    negative, negative_raw = _load_json(negative_path)
+    journal_rows, journal_final_sha = verify_journal_binding(
+        negative_journal_path, manifest, manifest_raw
+    )
+    compiled = compile_negative(journal_rows, manifest)
+    if _canonical_json(negative) != _canonical_json(compiled):
+        raise PilotEvidenceError(
+            "negative evidence does not match the append-only journal"
+        )
+    return manifest, manifest_raw, negative, negative_raw, journal_final_sha
+
+
 def collect_report(
     *,
     manifest_path: Path,
     negative_path: Path,
+    negative_journal_path: Path,
     rig_validation_path: Path,
     agent_db: Path,
     approval_db: Path,
@@ -237,8 +263,13 @@ def collect_report(
     notes_path: Path,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    manifest, manifest_raw = _load_json(manifest_path)
-    negative, negative_raw = _load_json(negative_path)
+    manifest, manifest_raw, negative, negative_raw, journal_final_sha = (
+        load_bound_negative_evidence(
+            manifest_path=manifest_path,
+            negative_path=negative_path,
+            negative_journal_path=negative_journal_path,
+        )
+    )
     identity = candidate_identity()
     assessment, rig_sha = assess_rig_validation(
         rig_validation_path, identity, now=(now or _utc_now()).timestamp()
@@ -286,6 +317,7 @@ def collect_report(
         "evidence": {
             "manifest_sha256": _sha_bytes(manifest_raw),
             "negative_sha256": _sha_bytes(negative_raw),
+            "negative_journal_final_sha256": journal_final_sha,
             "rig_validation_report_sha256": rig_sha,
             **db_hashes,
             "notes_sha256": _sha_bytes(notes_raw),
@@ -322,6 +354,7 @@ def _cmd_collect(args: argparse.Namespace) -> int:
     report = collect_report(
         manifest_path=Path(args.manifest),
         negative_path=Path(args.negative),
+        negative_journal_path=Path(args.negative_journal),
         rig_validation_path=Path(args.rig_validation),
         agent_db=Path(args.agent_db),
         approval_db=Path(args.approval_db),
@@ -358,6 +391,7 @@ def build_parser() -> argparse.ArgumentParser:
     collect = sub.add_parser("collect", help="cross-check all physical T-022 evidence")
     collect.add_argument("--manifest", required=True)
     collect.add_argument("--negative", required=True)
+    collect.add_argument("--negative-journal", required=True)
     collect.add_argument("--rig-validation", required=True)
     collect.add_argument("--agent-db", required=True)
     collect.add_argument("--approval-db", required=True)
