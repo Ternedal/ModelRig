@@ -21,6 +21,7 @@ fun main(args: Array<String>) = application {
     val experimental = agent3 || agent3Memory || agent3Validation ||
         agent3Capabilities || agent3Replan || agent3Review
     var showTasks by remember { mutableStateOf(tasks) }
+    var forceNormalChat by remember { mutableStateOf(false) }
 
     // The design frames every direction at 1240x740 (.win in the mockup).
     // Developer evidence surfaces stay narrow; the normal task surface needs
@@ -28,7 +29,7 @@ fun main(args: Array<String>) = application {
     val state = rememberWindowState(
         width = when {
             showTasks -> 1100.dp
-            experimental -> 900.dp
+            experimental && !forceNormalChat -> 900.dp
             else -> 1240.dp
         },
         height = 820.dp,
@@ -38,6 +39,7 @@ fun main(args: Array<String>) = application {
         state = state,
         title = when {
             showTasks -> "Kaliv · Opgaver"
+            forceNormalChat -> "Kaliv"
             agent3Capabilities -> "Kaliv · Agent 3.0 Capability Graph"
             agent3Review -> "Kaliv · Agent 3.0 Read Review"
             agent3Replan -> "Kaliv · Agent 3.0 Read Replanner"
@@ -49,7 +51,13 @@ fun main(args: Array<String>) = application {
         icon = painterResource("icon.png"),
     ) {
         when {
-            showTasks -> Agent3TaskApp(onUseAgent2 = { showTasks = false })
+            showTasks -> Agent3TaskApp(
+                onUseAgent2 = {
+                    showTasks = false
+                    forceNormalChat = true
+                },
+            )
+            forceNormalChat -> App()
             agent3Capabilities -> Agent3CapabilityDevApp()
             agent3Review -> Agent3ReviewDevApp()
             agent3Replan -> Agent3ReplanDevApp()
