@@ -1,5 +1,17 @@
 """Dormant public DNS/peer binding contract for web research.
 
+DORMANT BY DECISION, NOT BY DECAY. Zero callers here is the intended state, not
+an unfinished feature and not rot. This module fixes WHERE the trust boundary
+sits before any adapter exists, so that a future BrowserUse/Playwright/HTTP
+adapter has to satisfy the contract instead of defining the boundary itself --
+which is what happens when the adapter is written first. Do not delete it for
+lacking a user; a boundary without a user is still a boundary.
+
+Verified 27/07-2026: this is the only research_* module with no reference
+outside tests. research_contract and research_egress ARE in production -- see
+web_fetch.py, browser_host.py, browser_peer_adapter.py and
+scripts/browser_peer_public_validation.py. Do not generalise this note to them.
+
 This module performs no socket or browser I/O and registers no tool. A caller
 injects a resolver, receives one short-lived binding for an already-authorized
 egress plan, atomically claims it once, then proves the actual connected peer.

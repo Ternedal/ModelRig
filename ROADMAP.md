@@ -176,16 +176,37 @@ manuelle trin efter genstart.
 
 ## Åbne beslutninger (kræver Anders)
 
-- **Research-sporet:** `research_contract` + `research_egress` +
-  `research_peer_binding` (1.564 linjer, 8 testfiler, nul produktionskaldere) er
-  en **vedtaget tillidsgrænse uden adapter** — modulets egen docstring siger at
-  en fremtidig BrowserUse/Playwright/HTTP-adapter skal opfylde kontrakten *i
-  stedet for selv at definere hvor grænsen går*. Beslutning: markér statussen i
-  koden, så den ikke læses som forfald. (Ikke: om den skal skæres væk — man
-  skærer ikke en tillidsgrænse væk fordi den mangler en bruger.)
-- **1.0:** anbefaling er at tagge `v1.0.0` på `1.58.146` umiddelbart efter
-  rig-dagen. 1.0 har konsistent betydet *"apparatet er bevist på hardware"* i
-  hele roadmap'en, og det er præcis hvad rig-dagen afgør.
+- **Research-sporet.** Præmissen her var forkert og er rettet 27/7. Sporet er
+  ikke ét dvalende hele: **`research_contract` og `research_egress` er i drift.**
+  `research_contract` importeres af `web_fetch.py`, `browser_host.py` og
+  `browser_peer_adapter.py`, og `scripts/browser_peer_public_validation.py` —
+  scriptet der producerede Stage A's syvende bevis — importerer seks af
+  `research_*`-modulerne direkte. De kørte altså under valideringen.
+
+  **`research_peer_binding` (579 linjer) er den eneste med nul referencer uden
+  for tests.** Den er en **vedtaget tillidsgrænse uden adapter**: modulets egen
+  docstring siger at en fremtidig BrowserUse/Playwright/HTTP-adapter skal
+  opfylde kontrakten *i stedet for selv at definere hvor grænsen går*. Statussen
+  er nu skrevet ind i modulet, så den ikke læses som forfald. (Ikke: om den skal
+  skæres væk — man skærer ikke en tillidsgrænse væk fordi den mangler en bruger.)
+
+  Stadig åbent: om de otte moduler i drift skal dokumenteres som det de er —
+  kontraktlaget under browser-peer-stien. Det er en formulering, ikke et fund.
+- **1.0.** Anbefalingen om at tagge `v1.0.0` er trukket 27/7: den er teknisk
+  udelukket, og to uafhængige mekanismer i repoet afviser den.
+
+  `isNewer()` i `backend/cmd/modelrig-updater/main.go` sammenligner semver
+  numerisk felt for felt. Målt: `isNewer("1.58.145", "v1.0.0")` er `false`, så
+  hver kørende installation ville logge *"already up to date"* og aldrig hente
+  noget. Eneste vej derover er manuel geninstallation på rig og telefon. Og
+  `tests/workflow_staged_promotion_runbook` afviser selvstændigt et træ der er
+  bagud for den forfremmede kandidat — sabotage-testet: `1.0.0` bliver rød.
+
+  `1.58.146` er i øvrigt allerede skåret og released (9 assets, 27/7).
+
+  Vil 1.0-milepælen markeres, er **`2.0.0`** vejen: major stiger, så updateren
+  ruller den ud normalt. Målt grøn gennem samme sabotage-test. Beslutningen er
+  stadig din — kun *hvilket tal* er nu afgjort af hvad der virker.
 
 *Afgjort 25/7-2026:*
 
