@@ -176,6 +176,31 @@ manuelle trin efter genstart.
 
 ## Åbne beslutninger (kræver Anders)
 
+- **Fire tokenpar er under WCAG AA i lyst tema.** Målt 27/7 direkte på
+  `kaliv-ui-tokens.json`; det kræver ingen skærm, kun udregning.
+
+  | Par | ratio | krav |
+  |---|---|---|
+  | `light.muted` på `light.surface` | 4,05 | 4,5 |
+  | `brand.gold` på `light.surface` | 2,07 | 3,0 |
+  | `brand.highlight` på `light.surface` | 1,55 | 3,0 |
+  | `semantic.warning` på `light.surface` | 2,66 | 3,0 |
+
+  Mørkt tema er rent hele vejen — laveste er `semantic.danger` på 3,36.
+
+  `light.muted` er den der gør ondt i praksis: den bærer meta-rækken og
+  statusteksten ved thinking-animationen, altså tekst brugeren faktisk læser.
+  Den kan formentlig rettes uden at røre brandet — den skal blot mørkere.
+
+  `brand.gold` og `brand.highlight` er en anden sag. De **er** brandet, og at
+  flytte dem for at nå 3,0 er en designbeslutning, ikke en oprydning.
+  Alternativet er at de aldrig bruges som eneste signal på lys `surface` —
+  hvilket guiden i forvejen kræver: *"Farve er aldrig eneste signal."*
+
+  Låst fast i `tests/workflow_design_token_contrast.py`, som fejler både hvis
+  et nyt par falder under AA og hvis et af de fire rettes uden at listen
+  følger med. Ingen af dem er godkendt ved at stå der.
+
 - **Designguidens microcopy kræver et fase-signal i streamen.** Guiden
   foreskriver tre beskeder — `"Kaliv tænker …"`, `"Søger i din viden …"` og
   `"Kører værktøj …"` — og ingen af dem findes i nogen klient i dag. Målt
