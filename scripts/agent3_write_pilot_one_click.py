@@ -18,7 +18,6 @@ import getpass
 import hashlib
 import json
 import os
-import platform
 import shutil
 import sqlite3
 import subprocess
@@ -269,25 +268,44 @@ def ensure_stack_and_rig_validation(paths: PilotPaths) -> None:
         "Preflighten kræver stadig, at kun note_append er aktiv write-capability."
     )
     stage.start_stack(planner)
-    stage.heading("Kør kandidatbundet rig-validation")
-    run(
-        [
-            "powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(SCRIPTS / "run-agent3-rig-validation.ps1"),
-            "-BaseUrl",
-            BASE_URL,
-            "-PlannerModel",
-            planner,
-        ]
-    )
+
     identity = common.candidate_identity(ROOT)
-    assessment, _digest = common.assess_rig_validation(
-        RIG_REPORT, identity, now=common._utc_now().timestamp()
-    )
+    if MANIFEST.is_file():
+        stage.heading("Genbrug manifestbundet rig-validation")
+        if not RIG_REPORT.is_file():
+            raise OperatorError(
+                "Manifestet findes, men den bundne rig-validation-rapport mangler."
+            )
+        assessment, digest = common.assess_rig_validation(
+            RIG_REPORT, identity, now=common._utc_now().timestamp()
+        )
+        manifest, _raw = common._load_json(MANIFEST)
+        target = manifest.get("target") if isinstance(manifest.get("target"), dict) else {}
+        if target.get("rig_validation_report_sha256") != digest:
+            raise OperatorError(
+                "Rig-validation-rapporten ændrede sig efter manifest preparation."
+            )
+        stage.ok("Den oprindelige rig-validation SHA genbruges uændret.")
+    else:
+        stage.heading("Kør kandidatbundet rig-validation")
+        run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(SCRIPTS / "run-agent3-rig-validation.ps1"),
+                "-BaseUrl",
+                BASE_URL,
+                "-PlannerModel",
+                planner,
+            ]
+        )
+        assessment, _digest = common.assess_rig_validation(
+            RIG_REPORT, identity, now=common._utc_now().timestamp()
+        )
+
     if assessment.get("eligible_for_write_pilot") is not True:
         raise OperatorError(
             "Rig-validation er ikke eligible_for_write_pilot. "
@@ -937,15 +955,22 @@ def main(argv: list[str] | None = None) -> int:
     paths = resolve_paths()
     configure_environment(paths)
     ensure_stack_and_rig_validation(paths)
-    adb = find_adb()
-    model, release = android_device(adb)
-    stage.ok(f"Fysisk Android-enhed: {model} / Android {release}")
-    build_install_android(adb)
     prepare_and_preflight(paths)
 
+    adb: str | None = None
+    if args.phase in {"all", "positive", "negative"}:
+        adb = find_adb()
+        model, release = android_device(adb)
+        stage.ok(f"Fysisk Android-enhed: {model} / Android {release}")
+        build_install_android(adb)
+
     if args.phase in {"all", "positive"}:
+        if adb is None:
+            raise OperatorError("Android-enheden er ikke initialiseret.")
         run_positive_phase(paths, adb)
     if args.phase in {"all", "negative"}:
+        if adb is None:
+            raise OperatorError("Android-enheden er ikke initialiseret.")
         run_negative_phase(paths, adb)
     if args.phase in {"all", "collect"}:
         return collect(paths)
