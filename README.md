@@ -19,31 +19,47 @@ crash-restart + update-with-rollback), and a multi-step agent with human-gated w
 flowchart TB
     Desktop["Kaliv Desktop<br/>Compose JVM · Windows"]
     Kaliv["Kaliv (Android)<br/>chat · streaming voice · tools · RAG · foto→RAG"]
+
+    subgraph Appliance["Appliance layer — the rig stays up without a person watching"]
+        Sup["modelrig-supervisor<br/>starts worker, then server<br/>supplies MODELRIG_HOST=0.0.0.0<br/>restarts either on exit or hang"]
+        Upd["modelrig-updater<br/>newer release? swap exes<br/>verify /healthz reports the new version<br/>restore backup if it does not"]
+    end
+
     Go["Backend (Go) :8080<br/>pairing · tokens · reverse proxy ONLY<br/>flushes streams chunk-by-chunk"]
 
-    subgraph Worker["Worker (Python) :8099"]
+    subgraph Worker["Worker (Python) :8099 — mounted from app.entrypoint"]
         Pipe["RAG&nbsp;&nbsp;pdf · docx · pptx · html · foto (vision)<br/>Voice&nbsp;&nbsp;ASR → LLM(stream) → sentence-TTS<br/>buffered: /voice/converse/upload<br/>streamed: /voice/converse/stream (NDJSON)"]
         Tools["Kaliv Tools<br/>registry (in code)<br/>confirmation gate<br/>audit log (append-only)<br/>Executor seam"]
-        Eval["Eval-harness<br/>tool-discipline · dansk · latency<br/>--baseline --gate = regression"]
+        Sched["Scheduler<br/>at-most-once by construction<br/>claim + budget slot in one transaction<br/>write approvals leave a receipt"]
+        A3["Agent 3<br/>mount_agent3() owns the whole surface<br/>DORMANT unless KALIV_AGENT3_ENABLED=1<br/>server-authoritative plan · one confirmation per side effect"]
+        Eval["Eval-harness<br/>tool-discipline · dansk · latency<br/>workflow completion, not tool choice"]
     end
 
     Human(["human"])
     Ollama["Ollama :11434<br/>local — ALWAYS for embeddings"]
-    DB[("SQLite<br/>RAG · audit")]
+    DB[("SQLite<br/>RAG · audit · schedules")]
     Cloud["Ollama Cloud<br/>(optional)<br/>text model ≠ voice model<br/>(cloudModel / voiceCloudModel)"]
+
+    Sup -- "supervises" --> Go
+    Sup -- "supervises" --> Worker
+    Upd -. "checks releases · rolls back a bad one" .-> Sup
 
     Desktop -- "local-first, cloud fallback" --> Go
     Kaliv -- "pair + bearer token" --> Go
     Kaliv -. "direct cloud chat: rig not involved,<br/>NO tools exist on this road" .-> Cloud
     Go -- "/api/chat · /api/tags" --> Ollama
-    Go -- "/rag/* · /voice/* · /tools/*" --> Worker
+    Go -- "/rag/* · /voice/* · /tools/* · /schedules/*" --> Worker
     Human == "approves every write" ==> Tools
+    Human == "approves every scheduled write too" ==> Sched
+    Sched -- "runs through the same gate" --> Tools
     Worker -- "embeddings + generation<br/>embeddings ALWAYS local" --> Ollama
     Worker --> DB
     Worker -. "voice LLM step only ·<br/>explicit toggle · keep_alive<br/>NEVER sent to cloud" .-> Cloud
 
     classDef ext stroke-dasharray: 6 4;
     class Cloud ext;
+    classDef dormant stroke-dasharray: 4 3;
+    class A3 dormant;
 ```
 
 **Two cloud roads, and they are not the same thing.**
