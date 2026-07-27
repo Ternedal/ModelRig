@@ -4,10 +4,16 @@ name: ci
 # requests, so a regression or version drift is caught before a release tag is
 # cut. The test list lives in _tests.yml, shared with build-and-release.yml --
 # no duplication, the two gates can't drift apart.
+# workflow_dispatch: uden den kan gaten kun koere paa main eller via en PR, saa
+# en branch kan ikke faa CIs dom foer nogen aabner en PR for den. Det gjorde
+# lokalt groent til eneste tilgaengelige evidens, og lokalt groent er ikke
+# CI-groent -- det har kostet mindst een unoedvendig roed main. Med dispatch kan
+# enhver branch faa den rigtige koersel paa forlangende.
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
