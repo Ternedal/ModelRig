@@ -382,8 +382,8 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
             active.reason.isBlank() ||
             active.semantics !in TOOL_SEMANTICS ||
             active.stepId != current?.id ||
-            active.tool != current.tool ||
-            active.state != current.state ||
+            active.tool != current?.tool ||
+            active.state != current?.state ||
             (active.canRequest && !active.handlePresent) ||
             (active.canRequest && active.semantics !in setOf("cooperative", "runtime"))
         ) {
