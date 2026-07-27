@@ -37,40 +37,46 @@ data class KalivColors(
     val isDark: Boolean,
 )
 
-// Values sourced from the approved design guide (kaliv-ui-tokens.json v1.0,
-// assets/design/kaliv-ui-guide/) -- 12/7-2026. Do not tweak by eye; change the
-// tokens file and re-apply.
+// De to paletter LAESER nu KalivTokens, som scripts/design_tokens.py genererer
+// fra assets/design/kaliv-ui-guide/kaliv-ui-tokens.json. Foer 27/7-2026 stod
+// vaerdierne som literaler her, med en kommentar om at "change the tokens file
+// and re-apply" -- men re-apply var manuelt, og et haandtastet hex kan drive
+// fra sin kilde uden at nogen opdager det.
+//
+// CodeSurface og onPrimary staar stadig som literaler: de findes ikke i
+// tokensaettet. Det er ikke en forglemmelse, det er graensen for hvad guiden
+// definerer.
 val KalivDark = KalivColors(
-    Graphite = Color(0xFF0B0A09),
-    Surface = Color(0xFF171411),
-    SurfaceHigh = Color(0xFF211B16),
+    Graphite = KalivTokens.Dark.canvas,
+    Surface = KalivTokens.Dark.surface,
+    SurfaceHigh = KalivTokens.Dark.elevated,
     CodeSurface = Color(0xFF14100C),
-    Border = Color(0xFF4B3925),
-    Signal = Color(0xFF9A7136),
-    Amber = Color(0xFFC69A4B),
-    Highlight = Color(0xFFD8B66B),
-    TextHigh = Color(0xFFF3EFE6),
-    TextMuted = Color(0xFFA89D90),
-    Success = Color(0xFF6F8A63),
-    Warning = Color(0xFFB9823F),
-    Danger = Color(0xFF9C564C),
+    Border = KalivTokens.Dark.border,
+    Signal = KalivTokens.Brand.bronze,
+    Amber = KalivTokens.Brand.gold,
+    Highlight = KalivTokens.Brand.highlight,
+    TextHigh = KalivTokens.Dark.text,
+    TextMuted = KalivTokens.Dark.muted,
+    Success = KalivTokens.Semantic.success,
+    Warning = KalivTokens.Semantic.warning,
+    Danger = KalivTokens.Semantic.danger,
     isDark = true,
 )
 
 val KalivLight = KalivColors(
-    Graphite = Color(0xFFF7F3EC),
-    Surface = Color(0xFFEDE5D8),
-    SurfaceHigh = Color(0xFFFFFDF9),
+    Graphite = KalivTokens.Light.canvas,
+    Surface = KalivTokens.Light.surface,
+    SurfaceHigh = KalivTokens.Light.elevated,
     CodeSurface = Color(0xFFEDE7DA),
-    Border = Color(0xFFD7C9B4),
-    Signal = Color(0xFF9A7136),
-    Amber = Color(0xFFC69A4B),
-    Highlight = Color(0xFFD8B66B),
-    TextHigh = Color(0xFF231E19),
-    TextMuted = Color(0xFF6F665C),
-    Success = Color(0xFF6F8A63),
-    Warning = Color(0xFFB9823F),
-    Danger = Color(0xFF9C564C),
+    Border = KalivTokens.Light.border,
+    Signal = KalivTokens.Brand.bronze,
+    Amber = KalivTokens.Brand.gold,
+    Highlight = KalivTokens.Brand.highlight,
+    TextHigh = KalivTokens.Light.text,
+    TextMuted = KalivTokens.Light.muted,
+    Success = KalivTokens.Semantic.success,
+    Warning = KalivTokens.Semantic.warning,
+    Danger = KalivTokens.Semantic.danger,
     isDark = false,
 )
 
