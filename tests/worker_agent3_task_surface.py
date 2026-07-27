@@ -45,6 +45,16 @@ class Tool:
         self.idempotent = idempotent
         self.description = name
         self.params = {"type": "object", "properties": {}}
+        # Current main validates the complete kaliv-capability/v2 descriptor
+        # before a tool reaches the planner prompt. The fixture declares every
+        # registry-owned axis instead of relying on the pre-v2 test double shape.
+        self.isolate = False
+        self.schedulable = True
+        self.unschedulable_because = ""
+        self.env_allow = ()
+        self.network = "none"
+        self.network_destinations = ()
+        self.cancellation = "none"
 
     def human_summary(self, _args):
         return self.name
