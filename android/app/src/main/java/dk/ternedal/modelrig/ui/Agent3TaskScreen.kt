@@ -2,6 +2,7 @@ package dk.ternedal.modelrig.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,7 +14,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -23,7 +23,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.isTraceInProgress
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -69,9 +68,9 @@ fun Agent3TaskScreen(
 
     fun connection(): Pair<String, String> {
         val base = store.baseUrl?.takeIf { it.isNotBlank() }
-            ?: error("Ingen rig-URL er gemt")
+            ?: kotlin.error("Ingen rig-URL er gemt")
         val token = store.token?.takeIf { it.isNotBlank() }
-            ?: error("Ingen device-token er gemt")
+            ?: kotlin.error("Ingen device-token er gemt")
         return base to token
     }
 
@@ -199,11 +198,12 @@ fun Agent3TaskScreen(
                     Agent3ReadonlyTaskClient(base, token).status(runId)
                 }
             }
-            result.onSuccess { snapshot = it }
-                .onFailure {
-                    error = it.message ?: "Automatisk task-status fejlede"
-                    return@LaunchedEffect
-                }
+            if (result.isSuccess) {
+                snapshot = result.getOrThrow()
+            } else {
+                error = result.exceptionOrNull()?.message ?: "Automatisk task-status fejlede"
+                return@LaunchedEffect
+            }
         }
     }
 
@@ -551,7 +551,7 @@ private fun EvidenceCard(evidence: Agent3ReadonlyTaskClient.EvidenceBinding) {
 }
 
 @Composable
-private fun SurfaceCard(content: @Composable Column.() -> Unit) {
+private fun SurfaceCard(content: @Composable ColumnScope.() -> Unit) {
     Surface(color = KalivTheme.colors.surface, shape = RoundedCornerShape(14.dp)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), content = content)
     }
