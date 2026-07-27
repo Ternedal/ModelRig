@@ -22,6 +22,7 @@ from agent3_write_pilot_common import (  # noqa: E402
     _parse_time,
     _sha_bytes,
     _utc_now,
+    PilotEvidenceError,
     validate_manifest,
 )
 
@@ -38,7 +39,7 @@ _RECORD_COLUMNS = (
 )
 
 
-class RecorderError(RuntimeError):
+class RecorderError(PilotEvidenceError):
     pass
 
 
