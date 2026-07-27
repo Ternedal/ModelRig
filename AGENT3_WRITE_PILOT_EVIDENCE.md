@@ -90,19 +90,68 @@ python scripts\agent3_write_pilot_report.py bind `
 `bind` is single-use per ordinal and rejects duplicate or path-like IDs. It never
 changes a marker or candidate binding.
 
-## 3. Negative evidence contract
+## 3. Record the seven negative cases
 
-The negative runner/operator writes
-`validation/agent3-write-pilot-negative.json` with this exact top-level shape:
+Do not hand-write the negative JSON. Initialize the append-only, hash-chained
+SQLite journal while the manifest is still unchanged:
 
-```json
-{
-  "schema": "kaliv-agent3-write-pilot-negative/v1",
-  "pilot_id": "<same pilot id>",
-  "generated_at": "2026-07-27T12:00:00Z",
-  "cases": []
-}
+```powershell
+python scripts\agent3_write_pilot_recorder.py init `
+  --manifest validation\agent3-write-pilot-manifest.json `
+  --journal validation\agent3-write-pilot-negative-journal.db
 ```
+
+For each case, record the before-counts **before** sending the first request. The
+command returns a case ID and the exact marker to use. `replay` and
+`stop_retry_replan` must target an existing positive marker and therefore require
+`--positive-ordinal`:
+
+```powershell
+python scripts\agent3_write_pilot_recorder.py begin `
+  --manifest validation\agent3-write-pilot-manifest.json `
+  --journal validation\agent3-write-pilot-negative-journal.db `
+  --case changed_args `
+  --note-count 0 `
+  --approval-count 0
+```
+
+Save every exact HTTP response body to a file and append one observation per
+request. The recorder stores only its SHA-256, byte count, status and run ID:
+
+```powershell
+python scripts\agent3_write_pilot_recorder.py observe `
+  --journal validation\agent3-write-pilot-negative-journal.db `
+  --case-id <CASE-ID> `
+  --status 409 `
+  --response-file validation\responses\changed-args.json `
+  --run-id <RUN-ID>
+```
+
+Measure the after-counts and close the case. A case cannot finish before at least
+one response is recorded, cannot be reopened and cannot be edited in place:
+
+```powershell
+python scripts\agent3_write_pilot_recorder.py finish `
+  --journal validation\agent3-write-pilot-negative-journal.db `
+  --case-id <CASE-ID> `
+  --note-count 0 `
+  --approval-count 0
+```
+
+After all seven cases are complete, compile the strict negative evidence file:
+
+```powershell
+python scripts\agent3_write_pilot_recorder.py finalize `
+  --manifest validation\agent3-write-pilot-manifest.json `
+  --journal validation\agent3-write-pilot-negative-journal.db `
+  --output validation\agent3-write-pilot-negative.json
+```
+
+Every journal row includes the previous row hash. Finalization rejects missing or
+out-of-order rows, duplicate cases, manifest drift and payload tampering. The
+forensic collector requires the original journal, reconstructs the strict negative
+JSON from that chain and rejects any byte-level semantic mismatch. The final chain
+hash is stored in the physical report.
 
 Exactly these seven cases are required:
 
@@ -155,6 +204,7 @@ finished:
 python scripts\agent3_write_pilot_report.py collect `
   --manifest validation\agent3-write-pilot-manifest.json `
   --negative validation\agent3-write-pilot-negative.json `
+  --negative-journal validation\agent3-write-pilot-negative-journal.db `
   --rig-validation validation\agent3-rig-validation-latest.json `
   --agent-db <path-to-kaliv-agent3.db> `
   --approval-db <path-to-kaliv-agent3-approvals.db> `
@@ -175,6 +225,7 @@ most 24 hours old. A fresh half cannot carry an old half.
 The report schema is `kaliv-agent3-write-pilot/v1`. It contains:
 
 - exact candidate identity and evidence-file/database snapshot hashes;
+- the final append-only negative-journal chain hash;
 - the 20 run IDs, step IDs, marker hashes, revisions and approval times;
 - the seven negative cases with response hashes and run IDs;
 - one attributed device ID across the 20 positive approvals;
