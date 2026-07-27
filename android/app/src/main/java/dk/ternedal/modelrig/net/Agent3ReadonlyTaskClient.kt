@@ -88,11 +88,47 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
         val payload: String,
     )
 
+    data class PlanTermination(
+        val state: String,
+        val canRequest: Boolean,
+        val requestScope: String,
+        val effect: String,
+        val reason: String,
+    )
+
+    data class ModelStreamTermination(
+        val state: String,
+        val active: Boolean,
+        val canRequest: Boolean,
+        val handlePresent: Boolean,
+        val reason: String,
+    )
+
+    data class ActiveToolTermination(
+        val stepId: String,
+        val tool: String,
+        val state: String,
+        val semantics: String?,
+        val handlePresent: Boolean,
+        val canRequest: Boolean,
+        val requestState: String,
+        val reason: String,
+    )
+
+    data class TerminationReceipt(
+        val schema: String,
+        val plan: PlanTermination,
+        val modelStream: ModelStreamTermination,
+        val activeTool: ActiveToolTermination?,
+        val productionActivation: Boolean,
+    )
+
     data class Started(
         val run: Run,
         val events: List<Event>,
         val evidence: EvidenceBinding,
         val capabilityReceipt: CapabilityReceipt?,
+        val termination: TerminationReceipt,
         val terminal: Boolean,
     )
 
@@ -166,11 +202,13 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
         if (terminal != (run.state in TERMINAL_STATES)) {
             throw ModelRigException("Ugyldigt read-only task-run: terminal-status matcher ikke run-state")
         }
+        val termination = parseTermination(root.requireObject("termination"), run, terminal)
         return Started(
             run = run,
             events = parseEvents(root.optJSONArray("events") ?: JSONArray()),
             evidence = parseEvidence(root.requireObject("readiness_binding")),
             capabilityReceipt = parseCapabilityReceipt(root.optJSONObject("capability_receipt")),
+            termination = termination,
             terminal = terminal,
         )
     }
@@ -208,7 +246,12 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
         answer = value.nullableString("answer"),
         error = value.nullableString("error"),
     ).also {
-        if (it.id.isBlank() || it.state !in RUN_STATES) {
+        if (
+            it.id.isBlank() ||
+            it.state !in RUN_STATES ||
+            it.currentStep < 0 ||
+            it.currentStep > it.steps.size
+        ) {
             throw ModelRigException("Ugyldigt read-only task-run: run-identitet eller state er ugyldig")
         }
     }
@@ -243,6 +286,117 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
             }
         ) {
             throw ModelRigException("Ugyldig read-only task-kontrakt: kun lokale idempotente reads er tilladt")
+        }
+    }
+
+    private fun parseTermination(
+        value: JSONObject,
+        run: Run,
+        terminal: Boolean,
+    ): TerminationReceipt {
+        val planValue = value.requireObject("plan")
+        val modelValue = value.requireObject("model_stream")
+        val activeValue = value.optJSONObject("active_tool")
+        val receipt = TerminationReceipt(
+            schema = value.optString("schema"),
+            plan = PlanTermination(
+                state = planValue.optString("state"),
+                canRequest = planValue.requireBoolean("can_request"),
+                requestScope = planValue.optString("request_scope"),
+                effect = planValue.optString("effect"),
+                reason = planValue.optString("reason"),
+            ),
+            modelStream = ModelStreamTermination(
+                state = modelValue.optString("state"),
+                active = modelValue.requireBoolean("active"),
+                canRequest = modelValue.requireBoolean("can_request"),
+                handlePresent = modelValue.requireBoolean("handle_present"),
+                reason = modelValue.optString("reason"),
+            ),
+            activeTool = activeValue?.let {
+                ActiveToolTermination(
+                    stepId = it.optString("step_id"),
+                    tool = it.optString("tool"),
+                    state = it.optString("state"),
+                    semantics = it.nullableString("semantics"),
+                    handlePresent = it.requireBoolean("handle_present"),
+                    canRequest = it.requireBoolean("can_request"),
+                    requestState = it.optString("request_state"),
+                    reason = it.optString("reason"),
+                )
+            },
+            productionActivation = value.requireBoolean("production_activation"),
+        )
+        validateTermination(receipt, run, terminal)
+        return receipt
+    }
+
+    private fun validateTermination(
+        receipt: TerminationReceipt,
+        run: Run,
+        terminal: Boolean,
+    ) {
+        val plan = receipt.plan
+        val model = receipt.modelStream
+        val active = receipt.activeTool
+        val current = run.steps.getOrNull(run.currentStep)
+
+        if (
+            receipt.schema != TERMINATION_SCHEMA ||
+            receipt.productionActivation ||
+            plan.state !in PLAN_TERMINATION_STATES ||
+            plan.requestScope != "plan" ||
+            plan.effect !in PLAN_EFFECTS ||
+            plan.reason.isBlank() ||
+            plan.canRequest != (plan.state == "available") ||
+            plan.canRequest == terminal
+        ) {
+            throw ModelRigException("Ugyldigt read-only termination-receipt: plan-scope er inkonsistent")
+        }
+        val expectedEffect = if (current?.state == "executing") {
+            "prevent_future_steps_active_tool_continues"
+        } else {
+            "prevent_future_steps"
+        }
+        if (plan.effect != expectedEffect) {
+            throw ModelRigException("Ugyldigt read-only termination-receipt: plan-effekt matcher ikke aktivt step")
+        }
+        if (
+            model.state != "not_active" ||
+            model.active ||
+            model.canRequest ||
+            model.handlePresent ||
+            model.reason.isBlank()
+        ) {
+            throw ModelRigException("Ugyldigt read-only termination-receipt: modelstream-scope er inkonsistent")
+        }
+        if ((active == null) != (current == null)) {
+            throw ModelRigException("Ugyldigt read-only termination-receipt: aktivt tool matcher ikke current_step")
+        }
+        if (active == null) return
+        if (
+            active.stepId.isBlank() ||
+            active.tool.isBlank() ||
+            active.state.isBlank() ||
+            active.requestState !in TOOL_REQUEST_STATES ||
+            active.reason.isBlank() ||
+            active.semantics !in TOOL_SEMANTICS ||
+            active.stepId != current?.id ||
+            active.tool != current.tool ||
+            active.state != current.state ||
+            (active.canRequest && !active.handlePresent) ||
+            (active.canRequest && active.semantics !in setOf("cooperative", "runtime"))
+        ) {
+            throw ModelRigException("Ugyldigt read-only termination-receipt: aktivt tool er inkonsistent")
+        }
+        if (active.state == "executing" && active.requestState == "terminal") {
+            throw ModelRigException("Ugyldigt read-only termination-receipt: executing tool kan ikke være terminalt")
+        }
+        if (active.state == "completed_after_cancel" && active.requestState != "terminal") {
+            throw ModelRigException("Ugyldigt read-only termination-receipt: sen completion mangler terminal status")
+        }
+        if (active.requestState == "available" && !active.canRequest) {
+            throw ModelRigException("Ugyldigt read-only termination-receipt: tilgængelig tool-kontrol kan ikke bruges")
         }
     }
 
@@ -379,6 +533,7 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
         private const val FALLBACK = "agent2"
         private const val SELECTED_REASON = "agent3_readonly_selected"
         private const val ROUTE = "rig_tools_local"
+        private const val TERMINATION_SCHEMA = "kaliv-agent3-termination/v1"
         private val OPAQUE_ID = Regex("^[A-Za-z0-9_-]{1,200}$")
         private val SHA256 = Regex("^[0-9a-f]{64}$")
         private val GIT_SHA = Regex("^[0-9a-f]{40}$")
@@ -391,5 +546,18 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
             "cancelled",
         )
         private val TERMINAL_STATES = setOf("blocked", "completed", "failed", "cancelled")
+        private val PLAN_TERMINATION_STATES = setOf("available", "terminal")
+        private val PLAN_EFFECTS = setOf(
+            "prevent_future_steps",
+            "prevent_future_steps_active_tool_continues",
+        )
+        private val TOOL_SEMANTICS = setOf<String?>(null, "none", "cooperative", "runtime")
+        private val TOOL_REQUEST_STATES = setOf(
+            "available",
+            "pending",
+            "terminal",
+            "unavailable",
+            "not_active",
+        )
     }
 }
