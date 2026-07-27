@@ -100,15 +100,24 @@ class SchedulerRunner:
         """
         now_v = time.time() if now is None else now
         # F-1003: recovery treats every 'reserved' occurrence as a dead
-        # worker's. That is only true if no OTHER worker is alive -- so the
-        # lease is a precondition. Failing to get it means a living owner
-        # exists, and abandoning its in-flight claims here would refund slots
-        # for runs that are happening right now.
+        # worker's. That is only true if no OTHER owner holds the lease -- so
+        # the lease is a precondition, and abandoning another owner's in-flight
+        # claims here would refund slots for runs that are happening right now.
+        #
+        # Failing to acquire it does NOT prove a worker is alive. Each process
+        # gets a fresh random owner_id (see __init__), so a worker that died
+        # and restarted cannot reclaim its own lease: the dead process's lease
+        # stays valid for the remainder of lease_ttl_seconds and blocks the
+        # restart's recovery. That is the protection working as designed -- the
+        # consequence is only that the occurrence is resolved at the NEXT
+        # startup -- but the log line must not assert a living worker it has
+        # not observed.
         if not self.schedules.acquire_lease(
                 self.owner_id, ttl_seconds=self.lease_ttl_seconds, now=now_v):
             logging.getLogger(__name__).warning(
-                "scheduler: recovery sprunget over — en anden ejer holder "
-                "lease'en (levende worker); ingen occurrences røres")
+                "scheduler: recovery sprunget over — lease'en holdes af en "
+                "anden ejer: enten en kørende worker, eller en død workers "
+                "lease der endnu ikke er udløbet; ingen occurrences røres")
             return {"executed": [], "abandoned": [], "unknown": [],
                     "skipped_no_lease": True}
         executed_ids: list[str] = []

@@ -133,10 +133,21 @@ try {
 }
 finally { Pop-Location }
 
+# En backend bundet til 127.0.0.1 kan ikke naas af telefonen, og Stage A's
+# voice- og agent-beviser har enheden med i loekken. Defaulten er stadig
+# loopback -- at aabne en LAN-binding skal vaere et bevidst valg -- men den kan
+# nu overstyres, og den valgte adresse skrives ud, saa en uNaaelig backend
+# fejler synligt i stedet for at se ud som om appen "holdt op med at virke".
+$stackHost = if ($env:MODELRIG_HOST) { $env:MODELRIG_HOST } else { "127.0.0.1" }
+Write-Host "  Backend bindes til $stackHost`:8080" -ForegroundColor Cyan
+if ($stackHost -eq "127.0.0.1") {
+    Write-Host "  BEMAERK: telefonen kan ikke naa en loopback-bundet backend. Saet MODELRIG_HOST=0.0.0.0 foer start hvis enheden skal deltage." -ForegroundColor Yellow
+}
+
 @"
 @echo off
 cd /d "$runtimeDir"
-set "MODELRIG_HOST=127.0.0.1"
+set "MODELRIG_HOST=$stackHost"
 set "MODELRIG_PORT=8080"
 set "MODELRIG_DATA=$escapedData"
 set "KALIV_AGENT3_ENABLED=1"
