@@ -31,6 +31,13 @@ checks = {
         and "git push" not in launcher.lower()
         and "release" not in launcher.lower()
     ),
+    "fresh default notes target is created without truncation": (
+        'set "DEFAULT_NOTES_DIR=%USERPROFILE%\\Documents\\Kaliv"' in launcher
+        and 'if not exist "%DEFAULT_NOTES_DIR%" mkdir "%DEFAULT_NOTES_DIR%"' in launcher
+        and 'if not exist "%DEFAULT_NOTES%" type nul > "%DEFAULT_NOTES%"' in launcher
+        and 'type nul > "%DEFAULT_NOTES%"' in launcher
+        and 'type nul > "%DEFAULT_NOTES%"\npy -3' not in launcher.replace("\r\n", "\n")
+    ),
     "fixed ceremony order is encoded": sequence == sorted(sequence),
     "journal binds only after all positive runs": (
         "Journalen må først initialiseres efter 20/20 positive binds" in script
