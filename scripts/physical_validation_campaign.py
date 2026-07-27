@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import physical_validation_campaign_core as _core
-from physical_validation_task_ui import TASK_UI_SCHEMA, validate_task_ui
+import physical_validation_task_ui as _task_ui
 
 # Preserve the complete historical module API, including private helpers used by
 # the repository's contract tests. Explicit wrapper functions below intentionally
@@ -24,6 +24,11 @@ from physical_validation_task_ui import TASK_UI_SCHEMA, validate_task_ui
 for _name in dir(_core):
     if _name not in globals():
         globals()[_name] = getattr(_core, _name)
+
+SCHEMA = _core.SCHEMA
+DEFAULT_REPORT = _core.DEFAULT_REPORT
+TASK_UI_SCHEMA = _task_ui.TASK_UI_SCHEMA
+validate_task_ui = _task_ui.validate_task_ui
 
 DEFAULT_PATHS = dict(_core.DEFAULT_PATHS)
 DEFAULT_PATHS["task_ui"] = Path("validation/agent3-task-ui-validation-latest.json")
