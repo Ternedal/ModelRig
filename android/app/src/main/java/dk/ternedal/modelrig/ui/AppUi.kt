@@ -43,6 +43,7 @@ import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.net.CloudClient
 import dk.ternedal.modelrig.logic.TurnInput
 import dk.ternedal.modelrig.logic.TurnRouter
+import dk.ternedal.modelrig.logic.TurnStatus
 import dk.ternedal.modelrig.net.ModelRigClient
 import dk.ternedal.modelrig.ui.theme.*
 import kotlinx.coroutines.Dispatchers
@@ -542,6 +543,9 @@ private data class Msg(
     val role: String,
     val text: String,
     val streaming: Boolean = false,
+    // Designguiden afsnit 08: "Loading: Kaliv thinking-animation + kort status."
+    // Stemplet naar pladsholderen oprettes, hvor turens plan er kendt.
+    val status: String = TurnStatus.THINKING,
     val error: Boolean = false, // shown in UI, but never persisted or sent as history
     val sources: List<String> = emptyList(), // RAG source names, if this reply used RAG
     val fellBackToCloud: Boolean = false, // rig was unreachable -> answered via cloud
@@ -878,6 +882,7 @@ private fun ChatScreen(
                                 // can reference it.
                                 messages.add(Msg("user", tt))
                                 replyIdx = messages.size
+                                // Stemme-turen har ingen turnPlan i scope; defaulten er den rigtige.
                                 messages.add(Msg("assistant", "", streaming = true))
                             }
                         },
@@ -1096,7 +1101,7 @@ private fun ChatScreen(
         val convo = messages.filter { !it.error }.map { it.role to it.text }
         val history = trimHistory(sys, convo)
         val idx = messages.size
-        messages.add(Msg("assistant", "", streaming = true))
+        messages.add(Msg("assistant", "", streaming = true, status = TurnStatus.forPlan(turnPlan)))
         val rigModel = currentModel
         val cModel = cloudModel
         val srcFilter = ragSourceFilter
@@ -1285,7 +1290,7 @@ private fun ChatScreen(
         val cModel = cloudModel
         val srcFilter = ragSourceFilter
         val cidNow = convId
-        messages[i] = Msg("assistant", "", streaming = true)
+        messages[i] = Msg("assistant", "", streaming = true, status = TurnStatus.forPlan(turnPlan))
         busy = true
         var proposal: dk.ternedal.modelrig.net.ToolTurn? = null
         scope.launch {
@@ -3001,7 +3006,7 @@ private fun StopGlyph(color: Color, modifier: Modifier) {
 // play it via AnimatedImageDrawable in a tiny ImageView. That API is 28+, so on
 // API 26-27 we fall back to the plain ellipsis rather than crash.
 @Composable
-private fun ThinkingIndicator() {
+private fun ThinkingIndicator(status: String = TurnStatus.THINKING) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
         AndroidView(
             modifier = Modifier.size(52.dp),
@@ -3018,7 +3023,7 @@ private fun ThinkingIndicator() {
             },
         )
     } else {
-        Text("…", color = KalivTheme.colors.textMuted, fontSize = 15.sp, lineHeight = 21.sp)
+        Text(status, color = KalivTheme.colors.textMuted, fontSize = 15.sp, lineHeight = 21.sp)
     }
 }
 
@@ -3093,7 +3098,7 @@ private fun Bubble(m: Msg, onRetry: (() -> Unit)? = null) {
                     when {
                         isUser -> Text(m.text, color = KalivTheme.colors.onSignal, fontSize = 15.sp, lineHeight = 21.sp)
                         m.error -> Text(m.text, color = KalivTheme.colors.danger, fontSize = 14.sp, lineHeight = 20.sp)
-                        m.streaming && m.text.isEmpty() -> ThinkingIndicator()
+                        m.streaming && m.text.isEmpty() -> ThinkingIndicator(m.status)
                         m.streaming -> Text(m.text + "▍", color = KalivTheme.colors.textHigh, fontSize = 15.sp, lineHeight = 21.sp)
                         else -> MarkdownText(m.text, color = KalivTheme.colors.textHigh)
                     }

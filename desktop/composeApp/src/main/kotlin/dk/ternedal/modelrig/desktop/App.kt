@@ -84,11 +84,19 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+private object KalivStatus {
+    const val THINKING = "Kaliv t\u00e6nker \u2026"
+    const val RAG = "S\u00f8ger i din viden \u2026"
+    const val TOOLS = "K\u00f8rer v\u00e6rkt\u00f8j \u2026"
+}
+
 private data class UiMessage(
     val role: String,
     val text: String,
     val source: ChatResult.Source? = null,
     val streaming: Boolean = false,
+    // Designguiden afsnit 08: thinking-animation + kort status.
+    val status: String = KalivStatus.THINKING,
     val ragSources: List<String> = emptyList(),
     // For the guide's identity row ("Kaliv · 14:32"). Loaded messages carry the
     // stored created_at; new ones stamp now.
@@ -240,7 +248,7 @@ fun App() {
                 // only render it, never bypass it.
                 val sysT = localSystem.trim().takeIf { it.isNotEmpty() }
                 val assistantIdxT = messages.size
-                messages.add(UiMessage("assistant", "", null, streaming = true))
+                messages.add(UiMessage("assistant", "", null, streaming = true, status = KalivStatus.TOOLS))
                 scope.launch {
                     val cid = withContext(Dispatchers.IO) {
                         val id = convId ?: db.newConversation(source = "tools", model = localModel, title = text)
@@ -295,7 +303,7 @@ fun App() {
             val useRag = ragMode
             val srcFilter = ragSourceFilter
             val assistantIdx = messages.size
-            messages.add(UiMessage("assistant", "", null, streaming = true))
+            messages.add(UiMessage("assistant", "", null, streaming = true, status = if (useRag) KalivStatus.RAG else KalivStatus.THINKING))
             scope.launch {
                 // Best-effort source label for the DB row: since ChatRouter can
                 // fall back dynamically, we label by the PREFERRED source
@@ -1063,7 +1071,7 @@ private fun MessageBubble(m: UiMessage) {
                     }
                     when {
                         isUser -> Text(m.text, color = fg, fontSize = 16.sp, lineHeight = 25.sp)
-                        m.streaming && m.text.isEmpty() -> DesktopThinking()
+                        m.streaming && m.text.isEmpty() -> DesktopThinking(m.status)
                         m.streaming -> Text(m.text + "▍", color = fg, fontSize = 16.sp, lineHeight = 25.sp)
                         else -> MarkdownText(m.text, color = fg)
                     }
@@ -1078,7 +1086,7 @@ private fun MessageBubble(m: UiMessage) {
 // an animated WebP; painterResource draws only the first frame, so on desktop we
 // decode the frames and drive them with a small timer.
 @Composable
-private fun DesktopThinking() {
+private fun DesktopThinking(status: String = KalivStatus.THINKING) {
     // Compose Desktop's painterResource only draws the FIRST frame of an animated
     // WebP, so the old version sat frozen. Instead of fighting the image decoder,
     // draw the animation natively: the still Kaliv ankh with 12 bronze/gold
@@ -1098,30 +1106,36 @@ private fun DesktopThinking() {
 
     val bronze = KalivTheme.colors.Signal
     val gold = KalivTheme.colors.Amber
-    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
-            val c = center
-            val ringR = size.minDimension * 0.42f
-            val n = 12
-            for (i in 0 until n) {
-                val a = Math.toRadians((angle + i * (360f / n)).toDouble())
-                val px = c.x + (ringR * kotlin.math.cos(a)).toFloat()
-                val py = c.y + (ringR * kotlin.math.sin(a)).toFloat()
-                // Fade + shrink around the ring so it reads as a moving comet head,
-                // not a static ring of dots.
-                val phase = i.toFloat() / n
-                val alpha = 0.25f + 0.75f * ((1f - phase))
-                val dotR = size.minDimension * (0.03f + 0.05f * (1f - phase))
-                drawCircle(
-                    color = (if (i % 2 == 0) bronze else gold).copy(alpha = alpha),
-                    radius = dotR,
-                    center = Offset(px, py),
-                )
+    // Guiden, afsnit 08: "Kaliv thinking-animation + kort status." Teksten
+    // staar ved siden af animationen, ikke som en ekstra spinner.
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.fillMaxSize()) {
+                val c = center
+                val ringR = size.minDimension * 0.42f
+                val n = 12
+                for (i in 0 until n) {
+                    val a = Math.toRadians((angle + i * (360f / n)).toDouble())
+                    val px = c.x + (ringR * kotlin.math.cos(a)).toFloat()
+                    val py = c.y + (ringR * kotlin.math.sin(a)).toFloat()
+                    // Fade + shrink around the ring so it reads as a moving comet head,
+                    // not a static ring of dots.
+                    val phase = i.toFloat() / n
+                    val alpha = 0.25f + 0.75f * ((1f - phase))
+                    val dotR = size.minDimension * (0.03f + 0.05f * (1f - phase))
+                    drawCircle(
+                        color = (if (i % 2 == 0) bronze else gold).copy(alpha = alpha),
+                        radius = dotR,
+                        center = Offset(px, py),
+                    )
+                }
+            }
+            if (ankh != null) {
+                Image(ankh, contentDescription = "tænker", modifier = Modifier.size(22.dp))
             }
         }
-        if (ankh != null) {
-            Image(ankh, contentDescription = "tænker", modifier = Modifier.size(22.dp))
-        }
+        Spacer(Modifier.width(8.dp))
+        Text(status, color = KalivTheme.colors.TextMuted, fontSize = 15.sp, lineHeight = 21.sp)
     }
 }
 

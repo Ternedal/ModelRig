@@ -40,6 +40,33 @@ data class TurnInput(
     val allowRagCloud: Boolean,
 )
 
+/**
+ * Statusteksterne fra designguiden, afsnit 07. De udledes HER frem for i UI'et,
+ * fordi valget mellem dem er den samme routing-beslutning som resten af planen
+ * -- og fordi ren logik kan unit-testes, hvor en streng i en composable ikke kan.
+ *
+ * Bemaerk at dette ikke er at rekonstruere serverens semantik lokalt: toolsMode
+ * og ragMode er toggles brugeren selv har sat, og planen er klientens eget valg
+ * af hvilken sti den kalder. Fasen INDE i et kald (henter kontekst kontra
+ * genererer) ville kraeve et signal fra serveren; det er en separat beslutning.
+ */
+object TurnStatus {
+    const val THINKING = "Kaliv tænker …"
+    const val RAG = "Søger i din viden …"
+    const val TOOLS = "Kører værktøj …"
+
+    /**
+     * Statussen er UDLEDT af planen, ikke en del af den. Derfor en funktion frem
+     * for et felt: TurnPlan er routing-beslutningen, og dens beslutningstabel
+     * skal kunne testes uden at en praesentationsstreng er med i ligningen.
+     */
+    fun forPlan(p: TurnPlan): String = when {
+        p.useTools -> TOOLS
+        p.useRag -> RAG
+        else -> THINKING
+    }
+}
+
 data class TurnPlan(
     val useTools: Boolean,
     val useRag: Boolean,

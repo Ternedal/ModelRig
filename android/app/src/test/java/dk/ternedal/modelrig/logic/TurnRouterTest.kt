@@ -1,6 +1,7 @@
 package dk.ternedal.modelrig.logic
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -71,5 +72,34 @@ class TurnRouterTest {
         val p = TurnRouter.plan(TurnInput("cloud", toolsMode = true, ragMode = false, hasCloudKey = true, allowRagCloud = false))
         assertEquals(true, p.useTools)
         assertEquals(true, p.useCloud)
+    }
+
+    // Designguiden afsnit 07 foreskriver tre statustekster. De hoerer til her og
+    // ikke i UI'et, fordi valget mellem dem ER routing-beslutningen -- og fordi
+    // en streng i en composable ikke kan testes.
+    @Test
+    fun `status foelger turens plan`() {
+        fun status(mode: String, tools: Boolean, rag: Boolean) =
+            TurnRouter.plan(TurnInput(mode, tools, rag, hasCloudKey = true, allowRagCloud = true)).let(TurnStatus::forPlan)
+
+        assertEquals(TurnStatus.THINKING, status("rig", tools = false, rag = false))
+        assertEquals(TurnStatus.RAG, status("rig", tools = false, rag = true))
+        assertEquals(TurnStatus.TOOLS, status("rig", tools = true, rag = false))
+        // Tools vinder over RAG: naar begge er til, er det vaerktoejet der koerer.
+        assertEquals(TurnStatus.TOOLS, status("rig", tools = true, rag = true))
+        // Cloud uden rig er ikke en videns-soegning, uanset ragMode-toggle.
+        assertEquals(TurnStatus.THINKING, status("cloud", tools = false, rag = true))
+    }
+
+    @Test
+    fun `status er aldrig tom`() {
+        for (mode in listOf("rig", "cloud")) {
+            for (tools in listOf(true, false)) {
+                for (rag in listOf(true, false)) {
+                    val p = TurnRouter.plan(TurnInput(mode, tools, rag, true, true))
+                    assertTrue("tom status for $mode/$tools/$rag", TurnStatus.forPlan(p).isNotBlank())
+                }
+            }
+        }
     }
 }
