@@ -78,8 +78,8 @@ def _max_age_from_env(environ: Mapping[str, str]) -> tuple[float | None, str | N
 def _base(max_age_hours: float, *, operator_enabled: bool) -> dict[str, Any]:
     return {
         "schema": READINESS_SCHEMA,
-        # This slice evaluates evidence only. It cannot alter the normal chat
-        # router, so even a perfect report still selects Agent 2.
+        # The server selects the dedicated task surface only. Normal chat remains
+        # on Agent 2 and production activation stays false in every outcome.
         "selected_surface": "agent2",
         "candidate_surface": "agent3_readonly",
         "fallback_surface": "agent2",
@@ -129,10 +129,8 @@ def _base(max_age_hours: float, *, operator_enabled: bool) -> dict[str, Any]:
 
 def _finish(result: dict[str, Any], reasons: list[str]) -> dict[str, Any]:
     unique = list(dict.fromkeys(reasons))
-    if not unique:
-        unique = ["task_ui_integration_not_delivered"]
     result["reasons"] = unique
-    result["reason"] = unique[0]
+    result["reason"] = unique[0] if unique else "agent3_readonly_selected"
     return result
 
 
@@ -147,10 +145,12 @@ def assess_task_readiness(
     max_age_hours: float = DEFAULT_MAX_AGE_HOURS,
     report_sha256: str | None = None,
 ) -> dict[str, Any]:
-    """Assess physical read-only pilot evidence without activating any route.
+    """Assess physical read-only pilot evidence for the dedicated task surface.
 
     The returned object is deliberately redacted. It never contains prompts,
     model answers, tool results, hostnames, base URLs, run IDs or raw errors.
+    Selecting ``agent3_readonly`` never changes normal chat or activates
+    production; it only authorizes the typed task-UI surface.
     """
 
     result = _base(max_age_hours, operator_enabled=operator_enabled)
@@ -300,12 +300,10 @@ def assess_task_readiness(
     evidence_ready = not reasons
     result["eligible_for_task_ui"] = evidence_ready
 
-    # Operator intent is visible but cannot activate this delivery. The actual
-    # normal-chat/task-UI integration is a later T-021 slice after physical review.
     if not operator_enabled:
         reasons.append("operator_disabled")
     elif evidence_ready:
-        reasons.append("task_ui_integration_not_delivered")
+        result["selected_surface"] = "agent3_readonly"
 
     return _finish(result, reasons)
 
@@ -398,12 +396,23 @@ def build_task_readiness_router(provider: ReadinessProvider) -> APIRouter:
     @router.get("/task-readiness")
     def task_readiness() -> dict[str, Any]:
         value = provider()
-        # A provider is server-owned, but fail closed if a future refactor returns
-        # a shape that could claim activation.
         if value.get("production_activation") is not False:
             raise RuntimeError("task readiness may never activate production")
-        if value.get("selected_surface") != "agent2":
-            raise RuntimeError("dormant readiness contract may only select agent2")
+        if value.get("normal_chat_route_unchanged") is not True:
+            raise RuntimeError("task readiness may never change normal chat")
+        selected = value.get("selected_surface")
+        if selected not in {"agent2", "agent3_readonly"}:
+            raise RuntimeError("task readiness returned an unknown selected surface")
+        if value.get("candidate_surface") != "agent3_readonly":
+            raise RuntimeError("task readiness returned an unknown candidate surface")
+        if value.get("fallback_surface") != "agent2":
+            raise RuntimeError("task readiness returned an unknown fallback surface")
+        if selected == "agent3_readonly" and not (
+            value.get("eligible_for_task_ui") is True
+            and value.get("operator_enabled") is True
+            and value.get("reason") == "agent3_readonly_selected"
+        ):
+            raise RuntimeError("Agent 3 read-only surface requires exact readiness")
         return value
 
     return router
