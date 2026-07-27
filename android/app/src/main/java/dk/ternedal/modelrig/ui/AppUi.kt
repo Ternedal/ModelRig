@@ -31,6 +31,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import android.content.Intent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -2232,7 +2233,10 @@ private fun ChatScreen(
                     Spacer(Modifier.width(6.dp))
                     if (busy) {
                         Box(
-                            Modifier.size(48.dp).clickable(onClick = { activeCall?.cancel() }),
+                            Modifier.size(48.dp).clickable(
+                                onClickLabel = "Stop svaret", role = Role.Button,
+                                onClick = { activeCall?.cancel() },
+                            ),
                             contentAlignment = Alignment.Center,
                         ) { StopGlyph(color = KalivTheme.colors.danger, modifier = Modifier.size(20.dp)) }
                     } else {
@@ -2240,7 +2244,10 @@ private fun ChatScreen(
                         // are often "what's in this?" with an image and no text).
                         val canSend = input.isNotBlank() || pendingImageB64 != null
                         Box(
-                            Modifier.size(48.dp).clickable(enabled = canSend, onClick = onSend),
+                            Modifier.size(48.dp).clickable(
+                                enabled = canSend, onClickLabel = "Send", role = Role.Button,
+                                onClick = onSend,
+                            ),
                             contentAlignment = Alignment.Center,
                         ) { SendGlyph(color = if (canSend) KalivTheme.colors.signal else KalivTheme.colors.textMuted, modifier = Modifier.size(26.dp)) }
                     }

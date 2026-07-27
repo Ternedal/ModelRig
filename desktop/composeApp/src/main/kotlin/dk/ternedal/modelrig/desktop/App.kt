@@ -2,6 +2,7 @@ package dk.ternedal.modelrig.desktop
 
 import androidx.compose.foundation.background
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Path
@@ -692,7 +693,11 @@ fun App() {
                             .clip(RoundedCornerShape(16.dp))
                             .background(if (canSend) KalivTheme.colors.Signal else KalivTheme.colors.SurfaceHigh)
                             .border(1.dp, if (canSend) KalivTheme.colors.Signal else KalivTheme.colors.Border, RoundedCornerShape(16.dp))
-                            .clickable(enabled = canSend) { send() },
+                            .clickable(
+                                enabled = canSend,
+                                onClickLabel = if (busy) "Sender" else "Send",
+                                role = Role.Button,
+                            ) { send() },
                         contentAlignment = Alignment.Center,
                     ) {
                         if (busy) Text("…", color = KalivTheme.colors.TextMuted)
