@@ -105,6 +105,45 @@ data class Agent3ReadonlyTaskEvent(
 )
 
 @Serializable
+data class Agent3PlanTermination(
+    val state: String = "",
+    @SerialName("can_request") val canRequest: Boolean = false,
+    @SerialName("request_scope") val requestScope: String = "",
+    val effect: String = "",
+    val reason: String = "",
+)
+
+@Serializable
+data class Agent3ModelStreamTermination(
+    val state: String = "",
+    val active: Boolean = false,
+    @SerialName("can_request") val canRequest: Boolean = false,
+    @SerialName("handle_present") val handlePresent: Boolean = false,
+    val reason: String = "",
+)
+
+@Serializable
+data class Agent3ActiveToolTermination(
+    @SerialName("step_id") val stepId: String = "",
+    val tool: String = "",
+    val state: String = "",
+    val semantics: String? = null,
+    @SerialName("handle_present") val handlePresent: Boolean = false,
+    @SerialName("can_request") val canRequest: Boolean = false,
+    @SerialName("request_state") val requestState: String = "",
+    val reason: String = "",
+)
+
+@Serializable
+data class Agent3TerminationReceipt(
+    val schema: String = "",
+    val plan: Agent3PlanTermination = Agent3PlanTermination(),
+    @SerialName("model_stream") val modelStream: Agent3ModelStreamTermination = Agent3ModelStreamTermination(),
+    @SerialName("active_tool") val activeTool: Agent3ActiveToolTermination? = null,
+    @SerialName("production_activation") val productionActivation: Boolean = true,
+)
+
+@Serializable
 data class Agent3ReadonlyTaskSnapshot(
     @SerialName("task_surface") val taskSurface: String = "",
     @SerialName("selected_surface") val selectedSurface: String = "",
@@ -114,6 +153,7 @@ data class Agent3ReadonlyTaskSnapshot(
     val events: List<Agent3ReadonlyTaskEvent> = emptyList(),
     @SerialName("readiness_binding") val evidence: Agent3TaskEvidenceBinding = Agent3TaskEvidenceBinding(),
     @SerialName("capability_receipt") val capabilityReceipt: Agent3TaskCapabilityReceipt? = null,
+    val termination: Agent3TerminationReceipt = Agent3TerminationReceipt(),
     val terminal: Boolean = false,
     @SerialName("production_activation") val productionActivation: Boolean = true,
     @SerialName("normal_chat_route_unchanged") val normalChatRouteUnchanged: Boolean = false,
@@ -123,7 +163,7 @@ data class Agent3ReadonlyTaskSnapshot(
  * Normal desktop transport for the readiness-bound read-only task surface.
  *
  * It intentionally exposes only preview, single-use start, task-scoped status
- * and task-scoped Stop. Generic Agent 3 runs, confirmation, retry, resume,
+ * and task-scoped plan Stop. Generic Agent 3 runs, confirmation, retry, resume,
  * memory, cloud, RAG and client-authored plans are absent from the API.
  */
 class Agent3ReadonlyTaskClient(baseUrl: String, private val bearer: String) {
@@ -209,8 +249,20 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val bearer: String) {
 
     internal fun parseSnapshot(body: String, expectedRunId: String? = null): Agent3ReadonlyTaskSnapshot {
         val root = parseObject(body, "snapshot")
-        val terminal = root["terminal"]?.jsonPrimitive?.booleanOrNull
-            ?: throw Agent3Exception("Invalid read-only task snapshot: terminal is missing")
+        val terminal = requireBoolean(root, "terminal", "snapshot")
+        val terminationRoot = requireObject(root, "termination", "snapshot")
+        val planRoot = requireObject(terminationRoot, "plan", "termination")
+        val streamRoot = requireObject(terminationRoot, "model_stream", "termination")
+        requireBoolean(planRoot, "can_request", "termination.plan")
+        requireBoolean(streamRoot, "active", "termination.model_stream")
+        requireBoolean(streamRoot, "can_request", "termination.model_stream")
+        requireBoolean(streamRoot, "handle_present", "termination.model_stream")
+        requireBoolean(terminationRoot, "production_activation", "termination")
+        (terminationRoot["active_tool"] as? JsonObject)?.let { active ->
+            requireBoolean(active, "handle_present", "termination.active_tool")
+            requireBoolean(active, "can_request", "termination.active_tool")
+        }
+
         val value = decode<Agent3ReadonlyTaskSnapshot>(body, "snapshot")
         validateEnvelope(
             taskSurface = value.taskSurface,
@@ -220,8 +272,13 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val bearer: String) {
             productionActivation = value.productionActivation,
             normalChatRouteUnchanged = value.normalChatRouteUnchanged,
         )
-        if (value.run.id.isBlank() || value.run.state !in RUN_STATES) {
-            throw Agent3Exception("Invalid read-only task snapshot: run identity or state is invalid")
+        if (
+            value.run.id.isBlank() ||
+            value.run.state !in RUN_STATES ||
+            value.run.currentStep < 0 ||
+            value.run.currentStep > value.run.steps.size
+        ) {
+            throw Agent3Exception("Invalid read-only task snapshot: run identity, state or current step is invalid")
         }
         if (expectedRunId != null && value.run.id != expectedRunId) {
             throw Agent3Exception("Invalid read-only task snapshot: server returned another run id")
@@ -236,6 +293,7 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val bearer: String) {
         if (terminal != (value.run.state in TERMINAL_STATES)) {
             throw Agent3Exception("Invalid read-only task snapshot: terminal disagrees with run state")
         }
+        validateTermination(value.termination, value.run, terminal)
         validateEvidence(value.evidence)
         value.capabilityReceipt?.let(::validateReceipt)
         return value
@@ -252,6 +310,14 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val bearer: String) {
     } catch (e: Exception) {
         throw Agent3Exception("Agent 3.0 read-only task $label returned invalid JSON: ${e.message}")
     }
+
+    private fun requireObject(root: JsonObject, name: String, label: String): JsonObject =
+        root[name] as? JsonObject
+            ?: throw Agent3Exception("Invalid read-only task $label: $name object is missing")
+
+    private fun requireBoolean(root: JsonObject, name: String, label: String): Boolean =
+        root[name]?.jsonPrimitive?.booleanOrNull
+            ?: throw Agent3Exception("Invalid read-only task $label: $name boolean is missing")
 
     private fun validateEnvelope(
         taskSurface: String,
@@ -277,6 +343,75 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val bearer: String) {
     private fun validateSteps(steps: List<Agent3ReadonlyTaskStep>) {
         if (steps.any { it.tool.isBlank() || it.risk != "read" || it.egress != "local" || !it.idempotent }) {
             throw Agent3Exception("Invalid read-only task contract: only local idempotent reads are allowed")
+        }
+    }
+
+    private fun validateTermination(
+        value: Agent3TerminationReceipt,
+        run: Agent3ReadonlyTaskRun,
+        terminal: Boolean,
+    ) {
+        val plan = value.plan
+        val stream = value.modelStream
+        val active = value.activeTool
+        val current = run.steps.getOrNull(run.currentStep)
+
+        if (
+            value.schema != TERMINATION_SCHEMA ||
+            value.productionActivation ||
+            plan.state !in PLAN_TERMINATION_STATES ||
+            plan.requestScope != "plan" ||
+            plan.effect !in PLAN_EFFECTS ||
+            plan.reason.isBlank() ||
+            plan.canRequest != (plan.state == "available") ||
+            plan.canRequest == terminal
+        ) {
+            throw Agent3Exception("Invalid read-only termination receipt: plan scope is inconsistent")
+        }
+        val expectedEffect = if (current?.state == "executing") {
+            "prevent_future_steps_active_tool_continues"
+        } else {
+            "prevent_future_steps"
+        }
+        if (plan.effect != expectedEffect) {
+            throw Agent3Exception("Invalid read-only termination receipt: plan effect disagrees with active step")
+        }
+        if (
+            stream.state != "not_active" ||
+            stream.active ||
+            stream.canRequest ||
+            stream.handlePresent ||
+            stream.reason.isBlank()
+        ) {
+            throw Agent3Exception("Invalid read-only termination receipt: model stream scope is inconsistent")
+        }
+        if ((active == null) != (current == null)) {
+            throw Agent3Exception("Invalid read-only termination receipt: active tool disagrees with current step")
+        }
+        if (active == null) return
+        if (
+            active.stepId.isBlank() ||
+            active.tool.isBlank() ||
+            active.state.isBlank() ||
+            active.requestState !in TOOL_REQUEST_STATES ||
+            active.reason.isBlank() ||
+            active.semantics !in TOOL_SEMANTICS ||
+            active.stepId != current?.id ||
+            active.tool != current?.tool ||
+            active.state != current?.state ||
+            (active.canRequest && !active.handlePresent) ||
+            (active.canRequest && active.semantics !in setOf("cooperative", "runtime"))
+        ) {
+            throw Agent3Exception("Invalid read-only termination receipt: active tool is inconsistent")
+        }
+        if (active.state == "executing" && active.requestState == "terminal") {
+            throw Agent3Exception("Invalid read-only termination receipt: executing tool cannot be terminal")
+        }
+        if (active.state == "completed_after_cancel" && active.requestState != "terminal") {
+            throw Agent3Exception("Invalid read-only termination receipt: late completion is not terminal")
+        }
+        if (active.requestState == "available" && !active.canRequest) {
+            throw Agent3Exception("Invalid read-only termination receipt: available tool control cannot be requested")
         }
     }
 
@@ -336,6 +471,7 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val bearer: String) {
         private const val SELECTED_REASON = "agent3_readonly_selected"
         private const val ROUTE = "rig_tools_local"
         private const val RECEIPT_SCHEMA = "kaliv-agent3-capability-receipt/v1"
+        private const val TERMINATION_SCHEMA = "kaliv-agent3-termination/v1"
         private val OPAQUE_ID = Regex("^[A-Za-z0-9_-]{1,200}$")
         private val SHA256 = Regex("^[0-9a-f]{64}$")
         private val GIT_SHA = Regex("^[0-9a-f]{40}$")
@@ -348,5 +484,18 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val bearer: String) {
             "cancelled",
         )
         private val TERMINAL_STATES = setOf("blocked", "completed", "failed", "cancelled")
+        private val PLAN_TERMINATION_STATES = setOf("available", "terminal")
+        private val PLAN_EFFECTS = setOf(
+            "prevent_future_steps",
+            "prevent_future_steps_active_tool_continues",
+        )
+        private val TOOL_SEMANTICS = setOf<String?>(null, "none", "cooperative", "runtime")
+        private val TOOL_REQUEST_STATES = setOf(
+            "available",
+            "pending",
+            "terminal",
+            "unavailable",
+            "not_active",
+        )
     }
 }
