@@ -194,6 +194,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_doc_authority.py`
 - `tests/workflow_freeze_check.py`
 - `tests/workflow_physical_validation_campaign.py`
+- `tests/workflow_physical_validation_campaign_task_ui.py`
 - `tests/workflow_release.py`
 - `tests/workflow_rig_preflight.py`
 - `tests/workflow_route_inventory.py`
