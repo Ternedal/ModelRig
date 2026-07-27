@@ -37,13 +37,13 @@ OPERATORS = (
         "T-022 append-only write-pilot",
         SCRIPTS / "agent3_write_pilot_physical_one_click.py",
         ROOT / "validation" / "agent3-write-pilot-latest.json",
-        "kaliv-agent3-write-pilot-report/v1",
+        "kaliv-agent3-write-pilot/v1",
     ),
     (
         "T-023 termination UI-pilot",
         SCRIPTS / "agent3_termination_ui_physical_one_click.py",
         ROOT / "validation" / "agent3-termination-ui-physical-latest.json",
-        "kaliv-agent3-termination-ui-physical-report/v1",
+        "kaliv-agent3-termination-ui-physical/v1",
     ),
 )
 
