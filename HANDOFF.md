@@ -460,7 +460,60 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     med enhver ny probe i dette repo. Grønt fra en probe der ikke er
     kontrolleret imod en kendt fejl betyder ingenting.
 
-## 9. Kø — hvem har bolden (16/7)
+25. **Målingen er mistænkt før konklusionen — og et instrument der siger
+    nul skal bevises i stand til at sige andet.** 27/7 ramte samme fejl fem
+    gange i forskellig forklædning: en importgraf gav tre forskellige tal og
+    ingen af dem repoets kendte 24% (statisk AST kan ikke se `mount_agent3`);
+    `git log A..B` gav tomt på en shallow clone og `2>/dev/null` slugte fejlen;
+    `ls X | sed && echo ok` meldte succes fordi `sed` lykkedes; testsuiten blev
+    kørt før `current_state.py` og fejlede på en fil der var ved at blive
+    rettet; og et touch-target-grep rapporterede "0 overtrædelser" mens
+    kontroltjekket viste at det fandt 0 af 23 klikbare elementer overhovedet.
+    **Kør altid kontroltjekket:** hvis målingen kan finde nul, så bevis først at
+    den kan finde noget. Et nul fra et blindt instrument ligner et rent resultat.
+26. **Grønt main er ikke leveret.** 27/7 stod der 27 commits og 12 timer mellem
+    sidste release og main, mens `VERSION` stadig sagde det udgivne nummer — så
+    enhver der byggede fra main fik en binær der rapporterede en version den
+    ikke var. Færdigt arbejde der ikke er ude er ikke færdigt. Skær en release
+    når main har samlet noget der er værd at have ude, frem for at vente på at
+    nogen spørger.
+27. **Et dokument adresseret til en AI rådner farligere end andre.**
+    `brand/05_handoff-docs/claude-handoff-brief.md` beder eksplicit en AI om at
+    omsætte brandretningen til et designsystem — og beskriver ModelRig med
+    safirblå som primærfarve. Det gældende Kaliv-system er messing og har nul
+    blålige tokens. En session der læste den ville bygge det forkerte produkt
+    uden at noget advarede den. Alle fire ModelRig-era briefs er nu bannerede
+    som overhalede. Markér den slags **når** retningen skifter, ikke bagefter.
+
+## 9. Kø — hvem har bolden (16/7, opdateret 27/7)
+
+**[27/7 — status på køen.]** Alt der kunne afgøres uden hardware, uden en skærm
+og uden en beslutning fra Anders er ryddet. Det der står tilbage er blokeret på
+netop de tre ting:
+
+- **Riggen:** workflow-baselinen (projektets første completion rate) og PR #135.
+  Baselinen har nu ét indgangspunkt: `scripts/workflow_baseline_one_click.py`.
+  `--check` svarer på om riggen er klar uden at køre eller skrive noget, og hver
+  blokering bærer rettelsen i beskeden frem for i gate-tabellen.
+- **En skærm:** guidens tilstande (hover 4-6%, focus-ring 2 px, pressed 8%),
+  breakpoints og 200% zoom. Alt tekstuelt, semantisk og kontrastmæssigt er
+  derimod målt og lukket.
+- **Anders:** tre tokenpar under WCAG AA som er brandfarver eller semantik;
+  Android-paletten i `theme/Theme.kt`, der har egne værdier med *bedre* kontrast
+  end tokenet (7,28 mod 4,50) — så valget er konsistens kontra kontrast, ikke
+  en rettelse; og fase-signalet i chat-streamen. Alle tre står i `ROADMAP.md`
+  under Åbne beslutninger med tallene.
+
+**Dependabot er tom.** Fra elleve åbne PR'er til nul. Kun to af dem var
+blokeret af deres eget indhold; resten hang på to infrastrukturrødder ingen PR
+pegede på — Kotlin-versionen (adskilt for desktop og Android) og
+Android-platformen (AGP 8.9.1 + compileSdk 36, ikke 8.6.0 som fejlbeskeden
+antydede).
+
+**`ci.yml` kan nu køres på forlangende** (`workflow_dispatch`). Før kørte gaten
+kun på push til main og på pull requests, så en branch kunne ikke få CI's dom
+før nogen åbnede en PR — og lokalt grønt er ikke CI-grønt.
+
 
 **Ingen af disse er blokeret på kode. De er blokeret på rig, telefon,
 branch-ejer eller en beslutning.**
@@ -633,5 +686,11 @@ runbooks (S1–S4 streaming) · `TROUBLESHOOTING.md` = symptom→fix fra faktisk
 fejl · `MODELS.md` = modelvalg + voice-modeller · `CLOUD_TOOLS.md` =
 cloud-agent-status · `DRIFT.md` = Tailscale/backup/geninstallation ·
 `scripts/START_HERE.md` = opstart · `assets/design/kaliv-ui-guide/` =
-design-autoritet · Historiske (bannered): TESTGUIDE, PLAN_v1.13.0,
+design-autoritet, og `kaliv-ui-tokens.json` er **eneste** tokenkilde:
+`scripts/design_tokens.py` genererer `KalivTokens.kt` til begge moduler, og
+desktops `Brand.kt` læser dem frem for at kopiere hex ·
+`scripts/workflow_baseline_one_click.py` = workflow-baselinen, `--check` for
+preflight alene · `brand/05_handoff-docs/` = **OVERHALET**, ModelRig-era med
+safirblå; læs den ikke som gældende · Historiske (bannered): TESTGUIDE,
+PLAN_v1.13.0,
 ALVA_VOICE_ROADMAP_DELTA, CLIENT_BUILD_AND_TEST, KRAVSPEC_V5 (leveret).

@@ -237,3 +237,37 @@ tabt RMS-meter-polling, race på replyIdx (hurtig første sætning kunne miste
 tekst), skrøbelig transcript-gendannelse. Alle fixet. **Hvis streaming driller
 on-device:** det bufrede endpoint (`/voice/converse/upload`) er urørt — app-
 siden kan rulles tilbage til det uden worker-ændringer.
+
+## AGP 8.9.1: "Toolchain does not provide the required capabilities: [JAVA_COMPILER]"
+
+Symptom: `:app:compileDebugUnitTestJavaWithJavac` fejler ved *konfiguration*,
+før noget kompileres. Beskeden nævner en JDK-sti der ser rigtig ud.
+
+Årsag: Ubuntus `openjdk-21-jre` har `java`, men ikke `javac`. AGP 8.5.2 kom
+igennem alligevel; **8.9.1 er strengere om toolchains**. Platformbumpet 27/7
+gjorde det til et krav.
+
+Fix: brug en fuld JDK. `JAVA_HOME=/opt/jdk21` med en Temurin-udgave, ikke
+system-JRE'en. Bemærk at en frisk Temurin ikke kender en proxy-CA; fejler
+afhængighedsopløsningen bagefter med `PKIX path building failed`, så kopiér
+systemets truststore ind: `cp /etc/ssl/certs/java/cacerts $JAVA_HOME/lib/security/`.
+
+## Rødt CI betyder ikke rød kode
+
+Symptom: `android-compile` rød på main uden nogen kodeændring der forklarer det.
+
+Årsag set 27/7: `Could not GET '...repo.maven.apache.org/.../kotlin-reflect-1.9.23.pom'.
+Received status code 403 from server: Forbidden`. Maven Central afviste
+runneren. Jobbet nåede aldrig frem til at kompilere noget — nul compilerfejl i
+loggen.
+
+Fix: hent loggen og se efter `e: file://`-linjer, **før** du reverterer. Er der
+ingen, er det ikke koden. `POST /actions/runs/{id}/rerun-failed-jobs` kørte
+grønt uden en eneste ændring. En refleks-revert ville have rullet en korrekt
+ændring tilbage på grund af en 403 hos et tredjeparts-repo.
+
+Bemærk driftsforholdet: `kotlin-reflect` er en transitiv afhængighed i
+Gradle-classpathen og hentes ubuffret ved hver kørsel. En 403 der rammer den,
+fælder hele Android-jobbet — og på et *tag* ville det have blokeret
+`build-android` og givet en draft uden assets. Samme symptom som 1.58.143, helt
+anden årsag.
