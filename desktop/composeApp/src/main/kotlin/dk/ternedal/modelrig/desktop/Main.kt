@@ -1,5 +1,9 @@
 package dk.ternedal.modelrig.desktop
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
@@ -7,6 +11,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 
 fun main(args: Array<String>) = application {
+    val tasks = args.contains("--tasks")
     val agent3 = args.contains("--agent3")
     val agent3Memory = args.contains("--agent3-memory")
     val agent3Validation = args.contains("--agent3-validation")
@@ -15,18 +20,24 @@ fun main(args: Array<String>) = application {
     val agent3Review = args.contains("--agent3-review")
     val experimental = agent3 || agent3Memory || agent3Validation ||
         agent3Capabilities || agent3Replan || agent3Review
+    var showTasks by remember { mutableStateOf(tasks) }
+
     // The design frames every direction at 1240x740 (.win in the mockup).
-    // At the old 1000dp the 1b cockpit had rail 70 + chat 360 + log 264 = 694
-    // and left the plan panel ~250dp, which wrapped "Agent-plan" one letter
-    // per line. 1240 gives the plan panel the ~546dp the mockup assumes.
+    // Developer evidence surfaces stay narrow; the normal task surface needs
+    // enough width for plan review, receipts and events without changing App().
     val state = rememberWindowState(
-        width = if (experimental) 900.dp else 1240.dp,
+        width = when {
+            showTasks -> 1100.dp
+            experimental -> 900.dp
+            else -> 1240.dp
+        },
         height = 820.dp,
     )
     Window(
         onCloseRequest = ::exitApplication,
         state = state,
         title = when {
+            showTasks -> "Kaliv · Opgaver"
             agent3Capabilities -> "Kaliv · Agent 3.0 Capability Graph"
             agent3Review -> "Kaliv · Agent 3.0 Read Review"
             agent3Replan -> "Kaliv · Agent 3.0 Read Replanner"
@@ -38,6 +49,7 @@ fun main(args: Array<String>) = application {
         icon = painterResource("icon.png"),
     ) {
         when {
+            showTasks -> Agent3TaskApp(onUseAgent2 = { showTasks = false })
             agent3Capabilities -> Agent3CapabilityDevApp()
             agent3Review -> Agent3ReviewDevApp()
             agent3Replan -> Agent3ReplanDevApp()
