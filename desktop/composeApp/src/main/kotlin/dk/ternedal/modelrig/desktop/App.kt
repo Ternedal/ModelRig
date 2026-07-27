@@ -922,9 +922,7 @@ private fun Header(
                 .border(1.dp, KalivTheme.colors.Border, RoundedCornerShape(14.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            runCatching {
-                painterResource(if (dark) "kaliv_symbol_dark.png" else "kaliv_symbol_light.png")
-            }.getOrNull()?.let {
+            kalivSymbolPainter(dark)?.let {
                 Image(painter = it, contentDescription = null, modifier = Modifier.size(24.dp))
             }
         }
@@ -1028,9 +1026,7 @@ private fun MessageBubble(m: UiMessage) {
         ) {
             if (!isUser) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    runCatching {
-                        painterResource(if (KalivTheme.colors.isDark) "kaliv_symbol_dark.png" else "kaliv_symbol_light.png")
-                    }.getOrNull()?.let {
+                    kalivSymbolPainter(KalivTheme.colors.isDark)?.let {
                         Image(painter = it, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(5.dp))
                     }
@@ -1088,9 +1084,7 @@ private fun DesktopThinking() {
     // draw the animation natively: the still Kaliv ankh with 12 bronze/gold
     // particles orbiting as a loading ring (the source design), on a 1.28s loop.
     // This is guaranteed to animate on the JVM and is crisp at any size.
-    val ankh = runCatching {
-        painterResource(if (KalivTheme.colors.isDark) "kaliv_symbol_dark.png" else "kaliv_symbol_light.png")
-    }.getOrNull()
+    val ankh = kalivSymbolPainter(KalivTheme.colors.isDark)
 
     val transition = rememberInfiniteTransition(label = "thinking")
     val angle by transition.animateFloat(

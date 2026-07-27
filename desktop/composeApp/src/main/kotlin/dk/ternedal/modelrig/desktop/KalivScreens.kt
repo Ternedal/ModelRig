@@ -39,6 +39,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -90,14 +91,31 @@ internal val kalivPrimaryInk = Color(0xFFFFF6E9)
 
 /**
  * The ankh brand mark. dark symbol on dark theme, light on light (handoff:
- * "Assets"). Falls back silently if the resource is missing (same runCatching
- * pattern App.kt uses for the header chip).
+ * "Assets"). Falls back silently if the resource is missing (via kalivSymbolPainter,
+ * som App.kt ogsaa bruger).
+ */
+/** Marker udelukkende til classloader-opslag af bundtede ressourcer. */
+private object KalivRes
+
+/**
+ * Compose forbyder composable-kald baade inde i runCatching's lambda OG inde i
+ * try/catch, saa det gamle vaern om painterResource kan ikke overleve en nyere
+ * compiler. Loesningen er ikke at fjerne faldbacken, men at flytte den fejlbare
+ * del ud af kompositionen: om classpath-ressourcen findes er et almindeligt
+ * opslag. Er den der, kaldes painterResource uden vaern.
  */
 @Composable
+internal fun kalivSymbolPainter(dark: Boolean): Painter? {
+    val name = if (dark) "kaliv_symbol_dark.png" else "kaliv_symbol_light.png"
+    val present = remember(name) {
+        KalivRes::class.java.classLoader?.getResource(name) != null
+    }
+    return if (present) painterResource(name) else null
+}
+
+@Composable
 internal fun KalivAnkh(size: Int, modifier: Modifier = Modifier) {
-    runCatching {
-        painterResource(if (KalivTheme.colors.isDark) "kaliv_symbol_dark.png" else "kaliv_symbol_light.png")
-    }.getOrNull()?.let {
+    kalivSymbolPainter(KalivTheme.colors.isDark)?.let {
         Image(painter = it, contentDescription = null, modifier = modifier.size(size.dp))
     }
 }
