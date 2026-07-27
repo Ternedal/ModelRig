@@ -176,6 +176,26 @@ manuelle trin efter genstart.
 
 ## Åbne beslutninger (kræver Anders)
 
+- **Designguidens microcopy kræver et fase-signal i streamen.** Guiden
+  foreskriver tre beskeder — `"Kaliv tænker …"`, `"Søger i din viden …"` og
+  `"Kører værktøj …"` — og ingen af dem findes i nogen klient i dag. Målt
+  27/7: det er ikke en strengudskiftning. `busy` er én boolean i både
+  `App.kt` og `AppUi.kt`, og chat-streamen kender kun `chunk`, `done`,
+  `error` og `transcript`. Der er intet fase-signal at vælge besked ud fra.
+
+  Værst i tools-mode: `App.kt:236` noterer at desktop dér er *non-streaming
+  by necessity* — workeren skal se hele svaret for at opdage et tool-kald —
+  så klienten får intet før alt er færdigt. Netop hvor `"Kører værktøj …"`
+  betyder mest, er klienten blind.
+
+  Beslutningen er derfor ikke om ordlyden, men om workeren skal sende sin
+  fase med. Bemærk at Sols invariant peger samme vej: *klienten må ikke
+  rekonstruere semantik lokalt — vis server-state.* At lade klienten gætte
+  ud fra timing ville bryde den; at sende fasen fra serveren opfylder den.
+
+  Rører worker (uden for agent3), begge klienter og muligvis agent3's
+  overflade. Ikke oprydning.
+
 - **Research-sporet.** Præmissen her var forkert og er rettet 27/7. Sporet er
   ikke ét dvalende hele: **`research_contract` og `research_egress` er i drift.**
   `research_contract` importeres af `web_fetch.py`, `browser_host.py` og
