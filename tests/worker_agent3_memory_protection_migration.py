@@ -168,97 +168,123 @@ def connect(path: Path) -> sqlite3.Connection:
     return conn
 
 
-def file_family_bytes(path: Path) -> bytes:
+def family_bytes(path: Path) -> bytes:
     result = bytearray()
-    for candidate in (path, Path(str(path) + "-wal"), Path(str(path) + "-shm"), Path(str(path) + "-journal")):
+    for candidate in (
+        path,
+        Path(str(path) + "-wal"),
+        Path(str(path) + "-shm"),
+        Path(str(path) + "-journal"),
+    ):
         if candidate.is_file():
             result.extend(candidate.read_bytes())
     return bytes(result)
 
 
-def assert_no_sensitive_bytes(path: Path) -> bool:
-    raw = file_family_bytes(path)
-    return all(secret.encode("utf-8") not in raw for secret in SECRETS.values())
+def has_no_protected_plaintext(path: Path) -> bool:
+    raw = family_bytes(path)
+    return all(value.encode("utf-8") not in raw for value in SECRETS.values())
 
 
 def clone(source: Path, destination: Path) -> None:
     shutil.copy2(source, destination)
     for suffix in ("-wal", "-shm", "-journal"):
-        candidate = Path(str(source) + suffix)
-        if candidate.is_file():
-            shutil.copy2(candidate, Path(str(destination) + suffix))
+        companion = Path(str(source) + suffix)
+        if companion.is_file():
+            shutil.copy2(companion, Path(str(destination) + suffix))
 
 
-with tempfile.TemporaryDirectory(prefix="kaliv-t033-migration-") as tmp:
+def completed_store(root: Path) -> tuple[Path, dict[str, str]]:
+    path = root / "memory.db"
+    ids = seed(path)
+    summary = MemoryProtectionMigrator(
+        path,
+        MemoryProtectionCodec(TestAeadProvider()),
+        clock=lambda: 1_900_000_001.0,
+    ).migrate()
+    check("complete migration reaches completed state", summary.complete)
+    return path, ids
+
+
+with tempfile.TemporaryDirectory(prefix="kaliv-t033-partial-") as tmp:
     root = Path(tmp)
     db = root / "memory.db"
-    ids = seed(db)
-    codec = MemoryProtectionCodec(TestAeadProvider())
-    migrator = MemoryProtectionMigrator(db, codec, clock=lambda: 1_900_000_000.0)
-
-    partial = migrator.migrate(batch_limit=1, finalize=True)
-    check("one-row batch remains explicitly incomplete", not partial.complete)
-    check("partial migration keeps a resumable running state", partial.state == "running")
-    check("partial migration commits exactly one row", partial.batch_commits == 1)
+    seed(db)
+    migrator = MemoryProtectionMigrator(
+        db,
+        MemoryProtectionCodec(TestAeadProvider()),
+        clock=lambda: 1_900_000_000.0,
+    )
+    partial = migrator.migrate(batch_limit=1)
+    check("one-row batch remains incomplete", not partial.complete)
+    check("partial migration stays running", partial.state == "running")
+    check("partial migration commits exactly one complete row", partial.batch_commits == 1)
     check("partial migration reports remaining plaintext", partial.rows_remaining_plaintext > 0)
-    check("partial migration never claims scrub completion", partial.scrub_completed is False)
+    check("partial migration does not claim scrub", partial.scrub_completed is False)
+    check("partial migration can be inspected", migrator.inspect().batch_commits == 1)
 
-    inspected_partial = migrator.inspect()
-    check("partial state can be inspected and resumed", inspected_partial.rows_protected == 1)
-
-    completed = MemoryProtectionMigrator(
+    resumed = MemoryProtectionMigrator(
         db,
         MemoryProtectionCodec(TestAeadProvider()),
         clock=lambda: 1_900_000_001.0,
     ).migrate()
-    check("resumed migration completes", completed.complete)
-    check("all protected rows leave plaintext state", completed.rows_remaining_plaintext == 0)
-    check("deleted protected row becomes a payload-free redaction", completed.rows_redacted == 1)
-    check("source_ref inventory is recorded without its value", completed.source_refs_protected == 1)
-    check("completion runs secure scrub", completed.scrub_completed is True)
-    check("summary remains non-activating", completed.to_dict()["production_activation"] is False)
+    check("partial migration resumes to completion", resumed.complete)
+    check("resume leaves no protected plaintext rows", resumed.rows_remaining_plaintext == 0)
+    check("deleted protected row is redacted", resumed.rows_redacted == 1)
+    check("source-ref count is metadata only", resumed.source_refs_protected == 1)
+    check("summary remains non-activating", resumed.to_dict()["production_activation"] is False)
+    check("completed database family has no protected plaintext", has_no_protected_plaintext(db))
 
+with tempfile.TemporaryDirectory(prefix="kaliv-t033-complete-") as tmp:
+    root = Path(tmp)
+    db, ids = completed_store(root)
     conn = connect(db)
     try:
         rows = {
             row["id"]: row
             for row in conn.execute("SELECT * FROM agent_memories").fetchall()
         }
-        check("public row remains readable and unchanged", rows[ids["public"]]["value"] == PUBLIC_VALUE)
-        check("operational row remains readable and unchanged", rows[ids["operational"]]["value"] == OPERATIONAL_VALUE)
+        check("public row remains readable", rows[ids["public"]]["value"] == PUBLIC_VALUE)
+        check(
+            "operational row remains readable",
+            rows[ids["operational"]]["value"] == OPERATIONAL_VALUE,
+        )
         for name in ("private", "secret", "old", "new"):
             row = rows[ids[name]]
-            check(f"{name} plaintext value is empty", row["value"] == "")
+            check(f"{name} plaintext is cleared", row["value"] == "")
             check(f"{name} row is protected", row["protection_state"] == "protected")
-            check(f"{name} value envelope exists", isinstance(row["value_protected"], str) and bool(row["value_protected"]))
+            check(
+                f"{name} envelope exists",
+                isinstance(row["value_protected"], str) and bool(row["value_protected"]),
+            )
         private = rows[ids["private"]]
-        check("private source_ref plaintext is cleared", private["source_ref"] is None)
-        check("private source_ref envelope exists", isinstance(private["source_ref_protected"], str) and bool(private["source_ref_protected"]))
+        check("source-ref plaintext is cleared", private["source_ref"] is None)
+        check(
+            "source-ref envelope exists",
+            isinstance(private["source_ref_protected"], str)
+            and bool(private["source_ref_protected"]),
+        )
         deleted = rows[ids["deleted"]]
-        check("deleted row has redacted state", deleted["protection_state"] == "redacted")
-        check("deleted row has no protected payload", deleted["value_protected"] is None and deleted["source_ref_protected"] is None)
+        check("deleted row is payload-free redacted", deleted["protection_state"] == "redacted" and deleted["value_protected"] is None)
 
-        migration = conn.execute(
+        receipt = conn.execute(
             "SELECT * FROM agent_memory_protection_migrations WHERE id=?",
             (MIGRATION_ID,),
         ).fetchone()
-        check("migration receipt uses exact schema", migration["schema"] == MIGRATION_SCHEMA)
-        check("migration receipt is completed", migration["state"] == "completed" and migration["scrub_completed"] == 1)
-        serialized_migration = json.dumps(dict(migration), sort_keys=True)
-        check("migration receipt stores no sensitive value", all(secret not in serialized_migration for secret in SECRETS.values()))
-
+        check("migration receipt uses exact schema", receipt["schema"] == MIGRATION_SCHEMA)
+        check("migration receipt is completed", receipt["state"] == "completed" and receipt["scrub_completed"] == 1)
+        receipt_json = json.dumps(dict(receipt), sort_keys=True)
+        check("migration receipt stores no sensitive value", all(value not in receipt_json for value in SECRETS.values()))
         index_sql = "\n".join(
             str(row[0] or "")
-            for row in conn.execute(
-                "SELECT sql FROM sqlite_master WHERE type='index'"
-            ).fetchall()
+            for row in conn.execute("SELECT sql FROM sqlite_master WHERE type='index'")
         )
-        check("no index contains protected envelope columns", "value_protected" not in index_sql and "source_ref_protected" not in index_sql)
+        check("protected envelope columns are not indexed", "value_protected" not in index_sql and "source_ref_protected" not in index_sql)
     finally:
         conn.close()
 
-    check("completed SQLite/WAL family contains no protected plaintext bytes", assert_no_sensitive_bytes(db))
-    check("public data is not falsely scrubbed", PUBLIC_VALUE.encode("utf-8") in file_family_bytes(db))
+    check("completed SQLite/WAL/journal bytes contain no protected plaintext", has_no_protected_plaintext(db))
+    check("public value is not falsely scrubbed", PUBLIC_VALUE.encode("utf-8") in family_bytes(db))
 
     backup = root / "memory-backup.db"
     source = connect(db)
@@ -268,7 +294,7 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-migration-") as tmp:
     finally:
         target.close()
         source.close()
-    check("post-migration SQLite backup contains no protected plaintext", assert_no_sensitive_bytes(backup))
+    check("post-migration SQLite backup has no protected plaintext", has_no_protected_plaintext(backup))
     check(
         "post-migration backup validates in the same scope",
         MemoryProtectionMigrator(
@@ -277,17 +303,15 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-migration-") as tmp:
         ).inspect().complete,
     )
 
-    completed_again = MemoryProtectionMigrator(
+    stable = MemoryProtectionMigrator(
         db,
         MemoryProtectionCodec(TestAeadProvider()),
-        clock=lambda: 1_900_000_002.0,
     ).migrate(finalize=False)
-    check("completed migration is resumably inspectable", completed_again.rows_remaining_plaintext == 0)
-    check("completed migration remains complete without another scrub", completed_again.complete)
+    check("completed migration is resumably inspectable", stable.complete)
 
-    tamper_scope = root / "tamper-scope.db"
-    clone(db, tamper_scope)
-    conn = connect(tamper_scope)
+    changed_scope = root / "changed-scope.db"
+    clone(db, changed_scope)
+    conn = connect(changed_scope)
     try:
         conn.execute(
             "UPDATE agent_memories SET predicate='changed_after_protection' WHERE id=?",
@@ -297,16 +321,17 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-migration-") as tmp:
     finally:
         conn.close()
     expect_error(
-        "moving ciphertext to changed row scope fails closed",
+        "moving envelope to changed row scope fails closed",
         lambda: MemoryProtectionMigrator(
-            tamper_scope, MemoryProtectionCodec(TestAeadProvider())
+            changed_scope,
+            MemoryProtectionCodec(TestAeadProvider()),
         ).inspect(),
         "inspection failed closed",
     )
 
-    tamper_plaintext = root / "tamper-plaintext.db"
-    clone(db, tamper_plaintext)
-    conn = connect(tamper_plaintext)
+    restored = root / "restored-plaintext.db"
+    clone(db, restored)
+    conn = connect(restored)
     try:
         conn.execute(
             "UPDATE agent_memories SET value='RESTORED-PLAINTEXT' WHERE id=?",
@@ -318,23 +343,26 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-migration-") as tmp:
     expect_error(
         "restored plaintext in protected row fails closed",
         lambda: MemoryProtectionMigrator(
-            tamper_plaintext, MemoryProtectionCodec(TestAeadProvider())
+            restored,
+            MemoryProtectionCodec(TestAeadProvider()),
         ).inspect(),
         "retains readable plaintext",
     )
 
-    tamper_cipher = root / "tamper-cipher.db"
-    clone(db, tamper_cipher)
-    conn = connect(tamper_cipher)
+    tampered = root / "tampered-cipher.db"
+    clone(db, tampered)
+    conn = connect(tampered)
     try:
-        row = conn.execute(
-            "SELECT value_protected FROM agent_memories WHERE id=?", (ids["secret"],)
-        ).fetchone()
-        envelope = json.loads(row[0])
-        cipher = bytearray(base64.b64decode(envelope["ciphertext_b64"]))
-        cipher[-1] ^= 1
-        envelope["ciphertext_b64"] = base64.b64encode(cipher).decode("ascii")
-        envelope["ciphertext_sha256"] = hashlib.sha256(cipher).hexdigest()
+        envelope = json.loads(
+            conn.execute(
+                "SELECT value_protected FROM agent_memories WHERE id=?",
+                (ids["secret"],),
+            ).fetchone()[0]
+        )
+        ciphertext = bytearray(base64.b64decode(envelope["ciphertext_b64"]))
+        ciphertext[-1] ^= 1
+        envelope["ciphertext_b64"] = base64.b64encode(ciphertext).decode("ascii")
+        envelope["ciphertext_sha256"] = hashlib.sha256(ciphertext).hexdigest()
         conn.execute(
             "UPDATE agent_memories SET value_protected=? WHERE id=?",
             (json.dumps(envelope, sort_keys=True, separators=(",", ":")), ids["secret"]),
@@ -343,9 +371,10 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-migration-") as tmp:
     finally:
         conn.close()
     expect_error(
-        "rewritten ciphertext digest cannot bypass provider authentication",
+        "rewritten digest cannot bypass provider authentication",
         lambda: MemoryProtectionMigrator(
-            tamper_cipher, MemoryProtectionCodec(TestAeadProvider())
+            tampered,
+            MemoryProtectionCodec(TestAeadProvider()),
         ).inspect(),
         "inspection failed closed",
     )
@@ -355,33 +384,35 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-migration-") as tmp:
     conn = connect(partial_public)
     try:
         conn.execute(
-            "UPDATE agent_memories SET protection_schema=? WHERE id=?",
-            ("unexpected", ids["public"]),
+            "UPDATE agent_memories SET protection_schema='unexpected' WHERE id=?",
+            (ids["public"],),
         )
         conn.commit()
     finally:
         conn.close()
     expect_error(
-        "partial metadata on public row fails closed",
+        "partial protection metadata on public row fails closed",
         lambda: MemoryProtectionMigrator(
-            partial_public, MemoryProtectionCodec(TestAeadProvider())
+            partial_public,
+            MemoryProtectionCodec(TestAeadProvider()),
         ).inspect(),
         "partial protection metadata",
     )
 
-    provider_drift = TestAeadProvider()
-    provider_drift.provider_id = "different-provider"
+    drift_provider = TestAeadProvider()
+    drift_provider.provider_id = "different-provider"
     expect_error(
-        "resume with another provider identity fails closed",
+        "resume under another provider fails closed",
         lambda: MemoryProtectionMigrator(
-            db, MemoryProtectionCodec(provider_drift)
+            db,
+            MemoryProtectionCodec(drift_provider),
         ).inspect(),
         "provider mismatch",
     )
 
-    unknown_state = root / "unknown-state.db"
-    clone(db, unknown_state)
-    conn = connect(unknown_state)
+    unknown = root / "unknown-state.db"
+    clone(db, unknown)
+    conn = connect(unknown)
     try:
         conn.execute(
             "UPDATE agent_memories SET protection_state='future' WHERE id=?",
@@ -391,17 +422,19 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-migration-") as tmp:
     finally:
         conn.close()
     expect_error(
-        "unknown row state fails closed",
+        "unknown protection state fails closed",
         lambda: MemoryProtectionMigrator(
-            unknown_state, MemoryProtectionCodec(TestAeadProvider())
+            unknown,
+            MemoryProtectionCodec(TestAeadProvider()),
         ).inspect(),
         "unknown protection state",
     )
 
     expect_error(
-        "invalid zero batch is rejected",
+        "zero batch limit is rejected",
         lambda: MemoryProtectionMigrator(
-            db, MemoryProtectionCodec(TestAeadProvider())
+            db,
+            MemoryProtectionCodec(TestAeadProvider()),
         ).migrate(batch_limit=0),
         "at least one",
     )
@@ -412,31 +445,33 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-crash-") as tmp:
     seed(db)
     failing = MemoryProtectionMigrator(
         db,
-        MemoryProtectionCodec(TestAeadProvider(fail_on_protect_call=2)),
+        MemoryProtectionCodec(TestAeadProvider(fail_on_protect_call=3)),
     )
     expect_error(
-        "injected provider interruption stops the batch",
+        "provider interruption stops the next row",
         lambda: failing.migrate(finalize=False),
         "failed closed",
     )
     interrupted = MemoryProtectionMigrator(
-        db, MemoryProtectionCodec(TestAeadProvider())
+        db,
+        MemoryProtectionCodec(TestAeadProvider()),
     ).inspect()
-    check("row commits before interruption remain durable", interrupted.batch_commits == 1)
-    check("interrupted migration remains explicitly incomplete", interrupted.rows_remaining_plaintext > 0 and not interrupted.complete)
+    check("one complete row remains durable before interruption", interrupted.batch_commits == 1)
+    check("interrupted migration stays incomplete", interrupted.rows_remaining_plaintext > 0 and not interrupted.complete)
     resumed = MemoryProtectionMigrator(
-        db, MemoryProtectionCodec(TestAeadProvider())
+        db,
+        MemoryProtectionCodec(TestAeadProvider()),
     ).migrate()
     check("interrupted migration resumes to completion", resumed.complete)
-    check("resumed final database contains no protected plaintext", assert_no_sensitive_bytes(db))
+    check("resumed database has no protected plaintext", has_no_protected_plaintext(db))
 
-with tempfile.TemporaryDirectory(prefix="kaliv-t033-paths-") as tmp:
+with tempfile.TemporaryDirectory(prefix="kaliv-t033-path-") as tmp:
     root = Path(tmp)
-    missing = root / "missing.db"
     expect_error(
         "missing database is rejected",
         lambda: MemoryProtectionMigrator(
-            missing, MemoryProtectionCodec(TestAeadProvider())
+            root / "missing.db",
+            MemoryProtectionCodec(TestAeadProvider()),
         ),
         "regular file",
     )
@@ -445,7 +480,8 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-paths-") as tmp:
     expect_error(
         "empty database is rejected",
         lambda: MemoryProtectionMigrator(
-            empty, MemoryProtectionCodec(TestAeadProvider())
+            empty,
+            MemoryProtectionCodec(TestAeadProvider()),
         ),
         "empty",
     )
@@ -455,12 +491,12 @@ if os.name == "nt":
         root = Path(tmp)
         db = root / "memory.db"
         seed(db)
-        dpapi_summary = MemoryProtectionMigrator(
+        summary = MemoryProtectionMigrator(
             db,
             MemoryProtectionCodec(WindowsDpapiMemoryProtectionProvider()),
         ).migrate()
-        check("real Windows DPAPI migrates the complete SQLite store", dpapi_summary.complete)
-        check("real Windows DPAPI migration scrubs raw protected values", assert_no_sensitive_bytes(db))
+        check("real Windows DPAPI migrates the complete store", summary.complete)
+        check("real Windows DPAPI migration scrubs raw protected values", has_no_protected_plaintext(db))
 else:
     check("real DPAPI SQLite migration is reserved for windows-latest", True)
 
