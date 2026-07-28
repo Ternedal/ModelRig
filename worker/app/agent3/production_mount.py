@@ -7,9 +7,11 @@ no protected-to-legacy fallback.
 """
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from .. import paths as _paths
 from ..build_identity import code_fingerprint
@@ -26,6 +28,9 @@ from .memory_api import build_memory_router
 from .memory_protected_api import build_protected_memory_router
 from .memory_protected_gateway import (
     GatewayProtectedMemoryAuthorizer,
+    MEMORY_REQUEST_BODY_MAX_BYTES,
+    MEMORY_STORE_ATTESTATION_HEADER,
+    MEMORY_STORE_ATTESTATION_VALUE,
     memory_store_mode,
 )
 from .memory_protected_reader import ProtectedMemoryReader
@@ -48,6 +53,35 @@ from .task_readiness import (
 )
 
 ProviderFactory = Callable[[], MemoryProtectionProvider]
+_PROTECTED_MEMORY_PREFIX = "/experimental/agent3/memory"
+
+
+def _install_protected_memory_request_boundary(app: FastAPI) -> None:
+    if getattr(app.state, "agent3_protected_memory_boundary_installed", False):
+        return
+
+    @app.middleware("http")
+    async def protected_memory_request_boundary(request: Request, call_next):
+        if request.url.path.startswith(_PROTECTED_MEMORY_PREFIX):
+            body = await request.body()
+            if len(body) > MEMORY_REQUEST_BODY_MAX_BYTES:
+                response = JSONResponse(
+                    status_code=413,
+                    content={"detail": "protected memory request body is too large"},
+                )
+                response.headers[
+                    MEMORY_STORE_ATTESTATION_HEADER
+                ] = MEMORY_STORE_ATTESTATION_VALUE
+                return response
+            request.state.agent3_memory_body_sha256 = hashlib.sha256(body).hexdigest()
+            response = await call_next(request)
+            response.headers[
+                MEMORY_STORE_ATTESTATION_HEADER
+            ] = MEMORY_STORE_ATTESTATION_VALUE
+            return response
+        return await call_next(request)
+
+    app.state.agent3_protected_memory_boundary_installed = True
 
 
 def mount_agent3(
@@ -59,8 +93,9 @@ def mount_agent3(
 
     `KALIV_AGENT3_MEMORY_STORE` is exact: empty/`legacy` mounts the historical
     plaintext store; `protected` requires a completed migration, a working
-    current-user provider and the gateway grant secret. Any protected-mode
-    failure aborts mounting instead of silently selecting `MemoryStore`.
+    current-user provider, a durable replay ledger and the gateway grant secret.
+    Any protected-mode failure aborts mounting instead of silently selecting
+    `MemoryStore`.
     """
     if not _mount_core(app):
         return False
@@ -84,6 +119,7 @@ def mount_agent3(
     protected_reader: ProtectedMemoryReader | None = None
     protected_writer: ProtectedMemoryWriter | None = None
     planner_memory_store: MemoryStore | None = None
+    grant_db_path = None
 
     if mode == "legacy":
         legacy_store = MemoryStore(str(memory_path))
@@ -93,7 +129,13 @@ def mount_agent3(
         # Construct every dependency before mounting the route. Reader/writer
         # independently validate the completed migration receipt/provider/key
         # scope. No code here invokes the migrator or catches errors to fall back.
-        authorizer = GatewayProtectedMemoryAuthorizer.from_environment()
+        grant_db_path = _paths.resolve(
+            "./kaliv-agent3-memory-grants.db",
+            env="KALIV_AGENT3_MEMORY_GRANT_DB",
+        )
+        authorizer = GatewayProtectedMemoryAuthorizer.from_environment(
+            replay_db=grant_db_path
+        )
         codec = MemoryProtectionCodec(protected_provider_factory())
         try:
             protected_reader = ProtectedMemoryReader(memory_path, codec)
@@ -104,6 +146,7 @@ def mount_agent3(
             if protected_writer is not None:
                 protected_writer.close()
             raise
+        _install_protected_memory_request_boundary(app)
         app.include_router(
             build_protected_memory_router(
                 protected_reader,
@@ -170,6 +213,7 @@ def mount_agent3(
     app.state.agent3_memory_store = legacy_store
     app.state.agent3_protected_memory_reader = protected_reader
     app.state.agent3_protected_memory_writer = protected_writer
+    app.state.agent3_protected_memory_grant_db = grant_db_path
     app.state.agent3_planner_memory_enabled = planner_memory_store is not None
     app.state.agent3_replan_preview_service = replan_preview_service
     app.state.agent3_outcome_answer_mounted = True
