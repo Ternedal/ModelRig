@@ -372,6 +372,23 @@ holder egress-siden på samme princip som D6's 300 sekunder på data-siden.
 Fire af de fem er stramme med vilje: løsn når der er data, ikke før. Kun nr. 2
 er et rent bekvemmelighedsvalg.
 
+**ÅBENT (27/7): hvad skal rig-dagen bevise?** `browser_peer_public_validation.py`
+bygger kæden i hånden — `boundary.prepare → claim → … → complete`, med
+`complete()` kaldt to steder for henholdsvis succes og fejl.
+`WebResearchFetcher` bygger nu den samme kæde, med `complete()` i en `finally`.
+
+To implementeringer af én kæde. Køres rig-dagen som scriptet er nu, **bevises
+scriptet — ikke henteren**, og henteren er den der skal i produktion.
+
+| | for | imod |
+|---|---|---|
+| **Lad scriptet kalde henteren** | rig-dagen beviser produktionskoden | ændrer den artefakt der producerede Stage A's syvende bevis, og ændringen kan ikke prøves i CI — scriptet er med vilje holdt udenfor |
+| **Lad dem være adskilte** | den beviste artefakt røres ikke | henteren når produktion uden nogensinde at have rørt internettet |
+| **Paritetstest i stedet** | billigt, ingen risiko for artefakten | en paritetstest med attrapper beviser ikke det samme som ét rigtigt GET |
+
+Beslutningen bestemmer hvad næste rig-dag er værd. Den er ikke truffet.
+
+
 *Afgjort 13/7-2026: **D1** keystore = risiko accepteret (`SECURITY.md`) · **D2** VERSION-kilde
 + CI-gate = leveret · **D5** dokumentstruktur = lean (denne fil + `STATUS.md` + `SECURITY.md`)
 · ROADMAP_V2 vedtaget.*
