@@ -11,6 +11,7 @@ from .agent3.production_mount import mount_agent3
 from .hardening import harden
 from .main import app as fastapi_app
 from .schedule_api import build_schedule_router
+from .web_research_mount import mount_web_research
 from .schedule_runtime import scheduler_lifespan
 
 # Route construction is side-effect free: no schedule/job/audit DB is opened and
@@ -27,6 +28,11 @@ install_termination_contract(fastapi_app)
 # mount self-guards on KALIV_AGENT3_ENABLED (default off) and owns the complete
 # production surface; launchers do not add parallel routers.
 mount_agent3(fastapi_app)
+
+# Web-research selvvagter paa KALIV_WEB_RESEARCH_ENABLED (default off) paa samme
+# maade. Flaget er en SEPARAT beslutning fra D6: D6 fastlagde politikken for
+# hvornaar noget maa sendes udad, ikke hvilken flade der aabnes.
+mount_web_research(fastapi_app)
 
 # The raw route app stays inert for unit tests. Only the documented production
 # entrypoint owns process lifecycle, and the hook itself creates no scheduler
