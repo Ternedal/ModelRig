@@ -33,6 +33,7 @@ from .memory_protected_gateway import (
     MEMORY_STORE_ATTESTATION_VALUE,
     memory_store_mode,
 )
+from .memory_protected_planner import ProtectedPlannerMemoryContextProvider
 from .memory_protected_reader import ProtectedMemoryReader
 from .memory_protected_writer import ProtectedMemoryWriter
 from .memory_protection import (
@@ -42,7 +43,7 @@ from .memory_protection import (
 )
 from .outcome_answer_api import build_outcome_answer_router
 from .plan_store import PlanStore
-from .planner import build_planner_router
+from .planner import PlannerMemoryContextProvider, build_planner_router
 from .replan_preview_api import (
     build_default_replan_preview_service,
     build_replan_preview_router,
@@ -119,6 +120,7 @@ def mount_agent3(
     protected_reader: ProtectedMemoryReader | None = None
     protected_writer: ProtectedMemoryWriter | None = None
     planner_memory_store: MemoryStore | None = None
+    planner_context_provider: PlannerMemoryContextProvider | None = None
     grant_db_path = None
 
     if mode == "legacy":
@@ -126,7 +128,7 @@ def mount_agent3(
         planner_memory_store = legacy_store
         app.include_router(build_memory_router(legacy_store))
     else:
-        # Construct every dependency before mounting the route. Reader/writer
+        # Construct every dependency before mounting a route. Reader/writer
         # independently validate the completed migration receipt/provider/key
         # scope. No code here invokes the migrator or catches errors to fall back.
         grant_db_path = _paths.resolve(
@@ -140,6 +142,9 @@ def mount_agent3(
         try:
             protected_reader = ProtectedMemoryReader(memory_path, codec)
             protected_writer = ProtectedMemoryWriter(memory_path, codec)
+            planner_context_provider = ProtectedPlannerMemoryContextProvider(
+                protected_reader
+            )
         except Exception:
             if protected_reader is not None:
                 protected_reader.close()
@@ -154,9 +159,9 @@ def mount_agent3(
                 authorizer=authorizer,
             )
         )
-        # The legacy planner compiler expects plaintext `MemoryStore` rows. It is
-        # deliberately unavailable in protected mode until a separate bounded,
-        # local-only compiler is proven; `use_memory=true` therefore returns 409.
+        # Protected planner memory is a separate local-only provider. It sees
+        # route target before any value is decrypted, rejects cloud use and
+        # never reopens the legacy plaintext MemoryStore.
         planner_memory_store = None
 
     def graph_provider():
@@ -180,6 +185,7 @@ def mount_agent3(
             orchestrator=orchestrator,
             plan_store=PlanStore(str(plan_path)),
             memory_store=planner_memory_store,
+            memory_context_provider=planner_context_provider,
             capability_graph_provider=graph_provider,
         )
     )
@@ -214,7 +220,13 @@ def mount_agent3(
     app.state.agent3_protected_memory_reader = protected_reader
     app.state.agent3_protected_memory_writer = protected_writer
     app.state.agent3_protected_memory_grant_db = grant_db_path
-    app.state.agent3_planner_memory_enabled = planner_memory_store is not None
+    app.state.agent3_planner_memory_context_provider = planner_context_provider
+    app.state.agent3_planner_memory_enabled = (
+        planner_memory_store is not None or planner_context_provider is not None
+    )
+    app.state.agent3_planner_memory_mode = (
+        "protected-local" if planner_context_provider is not None else "legacy"
+    )
     app.state.agent3_replan_preview_service = replan_preview_service
     app.state.agent3_outcome_answer_mounted = True
     app.state.agent3_capability_graph_mounted = True

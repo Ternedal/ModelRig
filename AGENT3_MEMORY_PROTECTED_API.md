@@ -14,9 +14,9 @@ with `KALIV_AGENT3_MEMORY_STORE=protected`.
 
 - empty or `legacy`: the historical plaintext `MemoryStore`, legacy CRUD/context
   routes and planner memory remain unchanged;
-- `protected`: the protected reader/writer/API are selected, while the legacy
-  store, legacy context-preview and plaintext planner-memory integration are not
-  mounted.
+- `protected`: the protected reader/writer/API and bounded local planner-context
+  provider are selected, while the legacy store, legacy context-preview and
+  plaintext planner-memory integration are not mounted.
 
 Protected startup requires all of the following before its route is included:
 
@@ -96,6 +96,34 @@ Every response is metadata-only:
   value, envelope or ciphertext;
 - there is no remote context-preview or secret reveal route.
 
+## Bounded local planner context
+
+Protected planner memory is a separate server-owned provider, not a remote
+memory route and not a duck-typed legacy `MemoryStore`.
+
+The planner resolves its route target before asking the provider for any values.
+The protected provider accepts only `local`; a cloud target or a private-cloud
+consent flag is rejected before the first decrypt operation and before the
+planner model is called.
+
+For an accepted local request:
+
+- only active, confirmed, unexpired, non-secret rows are eligible;
+- public, operational and private values may be used locally;
+- source provenance is never rendered;
+- output is capped at 12,000 characters and 50 records;
+- candidate decryption is independently capped at 24,000 characters and 100
+  records, normally at no more than twice the requested output limits;
+- subject filters are canonical, unique and capped at 20;
+- values are rendered by the existing untrusted JSON memory envelope with
+  markup characters escaped;
+- the plan store persists only included/excluded ids, character count, target
+  and SHA-256 receipt — never the decrypted context text.
+
+A zero budget returns an empty receipt without decrypting. Protected and legacy
+planner sources cannot be configured simultaneously. In protected mode the
+legacy context-preview route and plaintext planner store remain absent.
+
 ## Write policy
 
 The boundary accepts only `private` create/correct/delete operations. Secret
@@ -110,9 +138,8 @@ submitted plaintext.
 ## Deliberate remaining boundaries
 
 - protected mode is still behind the global dormant `KALIV_AGENT3_ENABLED=1`;
-- protected planner memory remains disabled until a separate bounded local-only
-  compiler can be proven without bulk decrypt or prompt leakage;
 - draft PR #206 remains the independent canary leak-surface promotion gate;
 - no secret reveal, bulk decrypt, value search, embedding or plaintext logging;
+- no protected memory is sent to cloud, including with a consent flag;
 - no implicit migration, key rotation or recovery bypass;
 - no physical Windows backup/restore claim yet.
