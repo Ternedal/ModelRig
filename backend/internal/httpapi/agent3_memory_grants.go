@@ -1,13 +1,16 @@
 package httpapi
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -15,12 +18,15 @@ import (
 )
 
 const (
-	agent3MemoryStoreEnv       = "KALIV_AGENT3_MEMORY_STORE"
-	agent3MemoryAPISecretEnv   = "KALIV_AGENT3_MEMORY_API_SECRET"
-	agent3MemoryGrantHeader    = "X-Kaliv-Agent3-Memory-Grant"
-	agent3MemoryGrantSchema    = "kaliv-agent3-memory-grant/v1"
-	agent3MemoryGrantTTL       = 30 * time.Second
-	agent3MemoryGrantMaxFuture = 5 * time.Second
+	agent3MemoryStoreEnv                = "KALIV_AGENT3_MEMORY_STORE"
+	agent3MemoryAPISecretEnv            = "KALIV_AGENT3_MEMORY_API_SECRET"
+	agent3MemoryGrantHeader             = "X-Kaliv-Agent3-Memory-Grant"
+	agent3MemoryStoreAttestationHeader  = "X-Kaliv-Agent3-Memory-Store"
+	agent3MemoryStoreAttestationValue   = "protected"
+	agent3MemoryGrantSchema             = "kaliv-agent3-memory-grant/v1"
+	agent3MemoryGrantTTL                = 30 * time.Second
+	agent3MemoryGrantMaxFuture          = 5 * time.Second
+	agent3MemoryRequestBodyMaxBytes     = 64 * 1024
 )
 
 var (
@@ -29,15 +35,17 @@ var (
 )
 
 type agent3MemoryGrantClaims struct {
-	Schema    string `json:"schema"`
-	Nonce     string `json:"nonce"`
-	DeviceID  string `json:"device_id"`
-	Action    string `json:"action"`
-	RequestID string `json:"request_id"`
-	Method    string `json:"method"`
-	Path      string `json:"path"`
-	IssuedAt  int64  `json:"issued_at"`
-	ExpiresAt int64  `json:"expires_at"`
+	Schema     string `json:"schema"`
+	Nonce      string `json:"nonce"`
+	DeviceID   string `json:"device_id"`
+	Action     string `json:"action"`
+	RequestID  string `json:"request_id"`
+	Method     string `json:"method"`
+	Path       string `json:"path"`
+	Query      string `json:"query"`
+	BodySHA256 string `json:"body_sha256"`
+	IssuedAt   int64  `json:"issued_at"`
+	ExpiresAt  int64  `json:"expires_at"`
 }
 
 func agent3MemoryStoreMode() (string, error) {
@@ -53,7 +61,7 @@ func agent3MemoryStoreMode() (string, error) {
 
 func agent3MemoryGrantSecret() ([]byte, error) {
 	secret := []byte(os.Getenv(agent3MemoryAPISecretEnv))
-	if len(secret) < 32 {
+	if len(secret) < 32 || len(secret) > 4_096 {
 		return nil, errAgent3MemoryGrantUnavailable
 	}
 	return secret, nil
@@ -65,6 +73,13 @@ func cleanAgent3MemoryGrantText(name, value string, maximum int) (string, error)
 		return "", fmt.Errorf("Agent 3 protected-memory %s is invalid", name)
 	}
 	return cleaned, nil
+}
+
+func cleanAgent3MemoryGrantOptionalText(name, value string, maximum int) (string, error) {
+	if len(value) > maximum || strings.ContainsAny(value, "\r\n\x00") {
+		return "", fmt.Errorf("Agent 3 protected-memory %s is invalid", name)
+	}
+	return value, nil
 }
 
 func agent3MemoryGrantAction(method, path string) (string, error) {
@@ -108,9 +123,28 @@ func agent3MemoryGrantAction(method, path string) (string, error) {
 	return "", errAgent3MemoryRouteUnsupported
 }
 
+func bindAgent3MemoryRequestBody(r *http.Request) (string, error) {
+	if r.Body == nil {
+		digest := sha256.Sum256(nil)
+		return hex.EncodeToString(digest[:]), nil
+	}
+	raw, err := io.ReadAll(io.LimitReader(r.Body, agent3MemoryRequestBodyMaxBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("protected-memory request body: %w", err)
+	}
+	if len(raw) > agent3MemoryRequestBodyMaxBytes {
+		return "", fmt.Errorf("protected-memory request body exceeds %d bytes", agent3MemoryRequestBodyMaxBytes)
+	}
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	r.ContentLength = int64(len(raw))
+	digest := sha256.Sum256(raw)
+	return hex.EncodeToString(digest[:]), nil
+}
+
 func issueAgent3MemoryGrant(
 	r *http.Request,
 	workerPath string,
+	bodySHA256 string,
 	now time.Time,
 ) (string, agent3MemoryGrantClaims, error) {
 	secret, err := agent3MemoryGrantSecret()
@@ -137,6 +171,16 @@ func issueAgent3MemoryGrant(
 	if err != nil || !strings.HasPrefix(path, "/experimental/agent3/memory") {
 		return "", agent3MemoryGrantClaims{}, errAgent3MemoryRouteUnsupported
 	}
+	query, err := cleanAgent3MemoryGrantOptionalText("query", r.URL.RawQuery, 4_096)
+	if err != nil {
+		return "", agent3MemoryGrantClaims{}, err
+	}
+	if len(bodySHA256) != sha256.Size*2 {
+		return "", agent3MemoryGrantClaims{}, errors.New("protected-memory request body digest is invalid")
+	}
+	if _, err := hex.DecodeString(bodySHA256); err != nil || bodySHA256 != strings.ToLower(bodySHA256) {
+		return "", agent3MemoryGrantClaims{}, errors.New("protected-memory request body digest is invalid")
+	}
 	method := strings.ToUpper(strings.TrimSpace(r.Method))
 	action, err := agent3MemoryGrantAction(method, path)
 	if err != nil {
@@ -148,15 +192,17 @@ func issueAgent3MemoryGrant(
 		return "", agent3MemoryGrantClaims{}, fmt.Errorf("protected-memory grant nonce: %w", err)
 	}
 	claims := agent3MemoryGrantClaims{
-		Schema:    agent3MemoryGrantSchema,
-		Nonce:     base64.RawURLEncoding.EncodeToString(nonceBytes),
-		DeviceID:  deviceID,
-		Action:    action,
-		RequestID: requestID,
-		Method:    method,
-		Path:      path,
-		IssuedAt:  now.Unix(),
-		ExpiresAt: now.Add(agent3MemoryGrantTTL).Unix(),
+		Schema:     agent3MemoryGrantSchema,
+		Nonce:      base64.RawURLEncoding.EncodeToString(nonceBytes),
+		DeviceID:   deviceID,
+		Action:     action,
+		RequestID:  requestID,
+		Method:     method,
+		Path:       path,
+		Query:      query,
+		BodySHA256: bodySHA256,
+		IssuedAt:   now.Unix(),
+		ExpiresAt:  now.Add(agent3MemoryGrantTTL).Unix(),
 	}
 	payload, err := json.Marshal(claims)
 	if err != nil {
@@ -179,6 +225,8 @@ func verifyAgent3MemoryGrant(
 	requestID string,
 	method string,
 	path string,
+	query string,
+	bodySHA256 string,
 	now time.Time,
 ) (agent3MemoryGrantClaims, error) {
 	secret, err := agent3MemoryGrantSecret()
@@ -211,13 +259,15 @@ func verifyAgent3MemoryGrant(
 		return agent3MemoryGrantClaims{}, errors.New("protected-memory grant payload is invalid")
 	}
 	if claims.Schema != agent3MemoryGrantSchema || claims.Nonce == "" || claims.DeviceID == "" ||
-		claims.Action == "" || claims.RequestID == "" || claims.Method == "" || claims.Path == "" {
+		claims.Action == "" || claims.RequestID == "" || claims.Method == "" || claims.Path == "" ||
+		claims.BodySHA256 == "" {
 		return agent3MemoryGrantClaims{}, errors.New("protected-memory grant claims are invalid")
 	}
 	if _, err := base64.RawURLEncoding.DecodeString(claims.Nonce); err != nil {
 		return agent3MemoryGrantClaims{}, errors.New("protected-memory grant nonce is invalid")
 	}
-	if claims.RequestID != requestID || claims.Method != method || claims.Path != path {
+	if claims.RequestID != requestID || claims.Method != method || claims.Path != path ||
+		claims.Query != query || claims.BodySHA256 != bodySHA256 {
 		return agent3MemoryGrantClaims{}, errors.New("protected-memory grant request binding is invalid")
 	}
 	action, err := agent3MemoryGrantAction(method, path)
