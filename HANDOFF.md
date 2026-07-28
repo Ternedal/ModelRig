@@ -550,6 +550,12 @@ udadgående læsninger (`network == "public"`, inert for alle ni eksisterende
 værktøjer), `build_intent` fra URL med fem sikkerhedsvalg, og en selvopdagende
 paritetstest over de fire `_public_address`-kopier.
 
+**De fem designvalg er truffet 27/7 og står som D7 i ROADMAP:** registrering
+sidst (det er den handling der tænder fladen), et menneskes afvisning
+efterlader intet spor i v1, `blocked` for vores egne grænser og `failed` for
+modpartens fejl, 2 MB-loftet afviser frem for at afkorte, og ét ja rækker til
+ét kald. Orkestreringen skal altså ikke længere beslutte noget — kun bygge.
+
 **Tilbage: orkestreringen.** `prepare → claim → issue → pin → prepare → execute
 → complete`. Den er udelelig — hver fejlsti skal stadig kalde `complete()` — og
 den skal skrives i sammenhæng.

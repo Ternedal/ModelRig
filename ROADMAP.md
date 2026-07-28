@@ -327,6 +327,51 @@ denne. **Håndhævet som test** (`tests/workflow_data_sharing_decision.py`), som
 D4: alle fire valg er pinnet, og teksten her kan ikke komme til at sige noget
 andet end koden gør uden at CI bliver rød.
 
+**D7 — Web-research-orkestreringen (T-034). Afgjort 27/7-2026.**
+Fem valg som kæden `prepare → claim → issue → pin → execute → complete` tvinger
+frem. Koden kan gøre begge dele i alle fem; det her er hvilken.
+
+**1. Registrering sidst.** `web_research` bliver først lagt i `REGISTRY` når
+orkestreringen er færdig og prøvet. Bekræftelseskortet slår værktøjer op ved
+navn, så uden registrering findes kortet ikke — og med registrering er
+værktøjet live så snart `KALIV_TOOLS_ENABLED=1`, fordi `is_enabled` bruger en
+deny-liste. De to flag komponeres (`TOOLS_ENABLED` **og**
+`WEB_RESEARCH_ENABLED`). Det er den handling der reelt tænder fladen, og den
+er den eneste af de fem der er svær at rulle tilbage: har fladen været tændt,
+har den været tændt.
+
+**2. Et menneskes afvisning efterlader intet spor i v1.** Afvises på kortet,
+kaldes `run` aldrig, og henteren når aldrig at lave en lease.
+`record_local_fallback` kunne registrere det, men den tager ingen lease og
+skulle derfor kaldes af noget uden for henteren — altså skulle tools-gaten
+kende research. Det er dyrere end værdien af at kunne tælle nej'er i v1.
+Genovervej når der er brugsdata.
+
+**3. Udfaldet skiller vores grænser fra modpartens fejl.**
+
+| Situation | `outcome` |
+|---|---|
+| SSRF-afvisning, byte-loft, ugyldig URL, pin nægtet | `blocked` |
+| timeout, forbindelsesfejl, 4xx/5xx fra modparten | `failed` |
+| hentet og læst | `completed` |
+
+Uden den skelnen kan kvitteringerne ikke svare på om *vi* nægtede eller om
+*det* gik i stykker, og det er netop den forskel der gør en audit brugbar
+bagefter.
+
+**4. Byte-loftet bliver på 2 MB, og loftet afviser.** Transporten kaster ved
+grænsen frem for at afkorte — det er allerede kodet, og det er rigtigt: en
+afkortet side ville nå modellen som om den var hel. Konsekvensen er at store
+sider aldrig kan læses, og det accepteres i v1. Pinnet i
+`tests/worker_web_research_intent.py`.
+
+**5. Ét ja rækker til ét kald.** Et genforsøg efter en timeout er et nyt
+udgående kald og kræver et nyt ja. Mest friktion, mindst overraskelse — og det
+holder egress-siden på samme princip som D6's 300 sekunder på data-siden.
+
+Fire af de fem er stramme med vilje: løsn når der er data, ikke før. Kun nr. 2
+er et rent bekvemmelighedsvalg.
+
 *Afgjort 13/7-2026: **D1** keystore = risiko accepteret (`SECURITY.md`) · **D2** VERSION-kilde
 + CI-gate = leveret · **D5** dokumentstruktur = lean (denne fil + `STATUS.md` + `SECURITY.md`)
 · ROADMAP_V2 vedtaget.*

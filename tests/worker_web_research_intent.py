@@ -89,6 +89,11 @@ check(intent.plan.sensitivity == "public",
       "sensitivity er public -- intet af brugerens gaar udad")
 check(intent.plan.max_bytes <= MAX_RESPONSE_BYTES,
       "byte-loftet er under skemaets 10 MB")
+# D7 nr. 4: loftet er 2 MB og det AFVISER frem for at afkorte. En afkortet side
+# ville naa modellen som om den var hel. Tallet staar her, saa en aendring er en
+# beslutning frem for en tastefejl.
+check(MAX_RESPONSE_BYTES == 2_000_000,
+      f"loftet er 2 MB som besluttet i D7 ({MAX_RESPONSE_BYTES})")
 
 # --- kanonisering ---------------------------------------------------------
 check(canonical_url("https://Example.COM/a") == "https://example.com/a",
