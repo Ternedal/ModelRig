@@ -106,12 +106,14 @@ def scan_surface(
     return findings
 
 
-def _regular_file(path: Path) -> bytes:
+def _regular_file(path: Path, *, allow_empty: bool = False) -> bytes:
     if path.is_symlink():
         raise ProtectedMemoryLeakGateError(f"scan path is a symlink: {path}")
     if not path.is_file():
         raise ProtectedMemoryLeakGateError(f"scan path is not a regular file: {path}")
     size = path.stat().st_size
+    if size == 0 and allow_empty:
+        return b""
     if size <= 0 or size > MAX_SCAN_BYTES:
         raise ProtectedMemoryLeakGateError(
             f"scan path size is outside 1..{MAX_SCAN_BYTES}: {path}"
@@ -126,22 +128,22 @@ def scan_sqlite_family(
     backups: Iterable[str | Path] = (),
 ) -> list[ProtectedMemoryLeakFinding]:
     db = Path(database)
-    candidates = [
-        db,
-        Path(str(db) + "-wal"),
-        Path(str(db) + "-shm"),
-        Path(str(db) + "-journal"),
-        *(Path(value) for value in backups),
+    candidates: list[tuple[Path, bool]] = [
+        (db, False),
+        (Path(str(db) + "-wal"), True),
+        (Path(str(db) + "-shm"), True),
+        (Path(str(db) + "-journal"), True),
+        *((Path(value), False) for value in backups),
     ]
     findings: list[ProtectedMemoryLeakFinding] = []
     canary_bytes = _canary_map(canaries)
     seen: set[Path] = set()
-    for path in candidates:
+    for path, allow_empty in candidates:
         resolved = path.resolve(strict=False)
         if resolved in seen or not path.exists():
             continue
         seen.add(resolved)
-        raw = _regular_file(path)
+        raw = _regular_file(path, allow_empty=allow_empty)
         for digest, encoded in canary_bytes.items():
             if encoded in raw:
                 findings.append(
