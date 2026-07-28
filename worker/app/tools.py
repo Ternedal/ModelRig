@@ -184,8 +184,24 @@ def requires_confirmation(tool: "Tool", origin: str) -> bool:
     MVP's rig_status that is disk space, GPU name and model names -- and the
     question itself already went out the same way. Proportionate. If a future
     read tool returns document contents, revisit THIS function.
+
+    Revisited 27/07-2026 (T-034). Den oprindelige regel spoerger "aendrer det
+    tilstand?". Det raekker ikke for et vaerktoej hvis HANDLING forlader
+    maskinen: en offentlig hentning skriver intet, men den roeber til en
+    tredjepart at du spurgte, og den vaelger hvilken vaert riggen kontakter.
+    Reglen er derfor "aendrer det tilstand, ELLER forlader det maskinen".
+
+    Bevidst knyttet til `network`, ikke til `sensitivity`. De to svarer paa
+    forskellige spoergsmaal -- sensitivity handler om hvor et RESULTAT maa
+    rejse hen, network om hvorvidt handlingen selv gaar udad. Se SECURITY.md's
+    tabel over de to akser.
+
+    Maalt foer aendringen: ingen af de ni registrerede vaerktoejer har
+    network="public", saa tilfoejelsen er inert for alt der findes i dag. Den
+    gaelder foerst naar et udadgaaende vaerktoej registreres -- og saa skal den
+    gaelde.
     """
-    return tool.risk in ("write", "desktop")
+    return tool.risk in ("write", "desktop") or tool.network == "public"
 
 
 class ToolError(RuntimeError):

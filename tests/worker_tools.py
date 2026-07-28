@@ -284,14 +284,26 @@ row = [e for e in g.audit.recent(5) if e["outcome"] == "executed"][0]
 check(row["origin"] == "cloud", "T17: origin recorded on the audit row")
 
 # T18: the rule itself, asserted directly rather than through a scenario.
+# Stubbene baerer `network` fra 27/07-2026: requires_confirmation spoerger nu
+# ogsaa om handlingen forlader maskinen, ikke kun om den aendrer tilstand.
+# Attributten er IKKE gjort valgfri i produktionskoden -- et getattr-default
+# ville betyde at et misdannet vaerktoej stille blev regnet som ikke-udadgaaende,
+# og fail-open i et sikkerhedstjek er vaerre end en raa AttributeError.
 class _T:
     risk = "read"
+    network = "none"
 class _W:
     risk = "write"
+    network = "none"
+class _R:            # laesning der gaar udad
+    risk = "read"
+    network = "public"
 check(T.requires_confirmation(_W(), "local") and T.requires_confirmation(_W(), "cloud"),
       "T18: every write needs a human, whoever proposed it")
 check(not T.requires_confirmation(_T(), "local") and not T.requires_confirmation(_T(), "cloud"),
-      "T18: reads run, whoever proposed them")
+      "T18: local reads run, whoever proposed them")
+check(T.requires_confirmation(_R(), "local") and T.requires_confirmation(_R(), "cloud"),
+      "T18b: a read that leaves the machine needs the card too")
 
 # ---------------------------------------------------------------------------
 # T19: the audit log is READABLE, and refusals show up in it. An append-only
