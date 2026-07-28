@@ -496,6 +496,33 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     `activation_readiness.py`, og tænd derefter. Samler du 52 commits mellem
     rig-dage, har du spildt den forrige.
 
+29. **Asymmetri betyder som regel en fejl i den ene — men ikke altid, og
+    forskellen er hvad de to ting SVARER PÅ.** Heuristikken virkede fire gange
+    27/7: `Brand.kt` kopierede hex mens generatoren ejede dem; ét SSRF-tjek
+    encodede sine stier mens tre ikke gjorde (path-traversal, rettet); én
+    memory-klient krævede en klassifikation mens skrivestien tav (stille
+    nulstilling, rettet); `DRIFT`s API-liste var frosset mens koden gik videre.
+
+    Modeksemplet, så ingen "retter" det: **Agent 3's `confirm` bærer en digest,
+    tools' `confirm` gør ikke.** Det ligner samme mangel og er det ikke. Tools'
+    gate fryser argumenterne server-side i `Pending` ved propose — *"the model
+    never gets a second chance to change the arguments after Anders has read
+    them"* — så klienten godkender ved id, og serveren holder indholdet. Agent
+    3's digest er et EKSTRA led, ikke det samme led. Tilføjer man en digest til
+    tools, tilføjer man en kopi af en sandhed serveren allerede ejer, og så er
+    man tilbage ved den fejl heuristikken skulle fange.
+
+    Samme gælder de inverterede defaults i `Agent3ValidationClient`:
+    `production_activation` læses med default **true** blandt et dusin `false`.
+    Det ligner en slåfejl. Det er retningen: en manglende tilladelse må ikke
+    give adgang, et manglende farefelt må ikke give tryghed. Begge peger mod at
+    afvise. Beskyttet af `Agent3InvertedDefaultTest`.
+
+    **Test før du retter:** spørg hvad de to ting svarer på. Er det samme
+    spørgsmål, er den ene forkert. Er det forskellige, er asymmetrien
+    meningen — og så skal den have en test der siger det, ellers bliver den
+    ryddet op næste gang.
+
 ## 9. Kø — hvem har bolden (16/7, opdateret 27/7)
 
 **[27/7 — status på køen.]** Alt der kunne afgøres uden hardware, uden en skærm
