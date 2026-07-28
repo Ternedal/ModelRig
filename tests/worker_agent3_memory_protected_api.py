@@ -44,10 +44,10 @@ class TestAeadProvider:
         self.calls = 0
 
     def _stream(self, entropy: bytes, nonce: bytes, length: int) -> bytes:
-        result = bytearray()
+        out = bytearray()
         block = 0
-        while len(result) < length:
-            result.extend(
+        while len(out) < length:
+            out.extend(
                 hmac.new(
                     self.key,
                     b"stream\x00" + entropy + nonce + block.to_bytes(4, "big"),
@@ -55,7 +55,7 @@ class TestAeadProvider:
                 ).digest()
             )
             block += 1
-        return bytes(result[:length])
+        return bytes(out[:length])
 
     def protect(self, plaintext: bytes, *, entropy: bytes) -> bytes:
         self.calls += 1
@@ -63,7 +63,7 @@ class TestAeadProvider:
             self.key + entropy + self.calls.to_bytes(8, "big")
         ).digest()[:16]
         stream = self._stream(entropy, nonce, len(plaintext))
-        encrypted = bytes(left ^ right for left, right in zip(plaintext, stream))
+        encrypted = bytes(a ^ b for a, b in zip(plaintext, stream))
         tag = hmac.new(
             self.key,
             b"tag\x00" + entropy + nonce + encrypted,
@@ -83,7 +83,7 @@ class TestAeadProvider:
         if not hmac.compare_digest(tag, expected):
             raise MemoryProtectionError("API fixture ciphertext authentication failed")
         stream = self._stream(entropy, nonce, len(encrypted))
-        return bytes(left ^ right for left, right in zip(encrypted, stream))
+        return bytes(a ^ b for a, b in zip(encrypted, stream))
 
 
 VALUES = {
@@ -126,11 +126,11 @@ def row(path: Path, memory_id: str) -> sqlite3.Row:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     try:
-        value = conn.execute(
+        result = conn.execute(
             "SELECT * FROM agent_memories WHERE id=?", (memory_id,)
         ).fetchone()
-        assert value is not None
-        return value
+        assert result is not None
+        return result
     finally:
         conn.close()
 
@@ -143,12 +143,10 @@ def row_count(path: Path) -> int:
         conn.close()
 
 
-def request_headers(request_id: str) -> dict[str, str]:
+def headers(request_id: str) -> dict[str, str]:
     return {"X-Request-ID": request_id}
 
 
-# The router has no implicit allow mode. Even constructing it requires a real
-# callable authorizer, so production cannot accidentally opt in with None/True.
 try:
     build_protected_memory_router(  # type: ignore[arg-type]
         None,
@@ -186,16 +184,14 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-api-") as tmp:
     finally:
         legacy.close()
 
-    migration = MemoryProtectionMigrator(
+    summary = MemoryProtectionMigrator(
         db,
         MemoryProtectionCodec(TestAeadProvider()),
     ).migrate()
-    check(migration.complete, "protected API fixture migration completes")
+    check(summary.complete, "protected API fixture migration completes")
 
-    reader = ProtectedMemoryReader(
-        db,
-        MemoryProtectionCodec(TestAeadProvider()),
-    )
+    reader = ProtectedMemoryReader(db, MemoryProtectionCodec(TestAeadProvider()))
+    writer_clock = itertools.count(20_000)
     writer_ids = iter(
         [
             "api-created-001",
@@ -211,7 +207,6 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-api-") as tmp:
     )
 
     now = 10_000.0
-    writer_clock = itertools.count(20_000)
     mode = {"value": "ok"}
     calls: list[tuple[str, ProtectedMemoryApiAction]] = []
 
@@ -222,19 +217,18 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-api-") as tmp:
             raise RuntimeError("authorizer backend unavailable")
         if mode["value"] == "wrong_type":
             return True
-        grant_action = (
-            ProtectedMemoryApiAction.STATUS
-            if mode["value"] == "wrong_action"
-            else action
-        )
+        grant_action = action
+        if mode["value"] == "wrong_action":
+            grant_action = (
+                ProtectedMemoryApiAction.READ_METADATA
+                if action is not ProtectedMemoryApiAction.READ_METADATA
+                else ProtectedMemoryApiAction.STATUS
+            )
         principal = "" if mode["value"] == "blank_principal" else "device:paired-1"
         grant_request = (
-            "different-request"
-            if mode["value"] == "wrong_request"
-            else request_id
+            "different-request" if mode["value"] == "wrong_request" else request_id
         )
-        issued_at = now - 1
-        expires_at = now + 30
+        issued_at, expires_at = now - 1, now + 30
         if mode["value"] == "expired":
             issued_at, expires_at = now - 60, now - 1
         elif mode["value"] == "future":
@@ -266,10 +260,10 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-api-") as tmp:
     )
     status = client.get(
         "/experimental/agent3/memory/status",
-        headers=request_headers("req-status-000"),
+        headers=headers("req-status-000"),
     )
-    check(status.status_code == 200, "fresh request-bound status grant is accepted")
     status_body = status.json()["protected_memory"]
+    check(status.status_code == 200, "fresh request-bound status grant is accepted")
     check(
         status_body["query_only"] is True
         and status_body["production_activation"] is False,
@@ -289,14 +283,14 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-api-") as tmp:
         mode["value"] = bad_mode
         response = client.get(
             "/experimental/agent3/memory/status",
-            headers=request_headers(f"req-bad-{bad_mode}"),
+            headers=headers(f"req-bad-{bad_mode}"),
         )
         check(response.status_code == 403, label)
     mode["value"] = "ok"
 
     created_response = client.post(
         "/experimental/agent3/memory",
-        headers=request_headers("req-create-001"),
+        headers=headers("req-create-001"),
         json={
             "subject": "Anders",
             "predicate": "api_private_created",
@@ -305,9 +299,9 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-api-") as tmp:
             "sensitivity": "private",
         },
     )
-    check(created_response.status_code == 200, "authorized private create succeeds")
     created = created_response.json()["memory"]
     created_id = created["id"]
+    check(created_response.status_code == 200, "authorized private create succeeds")
     check(
         created["value"] == "[redacted]" and created["source_ref"] is None,
         "create response never returns value or provenance plaintext",
@@ -319,19 +313,16 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-api-") as tmp:
         and created_row["protection_state"] == "protected",
         "API create commits only protected payload columns",
     )
-    opened_created = reader.get(
-        created_id,
-        access=MemoryReadAccess.LOCAL_MANAGEMENT,
-    )
+    opened = reader.get(created_id, access=MemoryReadAccess.LOCAL_MANAGEMENT)
     check(
-        opened_created.value == VALUES["created"]
-        and opened_created.source_ref == VALUES["created_source"],
+        opened.value == VALUES["created"]
+        and opened.source_ref == VALUES["created_source"],
         "local-management reader can open the protected API write",
     )
 
     secret_create = client.post(
         "/experimental/agent3/memory",
-        headers=request_headers("req-secret-create"),
+        headers=headers("req-secret-create"),
         json={
             "subject": "Anders",
             "predicate": "api_secret_forbidden",
@@ -343,10 +334,9 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-api-") as tmp:
 
     listed = client.get(
         "/experimental/agent3/memory?subject=Anders",
-        headers=request_headers("req-list-001"),
-    )
-    listed_records = listed.json()["memories"]
-    listed_ids = {item["id"] for item in listed_records}
+        headers=headers("req-list-001"),
+    ).json()["memories"]
+    listed_ids = {item["id"] for item in listed}
     check(
         private_seed.id in listed_ids
         and created_id in listed_ids
@@ -354,28 +344,28 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-api-") as tmp:
         "list includes non-secret metadata and omits secret rows",
     )
     check(
-        all(item["value"] == "[redacted]" and item["source_ref"] is None for item in listed_records),
+        all(item["value"] == "[redacted]" and item["source_ref"] is None for item in listed),
         "list is metadata-only for public, operational and private rows",
     )
 
     value_search = client.get(
         f"/experimental/agent3/memory/search?q={VALUES['created']}",
-        headers=request_headers("req-search-value"),
+        headers=headers("req-search-value"),
     ).json()["memories"]
-    predicate_search = client.get(
+    metadata_search = client.get(
         "/experimental/agent3/memory/search?q=api_private_created",
-        headers=request_headers("req-search-metadata"),
+        headers=headers("req-search-metadata"),
     ).json()["memories"]
     check(value_search == [], "search never scans or decrypts protected values")
     check(
-        [item["id"] for item in predicate_search] == [created_id]
-        and predicate_search[0]["value"] == "[redacted]",
+        [item["id"] for item in metadata_search] == [created_id]
+        and metadata_search[0]["value"] == "[redacted]",
         "metadata search matches subject/predicate and still redacts payload",
     )
 
     get_created = client.get(
         f"/experimental/agent3/memory/{created_id}",
-        headers=request_headers("req-get-created"),
+        headers=headers("req-get-created"),
     )
     check(
         get_created.status_code == 200
@@ -385,7 +375,7 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-api-") as tmp:
     check(
         client.get(
             f"/experimental/agent3/memory/{secret_seed.id}",
-            headers=request_headers("req-get-secret"),
+            headers=headers("req-get-secret"),
         ).status_code
         == 404,
         "secret metadata is absent from the remote boundary even by id",
@@ -393,15 +383,15 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-api-") as tmp:
 
     corrected_response = client.post(
         f"/experimental/agent3/memory/{created_id}/correct",
-        headers=request_headers("req-correct-002"),
+        headers=headers("req-correct-002"),
         json={
             "expected_updated_at": created["updated_at"],
             "value": VALUES["corrected"],
         },
     )
-    check(corrected_response.status_code == 200, "CAS-bound private correction succeeds")
     corrected = corrected_response.json()["memory"]
     corrected_id = corrected["id"]
+    check(corrected_response.status_code == 200, "CAS-bound private correction succeeds")
     check(
         corrected["value"] == "[redacted]"
         and corrected["source_ref"] is None
@@ -420,7 +410,7 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-api-") as tmp:
 
     history = client.get(
         f"/experimental/agent3/memory/{corrected_id}/history",
-        headers=request_headers("req-history-003"),
+        headers=headers("req-history-003"),
     ).json()["memories"]
     check(
         [item["lifecycle_status"] for item in history] == ["superseded", "active"]
@@ -428,29 +418,26 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-api-") as tmp:
         "history exposes version metadata without either plaintext value",
     )
 
-    count_before_stale = row_count(db)
+    before_stale = row_count(db)
     stale = client.post(
         f"/experimental/agent3/memory/{corrected_id}/correct",
-        headers=request_headers("req-stale-004"),
+        headers=headers("req-stale-004"),
         json={
             "expected_updated_at": corrected["updated_at"] - 1,
             "value": VALUES["stale"],
         },
     )
     check(stale.status_code == 409, "stale remote correction is rejected")
-    check(
-        row_count(db) == count_before_stale,
-        "stale correction leaves no replacement row",
-    )
+    check(row_count(db) == before_stale, "stale correction leaves no replacement row")
 
     deleted_response = client.delete(
         f"/experimental/agent3/memory/{corrected_id}"
         f"?expected_updated_at={corrected['updated_at']}",
-        headers=request_headers("req-delete-005"),
+        headers=headers("req-delete-005"),
     )
-    check(deleted_response.status_code == 200, "CAS-bound protected delete succeeds")
     deleted = deleted_response.json()["memory"]
     deleted_row = row(db, corrected_id)
+    check(deleted_response.status_code == 200, "CAS-bound protected delete succeeds")
     check(
         deleted["value"] == ""
         and deleted["source_ref"] is None
@@ -477,9 +464,6 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-api-") as tmp:
     writer.close()
     reader.close()
 
-# This slice is a boundary, not activation. The production mount must remain on
-# the existing MemoryStore until an explicit store-selection slice wires the
-# authenticated Go gateway and protected router together.
 production_mount = (
     ROOT / "worker" / "app" / "agent3" / "production_mount.py"
 ).read_text(encoding="utf-8")
