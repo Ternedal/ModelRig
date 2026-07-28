@@ -83,6 +83,15 @@ kald.
   proces- og CPU-lofter → hele trædet dør med ToolHost, altid.
 - **Reduceret token** (`CreateRestrictedToken`) eller separat lokal konto for
   Tier A → filsystem-rod håndhæves af OS'et, ikke af Python-strengtjek.
+- **`read_scope.py` som pre-check, ikke som erstatning.** OS-laget er stadig
+  den rigtige håndhævelse af roden — men det fanger ikke alt. Fem Windows-
+  navneformer ligger *inde* i roden og ville derfor slippe forbi et rod-scoped
+  token: `CON`/`NUL`/`COM1` (enheder, ikke filer under roden), en alternate
+  data stream på en fil i roden (`notes.txt:hidden`), og navne der bliver
+  tvetydige fordi Windows stripper trailing dot/space. For netop dem er
+  Python-tjekket ikke bælte til seler — det er det **eneste** lag.
+  Målt og lukket 27/7; `tests/worker_read_scope_windows_aliases.py`.
+  Ægte escapes (`..\..\Windows`, UNC, device-paths) fanges af begge lag.
 - **Lav integritet** for Tier B → UIPI forhindrer input til elevated vinduer
   (T6). Det er en ægte grænse, og den er gratis.
 - **Ikke AppContainer** for Tier B: det bryder desktop-adgang, som er selve
@@ -134,7 +143,7 @@ ikke-allowlisted vindue = fejl + audit-post.
 |---|---|---|
 | **I0a — portabelt substrat** ✅ **LEVERET (1.58.48)** | `toolhost.ProcessExecutor` + `tool_child`: per-kald child-proces, håndhævet timeout m. kill, output-cap, fejl/afvisning krydser grænsen korrekt, credential-fri child-env (allowlist), frozen-exe child-mode. **Dormant**: `KALIV_TOOL_ISOLATION=process` + `Tool.isolate` — ingen tools sætter det endnu | ✅ 13/13 nye tests inkl. ægte child-proces der kører et rigtigt registry-tool; alle eksisterende suiter grønne BÅDE med og uden isolation slået til (delegation bevist sikker) |
 | **I0b — Windows-rettighedslaget** 🔶 UDESTÅR (kræver rig) | Job Object (kill-on-close, hukommelses-/proces-lofter), reduceret token, lav integritet. POSIX-halvdelen er nu løst og bevist (proces-gruppe → grandchildren dør); **Windows bruger `taskkill /T` indtil Job Object lander** | Hængende procestræ dør helt; tool kan ikke læse uden for scoped rod (OS-nægtet); nedgraderet ToolHost bryder ikke voice/eksisterende tools |
-| **I1 — Tier A: fil-læs** | `read_file` (scoped rod, reduceret token, størrelsesloft) | Sti uden for roden = OS-nægtet, ikke Python-tjekket; audit viser sti + bytes |
+| **I1 — Tier A: fil-læs** | `read_file` (scoped rod, reduceret token, størrelsesloft) | Sti uden for roden = OS-nægtet. **To lag:** `read_scope.py` afviser desuden Windows-navneformer der ligger inde i roden og som OS-laget derfor ikke fanger (enhedsnavne, ADS, trailing dot/space, 8.3-aliaser) — se §4.1. Audit viser sti + bytes |
 | **I2 — Tier A: run_command** | Ingen netværk, scoped cwd, timeout, output-cap, `write`-klasse | Netværkskald indefra fejler; 30s-loop dræbes; output afkortet med markering |
 | **I0c — Tier B policy** ✅ **LEVERET (1.58.52)** | `desktop_policy.py`: screenshot-binding (`ScreenRegistry`), mål-allowlist (fail-closed), rate limit, cloud-origin-reglen. `desktop`-risikoklassen kender gaten nu (kræver altid bekræftelse). **Dormant** — ingen tools bruger den | ✅ 23 tests på alle kanter: forældet plan nægtes, ukendt `screen_id` nægtes, tom allowlist tillader intet, samme proces nægtes på forkert titel, cloud-origin nægtes uden separat samtykke |
 | **I3 — Tier B: se** | `screenshot` (`desktop`, lokal-model-only, `screen_id`, audit m. thumbnail) — policy findes, mangler capture + perceptuel hash | Cloud-origin nægtes uden eksplicit samtykke; hvert screenshot i audit; **tolerance kalibreret på rig** (§6.2) |
