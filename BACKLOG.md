@@ -282,7 +282,7 @@ Research-forarbejdet er merged, men forbliver dormant indtil de resterende gates
 
 | Task | Issue | P | Ejerskab | Afhænger af | Accept |
 |---|---:|---|---|---|---|
-| T-030 Fælles versioneret capability-schema v2 | #77 | P1 | [KERNE] (adapter-isolerbar) | — | Schema driver gates, API, klienter og docs uden automatisk aktivering. |
+| T-030 Fælles versioneret capability-schema v2 | #77 | P1 | [KERNE] ✅ | — | Alle otte acceptkriterier verificeret 27/7; se #77. T-034/036/037/038 var ikke reelt blokeret af den. |
 | T-031 Validér Windows isolation I0b | #78 | P1 | [RIG] | T-030, T-005 | Rettigheder, workspace, netværk, lifecycle og cleanup fysisk bevist. |
 | T-032 Fælles data-sharing policy for cloud-read | #79 | P0 | [KERNE] + [ANDERS] | — | Én scoped policy/receipt-model i v2 + Agent 3. |
 | T-033 Beskyt følsomme Agent 3 memory-felter | #80 | P1 | [RIG] (format [ISO]) | T-030 | Værdier ulæselige i DB/backups; restore testet på Windows. |
@@ -291,6 +291,31 @@ Research-forarbejdet er merged, men forbliver dormant indtil de resterende gates
 | T-036 GitHub read-only connector-pilot | #83 | P1 | [KERNE] (afgrænset) | T-030, T-032 | Scoped read-pilot med revisionsgrunding og audit. |
 | T-037 Google/Notion read-first connector-pakke | #84 | P2 | [KERNE] | T-030, T-032, T-036 | Separate scopes, read-first rollout og revocation. |
 | T-038 RigGate/Home Assistant read-only pilot | #85 | P2 | [KERNE] (afgrænset) | T-030, T-032 | Status og wake-preview uden side effect. |
+
+> ### T-030 — verificeret færdig 27/07, issue #77 er stadig åben
+>
+> Alle otte acceptkriterier er efterprøvet mod koden, ikke antaget:
+>
+> | # | Kriterium | Evidens |
+> |---|---|---|
+> | 1 | stabile id'er + eksplicit version | `capability_id` + `schema`; invalid-fixture `invalid_capability_id` |
+> | 2 | beskriver otte aspekter | `access`, `data_class`, `isolation`, `scheduling`, `confirmation`, `network`, `termination`, `replay` |
+> | 3 | samme validator og canonical serialisering | fixturerne bærer den forventede `canonical`-streng; begge implementeringer måles mod den |
+> | 4 | ukendte felter afvises | `additionalProperties: false` + `unknown_top_level`, `nested_unknown` |
+> | 5 | API/klientmodeller mod samme fixtures | fire moduler læser `contracts/kaliv-capability-v2-fixtures.json` |
+> | 6 | tools bevarer adfærd | `test_registry_adapter_is_pure_and_complete` |
+> | 7 | docs genererbare fra schemaet | `scripts/current_state.py:55` → `descriptors_from_registry` |
+> | 8 | schemaændring kan ikke tænde en capability | `production_activation` er `{"const": false}`; `production_activation_true` er en **invalid**-fixture |
+>
+> Kørt grønt i alle fire moduler: Python, Go, desktop-Kotlin og Android-Kotlin.
+>
+> **Forbehold på kriterium 3.** To implementeringer (209 linjer Python, 323 Go),
+> ikke bogstaveligt samme validator. Pariteten hviler på fixture-dækning — en
+> felttype ingen fixture rammer kan i princippet divergere. I dag 2 valid + 16
+> invalid.
+>
+> **Konsekvens:** T-034, T-036, T-037 og T-038 var ikke blokeret af T-030. Deres
+> anden afhængighed T-032 er det derimod, og den er `[ANDERS]`.
 
 ---
 
