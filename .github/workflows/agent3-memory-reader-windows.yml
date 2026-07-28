@@ -35,4 +35,16 @@ jobs:
         run: |
           $env:PYTHONDONTWRITEBYTECODE = "1"
           $env:PYTHONPATH = "worker"
-          python tests\worker_agent3_memory_protected_reader.py
+          $log = Join-Path $env:RUNNER_TEMP "agent3-memory-protected-reader.log"
+          python tests\worker_agent3_memory_protected_reader.py *> $log
+          $status = $LASTEXITCODE
+          Get-Content $log -Tail 200
+          exit $status
+      - name: Upload protected reader failure log
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: agent3-memory-protected-reader-failure
+          path: ${{ runner.temp }}/agent3-memory-protected-reader.log
+          if-no-files-found: error
+          retention-days: 7
