@@ -468,9 +468,12 @@ production_mount = (
     ROOT / "worker" / "app" / "agent3" / "production_mount.py"
 ).read_text(encoding="utf-8")
 check(
-    "memory_protected_api" not in production_mount
-    and "build_protected_memory_router" not in production_mount,
-    "protected API remains unmounted in production",
+    "mode = memory_store_mode()" in production_mount
+    and "if mode == \"legacy\":" in production_mount
+    and "build_protected_memory_router(" in production_mount
+    and "MemoryProtectionMigrator" not in production_mount
+    and "planner_memory_store = None" in production_mount,
+    "production mount selects protected API only through exact mode, without implicit migration or plaintext planner fallback",
 )
 
 print(f"\n===== AGENT3 PROTECTED MEMORY API: {passed} passed, {failed} failed =====")
