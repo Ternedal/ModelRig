@@ -485,6 +485,17 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     uden at noget advarede den. Alle fire ModelRig-era briefs er nu bannerede
     som overhalede. Markér den slags **når** retningen skifter, ikke bagefter.
 
+28. **Fysisk bevis er bundet til koden, så produktion er en tilstand du
+    genetablerer — ikke en milepæl du passerer.** `activation_readiness.py`
+    afviser en valideringsrapport fra et andet commit, og begrundelsen står i
+    generatoren selv: *"a report from a rig running different code is not stale
+    evidence, it is evidence about something else."* Målt 27/7 lå der 52
+    commits mellem Stage A og main — intet var i stykker, men rapporten
+    beskriver ét bestemt træ. Konsekvensen er en planlægningsregel: skær en
+    release, checkout **det tag**, kør beviserne mod netop det, spørg
+    `activation_readiness.py`, og tænd derefter. Samler du 52 commits mellem
+    rig-dage, har du spildt den forrige.
+
 ## 9. Kø — hvem har bolden (16/7, opdateret 27/7)
 
 **[27/7 — status på køen.]** Alt der kunne afgøres uden hardware, uden en skærm
@@ -503,8 +514,25 @@ netop de tre ting:
   derimod målt og lukket. **Bemærk:** de kræver den *kørende* app, ikke bare
   øjne — designpakkens to mockups er begge 1491×1055 enkeltskærme, og et
   statisk billede viser ikke en hover-tilstand.
-- **Anders — den vigtigste først:** hvilken flade D6's data-sharing-gate må
-  åbnes på. Politikken er besluttet og pinnet (`public` automatisk,
+**[27/7, sent — research er valgt, og fem stykker er landet.]** D6's
+fladebeslutning er truffet: `research` først. Landet siden: capability-
+kontrakten (dvalende, bevidst **ikke** i `REGISTRY`, fordi `ToolGate.is_enabled`
+bruger en deny-liste og en import derfor ville åbne fladen), flag-vagten
+`mount_web_research` (kun præcis `"1"` tæller), bekræftelseskortet udvidet til
+udadgående læsninger (`network == "public"`, inert for alle ni eksisterende
+værktøjer), `build_intent` fra URL med fem sikkerhedsvalg, og en selvopdagende
+paritetstest over de fire `_public_address`-kopier.
+
+**Tilbage: orkestreringen.** `prepare → claim → issue → pin → prepare → execute
+→ complete`. Den er udelelig — hver fejlsti skal stadig kalde `complete()` — og
+den skal skrives i sammenhæng.
+
+**Fælde til den der skriver den:** `ResearchPeerAuthorizationBridge` har
+`prepare` og `verify`. Den har **ikke** `authorize` eller `evidence`. Jeg skrev
+et helt modul mod de to opfundne navne 27/7; det importerede fint og ville have
+braget ved første kald. Kasseret, ikke merget. Læs broen før du kalder den.
+
+- **Anders:** tre tokenpar under WCAG AA som er brandfarver eller semantik; Politikken er besluttet og pinnet (`public` automatisk,
   `operational`/`private` bekræftet, `secret` forbudt, 300 s, kategori-kun), og
   `research` håndhæver allerede — men `agent_v2`, `agent3` og `connector` er
   slukkede, og at tænde en er en ny beslutning. **Fire tasks venter på præcis
