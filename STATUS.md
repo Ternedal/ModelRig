@@ -11,6 +11,35 @@
 
 # ModelRig — STATUS (honest build report)
 
+> ### 27/07-2026 — rettelse til 1.58-postens "Aabne rester"
+>
+> Historikken nedenfor staar uroert; det her er en dateret tilfoejelse, ikke en
+> omskrivning. To af de fire aabne rester har flyttet sig.
+>
+> **"a11y-punkter umaalt" gaelder ikke laengere.** Kontrast er nu maalt som ren
+> udregning paa tokens — fire par laa under WCAG AA, alle i lyst tema.
+> `light.muted` er rettet (`#776D62` → `#6F665C`, 4,05 → 4,50); de tre
+> resterende er brandfarver og semantik og staar som beslutning i ROADMAP.
+> Laast fast af `tests/workflow_design_token_contrast.py`, som fejler baade hvis
+> et nyt par falder under AA og hvis et af de tre rettes uden at listen foelger
+> med. Desuden: send- og stop-knapperne havde **ingen** accessible name — nul
+> `androidx.compose.ui.semantics`-imports i nogen af klienterne — og har nu
+> `onClickLabel` + `Role.Button` i begge.
+>
+> **"fonte approksimeret" gaelder stadig, og det er staerkere end det lyder.**
+> Maalt: nul fontfiler i `assets/design/` og `brand/`, mens tokens navngiver
+> `Inter` og `EB Garamond`. Det er ikke den eneste mangel i pakken —
+> `assets/design/kaliv-ui-guide/README.md` lover ogsaa
+> `Kaliv_UI_Design_Guide.docx` og `Kaliv_Thinking_128.gif`, og ingen af dem er
+> der. Fire filer designpakken refererer og ikke indeholder. Kraever kilden, ikke
+> kode.
+>
+> "footer-strip + hover-actions" og "Android-palet-alignment" staar uaendret;
+> foerste kraever oejne paa en skaerm, anden er en beslutning (Androids egen
+> palet har faktisk *bedre* kontrast end tokenet — 7,28 mod 4,50 — saa valget er
+> konsistens kontra kontrast).
+
+
 Version **1.58.0** — "Anders' DESIGNGUIDE anvendt paa desktop (kaliv-ui-tokens.json = autoritativ, pakken committet i assets/design/kaliv-ui-guide/): ny token-palet (bronze #9A7136, border-tokens, semantiske farver, dark+light), to-raekkes header (ankh-chip + serif-wordmark + nav-piller / kontekst-chips Model:X▾ RAG:Til Tools:Fra + Handlingslog/Moerk hoejre), bobler m. 1dp kant, radius 16, identitetsraekke -Kaliv · ◈ rig · 14:32- (created_at nu eksponeret via MsgRow), assistent max 780/bruger 620, krop 16/25sp, guide-composer (min 88dp, radius 20, -Skriv til Kaliv …-, 44dp send). PROCESFUND ejet: v1.57's composer-patch matchede ALDRIG (escape-vs-tegn) og release-noten overpaastod — nu assert pr. erstatning. Aabne rester: fonte approksimeret (Inter/EB Garamond ikke i pakken), footer-strip + hover-actions fra checklisten, a11y-punkter umaalt, Android-palet-alignment = Anders-beslutning. Verificeret: compile+jar, ikke med oejne". Follows 1.57.0. Autonomous sessions, **2026-07-02 → 07-12**.
 
 > **10/7:** rebranden er fuldført. Ikon i `v1.12.4`, navn + **tap-to-stop** i `v1.13.0` — begge compile-verificeret (Android bygget lokalt for første gang; se lektie 10). Roadmap går nu til V8 + målarkitektur, se `ROADMAP.md` §9–15. Mangler: Anders' on-device-test af stop-knappen og kold-start af PATH-fixet.
