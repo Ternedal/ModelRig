@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -44,6 +46,11 @@ func protectedMemoryHandler(t *testing.T, worker http.Handler) http.Handler {
 	})
 }
 
+func emptyBodySHA256() string {
+	digest := sha256.Sum256(nil)
+	return hex.EncodeToString(digest[:])
+}
+
 func TestAgent3MemoryGrantActionContract(t *testing.T) {
 	tests := []struct {
 		method string
@@ -78,7 +85,7 @@ func TestAgent3MemoryGrantActionContract(t *testing.T) {
 	}
 }
 
-func TestAgent3MemoryProtectedModeMintsDeviceBoundGrant(t *testing.T) {
+func TestAgent3MemoryProtectedModeMintsExactGrant(t *testing.T) {
 	t.Setenv("KALIV_AGENT3_ENABLED", "1")
 	t.Setenv(agent3MemoryStoreEnv, "protected")
 	t.Setenv(agent3MemoryAPISecretEnv, agent3MemoryTestSecret)
@@ -93,6 +100,7 @@ func TestAgent3MemoryProtectedModeMintsDeviceBoundGrant(t *testing.T) {
 		path = r.URL.Path
 		rawQuery = r.URL.RawQuery
 		mu.Unlock()
+		w.Header().Set(agent3MemoryStoreAttestationHeader, agent3MemoryStoreAttestationValue)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
@@ -118,18 +126,24 @@ func TestAgent3MemoryProtectedModeMintsDeviceBoundGrant(t *testing.T) {
 		t.Fatalf("gateway did not overwrite the client-supplied grant: %q", gotToken)
 	}
 	if gotRID != "req-memory-gateway-001" || gotMethod != http.MethodGet ||
-		gotPath != "/experimental/agent3/memory/search" {
-		t.Fatalf("worker binding = %q %q %q", gotRID, gotMethod, gotPath)
+		gotPath != "/experimental/agent3/memory/search" || gotQuery != "q=needle" {
+		t.Fatalf("worker binding = %q %q %q ?%s", gotRID, gotMethod, gotPath, gotQuery)
 	}
-	if !strings.Contains(gotQuery, "q=needle") {
-		t.Fatalf("worker query lost: %q", gotQuery)
-	}
-	claims, err := verifyAgent3MemoryGrant(gotToken, gotRID, gotMethod, gotPath, time.Now())
+	claims, err := verifyAgent3MemoryGrant(
+		gotToken,
+		gotRID,
+		gotMethod,
+		gotPath,
+		gotQuery,
+		emptyBodySHA256(),
+		time.Now(),
+	)
 	if err != nil {
 		t.Fatalf("forwarded grant did not verify: %v", err)
 	}
 	if claims.DeviceID != "paired-device-1" || claims.Action != "read_metadata" ||
-		claims.Schema != agent3MemoryGrantSchema {
+		claims.Schema != agent3MemoryGrantSchema || claims.Query != "q=needle" ||
+		claims.BodySHA256 != emptyBodySHA256() {
 		t.Fatalf("unexpected claims: %+v", claims)
 	}
 	if claims.ExpiresAt-claims.IssuedAt != int64(agent3MemoryGrantTTL/time.Second) {
@@ -140,18 +154,40 @@ func TestAgent3MemoryProtectedModeMintsDeviceBoundGrant(t *testing.T) {
 func TestAgent3MemoryGrantRejectsTamperingAndWrongBindings(t *testing.T) {
 	t.Setenv(agent3MemoryAPISecretEnv, agent3MemoryTestSecret)
 	now := time.Unix(20_000, 0)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/experimental/agent3/memory", strings.NewReader(`{}`))
+	body := `{"subject":"Anders","predicate":"x","value":"private"}`
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/experimental/agent3/memory?mode=exact",
+		strings.NewReader(body),
+	)
 	req.Header.Set("X-Request-ID", "req-write-001")
 	req = req.WithContext(context.WithValue(req.Context(), deviceKey, store.Device{ID: "dev-1"}))
-	token, claims, err := issueAgent3MemoryGrant(req, "/experimental/agent3/memory", now)
+	bodySHA, err := bindAgent3MemoryRequestBody(req)
+	if err != nil {
+		t.Fatalf("bind body: %v", err)
+	}
+	token, claims, err := issueAgent3MemoryGrant(
+		req,
+		"/experimental/agent3/memory",
+		bodySHA,
+		now,
+	)
 	if err != nil {
 		t.Fatalf("issue grant: %v", err)
 	}
-	if claims.Action != "write_private" {
-		t.Fatalf("action = %q", claims.Action)
+	if claims.Action != "write_private" || claims.Query != "mode=exact" ||
+		claims.BodySHA256 != bodySHA {
+		t.Fatalf("claims = %+v", claims)
 	}
-	if _, err := verifyAgent3MemoryGrant(token, "req-write-001", http.MethodPost,
-		"/experimental/agent3/memory", now); err != nil {
+	if _, err := verifyAgent3MemoryGrant(
+		token,
+		"req-write-001",
+		http.MethodPost,
+		"/experimental/agent3/memory",
+		"mode=exact",
+		bodySHA,
+		now,
+	); err != nil {
 		t.Fatalf("fresh exact grant failed: %v", err)
 	}
 	parts := strings.Split(token, ".")
@@ -161,21 +197,49 @@ func TestAgent3MemoryGrantRejectsTamperingAndWrongBindings(t *testing.T) {
 		rid    string
 		method string
 		path   string
+		query  string
+		body   string
 		at     time.Time
 	}{
-		"tampered": {token: tampered, rid: "req-write-001", method: http.MethodPost, path: "/experimental/agent3/memory", at: now},
-		"request":  {token: token, rid: "different", method: http.MethodPost, path: "/experimental/agent3/memory", at: now},
-		"method":   {token: token, rid: "req-write-001", method: http.MethodGet, path: "/experimental/agent3/memory", at: now},
-		"path":     {token: token, rid: "req-write-001", method: http.MethodPost, path: "/experimental/agent3/memory/id/correct", at: now},
-		"expired":  {token: token, rid: "req-write-001", method: http.MethodPost, path: "/experimental/agent3/memory", at: now.Add(time.Minute)},
+		"tampered": {token: tampered, rid: "req-write-001", method: http.MethodPost, path: "/experimental/agent3/memory", query: "mode=exact", body: bodySHA, at: now},
+		"request":  {token: token, rid: "different", method: http.MethodPost, path: "/experimental/agent3/memory", query: "mode=exact", body: bodySHA, at: now},
+		"method":   {token: token, rid: "req-write-001", method: http.MethodGet, path: "/experimental/agent3/memory", query: "mode=exact", body: bodySHA, at: now},
+		"path":     {token: token, rid: "req-write-001", method: http.MethodPost, path: "/experimental/agent3/memory/id/correct", query: "mode=exact", body: bodySHA, at: now},
+		"query":    {token: token, rid: "req-write-001", method: http.MethodPost, path: "/experimental/agent3/memory", query: "mode=changed", body: bodySHA, at: now},
+		"body":     {token: token, rid: "req-write-001", method: http.MethodPost, path: "/experimental/agent3/memory", query: "mode=exact", body: strings.Repeat("0", 64), at: now},
+		"expired":  {token: token, rid: "req-write-001", method: http.MethodPost, path: "/experimental/agent3/memory", query: "mode=exact", body: bodySHA, at: now.Add(time.Minute)},
 	}
 	for label, candidate := range cases {
 		t.Run(label, func(t *testing.T) {
-			if _, err := verifyAgent3MemoryGrant(candidate.token, candidate.rid,
-				candidate.method, candidate.path, candidate.at); err == nil {
+			if _, err := verifyAgent3MemoryGrant(
+				candidate.token,
+				candidate.rid,
+				candidate.method,
+				candidate.path,
+				candidate.query,
+				candidate.body,
+				candidate.at,
+			); err == nil {
 				t.Fatal("invalid grant binding was accepted")
 			}
 		})
+	}
+}
+
+func TestAgent3MemoryProtectedModeRequiresWorkerAttestation(t *testing.T) {
+	t.Setenv("KALIV_AGENT3_ENABLED", "1")
+	t.Setenv(agent3MemoryStoreEnv, "protected")
+	t.Setenv(agent3MemoryAPISecretEnv, agent3MemoryTestSecret)
+	h := protectedMemoryHandler(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"legacy":true}`))
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/experimental/agent3/memory", nil)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadGateway || strings.Contains(rec.Body.String(), "legacy") {
+		t.Fatalf("unattested worker response got status=%d body=%q", rec.Code, rec.Body.String())
 	}
 }
 
