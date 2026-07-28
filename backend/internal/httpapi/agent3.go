@@ -86,8 +86,13 @@ func (s *server) handleAgent3Memory(w http.ResponseWriter, r *http.Request) {
 			"protected Agent 3 memory requires a loopback worker upstream")
 		return
 	}
+	bodySHA256, err := bindAgent3MemoryRequestBody(r)
+	if err != nil {
+		writeErr(w, http.StatusRequestEntityTooLarge, "protected memory request body is invalid")
+		return
+	}
 	target := agent3MemoryTarget(r)
-	grant, _, err := issueAgent3MemoryGrant(r, target, time.Now())
+	grant, _, err := issueAgent3MemoryGrant(r, target, bodySHA256, time.Now())
 	if err != nil {
 		if errors.Is(err, errAgent3MemoryRouteUnsupported) {
 			writeErr(w, http.StatusNotFound, "protected memory route is not available")
@@ -98,10 +103,17 @@ func (s *server) handleAgent3Memory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The grant is minted only after authMW has attached the paired device. It is
-	// short-lived, method/path/action/request-bound and sent only over loopback.
-	s.Worker.ForwardWithHeaders(w, r, target, map[string]string{
-		agent3MemoryGrantHeader: grant,
-	})
+	// short-lived and bound to device, method, path, raw query, body digest,
+	// action and request id. The worker must additionally attest that protected
+	// mode—not a mismatched legacy route—served the response.
+	s.Worker.ForwardWithHeadersAndResponseAttestation(
+		w,
+		r,
+		target,
+		map[string]string{agent3MemoryGrantHeader: grant},
+		agent3MemoryStoreAttestationHeader,
+		agent3MemoryStoreAttestationValue,
+	)
 }
 
 func (s *server) handleAgent3RunsList(w http.ResponseWriter, r *http.Request) {
