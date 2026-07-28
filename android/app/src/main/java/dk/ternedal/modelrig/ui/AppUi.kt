@@ -2179,7 +2179,10 @@ private fun ChatScreen(
                     // model choice is the user's.
                     if (mode != "rig" || !ragMode) {
                         Box(
-                            Modifier.size(48.dp).clickable(enabled = !busy, onClick = {
+                            Modifier.size(48.dp).clickable(
+                                enabled = !busy,
+                                onClickLabel = "Vedhæft fil", role = Role.Button,
+                                onClick = {
                                 pendingImageError = null
                                 pickImage.launch(arrayOf("image/*"))
                             }),
@@ -2195,7 +2198,13 @@ private fun ChatScreen(
                         // becomes ⏹: the mic is busy anyway, so a separate stop
                         // button would just be another thing to aim at.
                         Box(
-                            Modifier.size(48.dp).clickable(enabled = !busy || voiceBusy, onClick = {
+                            Modifier.size(48.dp).clickable(
+                                enabled = !busy || voiceBusy,
+                                // Labelet foelger tilstanden: en skaermlaeser skal
+                                // kunne hoere FORSKEL paa at starte og stoppe.
+                                onClickLabel = if (recording) "Stop optagelse" else "Optag tale",
+                                role = Role.Button,
+                                onClick = {
                                 voiceError = null
                                 if (voiceBusy) {
                                     stopVoiceTurn()
