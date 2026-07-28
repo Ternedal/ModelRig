@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -400,7 +401,9 @@ private fun NavRow(item: NavItem, active: Boolean, onClick: () -> Unit) {
     val base = Modifier
         .fillMaxWidth()
         .clip(shape)
-        .clickable(onClick = onClick)
+        // NavItem baerer allerede et label ("Chat", "Modeller", ...); kun
+        // glyffen blev renderet, saa en skaermlaeser fik "\u25AC" eller intet.
+        .clickable(onClickLabel = item.label, role = Role.Tab, onClick = onClick)
     val bg = if (active) {
         base.background(
             Brush.horizontalGradient(listOf(Color(0x389A7136), Color(0x0F9A7136))), // .22 → .06
@@ -519,7 +522,7 @@ fun KalivContextPanel(
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Text("Kontekst & RAG", color = KalivTheme.colors.TextHigh, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
-                PillToggle(on = ragOn, onToggle = onToggleRag)
+                PillToggle(on = ragOn, label = "Kontekst & RAG", onToggle = onToggleRag)
             }
             Spacer(Modifier.height(8.dp))
             Text(
@@ -587,14 +590,14 @@ fun KalivContextPanel(
 
 /** A 38×21 pill switch (handoff: on = #8A6530 track, white knob). */
 @Composable
-internal fun PillToggle(on: Boolean, onToggle: () -> Unit) {
+internal fun PillToggle(on: Boolean, label: String, onToggle: () -> Unit) {
     val track = if (on) Color(0xFF8A6530) else KalivTheme.colors.SurfaceHigh
     Box(
         Modifier.size(width = 38.dp, height = 21.dp)
             .clip(RoundedCornerShape(999.dp))
             .background(track)
             .border(1.dp, if (on) Color(0xFF8A6530) else KalivTheme.colors.Border, RoundedCornerShape(999.dp))
-            .clickable(onClick = onToggle)
+            .clickable(onClickLabel = label, role = Role.Switch, onClick = onToggle)
             .padding(horizontal = 3.dp),
         contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart,
     ) {
@@ -989,7 +992,10 @@ internal fun AgentComposer(value: String, onValue: (String) -> Unit, enabled: Bo
             Modifier.size(44.dp).clip(RoundedCornerShape(14.dp))
                 .background(if (canSend) KalivTheme.colors.Signal else KalivTheme.colors.SurfaceHigh)
                 .border(1.dp, if (canSend) KalivTheme.colors.Signal else KalivTheme.colors.Border, RoundedCornerShape(14.dp))
-                .clickable(enabled = canSend, onClick = onSend),
+                .clickable(
+                    enabled = canSend, onClickLabel = "Send", role = Role.Button,
+                    onClick = onSend,
+                ),
             contentAlignment = Alignment.Center,
         ) {
             Text("\u2794", color = if (canSend) kalivPrimaryInk else KalivTheme.colors.TextMuted, fontSize = 16.sp)

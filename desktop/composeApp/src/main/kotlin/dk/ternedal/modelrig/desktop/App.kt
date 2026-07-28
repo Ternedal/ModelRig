@@ -1177,7 +1177,7 @@ private fun SettingsCard(
             Spacer(Modifier.height(8.dp))
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                PillToggle(agent3Cockpit) { onAgent3Cockpit(!agent3Cockpit) }
+                PillToggle(agent3Cockpit, label = "Agent 3-cockpit") { onAgent3Cockpit(!agent3Cockpit) }
                 Spacer(Modifier.width(10.dp))
                 Column {
                     Text("Agent-skaerm bruger Agent 3 (udvikler)", color = KalivTheme.colors.TextHigh, fontSize = 13.sp)
