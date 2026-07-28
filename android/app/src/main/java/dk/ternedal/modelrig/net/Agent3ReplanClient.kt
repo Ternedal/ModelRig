@@ -1,5 +1,7 @@
 package dk.ternedal.modelrig.net
 
+import java.nio.charset.StandardCharsets
+import java.net.URLEncoder
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -67,7 +69,7 @@ class Agent3ReplanClient(baseUrl: String, private val token: String) {
     fun preview(runId: String, plannerModel: String? = null): Preview {
         val body = JSONObject()
         plannerModel?.takeIf { it.isNotBlank() }?.let { body.put("planner_model", it) }
-        val root = post("/api/v1/experimental/agent3/runs/$runId/replan-preview", body)
+        val root = post("/api/v1/experimental/agent3/runs/${seg(runId)}/replan-preview", body)
         val window = root.optJSONObject("window") ?: JSONObject()
         return Preview(
             previewId = root.optString("preview_id"),
@@ -93,7 +95,7 @@ class Agent3ReplanClient(baseUrl: String, private val token: String) {
 
     fun apply(previewId: String): ApplyResult {
         val root = post(
-            "/api/v1/experimental/agent3/replan-previews/$previewId/apply",
+            "/api/v1/experimental/agent3/replan-previews/${seg(previewId)}/apply",
             JSONObject(),
         )
         val receipt = root.optJSONObject("replan") ?: JSONObject()
@@ -189,4 +191,20 @@ class Agent3ReplanClient(baseUrl: String, private val token: String) {
 
     private fun JSONObject.nullableDouble(name: String): Double? =
         if (!has(name) || isNull(name)) null else optDouble(name)
+
+    /**
+     * Encode een sti-komponent.
+     *
+     * Uden den aendrer et misdannet id HVILKET endpoint der rammes: maalt
+     * 27/07-2026 gav runId="../../healthz" stien
+     * /api/v1/experimental/healthz/confirm, fordi traversalen oploeses foer
+     * requesten sendes. Id'erne kommer fra serveren i dag, saa det var ikke
+     * udnytteligt -- men en klient boer ikke lade en vaerdi vaelge sin rute.
+     *
+     * Agent3MemoryClient gjorde det allerede; de oevrige gjorde ikke. Samme
+     * form her, saa de fire klienter opfoerer sig ens.
+     */
+    private fun seg(value: String): String =
+        URLEncoder.encode(value, StandardCharsets.UTF_8.toString()).replace("+", "%20")
+
 }
