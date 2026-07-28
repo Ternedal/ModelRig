@@ -1,9 +1,11 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // Agent 3.0 is an experimental, feature-flagged worker API. The Go server does
@@ -65,8 +67,39 @@ func (s *server) handleAgent3PlanStart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleAgent3Memory(w http.ResponseWriter, r *http.Request) {
-	// Memory CRUD is local SQLite work and never calls a model.
-	s.Worker.Forward(w, r, agent3MemoryTarget(r))
+	mode, err := agent3MemoryStoreMode()
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	if mode == "legacy" {
+		// Compatibility mode is explicit and remains exactly the pre-T-033 route.
+		// No internal grant is forwarded and an inbound spoofed grant is ignored by
+		// the narrow proxy header allow-list.
+		s.Worker.Forward(w, r, agent3MemoryTarget(r))
+		return
+	}
+	if s.Worker == nil || !scheduleWorkerIsLoopback(s.Worker.BaseURL) {
+		writeErr(w, http.StatusServiceUnavailable,
+			"protected Agent 3 memory requires a loopback worker upstream")
+		return
+	}
+	target := agent3MemoryTarget(r)
+	grant, _, err := issueAgent3MemoryGrant(r, target, time.Now())
+	if err != nil {
+		if errors.Is(err, errAgent3MemoryRouteUnsupported) {
+			writeErr(w, http.StatusNotFound, "protected memory route is not available")
+			return
+		}
+		writeErr(w, http.StatusServiceUnavailable,
+			"protected memory authorization is unavailable")
+		return
+	}
+	// The grant is minted only after authMW has attached the paired device. It is
+	// short-lived, method/path/action/request-bound and sent only over loopback.
+	s.Worker.ForwardWithHeaders(w, r, target, map[string]string{
+		agent3MemoryGrantHeader: grant,
+	})
 }
 
 func (s *server) handleAgent3RunsList(w http.ResponseWriter, r *http.Request) {
