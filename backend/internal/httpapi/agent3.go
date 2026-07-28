@@ -38,7 +38,9 @@ func agent3ReplanPreviewTarget(r *http.Request) string {
 func agent3MemoryTarget(r *http.Request) string {
 	const publicPrefix = "/api/v1/experimental/agent3/memory"
 	suffix := strings.TrimPrefix(r.URL.Path, publicPrefix)
-	return agent3Target(r, "/experimental/agent3/memory"+suffix)
+	// proxy.Client owns query propagation. Returning it here as well duplicated
+	// every memory query (`q=x&q=x`) and weakened exact request reasoning.
+	return "/experimental/agent3/memory" + suffix
 }
 
 func (s *server) handleAgent3Status(w http.ResponseWriter, r *http.Request) {
