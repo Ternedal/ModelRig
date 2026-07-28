@@ -115,33 +115,38 @@ curl http://<rig-ip>:8080/api/v1/health/deep  # rundtur til Ollama + worker (kr�
 Se `CLIENT_BUILD_AND_TEST.md` for fuld røgtest af både server og Android-app efter
 en opgradering.
 
-## 5. API-oversigt (alle bag bearer-token, medmindre andet nævnt)
+## 5. API-oversigt
 
-Tilføjet 0.20.12 — der fandtes ingen samlet oversigt før; endpoints var kun
-dokumenteret spredt i `STATUS.md`-changelogs. Autoritativ kilde er stadig
-koden (`backend/internal/httpapi/server.go`); dette er et driftsopslag.
-
-```
-GET    /healthz                      # ingen auth: oppe + version
-POST   /api/v1/pair/start            # ingen auth: start parring (udsteder kode)
-POST   /api/v1/pair/claim            # ingen auth: byt parringskode til token
-GET    /api/v1/status                # backend-status
-GET    /api/v1/health/deep           # rundtur backend -> Ollama + worker
-GET    /api/v1/devices               # parrede enheder
-DELETE /api/v1/devices/{id}          # revokér en enheds token
-POST   /api/v1/token/rotate          # rotér eget token (gammelt invalideres)
-POST   /api/v1/chat                  # streaming chat-proxy (Ollama /api/chat)
-GET    /api/v1/models                # installerede modeller (Ollama /api/tags)
-GET    /api/v1/models/running        # kørende modeller + VRAM (Ollama /api/ps)      [0.20.0]
-POST   /api/v1/models/pull           # hent model, streamer NDJSON-fremgang          [0.20.0]
-DELETE /api/v1/models/delete         # slet model (irreversibelt på rig'en)          [0.20.0]
-POST   /api/v1/rag/ingest            # ingestér tekst-dokumenter i RAG-indekset
-POST   /api/v1/rag/query             # hent matches (+ evt. syntetiseret svar)
-POST   /api/v1/rag/chat              # RAG-chat, streamer NDJSON (1. linje = kilder)
-GET    /api/v1/rag/sources           # kildeliste med chunk-antal
-DELETE /api/v1/rag/source?source=X   # fjern én kildes chunks
-GET    /api/v1/rag/stats             # kilder/chunks-totaler
-```
+> **[27/7-2026] Listen herunder er ikke længere komplet og er derfor fjernet.**
+>
+> Den blev skrevet ved 0.20.12 og har ikke fulgt med. Målt 27/7: den listede
+> **19 af backendens 60 ruter**. Intet i den var forkert — men hele
+> scheduler-, tools- og voice-fladen manglede, og al Agent 3. En oversigt der
+> er en tredjedel komplet er værre end ingen: man slår `/api/v1/schedules` op,
+> finder den ikke, og konkluderer at den ikke findes.
+>
+> En håndskrevet kopi af noget koden ejer rådner altid. Derfor en pegepind i
+> stedet, som ikke kan blive forældet:
+>
+> **Backendens ruter (`:8080`, `/api/v1/*`)** — autoritativ kilde er
+> `backend/internal/httpapi/`:
+>
+> ```powershell
+> Get-ChildItem backend\internal\httpapi\*.go -Exclude *_test.go |
+>   Select-String `
+>   -Pattern '"(GET|POST|PUT|DELETE|PATCH) (/[^"]*)"' |
+>   ForEach-Object { $_.Matches.Value } | Sort-Object -Unique
+> ```
+>
+> ```bash
+> grep -rhoE '"(GET|POST|PUT|DELETE|PATCH) /[^"]*"' \
+>   --include='*.go' --exclude='*_test.go' backend/internal/httpapi/ | sort -u
+> ```
+>
+> **Workerens ruter (`:8099`)** står i
+> [`ROUTE_INVENTORY.md`](ROUTE_INVENTORY.md), som **genereres** af
+> `scripts/route_inventory.py` og er CI-gated mod drift. Bemærk at det er en
+> anden service end backenden — de to overflader er ikke den samme.
 
 **RAG-relevans-tærskel (0.20.11):** `POST /api/v1/rag/query` og `/rag/chat`
 tager et valgfrit `min_score`-felt (0.0–1.0, default **0.3**). Matches under
