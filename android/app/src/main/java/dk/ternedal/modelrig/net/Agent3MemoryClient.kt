@@ -52,6 +52,7 @@ class Agent3MemoryClient(baseUrl: String, private val token: String) {
     )
 
     fun create(subject: String, predicate: String, value: String, kind: String, sensitivity: String): Memory {
+        requireClassification(sensitivity)
         val payload = JSONObject()
             .put("subject", subject)
             .put("predicate", predicate)
@@ -70,6 +71,7 @@ class Agent3MemoryClient(baseUrl: String, private val token: String) {
     )
 
     fun correct(memoryId: String, value: String, sensitivity: String): Memory {
+        requireClassification(sensitivity)
         val payload = JSONObject().put("value", value).put("sensitivity", sensitivity)
         return parseMemory(
             post("/api/v1/experimental/agent3/memory/${path(memoryId)}/correct", payload).requireObject("memory")
@@ -149,4 +151,30 @@ class Agent3MemoryClient(baseUrl: String, private val token: String) {
     private fun query(value: String): String = URLEncoder.encode(value, StandardCharsets.UTF_8.toString())
 
     private fun path(value: String): String = query(value).replace("+", "%20")
+
+    /**
+     * En hukommelse maa ikke skrives uden klassifikation.
+     *
+     * Laesestien er uroert med vilje: parseMemory bruger optString, saa et svar
+     * uden feltet giver "" -- maalt 27/07-2026. At lade LAESNINGEN kaste ville
+     * kunne braekke klienten mod en serverversion der legitimt udelader det.
+     *
+     * Skaden ligger paa SKRIVESTIEN. Agent3MemoryScreen forudfylder
+     * redigeringsfeltet med memory.sensitivity, saa et tomt felt ville rejse
+     * tilbage som `sensitivity: ""` og rydde klassifikationen i stilhed. En
+     * hukommelse der var `secret` ville blive gemt uden at vaere det, og intet
+     * i UI'et ville vise det.
+     *
+     * Derfor: fejl lukket her, hvor konsekvensen er, og lad laesningen vaere
+     * tolerant.
+     */
+    private fun requireClassification(sensitivity: String) {
+        if (sensitivity.isBlank()) {
+            throw ModelRigException(
+                "Memory 3.0 kraever en sensitivity; et tomt felt ville rydde " +
+                    "klassifikationen",
+            )
+        }
+    }
+
 }
