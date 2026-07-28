@@ -5,20 +5,26 @@ on:
     paths:
       - "worker/app/agent3/memory_protected_reader.py"
       - "worker/app/agent3/memory_protected_writer.py"
+      - "worker/app/agent3/memory_protected_context.py"
       - "worker/app/agent3/memory_protection.py"
       - "worker/app/agent3/memory_protection_migration.py"
       - "tests/worker_agent3_memory_protected_reader.py"
       - "tests/worker_agent3_memory_protected_writer.py"
+      - "tests/worker_agent3_memory_protected_context.py"
+      - "tests/worker_agent3_memory_protected_context_dpapi.py"
       - ".github/workflows/agent3-memory-reader-windows.yml"
   push:
     branches: [main]
     paths:
       - "worker/app/agent3/memory_protected_reader.py"
       - "worker/app/agent3/memory_protected_writer.py"
+      - "worker/app/agent3/memory_protected_context.py"
       - "worker/app/agent3/memory_protection.py"
       - "worker/app/agent3/memory_protection_migration.py"
       - "tests/worker_agent3_memory_protected_reader.py"
       - "tests/worker_agent3_memory_protected_writer.py"
+      - "tests/worker_agent3_memory_protected_context.py"
+      - "tests/worker_agent3_memory_protected_context_dpapi.py"
       - ".github/workflows/agent3-memory-reader-windows.yml"
   workflow_dispatch:
 
@@ -34,7 +40,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Run protected reader and writer against Windows DPAPI
+      - name: Run protected reader writer and local-context gates against Windows DPAPI
         shell: pwsh
         run: |
           $env:PYTHONDONTWRITEBYTECODE = "1"
@@ -46,7 +52,15 @@ jobs:
             python tests\worker_agent3_memory_protected_writer.py *>> $log
             $status = $LASTEXITCODE
           }
-          Get-Content $log -Tail 240
+          if ($status -eq 0) {
+            python tests\worker_agent3_memory_protected_context.py *>> $log
+            $status = $LASTEXITCODE
+          }
+          if ($status -eq 0) {
+            python tests\worker_agent3_memory_protected_context_dpapi.py *>> $log
+            $status = $LASTEXITCODE
+          }
+          Get-Content $log -Tail 320
           exit $status
       - name: Upload protected store failure log
         if: failure()
