@@ -37,6 +37,56 @@ class PathDenied(RuntimeError):
 _WINDOWS_ABSOLUTE = re.compile(r"^(?:[A-Za-z]:|\\\\|//)")
 
 
+# Windows-navne der ikke er filnavne. Hver af disse blev maalt igennem graensen
+# 27/07-2026, foer de blev lukket her.
+#
+# * reserverede DOS-enheder: "CON", "NUL", "COM1" aabner ENHEDEN, ogsaa med
+#   endelse ("CON.txt") og ogsaa i en undermappe. Ikke en fil i workspacet.
+# * trailing dot/space: Windows stripper dem, saa "notes.txt " og "notes.txt" er
+#   samme fil under to navne. Alt der senere sammenligner paa strengen bliver
+#   forkert.
+# * 8.3-aliaser ("PROGRA~1"): et kort navn for et langt, og det lange kan ligge
+#   uden for scope. Det er praecis "aliases" i T-035's acceptkriterium.
+# * alternate data streams ("notes.txt:hidden"): laeser indhold der ikke er i
+#   filen. Kolon i en komponent er aldrig et gyldigt filnavn paa Windows.
+_RESERVED_DOS = frozenset(
+    ["CON", "PRN", "AUX", "NUL"]
+    + [f"COM{i}" for i in range(1, 10)]
+    + [f"LPT{i}" for i in range(1, 10)]
+)
+_SHORT_NAME_ALIAS = re.compile(r"~\d")
+_DRIVE_COMPONENT = re.compile(r"^[A-Za-z]:$")
+
+
+def _reject_hostile_components(requested: str) -> None:
+    """Refuse Windows shapes that are not the file they look like.
+
+    Refusal, not normalisation: rewriting "notes.txt " to "notes.txt" would hide
+    that two different requests reached the same file, and that is exactly the
+    ambiguity an attacker wants. Same principle as the rest of this module.
+    """
+    for raw in re.split(r"[\\/]+", requested):
+        if not raw or raw in (".", "..") or _DRIVE_COMPONENT.match(raw):
+            continue
+        if ":" in raw:
+            raise PathDenied(
+                f"sti-komponent indeholder kolon (alternate data stream): {raw}"
+            )
+        if raw != raw.rstrip(" ."):
+            raise PathDenied(
+                f"sti-komponent slutter paa punktum eller mellemrum (Windows "
+                f"stripper dem, saa to navne bliver samme fil): {raw}"
+            )
+        if _SHORT_NAME_ALIAS.search(raw):
+            raise PathDenied(
+                f"sti-komponent ligner et 8.3-alias og kan pege uden for scope: {raw}"
+            )
+        if raw.split(".")[0].upper() in _RESERVED_DOS:
+            raise PathDenied(
+                f"sti-komponent er et reserveret DOS-enhedsnavn: {raw}"
+            )
+
+
 def _normalise(p: str) -> str:
     # Collapse ../, ./, doubled separators and case (Windows is case-insensitive
     # and mixes / and \). normpath does the separator + dot-segment work;
@@ -62,6 +112,7 @@ class ReadScope:
             raise PathDenied("tom sti")
         if "\x00" in requested:
             raise PathDenied("sti indeholder et NUL-byte")
+        _reject_hostile_components(requested)
         if _WINDOWS_ABSOLUTE.match(requested):
             # Absolute on Windows regardless of this host's os.sep. Only allow
             # it if it genuinely normalises under the root (it almost never
