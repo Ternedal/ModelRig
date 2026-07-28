@@ -19,8 +19,11 @@ sys.path.insert(0, str(ROOT / "worker"))
 
 from app.agent3.memory import MemoryStore  # noqa: E402
 from app.agent3.memory_protected_gateway import (  # noqa: E402
+    MEMORY_GRANT_DB_ENV,
     MEMORY_GRANT_HEADER,
     MEMORY_GRANT_SCHEMA,
+    MEMORY_STORE_ATTESTATION_HEADER,
+    MEMORY_STORE_ATTESTATION_VALUE,
 )
 from app.agent3.memory_protection import (  # noqa: E402
     KEY_SCOPE_CURRENT_USER,
@@ -32,6 +35,7 @@ from app.agent3.production_mount import mount_agent3  # noqa: E402
 
 SECRET = b"t033-protected-memory-gateway-test-secret-0123456789"
 DOMAIN = MEMORY_GRANT_SCHEMA.encode("ascii") + b"\x00"
+EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 passed = failed = 0
 
 
@@ -108,6 +112,8 @@ def grant_token(
     path: str,
     nonce: bytes,
     now: int,
+    query: str = "",
+    body_sha256: str = EMPTY_SHA256,
 ) -> str:
     claims = {
         "schema": MEMORY_GRANT_SCHEMA,
@@ -117,12 +123,18 @@ def grant_token(
         "request_id": request_id,
         "method": method,
         "path": path,
+        "query": query,
+        "body_sha256": body_sha256,
         "issued_at": now - 1,
         "expires_at": now + 30,
     }
     payload = json.dumps(claims, separators=(",", ":")).encode("utf-8")
     payload_part = b64(payload)
-    signature = hmac.new(SECRET, DOMAIN + payload_part.encode("ascii"), hashlib.sha256).digest()
+    signature = hmac.new(
+        SECRET,
+        DOMAIN + payload_part.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
     return payload_part + "." + b64(signature)
 
 
@@ -134,6 +146,7 @@ def configured(tmp: Path, *, mode: str | None, secret: bytes | None = SECRET):
         "KALIV_AGENT3_REVIEW_DB": str(tmp / "reviews.db"),
         "KALIV_AGENT3_REPLAN_DB": str(tmp / "replans.db"),
         "KALIV_AGENT3_MEMORY_DB": str(tmp / "memory.db"),
+        MEMORY_GRANT_DB_ENV: str(tmp / "memory-grants.db"),
         "KALIV_AGENT3_PLAN_DB": str(tmp / "plans.db"),
         "KALIV_AGENT3_APPROVAL_DB": str(tmp / "approvals.db"),
     }
@@ -144,6 +157,7 @@ def configured(tmp: Path, *, mode: str | None, secret: bytes | None = SECRET):
     touched = set(names) | {
         "KALIV_AGENT3_MEMORY_STORE",
         "KALIV_AGENT3_MEMORY_API_SECRET",
+        MEMORY_GRANT_DB_ENV,
     }
     old = {name: os.environ.get(name) for name in touched}
     try:
@@ -162,6 +176,7 @@ def configured(tmp: Path, *, mode: str | None, secret: bytes | None = SECRET):
 with tempfile.TemporaryDirectory(prefix="kaliv-t033-selection-protected-") as raw:
     tmp = Path(raw)
     memory_path = tmp / "memory.db"
+    grant_path = tmp / "memory-grants.db"
     legacy = MemoryStore(str(memory_path))
     try:
         legacy.create(
@@ -195,6 +210,10 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-selection-protected-") as ra
             app.state.agent3_planner_memory_enabled is False,
             "legacy plaintext planner memory is deliberately disabled in protected mode",
         )
+        check(
+            Path(app.state.agent3_protected_memory_grant_db) == grant_path,
+            "protected mode selects the exact separate grant ledger path",
+        )
         paths = set(app.openapi()["paths"])
         check(
             "/experimental/agent3/memory/status" in paths
@@ -208,15 +227,19 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-selection-protected-") as ra
         )
 
         client = TestClient(app)
-        check(
-            client.get(
-                "/experimental/agent3/memory/status",
-                headers={"X-Request-ID": "req-no-grant"},
-            ).status_code
-            == 403,
-            "direct worker request without gateway grant is refused",
+        no_grant = client.get(
+            "/experimental/agent3/memory/status",
+            headers={"X-Request-ID": "req-no-grant"},
         )
-        now = 50_000
+        check(
+            no_grant.status_code == 403
+            and no_grant.headers.get(MEMORY_STORE_ATTESTATION_HEADER)
+            == MEMORY_STORE_ATTESTATION_VALUE,
+            "direct worker request without gateway grant is refused and attested protected",
+        )
+
+        import time as _time
+
         request_id = "req-selection-status"
         path = "/experimental/agent3/memory/status"
         token = grant_token(
@@ -224,21 +247,8 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-selection-protected-") as ra
             request_id=request_id,
             method="GET",
             path=path,
-            nonce=b"s" * 32,
-            now=now,
-        )
-        # The production authorizer uses time.time; build a fresh exact router
-        # test through a token valid around real time rather than patching it.
-        import time as _time
-
-        real_now = int(_time.time())
-        token = grant_token(
-            action="status",
-            request_id=request_id,
-            method="GET",
-            path=path,
             nonce=b"t" * 32,
-            now=real_now,
+            now=int(_time.time()),
         )
         response = client.get(
             path,
@@ -249,8 +259,14 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-selection-protected-") as ra
         )
         check(
             response.status_code == 200
-            and response.json()["protected_memory"]["production_activation"] is False,
-            "gateway-signed status request reaches the protected router",
+            and response.json()["protected_memory"]["production_activation"] is False
+            and response.headers.get(MEMORY_STORE_ATTESTATION_HEADER)
+            == MEMORY_STORE_ATTESTATION_VALUE,
+            "gateway-signed status request reaches only the attested protected router",
+        )
+        check(
+            grant_path.is_file() and grant_path.stat().st_size > 0,
+            "protected grant ledger is created independently of the memory database",
         )
         reader = app.state.agent3_protected_memory_reader
         writer = app.state.agent3_protected_memory_writer
@@ -302,7 +318,10 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-selection-secret-") as raw:
             check(True, "missing gateway secret aborts protected startup")
         else:
             check(False, "missing gateway secret aborts protected startup")
-        check(provider_calls == 0, "secret failure occurs before provider or database selection")
+        check(
+            provider_calls == 0,
+            "secret failure occurs before provider or database selection",
+        )
 
 
 with tempfile.TemporaryDirectory(prefix="kaliv-t033-selection-legacy-") as raw:
@@ -314,13 +333,18 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-selection-legacy-") as raw:
         check(
             app.state.agent3_memory_store_mode == "legacy"
             and type(app.state.agent3_memory_store).__name__ == "MemoryStore"
-            and app.state.agent3_planner_memory_enabled is True,
-            "legacy mode retains the existing store and planner integration",
+            and app.state.agent3_planner_memory_enabled is True
+            and app.state.agent3_protected_memory_grant_db is None,
+            "legacy mode retains existing store/planner and creates no grant ledger",
         )
         check(
             "/experimental/agent3/memory/context-preview" in paths
             and "/experimental/agent3/memory/status" not in paths,
             "legacy and protected route surfaces cannot be mounted together",
+        )
+        check(
+            not (tmp / "memory-grants.db").exists(),
+            "legacy mode does not create protected replay state",
         )
         app.state.agent3_memory_store.close()
 
