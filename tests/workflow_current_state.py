@@ -14,6 +14,7 @@ Run: python3 tests/workflow_current_state.py
 """
 from __future__ import annotations
 
+import difflib
 import subprocess
 import sys
 from pathlib import Path
@@ -41,6 +42,21 @@ check(doc.exists(), "CURRENT_STATE.md is committed")
 
 r = subprocess.run([sys.executable, str(gen), "--check"], capture_output=True,
                    text=True, cwd=str(ROOT), timeout=120)
+if r.returncode != 0:
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import current_state as _CURRENT_STATE_DIAGNOSTIC  # noqa: E402
+
+    current_text = doc.read_text(encoding="utf-8") if doc.exists() else ""
+    expected_text = _CURRENT_STATE_DIAGNOSTIC.render()
+    print("===== CURRENT_STATE DRIFT DIFF =====")
+    print("\n".join(difflib.unified_diff(
+        current_text.splitlines(),
+        expected_text.splitlines(),
+        fromfile="committed/CURRENT_STATE.md",
+        tofile="generated/CURRENT_STATE.md",
+        lineterm="",
+    )))
+    print("===== END CURRENT_STATE DRIFT DIFF =====")
 check(r.returncode == 0,
       "CURRENT_STATE.md matches the code"
       if r.returncode == 0
