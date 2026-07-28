@@ -96,7 +96,11 @@ class CapabilityDescriptorV2(StrictModel):
     def validate_cross_fields(self) -> "CapabilityDescriptorV2":
         if not self.description.strip():
             raise ValueError("description must contain visible text")
-        expected = "required" if self.access in {"write", "desktop"} else "none"
+        # Fail-closed: alt der ikke er en ren laesning kraever bekraeftelse.
+        # Opremsningen {write, desktop} var aekvivalent saa laenge maengden
+        # var praecis tre -- og fail-open ved den fjerde. Se
+        # tests/workflow_access_derivation_parity.py.
+        expected = "none" if self.access == "read" else "required"
         if self.confirmation.mode != expected:
             raise ValueError("confirmation mode contradicts access")
         return self
@@ -176,7 +180,7 @@ def descriptor_from_tool(tool: object) -> CapabilityDescriptorV2:
                 ),
             ),
             confirmation=Confirmation(
-                mode="required" if risk in {"write", "desktop"} else "none"
+                mode="none" if risk == "read" else "required"
             ),
             network=Network(
                 mode=getattr(tool, "network", "undeclared"),

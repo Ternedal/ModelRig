@@ -222,6 +222,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_web_research_fetch.py`
 - `tests/worker_web_research_intent.py`
 - `tests/worker_web_research_mount.py`
+- `tests/workflow_access_derivation_parity.py`
 - `tests/workflow_action_pins.py`
 - `tests/workflow_activation_readiness.py`
 - `tests/workflow_agent3_dormant.py`

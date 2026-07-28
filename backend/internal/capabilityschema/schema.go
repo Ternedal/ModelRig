@@ -173,7 +173,18 @@ func (d Descriptor) Validate() error {
 		return err
 	}
 	expected := "none"
-	if d.Access == "write" || d.Access == "desktop" {
+	// Fail-closed: alt der IKKE er en ren laesning kraever bekraeftelse.
+	//
+	// Foer 27/07-2026 stod her `Access == "write" || Access == "desktop"`.
+	// Det er aekvivalent med formen nedenfor SAA LAENGE access-maengden er
+	// praecis {read, write, desktop} -- og fail-OPEN i samme sekund nogen
+	// tilfoejer en klasse: en ny vaerdi ville hverken vaere write eller
+	// desktop og dermed slippe uden kort.
+	//
+	// De to Kotlin-klienter brugte allerede `if (access == "read")`, altsaa
+	// den fail-closed form. Fire validatorer af een kontrakt maa ikke udlede
+	// det samme forskelligt; her er Go bragt paa linje med de tre andre.
+	if d.Access != "read" {
 		expected = "required"
 	}
 	if d.Confirmation.Mode != expected {
