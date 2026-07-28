@@ -64,7 +64,7 @@ den fysiske pilot.
 | T-014 Gem approval-receipt attribution (1.58.123) | — | P1 | [KERNE] ✅ | — | Approval/device/tider/revision auditeres. |
 | T-015 Fault-injection suite + readiness-gate (1.58.121) | — | P0 | [KERNE] ✅ | T-011, T-012, T-013 | Crash/overlap/budget/revoke/approval E2E-gates. |
 | T-016 Udvid Android ToolInfo + filtrér picker | #69 | P1 | [DEVICE] (backend ✅) | — | Unschedulable tools skjules/forklares. |
-| T-017 Timezone/DST/misfire-semantik | #70 | P2 | [KERNE] | T-010 | IANA-zone + DST/misfire-tests. |
+| T-017 Timezone/DST/misfire-semantik | #70 | P2 | [KERNE] ✅ | T-010 | Alle seks acceptkriterier verificeret 27/7; se #70. Policy som konstanter, 38 assertions. |
 | T-018 Bounded workers / eksplicit single-flight | #71 | P2 | [KERNE] | T-010, T-012, T-013 | Concurrency-model fault-testet. |
 | T-019 Fysisk scheduler-pilot: read + `note_append` | #72 | P0 | [RIG] | T-005, T-006, T-015, T-016 | Begge paths kører, stopper og recoverer. |
 
