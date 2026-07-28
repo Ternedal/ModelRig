@@ -224,13 +224,38 @@ gengæld atomiske i samme transaktion (T-014).
   `KALIV_EGRESS_GATE=1` på workeren og se hvad gating af reads faktisk koster i praksis, før du
   vælger.
 
+- **D6 — data-sharing policy (T-032) — LUKKET 27/7-2026.** Beslutningen står i
+  [`ROADMAP.md`](ROADMAP.md): `public` = automatisk, `operational` og `private`
+  = kræver bekræftelse, `secret` = forbudt. Kategori-kun (destinationen
+  registreres og vises, men afgør ikke), tilladelser lever 300 sekunder med loft
+  på 3600, og `research` er den eneste flade der håndhæver i dag. To invarianter
+  kan ikke slækkes i kode: `secret` altid forbudt, `private` aldrig automatisk.
+  Pinnet af `tests/workflow_data_sharing_decision.py`.
+
+  **To akser med samme fire ord — læs dem ikke som én.** Det er den nemmeste
+  fejl at lave her:
+
+  | | `sensitivity` (tabellen ovenfor) | `data_class` (D6) |
+  |---|---|---|
+  | Spørgsmål | må et tools **resultat** rejse til en cloud-model i chat-stien? | må lokal information **sendes til en ekstern read-tjeneste**? |
+  | Defineret i | `ToolSpec` i `tools.py` | capability-skemaet v2 |
+  | Håndhæves af | `KALIV_EGRESS_GATE` | data-sharing-gaten |
+  | Flader | agent v2 / normal chat | research, connector, agent3 |
+
+  Derfor er `operational` **ikke** selvmodsigende på tværs af de to: at sende
+  rig-beskrivende data til en cloud-model du selv har valgt at tale med er en
+  anden handling end at sende dem til en tredjeparts read-tjeneste. Den første
+  er nuværende dokumenterede adfærd; den anden kræver bekræftelse. At forene de
+  to akser til én er ikke besluttet og bør ikke ske stiltiende.
+
 - **Øvrige åbne sikkerhedspunkter ejes af backloggen** — ikke gentaget her:
-  cloud-read-egress-beslutningen (T-032, gjort prøvbar via
-  `KALIV_EGRESS_GATE` ovenfor), at-rest-beskyttelse af følsomme
-  Agent3-memoryværdier (T-033, kræver riggen), fysisk bevis af
-  I0b-procesisolering før den agentiske flade udvides, og
-  concurrency-modellen ud over single-flight (T-018). Se
+  at-rest-beskyttelse af følsomme Agent3-memoryværdier (T-033, kræver riggen)
+  og fysisk bevis af I0b-procesisolering før den agentiske flade udvides. Se
   [`BACKLOG.md`](BACKLOG.md).
+
+  *Concurrency-modellen (T-018) er ikke længere åben: single-flight ER den
+  vedtagne model, med køkapacitet nul, og alle syv acceptkriterier er
+  verificeret 27/7 — se #71.*
 
 ## Kontrakt: writes (præcisering, 1.58.37)
 
