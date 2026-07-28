@@ -34,6 +34,15 @@
 > der. Fire filer designpakken refererer og ikke indeholder. Kraever kilden, ikke
 > kode.
 >
+> **Om de resterende visuelle punkter: referencen raekker ikke.** Designpakken
+> indeholder to mockups, `Kaliv_UI_Target_Mockup.png` og
+> `Kaliv_UI_Annotated_Mockup.png` -- begge 1491x1055, altsaa enkeltskaerme og
+> ikke et saet. Guidens tilstandskrav (hover aendrer surface 4-6 %, focus-ring
+> 2 px, pressed 8 %) og dens breakpoints kan derfor ikke verificeres mod
+> pakken: et statisk billede viser ikke en hover-tilstand. De kraever den
+> koerende app, ikke bare oejne -- og det er en anden opgave end "sammenlign
+> med mockup'en".
+>
 > "footer-strip + hover-actions" og "Android-palet-alignment" staar uaendret;
 > foerste kraever oejne paa en skaerm, anden er en beslutning (Androids egen
 > palet har faktisk *bedre* kontrast end tokenet — 7,28 mod 4,50 — saa valget er
