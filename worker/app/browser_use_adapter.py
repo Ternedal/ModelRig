@@ -36,7 +36,7 @@ from .browser_use_network_guard import (
 from .research_contract import ResearchContractError, ResearchRequest, SourceReceipt
 from .web_fetch import FetchTrace, WebFetchError
 
-SUPPORTED_BROWSER_USE_VERSION = "0.13.4"
+SUPPORTED_BROWSER_USE_VERSION = "0.13.6"
 VERIFIED_SOURCE_MEDIA_TYPE = "application/vnd.modelrig.verified-source+json"
 READ_ONLY_EXCLUDED_ACTIONS = (
     "click",
@@ -205,6 +205,10 @@ def build_read_only_browser_profile(
     """Construct the single Browser Use profile permitted by this adapter.
 
     Browser Use 0.13.4 defaults to accepting downloads and grants clipboard
+    (maalt paa 0.13.4; IKKE efterproevet paa 0.13.6 -- pinnet blev bumpet
+    27/07-2026 uden at denne adfaerd kunne verificeres lokalt. Guarden
+    nedenfor er skrevet til at holde uanset defaulten, saa den er ikke
+    afhaengig af paastanden -- men paastanden er ikke maalt igen)
     plus notification permissions. Those defaults are appropriate for general
     automation and wrong for ModelRig research, so the adapter states every
     security-relevant value explicitly and validates the real runtime object.
