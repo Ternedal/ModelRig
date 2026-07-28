@@ -221,6 +221,52 @@ standardvisningen med `...`, og det ligner en tom liste:
 
 ---
 
+## Luk sløjfen — kan du så tænde?
+
+Stage A producerer beviset, men kørebogen har aldrig sagt hvilket, eller hvordan
+du ser om det virkede. Det er den ene artefakt der blokerer aktivering:
+
+```
+validation/agent3-rig-validation-latest.json
+```
+
+`START_STAGE_A_TEST.cmd` skriver den — `agent3` er ét af de seks beviser, og
+one-click'en kalder `scripts/run-agent3-rig-validation.ps1` når den mangler.
+
+Spørg bagefter direkte:
+
+```powershell
+python scripts\activation_readiness.py
+```
+
+Den svarer **JA** eller **NEJ** på "kan Agent 3 aktiveres nu" og "kan
+scheduleren", og lister hvad der blokerer. Den fejler lukket: ingen rapport =
+ikke klar.
+
+### Det vigtigste: beviset er bundet til koden
+
+Generatorens egen begrundelse siger hvorfor:
+
+> *"did the evidence describe the software we are about to switch on? A report
+> from a rig running different code is **not stale evidence, it is evidence
+> about something else**."*
+
+Konsekvensen er praktisk og let at overse: **hver commit efter en rig-dag
+ugyldiggør beviset.** Målt 27/7 lå der 52 commits mellem Stage A og main — ikke
+fordi noget gik i stykker, men fordi rapporten beskriver ét bestemt træ.
+
+Så produktion er ikke en milepæl du passerer én gang. Det er en tilstand du
+genetablerer per release du vil aktivere:
+
+1. skær en release
+2. checkout **det tag** (§1)
+3. kør beviserne mod netop det
+4. `activation_readiness.py` → JA
+5. tænd — eller lad være, men så på et oplyst grundlag
+
+Vil du undgå at spilde en rig-dag: lad være med at samle 52 commits mellem dem.
+Kør riggen mod det du faktisk vil have ude.
+
 ## Til sidst
 
 Når alle seks ligger i `validation\`, kører du `verify`. Den er grøn kun når
