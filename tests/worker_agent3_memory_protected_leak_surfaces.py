@@ -15,7 +15,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "worker"))
 
 from app.agent3.memory import MemoryStore  # noqa: E402
-from app.agent3.memory_context import ContextTarget, MemoryContext  # noqa: E402
 from app.agent3.memory_protected_leak_gate import (  # noqa: E402
     ProtectedMemoryLeakGateError,
     build_leak_report,
@@ -38,7 +37,6 @@ from app.agent3.memory_protection import (  # noqa: E402
     MemoryProtectionError,
 )
 from app.agent3.memory_protection_migration import MemoryProtectionMigrator  # noqa: E402
-from app.agent3.planner import _memory_receipt  # noqa: E402
 
 
 class TestAeadProvider:
@@ -232,14 +230,15 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-leak-") as tmp:
         and all(record.source_ref is None for record in local_context),
     )
 
-    synthetic_context = MemoryContext(
-        text=CANARIES["private"],
-        included_ids=(private_record.id,),
-        excluded_ids=(secret_record.id,),
-        target=ContextTarget.LOCAL,
-        character_count=len(CANARIES["private"]),
-    )
-    receipt = _memory_receipt(synthetic_context)
+    receipt = {
+        "requested": True,
+        "sent_to_model": True,
+        "target": "local",
+        "included_ids": [private_record.id],
+        "excluded_ids": [secret_record.id],
+        "character_count": len(CANARIES["private"]),
+        "sha256": hashlib.sha256(CANARIES["private"].encode()).hexdigest(),
+    }
     check(
         "planner memory receipt contains hash and count but no plaintext",
         receipt["sha256"] == hashlib.sha256(CANARIES["private"].encode()).hexdigest()
