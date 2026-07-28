@@ -1,5 +1,7 @@
 package dk.ternedal.modelrig.desktop.net
 
+import java.nio.charset.StandardCharsets
+import java.net.URLEncoder
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -83,11 +85,11 @@ class Agent3ReplanClient(baseUrl: String, private val bearer: String) {
 
     fun preview(runId: String, plannerModel: String? = null): Agent3ReplanPreview {
         val body = json.encodeToString(ReplanPreviewRequest(plannerModel?.takeIf { it.isNotBlank() }))
-        return decode(post("/api/v1/experimental/agent3/runs/$runId/replan-preview", body))
+        return decode(post("/api/v1/experimental/agent3/runs/${seg(runId)}/replan-preview", body))
     }
 
     fun apply(previewId: String): Agent3ReplanApplyResult =
-        decode(post("/api/v1/experimental/agent3/replan-previews/$previewId/apply", "{}"))
+        decode(post("/api/v1/experimental/agent3/replan-previews/${seg(previewId)}/apply", "{}"))
 
     private fun builder(path: String): HttpRequest.Builder = HttpRequest.newBuilder(URI.create(base + path))
         .header("Content-Type", "application/json")
@@ -113,4 +115,15 @@ class Agent3ReplanClient(baseUrl: String, private val bearer: String) {
     } catch (e: Exception) {
         throw Agent3Exception("Agent 3.0 replan returned invalid JSON: ${e.message}")
     }
+
+    /**
+     * Encode een sti-komponent. Se Agent3PathSegmentTest paa Android-siden:
+     * maalt 27/07-2026 gav runId="../../healthz" stien
+     * /api/v1/experimental/healthz/confirm, fordi traversalen oploeses foer
+     * requesten sendes. Desktop havde samme eksponering; den blev overset da
+     * Android blev rettet.
+     */
+    private fun seg(value: String): String =
+        URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20")
+
 }

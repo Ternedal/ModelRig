@@ -1,5 +1,7 @@
 package dk.ternedal.modelrig.net
 
+import java.nio.charset.StandardCharsets
+import java.net.URLEncoder
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -74,7 +76,7 @@ class ScheduleClient(baseUrl: String, private val token: String) {
     fun setEnabled(scheduleId: String, enabled: Boolean): ScheduleItem =
         parseItem(
             post(
-                "/api/v1/schedules/$scheduleId/enabled",
+                "/api/v1/schedules/${seg(scheduleId)}/enabled",
                 JSONObject().put("enabled", enabled),
             ).getJSONObject("schedule"),
         )
@@ -90,7 +92,7 @@ class ScheduleClient(baseUrl: String, private val token: String) {
             .put("max_runs", maxRuns)
         if (enable != null) body.put("enable", enable)
         return parsePreview(
-            post("/api/v1/schedules/$scheduleId/renew/preview", body)
+            post("/api/v1/schedules/${seg(scheduleId)}/renew/preview", body)
                 .getJSONObject("preview"),
         )
     }
@@ -104,7 +106,7 @@ class ScheduleClient(baseUrl: String, private val token: String) {
         if (preview.enable != null) body.put("enable", preview.enable)
         approvalTokenForRenewal(preview, scheduleId)?.let { body.put("approval_token", it) }
         return parseItem(
-            post("/api/v1/schedules/$scheduleId/renew", body)
+            post("/api/v1/schedules/${seg(scheduleId)}/renew", body)
                 .getJSONObject("schedule"),
         )
     }
@@ -134,7 +136,7 @@ class ScheduleClient(baseUrl: String, private val token: String) {
             .put("max_runs", preview.maxRuns)
             .put("preview_fingerprint", fingerprint)
         if (preview.enable != null) body.put("enable", preview.enable)
-        return post("/api/v1/schedules/$scheduleId/renew/approve", body)
+        return post("/api/v1/schedules/${seg(scheduleId)}/renew/approve", body)
             .getString("approval_token")
     }
 
@@ -224,6 +226,16 @@ class ScheduleClient(baseUrl: String, private val token: String) {
         toolLayerEnabled = o.optBoolean("tool_layer_enabled"),
         toolDisabled = o.optBoolean("tool_disabled"),
     )
+
+    /**
+     * Encode een sti-komponent. Samme grund som i Agent3Client: et misdannet id
+     * ville ellers aendre hvilket endpoint der rammes. Fundet 27/07-2026 af
+     * tests/workflow_client_path_segments.py, som scanner BEGGE platforme --
+     * scheduler-klienten var ikke med i den runde hvor Agent 3 blev rettet.
+     */
+    private fun seg(value: String): String =
+        URLEncoder.encode(value, StandardCharsets.UTF_8.toString()).replace("+", "%20")
+
 }
 
 data class ScheduleRuntimeStatus(

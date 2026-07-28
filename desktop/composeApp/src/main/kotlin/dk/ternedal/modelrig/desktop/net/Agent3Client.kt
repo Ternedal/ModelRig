@@ -1,5 +1,7 @@
 package dk.ternedal.modelrig.desktop.net
 
+import java.nio.charset.StandardCharsets
+import java.net.URLEncoder
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -251,23 +253,23 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
     }
 
     fun startPlanEnvelope(planId: String): Agent3RunEnvelope =
-        decodeRunEnvelope(post("/api/v1/experimental/agent3/plans/$planId/start", "{}"))
+        decodeRunEnvelope(post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", "{}"))
 
     fun startPlan(planId: String): Agent3Run = startPlanEnvelope(planId).run
 
     fun getRun(runId: String): Agent3Run =
-        decodeRunEnvelope(get("/api/v1/experimental/agent3/runs/$runId")).run
+        decodeRunEnvelope(get("/api/v1/experimental/agent3/runs/${seg(runId)}")).run
 
     fun listRuns(): List<Agent3Run> =
         decode<RunsEnvelope>(get("/api/v1/experimental/agent3/runs")).runs
 
     fun events(runId: String): List<Agent3Event> =
-        decode<EventsEnvelope>(get("/api/v1/experimental/agent3/runs/$runId/events")).events
+        decode<EventsEnvelope>(get("/api/v1/experimental/agent3/runs/${seg(runId)}/events")).events
 
     fun retry(runId: String, cloudReady: Boolean = false): Agent3Run =
         decodeRunEnvelope(
             post(
-                "/api/v1/experimental/agent3/runs/$runId/retry",
+                "/api/v1/experimental/agent3/runs/${seg(runId)}/retry",
                 json.encodeToString(RetryRequest(cloudReady)),
             )
         ).run
@@ -276,14 +278,14 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
         val body = json.encodeToString(
             ConfirmRequest(stepId, if (approve) "approve" else "deny", digest)
         )
-        return decodeRunEnvelope(post("/api/v1/experimental/agent3/runs/$runId/confirm", body)).run
+        return decodeRunEnvelope(post("/api/v1/experimental/agent3/runs/${seg(runId)}/confirm", body)).run
     }
 
     fun resume(runId: String): Agent3Run =
-        decodeRunEnvelope(post("/api/v1/experimental/agent3/runs/$runId/resume", "{}")).run
+        decodeRunEnvelope(post("/api/v1/experimental/agent3/runs/${seg(runId)}/resume", "{}")).run
 
     fun cancel(runId: String): Agent3Run =
-        decodeRunEnvelope(post("/api/v1/experimental/agent3/runs/$runId/cancel", "{}")).run
+        decodeRunEnvelope(post("/api/v1/experimental/agent3/runs/${seg(runId)}/cancel", "{}")).run
 
     private fun decodeRunEnvelope(body: String): Agent3RunEnvelope {
         val envelope = decode<Agent3RunEnvelope>(body)
@@ -375,4 +377,15 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
     } catch (e: Exception) {
         throw Agent3Exception("Agent 3.0 returned invalid JSON: ${e.message}")
     }
+
+    /**
+     * Encode een sti-komponent. Se Agent3PathSegmentTest paa Android-siden:
+     * maalt 27/07-2026 gav runId="../../healthz" stien
+     * /api/v1/experimental/healthz/confirm, fordi traversalen oploeses foer
+     * requesten sendes. Desktop havde samme eksponering; den blev overset da
+     * Android blev rettet.
+     */
+    private fun seg(value: String): String =
+        URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20")
+
 }
