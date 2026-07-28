@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import itertools
 import os
 import sqlite3
 import sys
@@ -171,6 +172,14 @@ def row(path: Path, memory_id: str) -> sqlite3.Row:
         conn.close()
 
 
+def row_count(path: Path) -> int:
+    conn = sqlite3.connect(path)
+    try:
+        return int(conn.execute("SELECT COUNT(*) FROM agent_memories").fetchone()[0])
+    finally:
+        conn.close()
+
+
 with tempfile.TemporaryDirectory(prefix="kaliv-t033-writer-") as tmp:
     root = Path(tmp)
     db = root / "memory.db"
@@ -180,17 +189,16 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-writer-") as tmp:
             "writer-created-001",
             "writer-secret-002",
             "writer-corrected-003",
-            "writer-failed-004",
-            "writer-collision-005",
+            "writer-unused-stale-004",
+            "writer-unused-stale-005",
         ]
     )
-    clock_values = iter([2_000.0, 2_001.0, 2_002.0, 2_003.0, 2_004.0])
-    codec = MemoryProtectionCodec(TestAeadProvider())
+    clock_values = itertools.count(2_000)
     writer = ProtectedMemoryWriter(
         db,
-        codec,
+        MemoryProtectionCodec(TestAeadProvider()),
         id_factory=lambda: next(ids),
-        clock=lambda: next(clock_values),
+        clock=lambda: float(next(clock_values)),
     )
 
     created = writer.create(
@@ -201,10 +209,9 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-writer-") as tmp:
         sensitivity="private",
         source_ref=VALUES["source"],
     )
-    check("protected create returns caller value", created.value == VALUES["created"])
     created_row = row(db, created.id)
-    check("protected create stores empty plaintext value", created_row["value"] == "")
-    check("protected create stores null plaintext source_ref", created_row["source_ref"] is None)
+    check("protected create returns caller value", created.value == VALUES["created"])
+    check("protected create stores no plaintext columns", created_row["value"] == "" and created_row["source_ref"] is None)
     check("protected create stores both envelopes", created_row["protection_fields"] == "value,source_ref")
     check("protected create row is protected", created_row["protection_state"] == "protected")
 
@@ -222,8 +229,11 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-writer-") as tmp:
         opened = reader.get(created.id, access=MemoryReadAccess.LOCAL_MANAGEMENT)
         check("reader opens newly created private value", opened.value == VALUES["created"])
         check("reader opens newly created source_ref", opened.source_ref == VALUES["source"])
-        context_secret = reader.get(secret.id, access=MemoryReadAccess.LOCAL_CONTEXT)
-        check("reader keeps new secret redacted in context", context_secret.value == "[redacted]")
+        check(
+            "reader keeps new secret redacted in context",
+            reader.get(secret.id, access=MemoryReadAccess.LOCAL_CONTEXT).value
+            == "[redacted]",
+        )
 
     corrected = writer.correct(
         created.id,
@@ -234,18 +244,22 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-writer-") as tmp:
     )
     old_row = row(db, created.id)
     new_row = row(db, corrected.id)
-    check("correction supersedes old row", old_row["lifecycle_status"] == "superseded")
-    check("old corrected row retains only encrypted history", old_row["value"] == "" and old_row["value_protected"])
+    check("correction supersedes old encrypted row", old_row["lifecycle_status"] == "superseded" and old_row["value"] == "")
     check("replacement points to old id", new_row["supersedes_id"] == created.id)
-    check("replacement plaintext remains empty", new_row["value"] == "" and new_row["source_ref"] is None)
+    check("replacement stores no plaintext columns", new_row["value"] == "" and new_row["source_ref"] is None)
     with ProtectedMemoryReader(db, MemoryProtectionCodec(TestAeadProvider())) as reader:
         history = reader.history(
             "Anders",
             "writer_created",
             access=MemoryReadAccess.LOCAL_MANAGEMENT,
         )
-        check("protected correction history opens both versions", [item.value for item in history] == [VALUES["created"], VALUES["corrected"]])
+        check(
+            "protected correction history opens both versions",
+            [item.value for item in history]
+            == [VALUES["created"], VALUES["corrected"]],
+        )
 
+    before_stale = row_count(db)
     expect_error(
         "stale correction is rejected",
         lambda: writer.correct(
@@ -257,7 +271,7 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-writer-") as tmp:
         MemoryConflict,
         "changed",
     )
-    check("stale correction adds no row", row(db, corrected.id)["lifecycle_status"] == "active")
+    check("stale correction rolls back its insert", row_count(db) == before_stale)
 
     deleted = writer.delete(
         corrected.id,
@@ -266,11 +280,10 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-writer-") as tmp:
     )
     deleted_row = row(db, corrected.id)
     check("protected delete returns payload-free tombstone", deleted.value == "" and deleted.source_ref is None)
-    check("protected delete clears value envelope", deleted_row["value_protected"] is None)
-    check("protected delete clears source envelope", deleted_row["source_ref_protected"] is None)
+    check("protected delete clears both envelopes", deleted_row["value_protected"] is None and deleted_row["source_ref_protected"] is None)
     check("protected delete marks redacted", deleted_row["protection_state"] == "redacted" and deleted_row["protection_fields"] == "")
     expect_error(
-        "repeated delete is not idempotently hidden",
+        "repeated delete is not reported as success",
         lambda: writer.delete(
             corrected.id,
             access=MemoryWriteAccess.LOCAL_MANAGEMENT,
@@ -332,7 +345,7 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-writer-failure-") as tmp:
     root = Path(tmp)
     db = root / "memory.db"
     seed_and_migrate(db, TestAeadProvider())
-    before = sqlite3.connect(db).execute("SELECT COUNT(*) FROM agent_memories").fetchone()[0]
+    before = row_count(db)
     failing_writer = ProtectedMemoryWriter(
         db,
         MemoryProtectionCodec(TestAeadProvider(fail_on_protect_call=2)),
@@ -352,8 +365,7 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-writer-failure-") as tmp:
         "could not be encrypted",
     )
     failing_writer.close()
-    after = sqlite3.connect(db).execute("SELECT COUNT(*) FROM agent_memories").fetchone()[0]
-    check("failed encryption leaves row count unchanged", before == after)
+    check("failed encryption leaves row count unchanged", before == row_count(db))
     check("failed plaintext never reaches SQLite bytes", VALUES["failed"].encode() not in family_bytes(db))
 
 with tempfile.TemporaryDirectory(prefix="kaliv-t033-writer-collision-") as tmp:
