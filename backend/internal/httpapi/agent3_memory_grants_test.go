@@ -18,10 +18,7 @@ import (
 
 const agent3MemoryTestSecret = "t033-protected-memory-gateway-test-secret-0123456789"
 
-func protectedMemoryHandler(
-	t *testing.T,
-	worker http.Handler,
-) http.Handler {
+func protectedMemoryHandler(t *testing.T, worker http.Handler) http.Handler {
 	t.Helper()
 	workerServer := httptest.NewServer(worker)
 	t.Cleanup(workerServer.Close)
@@ -127,13 +124,7 @@ func TestAgent3MemoryProtectedModeMintsDeviceBoundGrant(t *testing.T) {
 	if !strings.Contains(gotQuery, "q=needle") {
 		t.Fatalf("worker query lost: %q", gotQuery)
 	}
-	claims, err := verifyAgent3MemoryGrant(
-		gotToken,
-		gotRID,
-		gotMethod,
-		gotPath,
-		time.Now(),
-	)
+	claims, err := verifyAgent3MemoryGrant(gotToken, gotRID, gotMethod, gotPath, time.Now())
 	if err != nil {
 		t.Fatalf("forwarded grant did not verify: %v", err)
 	}
@@ -152,11 +143,7 @@ func TestAgent3MemoryGrantRejectsTamperingAndWrongBindings(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/experimental/agent3/memory", strings.NewReader(`{}`))
 	req.Header.Set("X-Request-ID", "req-write-001")
 	req = req.WithContext(context.WithValue(req.Context(), deviceKey, store.Device{ID: "dev-1"}))
-	token, claims, err := issueAgent3MemoryGrant(
-		req,
-		"/experimental/agent3/memory",
-		now,
-	)
+	token, claims, err := issueAgent3MemoryGrant(req, "/experimental/agent3/memory", now)
 	if err != nil {
 		t.Fatalf("issue grant: %v", err)
 	}
@@ -167,19 +154,22 @@ func TestAgent3MemoryGrantRejectsTamperingAndWrongBindings(t *testing.T) {
 		"/experimental/agent3/memory", now); err != nil {
 		t.Fatalf("fresh exact grant failed: %v", err)
 	}
-	for label, candidate, rid, method, path, at := range map[string]struct {
+	parts := strings.Split(token, ".")
+	tampered := parts[0] + "." + strings.Repeat("A", len(parts[1]))
+	cases := map[string]struct {
 		token  string
 		rid    string
 		method string
 		path   string
 		at     time.Time
 	}{
-		"tampered": {token: token[:len(token)-1] + "A", rid: "req-write-001", method: http.MethodPost, path: "/experimental/agent3/memory", at: now},
+		"tampered": {token: tampered, rid: "req-write-001", method: http.MethodPost, path: "/experimental/agent3/memory", at: now},
 		"request":  {token: token, rid: "different", method: http.MethodPost, path: "/experimental/agent3/memory", at: now},
 		"method":   {token: token, rid: "req-write-001", method: http.MethodGet, path: "/experimental/agent3/memory", at: now},
 		"path":     {token: token, rid: "req-write-001", method: http.MethodPost, path: "/experimental/agent3/memory/id/correct", at: now},
 		"expired":  {token: token, rid: "req-write-001", method: http.MethodPost, path: "/experimental/agent3/memory", at: now.Add(time.Minute)},
-	} {
+	}
+	for label, candidate := range cases {
 		t.Run(label, func(t *testing.T) {
 			if _, err := verifyAgent3MemoryGrant(candidate.token, candidate.rid,
 				candidate.method, candidate.path, candidate.at); err == nil {
