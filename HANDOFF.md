@@ -491,14 +491,25 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 og uden en beslutning fra Anders er ryddet. Det der står tilbage er blokeret på
 netop de tre ting:
 
-- **Riggen:** workflow-baselinen (projektets første completion rate) og PR #135.
+- **Riggen:** workflow-baselinen (projektets første completion rate), T-031's
+  fysiske Windows-isolation, og de fysiske Agent 3-pilotter. *(PR #135 stod her
+  først; den blev lukket samme dag som overhalet — single-flight ligger på main,
+  se #71.)*
   Baselinen har nu ét indgangspunkt: `scripts/workflow_baseline_one_click.py`.
   `--check` svarer på om riggen er klar uden at køre eller skrive noget, og hver
   blokering bærer rettelsen i beskeden frem for i gate-tabellen.
 - **En skærm:** guidens tilstande (hover 4-6%, focus-ring 2 px, pressed 8%),
   breakpoints og 200% zoom. Alt tekstuelt, semantisk og kontrastmæssigt er
-  derimod målt og lukket.
-- **Anders:** tre tokenpar under WCAG AA som er brandfarver eller semantik;
+  derimod målt og lukket. **Bemærk:** de kræver den *kørende* app, ikke bare
+  øjne — designpakkens to mockups er begge 1491×1055 enkeltskærme, og et
+  statisk billede viser ikke en hover-tilstand.
+- **Anders — den vigtigste først:** hvilken flade D6's data-sharing-gate må
+  åbnes på. Politikken er besluttet og pinnet (`public` automatisk,
+  `operational`/`private` bekræftet, `secret` forbudt, 300 s, kategori-kun), og
+  `research` håndhæver allerede — men `agent_v2`, `agent3` og `connector` er
+  slukkede, og at tænde en er en ny beslutning. **Fire tasks venter på præcis
+  den ene:** T-034, T-036, T-037, T-038. Dernæst: tre tokenpar under WCAG AA
+  som er brandfarver eller semantik;
   Android-paletten i `theme/Theme.kt`, der har egne værdier med *bedre* kontrast
   end tokenet (7,28 mod 4,50) — så valget er konsistens kontra kontrast, ikke
   en rettelse; og fase-signalet i chat-streamen. Alle tre står i `ROADMAP.md`
@@ -509,6 +520,13 @@ blokeret af deres eget indhold; resten hang på to infrastrukturrødder ingen PR
 pegede på — Kotlin-versionen (adskilt for desktop og Android) og
 Android-platformen (AGP 8.9.1 + compileSdk 36, ikke 8.6.0 som fejlbeskeden
 antydede).
+
+**Fem ægte huller i `read_scope.py`** — reserverede DOS-navne (`CON`, `NUL`,
+`COM1`), trailing dot/space, 8.3-aliaser og alternate data streams slap igennem
+sti-grænsen. Relevant for Sol og for enhver der bygger ovenpå: alle fem ligger
+*inde* i roden, så et rod-scoped restricted token ville ikke fange dem. For
+netop dem er Python-tjekket ikke bælte til seler — det er det eneste lag. Se
+`ISOLATION_DESIGN.md` §4.1.
 
 **`ci.yml` kan nu køres på forlangende** (`workflow_dispatch`). Før kørte gaten
 kun på push til main og på pull requests, så en branch kunne ikke få CI's dom
