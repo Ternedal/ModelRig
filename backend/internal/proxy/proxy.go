@@ -54,6 +54,28 @@ func (c *Client) WithAuthToken(t string) *Client {
 
 // Forward proxies r to c.BaseURL+upstreamPath and streams the response to w.
 func (c *Client) Forward(w http.ResponseWriter, r *http.Request, upstreamPath string) {
+	c.forward(w, r, upstreamPath, nil)
+}
+
+// ForwardWithHeaders is the narrow escape hatch for gateway-created internal
+// claims. Only the explicitly supplied headers are added; arbitrary client
+// headers are still not copied upstream. This lets a handler overwrite a
+// spoofed inbound claim instead of widening the generic proxy trust boundary.
+func (c *Client) ForwardWithHeaders(
+	w http.ResponseWriter,
+	r *http.Request,
+	upstreamPath string,
+	headers map[string]string,
+) {
+	c.forward(w, r, upstreamPath, headers)
+}
+
+func (c *Client) forward(
+	w http.ResponseWriter,
+	r *http.Request,
+	upstreamPath string,
+	headers map[string]string,
+) {
 	target := c.BaseURL + upstreamPath
 	if r.URL.RawQuery != "" {
 		if strings.Contains(upstreamPath, "?") {
@@ -79,6 +101,14 @@ func (c *Client) Forward(w http.ResponseWriter, r *http.Request, upstreamPath st
 	}
 	if rid := r.Header.Get("X-Request-ID"); rid != "" {
 		req.Header.Set("X-Request-ID", rid)
+	}
+	for name, value := range headers {
+		name = strings.TrimSpace(name)
+		if name == "" || strings.ContainsAny(name, "\r\n") || strings.ContainsAny(value, "\r\n") {
+			http.Error(w, "invalid internal upstream header", http.StatusInternalServerError)
+			return
+		}
+		req.Header.Set(name, value)
 	}
 	if c.AuthToken != "" {
 		req.Header.Set("Authorization", "Bearer "+c.AuthToken)
