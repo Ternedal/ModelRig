@@ -288,6 +288,45 @@ også når det er langsommere. **Håndhævet som test**
 (`tests/worker_d4_auto_routing.py`), ikke kun som prosa — en regel der kun står
 i et dokument driver, og den her ville drive mod "det var vel også i orden".
 
+**D6 — Data-sharing policy (T-032). Afgjort 27/7-2026.**
+Én fælles politik for hvornår lokal information må sendes til en ekstern
+read-tjeneste. Gælder alle fire flader: `agent_v2`, `agent3`, `research`,
+`connector`.
+
+| Datakategori | Beslutning |
+|---|---|
+| `public` | `automatic` |
+| `operational` | `confirmation_required` |
+| `private` | `confirmation_required` |
+| `secret` | `forbidden` |
+
+**Kategori-kun.** Destinationstypen (`public_web` / `cloud_model` / `connector`)
+registreres, indgår i request-digest og vises i previewet — men afgør ikke
+beslutningen. Begrundelse: en 12-cellers matrice kan ikke kalibreres uden data
+om hvor ofte hver kombination optræder, og kvitteringerne leverer netop de data.
+Udvid når de findes, ikke før.
+
+**Tilladelsens levetid: 300 sekunder**, loft 3600. Kort nok til at en tilladelse
+ikke overlever den handling den blev givet til. Er den for kort, er symptomet at
+man bekræfter igen — ikke at noget slipper ud.
+
+**To invarianter kan ikke slækkes**, uanset senere beslutninger: `secret` er
+altid `forbidden`, og `private` er aldrig `automatic`. Håndhævet i
+`DataSharingPolicy.__post_init__`, ikke kun aftalt.
+
+**Aktivering: `research` først — og den håndhævede allerede.** Begge
+operatør-scripts (`browser_peer_public_validation.py`,
+`browser_peer_runtime_live_fixture.py`) konstruerer boundary'en med
+`mode="enforce"` og uden policy-argument, altså på `DEFAULT_POLICY`. Det der
+manglede var ikke en kontakt, men denne tekst: issuen kræver at beslutningen er
+dokumenteret *før* en route åbnes, og det var det eneste udestående.
+
+**Ingen serveret rute bruger gaten endnu.** `agent_v2`, `agent3` og `connector`
+er slukkede, og at tænde en af dem er en ny beslutning — ikke en konsekvens af
+denne. **Håndhævet som test** (`tests/workflow_data_sharing_decision.py`), som
+D4: alle fire valg er pinnet, og teksten her kan ikke komme til at sige noget
+andet end koden gør uden at CI bliver rød.
+
 *Afgjort 13/7-2026: **D1** keystore = risiko accepteret (`SECURITY.md`) · **D2** VERSION-kilde
 + CI-gate = leveret · **D5** dokumentstruktur = lean (denne fil + `STATUS.md` + `SECURITY.md`)
 · ROADMAP_V2 vedtaget.*

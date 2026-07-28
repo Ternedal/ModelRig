@@ -284,7 +284,7 @@ Research-forarbejdet er merged, men forbliver dormant indtil de resterende gates
 |---|---:|---|---|---|---|
 | T-030 Fælles versioneret capability-schema v2 | #77 | P1 | [KERNE] ✅ | — | Alle otte acceptkriterier verificeret 27/7; se #77. T-034/036/037/038 var ikke reelt blokeret af den. |
 | T-031 Validér Windows isolation I0b | #78 | P1 | [RIG] | T-030, T-005 | Rettigheder, workspace, netværk, lifecycle og cleanup fysisk bevist. |
-| T-032 Fælles data-sharing policy for cloud-read | #79 | P0 | [KERNE] + [ANDERS] | — | Én scoped policy/receipt-model i v2 + Agent 3. |
+| T-032 Fælles data-sharing policy for cloud-read | #79 | P0 | [KERNE] + [ANDERS] ✅ | — | Besluttet 27/7 som **D6** i ROADMAP; pinnet af workflow_data_sharing_decision. research håndhævede allerede. |
 | T-033 Beskyt følsomme Agent 3 memory-felter | #80 | P1 | [RIG] (format [ISO]) | T-030 | Værdier ulæselige i DB/backups; restore testet på Windows. |
 | T-034 Web/research med citations | #81 | P1 | [KERNE] | T-030, T-032 | Peer-binding, citations, receipt, audit og eval. |
 | T-035 Scoped file-capabilities | #82 | P1 | [KERNE]/[RIG] | T-030, T-031 | Explicit workspace og adversarial path-tests. |
