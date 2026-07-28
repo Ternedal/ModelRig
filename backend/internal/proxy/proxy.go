@@ -54,7 +54,7 @@ func (c *Client) WithAuthToken(t string) *Client {
 
 // Forward proxies r to c.BaseURL+upstreamPath and streams the response to w.
 func (c *Client) Forward(w http.ResponseWriter, r *http.Request, upstreamPath string) {
-	c.forward(w, r, upstreamPath, nil)
+	c.forward(w, r, upstreamPath, nil, "", "")
 }
 
 // ForwardWithHeaders is the narrow escape hatch for gateway-created internal
@@ -67,7 +67,22 @@ func (c *Client) ForwardWithHeaders(
 	upstreamPath string,
 	headers map[string]string,
 ) {
-	c.forward(w, r, upstreamPath, headers)
+	c.forward(w, r, upstreamPath, headers, "", "")
+}
+
+// ForwardWithHeadersAndResponseAttestation forwards gateway-created internal
+// headers and refuses to expose the upstream body unless the worker identifies
+// the exact implementation that served it. It is intentionally header-specific:
+// callers cannot turn this into a generic response-header trust mechanism.
+func (c *Client) ForwardWithHeadersAndResponseAttestation(
+	w http.ResponseWriter,
+	r *http.Request,
+	upstreamPath string,
+	headers map[string]string,
+	requiredHeader string,
+	requiredValue string,
+) {
+	c.forward(w, r, upstreamPath, headers, requiredHeader, requiredValue)
 }
 
 func (c *Client) forward(
@@ -75,6 +90,8 @@ func (c *Client) forward(
 	r *http.Request,
 	upstreamPath string,
 	headers map[string]string,
+	requiredHeader string,
+	requiredValue string,
 ) {
 	target := c.BaseURL + upstreamPath
 	if r.URL.RawQuery != "" {
@@ -121,6 +138,16 @@ func (c *Client) forward(
 	}
 	defer resp.Body.Close()
 
+	if requiredHeader != "" {
+		if strings.ContainsAny(requiredHeader, "\r\n") || strings.ContainsAny(requiredValue, "\r\n") {
+			http.Error(w, "invalid upstream response attestation", http.StatusInternalServerError)
+			return
+		}
+		if resp.Header.Get(requiredHeader) != requiredValue {
+			http.Error(w, "upstream response attestation missing", http.StatusBadGateway)
+			return
+		}
+	}
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
