@@ -7,9 +7,11 @@ import json
 import math
 import os
 import re
+import sqlite3
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from fastapi import Request
@@ -22,10 +24,15 @@ from .memory_protected_api import (
 
 MEMORY_STORE_ENV = "KALIV_AGENT3_MEMORY_STORE"
 MEMORY_API_SECRET_ENV = "KALIV_AGENT3_MEMORY_API_SECRET"
+MEMORY_GRANT_DB_ENV = "KALIV_AGENT3_MEMORY_GRANT_DB"
 MEMORY_GRANT_HEADER = "X-Kaliv-Agent3-Memory-Grant"
+MEMORY_STORE_ATTESTATION_HEADER = "X-Kaliv-Agent3-Memory-Store"
+MEMORY_STORE_ATTESTATION_VALUE = "protected"
 MEMORY_GRANT_SCHEMA = "kaliv-agent3-memory-grant/v1"
+MEMORY_REQUEST_BODY_MAX_BYTES = 64 * 1024
 _MEMORY_GRANT_DOMAIN = MEMORY_GRANT_SCHEMA.encode("ascii") + b"\x00"
 _SEGMENT_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EXPECTED_KEYS = {
     "schema",
     "nonce",
@@ -34,6 +41,8 @@ _EXPECTED_KEYS = {
     "request_id",
     "method",
     "path",
+    "query",
+    "body_sha256",
     "issued_at",
     "expires_at",
 }
@@ -68,6 +77,31 @@ def protected_memory_secret(value: str | bytes | None = None) -> bytes:
             f"{MEMORY_API_SECRET_ENV} must contain 32-4096 bytes"
         )
     return secret
+
+
+def protected_memory_grant_db(value: str | Path | None = None) -> Path:
+    raw = os.getenv(MEMORY_GRANT_DB_ENV, "") if value is None else os.fspath(value)
+    if not isinstance(raw, str):
+        raise ProtectedMemoryApiAuthorizationError(
+            f"{MEMORY_GRANT_DB_ENV} must be a path"
+        )
+    cleaned = raw.strip()
+    if not cleaned or cleaned != raw or "\x00" in cleaned:
+        raise ProtectedMemoryApiAuthorizationError(
+            f"{MEMORY_GRANT_DB_ENV} must be a canonical non-empty path"
+        )
+    path = Path(cleaned)
+    if path.exists() and path.is_symlink():
+        raise ProtectedMemoryApiAuthorizationError(
+            "protected memory grant ledger must not be a symlink"
+        )
+    parent = path.parent
+    if parent.exists() and (parent.is_symlink() or not parent.is_dir()):
+        raise ProtectedMemoryApiAuthorizationError(
+            "protected memory grant ledger parent is invalid"
+        )
+    parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _decode_segment(value: Any, *, maximum: int, label: str) -> bytes:
@@ -118,22 +152,22 @@ def _strict_object(payload: bytes) -> dict[str, Any]:
     return value
 
 
-def _canonical_text(name: str, value: Any, maximum: int) -> str:
+def _canonical_text(name: str, value: Any, maximum: int, *, allow_empty: bool = False) -> str:
     if not isinstance(value, str):
         raise ProtectedMemoryApiAuthorizationError(
             f"protected memory grant {name} is invalid"
         )
     cleaned = value.strip()
     if (
-        not cleaned
-        or cleaned != value
-        or len(cleaned) > maximum
+        (not allow_empty and not cleaned)
+        or (value and cleaned != value)
+        or len(value) > maximum
         or any(character in value for character in ("\x00", "\r", "\n"))
     ):
         raise ProtectedMemoryApiAuthorizationError(
             f"protected memory grant {name} is invalid"
         )
-    return cleaned
+    return value
 
 
 def _timestamp(name: str, value: Any) -> float:
@@ -149,26 +183,130 @@ def _timestamp(name: str, value: Any) -> float:
     return parsed
 
 
-class GatewayProtectedMemoryAuthorizer:
-    """Verify and consume backend-issued grants at the loopback worker boundary."""
+class ProtectedMemoryGrantReplayLedger:
+    """Durable single-use ledger for write grants; stores hashes only."""
 
-    def __init__(self, secret: str | bytes, *, clock: Clock = time.time):
+    def __init__(self, path: str | Path):
+        self.path = protected_memory_grant_db(path)
+        connection = self._connect()
+        try:
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS protected_memory_grant_uses (
+                    nonce_sha256 TEXT PRIMARY KEY,
+                    action TEXT NOT NULL,
+                    device_sha256 TEXT NOT NULL,
+                    request_sha256 TEXT NOT NULL,
+                    consumed_at REAL NOT NULL,
+                    expires_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_protected_memory_grant_expiry
+                    ON protected_memory_grant_uses(expires_at);
+                """
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.path, timeout=5.0, isolation_level=None)
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=FULL")
+        connection.execute("PRAGMA secure_delete=ON")
+        return connection
+
+    @staticmethod
+    def _digest(value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    def consume(
+        self,
+        *,
+        nonce: str,
+        action: ProtectedMemoryApiAction,
+        device_id: str,
+        request_id: str,
+        now: float,
+        expires_at: float,
+    ) -> None:
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "DELETE FROM protected_memory_grant_uses WHERE expires_at <= ?",
+                (now,),
+            )
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO protected_memory_grant_uses(
+                        nonce_sha256,action,device_sha256,request_sha256,
+                        consumed_at,expires_at
+                    ) VALUES(?,?,?,?,?,?)
+                    """,
+                    (
+                        self._digest(nonce),
+                        action.value,
+                        self._digest(device_id),
+                        self._digest(request_id),
+                        now,
+                        expires_at,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                connection.rollback()
+                raise ProtectedMemoryApiAuthorizationError(
+                    "protected memory grant has already been consumed"
+                ) from exc
+            connection.commit()
+        except ProtectedMemoryApiAuthorizationError:
+            raise
+        except sqlite3.Error as exc:
+            connection.rollback()
+            raise ProtectedMemoryApiAuthorizationError(
+                "protected memory write grant could not be consumed durably"
+            ) from exc
+        finally:
+            connection.close()
+
+
+class GatewayProtectedMemoryAuthorizer:
+    """Verify backend-issued grants at the loopback worker boundary."""
+
+    def __init__(
+        self,
+        secret: str | bytes,
+        *,
+        replay_ledger: ProtectedMemoryGrantReplayLedger,
+        clock: Clock = time.time,
+    ):
         self._secret = protected_memory_secret(secret)
+        if not isinstance(replay_ledger, ProtectedMemoryGrantReplayLedger):
+            raise ProtectedMemoryApiAuthorizationError(
+                "protected memory gateway authorizer requires a durable replay ledger"
+            )
+        self._replay_ledger = replay_ledger
         if not callable(clock):
             raise ProtectedMemoryApiAuthorizationError(
                 "protected memory gateway authorizer requires a clock"
             )
         self._clock = clock
-        self._seen: dict[str, float] = {}
+        self._seen_reads: dict[str, float] = {}
         self._lock = threading.Lock()
 
     @classmethod
     def from_environment(
         cls,
         *,
+        replay_db: str | Path | None = None,
         clock: Clock = time.time,
     ) -> "GatewayProtectedMemoryAuthorizer":
-        return cls(protected_memory_secret(), clock=clock)
+        path = protected_memory_grant_db(replay_db)
+        return cls(
+            protected_memory_secret(),
+            replay_ledger=ProtectedMemoryGrantReplayLedger(path),
+            clock=clock,
+        )
 
     def __call__(
         self,
@@ -228,6 +366,12 @@ class GatewayProtectedMemoryAuthorizer:
         request_id = _canonical_text("request id", claims["request_id"], 200)
         method = _canonical_text("method", claims["method"], 16)
         path = _canonical_text("path", claims["path"], 1_000)
+        query = _canonical_text("query", claims["query"], 4_096, allow_empty=True)
+        body_sha256 = _canonical_text("body sha256", claims["body_sha256"], 64)
+        if _SHA256_RE.fullmatch(body_sha256) is None:
+            raise ProtectedMemoryApiAuthorizationError(
+                "protected memory grant body digest is invalid"
+            )
         if method != method.upper() or method != request.method.upper():
             raise ProtectedMemoryApiAuthorizationError(
                 "protected memory grant method mismatch"
@@ -235,6 +379,19 @@ class GatewayProtectedMemoryAuthorizer:
         if path != request.url.path:
             raise ProtectedMemoryApiAuthorizationError(
                 "protected memory grant path mismatch"
+            )
+        if query != request.url.query:
+            raise ProtectedMemoryApiAuthorizationError(
+                "protected memory grant query mismatch"
+            )
+        actual_body_sha256 = getattr(
+            request.state,
+            "agent3_memory_body_sha256",
+            None,
+        )
+        if actual_body_sha256 != body_sha256:
+            raise ProtectedMemoryApiAuthorizationError(
+                "protected memory grant body mismatch"
             )
         if request_id != request.headers.get("X-Request-ID", ""):
             raise ProtectedMemoryApiAuthorizationError(
@@ -267,15 +424,27 @@ class GatewayProtectedMemoryAuthorizer:
                 "protected memory grant lifetime is invalid"
             )
 
-        with self._lock:
-            expired = [key for key, expiry in self._seen.items() if expiry <= now]
-            for key in expired:
-                self._seen.pop(key, None)
-            if nonce in self._seen:
-                raise ProtectedMemoryApiAuthorizationError(
-                    "protected memory grant has already been consumed"
-                )
-            self._seen[nonce] = expires_at
+        if granted_action is ProtectedMemoryApiAction.WRITE_PRIVATE:
+            self._replay_ledger.consume(
+                nonce=nonce,
+                action=granted_action,
+                device_id=device_id,
+                request_id=request_id,
+                now=now,
+                expires_at=expires_at,
+            )
+        else:
+            with self._lock:
+                expired = [
+                    key for key, expiry in self._seen_reads.items() if expiry <= now
+                ]
+                for key in expired:
+                    self._seen_reads.pop(key, None)
+                if nonce in self._seen_reads:
+                    raise ProtectedMemoryApiAuthorizationError(
+                        "protected memory grant has already been consumed"
+                    )
+                self._seen_reads[nonce] = expires_at
 
         return ProtectedMemoryApiGrant(
             principal=f"device:{device_id}",
