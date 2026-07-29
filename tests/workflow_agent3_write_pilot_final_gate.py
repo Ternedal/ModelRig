@@ -274,7 +274,11 @@ for label, mutate, expected in mutations:
     value = fixture_report()
     mutate(value)
     result = assess(value)
-    check(label, result["gate"]["passed"] is False and expected in result["blockers"])
+    expected_present = any(
+        blocker == expected or blocker.startswith(f"{expected}:")
+        for blocker in result["blockers"]
+    )
+    check(label, result["gate"]["passed"] is False and expected_present)
 
 stale = fixture_report()
 stale["generated_at"] = iso(NOW - timedelta(hours=25))
