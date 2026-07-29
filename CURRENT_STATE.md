@@ -243,6 +243,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_desktop_agent3_termination_ui_contract.py`
 - `tests/workflow_doc_authority.py`
 - `tests/workflow_freeze_check.py`
+- `tests/workflow_milestone3_candidate_handoff.py`
 - `tests/workflow_milestone3_physical_candidate.py`
 - `tests/workflow_physical_validation_campaign.py`
 - `tests/workflow_physical_validation_final_gate.py`
