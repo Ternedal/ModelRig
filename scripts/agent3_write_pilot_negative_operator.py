@@ -3,8 +3,13 @@
 
 The recorder core mints unique negative markers itself, but replay and
 stop/retry/replan deliberately reuse a positive marker. This entrypoint replaces
-only the case-start policy so those two cases record the real existing note count
-instead of assuming zero, then delegates the ceremony to the tested core.
+only two orchestration policies:
+
+- an interrupted positive stage is resumed on the same exact candidate branch;
+- reused positive markers record their real existing note count before a negative
+  case begins.
+
+It then delegates the ceremony to the hash-chained recorder core.
 """
 from __future__ import annotations
 
@@ -18,6 +23,34 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import agent3_write_pilot_negative_one_click as core  # noqa: E402
+
+
+def safe_positive_stage() -> tuple[dict[str, Any], dict[str, Any], dict[str, Path], str]:
+    identity = core.positive.ensure_candidate()
+    should_resume = not core.MANIFEST.is_file() or not core.POSITIVE_OBSERVATIONS.is_file()
+    if not should_resume:
+        manifest, _raw = core.common._load_json(core.MANIFEST)
+        _bound, pending = core.positive.manifest_progress(manifest)
+        should_resume = bool(pending)
+    if should_resume:
+        core.positive.main()
+
+    manifest, _raw = core.common._load_json(core.MANIFEST)
+    observations, _observations_raw = core.common._load_json(core.POSITIVE_OBSERVATIONS)
+    errors = core.common.validate_manifest(manifest, require_bound=True)
+    errors.extend(core.positive.validate_resume(observations, manifest, identity))
+    bound, pending = core.positive.manifest_progress(manifest)
+    if pending or len(bound) != core.common.RUN_COUNT:
+        errors.append(
+            f"positive stage is incomplete: {len(bound)}/{core.common.RUN_COUNT}"
+        )
+    if errors:
+        raise core.OperatorError(
+            "Den positive del er ikke exact-candidate komplet: " + "; ".join(errors)
+        )
+    token = core.positive.ensure_token()
+    paths = core.positive.database_paths()
+    return manifest, observations, paths, token
 
 
 def safe_case_start(
@@ -65,6 +98,7 @@ def safe_case_start(
 
 
 def main() -> int:
+    core.ensure_positive_stage = safe_positive_stage
     core.ensure_case_started = safe_case_start
     return core.main()
 
