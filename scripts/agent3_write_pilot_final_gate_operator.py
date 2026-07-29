@@ -19,9 +19,11 @@ if str(SCRIPTS) not in sys.path:
 
 import agent3_write_pilot_final_gate as core  # noqa: E402
 
+_ORIGINAL_NUMBER = core._number
+
 
 def timestamp_seconds(value: Any) -> float | None:
-    numeric = core._number(value)
+    numeric = _ORIGINAL_NUMBER(value)
     if numeric is not None:
         return numeric
     parsed = core._parse_time(value)
