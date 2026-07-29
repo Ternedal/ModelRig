@@ -123,7 +123,7 @@ kaliv-agent3-memory-protected-backup-physical/v1
 
 ## Evidence boundary
 
-CI can test the state machine, mutations and real DPAPI on an ephemeral Windows
-runner. It cannot honestly claim that the actual ModelRig Windows profile and a
-second real profile were used. T-033 remains open until this operator creates a
-green report on the exact physical candidate.
+CI is not the physical Windows rig. CI can test the state machine, mutations and
+real DPAPI on an ephemeral Windows runner. It cannot honestly claim that the
+actual ModelRig Windows profile and a second real profile were used. T-033 remains
+open until this operator creates a green report on the exact physical candidate.
