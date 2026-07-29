@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import secrets
 import shutil
 import sqlite3
@@ -120,7 +119,11 @@ class ProtectedMemoryBackupManager:
         self.clock = clock
         self.busy_timeout_ms = max(1, min(int(busy_timeout_ms), 120_000))
 
-    def create(self, source: str | Path, bundle: str | Path) -> ProtectedMemoryBackupSummary:
+    def create(
+        self,
+        source: str | Path,
+        bundle: str | Path,
+    ) -> ProtectedMemoryBackupSummary:
         source_path = self._regular_database(Path(source), "source")
         bundle_path = Path(bundle)
         self._require_absent(bundle_path, "backup bundle")
@@ -199,12 +202,16 @@ class ProtectedMemoryBackupManager:
                 "protected memory backup failed SQLite integrity_check"
             )
         artifact = manifest["artifact"]
-        if int(artifact["page_count"]) != page_count or int(artifact["page_size"]) != page_size:
+        if (
+            int(artifact["page_count"]) != page_count
+            or int(artifact["page_size"]) != page_size
+        ):
             raise ProtectedMemoryBackupError(
                 "protected memory backup SQLite geometry changed"
             )
         verification_ids = self._validate_verification_ids(
-            database_path, manifest["verification_memory_ids"]
+            database_path,
+            manifest["verification_memory_ids"],
         )
         return ProtectedMemoryBackupSummary(
             schema=BACKUP_SCHEMA,
@@ -231,7 +238,8 @@ class ProtectedMemoryBackupManager:
         self._require_absent(destination_path, "restore destination")
         self._require_regular_parent(destination_path)
         verification_ids = self._validate_verification_ids(
-            database_path, manifest["verification_memory_ids"]
+            database_path,
+            manifest["verification_memory_ids"],
         )
 
         temporary = destination_path.with_name(
@@ -248,7 +256,10 @@ class ProtectedMemoryBackupManager:
                     "restored protected memory failed SQLite integrity_check"
                 )
             artifact = manifest["artifact"]
-            if int(artifact["page_count"]) != page_count or int(artifact["page_size"]) != page_size:
+            if (
+                int(artifact["page_count"]) != page_count
+                or int(artifact["page_size"]) != page_size
+            ):
                 raise ProtectedMemoryBackupError(
                     "restored protected memory SQLite geometry changed"
                 )
@@ -300,7 +311,10 @@ class ProtectedMemoryBackupManager:
                         access=MemoryReadAccess.LOCAL_MANAGEMENT,
                         include_deleted=True,
                     )
-                    if record.sensitivity not in {"private", "secret"} or not record.value:
+                    if (
+                        record.sensitivity not in {"private", "secret"}
+                        or not record.value
+                    ):
                         raise ProtectedMemoryBackupError(
                             "restore verification id did not open a protected value"
                         )
@@ -314,7 +328,8 @@ class ProtectedMemoryBackupManager:
         return opened
 
     def _validated_bundle(
-        self, bundle: Path
+        self,
+        bundle: Path,
     ) -> tuple[Path, dict[str, Any], Path]:
         if bundle.is_symlink() or not bundle.is_dir():
             raise ProtectedMemoryBackupError(
@@ -330,35 +345,57 @@ class ProtectedMemoryBackupManager:
         self._validate_manifest_shape(manifest)
         artifact = manifest["artifact"]
         if artifact["name"] != BACKUP_DATABASE_NAME:
-            raise ProtectedMemoryBackupError("protected memory backup artifact name mismatch")
-        actual_bytes = database_path.stat().st_size
-        if int(artifact["bytes"]) != actual_bytes:
-            raise ProtectedMemoryBackupError("protected memory backup byte count mismatch")
+            raise ProtectedMemoryBackupError(
+                "protected memory backup artifact name mismatch"
+            )
         if str(artifact["sha256"]) != self._sha256_file(database_path):
             raise ProtectedMemoryBackupError("protected memory backup digest mismatch")
+        actual_bytes = database_path.stat().st_size
+        if int(artifact["bytes"]) != actual_bytes:
+            raise ProtectedMemoryBackupError(
+                "protected memory backup byte count mismatch"
+            )
         return bundle, manifest, database_path
 
     def _validate_manifest_shape(self, manifest: dict[str, Any]) -> None:
         if set(manifest) != _MANIFEST_KEYS:
-            raise ProtectedMemoryBackupError("protected memory backup manifest keys mismatch")
+            raise ProtectedMemoryBackupError(
+                "protected memory backup manifest keys mismatch"
+            )
         if manifest.get("schema") != BACKUP_SCHEMA:
             raise ProtectedMemoryBackupError("protected memory backup schema mismatch")
         if manifest.get("revision") != BACKUP_REVISION:
             raise ProtectedMemoryBackupError("protected memory backup revision mismatch")
         created_at = manifest.get("created_at")
-        if isinstance(created_at, bool) or not isinstance(created_at, (int, float)) or created_at <= 0:
-            raise ProtectedMemoryBackupError("protected memory backup created_at is invalid")
+        if (
+            isinstance(created_at, bool)
+            or not isinstance(created_at, (int, float))
+            or created_at <= 0
+        ):
+            raise ProtectedMemoryBackupError(
+                "protected memory backup created_at is invalid"
+            )
         if set(manifest.get("source", {})) != _SOURCE_KEYS:
-            raise ProtectedMemoryBackupError("protected memory backup source keys mismatch")
+            raise ProtectedMemoryBackupError(
+                "protected memory backup source keys mismatch"
+            )
         if set(manifest.get("artifact", {})) != _ARTIFACT_KEYS:
-            raise ProtectedMemoryBackupError("protected memory backup artifact keys mismatch")
+            raise ProtectedMemoryBackupError(
+                "protected memory backup artifact keys mismatch"
+            )
         if set(manifest.get("restore_policy", {})) != _POLICY_KEYS:
-            raise ProtectedMemoryBackupError("protected memory backup restore policy keys mismatch")
+            raise ProtectedMemoryBackupError(
+                "protected memory backup restore policy keys mismatch"
+            )
         policy = manifest["restore_policy"]
         if any(policy.get(key) is not True for key in _POLICY_KEYS):
-            raise ProtectedMemoryBackupError("protected memory backup restore policy weakened")
+            raise ProtectedMemoryBackupError(
+                "protected memory backup restore policy weakened"
+            )
         if manifest.get("production_activation") is not False:
-            raise ProtectedMemoryBackupError("protected memory backup activated production")
+            raise ProtectedMemoryBackupError(
+                "protected memory backup activated production"
+            )
         artifact = manifest["artifact"]
         digest = artifact.get("sha256")
         if (
@@ -366,15 +403,23 @@ class ProtectedMemoryBackupManager:
             or len(digest) != 64
             or any(char not in "0123456789abcdef" for char in digest)
         ):
-            raise ProtectedMemoryBackupError("protected memory backup digest is invalid")
+            raise ProtectedMemoryBackupError(
+                "protected memory backup digest is invalid"
+            )
         for key in ("bytes", "page_count", "page_size"):
             value = artifact.get(key)
-            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value <= 0
+            ):
                 raise ProtectedMemoryBackupError(
                     f"protected memory backup artifact {key} is invalid"
                 )
         if int(artifact["bytes"]) > MAX_BACKUP_BYTES:
-            raise ProtectedMemoryBackupError("protected memory backup exceeds size limit")
+            raise ProtectedMemoryBackupError(
+                "protected memory backup exceeds size limit"
+            )
         ids = manifest.get("verification_memory_ids")
         if not isinstance(ids, list):
             raise ProtectedMemoryBackupError(
@@ -385,7 +430,11 @@ class ProtectedMemoryBackupManager:
                 "protected memory backup verification ids are not bounded and unique"
             )
         for memory_id in ids:
-            if not isinstance(memory_id, str) or not memory_id or len(memory_id) > 100:
+            if (
+                not isinstance(memory_id, str)
+                or not memory_id
+                or len(memory_id) > 100
+            ):
                 raise ProtectedMemoryBackupError(
                     "protected memory backup verification id is invalid"
                 )
@@ -398,9 +447,13 @@ class ProtectedMemoryBackupManager:
                 "protected memory backup source status does not match the artifact"
             )
         if status.provider != self.codec.provider.provider_id:
-            raise ProtectedMemoryBackupError("protected memory backup provider mismatch")
+            raise ProtectedMemoryBackupError(
+                "protected memory backup provider mismatch"
+            )
         if status.key_scope != self.codec.provider.key_scope:
-            raise ProtectedMemoryBackupError("protected memory backup key scope mismatch")
+            raise ProtectedMemoryBackupError(
+                "protected memory backup key scope mismatch"
+            )
 
     @staticmethod
     def _status_projection(status) -> dict[str, Any]:
@@ -417,22 +470,30 @@ class ProtectedMemoryBackupManager:
 
     @staticmethod
     def _require_status_equal(left, right) -> None:
-        if ProtectedMemoryBackupManager._status_projection(left) != ProtectedMemoryBackupManager._status_projection(right):
+        if (
+            ProtectedMemoryBackupManager._status_projection(left)
+            != ProtectedMemoryBackupManager._status_projection(right)
+        ):
             raise ProtectedMemoryBackupError(
                 "protected memory backup changed the validated store status"
             )
 
     def _verification_ids(self, database: Path) -> list[str]:
-        with self._open_read_only(database) as conn:
+        conn = self._open_read_only(database)
+        try:
             rows = conn.execute(
                 "SELECT id FROM agent_memories "
                 "WHERE protection_state='protected' ORDER BY id LIMIT ?",
                 (MAX_VERIFICATION_IDS,),
             ).fetchall()
+        finally:
+            conn.close()
         return [str(row[0]) for row in rows]
 
     def _validate_verification_ids(
-        self, database: Path, values: Any
+        self,
+        database: Path,
+        values: Any,
     ) -> list[str]:
         if not isinstance(values, list):
             raise ProtectedMemoryBackupError(
@@ -458,7 +519,9 @@ class ProtectedMemoryBackupManager:
             target_conn.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
             source_conn.backup(target_conn)
             target_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            mode = str(target_conn.execute("PRAGMA journal_mode=DELETE").fetchone()[0]).lower()
+            mode = str(
+                target_conn.execute("PRAGMA journal_mode=DELETE").fetchone()[0]
+            ).lower()
             if mode != "delete":
                 raise ProtectedMemoryBackupError(
                     "protected memory backup could not enter single-file journal mode"
@@ -476,16 +539,20 @@ class ProtectedMemoryBackupManager:
         self._regular_database(destination, "SQLite backup destination")
 
     def _database_integrity(self, path: Path) -> tuple[str, int, int]:
+        conn: sqlite3.Connection | None = None
         try:
-            with self._open_read_only(path) as conn:
-                integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
-                page_count = int(conn.execute("PRAGMA page_count").fetchone()[0])
-                page_size = int(conn.execute("PRAGMA page_size").fetchone()[0])
-                return integrity, page_count, page_size
+            conn = self._open_read_only(path)
+            integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
+            page_count = int(conn.execute("PRAGMA page_count").fetchone()[0])
+            page_size = int(conn.execute("PRAGMA page_size").fetchone()[0])
+            return integrity, page_count, page_size
         except sqlite3.Error as exc:
             raise ProtectedMemoryBackupError(
                 f"protected memory SQLite inspection failed: {type(exc).__name__}"
             ) from exc
+        finally:
+            if conn is not None:
+                conn.close()
 
     def _open_read_only(self, path: Path) -> sqlite3.Connection:
         uri = f"file:{path.resolve().as_posix()}?mode=ro"
@@ -562,7 +629,9 @@ class ProtectedMemoryBackupManager:
             + "\n"
         ).encode("utf-8")
         if len(raw) > MAX_MANIFEST_BYTES:
-            raise ProtectedMemoryBackupError("protected memory backup manifest is too large")
+            raise ProtectedMemoryBackupError(
+                "protected memory backup manifest is too large"
+            )
         path.write_bytes(raw)
 
     @staticmethod
