@@ -78,6 +78,13 @@ from .resources import (
     ResourceSnapshot,
 )
 from .scheduler import CampaignQueue, DuplicateCampaignError
+from .watchdog_adapters import (
+    CampaignWatchdogFailClosedService,
+    CheckpointPayloadProvider,
+    WatchdogAdapterCompositionError,
+    WatchdogLifecycleService,
+    WatchdogServiceAdapters,
+)
 from .watchdog import (
     CampaignWatchdogCoordinator,
     WatchdogActionHandler,
@@ -108,6 +115,11 @@ __all__ = [
     "CampaignExecutor",
     "CampaignNotFoundError",
     "WatchdogPolicy",
+    "WatchdogServiceAdapters",
+    "WatchdogLifecycleService",
+    "WatchdogAdapterCompositionError",
+    "CheckpointPayloadProvider",
+    "CampaignWatchdogFailClosedService",
     "WatchdogExecutionResult",
     "WatchdogExecutionError",
     "WatchdogCompositionError",
