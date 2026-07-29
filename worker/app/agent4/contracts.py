@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Callable, Mapping, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from .checkpoint import CampaignCheckpoint
+    from .resources import ResourceLease
 
 
 from .domain import (
@@ -54,6 +55,42 @@ class CampaignCheckpointStore(Protocol):
 
     def delete(self, campaign_id: str, checkpoint_id: str) -> bool:
         """Delete one checkpoint and report whether it existed."""
+
+
+CampaignResourceResolver = Callable[[CampaignSpec], Mapping[str, int]]
+
+
+@runtime_checkable
+class CampaignResourceLeaseManager(Protocol):
+    def try_acquire(
+        self,
+        campaign_id: str,
+        resources: Mapping[str, int],
+        *,
+        now: datetime,
+        ttl: timedelta,
+    ) -> "ResourceLease | None":
+        """Atomically acquire all requested resources or return none."""
+
+    def renew(
+        self,
+        lease_id: str,
+        *,
+        now: datetime,
+        ttl: timedelta,
+    ) -> "ResourceLease":
+        """Renew one active lease."""
+
+    def for_campaign(
+        self,
+        campaign_id: str,
+        *,
+        now: datetime,
+    ) -> "ResourceLease | None":
+        """Return the active lease for one campaign."""
+
+    def release_campaign(self, campaign_id: str) -> bool:
+        """Release resource ownership for one campaign."""
 
 
 @runtime_checkable
