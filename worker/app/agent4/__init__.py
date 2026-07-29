@@ -16,6 +16,8 @@ from .contracts import (
     CampaignEventSubscriber,
     CampaignExecutor,
     CampaignRepository,
+    CampaignResourceLeaseManager,
+    CampaignResourceResolver,
     Clock,
     IdGenerator,
 )
@@ -40,6 +42,11 @@ from .recovery import (
     RecoveryAction,
 )
 from .repository import CampaignRepositoryError, JsonCampaignRepository
+from .resource_admission import (
+    CampaignResourceBlockedError,
+    ResourceAwareCampaignSchedulerService,
+    ResourceDispatchResult,
+)
 from .resources import (
     InMemoryResourceLeaseManager,
     ResourceLease,
@@ -79,6 +86,9 @@ __all__ = [
     "CampaignRecoveryService",
     "CampaignRepository",
     "CampaignRepositoryError",
+    "CampaignResourceBlockedError",
+    "CampaignResourceLeaseManager",
+    "CampaignResourceResolver",
     "CampaignSchedulerService",
     "CampaignSpec",
     "CampaignState",
@@ -93,15 +103,17 @@ __all__ = [
     "DuplicateCampaignError",
     "IdGenerator",
     "InMemoryCampaignEventBus",
-    "InMemoryResourceLeaseManager",
     "JsonCampaignRepository",
     "JsonCheckpointStore",
-    "RecoveryAction",
+    "InMemoryResourceLeaseManager",
+    "ResourceDispatchResult",
     "ResourceLease",
     "ResourceLeaseConflictError",
     "ResourceLeaseError",
     "ResourceLeaseNotFoundError",
     "ResourceSnapshot",
+    "RecoveryAction",
+    "ResourceAwareCampaignSchedulerService",
     "SystemClock",
     "transition_campaign",
     "utc_now",
