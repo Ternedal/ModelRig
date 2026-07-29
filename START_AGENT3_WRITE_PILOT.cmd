@@ -8,7 +8,7 @@ if errorlevel 1 (
   exit /b 2
 )
 
-python scripts\agent3_write_pilot_final_gate.py
+python scripts\agent3_write_pilot_final_gate_operator.py
 set EXIT_CODE=%ERRORLEVEL%
 
 if not "%EXIT_CODE%"=="0" (
