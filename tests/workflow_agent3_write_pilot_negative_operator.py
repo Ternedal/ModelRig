@@ -291,7 +291,10 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t022-negative-entry-") as tmp:
     core.store.verify_journal = old_verify
     core.store._state = old_state
 
-with tempfile.TemporaryDirectory(prefix="kaliv-t022-negative-response-") as tmp:
+with tempfile.TemporaryDirectory(
+    prefix="kaliv-t022-negative-response-",
+    dir=ROOT,
+) as tmp:
     old_evidence = core.EVIDENCE_DIR
     core.EVIDENCE_DIR = Path(tmp)
     artifact = core.response_artifact("deny", 1, '{"status":"denied"}\n')
