@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Callable, Mapping, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Callable, Mapping, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from .checkpoint import CampaignCheckpoint
+
 
 from .domain import (
     CampaignEvent,
@@ -28,6 +32,28 @@ class CampaignRepository(Protocol):
 
     def delete(self, campaign_id: str) -> bool:
         """Delete one record and report whether it existed."""
+
+
+@runtime_checkable
+class CampaignCheckpointStore(Protocol):
+    def save(self, checkpoint: "CampaignCheckpoint") -> None:
+        """Persist one immutable checkpoint."""
+
+    def get(
+        self,
+        campaign_id: str,
+        checkpoint_id: str,
+    ) -> "CampaignCheckpoint | None":
+        """Return one checkpoint or none when it does not exist."""
+
+    def list(self, campaign_id: str) -> tuple["CampaignCheckpoint", ...]:
+        """Return checkpoints ordered by revision and creation time."""
+
+    def latest(self, campaign_id: str) -> "CampaignCheckpoint | None":
+        """Return the latest checkpoint for one campaign."""
+
+    def delete(self, campaign_id: str, checkpoint_id: str) -> bool:
+        """Delete one checkpoint and report whether it existed."""
 
 
 @runtime_checkable

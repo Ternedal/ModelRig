@@ -1,6 +1,15 @@
 """Agent 4 autonomous campaign orchestration foundation."""
 
+from .checkpoint import (
+    CampaignCheckpoint,
+    CampaignCheckpointService,
+    CheckpointConflictError,
+    CheckpointLifecycleError,
+    CheckpointStoreError,
+    JsonCheckpointStore,
+)
 from .contracts import (
+    CampaignCheckpointStore,
     CampaignEventHandler,
     CampaignEventPublisher,
     CampaignEventRecorder,
@@ -41,6 +50,9 @@ from .service import (
 )
 
 __all__ = [
+    "CampaignCheckpoint",
+    "CampaignCheckpointService",
+    "CampaignCheckpointStore",
     "CampaignConflictError",
     "CampaignEvent",
     "CampaignEventHandler",
@@ -65,12 +77,16 @@ __all__ = [
     "CampaignStatus",
     "CampaignTransitionError",
     "CampaignValidationError",
+    "CheckpointConflictError",
+    "CheckpointLifecycleError",
+    "CheckpointStoreError",
     "Clock",
     "DispatchResult",
     "DuplicateCampaignError",
     "IdGenerator",
     "InMemoryCampaignEventBus",
     "JsonCampaignRepository",
+    "JsonCheckpointStore",
     "RecoveryAction",
     "SystemClock",
     "transition_campaign",

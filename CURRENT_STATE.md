@@ -141,6 +141,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_validation_status.py`
 - `tests/worker_agent3_workflow_completion.py`
 - `tests/worker_agent3_workflow_receipt_integrity.py`
+- `tests/worker_agent4_checkpoints.py`
 - `tests/worker_agent4_foundation.py`
 - `tests/worker_agent4_recovery.py`
 - `tests/worker_agent4_scheduler_service.py`
