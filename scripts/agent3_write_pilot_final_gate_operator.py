@@ -20,6 +20,7 @@ if str(SCRIPTS) not in sys.path:
 import agent3_write_pilot_final_gate as core  # noqa: E402
 
 _ORIGINAL_NUMBER = core._number
+_ORIGINAL_ASSESS_REPORT = core.assess_report
 
 
 def timestamp_seconds(value: Any) -> float | None:
@@ -28,6 +29,19 @@ def timestamp_seconds(value: Any) -> float | None:
         return numeric
     parsed = core._parse_time(value)
     return parsed.timestamp() if parsed is not None else None
+
+
+def assess_report(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Keep external assess-only paths out of the sanitized gate report."""
+    original_report = core.REPORT
+    try:
+        try:
+            original_report.relative_to(core.ROOT)
+        except ValueError:
+            core.REPORT = core.ROOT / original_report.name
+        return _ORIGINAL_ASSESS_REPORT(*args, **kwargs)
+    finally:
+        core.REPORT = original_report
 
 
 def validate_negative_cases(cases: Any, blockers: list[str]) -> int:
@@ -106,6 +120,7 @@ def validate_negative_cases(cases: Any, blockers: list[str]) -> int:
 
 def install_policy() -> None:
     core._number = timestamp_seconds
+    core.assess_report = assess_report
     core._validate_negative_cases = validate_negative_cases
 
 
