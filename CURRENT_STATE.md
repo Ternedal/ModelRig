@@ -105,6 +105,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_memory_protected_backup.py`
 - `tests/worker_agent3_memory_protected_gateway.py`
 - `tests/worker_agent3_memory_protected_planner.py`
+- `tests/worker_agent3_memory_protected_planner_dpapi.py`
 - `tests/worker_agent3_memory_protected_reader.py`
 - `tests/worker_agent3_memory_protected_writer.py`
 - `tests/worker_agent3_memory_protection.py`
