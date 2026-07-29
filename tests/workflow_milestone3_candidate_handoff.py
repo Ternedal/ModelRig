@@ -28,17 +28,50 @@ def check(label: str, condition) -> None:
 
 check("schema is versioned", module.SCHEMA == "kaliv-milestone3-candidate-handoff/v1")
 check(
-    "authoritative branch is exact",
-    module.BRANCH == "agent/milestone3-physical-candidate-v1",
+    "authoritative candidate branch is exact",
+    module.CANDIDATE_BRANCH == "agent/milestone3-physical-candidate-v1",
 )
+check(
+    "review-only builder branch is separate",
+    module.BUILDER_BRANCH == "agent/milestone3-candidate-handoff-v1",
+)
+check("legacy BRANCH alias still points to candidate", module.BRANCH == module.CANDIDATE_BRANCH)
 check("version is exact", module.VERSION == "1.58.146")
-check("candidate requires current branch", 'git("branch", "--show-current")' in source)
-check("candidate requires clean tree", 'git("status", "--porcelain=v1")' in source)
-check("version sites are checked", '"version_tool.py"' in source and '"check"' in source)
-check("Android artifact is built", '"' + ':app:assembleDebug' + '"' in source)
+check("builder requires current helper branch", 'git("branch", "--show-current")' in source)
+check("builder requires clean tree", 'git("status", "--porcelain=v1")' in source)
+check(
+    "candidate SHA comes from authoritative ref",
+    'git("rev-parse", CANDIDATE_BRANCH)' in source,
+)
+check(
+    "builder must descend from candidate",
+    '"merge-base", "--is-ancestor"' in source,
+)
+check(
+    "helper diff is allowlisted",
+    "_ALLOWED_HELPER_DIFF" in source and "changes candidate runtime files" in source,
+)
+check(
+    "candidate version is read from candidate ref",
+    'git("show", f"{CANDIDATE_BRANCH}:VERSION")' in source,
+)
+check(
+    "candidate is built in detached worktree",
+    '"worktree", "add", "--detach"' in source
+    and "build_artifacts(candidate_root)" in source,
+)
+check(
+    "detached worktree SHA is rechecked",
+    'git("rev-parse", "HEAD", cwd=candidate_root)' in source,
+)
+check(
+    "detached worktree is removed",
+    '"worktree", "remove", "--force"' in source,
+)
+check("Android artifact is built", '":app:assembleDebug"' in source)
 check(
     "desktop uber jar is built",
-    '"' + ':composeApp:packageUberJarForCurrentOS' + '"' in source,
+    '":composeApp:packageUberJarForCurrentOS"' in source,
 )
 check(
     "Git bundle is created and verified",
@@ -48,6 +81,7 @@ check("artifacts are SHA-256 hashed", "sha256_file" in source and "SHA256SUMS.tx
 check("artifact sizes are bounded", "MAX_ARTIFACT_BYTES" in source)
 check("existing outputs are not overwritten", "handoff destination already exists" in source)
 check("ZIP is verified after creation", "archive.testzip()" in source)
+check("manifest separates candidate and builder", '"builder": identity["builder"]' in source)
 check("manifest denies physical evidence", '"physical_evidence_collected": False' in source)
 check("manifest denies publication", '"published": False' in source)
 check("manifest denies activation", '"production_activation": False' in source)
@@ -79,9 +113,14 @@ with tempfile.TemporaryDirectory(prefix="kaliv-m3-handoff-test-") as tmp:
     )
     bootstrap_text = bootstrap.read_text(encoding="utf-8")
     check("bootstrap embeds exact SHA", expected_sha in bootstrap_text)
-    check("bootstrap embeds exact branch", module.BRANCH in bootstrap_text)
-    check("bootstrap verifies bundle", 'git bundle verify "%BUNDLE%"' in bootstrap_text)
-    check("bootstrap clones local bundle", 'git clone "%BUNDLE%" "%DEST%"' in bootstrap_text)
+    check("bootstrap embeds exact candidate branch", module.CANDIDATE_BRANCH in bootstrap_text)
+    check("bootstrap verifies bundle", 'git bundle verify "%BUNDLE_ABS%"' in bootstrap_text)
+    check("bootstrap initializes local repository", 'git init "%DEST%"' in bootstrap_text)
+    check(
+        "bootstrap fetches exact branch from local bundle",
+        'git fetch "%BUNDLE_ABS%" "%EXPECTED_BRANCH%:%EXPECTED_BRANCH%"'
+        in bootstrap_text,
+    )
     check("bootstrap checks exact HEAD", "git rev-parse HEAD" in bootstrap_text)
     check("bootstrap checks clean clone", "git status --porcelain" in bootstrap_text)
     check(
