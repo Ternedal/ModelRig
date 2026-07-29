@@ -35,6 +35,14 @@ from .domain import (
     utc_now,
 )
 from .event_bus import CampaignEventOrderError, InMemoryCampaignEventBus
+from .health import (
+    CampaignHealthObservation,
+    CampaignWatchdogPolicy,
+    HealthLevel,
+    WatchdogAction,
+    WatchdogDecision,
+    WatchdogPolicy,
+)
 from .recovery import (
     CampaignRecoveryDecision,
     CampaignRecoveryReport,
@@ -92,6 +100,12 @@ __all__ = [
     "CampaignEventSubscriber",
     "CampaignExecutor",
     "CampaignNotFoundError",
+    "WatchdogPolicy",
+    "WatchdogDecision",
+    "WatchdogAction",
+    "HealthLevel",
+    "CampaignWatchdogPolicy",
+    "CampaignHealthObservation",
     "CampaignPriority",
     "CampaignQueue",
     "CampaignRecord",
