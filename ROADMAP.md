@@ -442,8 +442,57 @@ sin versionsbundne loader), og lad den nye vej plus en paritetsgate bære
 fremad. Så er den beviste artefakt stadig bevaret byte-identisk, mens
 rig-dagen fremover rører produktionskoden.
 
-**Ikke bygget endnu.** Opgaven er: `.retained`-frysning + loader, scriptet
-omskrevet til at kalde `WebResearchFetcher`, paritetsgate mellem de to veje.
+**MÅLT 29/7, og præmissen ovenfor holder ikke. Beslutningen står, formen gør
+ikke.** Ved at læse begge veje igennem før implementering:
+
+**De er ikke to implementeringer af én kæde.** De deler kun boundary-konvolutten
+(`prepare → claim → … → complete`). Midten er forskellig:
+
+| | scriptet | `WebResearchFetcher` |
+|---|---|---|
+| efter `claim` | `BrowserPeerFulfillmentController` → `ClaimBoundBrowserEvidence` | `bridge.prepare` → `peer.issue` → `transport.pin/prepare/execute` |
+| evidens | `evidence_store.prepare` → `pending.commit()` → `fetch(policy)` → `audit()`, og kræver præcis én post | ingen |
+| policy | `ReadOnlyBrowserPolicy` (domæner, steps, pages, kildebytes) | ingen |
+| rapportens `dns`-blok | bygget af `pending.permit.binding` | findes ikke |
+
+Grep-tallet er nul: henteren nævner hverken `ClaimBoundBrowserEvidence`,
+`BrowserPeerFulfillmentController` eller `ReadOnlyBrowserPolicy`. En naiv
+substitution ville altså **slette** den committede evidens-audit og kilden til
+rapportens DNS-blok — den ville gøre beviset tommere, ikke ægte.
+
+**Og det tungere fund: henteren har intet produktionskaldested.** `WebResearchFetcher(`
+optræder ét sted i repoet — `tests/worker_web_research_fetch.py:135` — med alle
+fire samarbejdspartnere injiceret som attrapper. Sætningen *"henteren er den der
+skal i produktion"* beskriver en hensigt, ikke en tilstand. Der findes ingen
+produktionskode der bygger den, med nogen transport, bag noget flag.
+
+Derfor kan spørgsmålet *"skal rig-dagen bevise scriptet eller henteren?"* ikke
+besvares endnu: der er ikke to kandidater at vælge imellem. Princippet i
+beslutningen — **rig-dagen skal bevise den kode der går i produktion** — står
+uændret. Rækkefølgen ændrer sig:
+
+1. **Først et produktionskaldested for henteren.** Hvem bygger den, med hvilken
+   transport, bag hvilket flag, og på hvilken sti? Uden det er der intet
+   produktionsartefakt at bevise. Dette er forudsætningen, ikke et sidespor.
+2. **Så formen.** Tre muligheder, i stigende pris:
+   **(a)** henteren tager en kaldergiven lease/claim, så scriptet kan udføre sin
+   egen konvolut gennem henterens krop — kræver refaktor af produktionskoden;
+   **(b)** produktionsvejen får også evidens-laget, så de to konvergerer for
+   alvor — dyrest, men så findes der reelt kun én kæde;
+   **(c)** rig-dagen kører begge: scriptet uændret (og frosset som `.retained`)
+   plus ét separat, lille produktionskald mod en rigtig URL — henteren rører
+   internettet uden at den beviste artefakt ændres.
+3. **Paritetsgaten (vej 3) er uafhængig af 1 og 2** og kan bygges nu — men den
+   skal pinne den *målte* forskel ovenfor, ikke en påstået lighed.
+
+**Anbefaling (Claude, 29/7): (c), efter trin 1.** Den giver præcis det
+beslutningen ville — produktionskode der har rørt internettet — uden at røre
+artefakten bag Stage A's syvende bevis, og uden en refaktor hvis værdi først kan
+måles når kaldestedet findes. `.retained`-frysningen hører til (c) og gælder
+uanset.
+
+**Ikke bygget endnu, og skal ikke bygges som oprindeligt formuleret.** Den, der
+tager opgaven: læs de to veje igennem selv først — se lektie 32 i `HANDOFF.md`.
 
 
 *Afgjort 13/7-2026: **D1** keystore = risiko accepteret (`SECURITY.md`) · **D2** VERSION-kilde
