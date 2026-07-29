@@ -53,7 +53,7 @@ sys.path.insert(0, "worker")
 # the campaign probes. Asking app.main and calling a mount by hand is a
 # different question than "what does this rig serve", and the answers diverge
 # the moment mounting moves: one lineage includes every agent3 router from
-# agent3/api.py:mount_agent3, another routes production through
+# the private core mount in agent3/api.py, another routes production through
 # agent3/production_mount.py. A probe calling the former reported 9 routes where
 # the entrypoint serves 25 -- and that briefly looked like the candidate had
 # lost its memory surface. It had not.

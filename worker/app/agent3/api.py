@@ -520,11 +520,19 @@ def build_default_replanner(orchestrator: Agent3Orchestrator) -> PersistentReadR
     )
 
 
-def mount_agent3(app: FastAPI) -> bool:
-    """Mount once, only when the explicit feature flag is enabled."""
+def _mount_agent3_core(app: FastAPI) -> bool:
+    """Mount the core runs/status/confirmation router. PRIVATE.
+
+    This is not the production contract. Per SOL-CLAUDE-SAMARBEJDE.md 29/07,
+    ``production_mount.mount_agent3`` is the only public owner of the Agent 3
+    route surface, and only it may set ``app.state.agent3_mounted``. This core
+    keeps its own internal idempotence marker so that ``agent3_mounted`` can
+    never mean "only the core router was mounted". Launchers, dev-runners and
+    scripts must import ``production_mount.mount_agent3``, never this.
+    """
     if os.getenv("KALIV_AGENT3_ENABLED", "0") != "1":
         return False
-    if getattr(app.state, "agent3_mounted", False):
+    if getattr(app.state, "agent3_core_mounted", False):
         return True
     orchestrator, adapter = build_default_runtime()
     replan_service = build_default_replanner(orchestrator)
@@ -536,7 +544,7 @@ def mount_agent3(app: FastAPI) -> bool:
             replan_service=replan_service,
         )
     )
-    app.state.agent3_mounted = True
+    app.state.agent3_core_mounted = True
     app.state.agent3_orchestrator = orchestrator
     app.state.agent3_replanner = replan_service
     app.state.agent3_read_review_store = orchestrator.review_store

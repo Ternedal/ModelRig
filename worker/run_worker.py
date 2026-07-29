@@ -39,9 +39,10 @@ def _mount_optional_agent3() -> bool:
         return False
 
     routing_app = _routing_app()
-    if getattr(routing_app.state, "agent3_full_surface_mounted", False):
-        return True
 
+    # No parallel precheck here. The authoritative mount owns idempotence
+    # (SOL-CLAUDE-SAMARBEJDE.md 29/07, kontraktpunkt 1); a launcher-side check
+    # against a second marker is exactly how the two could drift apart.
     from app.agent3.production_mount import mount_agent3
 
     return bool(mount_agent3(routing_app))

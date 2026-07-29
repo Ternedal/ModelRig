@@ -80,7 +80,7 @@ Undtagelsen er replan: en eksplicit replan kan erstatte den resterende pending r
 
 Disse er load-bearing:
 
-1. **Mount-ejerskab:** `mount_agent3(app)` er eneste ejer af hele Agent 3-routeoverfladen og sætter `app.state.agent3_mounted`. Dev-runnerne må ikke supplere overfladen.
+1. **Mount-ejerskab:** `mount_agent3(app)` er eneste ejer af hele Agent 3-routeoverfladen og sætter `app.state.agent3_mounted`. Dev-runnerne må ikke supplere overfladen. *(Præciseret 29/07, se sektionen nederst: den autoritative funktion er `production_mount.mount_agent3`, kernen er privat `_mount_agent3_core`, og `agent3_mounted` sættes først når hele compositionen er lykkedes. Pinnet i `tests/worker_agent3_mount_contract.py`.)*
 2. **Serverautoritativ plan:** modellen må kun foreslå `{tool,args}`. Risk, impact/sensitivity, egress, approval og idempotens tilføjes af kode.
 3. **Single-use start:** klienten starter et servergemt plan-id; den kan ikke levere en erstatningsplan ved start.
 4. **Capability binding:** capability-receipt bindes til planen og genberegnes ved start. Stale eller ændret capability-state stopper planen.
@@ -373,3 +373,57 @@ Jeg var selv på vej til at portere den linje som et "manglende fund". Den skal
 
 Intet af ovenstående rører `agent3/` ud over det, du eksplicit godkender i
 punkt 1.
+
+---
+
+# Sols svar modtaget 29/07 kl. 20:56 — kontrakten er implementeret
+
+Svaret ligger som kommentar på `#183`. Kontraktpunkt 1 lyder herefter:
+
+> `production_mount.mount_agent3(app)` er eneste ejer af hele Agent 3-
+> routeoverfladen. Den er dormant uden eksplicit flag og sætter først
+> `app.state.agent3_mounted`, når hele produktionsoverfladen er monteret.
+> Core-mountet er privat og kan ikke opfylde denne kontrakt alene.
+
+**Denne kontrakt er nu landet på main, før `#183`-merget** — hele Sols
+specifikation kunne implementeres direkte, fordi `production_mount.py`,
+launcherne og den udfasede markør allerede lå på main. Det fjerner
+tvetydigheden *før* convergence-merget i stedet for under det.
+
+Konkret, i det scope du godkendte:
+
+- `agent3/api.py`: `mount_agent3` → **privat** `_mount_agent3_core`, som nu kun
+  sætter `app.state.agent3_core_mounted`. Den sætter ikke længere
+  `agent3_mounted`, så flaget kan aldrig betyde "kun kernerouteren".
+- `agent3/production_mount.py`: importerer `_mount_agent3_core`, bruger
+  `agent3_mounted` som sin egen idempotensnøgle, og sætter den **som sidste
+  handling** efter hele compositionen. `agent3_full_surface_mounted` er
+  udfaset — nul consumers tilbage i produktionskoden.
+- `run_worker.py`: den parallelle precheck mod `agent3_full_surface_mounted` er
+  fjernet. Mountet ejer idempotensen (dit krav 5).
+- Launchere: `entrypoint.py`, `run_worker.py` og `run_worker_agent3.py`
+  importerede allerede fra `production_mount`. Ingen ændring nødvendig, men det
+  er nu **pinnet** som kontrakt, ikke tilfældigt.
+- Docstring-sætningen om `KALIV_AGENT3_ENABLED`, som `#183` havde tabt, er
+  genindsat i `production_mount`.
+
+**Paritetstesten:** `tests/worker_agent3_mount_contract.py`, 33 assertions,
+dækker alle seks punkter du krævede — dormans for både unset og `"0"` (nul
+`/experimental/agent3`-ruter, ingen af de to markører sat), komplet overflade og
+`agent3_mounted` ved `"1"`, idempotens uden dublerede `(method, path)`-par og
+uden udskiftning af stores/orchestrator, at et direkte core-mount **ikke** kan
+opfylde full-surface-kontrakten, at kernen ikke længere eksponerer et offentligt
+`mount_agent3`, og at launcherne kun importerer den autoritative mount.
+
+Én teknisk note, hvis du selv skriver mod route-tabellen: ruterne skal læses fra
+**OpenAPI-overfladen**, ikke `app.routes`. I denne FastAPI-version optræder
+inkluderede routere som `_IncludedRouter` uden `path`, så en optælling i
+`app.routes` giver nul og ser ud som en tom overflade. Det kostede mig to falske
+røde assertions.
+
+**Uændret respekteret:** `#167`s plain forward til `/confirm` porteres ikke.
+`agent3/task_readiness.py` og `#165`–`#167` er fortsat dit arbejde alene.
+
+**Næste:** `#183`-kæden merges mod nuværende main (ikke fast-forward — 28
+testfiler er kommet til siden 27/7), derefter de 7 task-UI-filer fra
+`#181`/`#182`, derefter lukning af `#168`–`#180`.

@@ -11,7 +11,7 @@ from fastapi import FastAPI
 
 from .. import paths as _paths
 from ..build_identity import code_fingerprint
-from .api import mount_agent3 as _mount_core
+from .api import _mount_agent3_core
 from .cancellation_status import install_termination_contract
 from .capability_graph_api import (
     build_capability_graph_router,
@@ -35,10 +35,18 @@ from .task_readiness import (
 
 
 def mount_agent3(app: FastAPI) -> bool:
-    """Mount the entire dormant surface exactly once after explicit opt-in."""
-    if not _mount_core(app):
+    """Mount the entire dormant surface exactly once after explicit opt-in.
+
+    Sole public owner of the Agent 3 route surface (kontraktpunkt 1, as
+    restated by Sol 29/07). All routes here are guarded by
+    ``KALIV_AGENT3_ENABLED`` through the core mount; none can alter normal chat
+    or claim production activation. ``app.state.agent3_mounted`` is set only
+    after the whole composition below has succeeded, so the flag can never mean
+    "only the core router was mounted".
+    """
+    if not _mount_agent3_core(app):
         return False
-    if getattr(app.state, "agent3_full_surface_mounted", False):
+    if getattr(app.state, "agent3_mounted", False):
         return True
 
     orchestrator = app.state.agent3_orchestrator
@@ -111,5 +119,6 @@ def mount_agent3(app: FastAPI) -> bool:
     app.state.agent3_capability_graph_mounted = True
     app.state.agent3_capability_receipt_mounted = True
     app.state.agent3_task_readiness_mounted = True
-    app.state.agent3_full_surface_mounted = True
+    # LAST, and only here: the full-surface composition above has succeeded.
+    app.state.agent3_mounted = True
     return True
