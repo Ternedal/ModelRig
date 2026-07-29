@@ -12,10 +12,8 @@ It never merges, pushes, tags, publishes, activates production or stores tokens.
 from __future__ import annotations
 
 import getpass
-import importlib.util
 import json
 import os
-import platform
 import shutil
 import sqlite3
 import subprocess
@@ -47,32 +45,17 @@ ANDROID_ACTIVITY = f"{ANDROID_PACKAGE}/.MainActivity"
 ANDROID_AGENT3_EXTRA = "dk.ternedal.modelrig.extra.AGENT3"
 POSITIVE_PREVIEW_PREFIX = "PREVIEW GODKENDT"
 POSITIVE_APPEND_PREFIX = "APPEND BEKRÆFTET"
+POSITIVE_RECOVERY_PREFIX = "GENOPTAG POSITIV"
 NEGATIVE_PREFIX = "NEGATIV CASE OBSERVERET"
 
 sys.path.insert(0, str(SCRIPTS))
+import agent3_write_pilot_common as common  # noqa: E402
+import agent3_write_pilot_forensics as forensics  # noqa: E402
+import agent3_write_pilot_journal_cases as journal_cases  # noqa: E402
+import agent3_write_pilot_journal_store as journal_store  # noqa: E402
+import agent3_write_pilot_preflight as preflight  # noqa: E402
+import agent3_write_pilot_report as pilot  # noqa: E402
 import stage_a_one_click as stage  # noqa: E402
-
-
-def _load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise OperatorError(f"Kan ikke indlæse {path.name}.")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-pilot = _load_module("t022_operator_report", SCRIPTS / "agent3_write_pilot_report.py")
-preflight = _load_module("t022_operator_preflight", SCRIPTS / "agent3_write_pilot_preflight.py")
-forensics = _load_module("t022_operator_forensics", SCRIPTS / "agent3_write_pilot_forensics.py")
-journal_cases = _load_module(
-    "t022_operator_journal_cases", SCRIPTS / "agent3_write_pilot_journal_cases.py"
-)
-journal_store = _load_module(
-    "t022_operator_journal_store", SCRIPTS / "agent3_write_pilot_journal_store.py"
-)
-common = _load_module("t022_operator_common", SCRIPTS / "agent3_write_pilot_common.py")
 
 
 class OperatorError(RuntimeError):
@@ -109,14 +92,13 @@ def run(
     cwd: Path = ROOT,
     check: bool = True,
     capture: bool = False,
-    binary: bool = False,
-) -> subprocess.CompletedProcess[Any]:
+) -> subprocess.CompletedProcess[str]:
     try:
         result = subprocess.run(
             args,
             cwd=cwd,
             env=os.environ.copy(),
-            text=not binary,
+            text=True,
             capture_output=capture,
             check=False,
             timeout=900,
@@ -124,16 +106,10 @@ def run(
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise OperatorError(f"Kunne ikke køre {args[0]}: {exc}") from exc
     if check and result.returncode != 0:
-        detail = ""
-        if capture:
-            output = result.stderr or result.stdout
-            if isinstance(output, bytes):
-                detail = output.decode("utf-8", errors="replace")
-            else:
-                detail = output or ""
+        detail = (result.stderr or result.stdout or "")[-1200:] if capture else ""
         raise OperatorError(
             f"Kommandoen fejlede ({result.returncode}): {' '.join(args)}"
-            + (f"\n{detail[-1200:]}" if detail else "")
+            + (f"\n{detail}" if detail else "")
         )
     return result
 
@@ -153,7 +129,7 @@ def ensure_candidate() -> str:
     return sha
 
 
-def ensure_secrets() -> str:
+def ensure_secrets() -> None:
     token = os.environ.get("MODELRIG_TOKEN", "").strip()
     if not token:
         token = getpass.getpass("  MODELRIG_TOKEN (skjult, gemmes ikke): ").strip()
@@ -168,7 +144,6 @@ def ensure_secrets() -> str:
     if not approval_secret:
         raise OperatorError("KALIV_AGENT3_APPROVAL_SECRET er tomt.")
     os.environ["KALIV_AGENT3_APPROVAL_SECRET"] = approval_secret
-    return token
 
 
 def ensure_stack() -> None:
@@ -184,8 +159,8 @@ def ensure_stack() -> None:
     stage.ensure_device_token()
     stage.heading("Start exact-head write-pilot stack")
     stage.note(
-        "Stacken startes med Agent 3, tools og backend-issued approval aktivt; "
-        "preflighten kræver, at note_append er eneste aktive write-capability."
+        "Preflighten kræver note_append som eneste aktive write-capability og "
+        "backend-issued, device-bound, single-use approval."
     )
     stage.start_stack(planner)
 
@@ -306,7 +281,7 @@ def save_state(value: dict[str, Any]) -> None:
 
 def prepare_new_session(candidate_sha: str, operator: str, paths: dict[str, str]) -> dict[str, Any]:
     if not RIG_REPORT.is_file():
-        raise OperatorError(f"Den kandidatbundne rig-validation mangler: {RIG_REPORT}")
+        raise OperatorError(f"Kandidatbundet rig-validation mangler: {RIG_REPORT}")
     archive_existing()
     manifest = common.prepare_manifest(operator=operator, rig_validation_path=RIG_REPORT)
     common._atomic_json(MANIFEST, manifest)
@@ -325,7 +300,6 @@ def prepare_new_session(candidate_sha: str, operator: str, paths: dict[str, str]
     if not report.get("success"):
         blockers = "\n".join(f"  - {item}" for item in report.get("blockers", []))
         raise OperatorError(f"T-022 preflight er rød:\n{blockers}")
-    journal_store._init(JOURNAL, MANIFEST)
     state = {
         "schema": "kaliv-agent3-write-pilot-operator/v1",
         "created_at": iso_now(),
@@ -340,7 +314,7 @@ def prepare_new_session(candidate_sha: str, operator: str, paths: dict[str, str]
         "production_activation": False,
     }
     save_state(state)
-    stage.ok("Manifest, grøn preflight og append-only journal er kandidatbundet.")
+    stage.ok("Manifest og grøn preflight er kandidatbundet; journalen oprettes efter run 20.")
     return state
 
 
@@ -370,7 +344,7 @@ def verify_positive(
     run_id: str,
     marker: str,
     paths: Mapping[str, str],
-    before_approval_count: int,
+    before_approval_count: int | None,
 ) -> list[str]:
     errors: list[str] = []
     runs = db_snapshot_rows(Path(paths["agent_db"]), forensics.load_run_records)
@@ -390,7 +364,7 @@ def verify_positive(
         )
     if note_count(Path(paths["notes"]), marker) != 1:
         errors.append("markøren forekommer ikke præcis én gang i notes.md")
-    if len(approvals) != before_approval_count + 1:
+    if before_approval_count is not None and len(approvals) != before_approval_count + 1:
         errors.append("approval-use-delta er ikke præcis én")
     return errors
 
@@ -401,26 +375,28 @@ def positive_runs(state: dict[str, Any], adb: str) -> None:
     complete = set(int(value) for value in state.get("positive_complete", []))
     for item in manifest["runs"]:
         ordinal = int(item["ordinal"])
-        if item.get("run_id") and ordinal in complete:
+        if item.get("run_id"):
+            complete.add(ordinal)
             continue
         marker = str(item["marker"])
         stage.heading(f"T-022 POSITIV {ordinal:02d}/20")
         print(f"  Brug hele denne tekst som note_append.text:\n\n  {marker}\n")
-        print("  Krav på skærmen:")
-        print("    - præcis ét note_append-step")
-        print("    - risk=write, egress=local, idempotent=false")
-        print("    - target og append-only konsekvens er synlig")
-        print("    - godkendelsen sker på den parrede Android-enhed")
+        print("  Krav: ét note_append-step, write/local/non-idempotent og fysisk Android-approval.")
         launch_android(adb)
         if ordinal == 1:
             launch_desktop()
-        before_approval = approval_count(Path(paths["approval_db"]))
-        before_note = note_count(Path(paths["notes"]), marker)
-        if before_note != 0:
-            raise OperatorError(f"Positiv markør {ordinal} findes allerede i notes.md.")
-        require_phrase(f"{POSITIVE_PREVIEW_PREFIX} {ordinal:02d}")
-        input("  Godkend fysisk på Android, vent på completed, og tryk Enter: ")
-        require_phrase(f"{POSITIVE_APPEND_PREFIX} {ordinal:02d}")
+        existing = note_count(Path(paths["notes"]), marker)
+        before_approval: int | None = None
+        if existing == 0:
+            before_approval = approval_count(Path(paths["approval_db"]))
+            require_phrase(f"{POSITIVE_PREVIEW_PREFIX} {ordinal:02d}")
+            input("  Godkend fysisk på Android, vent på completed, og tryk Enter: ")
+            require_phrase(f"{POSITIVE_APPEND_PREFIX} {ordinal:02d}")
+        elif existing == 1:
+            stage.note("Markøren findes allerede én gang; genoptager efter et afbrudt bind-step.")
+            require_phrase(f"{POSITIVE_RECOVERY_PREFIX} {ordinal:02d}")
+        else:
+            raise OperatorError(f"Positiv markør {ordinal} forekommer {existing} gange.")
         run_id = getpass.getpass("  Run-id (skjult; bindes i manifestet): ").strip()
         if common._OPAQUE_ID.fullmatch(run_id) is None:
             raise OperatorError("Run-id har ugyldigt format.")
@@ -443,20 +419,33 @@ def positive_runs(state: dict[str, Any], adb: str) -> None:
         state["positive_complete"] = sorted(complete)
         save_state(state)
         stage.ok(f"Positiv run {ordinal:02d} er verificeret og bundet én gang.")
+    if len(complete) != common.RUN_COUNT:
+        raise OperatorError("De 20 positive manifestposter er ikke alle bundet.")
+    if not JOURNAL.exists():
+        journal_store._init(JOURNAL, MANIFEST)
+    else:
+        journal_store.verify_journal_binding(JOURNAL, *common._load_json(MANIFEST))
     state["phase"] = "negative"
     save_state(state)
 
 
-def completed_negative_names() -> set[str]:
-    rows, _ = journal_store.verify_journal_binding(
-        JOURNAL, *common._load_json(MANIFEST)
-    )
+def journal_status() -> tuple[set[str], dict[str, Any] | None]:
+    rows, _ = journal_store.verify_journal_binding(JOURNAL, *common._load_json(MANIFEST))
     _meta, cases = journal_store._state(rows)
-    return {
-        str(case["begin"]["payload"]["name"])
-        for case in cases.values()
-        if case.get("begin") is not None and case.get("finish") is not None
-    }
+    complete: set[str] = set()
+    open_case: dict[str, Any] | None = None
+    for case_id, case in cases.items():
+        begin = case.get("begin")
+        if begin is None:
+            continue
+        name = str(begin["payload"]["name"])
+        if case.get("finish") is not None:
+            complete.add(name)
+        else:
+            if open_case is not None:
+                raise OperatorError("Journalen indeholder mere end én åben negativ case.")
+            open_case = {"case_id": case_id, "name": name, **case}
+    return complete, open_case
 
 
 def expected_statuses(name: str) -> tuple[int, ...]:
@@ -472,11 +461,7 @@ def expected_statuses(name: str) -> tuple[int, ...]:
 
 
 def response_observation_count(name: str) -> int:
-    if name == "concurrent_approval":
-        return 2
-    if name == "stop_retry_replan":
-        return 3
-    return 1
+    return 2 if name == "concurrent_approval" else 3 if name == "stop_retry_replan" else 1
 
 
 def capture_response(name: str, index: int) -> Path:
@@ -489,8 +474,7 @@ def capture_response(name: str, index: int) -> Path:
             raise OperatorError(f"Response-filen er ikke regulær: {source}")
         destination.write_bytes(source.read_bytes())
     else:
-        body = input("  Indsæt exact response body som én linje: ")
-        destination.write_text(body, encoding="utf-8")
+        destination.write_text(input("  Indsæt exact response body som én linje: "), encoding="utf-8")
     if destination.stat().st_size > journal_store.MAX_RESPONSE_BYTES:
         raise OperatorError("Response body overskrider recorderens størrelsesgrænse.")
     return destination
@@ -499,51 +483,61 @@ def capture_response(name: str, index: int) -> Path:
 def select_positive_ordinal(name: str) -> int | None:
     if name not in {"replay", "stop_retry_replan"}:
         return None
-    raw = prompt(f"Positiv ordinal som {name} skal målrette", "1")
     try:
-        ordinal = int(raw)
+        ordinal = int(prompt(f"Positiv ordinal som {name} skal målrette", "1"))
     except ValueError as exc:
         raise OperatorError("Ordinal skal være et heltal.") from exc
-    if not 1 <= ordinal <= 20:
-        raise OperatorError("Ordinal skal være 1..20.")
+    if not 1 <= ordinal <= common.RUN_COUNT:
+        raise OperatorError(f"Ordinal skal være 1..{common.RUN_COUNT}.")
     return ordinal
 
 
 def negative_cases(state: dict[str, Any], adb: str) -> None:
     paths = state["paths"]
     manifest, _ = common._load_json(MANIFEST)
-    complete = completed_negative_names()
+    if not JOURNAL.is_file():
+        raise OperatorError("Den manifestbundne negative journal mangler.")
+    complete, open_case = journal_status()
     for name in common._NEGATIVE_CASES:
         if name in complete:
             continue
         stage.heading(f"T-022 NEGATIV CASE — {name}")
-        ordinal = select_positive_ordinal(name)
-        if ordinal is None:
-            marker_for_before = None
-            before_note = 0
+        ordinal: int | None = None
+        if open_case is not None:
+            if open_case["name"] != name:
+                raise OperatorError(
+                    f"Journalen har en åben {open_case['name']}-case; kan ikke starte {name}."
+                )
+            case_id = str(open_case["case_id"])
+            marker = str(open_case["begin"]["payload"]["marker"])
+            observations = list(open_case.get("observations") or [])
+            stage.note(f"Genoptager åben {name}-case efter {len(observations)} observationer.")
         else:
-            marker_for_before = manifest["runs"][ordinal - 1]["marker"]
-            before_note = note_count(Path(paths["notes"]), marker_for_before)
-        before_approval = approval_count(Path(paths["approval_db"]))
-        case_id, marker = journal_cases.begin_case(
-            journal=JOURNAL,
-            manifest_path=MANIFEST,
-            name=name,
-            note_count=before_note,
-            approval_count=before_approval,
-            positive_ordinal=ordinal,
-        )
+            ordinal = select_positive_ordinal(name)
+            if ordinal is None:
+                before_note = 0
+            else:
+                before_note = note_count(Path(paths["notes"]), manifest["runs"][ordinal - 1]["marker"])
+            case_id, marker = journal_cases.begin_case(
+                journal=JOURNAL,
+                manifest_path=MANIFEST,
+                name=name,
+                note_count=before_note,
+                approval_count=approval_count(Path(paths["approval_db"])),
+                positive_ordinal=ordinal,
+            )
+            observations = []
         print(f"  Marker: {marker}")
-        print("  Udfør den navngivne adversarial case på den parrede enhed/klient.")
-        print("  Gem den eksakte HTTP-response body; recorderens hashkæde binder den.")
+        print("  Udfør casen fysisk og gem den eksakte HTTP-response body.")
         launch_android(adb)
-        require_phrase(f"{NEGATIVE_PREFIX} {name}")
-        statuses: list[int] = []
-        for index in range(1, response_observation_count(name) + 1):
+        if not observations:
+            require_phrase(f"{NEGATIVE_PREFIX} {name}")
+        statuses = [int(item["payload"]["status"]) for item in observations]
+        start_index = len(observations) + 1
+        for index in range(start_index, response_observation_count(name) + 1):
             allowed = expected_statuses(name)
-            raw_status = prompt(f"HTTP-status observation {index} ({'/'.join(map(str, allowed))})")
             try:
-                status = int(raw_status)
+                status = int(prompt(f"HTTP-status observation {index} ({'/'.join(map(str, allowed))})"))
             except ValueError as exc:
                 raise OperatorError("HTTP-status skal være et heltal.") from exc
             if status not in allowed:
@@ -563,15 +557,14 @@ def negative_cases(state: dict[str, Any], adb: str) -> None:
             statuses.append(status)
         if name == "concurrent_approval" and sorted(statuses) != [200, 409]:
             raise OperatorError("concurrent_approval kræver præcis én 200 og én 409.")
-        after_note = note_count(Path(paths["notes"]), marker)
-        after_approval = approval_count(Path(paths["approval_db"]))
         journal_cases.finish_case(
             journal=JOURNAL,
             case_id=case_id,
-            note_count=after_note,
-            approval_count=after_approval,
+            note_count=note_count(Path(paths["notes"]), marker),
+            approval_count=approval_count(Path(paths["approval_db"])),
         )
         complete.add(name)
+        open_case = None
         state["negative_complete"] = sorted(complete)
         save_state(state)
         stage.ok(f"Negativ case {name} er append-only registreret.")
@@ -627,8 +620,7 @@ def main() -> int:
     state = load_state()
     if state is None:
         operator = prompt("Operatørnavn", os.environ.get("USERNAME", "Anders"))
-        paths = path_config()
-        state = prepare_new_session(candidate_sha, operator, paths)
+        state = prepare_new_session(candidate_sha, operator, path_config())
         state["android_device"] = device
         save_state(state)
     elif state.get("candidate_sha") != candidate_sha:
