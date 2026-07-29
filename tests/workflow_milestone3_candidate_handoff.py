@@ -156,6 +156,43 @@ with tempfile.TemporaryDirectory(prefix="kaliv-m3-handoff-test-") as tmp:
     check("ZIP helper includes every file", names == ["kit/one.txt", "kit/two.txt"])
     check("ZIP helper produces valid archive", bad is None)
 
+    # Exercise the exact offline Git sequence used by START_HERE.cmd. This is a
+    # real bundle round trip, but on a tiny local repository with no network.
+    mini = root / "mini-source"
+    mini.mkdir()
+    module.run(["git", "init"], cwd=mini)
+    module.run(["git", "config", "user.name", "Kaliv CI"], cwd=mini)
+    module.run(["git", "config", "user.email", "kaliv-ci@example.invalid"], cwd=mini)
+    (mini / "candidate.txt").write_text("exact candidate\n", encoding="utf-8")
+    module.run(["git", "add", "candidate.txt"], cwd=mini)
+    module.run(["git", "commit", "-m", "candidate"], cwd=mini)
+    module.run(["git", "branch", "candidate"], cwd=mini)
+    candidate_sha = module.run(
+        ["git", "rev-parse", "candidate"], cwd=mini, capture=True
+    ).stdout.strip()
+
+    bundle = root / "candidate.bundle"
+    module.run(["git", "bundle", "create", str(bundle), "candidate"], cwd=mini)
+    destination = root / "mini-destination"
+    destination.mkdir()
+    module.run(["git", "init"], cwd=destination)
+    module.run(["git", "bundle", "verify", str(bundle)], cwd=destination, capture=True)
+    module.run(
+        [
+            "git",
+            "fetch",
+            str(bundle),
+            "candidate:refs/heads/candidate",
+        ],
+        cwd=destination,
+    )
+    fetched_sha = module.run(
+        ["git", "rev-parse", "refs/heads/candidate"],
+        cwd=destination,
+        capture=True,
+    ).stdout.strip()
+    check("real offline bundle round trip preserves exact SHA", fetched_sha == candidate_sha)
+
 failed = [label for label, ok in checks if not ok]
 for label, ok in checks:
     print(f"  {'PASS' if ok else 'FAIL'}: {label}")
