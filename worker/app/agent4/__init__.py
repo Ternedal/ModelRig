@@ -40,6 +40,14 @@ from .recovery import (
     RecoveryAction,
 )
 from .repository import CampaignRepositoryError, JsonCampaignRepository
+from .resources import (
+    InMemoryResourceLeaseManager,
+    ResourceLease,
+    ResourceLeaseConflictError,
+    ResourceLeaseError,
+    ResourceLeaseNotFoundError,
+    ResourceSnapshot,
+)
 from .scheduler import CampaignQueue, DuplicateCampaignError
 from .service import (
     CampaignConflictError,
@@ -85,9 +93,15 @@ __all__ = [
     "DuplicateCampaignError",
     "IdGenerator",
     "InMemoryCampaignEventBus",
+    "InMemoryResourceLeaseManager",
     "JsonCampaignRepository",
     "JsonCheckpointStore",
     "RecoveryAction",
+    "ResourceLease",
+    "ResourceLeaseConflictError",
+    "ResourceLeaseError",
+    "ResourceLeaseNotFoundError",
+    "ResourceSnapshot",
     "SystemClock",
     "transition_campaign",
     "utc_now",
