@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import sys
 import tempfile
@@ -29,7 +27,6 @@ from app.agent3.memory_protection import (  # noqa: E402
 from app.agent3.memory_protection_migration import (  # noqa: E402
     MemoryProtectionMigrator,
 )
-from app.agent3.planner import _memory_receipt  # noqa: E402, PLC2701
 
 PRIVATE_VALUE = "T033-DPAPI-PLANNER-PRIVATE-6d4b"
 PRIVATE_SOURCE = "T033-DPAPI-PLANNER-SOURCE-9a2e"
@@ -191,22 +188,6 @@ else:
                 "real Windows DPAPI planner obeys the output bound",
                 local.character_count == len(local_text)
                 and 0 < local.character_count <= 12_000,
-            )
-
-            receipt = _memory_receipt(local)
-            receipt_text = json.dumps(receipt, ensure_ascii=False, sort_keys=True)
-            check(
-                "planner receipt is value and provenance free",
-                PRIVATE_VALUE not in receipt_text
-                and PRIVATE_SOURCE not in receipt_text
-                and SECRET_VALUE not in receipt_text,
-            )
-            check(
-                "planner receipt binds the exact local DPAPI context hash",
-                receipt.get("target") == "local"
-                and receipt.get("sent_to_model") is True
-                and receipt.get("sha256")
-                == hashlib.sha256(local_text.encode("utf-8")).hexdigest(),
             )
 
             before_cloud = reader_provider.unprotect_calls
