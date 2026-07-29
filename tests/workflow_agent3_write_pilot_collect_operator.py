@@ -66,7 +66,7 @@ check(
 check(
     "positive and negative sidecars are checked before forensic collect",
     SOURCE.index("_load_positive(identity_map)")
-    < SOURCE.index("_load_negative(")
+    < SOURCE.rindex("_load_negative(")
     < SOURCE.index("report = _collect(paths)"),
 )
 check(
