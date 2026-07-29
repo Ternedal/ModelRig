@@ -34,8 +34,9 @@ check("collector operator exists", SCRIPT.is_file())
 check("combined Windows launcher exists", LAUNCHER.is_file())
 check("collector runbook exists", RUNBOOK.is_file())
 check(
-    "launcher invokes only the combined collector",
-    "agent3_write_pilot_collect_one_click.py" in LAUNCHER_SOURCE
+    "top-level launcher delegates only through the final gate",
+    "agent3_write_pilot_final_gate_operator.py" in LAUNCHER_SOURCE
+    and "agent3_write_pilot_collect_one_click.py" not in LAUNCHER_SOURCE
     and "agent3_write_pilot_negative_operator.py" not in LAUNCHER_SOURCE
     and "agent3_write_pilot_positive_one_click.py" not in LAUNCHER_SOURCE,
 )
@@ -247,6 +248,7 @@ def fixture_main():
     module.negative_entry.safe_positive_stage()
     return 0
 
+
 module.negative_entry.safe_positive_stage = fixture_stage
 module.negative_entry.main = fixture_main
 try:
@@ -279,6 +281,7 @@ captured_collect: dict[str, object] = {}
 def fake_collect(**kwargs):
     captured_collect.update(kwargs)
     return {"success": True, "production_activation": False, "blockers": []}
+
 
 module.report_module.collect_report = fake_collect
 try:
