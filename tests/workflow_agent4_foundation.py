@@ -323,5 +323,8 @@ class Agent4WatchdogPolicyTests(unittest.TestCase):
             WatchdogPolicy(heartbeat_timeout=timedelta(0))
 
 
+from support.agent4_watchdog_coordinator_cases import Agent4WatchdogCoordinatorTests
+
+
 if __name__ == "__main__":
     unittest.main()

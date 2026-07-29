@@ -78,6 +78,13 @@ from .resources import (
     ResourceSnapshot,
 )
 from .scheduler import CampaignQueue, DuplicateCampaignError
+from .watchdog import (
+    CampaignWatchdogCoordinator,
+    WatchdogActionHandler,
+    WatchdogCompositionError,
+    WatchdogExecutionError,
+    WatchdogExecutionResult,
+)
 from .service import (
     CampaignConflictError,
     CampaignNotFoundError,
@@ -101,6 +108,11 @@ __all__ = [
     "CampaignExecutor",
     "CampaignNotFoundError",
     "WatchdogPolicy",
+    "WatchdogExecutionResult",
+    "WatchdogExecutionError",
+    "WatchdogCompositionError",
+    "WatchdogActionHandler",
+    "CampaignWatchdogCoordinator",
     "WatchdogDecision",
     "WatchdogAction",
     "HealthLevel",
