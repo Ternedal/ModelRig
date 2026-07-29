@@ -143,8 +143,9 @@ checks = {
         and 'if not report.get("success"):' in source
         and 'state["phase"] = "complete"' in source
     ),
-    "all state and reports remain non-activating": (
-        source.count('"production_activation": False') >= 2
+    "all persisted state and reports remain non-activating": (
+        'value["production_activation"] = False' in source
+        and '"production_activation": False' in source
         and 'stage.ok("production_activation=false")' in source
         and "production_activation=true" not in source.lower()
     ),
