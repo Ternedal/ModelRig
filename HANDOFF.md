@@ -562,6 +562,22 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tre fejl ville have kostet arbejde eller sikkerhed; alle tre blev fanget af
     et tjek der tog under et minut.
 
+33. **En gruppering er ikke en optælling — og et branch-prefix er ikke et
+    spor.** Mit spor-sweep 29/7 grupperede åbne PR'er efter `t021-`, `t022-`,
+    `t033-` osv. og lagde resten i "andet". Det gav 58 åbne PR'er og to i
+    "andet". Det korrekte tal var 62, og forskellen var en **hel ni-PR-stak**
+    (Agent 4, `#220`–`#228`), som ingen af mine nøgler matchede. En ekstern
+    read-only analyse fangede den; jeg gjorde ikke, selv med fuld klon.
+
+    Værre: prefixet er nu tvetydigt. `agent/t033-*` dækker i dag **to
+    urelaterede spor** — memory-beskyttelse (`#143`, `#202`–`#212`, `#214`) og
+    Agent 4's retry (`#224`, `#225`). Et sweep der grupperer efter `t033-`
+    blander dem sammen og rapporterer ét spor hvor der er to.
+
+    **Reglen:** tæl først (`pulls`-endpointet, pagineret, `len()`), gruppér
+    derefter, og verificér at grupperne summerer til tællingen. Gør de ikke
+    det, mangler der en gruppe — det er dét, "andet: 2" i virkeligheden sagde.
+
 ## 9. Kø — hvem har bolden (16/7, opdateret 29/7)
 
 **[29/7, sent — Anders har truffet beslutningerne. Otte PRs lukket, fire
@@ -663,6 +679,55 @@ på resultatet), port de 7 task-UI-valideringsfiler fra `#181`/`#182`, luk
 **Port IKKE `#167`s `/confirm`-linje.** Den erstatter mains approval-aware
 handler med en plain forward og ville fjerne invariant 5 fra host-laget. Se
 lektie 32.
+
+**[29/7, aften — Agent 4 findes, og T-numrene kolliderer. Autoritativt: 62
+åbne PR'er (`#143`–`#228`), ikke 58.]** En ekstern read-only repoanalyse
+(29/7, uden lokal klon) fangede en stak jeg selv havde misset — se lektie 33.
+
+**Agent 4, `#220`–`#228`, verificeret lokalt:** ni stakkede PR'er skabt mellem
+17:22 og 20:15 samme dag. 35 filer: 16 moduler i `worker/app/agent4/**`, 7
+tests, 11 docs. **Dormant og standard-library-only** — dens `agent4/README.md`
+siger eksplicit at runtime-aktivering, API-ruter og baggrundstråde er bevidst
+fraværende, og at `import app.agent4` er bivirkningsfri og ikke kan starte
+Agent 3-arbejde. **Nul filoverlap** med t033-stakken. Håndværket matcher resten
+af repoet.
+
+**KOLLISION — skal afklares før flere slices.** Agent 4 bruger milepælene
+`T-030` → `T-034`. De numre er optaget:
+
+| Nummer | Betyder allerede | Agent 4 bruger det til |
+|---|---|---|
+| `T-030` | lukket med evidens (Agent 3) | foundation/lifecycle |
+| `T-031` | Windows-isolationen `[RIG]` | durable checkpoint store |
+| `T-032` | **D6 — data-sharing policy, afgjort 27/7** | resource lease kernel |
+| `T-033` | memory-beskyttelse (`#143`, `#202`–`#212`, `#214`) | retry-klassifikation |
+| `T-034` | **D7 — web-research-orkestreringen, afgjort 27/7** | health watchdog |
+
+To af dem er *afgjorte beslutninger* i `ROADMAP.md`, og `agent/t033-*` dækker
+nu to urelaterede spor samtidig. Enhver `T-03x`-reference i ROADMAP, HANDOFF
+eller en commit-besked er dermed tvetydig. Kollisionen er dokumentationsmæssig,
+ikke i kode — og derfor billig at rette nu og dyr at rette senere.
+**Anbefaling: omdøb Agent 4's milepæle til et eget rum (`A4-01` … `A4-05`) og
+branch-prefixet til `agent/a4-*`, før der lægges flere slices ovenpå.** Det er
+Anders' kald.
+
+**Hvad den eksterne analyse ellers ramte og missede.** Ramte: PR-tallet (62,
+vores eget var stale), og dens t021-dom er uafhængigt den samme som vores —
+`#183` supersederer, port kun det unikke, luk resten. Missede: dens
+*"aktuel head-CI kunne ikke verificeres"* var et værktøjsforbehold, ikke en
+kendsgerning — der ligger **tre grønne runs** på `06859e0` (`ci` + `codeql`,
+20:36 og 20:40Z), så dens dom om "svag integreret sandhed" hviler delvis på et
+hul der ikke findes. Og dens RAG-påstand (*"bevidst small-scale indtil 1k/10k
+benchmark er kørt"*) er forældet: benchmarket ER kørt — recall@5 = 1,0 ved
+10.000 chunks, query p95 3.671 ms, ingest >35 min ved 39% GPU. Der mangler ikke
+måledata; der mangler en beslutning om batching af embedding-kaldene. Dens head
+var én landing bagud (verificeret som ancestor af main).
+
+**Beslutningsreglen er værd at adoptere** (analysens skarpeste bidrag): *en PR
+må kun stå åben, hvis den er **aktiv**, **bevidst parkeret med et
+genstartskriterium**, eller **evidence-only for den valgte kandidat**.*
+Historiske og supersederede branches lukkes med en præcis pointer til
+afløseren. 62 åbne PR'er er symptomet på at reglen ikke har været håndhævet.
 
 **[27/7 — status på køen.]** Alt der kunne afgøres uden hardware, uden en skærm
 og uden en beslutning fra Anders er ryddet. Det der står tilbage er blokeret på
