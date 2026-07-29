@@ -82,19 +82,30 @@ def _resolve_under(root: Path, value: str | Path) -> Path:
     return resolved
 
 
-def _load_json(root: Path, path_value: str | Path) -> tuple[dict[str, Any], bytes, Path]:
+def _load_json(
+    root: Path,
+    path_value: str | Path,
+) -> tuple[dict[str, Any], bytes, Path]:
     path = _resolve_under(root, path_value)
     if not path.is_file() or path.is_symlink():
-        raise PhysicalBackupGateError(f"JSON evidence is missing or irregular: {path_value}")
+        raise PhysicalBackupGateError(
+            f"JSON evidence is missing or irregular: {path_value}"
+        )
     raw = path.read_bytes()
     if not raw or len(raw) > MAX_JSON_BYTES:
-        raise PhysicalBackupGateError(f"JSON evidence size is invalid: {path_value}")
+        raise PhysicalBackupGateError(
+            f"JSON evidence size is invalid: {path_value}"
+        )
     try:
         value = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise PhysicalBackupGateError(f"JSON evidence is not UTF-8 JSON: {path_value}") from exc
+        raise PhysicalBackupGateError(
+            f"JSON evidence is not UTF-8 JSON: {path_value}"
+        ) from exc
     if not isinstance(value, dict):
-        raise PhysicalBackupGateError(f"JSON evidence is not an object: {path_value}")
+        raise PhysicalBackupGateError(
+            f"JSON evidence is not an object: {path_value}"
+        )
     return value, raw, path
 
 
@@ -215,7 +226,9 @@ def judge(
         try:
             campaign_dir = _resolve_under(root, campaign_path)
             if campaign_dir.is_symlink() or not campaign_dir.is_dir():
-                errors.append("physical backup campaign_path is not a regular directory")
+                errors.append(
+                    "physical backup campaign_path is not a regular directory"
+                )
         except PhysicalBackupGateError as exc:
             errors.append(str(exc))
 
@@ -224,7 +237,10 @@ def judge(
 
     prepared_at = _parse_time(state.get("prepared_at"))
     observed_at = _parse_time(probe.get("observed_at"))
-    for label, value in (("prepared_at", prepared_at), ("probe.observed_at", observed_at)):
+    for label, value in (
+        ("prepared_at", prepared_at),
+        ("probe.observed_at", observed_at),
+    ):
         if value is None:
             errors.append(f"{label} is not timezone-aware")
         else:
@@ -232,14 +248,17 @@ def judge(
             if age < -0.25:
                 errors.append(f"{label} is in the future")
             elif age > MAX_AGE_HOURS:
-                errors.append(f"{label} is {age:.1f}h old; max is {MAX_AGE_HOURS:.1f}h")
+                errors.append(
+                    f"{label} is {age:.1f}h old; max is {MAX_AGE_HOURS:.1f}h"
+                )
     if prepared_at is not None and observed_at is not None:
         if observed_at < prepared_at:
             errors.append("cross-user probe predates same-user preparation")
         window = (observed_at - prepared_at).total_seconds() / 3600.0
         if window > MAX_WINDOW_HOURS:
             errors.append(
-                f"physical backup campaign spans {window:.1f}h; max is {MAX_WINDOW_HOURS:.1f}h"
+                f"physical backup campaign spans {window:.1f}h; "
+                f"max is {MAX_WINDOW_HOURS:.1f}h"
             )
     else:
         window = None
@@ -252,7 +271,10 @@ def judge(
     )
     owner_sid = owner.get("sid")
     probe_sid = probe_identity.get("sid")
-    for label, sid in (("owner.sid", owner_sid), ("probe_identity.sid", probe_sid)):
+    for label, sid in (
+        ("owner.sid", owner_sid),
+        ("probe_identity.sid", probe_sid),
+    ):
         if not isinstance(sid, str) or _SID.fullmatch(sid) is None:
             errors.append(f"{label} is invalid")
     if owner_sid == probe_sid and owner_sid is not None:
@@ -260,7 +282,11 @@ def judge(
     if probe.get("owner_sid") != owner_sid:
         errors.append("cross-user probe owner_sid mismatch")
 
-    canaries = state.get("canaries") if isinstance(state.get("canaries"), Mapping) else {}
+    canaries = (
+        state.get("canaries")
+        if isinstance(state.get("canaries"), Mapping)
+        else {}
+    )
     for key in (
         "private_value_sha256",
         "private_source_sha256",
@@ -273,11 +299,16 @@ def judge(
     if (
         not isinstance(memory_ids, Mapping)
         or set(memory_ids) != {"private", "secret"}
-        or any(not isinstance(value, str) or not value for value in memory_ids.values())
+        or any(
+            not isinstance(value, str) or not value
+            for value in memory_ids.values()
+        )
     ):
         errors.append("canary memory id inventory mismatch")
 
-    checks = state.get("checks") if isinstance(state.get("checks"), Mapping) else {}
+    checks = (
+        state.get("checks") if isinstance(state.get("checks"), Mapping) else {}
+    )
     for key in (
         "source_migrated",
         "bundle_verified",
@@ -288,22 +319,29 @@ def judge(
         if checks.get(key) is not True:
             errors.append(f"state check {key} is not true")
     if checks.get("protected_values_reopened") != 2:
-        errors.append("same-user restore did not reopen exactly two protected values")
+        errors.append(
+            "same-user restore did not reopen exactly two protected values"
+        )
     if checks.get("sensitive_plaintext_matches") != 0:
-        errors.append("sensitive canary plaintext was found in physical artifacts")
+        errors.append(
+            "sensitive canary plaintext was found in physical artifacts"
+        )
 
     artifacts = state.get("artifacts")
     validated_artifacts: list[dict[str, Any]] = []
     if not isinstance(artifacts, list):
         errors.append("physical artifact inventory is missing")
         artifacts = []
-    names = [item.get("name") for item in artifacts if isinstance(item, Mapping)]
+    names = [
+        item.get("name") for item in artifacts if isinstance(item, Mapping)
+    ]
     required_names = {
         "source_database",
         "backup_database",
         "backup_manifest",
         "restored_database",
         "same_user_log",
+        "probe_request",
     }
     if set(names) != required_names or len(names) != len(required_names):
         errors.append("physical artifact inventory mismatch")
@@ -318,7 +356,9 @@ def judge(
             if validated is not None:
                 validated_artifacts.append(validated)
 
-    artifact_by_name = {item["name"]: item for item in validated_artifacts}
+    artifact_by_name = {
+        item["name"]: item for item in validated_artifacts
+    }
     backup_digest = artifact_by_name.get("backup_database", {}).get("sha256")
     if probe.get("backup_database_sha256") != backup_digest:
         errors.append("cross-user probe backup digest mismatch")
@@ -329,8 +369,13 @@ def judge(
     if probe.get("error_type") != "ProtectedMemoryBackupError":
         errors.append("cross-user probe error type mismatch")
     error_code = probe.get("error_code")
-    if error_code not in {"current_key_scope_denied", "dpapi_unprotect_denied"}:
-        errors.append("cross-user probe error code is not a bounded DPAPI denial")
+    if error_code not in {
+        "current_key_scope_denied",
+        "dpapi_unprotect_denied",
+    }:
+        errors.append(
+            "cross-user probe error code is not a bounded DPAPI denial"
+        )
 
     summary = {
         "campaign_id": campaign_id,
@@ -345,7 +390,9 @@ def judge(
         "artifacts": validated_artifacts,
         "same_user_restore": checks.get("same_user_restore") is True,
         "cross_user_dpapi_denied": probe.get("result") == "dpapi_denied",
-        "sensitive_plaintext_matches": checks.get("sensitive_plaintext_matches"),
+        "sensitive_plaintext_matches": checks.get(
+            "sensitive_plaintext_matches"
+        ),
         "production_activation": False,
     }
     return errors, summary
@@ -375,15 +422,24 @@ def verify(
         "success": not errors,
         "candidate": {
             key: identity.get(key)
-            for key in ("version", "git_sha", "code_sha256", "identity_source")
+            for key in (
+                "version",
+                "git_sha",
+                "code_sha256",
+                "identity_source",
+            )
         },
         "state": {
-            "path": str(state_file.relative_to(root.resolve())).replace("\\", "/"),
+            "path": str(state_file.relative_to(root.resolve())).replace(
+                "\\", "/"
+            ),
             "sha256": _sha(state_raw),
             "bytes": len(state_raw),
         },
         "probe": {
-            "path": str(probe_file.relative_to(root.resolve())).replace("\\", "/"),
+            "path": str(probe_file.relative_to(root.resolve())).replace(
+                "\\", "/"
+            ),
             "sha256": _sha(probe_raw),
             "bytes": len(probe_raw),
         },
@@ -393,7 +449,10 @@ def verify(
     }
     destination = _resolve_under(root, report_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    payload = (
+        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
+        + "\n"
+    )
     with tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
@@ -415,7 +474,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--report",
         type=Path,
-        default=Path("validation/agent3-memory-protected-backup-physical-latest.json"),
+        default=Path(
+            "validation/agent3-memory-protected-backup-physical-latest.json"
+        ),
     )
     args = parser.parse_args(argv)
     try:
@@ -426,7 +487,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     except Exception as exc:
         print(
-            f"protected backup physical gate error: {type(exc).__name__}: {str(exc)[:500]}",
+            "protected backup physical gate error: "
+            f"{type(exc).__name__}: {str(exc)[:500]}",
             file=sys.stderr,
         )
         return 2
