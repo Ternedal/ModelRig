@@ -121,6 +121,15 @@ with tempfile.TemporaryDirectory(prefix="kaliv-m3-handoff-test-") as tmp:
         'git fetch "%BUNDLE_ABS%" "%EXPECTED_BRANCH%:%EXPECTED_BRANCH%"'
         in bootstrap_text,
     )
+    init_index = bootstrap_text.index('git init "%DEST%"')
+    verify_index = bootstrap_text.index('git bundle verify "%BUNDLE_ABS%"')
+    fetch_index = bootstrap_text.index(
+        'git fetch "%BUNDLE_ABS%" "%EXPECTED_BRANCH%:%EXPECTED_BRANCH%"'
+    )
+    check(
+        "bootstrap initializes before verifying and fetching bundle",
+        init_index < verify_index < fetch_index,
+    )
     check("bootstrap checks exact HEAD", "git rev-parse HEAD" in bootstrap_text)
     check("bootstrap checks clean clone", "git status --porcelain" in bootstrap_text)
     check(
