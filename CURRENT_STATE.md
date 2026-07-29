@@ -258,10 +258,16 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_scheduler_pilot_evidence.py`
 - `tests/workflow_scheduler_pilot_wizard.py`
 - `tests/workflow_spec_contract.py`
+- `tests/workflow_stage_a_checkpoint.py`
 - `tests/workflow_stage_a_one_click.py`
 - `tests/workflow_stage_a_operator_surface.py`
+- `tests/workflow_stage_a_phone_test.py`
 - `tests/workflow_stage_a_physical_operator.py`
 - `tests/workflow_stage_a_resume_cleanup.py`
+- `tests/workflow_stage_a_scheduler_easy.py`
+- `tests/workflow_stage_a_scheduler_finalize.py`
+- `tests/workflow_stage_a_scheduler_publish.py`
+- `tests/workflow_stage_a_voice_test.py`
 - `tests/workflow_stage_b_physical_gate.py`
 - `tests/workflow_staged_promotion_runbook.py`
 - `tests/workflow_success_harness.py`

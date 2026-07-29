@@ -69,8 +69,12 @@ kaliv-tools-state.json.tmp
 /validation/physical-validation-candidate-final-latest.json.tmp
 
 # One-click Stage A wizard: local progress, exact-head runtime binaries, generated
-# launchers and archived rolling reports remain on the physical rig only.
+# launchers, resumable checkpoints and archived rolling reports stay on the rig.
 /validation/stage-a-easy-state.json
+/validation/stage-a-checkpoint-latest.json
+/validation/stage-a-checkpoint-latest.json.tmp
+/validation/stage-a-voice-observations-state.json
+/validation/stage-a-voice-observations-state.json.tmp
 /validation/stage-a-runtime/
 /validation/archive/
 /validation/scheduler-pilot-easy-state.json
