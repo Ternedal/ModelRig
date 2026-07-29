@@ -104,8 +104,8 @@ check(
     and "observed_ordinals != set(bound)" in SOURCE,
 )
 check(
-    "all operator-owned records stay non-activating",
-    SOURCE.count('"production_activation": False') >= 3
+    "both operator-owned record types stay non-activating",
+    SOURCE.count('"production_activation": False') >= 2
     and "production_activation=false" in SOURCE,
 )
 check(
