@@ -52,6 +52,10 @@ from .retry import (
     RetryDisposition,
     RetryPolicy,
 )
+from .retry_scheduling import (
+    CampaignRetrySchedulingService,
+    RetryScheduleResult,
+)
 from .resource_admission import (
     CampaignResourceBlockedError,
     ResourceAwareCampaignSchedulerService,
@@ -108,6 +112,8 @@ __all__ = [
     "FailureDescriptor",
     "DefaultRetryClassifier",
     "CampaignRetryPlanner",
+    "CampaignRetrySchedulingService",
+    "RetryScheduleResult",
     "CampaignSpec",
     "CampaignState",
     "CampaignStatus",
