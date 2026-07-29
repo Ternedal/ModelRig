@@ -250,11 +250,11 @@ if exist "%DEST%" (\r
   exit /b 1\r
 )\r
 \r
-git bundle verify "%BUNDLE_ABS%"\r
-if errorlevel 1 goto fail\r
 git init "%DEST%"\r
 if errorlevel 1 goto fail\r
 cd /d "%DEST%"\r
+git bundle verify "%BUNDLE_ABS%"\r
+if errorlevel 1 goto fail\r
 git fetch "%BUNDLE_ABS%" "%EXPECTED_BRANCH%:%EXPECTED_BRANCH%"\r
 if errorlevel 1 goto fail\r
 git checkout "%EXPECTED_BRANCH%"\r
@@ -298,9 +298,9 @@ Tree: {identity['git_tree_sha']}
 1. Copy this entire folder to the Windows rig.
 2. Verify SHA256SUMS.txt if the folder crossed an untrusted medium.
 3. Double-click START_HERE.cmd.
-4. The bootstrap verifies the Git bundle, creates a local repository, fetches the
-   exact candidate branch, checks the exact SHA and clean tree, then starts
-   START_MILESTONE3_PHYSICAL.cmd.
+4. The bootstrap creates a local repository, verifies the Git bundle inside that
+   repository, fetches the exact candidate branch, checks the exact SHA and clean
+   tree, then starts START_MILESTONE3_PHYSICAL.cmd.
 
 artifacts/android contains the exact debug APK built from a detached worktree at
 the candidate commit. artifacts/desktop contains the exact Windows Compose
