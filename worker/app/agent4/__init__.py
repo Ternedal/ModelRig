@@ -42,6 +42,16 @@ from .recovery import (
     RecoveryAction,
 )
 from .repository import CampaignRepositoryError, JsonCampaignRepository
+from .retry import (
+    CampaignRetryPlanner,
+    DefaultRetryClassifier,
+    FailureDescriptor,
+    RetryCategory,
+    RetryClassifier,
+    RetryDecision,
+    RetryDisposition,
+    RetryPolicy,
+)
 from .resource_admission import (
     CampaignResourceBlockedError,
     ResourceAwareCampaignSchedulerService,
@@ -90,6 +100,14 @@ __all__ = [
     "CampaignResourceLeaseManager",
     "CampaignResourceResolver",
     "CampaignSchedulerService",
+    "RetryPolicy",
+    "RetryDisposition",
+    "RetryDecision",
+    "RetryClassifier",
+    "RetryCategory",
+    "FailureDescriptor",
+    "DefaultRetryClassifier",
+    "CampaignRetryPlanner",
     "CampaignSpec",
     "CampaignState",
     "CampaignStatus",
