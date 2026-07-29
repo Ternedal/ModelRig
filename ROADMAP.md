@@ -176,14 +176,32 @@ manuelle trin efter genstart.
 
 ## Åbne beslutninger (kræver Anders)
 
-- **Tre tokenpar er under WCAG AA i lyst tema.** Målt 27/7 direkte på
-  `kaliv-ui-tokens.json`; det kræver ingen skærm, kun udregning.
+- **~~Tre~~ TO tokenpar er under WCAG AA i lyst tema. AFGJORT 29/7 (Anders).**
+  Beslutningen blev delt: semantikken rettes, brandet bliver stående.
 
-  | Par | ratio | krav |
-  |---|---|---|
-  | `brand.gold` på `light.surface` | 2,07 | 3,0 |
-  | `brand.highlight` på `light.surface` | 1,55 | 3,0 |
-  | `semantic.warning` på `light.surface` | 2,66 | 3,0 |
+  | Par | ratio | krav | udfald |
+  |---|---|---|---|
+  | `brand.gold` på `light.surface` | 2,07 | 3,0 | **bliver stående** — brandet er brandet |
+  | `brand.highlight` på `light.surface` | 1,55 | 3,0 | **bliver stående** — brandet er brandet |
+  | ~~`semantic.warning`~~ | ~~2,66~~ | 3,0 | **RETTET 29/7** → 3,11 |
+
+  `semantic.warning` er rettet med præcis samme indgreb som `light.muted` fik
+  27/7: `#B9823F` → `#AA773A`, samme kulør (H 33,0) og samme mætning (S 49,2%),
+  kun lysheden fra 48,6% til 44,6%. Nu 3,11 på `surface`, 3,51 på `canvas`,
+  3,89 på `elevated`. Begrundelsen for at behandle den anderledes end de to
+  andre: den er **semantik, ikke brand** — en advarsel skal kunne læses, og
+  farven bærer betydning frem for identitet.
+
+  De to brandfarver bæres i stedet af guidens egen regel, *"Farve er aldrig
+  eneste signal"*, som allerede er et krav. At flytte dem ville være en
+  ændring af Kalivs udtryk, ikke en oprydning.
+
+  **Fundet 29/7, ikke rettet:** `KalivScreens.kt:171` bærer to hårdkodede hex
+  uden for tokensystemet (`0x38B9823F` + `0xFFD09A55`, WRITE-risikobadgen).
+  Det er samme mønster som `Brand.kt` havde før generatoren tog over (§8
+  lektie 29). Det er en håndtunet fill/tekst-parring på en skærm, så den er
+  bevidst ikke rørt blindt — den skal enten migreres til tokens eller pinnes
+  med en test.
 
   Mørkt tema er rent hele vejen — laveste er `semantic.danger` på 3,36.
 
@@ -194,10 +212,28 @@ manuelle trin efter genstart.
   statusteksten ved thinking-animationen — tekst brugeren faktisk læser.
 
   Bemærk at Android **ikke** var ramt: dens lyse palet i `theme/Theme.kt` er
-  håndbygget med egne værdier (`textMuted` = `#5A4831`, 7,28 på surface) og
-  bruger slet ikke tokenet. Det er godt for kontrasten og dårligt for
-  konsistensen — det er den divergens tokengeneratoren findes for at lukke,
-  og kaldestederne er ikke migreret endnu.
+  håndbygget med egne værdier (`textMuted` = `#5A4831`) og bruger slet ikke
+  tokenet. Det er den divergens tokengeneratoren findes for at lukke, og
+  kaldestederne er ikke migreret endnu.
+
+  **Målt om 29/7 — og målingen ændrer valget.** De to værdier står ikke kun
+  i forskellig lyshed: `#5A4831` har S = 29,5%, tokenets `#6F665C` har
+  S = 9,4%. Android-værdien er en varm **brun**, tokenet en næsten neutral
+  varmgrå. At "løfte tokenet til Android-værdien" ville derfor ikke være en
+  kontrastrettelse, men en ændring af desktops udtryk — desktop forbruger
+  tokenet i dag. Bemærk også at de to kontrasttal aldrig blev målt mod samme
+  baggrund: mod tokenets `light.surface` giver `#5A4831` 6,98 og `#6F665C`
+  4,50, så "Android har bedre kontrast" holder, men ikke med 7,28-tallet.
+
+  Valget står derfor mellem tre, og **ingen af dem er gratis**:
+  1. **Migrér Android til tokenet** — konsistens vinder, Androids dæmpede
+     tekst falder fra 6,98 til 4,50 (præcis på AA-grænsen for brødtekst).
+  2. **Mørkn tokenet som neutral først, migrér så** — begge vinder lidt,
+     desktop beholder sin neutrale karakter, ingen når 6,98.
+  3. **Lad asymmetrien stå med en test der siger den er villet** (§8 lektie 29).
+
+  Anbefaling ved bordet 29/7: (2). Men den rører en skærm, og den er
+  **ikke afgjort**.
 
   `brand.gold` og `brand.highlight` er en anden sag. De **er** brandet, og at
   flytte dem for at nå 3,0 er en designbeslutning, ikke en oprydning.
@@ -227,6 +263,13 @@ manuelle trin efter genstart.
 
   Rører worker (uden for agent3), begge klienter og muligvis agent3's
   overflade. Ikke oprydning.
+
+  **AFGJORT 29/7 (Anders): ja — workeren skal sende sin fase med.** Det er
+  den eneste af de to veje der opfylder Sols invariant (vis server-state,
+  rekonstruér ikke semantik lokalt), og alternativet — at lade klienten gætte
+  ud fra timing — ville bryde den. Prioriteret som **planlagt opgave, ikke
+  oprydning**: den er ikke-blokerende for rig-dagen og ligger efter
+  PR-oprydningen. Agent3-overfladen kræver koordinering med Sol.
 
 - **Research-sporet.** Præmissen her var forkert og er rettet 27/7. Sporet er
   ikke ét dvalende hele: **`research_contract` og `research_egress` er i drift.**
@@ -386,7 +429,21 @@ scriptet — ikke henteren**, og henteren er den der skal i produktion.
 | **Lad dem være adskilte** | den beviste artefakt røres ikke | henteren når produktion uden nogensinde at have rørt internettet |
 | **Paritetstest i stedet** | billigt, ingen risiko for artefakten | en paritetstest med attrapper beviser ikke det samme som ét rigtigt GET |
 
-Beslutningen bestemmer hvad næste rig-dag er værd. Den er ikke truffet.
+**AFGJORT 29/7 (Anders): vej 1 — scriptet skal kalde henteren, med vej 3 som
+supplement.** Repoets eget princip afgør det: *a report from a rig running
+different code is evidence about something else.* Et bevis der ikke beviser
+produktionskoden er ikke det bevis aktiveringen skal hvile på, og vej 2 gør
+næste rig-dag mindre værd end dens pris.
+
+Imod-punktet — at artefakten bag Stage A's syvende bevis ændres og ikke kan
+prøves i CI — mitigeres med repoets eget mønster: **frys det nuværende script
+som `.retained`** (præcedens: `agent3_readonly_pilot_one_click.retained` med
+sin versionsbundne loader), og lad den nye vej plus en paritetsgate bære
+fremad. Så er den beviste artefakt stadig bevaret byte-identisk, mens
+rig-dagen fremover rører produktionskoden.
+
+**Ikke bygget endnu.** Opgaven er: `.retained`-frysning + loader, scriptet
+omskrevet til at kalde `WebResearchFetcher`, paritetsgate mellem de to veje.
 
 
 *Afgjort 13/7-2026: **D1** keystore = risiko accepteret (`SECURITY.md`) · **D2** VERSION-kilde

@@ -28,7 +28,7 @@
     },
     "semantic": {
       "success": "#6F8A63",
-      "warning": "#B9823F",
+      "warning": "#AA773A",
       "danger": "#9C564C"
     }
   },

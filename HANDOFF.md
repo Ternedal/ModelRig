@@ -545,6 +545,58 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 
 ## 9. Kø — hvem har bolden (16/7, opdateret 29/7)
 
+**[29/7, sent — Anders har truffet beslutningerne. Otte PRs lukket, fire
+beslutninger registreret, t021 STOPPET af ejerskabsaftalen.]**
+
+*Lukket efter beslutning, hver med egen-delta målt umiddelbart før lukning:*
+**#98/#140/#133** overhalet af main (kapaciteten ligger der, og main's udgaver
+er de hærdede: versionsbundet loader med fail-closed resume for #140, +47
+linjer inkl. *authoritative time terms* for #133). **#115** lukket som
+beslutning — dens to filer ER nye, men modulet ville være det fjerde
+peer-binding-modul med syv duplikerede hjælpere (§8 lektie 29).
+**#138** lukket som beslutning: seks reelt nye filer, men en konkurrerende
+besvarelse af samme spørgsmål som den landede #136-barriere; launcheren og
+easy-entry-UX'en kan genimplementeres oven på barrieren hvis rig-dagen viser
+behov. **#144** lukket: main's wizard vinder (fail-closed `ea7d593e`,
+lint-gated, bundet i den retained loader).
+
+*Afgjort og registreret i `ROADMAP.md`:* **D7 = vej 1** (scriptet skal kalde
+henteren; frys det nuværende som `.retained`, paritetsgate som supplement) ·
+**WCAG delt** — `semantic.warning` rettet `#B9823F` → `#AA773A` (samme kulør
+og mætning, kun lyshed; 2,66 → 3,11), de to brandfarver bliver stående båret
+af guidens *"farve er aldrig eneste signal"* · **fase-signalet: ja**, workeren
+sender sin fase med, som planlagt opgave · **Android-paletten er STADIG
+ÅBEN** — se nedenfor.
+
+**To ting hvor målingen omgjorde anbefalingen — læs dem før du handler:**
+
+1. **t021 er IKKE "en gammel og en ny generation".** Jeg anbefalede at lukke
+   25/7-generationen. Målingen siger nej. #183-kæden (3 PRs, skåret 27/7, 175
+   commits bag main) er en **port af kernen** — dens 31 filer er alle med i
+   #167-kædens 45, hvoraf 26 er byte-identiske. #167-kæden (16 PRs, skåret
+   25/7, 607 commits bag) bærer **14 filer som #183-kæden slet ikke har**:
+   `Agent3ValidationScreen.kt`, `Agent3ValidationDevApp.kt`,
+   `Agent3ReadonlyTaskClient.kt`, `agent3_test.go`, kampagne- og
+   task-UI-valideringen. Ingen af kæderne er ancestor af den anden. At lukke
+   #167-kæden ville kassere den halvdel.
+   **Og vigtigere:** begge kæder rører `worker/app/agent3/**` og
+   `tests/*agent3*` — **Sols domæne**. Hverken landing af #183 eller lukning
+   af #167-kæden er vores at gøre alene. Sat på Sol-agendaen.
+
+2. **Android-paletten kunne ikke løftes som anbefalet.** `#5A4831` (Android)
+   og `#6F665C` (token) adskiller sig ikke bare i lyshed: S = 29,5% mod 9,4%
+   — en varm brun mod en næsten neutral varmgrå. At løfte tokenet ville ændre
+   desktops udtryk, ikke rette en kontrast. Tre reelle veje står i `ROADMAP`,
+   ingen af dem gratis. Kræver en skærm.
+
+**Sol-agenda (næste fælles session):** t021-knuden (begge kæder), #165/#166/#167
+(små, 3-5 egne filer hver — de store afvigelsestal var lektie 31-artefakten),
+og `external` som adgangsklasse (`_V2_RISK` i Sols kode; gaten afviser korrekt
+indtil da).
+
+**Sporene:** t022 og t033 er levende (PRs oprettet mens der blev arbejdet 29/7)
+— behold. t023 er et ægte produktvalg, anbefalet behold men efter rig-dagen.
+
 **[29/7 — tre landet, seks lukket som allerede landet, resten klassificeret.]**
 Main = `2f8b4d8`. Landet gennem fuld CI: **#162** (Stage A-operatør-UX;
 ps1'ens `-BackendHost` forenet med loopback-advarslen fra `c3a3ef2d`,

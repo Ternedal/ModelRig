@@ -41,7 +41,7 @@ object KalivTokens {
 
     object Semantic {
         val success: Color = Color(0xFF6F8A63)
-        val warning: Color = Color(0xFFB9823F)
+        val warning: Color = Color(0xFFAA773A)
         val danger: Color = Color(0xFF9C564C)
     }
 

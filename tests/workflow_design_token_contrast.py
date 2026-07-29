@@ -29,12 +29,17 @@ AA_UI = 3.0     # stor tekst, ikoner og UI-komponenter
 
 # Maalt 27/07-2026. Hver linje er en KENDT defekt, ikke en accept.
 # light.muted er RETTET 27/07 (#776D62 -> #6F665C): en neutral, ikke brandet,
-# saa den kunne moerknes til 4,50 uden at roere Kalivs udtryk. De tre der staar
-# tilbage ER brandfarver eller semantik, og at flytte dem er en designbeslutning.
+# saa den kunne moerknes til 4,50 uden at roere Kalivs udtryk.
+# semantic.warning er RETTET 29/07 (#B9823F -> #AA773A) efter Anders' beslutning:
+# samme kuloer (H 33,0) og samme maetning (S 49,2%), kun lysheden fra 48,6% til
+# 44,6%. Den er semantik og ikke brand -- en advarsel skal kunne laeses -- saa den
+# kunne moerknes med samme indgreb som light.muted fik. Nu 3,11 paa surface,
+# 3,51 paa canvas, 3,89 paa elevated.
+# De TO der staar tilbage ER brandfarver. Beslutningen 29/07 er at de BLIVER
+# staaende, og at guidens egen regel baerer dem: "Farve er aldrig eneste signal."
 KNOWN_BELOW_AA = {
     "brand.gold on light.surface",
     "brand.highlight on light.surface",
-    "semantic.warning on light.surface",
 }
 
 passed = failed = 0
