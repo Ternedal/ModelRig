@@ -523,7 +523,48 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     meningen — og så skal den have en test der siger det, ellers bliver den
     ryddet op næste gang.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 27/7)
+30. **GitHubs læse-API'er er eventually consistent — skriv-svaret og
+    git-protokollen er autoritative.** 29/7 svarede `PATCH refs/heads/main`
+    med den nye sha, mens et GET i samme sekund viste den gamle: en stale
+    replica, ikke en fejlet landing. Vagten "bekræft, så luk" nægtede korrekt
+    at lukke PR'en, og tre målinger ad to uafhængige veje (`git ls-remote` +
+    REST, med retry) bekræftede landingen. Samme familie: search-API'ets
+    PR-tælling haltede tre bagud efter seks lukninger — det paginerede
+    pulls-endpoint er det autoritative tal. Konkludér aldrig "falsk landing"
+    eller "nye PRs" på én læsning af et lagged endpoint.
+
+31. **Ancestor-af-main er skal-kriteriet for stacked PRs — to-punkts-diff
+    lyver, når main bare er nyere.** Fejemålingen 29/7 viste #149+#151–#155
+    med ~200 "afvigende" filer mod main; ancestry (`git merge-base
+    --is-ancestor <head> origin/main`) beviste, at alle seks var fuldt
+    indeholdt i main via #156-merget — afvigelserne var main's egen videre
+    udvikling. Alle seks lukket med det bevis. Klassifikationen NY/AFVIGER
+    er stadig den rigtige til retningsspørgsmål (#98/#133/#140/#144 og
+    #165–#167: nul nye filer, ægte divergens), men "er den landet?" afgøres
+    med ancestry, ikke diff.
+
+## 9. Kø — hvem har bolden (16/7, opdateret 29/7)
+
+**[29/7 — tre landet, seks lukket som allerede landet, resten klassificeret.]**
+Main = `2f8b4d8`. Landet gennem fuld CI: **#162** (Stage A-operatør-UX;
+ps1'ens `-BackendHost` forenet med loopback-advarslen fra `c3a3ef2d`,
+param-default ærer `MODELRIG_HOST`; phone-testens pin opdateret til den
+flettede kontrakt + gate mod usynlig loopback), **#136** (T-019
+pilot-barrier + operator; `schedule_runner.py` installerer nu BÅDE T-018
+single-flight og barrieren, som er dormant uden
+`KALIV_SCHEDULER_PILOT_BARRIER_DIR`), **#156** (read-only Control Center i
+alle fire lag; `mount_web_research` bevaret i entrypointet, desktop
+`App.kt` håndvævet mod main's nyere udgave, `ROUTE_INVENTORY.md`
+regenereret — gaten fangede selv det nye endpoint). **#149+#151–#155
+lukket** som beviseligt landet (ancestry, lektie 31). Klassificeret til
+retning med evidens på PR'erne: **#138** (konkurrerende hold-mekanisme til
+den landede barrier; dens ps1 er ældre end #162-foreningen), **#144**
+(`schedule_api`-regression + afvigende 844-linjers wizard mod main's
+fail-closed ~125), **#133**. Nyfundne **#165/#166/#167** er store
+base=main agent3-udgaver — **Sols domæne**, rør dem ikke uden aftalen.
+Autoritativt: **56 åbne PRs**; t033 og t022 er aktive (#215/#216 oprettet
+29/7, mens der blev arbejdet). Tallene i blokkene nedenfor er historik pr.
+27/7.
 
 **[27/7 — status på køen.]** Alt der kunne afgøres uden hardware, uden en skærm
 og uden en beslutning fra Anders er ryddet. Det der står tilbage er blokeret på
