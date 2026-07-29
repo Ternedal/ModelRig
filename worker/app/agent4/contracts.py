@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Callable, Protocol, runtime_checkable
+from typing import Callable, Mapping, Protocol, runtime_checkable
 
-from .domain import CampaignEvent, CampaignRecord, CampaignSpec, CampaignState
+from .domain import (
+    CampaignEvent,
+    CampaignEventKind,
+    CampaignRecord,
+    CampaignSpec,
+    CampaignState,
+    JsonValue,
+)
 
 
 @runtime_checkable
@@ -39,6 +46,19 @@ CampaignEventHandler = Callable[[CampaignEvent], None]
 class CampaignEventPublisher(Protocol):
     def publish(self, event: CampaignEvent) -> None:
         """Publish one validated, ordered campaign event."""
+
+
+@runtime_checkable
+class CampaignEventRecorder(Protocol):
+    def record(
+        self,
+        campaign_id: str,
+        kind: CampaignEventKind,
+        *,
+        occurred_at: datetime,
+        payload: Mapping[str, JsonValue] | None = None,
+    ) -> CampaignEvent:
+        """Create and publish the next ordered event for one campaign."""
 
 
 @runtime_checkable

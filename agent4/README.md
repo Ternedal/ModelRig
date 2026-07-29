@@ -28,7 +28,8 @@ worker/app/agent4/
 ├── domain.py
 ├── event_bus.py
 ├── repository.py
-└── scheduler.py
+├── scheduler.py
+└── service.py
 ```
 
 ## Test locally
@@ -52,11 +53,17 @@ CampaignExecutor protocol
 Agent 3 runtime             (unchanged)
 ```
 
+## T-030 lifecycle service
+
+`CampaignSchedulerService` now provides explicit submit, dispatch, pause,
+resume, cancellation and completion commands. It is caller-driven and remains
+fully dormant until a host composes it with repository, executor, event and
+clock implementations. See `docs/AGENT_4_T030_SCHEDULER.md`.
+
 ## Next slices
 
-1. T-030 scheduler service and lifecycle commands.
-2. T-031 startup recovery and persisted checkpoints.
-3. T-032 resource leases and concurrency limits.
-4. T-033 retry classification and backoff.
-5. T-034 health observations and watchdog policy.
-6. T-035 append-only timeline/evidence integration.
+1. T-031 startup recovery and persisted checkpoints.
+2. T-032 resource leases and concurrency limits.
+3. T-033 retry classification and backoff.
+4. T-034 health observations and watchdog policy.
+5. T-035 append-only timeline/evidence integration.

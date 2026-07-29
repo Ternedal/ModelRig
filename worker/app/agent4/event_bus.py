@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime
 from threading import RLock
-from typing import Callable
+from typing import Callable, Mapping
 
 from .contracts import CampaignEventHandler
-from .domain import CampaignEvent, CampaignValidationError
+from .domain import (
+    CampaignEvent,
+    CampaignEventKind,
+    CampaignValidationError,
+    JsonValue,
+)
 
 
 class CampaignEventOrderError(ValueError):
@@ -18,8 +24,12 @@ class InMemoryCampaignEventBus:
     """Synchronous event bus with validated per-campaign sequence ordering."""
 
     def __init__(self, *, history_limit: int = 1000) -> None:
-        if isinstance(history_limit, bool) or history_limit < 1:
-            raise CampaignValidationError("history_limit must be at least 1")
+        if (
+            isinstance(history_limit, bool)
+            or not isinstance(history_limit, int)
+            or history_limit < 1
+        ):
+            raise CampaignValidationError("history_limit must be an integer of at least 1")
         self._history_limit = history_limit
         self._history: dict[str, list[CampaignEvent]] = defaultdict(list)
         self._event_ids: set[str] = set()
@@ -41,26 +51,58 @@ class InMemoryCampaignEventBus:
 
         return unsubscribe
 
+    def record(
+        self,
+        campaign_id: str,
+        kind: CampaignEventKind,
+        *,
+        occurred_at: datetime,
+        payload: Mapping[str, JsonValue] | None = None,
+    ) -> CampaignEvent:
+        with self._lock:
+            history = self._history[campaign_id]
+            sequence = history[-1].sequence + 1 if history else 1
+            event = CampaignEvent(
+                event_id=f"{campaign_id}:{sequence}",
+                campaign_id=campaign_id,
+                kind=kind,
+                sequence=sequence,
+                occurred_at=occurred_at,
+                payload=payload or {},
+            )
+            handlers = self._accept(event)
+        self._notify(handlers, event)
+        return event
+
     def publish(self, event: CampaignEvent) -> None:
         with self._lock:
-            if event.event_id in self._event_ids:
-                raise CampaignEventOrderError(
-                    f"event id {event.event_id!r} has already been published"
-                )
-            history = self._history[event.campaign_id]
-            expected_sequence = history[-1].sequence + 1 if history else 1
-            if event.sequence != expected_sequence:
-                raise CampaignEventOrderError(
-                    f"campaign {event.campaign_id!r} expected event sequence "
-                    f"{expected_sequence}, got {event.sequence}"
-                )
+            handlers = self._accept(event)
+        self._notify(handlers, event)
 
-            history.append(event)
-            self._event_ids.add(event.event_id)
-            if len(history) > self._history_limit:
-                history.pop(0)
-            handlers = tuple(self._handlers.values())
+    def _accept(self, event: CampaignEvent) -> tuple[CampaignEventHandler, ...]:
+        if event.event_id in self._event_ids:
+            raise CampaignEventOrderError(
+                f"event id {event.event_id!r} has already been published"
+            )
+        history = self._history[event.campaign_id]
+        expected_sequence = history[-1].sequence + 1 if history else 1
+        if event.sequence != expected_sequence:
+            raise CampaignEventOrderError(
+                f"campaign {event.campaign_id!r} expected event sequence "
+                f"{expected_sequence}, got {event.sequence}"
+            )
 
+        history.append(event)
+        self._event_ids.add(event.event_id)
+        if len(history) > self._history_limit:
+            history.pop(0)
+        return tuple(self._handlers.values())
+
+    @staticmethod
+    def _notify(
+        handlers: tuple[CampaignEventHandler, ...],
+        event: CampaignEvent,
+    ) -> None:
         for handler in handlers:
             handler(event)
 
