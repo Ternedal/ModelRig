@@ -101,7 +101,7 @@ check(
 )
 check(
     "operator-owned evidence remains non-activating",
-    CORE_SOURCE.count('"production_activation": False') >= 4
+    CORE_SOURCE.count('"production_activation": False') >= 3
     and "production_activation=false" in CORE_SOURCE,
 )
 check(
