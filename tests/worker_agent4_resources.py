@@ -3,15 +3,28 @@
 
 from __future__ import annotations
 
+import tempfile
 import threading
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-from app.agent4 import CampaignValidationError
 from app.agent4.resources import (
     InMemoryResourceLeaseManager,
     ResourceLeaseConflictError,
     ResourceLeaseNotFoundError,
+)
+from app.agent4 import (
+    CampaignPriority,
+    CampaignSpec,
+    CampaignStatus,
+    CampaignValidationError,
+    InMemoryCampaignEventBus,
+    JsonCampaignRepository,
+)
+from app.agent4.resource_admission import (
+    CampaignResourceBlockedError,
+    ResourceAwareCampaignSchedulerService,
 )
 
 
@@ -189,6 +202,172 @@ class ResourceLeaseManagerTests(unittest.TestCase):
 
         self.assertEqual(sum(result is not None for result in results), 1)
         self.assertEqual(dict(manager.snapshot(now=NOW).used), {"gpu": 1})
+
+
+class MutableClock:
+    def __init__(self) -> None:
+        self.value = NOW
+
+    def now(self) -> datetime:
+        return self.value
+
+
+class RecordingExecutor:
+    def __init__(self) -> None:
+        self.dispatches: list[str] = []
+        self.signals: list[tuple[str, str]] = []
+        self.dispatch_error: Exception | None = None
+        self.signal_error: Exception | None = None
+
+    def dispatch(self, spec, state) -> str:
+        self.dispatches.append(spec.campaign_id)
+        if self.dispatch_error is not None:
+            raise self.dispatch_error
+        return f"runtime:{spec.campaign_id}"
+
+    def signal(self, campaign_id: str, command: str) -> None:
+        self.signals.append((campaign_id, command))
+        if self.signal_error is not None:
+            raise self.signal_error
+
+
+class ResourceAwareSchedulerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.repository = JsonCampaignRepository(Path(self.directory.name))
+        self.executor = RecordingExecutor()
+        self.events = InMemoryCampaignEventBus()
+        self.clock = MutableClock()
+        self.leases = InMemoryResourceLeaseManager({"gpu": 1, "browser": 1})
+        self.service = ResourceAwareCampaignSchedulerService(
+            repository=self.repository,
+            executor=self.executor,
+            events=self.events,
+            clock=self.clock,
+            resource_leases=self.leases,
+            resource_resolver=lambda spec: spec.parameters.get("resources", {}),
+            resource_lease_ttl=TTL,
+        )
+
+    def tearDown(self) -> None:
+        self.directory.cleanup()
+
+    def spec(
+        self,
+        campaign_id: str,
+        *,
+        resources: dict[str, int] | None = None,
+        priority: CampaignPriority = CampaignPriority.NORMAL,
+    ) -> CampaignSpec:
+        return CampaignSpec(
+            campaign_id=campaign_id,
+            name=campaign_id,
+            workflow="agent3.write-pilot",
+            created_at=NOW,
+            priority=priority,
+            parameters={"resources": resources or {}},
+        )
+
+    def test_blocked_high_priority_work_does_not_block_admissible_work(self) -> None:
+        holder = self.leases.try_acquire(
+            "external", {"gpu": 1}, now=NOW, ttl=TTL
+        )
+        self.service.submit(
+            self.spec(
+                "high-gpu",
+                resources={"gpu": 1},
+                priority=CampaignPriority.CRITICAL,
+            )
+        )
+        self.service.submit(
+            self.spec("normal-browser", resources={"browser": 1})
+        )
+
+        first = self.service.dispatch_ready()
+
+        self.assertEqual(first.record.spec.campaign_id, "normal-browser")
+        self.assertEqual(self.service.queued_count, 1)
+        self.assertEqual(
+            self.service.get("high-gpu").state.status,
+            CampaignStatus.QUEUED,
+        )
+        self.service.complete("normal-browser", succeeded=True)
+        self.leases.release(holder.lease_id)
+        self.assertEqual(
+            self.service.dispatch_ready().record.spec.campaign_id,
+            "high-gpu",
+        )
+
+    def test_dispatch_holds_lease_and_records_identity(self) -> None:
+        self.service.submit(self.spec("campaign-1", resources={"gpu": 1}))
+
+        result = self.service.dispatch_ready()
+        lease = self.leases.for_campaign("campaign-1", now=NOW)
+
+        self.assertIsNotNone(lease)
+        self.assertEqual(result.resource_lease_id, lease.lease_id)
+        started = self.events.history("campaign-1")[-1]
+        self.assertEqual(started.payload["resource_lease_id"], lease.lease_id)
+        self.assertEqual(dict(started.payload["resources"]), {"gpu": 1})
+
+    def test_dispatch_failure_releases_resources(self) -> None:
+        self.executor.dispatch_error = RuntimeError("agent3 unavailable")
+        self.service.submit(self.spec("campaign-1", resources={"gpu": 1}))
+
+        result = self.service.dispatch_ready()
+
+        self.assertFalse(result.succeeded)
+        self.assertEqual(result.record.state.status, CampaignStatus.FAILED)
+        self.assertIsNone(self.leases.for_campaign("campaign-1", now=NOW))
+
+    def test_pause_releases_and_resume_reacquires_without_new_attempt(self) -> None:
+        self.service.submit(self.spec("campaign-1", resources={"gpu": 1}))
+        running = self.service.dispatch_ready().record
+        self.service.request_pause("campaign-1")
+        paused = self.service.mark_paused("campaign-1")
+
+        self.assertIsNone(self.leases.for_campaign("campaign-1", now=NOW))
+        resumed = self.service.resume("campaign-1")
+        self.assertEqual(resumed.state.attempt, running.state.attempt)
+        self.assertEqual(paused.state.status, CampaignStatus.PAUSED)
+        self.assertIsNotNone(self.leases.for_campaign("campaign-1", now=NOW))
+
+    def test_blocked_resume_stays_paused(self) -> None:
+        self.service.submit(self.spec("campaign-1", resources={"gpu": 1}))
+        self.service.dispatch_ready()
+        self.service.request_pause("campaign-1")
+        self.service.mark_paused("campaign-1")
+        self.leases.try_acquire("external", {"gpu": 1}, now=NOW, ttl=TTL)
+
+        with self.assertRaises(CampaignResourceBlockedError):
+            self.service.resume("campaign-1")
+
+        self.assertEqual(
+            self.service.get("campaign-1").state.status,
+            CampaignStatus.PAUSED,
+        )
+
+    def test_completion_and_cancel_ack_release_resources(self) -> None:
+        self.service.submit(self.spec("complete-me", resources={"gpu": 1}))
+        self.service.dispatch_ready()
+        self.service.complete("complete-me", succeeded=True)
+        self.assertIsNone(self.leases.for_campaign("complete-me", now=NOW))
+
+        self.service.submit(self.spec("cancel-me", resources={"gpu": 1}))
+        self.service.dispatch_ready()
+        self.service.request_cancel("cancel-me")
+        self.service.mark_cancelled("cancel-me")
+        self.assertIsNone(self.leases.for_campaign("cancel-me", now=NOW))
+
+    def test_renew_extends_active_lease(self) -> None:
+        self.service.submit(self.spec("campaign-1", resources={"gpu": 1}))
+        self.service.dispatch_ready()
+        self.clock.value = NOW + timedelta(minutes=1)
+
+        renewed = self.service.renew_resources("campaign-1")
+
+        self.assertEqual(renewed.revision, 2)
+        self.assertEqual(renewed.expires_at, self.clock.value + TTL)
 
 
 if __name__ == "__main__":
