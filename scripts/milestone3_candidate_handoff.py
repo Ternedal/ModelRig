@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Build an offline, exact-head Milestone 3 physical-candidate handoff kit.
 
-The kit contains a verified Git bundle, the exact Android debug APK, the Windows
-Compose uber-jar, a bootstrap launcher, and SHA-256 metadata. It is deliberately
-local-only: no push, tag, release, upload, merge, or production activation exists
-in this tool.
+The builder itself lives on a review-only helper branch. Every shipped byte is
+instead built from a temporary detached worktree at the authoritative physical
+candidate ref. The kit contains a verified Git bundle, Android debug APK, Windows
+Compose uber-jar, bootstrap launcher and SHA-256 metadata.
+
+It is deliberately local-only: no push, tag, release, upload, merge or production
+activation exists in this tool.
 """
 from __future__ import annotations
 
@@ -25,15 +28,20 @@ os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[1]
-BRANCH = "agent/milestone3-physical-candidate-v1"
+CANDIDATE_BRANCH = "agent/milestone3-physical-candidate-v1"
+BUILDER_BRANCH = "agent/milestone3-candidate-handoff-v1"
+BRANCH = CANDIDATE_BRANCH
 VERSION = "1.58.146"
 SCHEMA = "kaliv-milestone3-candidate-handoff/v1"
 DEFAULT_OUTPUT = ROOT / "handoff"
-ANDROID_APK = (
-    ROOT / "android" / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"
-)
-DESKTOP_JARS = ROOT / "desktop" / "composeApp" / "build" / "compose" / "jars"
 MAX_ARTIFACT_BYTES = 1_500_000_000
+_ALLOWED_HELPER_DIFF = {
+    "BUILD_MILESTONE3_HANDOFF.cmd",
+    "CURRENT_STATE.md",
+    "MILESTONE3_HANDOFF.md",
+    "scripts/milestone3_candidate_handoff.py",
+    "tests/workflow_milestone3_candidate_handoff.py",
+}
 
 
 class HandoffError(RuntimeError):
@@ -50,6 +58,7 @@ def run(
     cwd: Path = ROOT,
     capture: bool = False,
     timeout: int = 1800,
+    check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     try:
         result = subprocess.run(
@@ -63,7 +72,7 @@ def run(
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise HandoffError(f"cannot run {args[0]}: {exc}") from exc
-    if result.returncode != 0:
+    if check and result.returncode != 0:
         detail = (result.stderr or result.stdout or "")[-2000:] if capture else ""
         raise HandoffError(
             f"command failed ({result.returncode}): {' '.join(args)}"
@@ -72,8 +81,8 @@ def run(
     return result
 
 
-def git(*args: str, capture: bool = True) -> str:
-    return run(["git", *args], capture=capture).stdout.strip()
+def git(*args: str, cwd: Path = ROOT, capture: bool = True) -> str:
+    return run(["git", *args], cwd=cwd, capture=capture).stdout.strip()
 
 
 def sha256_file(path: Path) -> str:
@@ -98,25 +107,56 @@ def atomic_json(path: Path, value: Mapping[str, Any]) -> None:
     )
 
 
-def ensure_candidate() -> dict[str, Any]:
+def ensure_builder_checkout() -> dict[str, Any]:
     if shutil.which("git") is None:
         raise HandoffError("git is required to build the offline candidate bundle")
-    branch = git("branch", "--show-current")
-    sha = git("rev-parse", "HEAD")
+    builder_branch = git("branch", "--show-current")
+    builder_sha = git("rev-parse", "HEAD")
     dirty = git("status", "--porcelain=v1")
-    if branch != BRANCH:
-        raise HandoffError(f"wrong branch: expected {BRANCH}, got {branch or '<detached>'}")
+    if builder_branch != BUILDER_BRANCH:
+        raise HandoffError(
+            f"wrong builder branch: expected {BUILDER_BRANCH}, got {builder_branch or '<detached>'}"
+        )
     if dirty:
-        raise HandoffError("working tree is not clean; handoff must bind committed bytes only")
-    version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-    if version != VERSION:
-        raise HandoffError(f"VERSION mismatch: expected {VERSION}, got {version}")
-    run([sys.executable, str(ROOT / "scripts" / "version_tool.py"), "check"])
+        raise HandoffError("builder working tree is not clean")
+
+    candidate_sha = git("rev-parse", CANDIDATE_BRANCH)
+    candidate_tree = git("rev-parse", f"{CANDIDATE_BRANCH}^{{tree}}")
+    ancestry = run(
+        ["git", "merge-base", "--is-ancestor", candidate_sha, builder_sha],
+        capture=True,
+        check=False,
+    )
+    if ancestry.returncode != 0:
+        raise HandoffError("builder branch is not descended from the authoritative candidate")
+
+    changed = {
+        line.strip()
+        for line in git("diff", "--name-only", f"{candidate_sha}..{builder_sha}").splitlines()
+        if line.strip()
+    }
+    unexpected = sorted(changed - _ALLOWED_HELPER_DIFF)
+    if unexpected:
+        raise HandoffError(
+            "builder branch changes candidate runtime files: " + ", ".join(unexpected)
+        )
+
+    candidate_version = git("show", f"{CANDIDATE_BRANCH}:VERSION")
+    if candidate_version != VERSION:
+        raise HandoffError(
+            f"candidate VERSION mismatch: expected {VERSION}, got {candidate_version}"
+        )
     return {
-        "version": version,
-        "git_sha": sha,
-        "branch": branch,
+        "version": candidate_version,
+        "git_sha": candidate_sha,
+        "git_tree_sha": candidate_tree,
+        "branch": CANDIDATE_BRANCH,
         "working_tree_clean": True,
+        "builder": {
+            "branch": builder_branch,
+            "git_sha": builder_sha,
+            "allowed_diff": sorted(changed),
+        },
     }
 
 
@@ -127,15 +167,26 @@ def gradle_wrapper(project: Path) -> Path:
     return candidate
 
 
-def build_artifacts() -> tuple[Path, Path]:
-    android_gradle = gradle_wrapper(ROOT / "android")
-    desktop_gradle = gradle_wrapper(ROOT / "desktop")
+def build_artifacts(candidate_root: Path) -> tuple[Path, Path]:
+    android_root = candidate_root / "android"
+    desktop_root = candidate_root / "desktop"
+    android_gradle = gradle_wrapper(android_root)
+    desktop_gradle = gradle_wrapper(desktop_root)
     run(
         [str(android_gradle), ":app:assembleDebug", "--no-daemon", "--console=plain"],
-        cwd=ROOT / "android",
+        cwd=android_root,
     )
-    if not ANDROID_APK.is_file() or ANDROID_APK.stat().st_size <= 0:
-        raise HandoffError(f"Android APK was not produced: {ANDROID_APK}")
+    apk = (
+        android_root
+        / "app"
+        / "build"
+        / "outputs"
+        / "apk"
+        / "debug"
+        / "app-debug.apk"
+    )
+    if not apk.is_file() or apk.stat().st_size <= 0:
+        raise HandoffError(f"Android APK was not produced: {apk}")
 
     run(
         [
@@ -144,20 +195,21 @@ def build_artifacts() -> tuple[Path, Path]:
             "--no-daemon",
             "--console=plain",
         ],
-        cwd=ROOT / "desktop",
+        cwd=desktop_root,
     )
+    jar_dir = desktop_root / "composeApp" / "build" / "compose" / "jars"
     jars = sorted(
-        (path for path in DESKTOP_JARS.glob("*.jar") if path.is_file()),
+        (path for path in jar_dir.glob("*.jar") if path.is_file()),
         key=lambda path: path.stat().st_mtime_ns,
         reverse=True,
     )
     if len(jars) != 1:
         raise HandoffError(
-            f"expected exactly one packaged desktop jar in {DESKTOP_JARS}; found {len(jars)}"
+            f"expected exactly one packaged desktop jar in {jar_dir}; found {len(jars)}"
         )
     if jars[0].stat().st_size <= 0:
         raise HandoffError("desktop jar is empty")
-    return ANDROID_APK, jars[0]
+    return apk, jars[0]
 
 
 def checked_artifact(path: Path, relative: Path) -> dict[str, Any]:
@@ -187,9 +239,10 @@ if errorlevel 1 (\r
 )\r
 \r
 set "EXPECTED_SHA={sha}"\r
-set "EXPECTED_BRANCH={BRANCH}"\r
+set "EXPECTED_BRANCH={CANDIDATE_BRANCH}"\r
 set "BUNDLE={bundle_name}"\r
 set "DEST={destination}"\r
+for %%I in ("%BUNDLE%") do set "BUNDLE_ABS=%%~fI"\r
 \r
 if exist "%DEST%" (\r
   echo FEJL: %DEST% findes allerede. Flyt eller slet den bevidst foerst.\r
@@ -197,11 +250,13 @@ if exist "%DEST%" (\r
   exit /b 1\r
 )\r
 \r
-git bundle verify "%BUNDLE%"\r
+git bundle verify "%BUNDLE_ABS%"\r
 if errorlevel 1 goto fail\r
-git clone "%BUNDLE%" "%DEST%"\r
+git init "%DEST%"\r
 if errorlevel 1 goto fail\r
 cd /d "%DEST%"\r
+git fetch "%BUNDLE_ABS%" "%EXPECTED_BRANCH%:%EXPECTED_BRANCH%"\r
+if errorlevel 1 goto fail\r
 git checkout "%EXPECTED_BRANCH%"\r
 if errorlevel 1 goto fail\r
 for /f %%S in ('git rev-parse HEAD') do set "ACTUAL_SHA=%%S"\r
@@ -226,30 +281,34 @@ exit /b 1\r
 
 
 def create_bundle(path: Path) -> None:
-    run(["git", "bundle", "create", str(path), BRANCH])
+    run(["git", "bundle", "create", str(path), CANDIDATE_BRANCH])
     run(["git", "bundle", "verify", str(path)], capture=True)
 
 
-def write_readme(path: Path, *, sha: str) -> None:
+def write_readme(path: Path, *, identity: Mapping[str, Any]) -> None:
     atomic_text(
         path,
         f"""Kaliv / ModelRig Milestone 3 physical candidate handoff
 
-Version: {VERSION}
-Branch: {BRANCH}
-Commit: {sha}
+Version: {identity['version']}
+Branch: {identity['branch']}
+Commit: {identity['git_sha']}
+Tree: {identity['git_tree_sha']}
 
 1. Copy this entire folder to the Windows rig.
 2. Verify SHA256SUMS.txt if the folder crossed an untrusted medium.
 3. Double-click START_HERE.cmd.
-4. The bootstrap verifies the Git bundle, clones the exact candidate, checks the
-   exact SHA and clean tree, then starts START_MILESTONE3_PHYSICAL.cmd.
+4. The bootstrap verifies the Git bundle, creates a local repository, fetches the
+   exact candidate branch, checks the exact SHA and clean tree, then starts
+   START_MILESTONE3_PHYSICAL.cmd.
 
-artifacts/android contains the exact debug APK built from this candidate.
-artifacts/desktop contains the exact Windows Compose uber-jar.
-The physical operator may rebuild them and must still collect real device evidence.
+artifacts/android contains the exact debug APK built from a detached worktree at
+the candidate commit. artifacts/desktop contains the exact Windows Compose
+uber-jar built from that same worktree.
 
-This handoff does not merge, publish, release, upload or activate production.
+The physical operator may rebuild artifacts and must still collect real device
+evidence. This handoff does not merge, publish, release, upload or activate
+production.
 """,
     )
 
@@ -276,39 +335,67 @@ def zip_directory(source: Path, destination: Path) -> None:
 
 
 def build_handoff(output_root: Path) -> tuple[Path, dict[str, Any]]:
-    identity = ensure_candidate()
-    sha = str(identity["git_sha"])
-    apk, jar = build_artifacts()
+    identity = ensure_builder_checkout()
+    candidate_sha = str(identity["git_sha"])
     output_root.mkdir(parents=True, exist_ok=True)
-    final_dir = output_root / f"ModelRig-Milestone3-{VERSION}-{sha[:12]}"
-    final_zip = output_root / f"ModelRig-Milestone3-{VERSION}-{sha[:12]}.zip"
+    final_dir = output_root / f"ModelRig-Milestone3-{VERSION}-{candidate_sha[:12]}"
+    final_zip = output_root / f"ModelRig-Milestone3-{VERSION}-{candidate_sha[:12]}.zip"
     if final_dir.exists() or final_zip.exists():
         raise HandoffError("handoff destination already exists; archive or remove it deliberately")
 
     staging = Path(tempfile.mkdtemp(prefix="milestone3-handoff-", dir=output_root))
+    worktree_parent = Path(tempfile.mkdtemp(prefix="milestone3-candidate-worktree-"))
+    candidate_root = worktree_parent / "candidate"
+    worktree_added = False
     try:
+        run(["git", "worktree", "add", "--detach", str(candidate_root), candidate_sha])
+        worktree_added = True
+        run(
+            [
+                sys.executable,
+                str(candidate_root / "scripts" / "version_tool.py"),
+                "check",
+            ],
+            cwd=candidate_root,
+        )
+        if git("rev-parse", "HEAD", cwd=candidate_root) != candidate_sha:
+            raise HandoffError("detached build worktree is not at the candidate SHA")
+        if git("status", "--porcelain=v1", cwd=candidate_root):
+            raise HandoffError("detached candidate worktree is dirty before build")
+
+        apk, jar = build_artifacts(candidate_root)
         kit = staging / final_dir.name
         artifacts_android = kit / "artifacts" / "android"
         artifacts_desktop = kit / "artifacts" / "desktop"
         artifacts_android.mkdir(parents=True)
         artifacts_desktop.mkdir(parents=True)
 
-        bundle = kit / f"ModelRig-Milestone3-{sha[:12]}.bundle"
+        bundle = kit / f"ModelRig-Milestone3-{candidate_sha[:12]}.bundle"
         create_bundle(bundle)
-        copied_apk = artifacts_android / f"kaliv-{VERSION}-{sha[:12]}-debug.apk"
-        copied_jar = artifacts_desktop / f"kaliv-desktop-{VERSION}-{sha[:12]}.jar"
+        copied_apk = artifacts_android / f"kaliv-{VERSION}-{candidate_sha[:12]}-debug.apk"
+        copied_jar = artifacts_desktop / f"kaliv-desktop-{VERSION}-{candidate_sha[:12]}.jar"
         shutil.copy2(apk, copied_apk)
         shutil.copy2(jar, copied_jar)
         bootstrap = kit / "START_HERE.cmd"
         readme = kit / "README.txt"
-        write_bootstrap(bootstrap, sha=sha, bundle_name=bundle.name)
-        write_readme(readme, sha=sha)
+        write_bootstrap(bootstrap, sha=candidate_sha, bundle_name=bundle.name)
+        write_readme(readme, identity=identity)
 
         manifest_path = kit / "candidate-manifest.json"
         manifest = {
             "schema": SCHEMA,
             "generated_at": iso_now(),
-            "candidate": identity,
+            "candidate": {
+                key: identity[key]
+                for key in (
+                    "version",
+                    "git_sha",
+                    "git_tree_sha",
+                    "branch",
+                    "working_tree_clean",
+                )
+            },
+            "builder": identity["builder"],
             "artifacts": {
                 "git_bundle": checked_artifact(bundle, bundle.relative_to(kit)),
                 "android_apk": checked_artifact(copied_apk, copied_apk.relative_to(kit)),
@@ -332,8 +419,14 @@ def build_handoff(output_root: Path) -> tuple[Path, dict[str, Any]]:
         zip_directory(final_dir, final_zip)
         return final_zip, manifest
     finally:
-        if staging.exists():
-            shutil.rmtree(staging, ignore_errors=True)
+        if worktree_added:
+            run(
+                ["git", "worktree", "remove", "--force", str(candidate_root)],
+                capture=True,
+                check=False,
+            )
+        shutil.rmtree(worktree_parent, ignore_errors=True)
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def main(argv: list[str] | None = None) -> int:
