@@ -298,6 +298,15 @@ class Agent4WatchdogPolicyTests(unittest.TestCase):
         self.assertEqual(decision.action, WatchdogAction.RENEW_RESOURCES)
         self.assertEqual(decision.resource_time_remaining, timedelta(seconds=30))
 
+    def test_expired_lease_is_unsafe_and_fails_closed(self) -> None:
+        decision = CampaignWatchdogPolicy().assess(
+            self.observation(
+                resource_lease_expires_at=BASE_TIME - timedelta(seconds=1)
+            )
+        )
+        self.assertEqual(decision.level, HealthLevel.UNSAFE)
+        self.assertEqual(decision.action, WatchdogAction.FAIL_CLOSED)
+
     def test_non_active_campaign_is_not_applicable(self) -> None:
         decision = CampaignWatchdogPolicy().assess(
             self.observation(status=CampaignStatus.PAUSED)

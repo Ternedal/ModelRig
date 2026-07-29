@@ -13,6 +13,7 @@ class HealthLevel(StrEnum):
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     UNRESPONSIVE = "unresponsive"
+    UNSAFE = "unsafe"
     NOT_APPLICABLE = "not_applicable"
 
 
@@ -179,6 +180,15 @@ class CampaignWatchdogPolicy:
             if observation.resource_lease_expires_at is not None
             else None
         )
+        if resource_remaining is not None and resource_remaining <= timedelta(0):
+            return WatchdogDecision(
+                level=HealthLevel.UNSAFE,
+                action=WatchdogAction.FAIL_CLOSED,
+                reason="resource lease has expired",
+                heartbeat_age=heartbeat_age,
+                progress_age=progress_age,
+                resource_time_remaining=resource_remaining,
+            )
         if (
             resource_remaining is not None
             and resource_remaining <= self._policy.resource_renewal_window

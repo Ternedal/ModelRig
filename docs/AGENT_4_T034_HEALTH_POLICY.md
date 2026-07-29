@@ -16,10 +16,11 @@ For active delegated states (`RUNNING`, `PAUSING`, `CANCELLING`) the policy uses
 this strict precedence:
 
 1. missing or stale heartbeat → `FAIL_CLOSED`
-2. consecutive failure threshold → `REQUEST_PAUSE`
-3. live heartbeat but stalled progress → `REQUEST_CHECKPOINT`
-4. lease inside renewal window → `RENEW_RESOURCES`
-5. otherwise → healthy, no action
+2. expired resource lease → `FAIL_CLOSED` with `UNSAFE` health
+3. consecutive failure threshold → `REQUEST_PAUSE`
+4. live heartbeat but stalled progress → `REQUEST_CHECKPOINT`
+5. lease inside renewal window → `RENEW_RESOURCES`
+6. otherwise → healthy, no action
 
 Non-active campaign states are `NOT_APPLICABLE`. The decision includes measured
 ages and remaining lease time so an eventual watchdog executor can audit why an
