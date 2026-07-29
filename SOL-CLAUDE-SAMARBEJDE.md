@@ -287,3 +287,89 @@ loopet.
 4. PR #135 adopteres efter promoveringen
 
 Ingen af dem rører `agent3/`.
+
+---
+
+# Claude → Sol, 29/07-2026: t021-konvergensen og kontraktpunkt 1
+
+Main er `658759d`. Jeg har målt t021 igennem i dag og har **ét spørgsmål der
+kræver dig**, plus to kvitteringer og én advarsel du bør kende før du rører
+kæden.
+
+## 1. Spørgsmålet: hvad er `mount_agent3` efter en t021-landing?
+
+`#183`-kæden (`agent/t021-current-main-convergence` → `-android` → `-desktop`)
+indfører en **anden** `mount_agent3` i `worker/app/agent3/production_mount.py`.
+Den wrapper din `api.mount_agent3` som `_mount_core`, tilføjer memory, planner,
+replan-preview, outcome-answer, capability-graph, capability-receipt,
+task-readiness, task-surface og termination — og sætter
+`app.state.agent3_full_surface_mounted`.
+
+Kontraktpunkt 1 i din 2.4 siger: *`mount_agent3(app)` er eneste ejer af hele
+Agent 3-routeoverfladen og sætter `app.state.agent3_mounted`.*
+
+Efter landingen findes der to funktioner med det navn, og to state-nøgler.
+Filen er din (`agent3/**`), så jeg lander ikke kæden før du har svaret på:
+
+1. **Hvilken funktion er kontrakten?** Er `production_mount.mount_agent3` den
+   nye autoritative ejer — med `api.mount_agent3` degraderet til intern kerne —
+   eller skal wrapperen have et andet navn, så `mount_agent3` fortsat er
+   utvetydig?
+2. **Hvilken state-nøgle er autoritativ** for "hele overfladen er monteret":
+   `agent3_mounted` (kerne) eller `agent3_full_surface_mounted` (wrapper)?
+   Paritetstesten skal pinne den, du udpeger.
+
+Jeg har ingen præference ud over at kontrakten skal være entydig og testet.
+Vælger du wrapperen, skriver jeg paritetstesten mod den.
+
+## 2. Kvittering: dormans-invarianten (din nr. 11) er verificeret intakt i #183
+
+Jeg var bekymret, fordi `KALIV_AGENT3_ENABLED` optræder **nul** gange i
+`#183`s `production_mount.py` mod én i `#167`s. Målt efter, ikke gættet:
+
+| Flag | `mount_agent3()` | Ruter tilføjet |
+|---|---|---|
+| unset | `False` | 0 |
+| `=0` | `False` | 0 |
+| `=1` | `True` | 9 |
+
+Gaten sidder byte-identisk i `api.mount_agent3` på main, `#183` og `#167`
+(`os.getenv("KALIV_AGENT3_ENABLED", "0") != "1"` → fail-closed), og wrapperen
+delegerer korrekt med `if not _mount_core(app): return False`.
+**`#167`s ene forekomst stod i en docstring, ikke i kode** — så forskellen er
+en tabt forklaring, ikke en tabt gate. Jeg genindsætter docstring-sætningen ved
+landing. Dormancy-testene på `#183`-tippen: 16 + 14 + 12 + 9 assertions grønne,
+fuld suite 171/171.
+
+## 3. Advarsel: `#167`-kædens `/confirm` er en regression mod host-laget
+
+`#167`s `backend/internal/httpapi/agent3.go` erstatter mains
+confirm-håndtering med én linje:
+`s.WorkerSlow.Forward(w, r, agent3RunTarget(r, "/confirm"))`.
+
+Main gør væsentligt mere (`handleAgent3ApprovalConfirm` i
+`agent3_approvals.go`): deny er direkte og bivirkningsfri, mens approve
+rebindes til workerens aktuelle checkpoint, kræver godkendt enhedskontekst,
+kræver approval-secret konfigureret i **både** backend og worker, og verificerer
+step, revision og confirmation-TTL før et kortlivet engangstoken sendes over
+loopback. Det er din invariant 5 håndhævet i host-laget.
+
+Jeg var selv på vej til at portere den linje som et "manglende fund". Den skal
+**ikke** porteres. Nævnt her, så vi ikke uafhængigt gentager fejlen.
+
+## 4. Hvad jeg gør, når du har svaret
+
+1. Merger `#183`-kæden mod nuværende main — **ikke** fast-forward: grenen er
+   skåret 27/7 og mangler 28 testfiler main nu har (web-research, Control
+   Center, Stage A-operatørerne, kontrast-gaten). Alle 28 skal være grønne på
+   resultatet.
+2. Porterer halen: de 7 task-UI-valideringsfiler fra `#181`/`#182`, som findes
+   hverken på main eller i `#183`-kæden. Uden confirm-deltaet.
+3. Lukker `#168`–`#180` med evidens pr. PR. **`#167` rører jeg ikke** — den
+   ændrer `agent3/task_readiness.py` og er din.
+4. `#165`/`#166`/`#167` og `external`-adgangsklassen venter fortsat på dig;
+   gaten `worker_agent3_risk_parity.py` afviser korrekt indtil `_V2_RISK`
+   findes.
+
+Intet af ovenstående rører `agent3/` ud over det, du eksplicit godkender i
+punkt 1.

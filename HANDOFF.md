@@ -543,6 +543,25 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     #165–#167: nul nye filer, ægte divergens), men "er den landet?" afgøres
     med ancestry, ikke diff.
 
+32. **En optælling beviser ikke fravær. Kald funktionen.** Tre gange 29/7 pegede
+    en tælling den forkerte vej, og hver gang rettede et funktionelt tjek den:
+    `KALIV_AGENT3_ENABLED` optrådte nul gange i `#183`s `production_mount.py`,
+    så jeg mistænkte en brudt dormans — gaten sad i `api.mount_agent3`, som
+    wrapperen delegerer til, og `#167`s ene forekomst stod i en **docstring**;
+    et mount med flaget usat gav `False` og nul ruter. `/confirm` optrådte i nul
+    `Forward`-linjer i mains `agent3.go`, så jeg konkluderede et hul i
+    host-laget — ruten er registreret i `server.go` og går gennem
+    `handleAgent3ApprovalConfirm`, som er **rigere** end den forward jeg var på
+    vej til at "genindsætte"; havde jeg porteret den, havde jeg fjernet
+    invariant 5 fra host-laget. Og linjetal fik `#183` til at se ud som et
+    supersæt, hvor kun en diff pr. fil kunne vise det.
+
+    **Reglen:** grep afgør hvor du skal læse, aldrig hvad der er sandt. Er
+    påstanden "X mangler" eller "A indeholder B", så udfør den — importér
+    modulet, kald funktionen med flaget slået fra, ram ruten, diff filen. Alle
+    tre fejl ville have kostet arbejde eller sikkerhed; alle tre blev fanget af
+    et tjek der tog under et minut.
+
 ## 9. Kø — hvem har bolden (16/7, opdateret 29/7)
 
 **[29/7, sent — Anders har truffet beslutningerne. Otte PRs lukket, fire
@@ -617,6 +636,33 @@ base=main agent3-udgaver — **Sols domæne**, rør dem ikke uden aftalen.
 Autoritativt: **56 åbne PRs**; t033 og t022 er aktive (#215/#216 oprettet
 29/7, mens der blev arbejdet). Tallene i blokkene nedenfor er historik pr.
 27/7.
+
+**[29/7, sent — t021 er målt igennem, og bolden ligger hos Sol.]** Retningen er
+valgt: **byg på `#183`-kæden**, kør ikke `#167`-stakken færdig. Målt: kæderne
+deler 31 af 45 filer, 26 byte-identisk; `#183` er strengt supersæt på
+testfladen, og dens `production_mount.py` composer selv current mains flade.
+Dormans (invariant 11) er verificeret **empirisk** intakt i `#183` — flag usat
+eller `0` giver `mount_agent3() == False` og nul ruter, `=1` giver ni; se
+lektie 32 for hvorfor tællingen først pegede den anden vej. Suite 171/171 på
+tippen.
+
+**Blokeret på ét svar fra Sol:** `#183` indfører en anden `mount_agent3` i
+`agent3/production_mount.py`, som wrapper `api.mount_agent3` og sætter
+`agent3_full_surface_mounted`. Kontraktpunkt 1 udpeger `mount_agent3` som
+eneste ejer med `agent3_mounted`. Hvilken funktion og hvilken state-nøgle der
+er kontrakten efter landing, er hans kald — spørgsmålet står i
+`SOL-CLAUDE-SAMARBEJDE.md` under 29/07.
+
+**Når svaret findes:** merge `#183`-kæden mod nuværende main (**ikke**
+fast-forward — grenen mangler 28 testfiler main har, heriblandt web-research,
+Control Center, Stage A-operatørerne og kontrast-gaten; alle skal være grønne
+på resultatet), port de 7 task-UI-valideringsfiler fra `#181`/`#182`, luk
+`#168`–`#180` med evidens pr. PR. **`#167` røres ikke** — den ændrer
+`agent3/task_readiness.py`.
+
+**Port IKKE `#167`s `/confirm`-linje.** Den erstatter mains approval-aware
+handler med en plain forward og ville fjerne invariant 5 fra host-laget. Se
+lektie 32.
 
 **[27/7 — status på køen.]** Alt der kunne afgøres uden hardware, uden en skærm
 og uden en beslutning fra Anders er ryddet. Det der står tilbage er blokeret på
