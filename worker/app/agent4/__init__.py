@@ -24,6 +24,12 @@ from .domain import (
     utc_now,
 )
 from .event_bus import CampaignEventOrderError, InMemoryCampaignEventBus
+from .recovery import (
+    CampaignRecoveryDecision,
+    CampaignRecoveryReport,
+    CampaignRecoveryService,
+    RecoveryAction,
+)
 from .repository import CampaignRepositoryError, JsonCampaignRepository
 from .scheduler import CampaignQueue, DuplicateCampaignError
 from .service import (
@@ -48,6 +54,9 @@ __all__ = [
     "CampaignPriority",
     "CampaignQueue",
     "CampaignRecord",
+    "CampaignRecoveryDecision",
+    "CampaignRecoveryReport",
+    "CampaignRecoveryService",
     "CampaignRepository",
     "CampaignRepositoryError",
     "CampaignSchedulerService",
@@ -62,6 +71,7 @@ __all__ = [
     "IdGenerator",
     "InMemoryCampaignEventBus",
     "JsonCampaignRepository",
+    "RecoveryAction",
     "SystemClock",
     "transition_campaign",
     "utc_now",

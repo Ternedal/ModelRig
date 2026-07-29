@@ -77,6 +77,19 @@ class CampaignSchedulerService:
     def queued_count(self) -> int:
         return len(self._queue)
 
+    def recover(self):
+        """Rehydrate the shared queue and fail interrupted work closed."""
+
+        from .recovery import CampaignRecoveryService
+
+        with self._lock:
+            return CampaignRecoveryService(
+                repository=self._repository,
+                queue=self._queue,
+                events=self._events,
+                clock=self._clock,
+            ).recover()
+
     def submit(self, spec: CampaignSpec) -> CampaignRecord:
         with self._lock:
             if self._repository.get(spec.campaign_id) is not None:
