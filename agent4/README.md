@@ -4,7 +4,7 @@ Agent 4 is the orchestration layer above the validated Agent 3 runtime. It owns
 campaign scheduling, durable orchestration state, recovery and operator-facing
 control. It does **not** change Agent 3 execution contracts.
 
-## Current scope: A4-01 through A4-07
+## Current scope: A4-01 through A4-08
 
 The branch provides dormant, standard-library-only orchestration contracts:
 
@@ -18,6 +18,7 @@ The branch provides dormant, standard-library-only orchestration contracts:
 - pure watchdog policy, guarded coordination and explicit service adapters;
 - append-only, hash-chained campaign timelines with JSON evidence metadata;
 - one explicit, dormant runtime-composition factory over the shared components;
+- a bounded host-neutral operator read model with stable timeline snapshots;
 - unit and composition tests automatically discovered by the shared CI glob.
 
 Runtime activation, API routes and background threads are deliberately absent.
@@ -34,6 +35,7 @@ Agent 4 uses its own namespace so it cannot collide with ModelRig roadmap tasks:
 5. `A4-05` — health policy, watchdog coordinator and adapters.
 6. `A4-06` — append-only timeline and evidence metadata integration.
 7. `A4-07` — explicit dormant runtime composition.
+8. `A4-08` — bounded operator read model and stable timeline snapshots.
 
 Retired aliases and provenance rules are documented only in
 `docs/AGENT_4_IDENTITY.md`.
@@ -49,6 +51,7 @@ worker/app/agent4/
 ├── domain.py
 ├── event_bus.py
 ├── health.py
+├── operator.py
 ├── recovery.py
 ├── repository.py
 ├── resource_admission.py
@@ -75,7 +78,9 @@ PYTHONPATH=worker python tests/worker_agent4_timeline.py
 ```text
 Kaliv / RigGate
        |
-Agent 4 operator API        (later milestone)
+Agent 4 transport/API       (later integration decision)
+       |
+Agent4OperatorReadService   (A4-08, explicit reads only)
        |
 Agent 4 orchestrator        (this package)
        |
@@ -106,3 +111,11 @@ artifact references; it does not embed or fetch binary content. See
 timeline, event bus, queue, resource manager, scheduler, retry service and
 watchdog failure boundary. Composition creates no directory, runs no recovery and
 starts no background behavior. See `docs/AGENT_4_A4_07_COMPOSITION.md`.
+
+## A4-08 operator read model
+
+`Agent4OperatorReadService` exposes bounded campaign summaries and verified
+timeline pages over the same explicitly composed scheduler and timeline. A caller
+may reuse the returned snapshot sequence to keep paging stable while clean appends
+continue. The service performs no lifecycle mutation and mounts no transport.
+See `docs/AGENT_4_A4_08_OPERATOR_READ.md`.
