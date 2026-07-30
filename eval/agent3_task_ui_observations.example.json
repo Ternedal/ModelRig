@@ -1,0 +1,69 @@
+{
+  "schema": "kaliv-agent3-task-ui-observations/v1",
+  "observed_at": "2026-07-27T00:00:00+02:00",
+  "operator": "FILL_ME",
+  "clients": {
+    "android": {
+      "platform": "android",
+      "device": "Pixel 6a",
+      "candidate": {
+        "version": "FILL_ME",
+        "git_sha": "FILL_ME_40_HEX",
+        "code_sha256": "FILL_ME_64_HEX"
+      },
+      "selected_surface": "agent3_readonly",
+      "fallback_surface": "agent2",
+      "server_reason": "agent3_readonly_selected",
+      "stop_terminal_state": "cancelled",
+      "normal_chat_surface": "agent2",
+      "checks": {
+        "selected_surface_visible": false,
+        "server_reason_visible": false,
+        "plan_review_visible": false,
+        "preview_did_not_execute": false,
+        "tool_status_visible": false,
+        "stop_visible": false,
+        "stop_after_fallback": false,
+        "receipts_visible": false,
+        "replans_visible": false,
+        "terminal_outcome_visible": false,
+        "fallback_visible": false,
+        "normal_chat_round_trip": false,
+        "no_write_controls": false
+      },
+      "evidence_path": "validation/agent3-task-ui-evidence/android.txt",
+      "evidence_sha256": "FILL_ME_64_HEX"
+    },
+    "desktop": {
+      "platform": "windows",
+      "device": "ModelRig Windows desktop",
+      "candidate": {
+        "version": "FILL_ME",
+        "git_sha": "FILL_ME_40_HEX",
+        "code_sha256": "FILL_ME_64_HEX"
+      },
+      "selected_surface": "agent3_readonly",
+      "fallback_surface": "agent2",
+      "server_reason": "agent3_readonly_selected",
+      "stop_terminal_state": "cancelled",
+      "normal_chat_surface": "agent2",
+      "checks": {
+        "selected_surface_visible": false,
+        "server_reason_visible": false,
+        "plan_review_visible": false,
+        "preview_did_not_execute": false,
+        "tool_status_visible": false,
+        "stop_visible": false,
+        "stop_after_fallback": false,
+        "receipts_visible": false,
+        "replans_visible": false,
+        "terminal_outcome_visible": false,
+        "fallback_visible": false,
+        "normal_chat_round_trip": false,
+        "no_write_controls": false
+      },
+      "evidence_path": "validation/agent3-task-ui-evidence/desktop.txt",
+      "evidence_sha256": "FILL_ME_64_HEX"
+    }
+  }
+}
