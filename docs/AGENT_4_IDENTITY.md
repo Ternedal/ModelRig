@@ -24,7 +24,7 @@ integration boundaries and `HANDOFF.md` require parity evidence and coordination
 | `A4-03` | resource leases and scheduler admission |
 | `A4-04` | retry classification and durable retry scheduling |
 | `A4-05` | health policy, watchdog coordinator and service adapters |
-| `A4-06` | reserved for append-only timeline/evidence integration |
+| `A4-06` | append-only timeline and evidence metadata integration |
 
 ## Retired aliases
 
@@ -38,7 +38,8 @@ must use the `A4-*` IDs and `agent/a4-*` prefix.
 
 ## Activation boundary
 
-This identity migration does not activate Agent 4. Importing the package starts
-no thread, timer, scheduler, network request or Agent 3 work. Any future runtime
-mount or recurring loop is a separate integration decision and must be tested
-against the existing dormant contracts.
+The A4-06 timeline is a storage and composition contract, not runtime activation.
+Constructing it starts no thread, timer, scheduler, network request or Agent 3
+work, and it creates no directory until an explicit append. Any runtime mount,
+recurring ingestion loop, binary evidence vault or cross-process writer is a
+separate integration decision.
