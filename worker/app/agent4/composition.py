@@ -20,6 +20,7 @@ from .contracts import (
 )
 from .domain import CampaignValidationError
 from .health import CampaignWatchdogPolicy
+from .operator import Agent4OperatorReadService
 from .recovery import CampaignRecoveryReport
 from .repository import JsonCampaignRepository
 from .resource_admission import ResourceAwareCampaignSchedulerService
@@ -77,6 +78,7 @@ class Agent4RuntimeContext:
     resources: InMemoryResourceLeaseManager
     clock: Clock
     scheduler: ResourceAwareCampaignSchedulerService
+    operator: Agent4OperatorReadService
     checkpoints: CampaignCheckpointService
     retry_planner: CampaignRetryPlanner
     retries: CampaignRetrySchedulingService
@@ -150,6 +152,10 @@ def compose_agent4_runtime(
         resource_resolver=resource_resolver,
         resource_lease_ttl=resource_lease_ttl,
     )
+    operator = Agent4OperatorReadService(
+        scheduler=scheduler,
+        timeline=timeline,
+    )
     checkpoints = CampaignCheckpointService(
         repository=repository,
         checkpoints=checkpoint_store,
@@ -181,6 +187,7 @@ def compose_agent4_runtime(
         resources=resources,
         clock=runtime_clock,
         scheduler=scheduler,
+        operator=operator,
         checkpoints=checkpoints,
         retry_planner=retry_planner,
         retries=retries,
