@@ -143,17 +143,6 @@ data class CapabilityDescriptorV2(
                 "scheduling reason contradicts allowed",
             )
 
-            requireExactKeys(confirmationObject, setOf("mode"), "confirmation")
-            val confirmation = CapabilityConfirmationV2(
-                mode = requireString(confirmationObject, "mode"),
-            )
-            requireContract(confirmation.mode in confirmationModes, "unsupported confirmation.mode")
-            val expectedConfirmation = if (access == "read") "none" else "required"
-            requireContract(
-                confirmation.mode == expectedConfirmation,
-                "confirmation mode contradicts access",
-            )
-
             requireExactKeys(networkObject, setOf("mode", "destinations"), "network")
             val network = CapabilityNetworkV2(
                 mode = requireString(networkObject, "mode"),
@@ -168,6 +157,18 @@ data class CapabilityDescriptorV2(
                 network.mode !in setOf("loopback", "configured_service", "public") ||
                     network.destinations.isNotEmpty(),
                 "networked mode requires a destination",
+            )
+
+            requireExactKeys(confirmationObject, setOf("mode"), "confirmation")
+            val confirmation = CapabilityConfirmationV2(
+                mode = requireString(confirmationObject, "mode"),
+            )
+            requireContract(confirmation.mode in confirmationModes, "unsupported confirmation.mode")
+            val expectedConfirmation =
+                if (access != "read" || network.mode == "public") "required" else "none"
+            requireContract(
+                confirmation.mode == expectedConfirmation,
+                "confirmation mode contradicts access/network",
             )
 
             requireExactKeys(terminationObject, setOf("mode"), "termination")
@@ -243,24 +244,22 @@ data class CapabilityDescriptorV2(
             if (!condition) throw CapabilityContractException(message)
         }
 
-        private fun canonicalize(value: Any?): String = when (value) {
-            null, JSONObject.NULL -> "null"
+        private fun canonicalize(source: JSONObject): String = canonicalValue(source)
+
+        private fun canonicalValue(value: Any?): String = when (value) {
             is JSONObject -> value.keys().asSequence().toList().sorted().joinToString(
                 prefix = "{",
                 postfix = "}",
                 separator = ",",
-            ) { key -> JSONObject.quote(key) + ":" + canonicalize(value.get(key)) }
+            ) { key -> "${JSONObject.quote(key)}:${canonicalValue(value.get(key))}" }
             is JSONArray -> (0 until value.length()).joinToString(
                 prefix = "[",
                 postfix = "]",
                 separator = ",",
-            ) { index -> canonicalize(value.get(index)) }
+            ) { index -> canonicalValue(value.get(index)) }
             is String -> JSONObject.quote(value)
-            is Boolean -> value.toString()
-            is Number -> JSONObject.numberToString(value)
-            else -> throw CapabilityContractException(
-                "unsupported JSON value in canonical descriptor: ${value::class.java.name}",
-            )
+            JSONObject.NULL -> "null"
+            else -> value.toString()
         }
     }
 }

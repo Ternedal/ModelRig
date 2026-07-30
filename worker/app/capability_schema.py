@@ -75,6 +75,16 @@ class Replay(StrictModel):
     idempotent: bool
 
 
+def expected_confirmation_mode(access: str, network_mode: str) -> str:
+    """Derive confirmation from both the action and its execution boundary.
+
+    A public-network read changes no local state, but it still transmits an exact
+    user-approved request to a third party. ToolGate already cards that action;
+    the versioned descriptor must tell hosts and clients the same truth.
+    """
+    return "required" if access != "read" or network_mode == "public" else "none"
+
+
 class CapabilityDescriptorV2(StrictModel):
     schema_id: Literal["kaliv-capability/v2"] = Field(alias="schema")
     capability_id: str = Field(pattern=r"^tool:[A-Za-z0-9._:-]{1,155}$")
@@ -96,13 +106,9 @@ class CapabilityDescriptorV2(StrictModel):
     def validate_cross_fields(self) -> "CapabilityDescriptorV2":
         if not self.description.strip():
             raise ValueError("description must contain visible text")
-        # Fail-closed: alt der ikke er en ren laesning kraever bekraeftelse.
-        # Opremsningen {write, desktop} var aekvivalent saa laenge maengden
-        # var praecis tre -- og fail-open ved den fjerde. Se
-        # tests/workflow_access_derivation_parity.py.
-        expected = "none" if self.access == "read" else "required"
+        expected = expected_confirmation_mode(self.access, self.network.mode)
         if self.confirmation.mode != expected:
-            raise ValueError("confirmation mode contradicts access")
+            raise ValueError("confirmation mode contradicts access/network")
         return self
 
     def to_dict(self) -> dict[str, Any]:
@@ -160,6 +166,7 @@ def descriptor_from_tool(tool: object) -> CapabilityDescriptorV2:
 
     try:
         risk = getattr(tool, "risk")
+        network_mode = getattr(tool, "network", "undeclared")
         return CapabilityDescriptorV2(
             schema=SCHEMA,
             capability_id=f"tool:{name}",
@@ -180,10 +187,10 @@ def descriptor_from_tool(tool: object) -> CapabilityDescriptorV2:
                 ),
             ),
             confirmation=Confirmation(
-                mode="none" if risk == "read" else "required"
+                mode=expected_confirmation_mode(risk, network_mode)
             ),
             network=Network(
-                mode=getattr(tool, "network", "undeclared"),
+                mode=network_mode,
                 destinations=list(destinations),
             ),
             termination=Termination(mode=getattr(tool, "cancellation")),

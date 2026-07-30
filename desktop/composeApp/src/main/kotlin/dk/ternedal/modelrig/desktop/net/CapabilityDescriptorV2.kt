@@ -99,10 +99,11 @@ data class CapabilityDescriptorV2(
             confirmation.mode in setOf("none", "required"),
             "unsupported confirmation.mode",
         )
-        val expectedConfirmation = if (access == "read") "none" else "required"
+        val expectedConfirmation =
+            if (access != "read" || network.mode == "public") "required" else "none"
         requireContract(
             confirmation.mode == expectedConfirmation,
-            "confirmation mode contradicts access",
+            "confirmation mode contradicts access/network",
         )
         requireContract(
             network.mode in setOf(
