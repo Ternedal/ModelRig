@@ -276,7 +276,19 @@ fun App() {
                     val res = withContext(Dispatchers.IO) {
                         runCatching {
                             ToolsClient(localUrl, deviceToken.ifBlank { null })
-                                .toolsChat(text, localModel, priorPairs, sysT)
+                                .toolsChatStream(text, localModel, priorPairs, sysT) { name ->
+                                    // Riggens egen fase undervejs. En vaerktoejstur
+                                    // var foer en lukket doer: een statisk tekst og
+                                    // ingen tegn paa liv foer svaret landede.
+                                    KalivStatus.forPhase(name)?.let { label ->
+                                        scope.launch {
+                                            val cur = messages[assistantIdxT]
+                                            if (cur.streaming) {
+                                                messages[assistantIdxT] = cur.copy(status = label)
+                                            }
+                                        }
+                                    }
+                                }
                         }
                     }
                     res.onSuccess { turn ->

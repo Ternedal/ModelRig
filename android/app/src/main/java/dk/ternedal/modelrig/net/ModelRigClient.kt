@@ -566,19 +566,25 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
      * still run without asking; writes still stop at the confirmation card.
      * Risk decides, not origin (Anders, 2026-07-10).
      */
-    fun toolsChat(
+    /**
+     * Payload'en for en vaerktoejstur, delt af [toolsChat] og
+     * [toolsChatStream]. Udtrukket saa de to indgange ikke kan drive fra
+     * hinanden -- samme grund som paa riggen, hvor begge endpoints kalder
+     * _tools_chat_turn.
+     */
+    private fun toolsChatPayload(
         message: String,
-        model: String? = null,
-        conversationId: String? = null,
-        cloudBaseUrl: String? = null,
-        cloudKey: String? = null,
-        history: List<Pair<String, String>> = emptyList(),
-        rag: Boolean = false,
-        ragSource: String? = null,
-        allowRagCloud: Boolean = false,
-        imageB64: String? = null,
-        system: String? = null,
-    ): ToolTurn {
+        model: String?,
+        conversationId: String?,
+        cloudBaseUrl: String?,
+        cloudKey: String?,
+        history: List<Pair<String, String>>,
+        rag: Boolean,
+        ragSource: String?,
+        allowRagCloud: Boolean,
+        imageB64: String?,
+        system: String?,
+    ): JSONObject {
         val payload = JSONObject().put("message", message)
         // Send the system prompt in its own field, not at the head of history.
         // The rig protects a leading system message when trimming, but an
@@ -615,6 +621,24 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
             payload.put("cloud_base_url", cloudBaseUrl)
             payload.put("cloud_key", cloudKey)
         }
+        return payload
+    }
+
+    fun toolsChat(
+        message: String,
+        model: String? = null,
+        conversationId: String? = null,
+        cloudBaseUrl: String? = null,
+        cloudKey: String? = null,
+        history: List<Pair<String, String>> = emptyList(),
+        rag: Boolean = false,
+        ragSource: String? = null,
+        allowRagCloud: Boolean = false,
+        imageB64: String? = null,
+        system: String? = null,
+    ): ToolTurn {
+        val payload = toolsChatPayload(message, model, conversationId, cloudBaseUrl,
+            cloudKey, history, rag, ragSource, allowRagCloud, imageB64, system)
         val builder = Request.Builder().url("$base/api/v1/tools/chat")
             .post(payload.toString().toRequestBody(jsonType))
         token?.let { builder.header("Authorization", "Bearer $it") }
@@ -623,6 +647,65 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
             val body = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) throw ModelRigException("tools chat failed (${resp.code}): $body")
             return parseToolTurn(JSONObject(body))
+        }
+    }
+
+    /**
+     * Samme tur som [toolsChat], men riggen fortaeller undervejs hvad den laver.
+     *
+     * En vaerktoejstur er lang -- modellen taenker, et vaerktoej koerer,
+     * modellen taenker igen -- og med det gamle endpoint sker alt det bag en
+     * lukket doer: een statisk tekst og ingen tegn paa liv foer svaret lander.
+     *
+     * [onPhase] kaldes paa netvaerkstraaden; kalderen laegger selv opdateringen
+     * over paa UI-traaden.
+     *
+     * Fail-closed som de tre andre stroem-laesere her: en udtoemt stroem UDEN
+     * en resultatlinje er en fejl, ikke en tom succes. Et droppet socket
+     * afslutter body'en praecis som en faerdig tur.
+     */
+    fun toolsChatStream(
+        message: String,
+        model: String? = null,
+        conversationId: String? = null,
+        cloudBaseUrl: String? = null,
+        cloudKey: String? = null,
+        history: List<Pair<String, String>> = emptyList(),
+        rag: Boolean = false,
+        ragSource: String? = null,
+        allowRagCloud: Boolean = false,
+        imageB64: String? = null,
+        system: String? = null,
+        registerCall: ((okhttp3.Call) -> Unit)? = null,
+        onPhase: (String) -> Unit = {},
+    ): ToolTurn {
+        val payload = toolsChatPayload(message, model, conversationId, cloudBaseUrl,
+            cloudKey, history, rag, ragSource, allowRagCloud, imageB64, system)
+        val builder = Request.Builder().url("$base/api/v1/tools/chat/stream")
+            .post(payload.toString().toRequestBody(jsonType))
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        val call = voiceHttp.newCall(builder.build())
+        registerCall?.invoke(call)
+        call.execute().use { resp ->
+            if (!resp.isSuccessful) {
+                val body = resp.body?.string().orEmpty()
+                throw ModelRigException("tools chat failed (${resp.code}): $body")
+            }
+            val source = resp.body?.source() ?: throw ModelRigException("tom stream")
+            var turn: ToolTurn? = null
+            while (!source.exhausted()) {
+                val line = source.readUtf8Line() ?: break
+                if (line.isBlank()) continue
+                val o = runCatching { JSONObject(line) }.getOrNull() ?: continue
+                val err = o.optString("error")
+                if (err.isNotEmpty()) throw ModelRigException("tools chat: $err")
+                o.optJSONObject("result")?.let { turn = parseToolTurn(it); return@let }
+                val phase = o.optString("phase")
+                if (phase.isNotEmpty()) onPhase(phase)
+            }
+            return turn ?: throw ModelRigException(
+                "værktøjsturen blev afbrudt undervejs — forbindelsen lukkede før riggen var færdig; prøv igen",
+            )
         }
     }
 

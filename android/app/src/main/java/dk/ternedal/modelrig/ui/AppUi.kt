@@ -1227,7 +1227,7 @@ private fun ChatScreen(
                             // prompt, which now travels in its own field.
                             val prior = history.dropLast(1).filter { it.first != "system" }
                             val turn = ModelRigClient(store.baseUrl ?: "", store.token)
-                                .toolsChat(
+                                .toolsChatStream(
                                     t,
                                     model = if (viaCloud) cModel else rigModel,
                                     cloudBaseUrl = if (viaCloud) "https://ollama.com" else null,
@@ -1238,6 +1238,8 @@ private fun ChatScreen(
                                     allowRagCloud = allowRagCloud,
                                     imageB64 = imageB64,
                                     system = sys,
+                                    registerCall = hook,
+                                    onPhase = onPhase,
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.status == "confirmation_required") {
@@ -1360,7 +1362,7 @@ private fun ChatScreen(
                             }
                             val prior = history.dropLast(1).filter { it.first != "system" }
                             val turn = ModelRigClient(store.baseUrl ?: "", store.token)
-                                .toolsChat(
+                                .toolsChatStream(
                                     t,
                                     model = if (viaCloud) cModel else rigModel,
                                     cloudBaseUrl = if (viaCloud) "https://ollama.com" else null,
@@ -1371,6 +1373,8 @@ private fun ChatScreen(
                                     allowRagCloud = allowRagCloud,
                                     imageB64 = null,
                                     system = sys,
+                                    registerCall = hook,
+                                    onPhase = onPhase,
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.status == "confirmation_required") {
