@@ -4,16 +4,19 @@ Agent 4 is the orchestration layer above the validated Agent 3 runtime. It owns
 campaign scheduling, durable orchestration state, recovery and operator-facing
 control. It does **not** change Agent 3 execution contracts.
 
-## Current milestone: A4-01 foundation
+## Current scope: A4-01 through A4-06
 
-The branch currently provides a dormant, standard-library-only foundation:
+The branch provides dormant, standard-library-only orchestration contracts:
 
 - immutable `CampaignSpec`, `CampaignState`, `CampaignEvent` and `CampaignRecord`;
 - explicit, fail-closed campaign state transitions;
 - deterministic scheduling with priority and future start times;
 - atomic JSON campaign persistence with schema and filename binding;
-- ordered per-campaign event publication;
-- protocols for repositories, executors, clocks, IDs and event delivery;
+- durable checkpoints and caller-driven startup recovery;
+- process-local resource leases and resource-aware admission;
+- deterministic retry classification and durable retry scheduling;
+- pure watchdog policy, guarded coordination and explicit service adapters;
+- append-only, hash-chained campaign timelines with JSON evidence metadata;
 - unit and composition tests automatically discovered by the shared CI glob.
 
 Runtime activation, API routes and background threads are deliberately absent.
@@ -28,7 +31,7 @@ Agent 4 uses its own namespace so it cannot collide with ModelRig roadmap tasks:
 3. `A4-03` — resource leases and scheduler admission.
 4. `A4-04` — retry classification and durable retry scheduling.
 5. `A4-05` — health policy, watchdog coordinator and adapters.
-6. `A4-06` — future append-only timeline/evidence integration.
+6. `A4-06` — append-only timeline and evidence metadata integration.
 
 Retired aliases and provenance rules are documented only in
 `docs/AGENT_4_IDENTITY.md`.
@@ -51,6 +54,7 @@ worker/app/agent4/
 ├── retry_scheduling.py
 ├── scheduler.py
 ├── service.py
+├── timeline.py
 ├── watchdog.py
 └── watchdog_adapters.py
 ```
@@ -60,6 +64,7 @@ worker/app/agent4/
 ```bash
 PYTHONPATH=worker python tests/worker_agent4_foundation.py
 PYTHONPATH=worker python tests/workflow_agent4_foundation.py
+PYTHONPATH=worker python tests/worker_agent4_timeline.py
 ```
 
 ## Architectural boundary
@@ -82,3 +87,12 @@ Agent 3 runtime             (unchanged)
 cancellation and completion commands. It is caller-driven and remains fully
 dormant until a host composes it with repository, executor, event and clock
 implementations. See `docs/AGENT_4_A4_01_SCHEDULER.md`.
+
+## A4-06 timeline and evidence
+
+`JsonlCampaignTimelineStore` persists one append-only JSONL timeline per campaign.
+Every entry is filename-bound, strictly sequenced and linked to the previous entry
+by SHA-256. `DurableCampaignEventBus` accepts an event only after the corresponding
+line has been flushed and fsynced. Evidence stores JSON metadata and immutable
+artifact references; it does not embed or fetch binary content. See
+`docs/AGENT_4_A4_06_TIMELINE.md`.
