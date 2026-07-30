@@ -8,6 +8,11 @@ from .checkpoint import (
     CheckpointStoreError,
     JsonCheckpointStore,
 )
+from .composition import (
+    Agent4RuntimeContext,
+    Agent4RuntimePaths,
+    compose_agent4_runtime,
+)
 from .contracts import (
     CampaignCheckpointStore,
     CampaignEventHandler,
@@ -114,6 +119,8 @@ from .service import (
 )
 
 __all__ = [
+    "Agent4RuntimeContext",
+    "Agent4RuntimePaths",
     "CampaignCheckpoint",
     "CampaignCheckpointService",
     "CampaignCheckpointStore",
@@ -201,6 +208,7 @@ __all__ = [
     "ResourceAwareCampaignSchedulerService",
     "SystemClock",
     "TIMELINE_SCHEMA",
+    "compose_agent4_runtime",
     "transition_campaign",
     "utc_now",
 ]

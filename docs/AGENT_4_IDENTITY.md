@@ -25,6 +25,7 @@ integration boundaries and `HANDOFF.md` require parity evidence and coordination
 | `A4-04` | retry classification and durable retry scheduling |
 | `A4-05` | health policy, watchdog coordinator and service adapters |
 | `A4-06` | append-only timeline and evidence metadata integration |
+| `A4-07` | explicit dormant runtime composition |
 
 ## Retired aliases
 
@@ -40,6 +41,7 @@ must use the `A4-*` IDs and `agent/a4-*` prefix.
 
 The A4-06 timeline is a storage and composition contract, not runtime activation.
 Constructing it starts no thread, timer, scheduler, network request or Agent 3
-work, and it creates no directory until an explicit append. Any runtime mount,
-recurring ingestion loop, binary evidence vault or cross-process writer is a
-separate integration decision.
+work, and it creates no directory until an explicit append. A4-07 adds a canonical
+object graph but still performs no recovery, dispatch, retry or watchdog action.
+Any runtime mount, operator API, recurring loop, binary evidence vault or
+cross-process writer is a separate integration decision.

@@ -4,7 +4,7 @@ Agent 4 is the orchestration layer above the validated Agent 3 runtime. It owns
 campaign scheduling, durable orchestration state, recovery and operator-facing
 control. It does **not** change Agent 3 execution contracts.
 
-## Current scope: A4-01 through A4-06
+## Current scope: A4-01 through A4-07
 
 The branch provides dormant, standard-library-only orchestration contracts:
 
@@ -17,6 +17,7 @@ The branch provides dormant, standard-library-only orchestration contracts:
 - deterministic retry classification and durable retry scheduling;
 - pure watchdog policy, guarded coordination and explicit service adapters;
 - append-only, hash-chained campaign timelines with JSON evidence metadata;
+- one explicit, dormant runtime-composition factory over the shared components;
 - unit and composition tests automatically discovered by the shared CI glob.
 
 Runtime activation, API routes and background threads are deliberately absent.
@@ -32,6 +33,7 @@ Agent 4 uses its own namespace so it cannot collide with ModelRig roadmap tasks:
 4. `A4-04` — retry classification and durable retry scheduling.
 5. `A4-05` — health policy, watchdog coordinator and adapters.
 6. `A4-06` — append-only timeline and evidence metadata integration.
+7. `A4-07` — explicit dormant runtime composition.
 
 Retired aliases and provenance rules are documented only in
 `docs/AGENT_4_IDENTITY.md`.
@@ -42,6 +44,7 @@ Retired aliases and provenance rules are documented only in
 worker/app/agent4/
 ├── __init__.py
 ├── checkpoint.py
+├── composition.py
 ├── contracts.py
 ├── domain.py
 ├── event_bus.py
@@ -96,3 +99,10 @@ by SHA-256. `DurableCampaignEventBus` accepts an event only after the correspond
 line has been flushed and fsynced. Evidence stores JSON metadata and immutable
 artifact references; it does not embed or fetch binary content. See
 `docs/AGENT_4_A4_06_TIMELINE.md`.
+
+## A4-07 runtime composition
+
+`compose_agent4_runtime(...)` wires one shared repository, checkpoint store,
+timeline, event bus, queue, resource manager, scheduler, retry service and
+watchdog failure boundary. Composition creates no directory, runs no recovery and
+starts no background behavior. See `docs/AGENT_4_A4_07_COMPOSITION.md`.

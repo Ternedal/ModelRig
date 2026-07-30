@@ -9,14 +9,15 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.agent4 import (
+    Agent4RuntimeContext,
     CampaignEventKind,
     CampaignHealthObservation,
     CampaignSpec,
     CampaignStatus,
     CampaignValidationError,
     FailureDescriptor,
+    compose_agent4_runtime,
 )
-from app.agent4.composition import Agent4RuntimeContext, compose_agent4_runtime
 
 
 BASE_TIME = datetime(2026, 7, 30, 20, 0, tzinfo=timezone.utc)
