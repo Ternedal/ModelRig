@@ -26,6 +26,7 @@ integration boundaries and `HANDOFF.md` require parity evidence and coordination
 | `A4-05` | health policy, watchdog coordinator and service adapters |
 | `A4-06` | append-only timeline and evidence metadata integration |
 | `A4-07` | verified timeline cursors, paging and caller-driven replay |
+| `A4-08` | durable consumer offsets and explicit at-least-once batches |
 
 ## Retired aliases
 
@@ -39,9 +40,10 @@ must use the `A4-*` IDs and `agent/a4-*` prefix.
 
 ## Activation boundary
 
-The A4-06 timeline and A4-07 replay layer are storage/read composition contracts,
-not runtime activation. Constructing them starts no thread, timer, scheduler,
-network request or Agent 3 work. The timeline creates no directory until an
-explicit append, and replay never mutates timeline bytes. Any runtime mount,
-recurring ingestion loop, durable consumer offsets, binary evidence vault or
-cross-process writer is a separate integration decision.
+The A4-06 timeline, A4-07 replay layer and A4-08 consumer offsets are explicit
+storage/read composition contracts, not runtime activation. Constructing them
+starts no thread, timer, scheduler, network request or Agent 3 work. The timeline
+creates no directory until an explicit append; replay never mutates timeline
+bytes; the consumer store creates no directory until an explicit offset save.
+Any runtime mount, recurring ingestion loop, distributed consumer lease, binary
+evidence vault or cross-process writer is a separate integration decision.

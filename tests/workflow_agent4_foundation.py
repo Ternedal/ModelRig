@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Auto-discovered Agent 4 workflow gate for foundation and replay cases."""
+"""Auto-discovered Agent 4 workflow gate for foundation, replay and consumers."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from support.agent4_foundation_core import (
     Agent4WatchdogCoordinatorTests,
     Agent4WatchdogPolicyTests,
 )
+from support.agent4_timeline_consumer_cases import Agent4TimelineConsumerTests
 from support.agent4_timeline_replay_cases import Agent4TimelineReplayTests
 
 
