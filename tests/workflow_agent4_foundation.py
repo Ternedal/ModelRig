@@ -12,6 +12,9 @@ from support.agent4_foundation_core import (
     Agent4WatchdogPolicyTests,
 )
 from support.agent4_timeline_consumer_cases import Agent4TimelineConsumerTests
+from support.agent4_timeline_consumer_flight_cases import (
+    Agent4TimelineConsumerFlightTests,
+)
 from support.agent4_timeline_replay_cases import Agent4TimelineReplayTests
 
 
