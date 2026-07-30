@@ -26,13 +26,96 @@ private data class RagSourcesLine(val sources: List<RagSourceHit>? = null)
 private data class RagMsg(val content: String = "")
 
 @Serializable
-private data class RagContentLine(val message: RagMsg = RagMsg())
+private data class RagContentLine(
+    val message: RagMsg = RagMsg(),
+    val done: Boolean = false,
+)
+
+@Serializable
+private data class RagErrorLine(val error: String = "")
 
 @Serializable
 private data class RagSourceEntry(val source: String = "")
 
 @Serializable
 private data class RagSourceListResponse(val sources: List<RagSourceEntry> = emptyList())
+
+/**
+ * Hvad en linje i `/rag/chat`-stroemmen ER -- afgjort af dens FORM, ikke dens
+ * plads i stroemmen.
+ *
+ * Den tidligere loekke genkendte kildehovedet med `if (first)`. Det virkede,
+ * fordi hovedet altid kom foerst, men det gjorde parseren afhaengig af
+ * raekkefoelgen: den dag workeren udsender en linje foer hovedet -- fx
+ * fase-signalet (ROADMAP, fase-signal) -- ville `first` blive brugt op paa den
+ * linje, hovedet ville falde igennem til indholdsgrenen, og kildechipsene
+ * ville forsvinde UDEN en fejl. En tavs forsvinding er den dyreste slags.
+ *
+ * Formbaseret dispatch gaer det umuligt og giver samtidig paritet med Androids
+ * `StreamContract`, som allerede afgoer efter form. Ukendte linjer bliver
+ * [Event.Ignored] -- praecis som Androids `StreamEvent.Ignored` -- saa nye
+ * event-typer er additive og bagudkompatible.
+ */
+internal object RagStreamParser {
+    private val json = Json { ignoreUnknownKeys = true }
+
+    internal sealed interface Event {
+        data class Sources(val names: List<String>) : Event
+        data class Delta(val text: String) : Event
+
+        /** Workerens terminale linje. `trailingDelta` kan baere sidste tekst. */
+        data class Done(val trailingDelta: String = "") : Event
+
+        /**
+         * En bar `{"error": "..."}` fra workeren.
+         *
+         * Den linje forsvandt tavst her: den har ingen `message.content`, saa
+         * den gamle afkodning gav en tom delta og droppede den. Workeren
+         * udsender den netop for at efterlade en GRUND paa traaden naar Ollama
+         * doer midt i et svar (`main_impl.py`, /rag/chat). Uden dette tilfaelde
+         * saa brugeren et afbrudt svar uden aarsag.
+         */
+        data class Failure(val message: String) : Event
+
+        data object Ignored : Event
+    }
+
+    fun parse(line: String): Event {
+        if (line.isBlank()) return Event.Ignored
+        val sources = runCatching {
+            json.decodeFromString(RagSourcesLine.serializer(), line).sources
+        }.getOrNull()
+        if (sources != null) {
+            return Event.Sources(sources.map { it.source }.filter { it.isNotEmpty() })
+        }
+        val error = runCatching {
+            json.decodeFromString(RagErrorLine.serializer(), line).error
+        }.getOrDefault("")
+        if (error.isNotEmpty()) return Event.Failure(error)
+        val content = runCatching {
+            json.decodeFromString(RagContentLine.serializer(), line)
+        }.getOrNull() ?: return Event.Ignored
+        if (content.done) return Event.Done(content.message.content)
+        return if (content.message.content.isNotEmpty()) {
+            Event.Delta(content.message.content)
+        } else {
+            Event.Ignored
+        }
+    }
+
+    /**
+     * Hvad en udtoemt stroem betyder. Null = en aegte fuldfoerelse.
+     *
+     * Samme ordlyd som Androids `StreamContract.terminalFailure`, saa de to
+     * klienter siger det samme til den samme bruger: et afbrudt svar og et
+     * svar der aldrig startede er forskellige fejl, og ingen af dem er succes.
+     */
+    fun terminalFailure(sawTerminal: Boolean, sawContent: Boolean): String? = when {
+        sawTerminal -> null
+        sawContent -> "svaret blev afbrudt undervejs — forbindelsen lukkede før modellen var færdig; prøv igen"
+        else -> "intet svar modtaget (tom stream) — prøv igen"
+    }
+}
 
 /**
  * Client for the ModelRig backend's RAG endpoints (`/api/v1/rag/chat`,
@@ -81,25 +164,33 @@ class RagClient(private val baseUrl: String, private val bearer: String?) {
         if (resp.statusCode() !in 200..299) {
             throw OllamaException("rag chat failed (${resp.statusCode()})")
         }
-        var first = true
+        // Fail-closed, som OllamaClient.chatStream (F-005) og som Androids
+        // ragChatStream: EOF er ikke succes. Et droppet socket eller en
+        // proxy-timeout afslutter ogsaa sekvensen paent, saa fuldfoerelse
+        // kraever workerens terminale linje -- og et afbrudt svar skal
+        // skelnes fra et der aldrig startede.
+        var sawDone = false
+        var sawContent = false
         resp.body().forEach { line ->
-            if (line.isBlank()) return@forEach
-            if (first) {
-                first = false
-                val srcs = runCatching {
-                    json.decodeFromString(RagSourcesLine.serializer(), line).sources
-                }.getOrNull()
-                if (srcs != null) {
-                    onSources(srcs.map { it.source }.filter { it.isNotEmpty() })
-                    return@forEach
+            when (val event = RagStreamParser.parse(line)) {
+                is RagStreamParser.Event.Sources -> onSources(event.names)
+                is RagStreamParser.Event.Delta -> {
+                    sawContent = true
+                    onDelta(event.text)
                 }
-                // fell through: first line wasn't a sources header, treat as content below
+                is RagStreamParser.Event.Done -> {
+                    if (event.trailingDelta.isNotEmpty()) {
+                        sawContent = true
+                        onDelta(event.trailingDelta)
+                    }
+                    sawDone = true
+                }
+                is RagStreamParser.Event.Failure ->
+                    throw OllamaException("rag chat: ${event.message}")
+                RagStreamParser.Event.Ignored -> Unit
             }
-            val delta = runCatching {
-                json.decodeFromString(RagContentLine.serializer(), line).message.content
-            }.getOrDefault("")
-            if (delta.isNotEmpty()) onDelta(delta)
         }
+        RagStreamParser.terminalFailure(sawDone, sawContent)?.let { throw OllamaException(it) }
     }
 
     /** Lists ingested RAG source names, for the source-filter picker. */

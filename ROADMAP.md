@@ -271,6 +271,36 @@ manuelle trin efter genstart.
   oprydning**: den er ikke-blokerende for rig-dagen og ligger efter
   PR-oprydningen. Agent3-overfladen kræver koordinering med Sol.
 
+  **MÅLT 30/7 før implementering — beslutningen står, men det er ikke en
+  additiv ændring.** Tre kendsgerninger, målt i koden:
+
+  1. **Den vigtigste fase kan ikke udsendes som den er.** I `/rag/chat`
+     (`main_impl.py`) kaldes `rag.query(...)` **før** `gen()` og før
+     `StreamingResponse` returneres. Når strømmen åbner, er søgningen forbi.
+     "Søger i din viden…" kan altså ikke sendes additivt — den kræver at
+     strømmen åbnes før hentningen, dvs. at `gen()` overtager retrieval og at
+     dens Ollama-fejl bliver en strøm-fejl i stedet for en ren 502. Det er en
+     kontraktændring på fejlvejen, ikke en ny linje.
+  2. **Tools-fasen har ingen strøm overhovedet.** `_run_tool_loop` (linje 686,
+     kaldt fra 845 og 893) returnerer et færdigt objekt. "Kører værktøj…"
+     kræver at tool-loopet bliver en generator — det største enkeltstykke.
+  3. **Additive linjer er til gengæld sikre — men kun efter kildehovedet.**
+     Androids `StreamContract.parse` ender på `StreamEvent.Ignored`, og
+     desktops `RagClient` dropper linjer uden `message.content`. Ukendte
+     events er derfor harmløse. MEN desktops løkke er **positionsafhængig**:
+     `if (first)` bruges til at genkende kildehovedet, så en fase-linje FØR
+     hovedet ville få kildechipsene til at forsvinde i stilhed. Enhver
+     fase-linje skal ligge efter hovedet, og desktops parser bør gøres
+     formbaseret frem for positionsbaseret.
+
+  **Rækkefølge, hvis det skal bygges:** (a) gør desktops parser formbaseret —
+  lille, sikker, og fjerner fælden uanset resten; (b) flyt retrieval ind i
+  `gen()` for `/rag/chat`, så `searching` og `generating` kan udsendes, med
+  fejlvejens kontraktændring dokumenteret; (c) gør tool-loopet streamende, så
+  `tool_run` kan udsendes; (d) typed `Phase`-event i `StreamContract` +
+  desktop, og først til sidst UI'et. Punkt (a) kan landes når som helst;
+  (b) og (c) er egne opgaver med egne tests.
+
 - **Research-sporet.** Præmissen her var forkert og er rettet 27/7. Sporet er
   ikke ét dvalende hele: **`research_contract` og `research_egress` er i drift.**
   `research_contract` importeres af `web_fetch.py`, `browser_host.py` og
@@ -484,6 +514,11 @@ uændret. Rækkefølgen ændrer sig:
    internettet uden at den beviste artefakt ændres.
 3. **Paritetsgaten (vej 3) er uafhængig af 1 og 2** og kan bygges nu — men den
    skal pinne den *målte* forskel ovenfor, ikke en påstået lighed.
+   **Bygget 30/7: `tests/workflow_web_research_parity.py`** — konvoluttens
+   rækkefølge og complete-i-finally bevist behavioralt (ved kald, lektie 32),
+   evidens-asymmetrien og det manglende produktionskaldested frosset som
+   bevidste pins, der SKAL flippes ved hhv. trin 2 og trin 1. Gaten er dermed
+   checklisten for begge trin.
 
 **Anbefaling (Claude, 29/7): (c), efter trin 1.** Den giver præcis det
 beslutningen ville — produktionskode der har rørt internettet — uden at røre
