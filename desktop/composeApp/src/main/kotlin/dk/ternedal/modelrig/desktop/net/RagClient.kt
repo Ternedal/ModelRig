@@ -160,8 +160,11 @@ class RagClient(private val baseUrl: String, private val bearer: String?) {
         model: String?,
         sourceFilter: String?,
         onSources: (List<String>) -> Unit,
-        onDelta: (String) -> Unit,
+        // onPhase staar FOER onDelta med vilje: kaldstederne bruger
+        // trailing-lambda for deltaerne, og Kotlin binder den til den SIDSTE
+        // parameter. Med onPhase sidst bandt deltaerne til fasen.
         onPhase: (String) -> Unit = {},
+        onDelta: (String) -> Unit,
     ) {
         val payload = json.encodeToString(
             RagChatRequest.serializer(),
