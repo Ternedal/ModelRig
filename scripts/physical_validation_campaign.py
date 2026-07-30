@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Aggregate every physical ModelRig proof, including T-021 task UI evidence.
 
-The pre-T-021 campaign implementation is preserved byte-for-byte in
+The current-main campaign implementation is preserved byte-for-byte in
 ``physical_validation_campaign_core.py``. This wrapper re-exports that API and
 adds one independently validated evidence domain without rewriting the existing
 seven validators.
@@ -9,14 +9,28 @@ seven validators.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import platform
 import socket
 from datetime import datetime, timezone
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
-import physical_validation_campaign_core as _core
-import physical_validation_task_ui as _task_ui
+
+def _load_sibling(module_name: str, filename: str) -> ModuleType:
+    """Load a sibling module without relying on the caller's ``sys.path``."""
+    path = Path(__file__).resolve().with_name(filename)
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load campaign sibling: {filename}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_core = _load_sibling("physical_validation_campaign_core", "physical_validation_campaign_core.py")
+_task_ui = _load_sibling("physical_validation_task_ui", "physical_validation_task_ui.py")
 
 # Preserve the complete historical module API, including private helpers used by
 # the repository's contract tests. Explicit wrapper functions below intentionally
@@ -57,7 +71,7 @@ _safe_error = _core._safe_error
 
 
 def _legacy_campaign_report(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    # The historical test monkey-patches these names on this wrapper. Mirror the
+    # Historical tests monkey-patch these names on this wrapper. Mirror the
     # current bindings into the untouched core before delegating.
     _core.candidate_identity = candidate_identity
     _core._load_agent3_assessor = _load_agent3_assessor
