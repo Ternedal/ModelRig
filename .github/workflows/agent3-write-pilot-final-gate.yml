@@ -1,0 +1,34 @@
+name: agent3-write-pilot-final-gate-contract
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent3-write-pilot-final-gate-contract-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-contract:
+    name: validate dormant final-gate contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact ref
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate final-gate implementation
+        run: python tests/workflow_agent3_write_pilot_final_gate.py
+
+      - name: State physical boundary
+        run: |
+          echo "This hosted workflow validates only the dormant gate contract."
+          echo "It does not access the Windows rig, paired device or local T-022 report."
+          echo "production_activation=false"
