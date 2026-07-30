@@ -38,8 +38,20 @@ WEB_RESEARCH_SPEC = Tool(
         "type": "object",
         "properties": {
             "url": {"type": "string", "description": "Absolut https-URL"},
+            # Maalt 30/07-2026 (D7 trin 1): kontrakten landede FOER henteren, og
+            # henteren kraever et formaal -- `build_intent` afviser en tom
+            # `purpose`, saa en spec uden feltet kan kun producere blokerede
+            # kald. Formaalet er desuden praecis det, mennesket godkender paa
+            # kortet: "hent X" og "hent X for at Y" er ikke samme beslutning.
+            "purpose": {
+                "type": "string",
+                "description": "Formålet med hentningen; vises på kortet",
+            },
         },
-        "required": ["url"],
+        "required": ["url", "purpose"],
+        # Lukket skema: der findes ingen kanal ekstra kontekst kan rejse i
+        # (D4). En ukendt noegle er afvist, ikke ignoreret.
+        "additionalProperties": False,
     },
     run=None,  # dvalende: ingen eksekvering før aktivering er besluttet
     sensitivity="public",

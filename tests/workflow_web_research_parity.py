@@ -3,9 +3,10 @@
 Gaten pinner den MAALTE forskel (ROADMAP D7, maalingen 29/7), ikke en paastaaet
 lighed. Den fryser tre kendsgerninger, som HVER ISAER er et bevidst flip-punkt:
 
-  FLIP VED TRIN 1 (produktionskaldested): del E maaler, at WebResearchFetcher
-  ikke konstrueres nogen steder uden for sin egen test. Naar kaldestedet
-  landes, SKAL pinnen opdateres med stien til det -- gaten er checklisten.
+  FLIPPET VED TRIN 1 (30/07-2026): del E maalte, at WebResearchFetcher ikke
+  blev konstrueret nogen steder uden for sin egen test. Kaldestedet er landet
+  som ToolGate-vaerktoejet, og pinnen peger nu paa praecis den ene sti.
+  Dukker der en anden op, er det en ny udgaaende sti -- og en ny beslutning.
 
   FLIP VED TRIN 2 (evidens-konvergens, mulighed (b)): del C+D maaler, at
   scriptet baerer evidenslaget (fulfillment-controller, claim-bundet evidens,
@@ -218,10 +219,11 @@ constructions: list[str] = []
 for base in (ROOT / "worker", ROOT / "scripts"):
     for path in base.rglob("*.py"):
         if "WebResearchFetcher(" in path.read_text(encoding="utf-8"):
-            constructions.append(str(path.relative_to(ROOT)))
-check(constructions == [],
-      "MAALT (flip ved D7 trin 1): WebResearchFetcher konstrueres endnu ikke i "
-      f"produktion -- opdater pinnen med kaldestedets sti naar det lander ({constructions})")
+            constructions.append(str(path.relative_to(ROOT)).replace("\\", "/"))
+check(sorted(constructions) == ["worker/app/web_research_tool.py"],
+      "MAALT (flippet ved D7 trin 1, 30/07-2026): henteren konstrueres PRAECIS "
+      "eet sted i produktion -- ToolGate-vaerktoejet. Dukker der flere op, er "
+      f"det en ny udgaaende sti og en ny beslutning ({constructions})")
 
 print(f"\n===== WEB RESEARCH PARITY (D7 vej 3): {PASSED} passed, {FAILED} failed =====")
 if FAILED:

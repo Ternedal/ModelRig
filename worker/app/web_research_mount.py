@@ -50,11 +50,20 @@ def build_web_research_router() -> APIRouter:
 
 
 def mount_web_research(app: FastAPI) -> bool:
-    """Montér fladen praecis een gang, og kun efter eksplicit opt-in."""
+    """Montér fladen praecis een gang, og kun efter eksplicit opt-in.
+
+    Siden D7 trin 1 (30/07-2026) omfatter fladen ogsaa `web_research` i
+    ToolGate-REGISTRY -- henterens produktionskaldested. Samme flag, samme
+    vagt: ruten og vaerktoejet er een beslutning. Importen er lazy, saa
+    flaget slukket betyder at tool-modulet aldrig roeres.
+    """
     if not web_research_enabled():
         return False
     if getattr(app.state, _STATE_ATTR, False):
         return True
     app.include_router(build_web_research_router())
+    from .web_research_tool import register_web_research_tool
+
+    register_web_research_tool()
     setattr(app.state, _STATE_ATTR, True)
     return True

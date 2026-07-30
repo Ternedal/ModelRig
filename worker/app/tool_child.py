@@ -40,6 +40,17 @@ def main() -> int:
     # surface, and a malformed request should fail before that cost.
     from .tools import REGISTRY, ToolDenied
 
+    # Gated tools are registered by the ASGI mount in the parent, not at import
+    # of tools.py -- so a fresh child starts WITHOUT them and would answer
+    # "unknown tool" for something the parent just got a yes for. Each
+    # registration function re-checks its own flag, and child_env only passes
+    # the flags a tool named in env_allow, so this stays fail-closed: with the
+    # flag absent nothing is added. Measured 30/07-2026 (D7 step 1); when a
+    # second gated tool arrives, this becomes a list, not a pattern to guess.
+    from .web_research_tool import register_web_research_tool
+
+    register_web_research_tool()
+
     name = req.get("tool")
     args = req.get("args") or {}
     tool = REGISTRY.get(name)

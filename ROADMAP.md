@@ -529,6 +529,36 @@ uanset.
 **Ikke bygget endnu, og skal ikke bygges som oprindeligt formuleret.** Den, der
 tager opgaven: læs de to veje igennem selv først — se lektie 32 i `HANDOFF.md`.
 
+**AFGJORT 30/7 (Anders): trin 1 = et ToolGate-værktøj. LANDET 30/7.**
+Kaldestedet er `web_research` i workerens `REGISTRY`, ikke et nyt endpoint og
+ikke en RAG-sidevej: tools-sporet bærer allerede fase-signalet (`tool_run`),
+bekræftelseskortet og den todelte adgangsmodel, så kortet følger af de akser
+der findes i forvejen (`risk=read` **plus** `network=public`) i stedet for af
+en ny regel. Gaten er den **eksisterende** flade-gate
+`KALIV_WEB_RESEARCH_ENABLED` — ruten og værktøjet er én beslutning, og to
+næsten ens flag ville være en forvekslingsfælde. Ovenpå gælder ToolGates
+almindelige lag (`KALIV_TOOLS_ENABLED` + kort per kald).
+
+Værktøjet **arver** den dvalende `WEB_RESEARCH_SPEC` fra
+`web_research_capability.py` frem for at deklarere en konkurrerende kopi;
+specen forbliver dvalende med `run=None`, og en test pinner at de to ikke kan
+glide fra hinanden. To ting måtte rettes ved aktiveringen: specen manglede
+`purpose` (henteren afviser et tomt formål, så kontrakten som landet kunne kun
+producere blokerede kald), og `isolate=True` krævede at `tool_child`
+bootstrapper de gatede registreringer — ellers ville et isoleret kald svare
+`unknown tool` på et godkendt værktøj, først den dag nogen satte
+`KALIV_TOOL_ISOLATION=process`.
+
+D4 holdes strukturelt frem for disciplinært: `run()` tager kun `url` og
+`purpose`, skemaet er lukket (`additionalProperties: false`), og en ukendt
+nøgle afvises **før** kompositionen bygges. Der findes altså ingen kanal
+RAG-kontekst kan rejse i — pinnet i `tests/worker_web_research_tool.py`.
+
+Paritetsgatens del E er flippet: den peger nu på `worker/app/web_research_tool.py`
+som henterens ene produktionskaldested. Dukker der et andet op, er det en ny
+udgående sti og en ny beslutning. **Trin 2 (evidens-konvergens) og rig-dagens
+form (c) står uændret.**
+
 
 *Afgjort 13/7-2026: **D1** keystore = risiko accepteret (`SECURITY.md`) · **D2** VERSION-kilde
 + CI-gate = leveret · **D5** dokumentstruktur = lean (denne fil + `STATUS.md` + `SECURITY.md`)

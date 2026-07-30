@@ -53,6 +53,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_TOOLS_ENABLED` | `0` |
 | `KALIV_TOOL_ISOLATION` | `` |
 | `KALIV_VISION_MODEL` | `(unset)` |
+| `KALIV_WEB_RESEARCH_ENABLED` | `` |
 | `KALIV_WORKER_ALLOW_LAN` | `0` |
 
 ## Desktop credential storage
@@ -231,6 +232,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_web_research_fetch.py`
 - `tests/worker_web_research_intent.py`
 - `tests/worker_web_research_mount.py`
+- `tests/worker_web_research_tool.py`
 - `tests/workflow_access_derivation_parity.py`
 - `tests/workflow_action_pins.py`
 - `tests/workflow_activation_readiness.py`

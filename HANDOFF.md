@@ -75,6 +75,25 @@ dem, minde om dem eller starte en diskussion om dem.
 push/tag-kommandoer, men **`sed 's/github_pat_[A-Za-z0-9_]*/***REDACTED***/g'`
 når du skal LÆSE tool-output** — ellers redigerer du din egen evidens væk.
 
+**Tre beslutninger truffet af Anders 30/7 — genåbn dem ikke:**
+
+7. **D7 trin 1 = et ToolGate-værktøj.** Henterens produktionskaldested er
+   `web_research` i workerens `REGISTRY`, ikke et nyt endpoint og ikke en
+   RAG-sidevej. Gaten er den eksisterende flade-gate
+   `KALIV_WEB_RESEARCH_ENABLED` — ét navn for én flade. Rig-dagens form er
+   **(c)**: scriptet frosset som `.retained` plus ét separat produktionskald
+   mod en rigtig URL. **Landet 30/7** (se §9).
+8. **`#163` lukkes; desktop-sporet reddes separat.** Research-delen er
+   supersederet, og branchens `capability_schema`-ændring ville tavst
+   genindføre den forkastede `external`-adgangsklasse. De 12 desktop-moduler
+   + 11 testfiler (Computer Use I3/I4) løftes i en frisk branch mod main —
+   kun A-filer, versionsrodet fladet ud undervejs. Milepælen defineres i
+   ROADMAP; navnet `F5` genoplives ikke.
+9. **Android-palettens divergens er et bevidst platformsvalg.** Forskellen i
+   mætning (29,5 % mod 9,4 %) pinnes med dokumenteret override i token-laget
+   plus test, så velmenende oprydning ikke kan slette den tavst. Det
+   æstetiske valg træffes på rig-dagen med begge apps foran sig.
+
 ---
 
 ## 1. Hvad projektet er
@@ -644,7 +663,49 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     `#250`/`#251` (blot gamle, gik rigtigt af sig selv) — samme syv filer,
     modsat udfald. Kør tjekket; gæt det ikke.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 29/7)
+## 9. Kø — hvem har bolden (16/7, opdateret 30/7)
+
+**[30/7, aften — D7 trin 1 LANDET. claim: Claude 30/7 22:32 — scope:
+`worker/app/web_research_tool.py` (ny), `web_research_capability.py`,
+`web_research_mount.py`, `tool_child.py`, `tests/worker_web_research_tool.py`
+(ny), paritetsgatens del E.]**
+
+Anders traf de tre åbne beslutninger (§0 nr. 7–9). Denne blok er trin 1 af
+dem; de to andre venter stadig i køen.
+
+*Hvad der landede:* `web_research` er nu henterens ene produktionskaldested,
+registreret i `REGISTRY` bag `KALIV_WEB_RESEARCH_ENABLED` — samme flag som
+ruten, monteret fra samme selvvagtende sted (`mount_web_research`).
+
+Tre fund undervejs, som ikke stod i oplægget:
+
+1. **Kontrakten fandtes allerede.** `web_research_capability.py` landede
+   `WEB_RESEARCH_SPEC` før featuren, dvalende med `run=None`. Værktøjet
+   **arver** den med `dataclasses.replace` frem for at deklarere en næsten
+   ens kopi (lektie 29). Kontrakten forbliver dvalende, og en test pinner at
+   de to ikke kan glide fra hinanden.
+2. **Kontrakten manglede `purpose`.** Henteren kræver et formål —
+   `build_intent` afviser et tomt — så specen som landet kunne kun producere
+   blokerede kald. `purpose` er tilføjet med `additionalProperties: false`.
+   Formålet er desuden præcis det, mennesket godkender på kortet.
+3. **`isolate=True` var en halv sandhed.** Et isoleret barn bygger sin EGEN
+   `REGISTRY` og kendte derfor ikke et gate-registreret værktøj: kaldet ville
+   svare `unknown tool` på noget forælderen lige havde fået et ja til — og
+   først den dag nogen satte `KALIV_TOOL_ISOLATION=process`. `tool_child`
+   bootstrapper nu de gatede registreringer, og værktøjet navngiver sit eget
+   flag i `env_allow` (`child_env` filtrerer alt andet væk). Bevist
+   ende-til-ende: med flag hentede barnet en rigtig side (200, 559 bytes,
+   ægte binding og opløst IP); uden flag `unknown tool`.
+
+*Verificeret lokalt før landing:* CI's `ruff`-kommando ren, hele
+`tests/worker_*.py` + `tests/workflow_*.py` grøn, paritetsgatens del E flippet
+til at pege på det ene kaldested, `ACTIVATION_READINESS.md` +
+`CURRENT_STATE.md` regenereret med deres egne generatorer (flaget dukkede op
+som switch nr. 14 — det literale `os.getenv` på registreringsstedet er
+grunden; mount-modulets konstant var en blind plet).
+
+*Stadig i Claudes kø:* desktop-redningen (§0 nr. 8) og palette-pinnen
+(§0 nr. 9). Rig-dagens form (c) er uændret og hører til rig-dagen.
 
 **[29/7, sent — Anders har truffet beslutningerne. Otte PRs lukket, fire
 beslutninger registreret, t021 STOPPET af ejerskabsaftalen.]**
