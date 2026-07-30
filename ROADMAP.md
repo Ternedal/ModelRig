@@ -484,6 +484,11 @@ uændret. Rækkefølgen ændrer sig:
    internettet uden at den beviste artefakt ændres.
 3. **Paritetsgaten (vej 3) er uafhængig af 1 og 2** og kan bygges nu — men den
    skal pinne den *målte* forskel ovenfor, ikke en påstået lighed.
+   **Bygget 30/7: `tests/workflow_web_research_parity.py`** — konvoluttens
+   rækkefølge og complete-i-finally bevist behavioralt (ved kald, lektie 32),
+   evidens-asymmetrien og det manglende produktionskaldested frosset som
+   bevidste pins, der SKAL flippes ved hhv. trin 2 og trin 1. Gaten er dermed
+   checklisten for begge trin.
 
 **Anbefaling (Claude, 29/7): (c), efter trin 1.** Den giver præcis det
 beslutningen ville — produktionskode der har rørt internettet — uden at røre
