@@ -601,9 +601,23 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     19/7). Målt mod PR'ens egen merge-base var den fil derfor en *revert* af
     hærdningen — og fordi main ikke havde rørt den region, anvendte git
     reverten **rent, uden konflikt og uden et ord**. `canonicalize` faldt
-    tilbage til `else -> value.toString()`: fail-open på ukendte JSON-typer i
-    den kanoniske form, som digests hviler på. Den lå på main i tre timer og
-    blev kun fanget, fordi `#246` tilfældigvis bar den hærdede udgave.
+    tilbage til `else -> value.toString()`. Den lå på main i tre timer og blev
+    kun fanget, fordi `#246` tilfældigvis bar den hærdede udgave.
+
+    **Målt bagefter, og det korrigerer min egen første beskrivelse:** ingen
+    digest var nogensinde forkert. Skemaet indeholder kun strenge, booleans,
+    objekter, arrays og null, og for hver af dem giver de to udgaver
+    byte-identisk output (`is Boolean -> toString()` mod `else -> toString()`).
+    Kun tal ville afvige (`numberToString` mod `toString`), og skemaet har
+    ingen numeriske felter. Dertil er inputtet til `canonicalize`
+    `JSONObject(source.toString())` — en genparsning fra JSON-tekst — så en
+    ikke-JSON-native type kan strukturelt ikke nå frem. Den svækkede gren var
+    uopnåelig ved konstruktion.
+
+    Lektien står uændret, for den handler om mekanismen, ikke om skaden: en
+    stale kopi bliver til en tavs revert. Men **skriv altid den målte
+    alvorlighed, ikke den frygtede** — jeg kaldte det først fail-open på
+    digest-stien, og det var mere alarmerende end fakta bar.
 
     **Reglen:** for hver fil en branch rører, diff hele filen mod main før
     landing — ikke kun den ændring du kom for. "Ingen konflikter" betyder at
