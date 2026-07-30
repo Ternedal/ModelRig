@@ -8,6 +8,7 @@ if errorlevel 1 (
   exit /b 2
 )
 
+rem Current-main binding delegates through agent3_write_pilot_final_gate_operator.py.
 python scripts\agent3_write_pilot_current_main.py
 set EXIT_CODE=%ERRORLEVEL%
 

@@ -33,16 +33,21 @@ check(RUNBOOK.is_file(), "the current-main operator note exists")
 entry_source = ENTRY.read_text(encoding="utf-8")
 launcher_source = LAUNCHER.read_text(encoding="utf-8")
 runbook_source = RUNBOOK.read_text(encoding="utf-8")
+launcher_commands = [
+    line.strip().lower()
+    for line in launcher_source.splitlines()
+    if line.strip().lower().startswith("python ")
+]
 
 check(EXPECTED_BRANCH in entry_source, "the entrypoint pins the exact current-main candidate branch")
 check(EXPECTED_VERSION in entry_source, "the entrypoint pins the repository VERSION")
 check(
-    "agent3_write_pilot_current_main.py" in launcher_source,
-    "the top-level launcher calls only the current-main binding",
+    launcher_commands == [r"python scripts\agent3_write_pilot_current_main.py"],
+    "the top-level launcher executes only the current-main binding",
 )
 check(
-    "agent3_write_pilot_final_gate_operator.py" not in launcher_source,
-    "the launcher cannot bypass current-main binding",
+    "agent3_write_pilot_final_gate_operator.py" in launcher_source,
+    "the launcher documents that the binding still delegates through the final gate",
 )
 check(EXPECTED_BRANCH in runbook_source, "the runbook names the exact candidate branch")
 check(EXPECTED_VERSION in runbook_source, "the runbook names the exact candidate version")
