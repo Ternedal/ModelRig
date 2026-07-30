@@ -95,7 +95,8 @@
         "decidedBy": "Anders",
         "decidedOn": "2026-07-30",
         "reason": "Maalt 30/07-2026: Androids vaerdi giver 7,96:1 mod appens lyse baggrund (#F7F4EF); tokenets vaerdi ville give 5,13:1 paa samme baggrund. Begge bestaar AA (4,5), men kun den foerste bestaar AAA (7,0). Telefonen laeses i dagslys, desktoppen sjaeldent. At 'loefte' Android til tokenet er derfor ikke en oprydning men en maalbar tilbagegang i laesbarhed netop der hvor den betyder mest.",
-        "revisit": "Rig-dagen, med begge apps foran sig: loeft tokenet, saenk Android, eller behold divergensen permanent. Indtil da er den en truffet beslutning, ikke et aabent spoergsmaal."
+        "revisit": "Rig-dagen, med begge apps foran sig: loeft tokenet, saenk Android, eller behold divergensen permanent. Indtil da er den en truffet beslutning, ikke et aabent spoergsmaal.",
+        "precedent": "Tokenets egen vaerdi er ikke tilfaeldig: den blev moerknet 27/07-2026 netop for at naa WCAG AA (commit 52769855, 'darken light.muted to reach WCAG AA'). Et loeft til Androids vaerdi ville derfor vaere den ANDEN moerkning i samme retning -- en fortsaettelse af tokenets egen historie, ikke en kursaendring. Det er den oplysning rig-dagens valg mangler, hvis man kun ser de to tal."
       }
     }
   }
