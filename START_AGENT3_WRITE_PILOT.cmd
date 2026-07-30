@@ -8,12 +8,12 @@ if errorlevel 1 (
   exit /b 2
 )
 
-python scripts\agent3_write_pilot_final_gate_operator.py
+python scripts\agent3_write_pilot_current_main.py
 set EXIT_CODE=%ERRORLEVEL%
 
 if not "%EXIT_CODE%"=="0" (
   echo.
-  echo T-022 final gate stoppede sikkert med exit %EXIT_CODE%.
+  echo T-022 current-main final gate stoppede sikkert med exit %EXIT_CODE%.
   echo Ingen gammel groen final-gate eller produktionsaktivering er blevet efterladt.
 )
 
