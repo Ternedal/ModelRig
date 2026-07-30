@@ -146,6 +146,30 @@ slår baseline på tool-disciplin · cloud-routing er synlig + følger skreven p
 - **Integrationer:** Home Assistant read-only → writes m. confirmation gate · scheduler for
   read-only jobs · eksternt API m. scoped credentials + transportbeskyttelse.
 
+### Agent 4 — arkitektur fastlagt 30/7-2026
+
+Referencearkitekturen er valgt: **gren `#258` (B)**. Beslutningerne står i
+`AGENT_4_ARCHITECTURE_DECISIONS.md` (ADR-A4-001 til A4-004) og håndhæves af
+`tests/workflow_agent4_storage_boundary.py` og
+`tests/workflow_agent4_dormant_runtime.py`.
+
+Åbne roadmap-punkter, der følger af beslutningen:
+
+- **Evidens som first-class timeline record** oven på B's lagringsmodel
+  (ADR-A4-001a). Gren A's model gjorde evidens til en selvstændig, adresserbar
+  post i den ordnede strøm; B hænger evidens på en hændelse som reference.
+  A's model er rigere for et kommende operator-/API-lag, og funktionen er
+  udskudt — ikke forkastet.
+- **Omdøbning af `watchdog.py`, `scheduler.py` og `retry_scheduling.py`**
+  (ADR-A4-004), gennemgået samlet og udført **før** `#253` lander.
+- **Genvurdering af den resterende A4-stak** mod B som referencearkitektur.
+
+Bevidst *ikke* på listen nu: de to stores læser og verificerer hele kæden ved
+hver append, så n appends koster O(n²). Det er et accepteret valg —
+korrekthed før performance. Et dvalende system må gerne betale CPU for
+stærkere integritet, og optimeringen kan senere ske bag samme kontrakt.
+Genbesøges når en kampagne bliver lang nok til at det kan måles.
+
 ### Computer Use (Tier B) — milepælen, defineret 30/7-2026
 
 Erstatter den udefinerede reference til "F5", som aldrig blev beskrevet noget
