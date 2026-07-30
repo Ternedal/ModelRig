@@ -91,6 +91,13 @@ from .timeline import (
     JsonlCampaignTimelineStore,
     TIMELINE_SCHEMA,
 )
+from .timeline_lock import (
+    CampaignTimelineFileLease,
+    CampaignTimelineLockError,
+    CampaignTimelineLockTimeout,
+    FileCampaignTimelineLockManager,
+    ProcessSafeCampaignTimeline,
+)
 from .watchdog_adapters import (
     CampaignWatchdogFailClosedService,
     CheckpointPayloadProvider,
@@ -133,7 +140,10 @@ __all__ = [
     "CampaignTimelineEntry",
     "CampaignTimelineEntryType",
     "CampaignTimelineError",
+    "CampaignTimelineFileLease",
     "CampaignTimelineIntegrityError",
+    "CampaignTimelineLockError",
+    "CampaignTimelineLockTimeout",
     "WatchdogPolicy",
     "WatchdogServiceAdapters",
     "WatchdogLifecycleService",
@@ -184,6 +194,7 @@ __all__ = [
     "DispatchResult",
     "DuplicateCampaignError",
     "DurableCampaignEventBus",
+    "FileCampaignTimelineLockManager",
     "GENESIS_HASH",
     "IdGenerator",
     "InMemoryCampaignEventBus",
@@ -191,6 +202,7 @@ __all__ = [
     "JsonCheckpointStore",
     "JsonlCampaignTimelineStore",
     "InMemoryResourceLeaseManager",
+    "ProcessSafeCampaignTimeline",
     "ResourceDispatchResult",
     "ResourceLease",
     "ResourceLeaseConflictError",
