@@ -43,6 +43,42 @@ class RagStreamParserTest {
     }
 
     @Test
+    fun bareErrorLineBecomesAFailure() {
+        // Den linje forsvandt tavst foer: ingen message.content -> tom delta.
+        // Workeren udsender den netop for at efterlade en GRUND paa traaden.
+        assertEquals(
+            RagStreamParser.Event.Failure("ollama nede"),
+            RagStreamParser.parse("""{"error":"ollama nede"}"""),
+        )
+    }
+
+    @Test
+    fun terminalLineIsRecognisedAndCanCarryTrailingText() {
+        assertEquals(
+            RagStreamParser.Event.Done(""),
+            RagStreamParser.parse("""{"message":{"content":""},"done":true}"""),
+        )
+        assertEquals(
+            RagStreamParser.Event.Done("sidste ord"),
+            RagStreamParser.parse("""{"message":{"content":"sidste ord"},"done":true}"""),
+        )
+    }
+
+    @Test
+    fun terminalFailureDistinguishesTruncatedFromEmpty() {
+        assertEquals(null, RagStreamParser.terminalFailure(sawTerminal = true, sawContent = true))
+        assertEquals(null, RagStreamParser.terminalFailure(sawTerminal = true, sawContent = false))
+        assertEquals(
+            "svaret blev afbrudt undervejs — forbindelsen lukkede før modellen var færdig; prøv igen",
+            RagStreamParser.terminalFailure(sawTerminal = false, sawContent = true),
+        )
+        assertEquals(
+            "intet svar modtaget (tom stream) — prøv igen",
+            RagStreamParser.terminalFailure(sawTerminal = false, sawContent = false),
+        )
+    }
+
+    @Test
     fun unknownEventsAreIgnoredNotShownAsText() {
         // Bagudkompatibilitet: en ny event-type maa aldrig lande i chatteksten.
         assertEquals(
