@@ -139,6 +139,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_task_readiness.py`
 - `tests/worker_agent3_task_readiness_entrypoint.py`
 - `tests/worker_agent3_task_surface.py`
+- `tests/worker_agent3_task_ui_validation.py`
 - `tests/worker_agent3_unattended_execution.py`
 - `tests/worker_agent3_validation_gate.py`
 - `tests/worker_agent3_validation_path_contract.py`
@@ -255,6 +256,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_doc_authority.py`
 - `tests/workflow_freeze_check.py`
 - `tests/workflow_physical_validation_campaign.py`
+- `tests/workflow_physical_validation_campaign_task_ui.py`
 - `tests/workflow_physical_validation_final_gate.py`
 - `tests/workflow_release.py`
 - `tests/workflow_remaining_physical_pilots.py`
