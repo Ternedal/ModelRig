@@ -10,7 +10,12 @@ from .. import tools
 from .core import AgentRun, RunState, StepState
 
 SCHEMA = "kaliv-agent3-termination/v1"
-_TERMINAL_RUNS = {RunState.COMPLETED, RunState.FAILED, RunState.CANCELLED}
+_TERMINAL_RUNS = {
+    RunState.BLOCKED,
+    RunState.COMPLETED,
+    RunState.FAILED,
+    RunState.CANCELLED,
+}
 _SEMANTICS = {
     "none": "none",
     "cooperative": "cooperative",

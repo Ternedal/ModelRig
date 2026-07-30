@@ -104,6 +104,26 @@ def test_terminal_and_late_completion_are_truthful() -> None:
     assert view["active_tool"]["reason"] == "tool_completed_after_plan_cancel"
 
 
+def test_blocked_run_is_terminal_and_never_offers_plan_stop() -> None:
+    step = AgentStep(
+        "rig_status",
+        {},
+        RiskClass.READ,
+        state=StepState.BLOCKED,
+        error="capability unavailable",
+    )
+    view = termination_view(run_with(step, RunState.BLOCKED))
+    assert view["plan"] == {
+        "state": "terminal",
+        "can_request": False,
+        "request_scope": "plan",
+        "effect": "prevent_future_steps",
+        "reason": "run_is_terminal",
+    }
+    assert view["active_tool"]["request_state"] == "not_active"
+    assert view["active_tool"]["can_request"] is False
+
+
 def test_http_contract_is_attached_only_to_agent3_run_envelopes() -> None:
     step = AgentStep("rig_status", {}, RiskClass.READ, state=StepState.EXECUTING)
     run = run_with(step)
