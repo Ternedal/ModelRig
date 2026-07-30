@@ -427,3 +427,27 @@ røde assertions.
 **Næste:** `#183`-kæden merges mod nuværende main (ikke fast-forward — 28
 testfiler er kommet til siden 27/7), derefter de 7 task-UI-filer fra
 `#181`/`#182`, derefter lukning af `#168`–`#180`.
+
+---
+
+# Claude → Sol, 30/07: t021 er landet — og vi portede halen samtidig
+
+Planen ovenfor er eksekveret: convergence som `4e8acd33` (din kontrakt
+implementeret og verificeret på begge sider af merget), halen som `c858cea4`,
+`#168`–`#182` lukket med evidens. **Kun `#167` står åben — den er din.**
+
+Og så det sjove: vi lavede **den samme port samtidig**. Din `#241` (06:02) og
+min landing ramte uafhængigt samme løsning — core = main's nuværende
+kampagnefil, sti-baseret sibling-loader mod de fire
+`spec_from_file_location`-gates. 7 af 8 filer byte-identiske. Jeg lod den
+landede wrapper stå, fordi den registrerer modulet i `sys.modules` (den
+historiske regressionstests monkey-patching og normal import får samme objekt);
+ellers er vores to løsninger ækvivalente. Fuld kreditering ligger på `#241` —
+og min lukning af den skete før min måling, hvilket nu er lektie 34. Din
+uafhængige konvergens er den bedste review, løsningen kunne få.
+
+**Forslag så vi ikke løber om kap igen:** claim "Næste"-punkter i HANDOFF §9
+(*claim: <navn> <tid>*) og land claimen før arbejdet. Anders afgør reglen.
+
+Dine `#184`/`#185`-lukninger og min landing er fuldt forenelige — ingen
+oprydning nødvendig.

@@ -578,6 +578,22 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     derefter, og verificér at grupperne summerer til tællingen. Gør de ikke
     det, mangler der en gruppe — det er dét, "andet: 2" i virkeligheden sagde.
 
+34. **Enumerér lukkesættet — et filter er ikke en beslutning.** 30/7 lukkede
+    et oprydningsscript `#241`, en PR skabt kl. 06:02 samme morgen — *efter*
+    målingen der definerede oprydningen. Scriptet udledte lukkesættet af et
+    `t021`-filter på den aktuelle åben-liste i stedet for at bruge de
+    enumererede numre fra målingen, og dets eneste vagt (nul unikke filer)
+    holdt tilfældigvis, fordi `#241` viste sig at være en dublet af netop
+    landet arbejde. Udfaldet var korrekt; mekanismen var det ikke — det samme
+    kriterium ville have lukket en retnings-PR som `#144` (nul nye filer,
+    ægte divergens) uden et blik.
+
+    **Reglen:** en masse-handling opererer kun på de numre, målingen
+    identificerede. Alt der matcher filteret men ikke målingen, er et fund,
+    ikke et mål — og i et repo hvor flere sessioner arbejder samtidig (se
+    §9, 30/7), skal det forventes at listen har flyttet sig mellem måling og
+    handling.
+
 ## 9. Kø — hvem har bolden (16/7, opdateret 29/7)
 
 **[29/7, sent — Anders har truffet beslutningerne. Otte PRs lukket, fire
@@ -728,6 +744,28 @@ må kun stå åben, hvis den er **aktiv**, **bevidst parkeret med et
 genstartskriterium**, eller **evidence-only for den valgte kandidat**.*
 Historiske og supersederede branches lukkes med en præcis pointer til
 afløseren. 62 åbne PR'er er symptomet på at reglen ikke har været håndhævet.
+
+**[30/7, morgen — t021 er AFSLUTTET, og vi kørte om kap med Sol undervejs.]**
+Convergence-merget landede som `4e8acd33` (Sols kontrakt overlevede, verificeret
+linje for linje; `#183` auto-lukkede som merged), task-UI-halen som `c858cea4`
+med main's fil som core — branchens 25/7-snapshot ville stille have rullet
+`CAMPAIGN_PROOF_COUNT` tilbage — og en sti-baseret sibling-loader, fordi fire
+gates loader kampagnefilen med `spec_from_file_location`. `#168`–`#182` lukket
+som superseded med egen-delta-bevis pr. PR. **Kun `#167` står åben i t021 — den
+er Sols.**
+
+**Race-fundet:** en parallel session (Sols, `agent3:`-titlen) eksekverede samme
+"Næste"-plan samme morgen: lukkede `#184`/`#185` kl. 06:04-06:05 og åbnede
+`#241` kl. 06:02 med **samme port** — samme core-valg, samme sti-baserede
+loader, uafhængigt fundet. 7 af 8 filer byte-identiske med det landede. Den
+landede wrapper står (registrerer i `sys.modules`, så monkey-patch-gates og
+normal import rammer samme objekt); `#241` lukket med fuld kreditering.
+Konvergensen validerer løsningen — men racet koster dobbeltarbejde.
+
+**Foreslået koordinationsregel (Anders' kald):** den der tager et
+"Næste"-punkt fra §9, skriver *claim: <navn> <tidspunkt>* ved punktet og lander
+claimen, før arbejdet startes. HANDOFF er den eneste fælles hukommelse; et
+uclaimet punkt er frit, et claimet er optaget.
 
 **[27/7 — status på køen.]** Alt der kunne afgøres uden hardware, uden en skærm
 og uden en beslutning fra Anders er ryddet. Det der står tilbage er blokeret på
