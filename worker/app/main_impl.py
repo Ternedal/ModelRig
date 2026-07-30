@@ -937,30 +937,46 @@ async def query(req: QueryReq) -> dict:
 
 @app.post("/rag/chat")
 async def rag_chat(req: QueryReq):
-    """Retrieve context, then STREAM the answer as NDJSON.
+    """STREAM the answer as NDJSON, with the worker's own phase on the wire.
 
-    The retrieval (embedding) happens first, so an Ollama failure there returns a
-    clean 502. The first streamed line is `{"sources": [...]}` (what context was
-    used); the remaining lines are Ollama's chat NDJSON (message.content deltas).
-    A chat failure mid-stream is surfaced as a final `{"error": ...}` line.
+    Line order: `{"phase": "searching"}`, then `{"sources": [...]}` (what context
+    was used), then `{"phase": "generating"}`, then Ollama's chat NDJSON
+    (message.content deltas). A failure anywhere is surfaced as an
+    `{"error": ...}` line.
+
+    **Retrieval happens INSIDE the generator, on purpose.** It used to run before
+    the response opened, which meant an embedding failure returned a clean 502 --
+    but it also meant the stream could not exist until the search was already
+    over, so "searching" was unsendable. The guide asks for three phase messages;
+    a client cannot honestly show one for work that finished before it heard
+    anything. Sol's invariant applies: show server state, do not reconstruct
+    semantics locally.
+
+    The cost is the error path: an embedding failure is now a stream `error`
+    line, not a 502. Measured before making the change -- both clients surface it
+    with the worker's reason attached, and desktop actually improves, because its
+    502 branch only ever showed the bare status code while the error branch
+    carries the text. `/rag/query` keeps its 502; this is the streaming path only.
     """
-    try:
-        matches = (await rag.query(
-            store, req.query, top_k=req.top_k, synthesize=False, source=req.source,
-            min_score=req.min_score,
-        ))["matches"]
-    except oc.OllamaError as e:
-        raise HTTPException(status_code=502, detail=str(e))
-
-    context = "\n\n".join(f"[{m['source'] or m['id']}] {m['text']}" for m in matches)
-    messages = [
-        {"role": "system",
-         "content": "Answer using ONLY the provided context. "
-                    "If the answer is not in the context, say you don't know."},
-        {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {req.query}"},
-    ]
-
     async def gen():
+        yield (json.dumps({"phase": "searching"}) + "\n").encode()
+        try:
+            matches = (await rag.query(
+                store, req.query, top_k=req.top_k, synthesize=False,
+                source=req.source, min_score=req.min_score,
+            ))["matches"]
+        except oc.OllamaError as e:
+            yield (json.dumps({"error": str(e)}) + "\n").encode()
+            return
+
+        context = "\n\n".join(f"[{m['source'] or m['id']}] {m['text']}" for m in matches)
+        messages = [
+            {"role": "system",
+             "content": "Answer using ONLY the provided context. "
+                        "If the answer is not in the context, say you don't know."},
+            {"role": "user",
+             "content": f"Context:\n{context}\n\nQuestion: {req.query}"},
+        ]
         # One chip per SOURCE, not per chunk. Several chunks from the same
         # file share a source name; emitting one head entry each produced
         # duplicate chips client-side (e.g. "test.txt" twice for a 2-chunk
@@ -992,6 +1008,9 @@ async def rag_chat(req: QueryReq):
             msg = "Jeg kan ikke finde noget relevant i kilderne til at besvare det. / I don't have relevant context to answer that."
             yield (json.dumps({"message": {"content": msg}, "done": True}) + "\n").encode()
             return
+        # Only now is the model actually about to think. Emitting this before
+        # the no-match branch would promise generation that never happens.
+        yield (json.dumps({"phase": "generating"}) + "\n").encode()
         try:
             async for chunk in oc.chat_stream(messages, model=req.model):
                 yield chunk
