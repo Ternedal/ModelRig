@@ -594,6 +594,42 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     §9, 30/7), skal det forventes at listen har flyttet sig mellem måling og
     handling.
 
+35. **Et rent merge er ikke et review. Diff HELE filen, ikke din hunk.** 30/7
+    landede jeg `#243` efter et grundigt review af dens confirmation-ændring.
+    Samme PR bar en **stale kopi** af `android/.../CapabilityDescriptorV2.kt`,
+    skåret før `3c8a3884` ("fail closed on Android descriptor parse errors",
+    19/7). Målt mod PR'ens egen merge-base var den fil derfor en *revert* af
+    hærdningen — og fordi main ikke havde rørt den region, anvendte git
+    reverten **rent, uden konflikt og uden et ord**. `canonicalize` faldt
+    tilbage til `else -> value.toString()`: fail-open på ukendte JSON-typer i
+    den kanoniske form, som digests hviler på. Den lå på main i tre timer og
+    blev kun fanget, fordi `#246` tilfældigvis bar den hærdede udgave.
+
+    **Reglen:** for hver fil en branch rører, diff hele filen mod main før
+    landing — ikke kun den ændring du kom for. "Ingen konflikter" betyder at
+    git kunne kombinere ændringerne, ikke at kombinationen er rigtig. En
+    branch der er ældre end main i en fil, ser for git ud som en bevidst
+    ændring af den fil.
+
+36. **Stale-tjek før hvert merge — tre kommandoer, syv fund hver gang.**
+    Konsekvensen af lektie 35, gjort mekanisk. For hver berørt fil: er main's
+    seneste commit på filen med i branchens historie?
+
+    ```
+    for f in $(git diff --name-only origin/main $HEAD); do
+      last=$(git log -1 --format=%H origin/main -- "$f")
+      git merge-base --is-ancestor "$last" $HEAD || echo "STALE $f"
+    done
+    ```
+
+    Er en fil stale, afgør ét spørgsmål mere udfaldet: **ændrer branchen den
+    selv** (sammenlign `$HEAD:$f` med `$MB:$f`)? Er den blot gammel, tager git
+    main's udgave rent og alt er godt. Har branchen ændret den, er ændringen
+    en revert af main's nyere arbejde, og git anvender den uden at spørge.
+    Det er hele forskellen mellem `#246` (revert, fangede den i hånden) og
+    `#250`/`#251` (blot gamle, gik rigtigt af sig selv) — samme syv filer,
+    modsat udfald. Kør tjekket; gæt det ikke.
+
 ## 9. Kø — hvem har bolden (16/7, opdateret 29/7)
 
 **[29/7, sent — Anders har truffet beslutningerne. Otte PRs lukket, fire
@@ -744,6 +780,34 @@ må kun stå åben, hvis den er **aktiv**, **bevidst parkeret med et
 genstartskriterium**, eller **evidence-only for den valgte kandidat**.*
 Historiske og supersederede branches lukkes med en præcis pointer til
 afløseren. 62 åbne PR'er er symptomet på at reglen ikke har været håndhævet.
+
+**[30/7, eftermiddag — Sol-agendaen er gennemført, og fem PR'er er landet.
+Autoritativt: 35 åbne PR'er, ned fra 62 i går.]** Sol reviewede og godkendte
+mount-kontrakten, lukkede `#165`/`#166`/`#167` (t021 dermed helt lukket),
+forkastede `external` til fordel for den stærkere todelte model
+(`access` **plus** `network.mode=public`), tog eksplicit ejerskab af Agent 4 og
+omnummererede `T-030`–`T-034` → `A4-01`–`A4-05` med prefix `agent/a4-*`.
+**Claim-reglen er accepteret** i formen: præcist scope før arbejdet, fire
+timers udløb uden aktivitet, Anders kan altid overstyre.
+
+Landet i dag, hver med sit eget grønne run og bekræftelse ad to veje:
+`#242` (`3dc1e86`, ægte fast-forward), `#243` (`b948a27`), og hele
+`#251`-stakken nedefra — `#246` (`88e9ba0`), `#250` (`b2b4810`), `#251`
+(`d6f2459`).
+
+**To ting er værd at bære videre fra de landinger.** For det første: `#251`
+så ud som seks filer i sin egen diff, men dens reelle delta mod main var 66
+filer i tre lag. Mål altid tre-punkts mod main, aldrig PR-diffen mod dens base
+(lektie 31). For det andet: stale-tjekket (lektie 36) fandt **syv bagudliggende
+filer i hvert eneste lag** — begge `CapabilityDescriptorV2.kt`,
+`capabilityschema/schema.go`, `capability_schema.py`, `routing_preview.py` og
+to tests. I `#246` var en af dem en revert, der skulle rettes i hånden; i
+`#250` og `#251` var de blot gamle og gik rigtigt af sig selv. Samme overflade,
+modsat udfald — det er præcis derfor tjekket skal køres.
+
+**Til protokollen:** landingerne flytter Milestone 3-kandidaten til main; de
+beviser den ikke. Intet fysisk er kørt, ingen kampagne udført,
+`production_activation` er uændret.
 
 **[30/7, morgen — t021 er AFSLUTTET, og vi kørte om kap med Sol undervejs.]**
 Convergence-merget landede som `4e8acd33` (Sols kontrakt overlevede, verificeret
