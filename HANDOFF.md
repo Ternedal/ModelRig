@@ -665,6 +665,37 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 
 ## 9. Kø — hvem har bolden (16/7, opdateret 30/7)
 
+**[30/7, aften — Computer Use I3/I4 REDDET fra `#163`. claim: Claude 30/7
+22:55 — scope: `worker/app/desktop_*` (nye), `worker/app/main.py`
+(gated registrering), `tests/worker_desktop_*` (nye), ROADMAP-milepæl.]**
+
+`#163`s brugbare del er løftet i en frisk branch mod main — kun A-filer, ingen
+af de fire tavse overskrivninger. Tre ting måtte gøres, og de er værd at kende:
+
+1. **Registreringshooket lå i branchens `main.py`.** Det var en af de fire
+   overskrivninger, og den bar også `browser_research`-registreringen. Kun
+   desktop-delen er løftet, oven på mains udgave. Registreringen bor i
+   `main.py` og ikke i entrypointet, fordi vision-broen skal wrappe
+   `_run_tool_loop` i selve implementeringsmodulet: en flade monteret senere i
+   ASGI-laget ville lade et enkelt tool-loop slippe uden om broen.
+   `tests/worker_desktop_screenshot_entrypoint.py` prøver præcis det i en
+   frisk proces.
+2. **Versionsrodet er fladet ud.** `desktop_win32.py` var en 14-linjers shim
+   over `_v2` — kollapset til ét modul. `desktop_action_preview_tool.py` var
+   en facade, der rettede én closure-binding-fejl i ToolGate-installeren
+   (screenshot- og preview-wrapperne delte én closure-celle, så den anden
+   tildeling fik screenshot-wrapperen til at kalde sig selv rekursivt);
+   rettelsen ER nu implementeringen, og `_legacy` er slettet. Tolv moduler
+   blev til ti.
+3. **Testene er kørt mod MAINS `capability_schema`** — den todelte model, uden
+   branchens forkastede `external`-klasse. Alle grønne. Det var den måling,
+   der afgjorde om redningen overhovedet var mulig.
+
+Milepælen er defineret i `ROADMAP.md` som Computer Use (Tier B) med tre slices:
+I3 (se) og I4 (foreslå) er landet **dvalende** bag `KALIV_COMPUTER_USE`; I5
+(handle) er ikke bygget, og dens fysiske gate kan ikke bevises af CI. Navnet
+`F5` er ikke genoplivet.
+
 **[30/7, aften — D7 trin 1 LANDET. claim: Claude 30/7 22:32 — scope:
 `worker/app/web_research_tool.py` (ny), `web_research_capability.py`,
 `web_research_mount.py`, `tool_child.py`, `tests/worker_web_research_tool.py`

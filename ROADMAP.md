@@ -146,6 +146,28 @@ slår baseline på tool-disciplin · cloud-routing er synlig + følger skreven p
 - **Integrationer:** Home Assistant read-only → writes m. confirmation gate · scheduler for
   read-only jobs · eksternt API m. scoped credentials + transportbeskyttelse.
 
+### Computer Use (Tier B) — milepælen, defineret 30/7-2026
+
+Erstatter den udefinerede reference til "F5", som aldrig blev beskrevet noget
+sted. Substratet er **landet dvalende** på main 30/7 (redningen af `#163`s
+brugbare del): ti moduler bag `KALIV_COMPUTER_USE`, som er slukket by default
+og fremgår af `ACTIVATION_READINESS.md`.
+
+| Slice | Indhold | Status |
+|---|---|---|
+| **I3 — se** | signeret, screenshot-bundet kontrakt (HMAC) · capture af ét allowlistet forgrundsvindue · perceptuel hash + korttidsgyldigt `screen_token` · lokal-only vision-bro, der nægter cloud-fortsættelse | **landet dvalende** |
+| **I4 — foreslå** | signerede engangs-planer for ét præcist klik/tekstinput · `consume` kører allowlist-tjekket igen mod et FRISKT capture | **landet dvalende** |
+| **I5 — handle** | Win32 `SendInput` bag fysisk gate-evidens (low-integrity/UIPI) + ét friskt menneskeligt ja bundet til den præcise plan | **ikke bygget** |
+
+I5 er den eneste med reel ny magt, og dens gate kan **ikke** bevises af CI:
+evidensen skal produceres af en probe-runner på en interaktiv Windows-rig.
+Rækkefølgen er derfor: rig-dagen beviser I3's capture og I4's plan-konsumption
+først; I5 åbnes ikke før den fysiske gate har produceret et bevis bundet til
+præcis den commit, den skal beskytte.
+
+`desktop_click` og `desktop_type` findes ikke i `REGISTRY` — pinnet i
+`tests/worker_desktop_screenshot_entrypoint.py`, som prøver en frisk proces.
+
 ---
 
 ## NOT NOW — betingede horisonter (aktiveres kun ved målt behov)
