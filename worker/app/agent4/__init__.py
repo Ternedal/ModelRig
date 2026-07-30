@@ -48,6 +48,13 @@ from .health import (
     WatchdogDecision,
     WatchdogPolicy,
 )
+from .operator import (
+    MAX_OPERATOR_CAMPAIGNS,
+    MAX_OPERATOR_TIMELINE_ENTRIES,
+    Agent4CampaignOverview,
+    Agent4OperatorReadService,
+    Agent4TimelinePage,
+)
 from .recovery import (
     CampaignRecoveryDecision,
     CampaignRecoveryReport,
@@ -119,8 +126,11 @@ from .service import (
 )
 
 __all__ = [
+    "Agent4CampaignOverview",
+    "Agent4OperatorReadService",
     "Agent4RuntimeContext",
     "Agent4RuntimePaths",
+    "Agent4TimelinePage",
     "CampaignCheckpoint",
     "CampaignCheckpointService",
     "CampaignCheckpointStore",
@@ -198,6 +208,8 @@ __all__ = [
     "JsonCheckpointStore",
     "JsonlCampaignTimelineStore",
     "InMemoryResourceLeaseManager",
+    "MAX_OPERATOR_CAMPAIGNS",
+    "MAX_OPERATOR_TIMELINE_ENTRIES",
     "ResourceDispatchResult",
     "ResourceLease",
     "ResourceLeaseConflictError",
