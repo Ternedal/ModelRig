@@ -37,6 +37,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_AGENT3_PILOT_MAX_AGE_HOURS` | `(unset)` |
 | `KALIV_AGENT3_PILOT_REPORT` | `(unset)` |
 | `KALIV_AGENT3_TASK_UI` | `(unset)` |
+| `KALIV_AGENT3_TASK_WORKERS` | `2` |
 | `KALIV_AGENT3_VALIDATION_MAX_AGE_HOURS` | `(unset)` |
 | `KALIV_AGENT3_VALIDATION_REPORT` | `(unset)` |
 | `KALIV_ALLOW_RAG_CLOUD` | `` |
@@ -136,6 +137,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_routing_preview.py`
 - `tests/worker_agent3_smoke_cli.py`
 - `tests/worker_agent3_task_readiness.py`
+- `tests/worker_agent3_task_readiness_entrypoint.py`
+- `tests/worker_agent3_task_surface.py`
 - `tests/worker_agent3_unattended_execution.py`
 - `tests/worker_agent3_validation_gate.py`
 - `tests/worker_agent3_validation_path_contract.py`

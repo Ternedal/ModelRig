@@ -159,7 +159,7 @@ for rel in LAUNCHERS:
         f"{rel} importerer ikke kernen direkte",
     )
     check(
-        "agent3_full_surface_mounted" not in source,
+        "state.agent3_full_surface_mounted" not in source,
         f"{rel} har ingen parallel precheck mod den udfasede markoer",
     )
 
@@ -170,8 +170,9 @@ for rel in (
 ):
     source = (ROOT / rel).read_text(encoding="utf-8")
     check(
-        "agent3_full_surface_mounted" not in source,
-        f"{rel} saetter/laeser ikke agent3_full_surface_mounted",
+        "state.agent3_full_surface_mounted" not in source,
+        f"{rel} saetter/laeser ikke agent3_full_surface_mounted (omtale i en"
+        " kommentar er ikke en consumer)",
     )
 
 _flag(None)

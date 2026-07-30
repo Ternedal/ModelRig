@@ -1,5 +1,6 @@
 package dk.ternedal.modelrig
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,6 +13,7 @@ import dk.ternedal.modelrig.ui.Agent3MemoryScreen
 import dk.ternedal.modelrig.ui.Agent3ReplanScreen
 import dk.ternedal.modelrig.ui.Agent3ReviewScreen
 import dk.ternedal.modelrig.ui.Agent3Screen
+import dk.ternedal.modelrig.ui.Agent3TaskScreen
 import dk.ternedal.modelrig.ui.Agent3ValidationScreen
 import dk.ternedal.modelrig.ui.AppEntryUi
 import dk.ternedal.modelrig.ui.ScheduleScreen
@@ -28,11 +30,15 @@ class MainActivity : ComponentActivity() {
 
         // Explicit control-surface entries. The normal launcher sends none of
         // these extras, so ordinary launch still gets AppUi through AppEntryUi.
-        // Scheduler is a human-facing app shortcut; Agent 3 entries remain
-        // developer-only ADB surfaces until their own readiness gates say otherwise.
+        // Scheduler and the readiness-routed read-only task surface are
+        // human-facing app shortcuts; the remaining Agent 3 entries stay
+        // developer-only ADB surfaces.
         val openSchedules =
             intent?.getBooleanExtra(EXTRA_SCHEDULES, false) == true ||
                 (intent?.data?.scheme == "kaliv" && intent?.data?.host == "schedules")
+        val openAgent3Task =
+            intent?.getBooleanExtra(EXTRA_AGENT3_TASK, false) == true ||
+                (intent?.data?.scheme == "kaliv" && intent?.data?.host == "tasks")
         val openAgent3 = intent?.getBooleanExtra(EXTRA_AGENT3, false) == true
         val openAgent3Memory = intent?.getBooleanExtra(EXTRA_AGENT3_MEMORY, false) == true
         val openAgent3Validation = intent?.getBooleanExtra(EXTRA_AGENT3_VALIDATION, false) == true
@@ -45,6 +51,22 @@ class MainActivity : ComponentActivity() {
                     val store = remember { TokenStore(this) }
                     ModelRigTheme(dark = store.darkMode) {
                         ScheduleScreen(store = store, onClose = { finish() })
+                    }
+                }
+                openAgent3Task -> {
+                    val store = remember { TokenStore(this) }
+                    ModelRigTheme(dark = store.darkMode) {
+                        Agent3TaskScreen(
+                            store = store,
+                            onClose = { finish() },
+                            onUseAgent2 = {
+                                // Start the ordinary app with no task/developer
+                                // extras. The new instance owns normal Agent 2
+                                // chat; this shortcut activity then closes.
+                                startActivity(Intent(this, MainActivity::class.java))
+                                finish()
+                            },
+                        )
                     }
                 }
                 openAgent3Capabilities -> {
@@ -93,6 +115,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_SCHEDULES = "dk.ternedal.modelrig.extra.SCHEDULES"
+        const val EXTRA_AGENT3_TASK = "dk.ternedal.modelrig.extra.AGENT3_TASK"
         const val EXTRA_AGENT3 = "dk.ternedal.modelrig.extra.AGENT3"
         const val EXTRA_AGENT3_MEMORY = "dk.ternedal.modelrig.extra.AGENT3_MEMORY"
         const val EXTRA_AGENT3_VALIDATION = "dk.ternedal.modelrig.extra.AGENT3_VALIDATION"

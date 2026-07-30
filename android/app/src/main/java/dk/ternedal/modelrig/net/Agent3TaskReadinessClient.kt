@@ -7,11 +7,11 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * Typed, read-only transport for the dormant Agent 3 task-readiness contract.
+ * Typed, read-only transport for the server-authoritative Agent 3 task surface.
  *
- * Unknown schemas or surfaces fail closed. This client has no mutation methods
- * and rejects any response that selects Agent 3 before the task-UI integration
- * has been delivered.
+ * This client can observe the selected surface but cannot start a run, submit a
+ * plan or alter normal chat. Unknown or internally inconsistent contracts fail
+ * closed instead of being guessed into a route.
  */
 class Agent3TaskReadinessClient(baseUrl: String, private val token: String) {
     private val base = baseUrl.trimEnd('/')
@@ -70,28 +70,51 @@ class Agent3TaskReadinessClient(baseUrl: String, private val token: String) {
         val pilot: Pilot,
         val rigValidation: RigValidation,
         val uiContract: UiContract,
-    )
+    ) {
+        val agent3ReadonlySelected: Boolean
+            get() = selectedSurface == AGENT3_READONLY
+    }
 
     fun readiness(): Readiness {
         val request = Request.Builder()
-            .url(base + "/api/v1/experimental/agent3/task-readiness")
+            .url(base + ENDPOINT)
             .get()
             .header("Authorization", "Bearer $token")
             .build()
-        val root = execute(request)
-        if (root.optString("schema") != "kaliv-agent3-task-readiness/v1") {
+        return parse(execute(request))
+    }
+
+    internal fun parse(root: JSONObject): Readiness {
+        if (root.optString("schema") != SCHEMA) {
             throw ModelRigException("Ukendt Agent 3 task-readiness-kontrakt")
         }
+
         val selected = root.optString("selected_surface")
         val candidate = root.optString("candidate_surface")
         val fallback = root.optString("fallback_surface")
-        if (selected != "agent2" || candidate != "agent3_readonly" || fallback != "agent2") {
-            throw ModelRigException("Ugyldig Agent 3 task-readiness: ukendt eller aktiv surface")
-        }
+        val eligible = root.optBoolean("eligible_for_task_ui", false)
+        val operatorEnabled = root.optBoolean("operator_enabled", false)
         val productionActivation = root.optBoolean("production_activation", true)
         val normalChatUnchanged = root.optBoolean("normal_chat_route_unchanged", false)
+        val reason = root.optString("reason").ifBlank { "unknown" }
+        val reasons = root.optJSONArray("reasons").toStrings()
+
+        if (selected !in setOf(AGENT2, AGENT3_READONLY) ||
+            candidate != AGENT3_READONLY ||
+            fallback != AGENT2
+        ) {
+            throw ModelRigException("Ugyldig Agent 3 task-readiness: ukendt surface")
+        }
         if (productionActivation || !normalChatUnchanged) {
             throw ModelRigException("Ugyldig Agent 3 task-readiness: normal chat må ikke ændres")
+        }
+        if (selected == AGENT3_READONLY &&
+            (!eligible || !operatorEnabled || reason != AGENT3_SELECTED_REASON || reasons.isNotEmpty())
+        ) {
+            throw ModelRigException("Ugyldig Agent 3 task-readiness: Agent 3 kræver eksakt readiness")
+        }
+        if (selected == AGENT2 && reason == AGENT3_SELECTED_REASON) {
+            throw ModelRigException("Ugyldig Agent 3 task-readiness: valgt surface og årsag er uenige")
         }
 
         val pilot = root.optJSONObject("pilot")
@@ -100,20 +123,35 @@ class Agent3TaskReadinessClient(baseUrl: String, private val token: String) {
             ?: throw ModelRigException("Agent 3 task-readiness mangler rig_validation")
         val ui = root.optJSONObject("ui_contract")
             ?: throw ModelRigException("Agent 3 task-readiness mangler ui_contract")
-        if (ui.optString("route_source") != "server_authoritative") {
-            throw ModelRigException("Agent 3 task-readiness har ikke server-authoritative routing")
+
+        val uiContract = UiContract(
+            routeSource = ui.optString("route_source"),
+            stopVisible = ui.optBoolean("stop_visible", false),
+            fallbackVisible = ui.optBoolean("fallback_visible", false),
+            receiptsVisible = ui.optBoolean("receipts_visible", false),
+            replansVisible = ui.optBoolean("replans_visible", false),
+            outcomesVisible = ui.optBoolean("outcomes_visible", false),
+        )
+        if (uiContract.routeSource != "server_authoritative" ||
+            !uiContract.stopVisible ||
+            !uiContract.fallbackVisible ||
+            !uiContract.receiptsVisible ||
+            !uiContract.replansVisible ||
+            !uiContract.outcomesVisible
+        ) {
+            throw ModelRigException("Ugyldig Agent 3 task-readiness: UI-sikkerhedskontrakten er ufuldstændig")
         }
 
         return Readiness(
             selectedSurface = selected,
             candidateSurface = candidate,
             fallbackSurface = fallback,
-            eligibleForTaskUi = root.optBoolean("eligible_for_task_ui", false),
-            operatorEnabled = root.optBoolean("operator_enabled", false),
+            eligibleForTaskUi = eligible,
+            operatorEnabled = operatorEnabled,
             normalChatRouteUnchanged = true,
             productionActivation = false,
-            reason = root.optString("reason").ifBlank { "unknown" },
-            reasons = root.optJSONArray("reasons").toStrings(),
+            reason = reason,
+            reasons = reasons,
             pilot = Pilot(
                 configured = pilot.optBoolean("configured", false),
                 present = pilot.optBoolean("present", false),
@@ -143,14 +181,7 @@ class Agent3TaskReadinessClient(baseUrl: String, private val token: String) {
                 codeMatch = validation.optBoolean("code_match", false),
                 reportSha256 = validation.nullableString("report_sha256"),
             ),
-            uiContract = UiContract(
-                routeSource = "server_authoritative",
-                stopVisible = ui.optBoolean("stop_visible", false),
-                fallbackVisible = ui.optBoolean("fallback_visible", false),
-                receiptsVisible = ui.optBoolean("receipts_visible", false),
-                replansVisible = ui.optBoolean("replans_visible", false),
-                outcomesVisible = ui.optBoolean("outcomes_visible", false),
-            ),
+            uiContract = uiContract,
         )
     }
 
@@ -184,4 +215,12 @@ class Agent3TaskReadinessClient(baseUrl: String, private val token: String) {
 
     private fun JSONObject.nullableInt(name: String): Int? =
         if (!has(name) || isNull(name)) null else optInt(name)
+
+    companion object {
+        private const val ENDPOINT = "/api/v1/experimental/agent3/task-readiness"
+        private const val SCHEMA = "kaliv-agent3-task-readiness/v1"
+        private const val AGENT2 = "agent2"
+        private const val AGENT3_READONLY = "agent3_readonly"
+        private const val AGENT3_SELECTED_REASON = "agent3_readonly_selected"
+    }
 }
