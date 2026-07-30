@@ -686,7 +686,8 @@ def _rag_cloud_allowed(req: "ToolChatReq") -> bool:
 async def _run_tool_loop(messages: list[dict], model: "str | None",
                          cloud_base_url: "str | None", cloud_key: "str | None",
                          conversation_id: "str | None", origin: str,
-                         sources: list, tools_used: list) -> dict:
+                         sources: list, tools_used: list,
+                         on_phase=None) -> dict:
     """One agent turn's tool loop. The model may chain READ tools -- each result
     fed back -- until it answers or the step budget runs out. A WRITE stops the
     loop and returns a confirmation card; the invariant never moves. Reused by
@@ -698,7 +699,20 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
     from . import tools as t
     _schema = t.ollama_tool_schema(t.GATE)
     last_result = None
+
+    async def _phase(name: str) -> None:
+        """Udsend en fase, hvis kalderen lytter.
+
+        ``on_phase`` er en ``async (str) -> None`` eller None. Valgfri med
+        vilje: de to request/response-indgange er uaendrede, og kun den
+        streamende sender en callback ind. Loopets logik er den samme i begge
+        tilfaelde -- fasen er observation, ikke kontrol.
+        """
+        if on_phase is not None:
+            await on_phase(name)
+
     for step in range(TOOL_MAX_STEPS):
+        await _phase("generating")
         try:
             msg = await oc.chat_tools(messages, tools=_schema, model=model,
                                       base_url=cloud_base_url, api_key=cloud_key)
@@ -721,6 +735,9 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
                 raise HTTPException(status_code=400, detail="tool arguments are not valid JSON")
         messages.append({"role": "assistant", "content": msg.get("content", ""),
                          "tool_calls": calls[:1]})
+        # Modellen har valgt et vaerktoej; naa er det gaten og vaerktoejet der
+        # arbejder, ikke modellen. Fasen skal skifte HER, ikke da turen startede.
+        await _phase("tool_run")
         try:
             result = await asyncio.to_thread(
                 t.GATE.propose, name, args, conversation_id,
@@ -750,14 +767,18 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
             "tool_result": last_result, "steps_exhausted": True}
 
 
-@app.post("/tools/chat")
-async def tools_chat(req: ToolChatReq) -> dict:
+async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
     """One chat turn in which the model MAY propose a tool.
 
     Read tools run and the model answers, in one call. Write tools stop here
     and return a confirmation_id: nothing has been executed, and the arguments
     Anders reads on the card are the arguments that will run -- the model gets
     no second chance to change them after approval.
+
+    Delt af ``/tools/chat`` og ``/tools/chat/stream``, saa de to indgange ikke
+    kan drive fra hinanden. ``on_phase`` er den ENESTE forskel: den streamende
+    sender en callback ind, den gamle sender None, og resten af turen er
+    bogstaveligt samme kode.
     """
     from . import tools as t
     _logger.info("level=info tools_chat=start model=%r rag=%s hist=%d",
@@ -844,8 +865,14 @@ async def tools_chat(req: ToolChatReq) -> dict:
     origin = "cloud" if req.cloud_key else "local"
     return await _run_tool_loop(
         messages, req.model, req.cloud_base_url, req.cloud_key,
-        req.conversation_id, origin, sources, [],
+        req.conversation_id, origin, sources, [], on_phase=on_phase,
     )
+
+
+@app.post("/tools/chat")
+async def tools_chat(req: ToolChatReq) -> dict:
+    """Uaendret request/response-indgang. Se [_tools_chat_turn]."""
+    return await _tools_chat_turn(req)
 
 
 class ConfirmChatReq(BaseModel):
@@ -855,6 +882,74 @@ class ConfirmChatReq(BaseModel):
     # key is never persisted on the rig, not even for 60 seconds.
     cloud_base_url: str | None = None
     cloud_key: str | None = None
+
+
+@app.post("/tools/chat/stream")
+async def tools_chat_stream(req: ToolChatReq):
+    """Samme tur som ``/tools/chat``, men med fasen paa traaden.
+
+    **Hvorfor et nyt endpoint frem for at aendre det gamle:** telefonen er en
+    installeret APK der opdateres uafhaengigt af riggen. Aendrede vi wire-formen
+    paa ``/tools/chat``, ville en aeldre app mod en nyere rig faa NDJSON hvor
+    den venter eet JSON-objekt -- og fejle paa en tur der involverer
+    bekraeftelseskort. Det gamle endpoint er uroert; klienter migrerer naar de
+    er klar.
+
+    Linjeformat -- fase-linjer, saa PRAECIS eet resultat til sidst::
+
+        {"phase": "generating"}   <- modellen vaelger vaerktoej
+        {"phase": "tool_run"}     <- gaten og vaerktoejet arbejder
+        {"phase": "generating"}   <- modellen laeser resultatet
+        {"result": { ...samme objekt som /tools/chat... }}
+
+    Resultatlinjen er uaendret i form, inklusive ``confirmation_required`` med
+    kort. En klient kan derfor laese sidste ``result``-linje og behandle den
+    praecis som svaret fra det gamle endpoint.
+
+    Fejl bliver en ``{"error": ...}``-linje frem for en HTTP-status, af samme
+    grund som paa /rag/chat: headers er sendt, naar den foerste fase gaar ud.
+    De to klienters stroem-laesere overflader allerede den form med grunden i.
+    """
+    from . import tools as t
+    _logger.info("level=info tools_chat_stream=start model=%r hist=%d",
+                 req.model, len(req.history))
+    if not t.GATE.enabled:
+        raise HTTPException(status_code=403, detail="the tool layer is disabled")
+
+    async def gen():
+        queue: "asyncio.Queue[str | None]" = asyncio.Queue()
+
+        async def on_phase(name: str) -> None:
+            await queue.put(name)
+
+        async def run():
+            try:
+                return await _tools_chat_turn(req, on_phase=on_phase)
+            finally:
+                await queue.put(None)
+
+        task = asyncio.create_task(run())
+        try:
+            while True:
+                name = await queue.get()
+                if name is None:
+                    break
+                yield (json.dumps({"phase": name}) + "\n").encode()
+            result = await task
+            yield (json.dumps({"result": result}) + "\n").encode()
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+        except HTTPException as e:
+            # Et gate-afslag eller en Ollama-fejl er en HTTP-status i den
+            # request/response-verden loopet stammer fra. Headers er sendt her,
+            # saa den skal baere sin GRUND ud som en linje i stedet.
+            yield (json.dumps({"error": e.detail, "status": e.status_code}) + "\n").encode()
+        except Exception as e:  # efterlad aldrig konsumenten i tvivl
+            _logger.exception("level=error tools_chat_stream unexpected=%r", str(e))
+            yield (json.dumps({"error": f"{type(e).__name__}: {e}"}) + "\n").encode()
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson")
 
 
 @app.post("/tools/confirm/chat")
