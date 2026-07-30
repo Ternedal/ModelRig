@@ -35,6 +35,46 @@ private data class RagSourceEntry(val source: String = "")
 private data class RagSourceListResponse(val sources: List<RagSourceEntry> = emptyList())
 
 /**
+ * Hvad en linje i `/rag/chat`-stroemmen ER -- afgjort af dens FORM, ikke dens
+ * plads i stroemmen.
+ *
+ * Den tidligere loekke genkendte kildehovedet med `if (first)`. Det virkede,
+ * fordi hovedet altid kom foerst, men det gjorde parseren afhaengig af
+ * raekkefoelgen: den dag workeren udsender en linje foer hovedet -- fx
+ * fase-signalet (ROADMAP, fase-signal) -- ville `first` blive brugt op paa den
+ * linje, hovedet ville falde igennem til indholdsgrenen, og kildechipsene
+ * ville forsvinde UDEN en fejl. En tavs forsvinding er den dyreste slags.
+ *
+ * Formbaseret dispatch gaer det umuligt og giver samtidig paritet med Androids
+ * `StreamContract`, som allerede afgoer efter form. Ukendte linjer bliver
+ * [Event.Ignored] -- praecis som Androids `StreamEvent.Ignored` -- saa nye
+ * event-typer er additive og bagudkompatible.
+ */
+internal object RagStreamParser {
+    private val json = Json { ignoreUnknownKeys = true }
+
+    internal sealed interface Event {
+        data class Sources(val names: List<String>) : Event
+        data class Delta(val text: String) : Event
+        data object Ignored : Event
+    }
+
+    fun parse(line: String): Event {
+        if (line.isBlank()) return Event.Ignored
+        val sources = runCatching {
+            json.decodeFromString(RagSourcesLine.serializer(), line).sources
+        }.getOrNull()
+        if (sources != null) {
+            return Event.Sources(sources.map { it.source }.filter { it.isNotEmpty() })
+        }
+        val delta = runCatching {
+            json.decodeFromString(RagContentLine.serializer(), line).message.content
+        }.getOrDefault("")
+        return if (delta.isNotEmpty()) Event.Delta(delta) else Event.Ignored
+    }
+}
+
+/**
  * Client for the ModelRig backend's RAG endpoints (`/api/v1/rag/chat`,
  * `/api/v1/rag/sources`). Deliberately separate from `OllamaClient`/
  * `ChatRouter`: RAG only makes sense against the backend+worker, never local
@@ -81,24 +121,12 @@ class RagClient(private val baseUrl: String, private val bearer: String?) {
         if (resp.statusCode() !in 200..299) {
             throw OllamaException("rag chat failed (${resp.statusCode()})")
         }
-        var first = true
         resp.body().forEach { line ->
-            if (line.isBlank()) return@forEach
-            if (first) {
-                first = false
-                val srcs = runCatching {
-                    json.decodeFromString(RagSourcesLine.serializer(), line).sources
-                }.getOrNull()
-                if (srcs != null) {
-                    onSources(srcs.map { it.source }.filter { it.isNotEmpty() })
-                    return@forEach
-                }
-                // fell through: first line wasn't a sources header, treat as content below
+            when (val event = RagStreamParser.parse(line)) {
+                is RagStreamParser.Event.Sources -> onSources(event.names)
+                is RagStreamParser.Event.Delta -> onDelta(event.text)
+                RagStreamParser.Event.Ignored -> Unit
             }
-            val delta = runCatching {
-                json.decodeFromString(RagContentLine.serializer(), line).message.content
-            }.getOrDefault("")
-            if (delta.isNotEmpty()) onDelta(delta)
         }
     }
 
