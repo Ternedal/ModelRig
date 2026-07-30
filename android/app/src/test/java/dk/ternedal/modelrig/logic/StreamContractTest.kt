@@ -104,4 +104,46 @@ class StreamContractTest {
         assertEquals(StreamEvent.Done(trailingDelta = "Jeg kan ikke finde noget relevant."), ev)
         assertNull(StreamContract.terminalFailure(sawTerminal = true, sawContent = false))
     }
+
+    @Test
+    fun phaseLineBecomesATypedPhaseEvent() {
+        assertEquals(
+            StreamEvent.Phase("searching"),
+            StreamContract.parse("""{"phase":"searching"}"""),
+        )
+        assertEquals(
+            StreamEvent.Phase("generating"),
+            StreamContract.parse("""{"phase":"generating"}"""),
+        )
+    }
+
+    @Test
+    fun anUnknownPhaseIsStillAPhaseEventAndMapsToNoLabel() {
+        // Klienten oversaetter serverens ord, den opfinder dem ikke: en fase vi
+        // ikke kender navnet paa naar frem som event, men faar ingen etiket, saa
+        // den nuvaerende status bliver staaende i stedet for at blive blanket.
+        assertEquals(
+            StreamEvent.Phase("reticulating_splines"),
+            StreamContract.parse("""{"phase":"reticulating_splines"}"""),
+        )
+        assertEquals(null, TurnStatus.forPhase("reticulating_splines"))
+    }
+
+    @Test
+    fun phaseIsNotContentSoATruncatedStreamStillReportsAsNeverStarted() {
+        // Den vigtigste egenskab: en fase maa ikke taelle som svar. Gjorde den
+        // det, ville en stroem der naaede at sige "searching" og saa doede blive
+        // rapporteret som "afbrudt undervejs" i stedet for "aldrig startet".
+        assertEquals(
+            "intet svar modtaget (tom stream) — prøv igen",
+            StreamContract.terminalFailure(sawTerminal = false, sawContent = false),
+        )
+    }
+
+    @Test
+    fun knownPhasesMapToTheGuidesThreeMessages() {
+        assertEquals("Søger i din viden …", TurnStatus.forPhase("searching"))
+        assertEquals("Kaliv tænker …", TurnStatus.forPhase("generating"))
+        assertEquals("Kører værktøj …", TurnStatus.forPhase("tool_run"))
+    }
 }

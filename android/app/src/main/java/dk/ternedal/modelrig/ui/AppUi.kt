@@ -1164,6 +1164,17 @@ private fun ChatScreen(
                     messages[idx] = cur.copy(sources = srcs)
                 }
             }
+            // Riggens egen fase erstatter startgaettet fra TurnStatus.forPlan.
+            // Ukendt fase -> null -> statussen staar; en nyere worker maa ikke
+            // kunne blanke indikatoren.
+            val onPhase: (String) -> Unit = { name ->
+                TurnStatus.forPhase(name)?.let { label ->
+                    scope.launch {
+                        val cur = messages[idx]
+                        if (cur.streaming) messages[idx] = cur.copy(status = label)
+                    }
+                }
+            }
             val hook: (okhttp3.Call) -> Unit = { activeCall = it }
 
             // Track whether the rig stream emitted anything, so we only fall
@@ -1240,7 +1251,8 @@ private fun ChatScreen(
                         // (one query in, sources + answer out). History still shows and
                         // persists locally; it isn't replayed as context to the model.
                         useRag -> ModelRigClient(store.baseUrl ?: "", store.token)
-                            .ragChatStream(t, rigModel, srcFilter, registerCall = hook, onSources = onSources, onDelta = onDelta)
+                            .ragChatStream(t, rigModel, srcFilter, registerCall = hook, onSources = onSources,
+                                onDelta = onDelta, onPhase = onPhase)
                         useCloud -> {
                             val key = store.cloudKey ?: throw RuntimeException("ingen cloud-nøgle")
                             CloudClient(key).chatStream(cModel, history, registerCall = hook, imageB64 = imageB64, onDelta = onDelta)
@@ -1329,6 +1341,14 @@ private fun ChatScreen(
             val onSources: (List<String>) -> Unit = { srcs ->
                 scope.launch { val cur = messages[i]; messages[i] = cur.copy(sources = srcs) }
             }
+            val onPhase: (String) -> Unit = { name ->
+                TurnStatus.forPhase(name)?.let { label ->
+                    scope.launch {
+                        val cur = messages[i]
+                        if (cur.streaming) messages[i] = cur.copy(status = label)
+                    }
+                }
+            }
             val hook: (okhttp3.Call) -> Unit = { activeCall = it }
             val err = withContext(Dispatchers.IO) {
                 runCatching {
@@ -1360,7 +1380,8 @@ private fun ChatScreen(
                             }
                         }
                         useRag -> ModelRigClient(store.baseUrl ?: "", store.token)
-                            .ragChatStream(t, rigModel, srcFilter, registerCall = hook, onSources = onSources, onDelta = onDelta)
+                            .ragChatStream(t, rigModel, srcFilter, registerCall = hook, onSources = onSources,
+                                onDelta = onDelta, onPhase = onPhase)
                         useCloud -> {
                             val key = store.cloudKey ?: throw RuntimeException("ingen cloud-nøgle")
                             CloudClient(key).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)

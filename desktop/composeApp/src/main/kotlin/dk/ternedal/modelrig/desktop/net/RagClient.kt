@@ -35,6 +35,9 @@ private data class RagContentLine(
 private data class RagErrorLine(val error: String = "")
 
 @Serializable
+private data class RagPhaseLine(val phase: String = "")
+
+@Serializable
 private data class RagSourceEntry(val source: String = "")
 
 @Serializable
@@ -67,6 +70,16 @@ internal object RagStreamParser {
         data class Done(val trailingDelta: String = "") : Event
 
         /**
+         * Hvad riggen laver lige nu, med dens egne ord.
+         *
+         * Workeren udsender `searching` foer retrieval og `generating` foer
+         * foerste token. Bevidst IKKE indhold: en fase maa aldrig taelle som
+         * svar, ellers ville en stroem der annoncerede en fase og saa doede
+         * ligne et afbrudt svar i stedet for et der aldrig startede.
+         */
+        data class Phase(val name: String) : Event
+
+        /**
          * En bar `{"error": "..."}` fra workeren.
          *
          * Den linje forsvandt tavst her: den har ingen `message.content`, saa
@@ -92,6 +105,10 @@ internal object RagStreamParser {
             json.decodeFromString(RagErrorLine.serializer(), line).error
         }.getOrDefault("")
         if (error.isNotEmpty()) return Event.Failure(error)
+        val phase = runCatching {
+            json.decodeFromString(RagPhaseLine.serializer(), line).phase
+        }.getOrDefault("")
+        if (phase.isNotEmpty()) return Event.Phase(phase)
         val content = runCatching {
             json.decodeFromString(RagContentLine.serializer(), line)
         }.getOrNull() ?: return Event.Ignored
@@ -144,6 +161,7 @@ class RagClient(private val baseUrl: String, private val bearer: String?) {
         sourceFilter: String?,
         onSources: (List<String>) -> Unit,
         onDelta: (String) -> Unit,
+        onPhase: (String) -> Unit = {},
     ) {
         val payload = json.encodeToString(
             RagChatRequest.serializer(),
@@ -174,6 +192,10 @@ class RagClient(private val baseUrl: String, private val bearer: String?) {
         resp.body().forEach { line ->
             when (val event = RagStreamParser.parse(line)) {
                 is RagStreamParser.Event.Sources -> onSources(event.names)
+                // En fase er IKKE indhold: sawContent staar, saa en stroem der
+                // kun naaede at annoncere en fase rapporteres som "aldrig
+                // startet", ikke som "afbrudt undervejs".
+                is RagStreamParser.Event.Phase -> onPhase(event.name)
                 is RagStreamParser.Event.Delta -> {
                     sawContent = true
                     onDelta(event.text)

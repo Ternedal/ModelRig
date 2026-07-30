@@ -89,6 +89,21 @@ private object KalivStatus {
     const val THINKING = "Kaliv tænker …"
     const val RAG = "Søger i din viden …"
     const val TOOLS = "Kører værktøj …"
+
+    /**
+     * Serverens egen fase, oversat til den streng brugeren ser.
+     *
+     * Null betyder "behold den nuvaerende status": en ukendt fase fra en nyere
+     * worker maa ikke blanke UI'et eller tvinge et gaet. Samme ordlyd og samme
+     * null-regel som Androids TurnStatus.forPhase, saa de to klienter siger det
+     * samme til den samme bruger.
+     */
+    fun forPhase(name: String): String? = when (name) {
+        "searching" -> RAG
+        "generating" -> THINKING
+        "tool_run" -> TOOLS
+        else -> null
+    }
 }
 
 private data class UiMessage(
@@ -332,8 +347,20 @@ fun App() {
                                     messages[assistantIdx] = cur.copy(ragSources = srcs)
                                 }
                             }
+                            // Riggens egen fase erstatter klientens startgaet.
+                            val onPhase: (String) -> Unit = { name ->
+                                KalivStatus.forPhase(name)?.let { label ->
+                                    scope.launch {
+                                        val cur = messages[assistantIdx]
+                                        if (cur.streaming) {
+                                            messages[assistantIdx] = cur.copy(status = label)
+                                        }
+                                    }
+                                }
+                            }
                             RagClient(localUrl, deviceToken.ifBlank { null })
-                                .chatStream(text, localModel, srcFilter, onSources = onSources) { delta ->
+                                .chatStream(text, localModel, srcFilter, onSources = onSources,
+                                    onPhase = onPhase) { delta ->
                                     scope.launch {
                                         lastSource = ChatResult.Source.LOCAL
                                         val cur = messages[assistantIdx]

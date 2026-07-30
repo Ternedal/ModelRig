@@ -184,6 +184,7 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
             while (!source.exhausted()) {
                 val line = source.readUtf8Line() ?: break
                 when (val ev = StreamContract.parse(line)) {
+                    is StreamEvent.Phase -> Unit  // stemmestroemmen udsender ingen faser endnu
                     is StreamEvent.Transcript -> onTranscript(ev.text)
                     is StreamEvent.Chunk -> onChunk(ev.index, ev.text, ev.audioB64)
                     is StreamEvent.Done -> {
@@ -305,6 +306,7 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         registerCall: ((okhttp3.Call) -> Unit)? = null,
         onSources: (List<String>) -> Unit,
         onDelta: (String) -> Unit,
+        onPhase: (String) -> Unit = {},
     ) {
         val body = JSONObject()
             .put("query", query)
@@ -335,6 +337,10 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
                 val line = source.readUtf8Line() ?: break
                 when (val ev = StreamContract.parse(line)) {
                     is StreamEvent.Sources -> onSources(ev.names)
+                    // En fase er IKKE indhold: sawContent bliver staaende, saa
+                    // en stroem der kun naaede at annoncere en fase rapporteres
+                    // som "aldrig startet", ikke som "afbrudt undervejs".
+                    is StreamEvent.Phase -> onPhase(ev.name)
                     is StreamEvent.Delta -> { sawContent = true; onDelta(ev.text) }
                     is StreamEvent.Done -> {
                         if (ev.trailingDelta.isNotEmpty()) { sawContent = true; onDelta(ev.trailingDelta) }
