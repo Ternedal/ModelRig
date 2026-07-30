@@ -75,14 +75,10 @@ dem, minde om dem eller starte en diskussion om dem.
 push/tag-kommandoer, men **`sed 's/github_pat_[A-Za-z0-9_]*/***REDACTED***/g'`
 når du skal LÆSE tool-output** — ellers redigerer du din egen evidens væk.
 
-10. **Agent 4's arkitektur er fastlagt** (30/7, ADR-A4-001…004 i
-   `AGENT_4_ARCHITECTURE_DECISIONS.md`). Gren `#258` er referencearkitektur;
-   gren A bruges ikke som fundament. Storage må ikke kende subscribers —
-   afhængighedsretningen er en CI-gate. Polling-invarianten er præciseret til
-   *ingen applikationsstyrede* loops; OS-blokering og platformsprimitiver er
-   acceptable. `watchdog.py`, `scheduler.py` og `retry_scheduling.py` omdøbes
-   samlet før `#253` lander. Ejerskabet af `worker/app/agent4/**` er uændret
-   Sols.
+10. **Agent 4's arkitektur er fastlagt** (30/7). Se
+   `AGENT_4_ARCHITECTURE_DECISIONS.md` for de gældende arkitekturbeslutninger
+   og CI-gates. Den fil er den autoritative kilde — gengiv ikke
+   beslutningerne her.
 
 **Tre beslutninger truffet af Anders 30/7 — genåbn dem ikke:**
 
