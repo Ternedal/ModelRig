@@ -159,6 +159,10 @@ data class CapabilityDescriptorV2(
                 "networked mode requires a destination",
             )
 
+            // Rækkefølgen er en forudsætning, ikke en stilart: den toakse-regel
+            // #243 landede læser network.mode, så confirmation SKAL valideres
+            // efter network er parset. #246 flyttede blokken herover og måtte
+            // derfor falde tilbage til enkeltaksen -- se PR-kommentaren.
             requireExactKeys(confirmationObject, setOf("mode"), "confirmation")
             val confirmation = CapabilityConfirmationV2(
                 mode = requireString(confirmationObject, "mode"),
@@ -244,22 +248,24 @@ data class CapabilityDescriptorV2(
             if (!condition) throw CapabilityContractException(message)
         }
 
-        private fun canonicalize(source: JSONObject): String = canonicalValue(source)
-
-        private fun canonicalValue(value: Any?): String = when (value) {
+        private fun canonicalize(value: Any?): String = when (value) {
+            null, JSONObject.NULL -> "null"
             is JSONObject -> value.keys().asSequence().toList().sorted().joinToString(
                 prefix = "{",
                 postfix = "}",
                 separator = ",",
-            ) { key -> "${JSONObject.quote(key)}:${canonicalValue(value.get(key))}" }
+            ) { key -> JSONObject.quote(key) + ":" + canonicalize(value.get(key)) }
             is JSONArray -> (0 until value.length()).joinToString(
                 prefix = "[",
                 postfix = "]",
                 separator = ",",
-            ) { index -> canonicalValue(value.get(index)) }
+            ) { index -> canonicalize(value.get(index)) }
             is String -> JSONObject.quote(value)
-            JSONObject.NULL -> "null"
-            else -> value.toString()
+            is Boolean -> value.toString()
+            is Number -> JSONObject.numberToString(value)
+            else -> throw CapabilityContractException(
+                "unsupported JSON value in canonical descriptor: ${value::class.java.name}",
+            )
         }
     }
 }
