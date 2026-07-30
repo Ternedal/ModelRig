@@ -225,6 +225,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_tools_guardrail.py`
 - `tests/worker_tools_readtools.py`
 - `tests/worker_unit.py`
+- `tests/workflow_first_run.py`
 - `tests/worker_vision.py`
 - `tests/worker_voice_baseline.py`
 - `tests/worker_voice_stream.py`
@@ -241,6 +242,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_agent3_dormant.py`
 - `tests/workflow_agent3_readonly_pilot_one_click.py`
 - `tests/workflow_agent4_foundation.py`
+- `tests/workflow_agent4_identity.py`
 - `tests/workflow_android_credential_commit.py`
 - `tests/workflow_android_scheduler_picker.py`
 - `tests/workflow_appliance_lifecycle_updater_chain.py`
@@ -259,8 +261,11 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_dep_pins.py`
 - `tests/workflow_design_token_contrast.py`
 - `tests/workflow_design_tokens.py`
+- `tests/workflow_desktop_agent3_termination_ui_contract.py`
 - `tests/workflow_doc_authority.py`
 - `tests/workflow_freeze_check.py`
+- `tests/workflow_milestone3_candidate_handoff.py`
+- `tests/workflow_milestone3_current_main.py`
 - `tests/workflow_physical_validation_campaign.py`
 - `tests/workflow_physical_validation_campaign_task_ui.py`
 - `tests/workflow_physical_validation_final_gate.py`
