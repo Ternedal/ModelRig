@@ -1,6 +1,6 @@
 # Agent 4 foundation contract
 
-**Milestone:** T-030 foundation  
+**Milestone:** A4-01 foundation  
 **Status:** dormant implementation  
 **Runtime activation:** none  
 **Agent 3 contract changes:** none
@@ -74,17 +74,21 @@ workflow gate composes the full dormant path:
 spec → queue → transition → event → repository → restore
 ```
 
+## Delivered follow-on contracts
+
+- A4-01 startup recovery;
+- A4-02 checkpoint payload storage;
+- A4-03 resource admission;
+- A4-04 retry policy and durable scheduling;
+- A4-05 health/watchdog policy and explicit service adapters.
+
 ## Deliberately deferred
 
 - Agent 3 runtime adapter;
 - background polling loop;
 - REST/WebSocket endpoints;
-- cross-process leases;
-- retry policy;
-- resource admission;
-- checkpoint payload storage;
-- evidence vault;
-- startup recovery;
+- cross-process or distributed leases;
+- evidence vault and append-only persistent timeline;
 - multi-host orchestration.
 
-Each deferred item will be introduced behind a separately testable contract.
+Each deferred item must be introduced behind a separately testable contract.

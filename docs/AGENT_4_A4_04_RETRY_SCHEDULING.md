@@ -1,12 +1,12 @@
-# Agent 4 T-033 — durable retry scheduling
+# A4-04 — durable retry scheduling
 
-This slice applies the pure T-033 retry decision to durable campaign state. It
+This slice applies the pure A4-04 retry decision to durable campaign state. It
 remains caller-driven: the host explicitly reports a stopped runtime attempt,
 and normal explicit scheduler dispatch later starts the next attempt.
 
 ## State contract
 
-- `RUNNING -> SCHEDULED` is the only new lifecycle edge.
+- `RUNNING -> SCHEDULED` is the only dedicated retry lifecycle edge.
 - The failed attempt number is retained while waiting.
 - The next explicit `SCHEDULED -> RUNNING` transition increments the attempt.
 - Retry failure details remain in the ordered `RETRY_SCHEDULED` event; the
@@ -18,16 +18,16 @@ and normal explicit scheduler dispatch later starts the next attempt.
 
 `CampaignRetrySchedulingService.handle_failure()` performs work in this order:
 
-1. load and validate a durable `RUNNING` campaign
-2. compute the pure retry decision
-3. persist either terminal `FAILED` or retry `SCHEDULED`
-4. enqueue the persisted retry specification
-5. emit the ordered audit event
-6. release optional resource ownership
+1. load and validate a durable `RUNNING` campaign;
+2. compute the pure retry decision;
+3. persist either terminal `FAILED` or retry `SCHEDULED`;
+4. enqueue the persisted retry specification;
+5. emit the ordered audit event;
+6. release optional resource ownership.
 
 A crash after persistence but before enqueue leaves a durable `SCHEDULED`
-record. The existing T-031 startup recovery service rehydrates it, avoiding lost
-work. No retry is dispatched by this service.
+record. A4-01 startup recovery rehydrates it, avoiding lost work. No retry is
+dispatched by this service.
 
 ## Resource boundary
 

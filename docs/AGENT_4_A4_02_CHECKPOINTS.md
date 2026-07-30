@@ -1,8 +1,8 @@
-# T-031 — durable campaign checkpoints
+# A4-02 — durable campaign checkpoints
 
 **Status:** immutable local checkpoint store implemented  
 **Activation:** explicit lifecycle call only  
-**External object storage:** out of scope
+**Remote storage:** out of scope
 
 ## Envelope
 
@@ -44,8 +44,8 @@ checkpoint, which is safe and can be garbage-collected later.
 Checkpoints are accepted for `RUNNING`, `PAUSING` and `PAUSED` campaigns. They
 are rejected for queued, scheduled, cancelling and terminal campaigns.
 
-## Trust boundary
+## Storage boundary
 
-Payloads use the same local filesystem trust boundary as campaign records. This
-slice provides integrity detection, not encryption. Encryption or remote object
-storage requires a separate storage/security decision.
+Payloads use the same local filesystem boundary as campaign records. This
+contract detects accidental or conflicting content changes. Additional storage
+protection and remote backends require a separate design decision.

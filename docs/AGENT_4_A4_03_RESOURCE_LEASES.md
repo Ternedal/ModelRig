@@ -1,7 +1,7 @@
-# T-032 — resource leases and concurrency limits
+# A4-03 — resource leases and concurrency limits
 
 **Status:** process-local lease kernel implemented  
-**Scheduler integration:** separate follow-up slice  
+**Scheduler integration:** included in a separate A4-03 slice  
 **Cross-host coordination:** out of scope
 
 ## Purpose
@@ -26,17 +26,17 @@ worker or changing Agent 3.
 
 ## Process boundary
 
-Leases are intentionally in memory. T-031 startup recovery marks interrupted
+Leases are intentionally in memory. A4-01 startup recovery marks interrupted
 active campaigns failed, so a restarted Agent 4 process cannot silently resume
 work while forgetting ownership. Durable or distributed leases require a
 separate backend and fencing-token design.
 
-## Next slice
+## Scheduler admission
 
-The scheduler integration will:
+The A4-03 scheduler integration:
 
-1. resolve a resource vector for a campaign;
-2. skip ready campaigns that cannot currently be admitted;
-3. acquire before Agent 3 dispatch;
-4. release on completion, cancellation or failed dispatch;
-5. define pause/resume ownership semantics explicitly.
+1. resolves a resource vector for a campaign;
+2. skips ready campaigns that cannot currently be admitted;
+3. acquires before Agent 3 dispatch;
+4. releases on completion, cancellation or failed dispatch;
+5. defines pause/resume ownership semantics explicitly.

@@ -1,6 +1,6 @@
-# Agent 4 T-032 — resource-aware scheduler admission
+# A4-03 — resource-aware scheduler admission
 
-This slice composes the dormant T-030 lifecycle coordinator with the T-032
+This slice composes the dormant A4-01 lifecycle coordinator with the A4-03
 process-local resource lease kernel. It is additive: the original
 `CampaignSchedulerService` remains unchanged, while
 `ResourceAwareCampaignSchedulerService` provides explicit resource-aware
@@ -36,13 +36,12 @@ admission for hosts that opt into it.
 
 ## Validation
 
-The existing `tests/worker_agent4_resources.py` gate now covers both the lease
-kernel and scheduler admission. This avoids a new test-glob entry and therefore
-requires no generated `CURRENT_STATE.md` change.
+The existing `tests/worker_agent4_resources.py` gate covers both the lease
+kernel and scheduler admission. This avoids a separate test-glob entry.
 
 The gate includes head-of-line blocking, dispatch failure cleanup, pause/resume,
 blocked resume, cancellation, completion and renewal scenarios. The complete
-stack passes 53 Agent 4 tests locally.
+stack passes 53 Agent 4 tests at this slice.
 
 ## Deferred
 

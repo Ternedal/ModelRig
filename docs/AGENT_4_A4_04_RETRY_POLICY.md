@@ -1,8 +1,8 @@
-# Agent 4 T-033 — retry classification and deterministic backoff
+# A4-04 — retry classification and deterministic backoff
 
 This slice adds a pure retry-decision kernel. It does not mutate campaign state,
-requeue work, sleep or activate an automatic retry loop. Scheduler integration
-remains a separate reviewable slice.
+requeue work, sleep or activate an automatic retry loop. Durable scheduling is a
+separate A4-04 slice.
 
 ## Failure contract
 
@@ -39,23 +39,22 @@ replay in tests.
 `CampaignRetryPlanner` reads `CampaignSpec.max_attempts` and the current failed
 attempt number. It returns an immutable `RetryDecision` with:
 
-- retry or terminal disposition
-- category
-- failed and remaining attempt counts
-- delay and next ready timestamp when retryable
-- an explicit reason
+- retry or terminal disposition;
+- category;
+- failed and remaining attempt counts;
+- delay and next ready timestamp when retryable;
+- an explicit reason.
 
 Retryable failures become terminal once the campaign's attempt budget is
 exhausted. Permanent and cancelled failures are terminal immediately.
 
 ## Validation
 
-The existing `tests/workflow_agent4_foundation.py` gate now includes seven
-retry-policy scenarios, avoiding a new CI glob and generated-state change. The
-complete Agent 4 stack passes 60 tests locally.
+The existing `tests/workflow_agent4_foundation.py` gate includes seven
+retry-policy scenarios. The complete Agent 4 stack passes 60 tests at this
+slice.
 
 ## Deferred
 
-Transitioning a failed attempt back to a scheduled state, persistence of retry
-decisions, operator overrides, deterministic jitter and automatic redispatch are
-separate future slices.
+Operator overrides, deterministic jitter, automatic failure ingestion and
+automatic redispatch remain separate future slices.

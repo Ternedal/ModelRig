@@ -1,4 +1,4 @@
-# T-030 — caller-driven campaign scheduler
+# A4-01 — caller-driven campaign scheduler
 
 **Status:** implemented on the Agent 4 foundation branch  
 **Activation:** explicit composition only  
@@ -25,8 +25,7 @@ Supported commands:
 ## Dispatch contract
 
 A ready campaign is persisted as `RUNNING` before it is delegated to the
-executor. This makes an interrupted dispatch visible to the future T-031
-recovery slice.
+executor. This makes an interrupted dispatch visible to A4-01 startup recovery.
 
 ```text
 QUEUED/SCHEDULED
@@ -65,11 +64,14 @@ The service owns no thread and no timer. `dispatch_ready()` performs at most
 one explicit dispatch. A later host can drive it from an API, a scheduler or a
 test harness without changing the domain or persistence contracts.
 
-## Deferred to T-031+
+## Follow-on contracts
 
-- rehydrate the in-memory queue after restart;
-- reconcile campaigns found in `RUNNING`, `PAUSING` or `CANCELLING`;
-- persist event history;
-- cross-process leases and admission control;
-- retries and backoff;
-- API and WebSocket surfaces.
+- A4-01 startup recovery rehydrates durable work and fails interrupted active
+  work closed;
+- A4-02 persists checkpoint payloads;
+- A4-03 adds resource leases and admission;
+- A4-04 adds retry decisions and durable retry scheduling;
+- A4-05 adds health assessment and explicit watchdog adapters.
+
+Persistent event history, cross-process coordination and operator/API surfaces
+remain deferred.

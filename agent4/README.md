@@ -4,7 +4,7 @@ Agent 4 is the orchestration layer above the validated Agent 3 runtime. It owns
 campaign scheduling, durable orchestration state, recovery and operator-facing
 control. It does **not** change Agent 3 execution contracts.
 
-## Current milestone: T-030 foundation
+## Current milestone: A4-01 foundation
 
 The branch currently provides a dormant, standard-library-only foundation:
 
@@ -19,17 +19,40 @@ The branch currently provides a dormant, standard-library-only foundation:
 Runtime activation, API routes and background threads are deliberately absent.
 Importing `app.agent4` has no side effects and cannot start Agent 3 work.
 
+## Stable Agent 4 identities
+
+Agent 4 uses its own namespace so it cannot collide with ModelRig roadmap tasks:
+
+1. `A4-01` — foundation, lifecycle and startup recovery.
+2. `A4-02` — durable checkpoints.
+3. `A4-03` — resource leases and scheduler admission.
+4. `A4-04` — retry classification and durable retry scheduling.
+5. `A4-05` — health policy, watchdog coordinator and adapters.
+6. `A4-06` — future append-only timeline/evidence integration.
+
+Historical `T-030`–`T-034` labels and `agent/t03*` branch names are not Agent 4
+identities. See `docs/AGENT_4_IDENTITY.md`.
+
 ## Package layout
 
 ```text
 worker/app/agent4/
 ├── __init__.py
+├── checkpoint.py
 ├── contracts.py
 ├── domain.py
 ├── event_bus.py
+├── health.py
+├── recovery.py
 ├── repository.py
+├── resource_admission.py
+├── resources.py
+├── retry.py
+├── retry_scheduling.py
 ├── scheduler.py
-└── service.py
+├── service.py
+├── watchdog.py
+└── watchdog_adapters.py
 ```
 
 ## Test locally
@@ -53,17 +76,9 @@ CampaignExecutor protocol
 Agent 3 runtime             (unchanged)
 ```
 
-## T-030 lifecycle service
+## A4-01 lifecycle service
 
-`CampaignSchedulerService` now provides explicit submit, dispatch, pause,
-resume, cancellation and completion commands. It is caller-driven and remains
-fully dormant until a host composes it with repository, executor, event and
-clock implementations. See `docs/AGENT_4_T030_SCHEDULER.md`.
-
-## Next slices
-
-1. T-031 startup recovery and persisted checkpoints.
-2. T-032 resource leases and concurrency limits.
-3. T-033 retry classification and backoff.
-4. T-034 health observations and watchdog policy.
-5. T-035 append-only timeline/evidence integration.
+`CampaignSchedulerService` provides explicit submit, dispatch, pause, resume,
+cancellation and completion commands. It is caller-driven and remains fully
+dormant until a host composes it with repository, executor, event and clock
+implementations. See `docs/AGENT_4_A4_01_SCHEDULER.md`.

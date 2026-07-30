@@ -1,8 +1,8 @@
-# T-031 — startup recovery
+# A4-01 — startup recovery
 
 **Status:** dormant recovery contract implemented  
 **Runtime reconciliation:** fail-closed placeholder  
-**Checkpoint payload store:** next T-031 slice
+**Checkpoint payload store:** A4-02
 
 ## Recovery policy
 
@@ -32,5 +32,5 @@ Requeued and paused campaigns receive a `RECOVERED` event. Interrupted active
 campaigns receive ordered `RECOVERED` and `FAILED` events, with
 `phase=startup_recovery`.
 
-Event history remains in memory in this slice. Persistent timeline/evidence is
-planned for T-035.
+Event history remains in memory in this contract. Persistent timeline/evidence
+is planned for A4-06.
