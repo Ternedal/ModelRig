@@ -167,31 +167,47 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
             }
         }
 
-        fun stopTask() {
-            val runId = snapshot?.run?.id ?: return
-            if (!Agent3TaskUiPolicy.canStop(snapshot?.terminal, busy != DesktopTaskBusy.NONE)) return
-            busy = DesktopTaskBusy.STOP
+        fun stopPlan() {
+            val current = snapshot ?: return
+            if (!Agent3TaskUiPolicy.canStopPlan(
+                    current.termination.plan.canRequest,
+                    busy != DesktopTaskBusy.NONE,
+                )
+            ) return
+            busy = DesktopTaskBusy.STOP_PLAN
             error = null
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
                         val (base, bearer) = requireConnection()
-                        Agent3ReadonlyTaskClient(base, bearer).cancel(runId)
+                        Agent3ReadonlyTaskClient(base, bearer).cancel(current.run.id)
                     }
                 }
                 busy = DesktopTaskBusy.NONE
                 result.onSuccess { snapshot = it }
-                    .onFailure { error = it.message ?: "Opgaven kunne ikke stoppes" }
+                    .onFailure { error = it.message ?: "Planen kunne ikke stoppes" }
             }
         }
 
         LaunchedEffect(Unit) { refreshReadiness() }
 
         // Window-owned polling is cancelled when --tasks is closed or falls back
-        // to App(). The persisted rig run is stopped only by the explicit button.
-        LaunchedEffect(snapshot?.run?.id, snapshot?.terminal) {
+        // to App(). Cancelling the plan does not imply that a synchronous tool
+        // stopped, so the receipt keeps polling alive until tool truth is terminal.
+        LaunchedEffect(
+            snapshot?.run?.id,
+            snapshot?.terminal,
+            snapshot?.termination?.activeTool?.state,
+            snapshot?.termination?.activeTool?.requestState,
+        ) {
             val runId = snapshot?.run?.id ?: return@LaunchedEffect
-            while (isActive && Agent3TaskUiPolicy.shouldPoll(snapshot?.terminal)) {
+            while (
+                isActive && Agent3TaskUiPolicy.shouldPoll(
+                    runTerminal = snapshot?.terminal,
+                    activeToolState = snapshot?.termination?.activeTool?.state,
+                    activeToolRequestState = snapshot?.termination?.activeTool?.requestState,
+                )
+            ) {
                 delay(1_000)
                 if (busy != DesktopTaskBusy.NONE) continue
                 val result = withContext(Dispatchers.IO) {
@@ -364,13 +380,13 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                     value,
                     busy,
                     onRefresh = ::refreshRun,
-                    onStop = ::stopTask,
+                    onStopPlan = ::stopPlan,
                 )
             }
 
             Spacer(Modifier.height(22.dp))
             Text(
-                "Denne surface kan ikke bekræfte writes, genoptage generiske Agent 3-runs eller ændre routing.",
+                "Denne surface kan kun stoppe planen, når serverens receipt tillader det. Den kan ikke opfinde tool-/stream-kontrol, bekræfte writes, genoptage generiske Agent 3-runs eller ændre routing.",
                 color = KalivTheme.colors.TextMuted,
                 fontSize = 10.sp,
             )
@@ -414,8 +430,14 @@ private fun DesktopRunCard(
     value: Agent3ReadonlyTaskSnapshot,
     busy: DesktopTaskBusy,
     onRefresh: () -> Unit,
-    onStop: () -> Unit,
+    onStopPlan: () -> Unit,
 ) {
+    val activeTool = value.termination.activeTool
+    val polling = Agent3TaskUiPolicy.shouldPoll(
+        runTerminal = value.terminal,
+        activeToolState = activeTool?.state,
+        activeToolRequestState = activeTool?.requestState,
+    )
     DesktopTaskCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -429,25 +451,35 @@ private fun DesktopRunCard(
                 fontWeight = FontWeight.Bold,
             )
         }
-        if (!value.terminal) {
+        if (polling) {
             Spacer(Modifier.height(8.dp))
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
         DesktopValueRow("Route", value.run.route.kind)
         DesktopValueRow("Step", "${value.run.currentStep}/${value.run.steps.size}")
-        DesktopValueRow("Terminal", if (value.terminal) "ja" else "nej")
+        DesktopValueRow("Plan terminal", if (value.terminal) "ja" else "nej")
+        DesktopValueRow("Statuspolling", if (polling) "aktiv" else "afsluttet")
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = busy == DesktopTaskBusy.NONE, onClick = onRefresh) {
                 Text(if (busy == DesktopTaskBusy.STATUS) "Henter…" else "Opdatér")
             }
-            Button(
-                enabled = Agent3TaskUiPolicy.canStop(value.terminal, busy != DesktopTaskBusy.NONE),
-                onClick = onStop,
-            ) {
-                Text(if (busy == DesktopTaskBusy.STOP) "Stopper…" else "Stop")
+            if (value.termination.plan.canRequest) {
+                Button(
+                    enabled = Agent3TaskUiPolicy.canStopPlan(
+                        value.termination.plan.canRequest,
+                        busy != DesktopTaskBusy.NONE,
+                    ),
+                    onClick = onStopPlan,
+                ) {
+                    Text(if (busy == DesktopTaskBusy.STOP_PLAN) "Stopper plan…" else "Stop plan")
+                }
             }
         }
+
+        Spacer(Modifier.height(12.dp))
+        DesktopTerminationScopes(value)
+
         value.run.answer?.takeIf { it.isNotBlank() }?.let {
             Spacer(Modifier.height(10.dp))
             Text("Outcome", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.SemiBold)
@@ -482,6 +514,56 @@ private fun DesktopRunCard(
             }
         }
     }
+}
+
+@Composable
+private fun DesktopTerminationScopes(value: Agent3ReadonlyTaskSnapshot) {
+    val termination = value.termination
+    Text("Termination scopes", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.SemiBold)
+    Spacer(Modifier.height(6.dp))
+
+    Text("Plan", color = KalivTheme.colors.Signal, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+    DesktopValueRow("State", termination.plan.state)
+    DesktopValueRow("Kan anmodes", if (termination.plan.canRequest) "ja" else "nej")
+    DesktopValueRow("Scope", termination.plan.requestScope)
+    DesktopValueRow("Effekt", termination.plan.effect)
+    Text(termination.plan.reason, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
+    if (termination.plan.effect == "prevent_future_steps_active_tool_continues") {
+        Text(
+            "Stop af planen forhindrer fremtidige steps; det aktive tool fortsætter.",
+            color = KalivTheme.colors.Amber,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+
+    Spacer(Modifier.height(9.dp))
+    Text("Modelstream", color = KalivTheme.colors.Signal, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+    DesktopValueRow("State", termination.modelStream.state)
+    DesktopValueRow("Aktiv", if (termination.modelStream.active) "ja" else "nej")
+    DesktopValueRow("Handle", if (termination.modelStream.handlePresent) "til stede" else "mangler")
+    DesktopValueRow("Kan anmodes", if (termination.modelStream.canRequest) "ja" else "nej")
+    Text(termination.modelStream.reason, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
+
+    Spacer(Modifier.height(9.dp))
+    Text("Aktivt tool", color = KalivTheme.colors.Signal, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+    termination.activeTool?.let { active ->
+        DesktopValueRow("Tool", active.tool)
+        DesktopValueRow("Step", active.stepId)
+        DesktopValueRow("State", active.state)
+        DesktopValueRow("Semantik", active.semantics ?: "ukendt")
+        DesktopValueRow("Handle", if (active.handlePresent) "til stede" else "mangler")
+        DesktopValueRow("Request state", active.requestState)
+        DesktopValueRow("Kan anmodes", if (active.canRequest) "ja" else "nej")
+        Text(active.reason, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
+        if (active.canRequest) {
+            Text(
+                "Serveren rapporterer en tool-kontrol, men normal task-surface har ingen tool-cancel-route; ingen request sendes.",
+                color = KalivTheme.colors.Amber,
+                fontSize = 10.sp,
+            )
+        }
+    } ?: Text("Intet aktivt tool", color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
 }
 
 @Composable
@@ -584,5 +666,5 @@ private enum class DesktopTaskBusy {
     PREVIEW,
     START,
     STATUS,
-    STOP,
+    STOP_PLAN,
 }
