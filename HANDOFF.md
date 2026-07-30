@@ -823,6 +823,43 @@ modsat udfald — det er præcis derfor tjekket skal køres.
 beviser den ikke. Intet fysisk er kørt, ingen kampagne udført,
 `production_activation` er uændret.
 
+**[30/7, sent — oprydningen er færdig. Autoritativt: 19 åbne PR'er, ned fra
+62 i går.]** Ti dependabot-PR'er behandlet (otte landet, `#232` lukket på et
+rødt `android-compile`, `#239` lukket til fordel for at bringe desktops Gradle
+op på Androids 8.14.4 frem for et 8→9-spring på kun den ene klient), og
+t023-stakken `#190`–`#196` lukket: klassifikationen viste nul unikke filer, og
+diskriminatoren fandt præcis **én** afvigende fil — hele stakkens resterende
+bidrag var én sætning i `AGENT3_CANCELLATION_CONTRACT.md`, porteret ordret som
+`1308a554`. Invarianten var allerede håndhævet i `_TERMINAL_RUNS`; dokumentet
+sagde det bare ikke.
+
+**Fælde værd at kende:** "nul unikke filer" betyder kun *ingen nye* filer. Både
+t023-stakken og `#235` (browser-use-bumpet) blev stemplet sådan af den første
+klassifikation — men `#235` er et versionsbump til en eksisterende fil, ikke en
+skal. Diskriminatoren i lektie 36 er den rigtige test, ikke fil-optællingen.
+
+**De 19 tilbage er arbejde, ikke oprydning:** 13 t033 (Sols aktive spor), fire
+Agent 4 (`#253`–`#256`, Sols), `#235` (parkeret til D7's trin 1 er afgjort) og
+`#163`.
+
+**`#163` er den eneste PR, der hviler på "bevidst parkeret"-klausulen — og
+klausulen kræver et genstartskriterium, som ikke findes.** Beslutningen fra
+24/7 var *"merges ikke; desktop beholdes til F5"*, men PR'en havde **nul
+kommentarer**, og **`F5` optræder ikke i hverken ROADMAP eller HANDOFF**.
+Begrundelsen er nu skrevet på PR'en: research-delen er en konkurrerende
+implementering af mains web-research-sti, mens ti `desktop_*`-moduler er reelt
+nyt arbejde, der ikke findes andre steder (28 filer i alt). **Anders' kald:**
+definér F5 i ROADMAP, eller omformulér kriteriet til noget, der findes. Et
+kriterium, der peger på en udefineret milepæl, er en tidsubestemt udsættelse
+med en pænere etiket.
+
+**To udestående verifikationer fra dagens landinger**, begge noteret på deres
+PR'er og i commit-beskederne: `#230`s okhttp-major bærer ti klienter i
+`android/.../net/` — CI beviser compile og mockwebserver, ikke en rigtig
+forbindelse, så én chat-tur og én stemme-tur fra Pixel'en mod riggen mangler.
+Og `#231`s attest-build-provenance kan slet ikke bevises af CI, fordi
+`build-and-release.yml` ikke kører på push: **første rigtige tag er prøven.**
+
 **[30/7, morgen — t021 er AFSLUTTET, og vi kørte om kap med Sol undervejs.]**
 Convergence-merget landede som `4e8acd33` (Sols kontrakt overlevede, verificeret
 linje for linje; `#183` auto-lukkede som merged), task-UI-halen som `c858cea4`
