@@ -140,6 +140,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_task_readiness_entrypoint.py`
 - `tests/worker_agent3_task_surface.py`
 - `tests/worker_agent3_task_ui_validation.py`
+- `tests/worker_agent3_termination_ui_physical_report.py`
 - `tests/worker_agent3_unattended_execution.py`
 - `tests/worker_agent3_validation_gate.py`
 - `tests/worker_agent3_validation_path_contract.py`
@@ -233,8 +234,11 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_access_derivation_parity.py`
 - `tests/workflow_action_pins.py`
 - `tests/workflow_activation_readiness.py`
+- `tests/workflow_agent3_android_termination_ui.py`
 - `tests/workflow_agent3_dormant.py`
 - `tests/workflow_agent3_readonly_pilot_one_click.py`
+- `tests/workflow_agent3_termination_physical_campaign.py`
+- `tests/workflow_agent3_termination_ui_physical_operator.py`
 - `tests/workflow_agent3_write_pilot_collect_operator.py`
 - `tests/workflow_agent3_write_pilot_current_main_binding.py`
 - `tests/workflow_agent3_write_pilot_final_gate.py`
@@ -261,6 +265,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_dep_pins.py`
 - `tests/workflow_design_token_contrast.py`
 - `tests/workflow_design_tokens.py`
+- `tests/workflow_desktop_agent3_termination_ui_contract.py`
 - `tests/workflow_doc_authority.py`
 - `tests/workflow_freeze_check.py`
 - `tests/workflow_physical_validation_campaign.py`
