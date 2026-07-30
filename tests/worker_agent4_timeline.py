@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A4-06 timeline and A4-07 runtime-composition contract tests."""
+"""A4-06 timeline plus A4-07/A4-08 composition and operator contracts."""
 
 from __future__ import annotations
 
@@ -24,9 +24,14 @@ _composition = _load(
     "agent4_runtime_composition_cases",
     "agent4_runtime_composition_cases.py",
 )
+_operator = _load(
+    "agent4_operator_read_cases",
+    "agent4_operator_read_cases.py",
+)
 
 Agent4TimelineTests = _timeline.Agent4TimelineTests
 Agent4RuntimeCompositionTests = _composition.Agent4RuntimeCompositionTests
+Agent4OperatorReadTests = _operator.Agent4OperatorReadTests
 
 
 if __name__ == "__main__":
