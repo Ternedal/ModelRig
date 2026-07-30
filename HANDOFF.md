@@ -665,6 +665,30 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 
 ## 9. Kø — hvem har bolden (16/7, opdateret 30/7)
 
+**[30/7, aften — Android-palettens divergens PINNET. claim: Claude 30/7
+23:20 — scope: token-JSON'ens `platformOverrides`, `Theme.kt`-kommentar,
+`tests/workflow_android_palette_divergence.py` (ny).]**
+
+Den tredje af Anders' beslutninger. Divergensen er lys-temaets dæmpede tekst:
+tokenets `color.light.muted` er `#6F665C`, Androids `textMuted` er `#5A4831`.
+
+**Målingen gør den til en beslutning og ikke en smagssag.** Androids værdi
+giver **7,96:1** mod appens lyse baggrund — AAA. Tokenets ville give **5,13:1**
+på samme baggrund — kun AA. Telefonen læses i dagslys, desktoppen sjældent, så
+et "løft" ville koste læsbarhed præcis dér hvor den betyder mest.
+
+**Hvorfor den kunne forsvinde tavst:** `KalivTokens.kt` genereres og ligger
+allerede i Android-temaets pakke, men `Theme.kt` bruger stadig håndskrevne
+`Color(0x…)`-værdier, og *ingen test sammenlignede de to*. En velmenende
+oprydning — "migrér Theme.kt til KalivTokens" — ville have ændret udtrykket
+uden at noget blev rødt.
+
+Gaten er tosidet med vilje: den fælder både hvis Theme.kt migreres til
+tokenets værdi, OG hvis tokenet løftes til Androids (det sidste ville ændre
+desktoppens udtryk uden at nogen bad om det). Begge snubletråde er
+sabotage-prøvet. Det æstetiske valg træffes stadig på rig-dagen med begge apps
+foran sig; når det er truffet, opdateres `platformOverrides` og testen sammen.
+
 **[30/7, aften — Computer Use I3/I4 REDDET fra `#163`. claim: Claude 30/7
 22:55 — scope: `worker/app/desktop_*` (nye), `worker/app/main.py`
 (gated registrering), `tests/worker_desktop_*` (nye), ROADMAP-milepæl.]**

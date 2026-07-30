@@ -79,6 +79,12 @@ val KalivLightColors = KalivColors(
     accent = Color(0xFF5E4728),       // bronze link/accent text: 8.0:1 on ivory
     amber = Color(0xFFB69B73),
     textHigh = Color(0xFF2A2118),
+    // BEVIDST OVERRIDE af tokenets color.light.muted (#6F665C), Anders 30/7-2026.
+    // Målt: denne værdi giver 7,96:1 mod baggrunden nedenfor (AAA); tokenets
+    // ville give 5,13:1 (kun AA). Telefonen læses i dagslys. Migrér IKKE til
+    // KalivTokens.Light.muted som oprydning — det er en æstetisk beslutning,
+    // der hører til rig-dagen. Pinnet i platformOverrides + gaten
+    // tests/workflow_android_palette_divergence.py.
     textMuted = Color(0xFF5A4831),
     onSignal = Color(0xFFF3EFE6),     // ivory on deep bronze = 6.2:1 (charcoal failed AA at 3.2)
     success = Color(0xFF4F7A41),

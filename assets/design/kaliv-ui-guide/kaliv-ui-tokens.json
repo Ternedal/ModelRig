@@ -85,5 +85,18 @@
     "composerMinHeight": 88,
     "assistantMaxWidth": 780,
     "userMaxWidth": 620
+  },
+  "platformOverrides": {
+    "_note": "Bevidste platform-afvigelser fra tokenet ovenfor. En afvigelse der IKKE staar her er en fejl; en der staar her er en beslutning. Generatoren laeser kun 'color', 'spacing', 'radius' og 'layout', saa denne blok aendrer ingen genereret kode -- den dokumenterer, og tests/workflow_android_palette_divergence.py haandhaever.",
+    "android": {
+      "color.light.muted": {
+        "value": "#5A4831",
+        "tokenValue": "#6F665C",
+        "decidedBy": "Anders",
+        "decidedOn": "2026-07-30",
+        "reason": "Maalt 30/07-2026: Androids vaerdi giver 7,96:1 mod appens lyse baggrund (#F7F4EF); tokenets vaerdi ville give 5,13:1 paa samme baggrund. Begge bestaar AA (4,5), men kun den foerste bestaar AAA (7,0). Telefonen laeses i dagslys, desktoppen sjaeldent. At 'loefte' Android til tokenet er derfor ikke en oprydning men en maalbar tilbagegang i laesbarhed netop der hvor den betyder mest.",
+        "revisit": "Rig-dagen, med begge apps foran sig: loeft tokenet, saenk Android, eller behold divergensen permanent. Indtil da er den en truffet beslutning, ikke et aabent spoergsmaal."
+      }
+    }
   }
 }
