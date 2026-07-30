@@ -289,4 +289,5 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_staged_promotion_runbook.py`
 - `tests/workflow_success_harness.py`
 - `tests/workflow_test_coverage.py`
+- `tests/workflow_web_research_parity.py`
 - `tests/workflow_worker_entrypoints.py`
