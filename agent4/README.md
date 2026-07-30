@@ -30,8 +30,8 @@ Agent 4 uses its own namespace so it cannot collide with ModelRig roadmap tasks:
 5. `A4-05` — health policy, watchdog coordinator and adapters.
 6. `A4-06` — future append-only timeline/evidence integration.
 
-Historical `T-030`–`T-034` labels and `agent/t03*` branch names are not Agent 4
-identities. See `docs/AGENT_4_IDENTITY.md`.
+Retired aliases and provenance rules are documented only in
+`docs/AGENT_4_IDENTITY.md`.
 
 ## Package layout
 
