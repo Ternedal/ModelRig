@@ -36,7 +36,7 @@ a corrupt final entry fails the entire campaign timeline closed.
 A4-06 does not copy, upload, delete or open the referenced evidence. Binary
 evidence storage, retention and authorization remain host responsibilities.
 
-## Explicit operations
+## Explicit timeline operations
 
 `JsonCampaignTimelineStore` exposes only caller-driven operations:
 
@@ -60,21 +60,41 @@ protocol without subscribing to the in-memory bus. It:
 - may bind evidence explicitly through `record_with_evidence()`.
 
 The recorder performs one durable write only. It does not also publish to a
-transient bus, because a dual-write contract would need an explicit recovery and
+transient bus, because a dual-write contract needs an explicit recovery and
 redelivery model for the case where durable append succeeds and fan-out fails.
 
-No event bus is subscribed automatically. A later composition slice may connect
-the durable recorder to transient subscribers, but that integration must define
-failure ordering explicitly rather than silently adding side effects.
+## Durable delivery cursors
+
+`CampaignTimelineDeliveryService` provides explicit, caller-driven delivery to a
+consumer handler. Each consumer/campaign pair has an immutable, checksummed
+`CampaignTimelineCursor` persisted by `JsonCampaignTimelineCursorStore`.
+
+Delivery ordering is:
+
+1. validate the complete timeline chain;
+2. validate that the durable cursor still binds its acknowledged entry hash;
+3. select the next contiguous entry;
+4. call the consumer handler;
+5. advance the cursor exactly one sequence using compare-and-swap.
+
+This is intentionally **at-least-once** delivery. If the handler succeeds and the
+cursor write fails or the process stops, the same entry is delivered again on
+the next call. The consumer must therefore deduplicate using the stable event ID
+or entry hash. The ordering prevents an event from being acknowledged before the
+handler has accepted it.
+
+One delivery-service instance serializes concurrent calls. The cursor store also
+rejects stale or skipped compare-and-swap updates. Cross-process consumer leases,
+exactly-once effects and automatic dispatch remain separate future work.
 
 ## Safety boundary
 
 - no API route or runtime mount;
 - no background writer, timer or polling loop;
-- no automatic event ingestion;
+- no automatic event ingestion or consumer delivery;
 - no network or external-storage call;
 - no deletion or mutation API for committed timeline entries;
-- one process-local writer lock; distributed writer arbitration is deferred;
+- process-local writer and delivery locks only;
 - importing `app.agent4` remains side-effect free.
 
 ## Validation
@@ -83,6 +103,7 @@ The A4-06 cases run through the existing
 `tests/workflow_agent4_foundation.py` root entrypoint. They cover ordered append,
 evidence round-trip, verification and replay, duplicate/gap rejection, content
 tampering, chain and filename rebinding, interrupted temporary files, corrupt
-final entries, protocol compatibility, restart-safe sequence allocation,
-concurrent callers and fail-closed value validation. No new root test inventory
-entry is introduced.
+final entries, protocol compatibility, restart-safe recording, concurrent
+recorders, cursor checksums and CAS, ordered restart-safe delivery, handler and
+cursor failures, safe redelivery, cursor/timeline anchor mismatch and concurrent
+caller serialization. No new root test inventory entry is introduced.
