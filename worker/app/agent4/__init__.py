@@ -19,6 +19,7 @@ from .contracts import (
     CampaignRepository,
     CampaignResourceLeaseManager,
     CampaignResourceResolver,
+    CampaignTimelineCursorStore,
     CampaignTimelineStore,
     Clock,
     IdGenerator,
@@ -109,6 +110,15 @@ from .timeline import (
     TimelineIntegrityError,
     TimelineStoreError,
 )
+from .timeline_delivery import (
+    CampaignTimelineCursor,
+    CampaignTimelineDeliveryResult,
+    CampaignTimelineDeliveryService,
+    JsonCampaignTimelineCursorStore,
+    TimelineCursorConflictError,
+    TimelineCursorStoreError,
+    TimelineDeliveryIntegrityError,
+)
 from .timeline_recorder import TimelineCampaignEventRecorder
 
 __all__ = [
@@ -147,6 +157,10 @@ __all__ = [
     "CampaignSpec",
     "CampaignState",
     "CampaignStatus",
+    "CampaignTimelineCursor",
+    "CampaignTimelineCursorStore",
+    "CampaignTimelineDeliveryResult",
+    "CampaignTimelineDeliveryService",
     "CampaignTimelineEntry",
     "CampaignTimelineStore",
     "CampaignTimelineVerification",
@@ -177,6 +191,7 @@ __all__ = [
     "InMemoryCampaignEventBus",
     "InMemoryResourceLeaseManager",
     "JsonCampaignRepository",
+    "JsonCampaignTimelineCursorStore",
     "JsonCampaignTimelineStore",
     "JsonCheckpointStore",
     "RecoveryAction",
@@ -195,6 +210,9 @@ __all__ = [
     "SystemClock",
     "TimelineCampaignEventRecorder",
     "TimelineConflictError",
+    "TimelineCursorConflictError",
+    "TimelineCursorStoreError",
+    "TimelineDeliveryIntegrityError",
     "TimelineIntegrityError",
     "TimelineStoreError",
     "transition_campaign",
