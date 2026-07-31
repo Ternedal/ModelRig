@@ -46,9 +46,26 @@ evidence storage, retention and authorization remain host responsibilities.
 - `verify(campaign_id)`;
 - `replay(campaign_id, handler)`.
 
+## Timeline-backed event recorder
+
+`TimelineCampaignEventRecorder` implements the existing `CampaignEventRecorder`
+protocol without subscribing to the in-memory bus. It:
+
+- reads the validated durable timeline head;
+- assigns the next sequence and deterministic `<campaign_id>:<sequence>` event
+  identifier;
+- appends the event before returning it;
+- restores sequence allocation after creating a new recorder instance;
+- serializes concurrent calls made through one recorder;
+- may bind evidence explicitly through `record_with_evidence()`.
+
+The recorder performs one durable write only. It does not also publish to a
+transient bus, because a dual-write contract would need an explicit recovery and
+redelivery model for the case where durable append succeeds and fan-out fails.
+
 No event bus is subscribed automatically. A later composition slice may connect
-the timeline to lifecycle services, but that integration must define failure
-ordering explicitly rather than silently adding side effects.
+the durable recorder to transient subscribers, but that integration must define
+failure ordering explicitly rather than silently adding side effects.
 
 ## Safety boundary
 
@@ -66,5 +83,6 @@ The A4-06 cases run through the existing
 `tests/workflow_agent4_foundation.py` root entrypoint. They cover ordered append,
 evidence round-trip, verification and replay, duplicate/gap rejection, content
 tampering, chain and filename rebinding, interrupted temporary files, corrupt
-final entries and fail-closed value validation. No new root test inventory entry
-is introduced.
+final entries, protocol compatibility, restart-safe sequence allocation,
+concurrent callers and fail-closed value validation. No new root test inventory
+entry is introduced.
