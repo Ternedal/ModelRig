@@ -1,5 +1,6 @@
 """Agent 4 autonomous campaign orchestration foundation."""
 
+from .campaign_queue import CampaignQueue, DuplicateCampaignError
 from .checkpoint import (
     CampaignCheckpoint,
     CampaignCheckpointService,
@@ -35,13 +36,31 @@ from .domain import (
     utc_now,
 )
 from .event_bus import CampaignEventOrderError, InMemoryCampaignEventBus
+from .failure_handling import (
+    CampaignFailureHandlingService,
+    FailureHandlingResult,
+)
 from .health import (
     CampaignHealthObservation,
-    CampaignWatchdogPolicy,
+    CampaignHealthPolicy,
+    HealthDecision,
+    HealthInterventionAction,
     HealthLevel,
-    WatchdogAction,
-    WatchdogDecision,
-    WatchdogPolicy,
+    HealthPolicy,
+)
+from .health_intervention import (
+    CampaignHealthInterventionCoordinator,
+    HealthInterventionCompositionError,
+    HealthInterventionExecutionError,
+    HealthInterventionHandler,
+    HealthInterventionResult,
+)
+from .health_intervention_adapters import (
+    CampaignHealthFailClosedService,
+    CheckpointPayloadProvider,
+    HealthInterventionAdapterCompositionError,
+    HealthInterventionLifecycleService,
+    HealthInterventionServiceAdapters,
 )
 from .recovery import (
     CampaignRecoveryDecision,
@@ -50,20 +69,6 @@ from .recovery import (
     RecoveryAction,
 )
 from .repository import CampaignRepositoryError, JsonCampaignRepository
-from .retry import (
-    CampaignRetryPlanner,
-    DefaultRetryClassifier,
-    FailureDescriptor,
-    RetryCategory,
-    RetryClassifier,
-    RetryDecision,
-    RetryDisposition,
-    RetryPolicy,
-)
-from .retry_scheduling import (
-    CampaignRetrySchedulingService,
-    RetryScheduleResult,
-)
 from .resource_admission import (
     CampaignResourceBlockedError,
     ResourceAwareCampaignSchedulerService,
@@ -77,20 +82,15 @@ from .resources import (
     ResourceLeaseNotFoundError,
     ResourceSnapshot,
 )
-from .scheduler import CampaignQueue, DuplicateCampaignError
-from .watchdog_adapters import (
-    CampaignWatchdogFailClosedService,
-    CheckpointPayloadProvider,
-    WatchdogAdapterCompositionError,
-    WatchdogLifecycleService,
-    WatchdogServiceAdapters,
-)
-from .watchdog import (
-    CampaignWatchdogCoordinator,
-    WatchdogActionHandler,
-    WatchdogCompositionError,
-    WatchdogExecutionError,
-    WatchdogExecutionResult,
+from .retry import (
+    CampaignRetryPlanner,
+    DefaultRetryClassifier,
+    FailureDescriptor,
+    RetryCategory,
+    RetryClassifier,
+    RetryDecision,
+    RetryDisposition,
+    RetryPolicy,
 )
 from .service import (
     CampaignConflictError,
@@ -113,23 +113,12 @@ __all__ = [
     "CampaignEventRecorder",
     "CampaignEventSubscriber",
     "CampaignExecutor",
-    "CampaignNotFoundError",
-    "WatchdogPolicy",
-    "WatchdogServiceAdapters",
-    "WatchdogLifecycleService",
-    "WatchdogAdapterCompositionError",
-    "CheckpointPayloadProvider",
-    "CampaignWatchdogFailClosedService",
-    "WatchdogExecutionResult",
-    "WatchdogExecutionError",
-    "WatchdogCompositionError",
-    "WatchdogActionHandler",
-    "CampaignWatchdogCoordinator",
-    "WatchdogDecision",
-    "WatchdogAction",
-    "HealthLevel",
-    "CampaignWatchdogPolicy",
+    "CampaignFailureHandlingService",
+    "CampaignHealthFailClosedService",
+    "CampaignHealthInterventionCoordinator",
     "CampaignHealthObservation",
+    "CampaignHealthPolicy",
+    "CampaignNotFoundError",
     "CampaignPriority",
     "CampaignQueue",
     "CampaignRecord",
@@ -141,17 +130,8 @@ __all__ = [
     "CampaignResourceBlockedError",
     "CampaignResourceLeaseManager",
     "CampaignResourceResolver",
-    "CampaignSchedulerService",
-    "RetryPolicy",
-    "RetryDisposition",
-    "RetryDecision",
-    "RetryClassifier",
-    "RetryCategory",
-    "FailureDescriptor",
-    "DefaultRetryClassifier",
     "CampaignRetryPlanner",
-    "CampaignRetrySchedulingService",
-    "RetryScheduleResult",
+    "CampaignSchedulerService",
     "CampaignSpec",
     "CampaignState",
     "CampaignStatus",
@@ -159,23 +139,43 @@ __all__ = [
     "CampaignValidationError",
     "CheckpointConflictError",
     "CheckpointLifecycleError",
+    "CheckpointPayloadProvider",
     "CheckpointStoreError",
     "Clock",
+    "DefaultRetryClassifier",
     "DispatchResult",
     "DuplicateCampaignError",
+    "FailureDescriptor",
+    "FailureHandlingResult",
+    "HealthDecision",
+    "HealthInterventionAction",
+    "HealthInterventionAdapterCompositionError",
+    "HealthInterventionCompositionError",
+    "HealthInterventionExecutionError",
+    "HealthInterventionHandler",
+    "HealthInterventionLifecycleService",
+    "HealthInterventionResult",
+    "HealthInterventionServiceAdapters",
+    "HealthLevel",
+    "HealthPolicy",
     "IdGenerator",
     "InMemoryCampaignEventBus",
+    "InMemoryResourceLeaseManager",
     "JsonCampaignRepository",
     "JsonCheckpointStore",
-    "InMemoryResourceLeaseManager",
+    "RecoveryAction",
+    "ResourceAwareCampaignSchedulerService",
     "ResourceDispatchResult",
     "ResourceLease",
     "ResourceLeaseConflictError",
     "ResourceLeaseError",
     "ResourceLeaseNotFoundError",
     "ResourceSnapshot",
-    "RecoveryAction",
-    "ResourceAwareCampaignSchedulerService",
+    "RetryCategory",
+    "RetryClassifier",
+    "RetryDecision",
+    "RetryDisposition",
+    "RetryPolicy",
     "SystemClock",
     "transition_campaign",
     "utc_now",
