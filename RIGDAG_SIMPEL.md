@@ -7,6 +7,17 @@ blok — resten er kun de handlinger, et menneske sandfærdigt kan udføre.** De
 **Kandidaten er `1.58.147`** på branchen `agent/unified-candidate-1.58.147`.
 Wizard'en finder selv den eksakte SHA og nægter at gætte den.
 
+## SHA-invarianten — dagens hårdeste regel
+
+Stage A binder til kandidatens **eksakte 40-tegns SHA**. Samme SHA bruges til
+fast-forward, tag og release, og **enhver ændring af checkouten efter Stage A
+ugyldiggør hele dagens fysiske evidens** (`STAGED_PHYSICAL_PROMOTION.md`).
+Derfor: fra blok 1 starter, til promoveringen er afgjort, ændres
+kandidat-checkouten **ikke** — ingen commits, ingen omdøbninger, ingen
+git-operationer ud over læsning. Alt, der skal landes, landes **efter**
+dagen som normale PR'er mod `main`. Testlederen håndhæver reglen og afviser
+ethvert trin, der ville flytte SHA'en.
+
 ## Testlederen: Claude i desktop-appen
 
 Åbn Claude Desktop på riggen → **Code-fanen** → vælg repomappen
@@ -35,8 +46,8 @@ vinduer, hører hjemme i **Code-fanen**.
 - **Blok 1 er automatisk undtagen dine fem handlinger.** Wizard'en kører
   selv; testlederen overvåger loggen og siger præcis, hvornår og hvad du
   skal gøre — du rører kun mikrofon, telefon, app-godkendelse og ur.
-- **Blok 4:** valget er dit; alt omkring det (flip, gates, commit-udkast)
-  er testlederens.
+- **Blok 4:** valget er dit; udkastet laver testlederen i en separat mappe —
+  ingen commits på dagen (SHA-invarianten).
 - **Rapporten:** Cowork-sessionen kan køre Full Auto i sandkassen på
   `rig-evidence\` og skrive `EVIDENCE.md` løbende, mens Code-fanen kører
   blokkene.
@@ -70,15 +81,12 @@ Stopper noget: den manuelle vej står i `STAGED_PHYSICAL_PROMOTION.md`.
 
 ## Blok 2 — D7 form (c): henteren rører internettet, beviset fryses
 
-Rækkefølgen er pointen: **først** bruger blok 1 scriptet uændret (det syvende
-bevis), **derefter** fryses det:
+Blok 1 har allerede brugt scriptet **uændret** (det syvende bevis) — og der
+røres ikke ved det i dag: `.retained`-frysningen sker **efter promoveringen**
+som en normal PR (se »Efter dagen«), aldrig mellem Stage A og
+exact-SHA-promotion.
 
-1. Testlederen omdøber `scripts\browser_peer_public_validation.py` til
-   `.retained` efter præcedensen fra `agent3_readonly_pilot_one_click.retained`,
-   opdaterer operatørens reference i samme commit og kører den fulde suite
-   lokalt, før der committes. Kan præcedensen ikke følges 1:1, udskydes
-   frysningen til en lille PR — dagen beviser stadig produktionskaldet.
-2. Ét produktionskald ad den rigtige vej — **fuldautomatisk**: testlederen
+1. Ét produktionskald ad den rigtige vej — **fuldautomatisk**: testlederen
    starter workeren med begge flag kun i den session
    (`KALIV_TOOLS_ENABLED=1` og `KALIV_WEB_RESEARCH_ENABLED=1`, begge kræver
    præcis `"1"`), tæller rækkerne i audit-databasen `kaliv-audit.db`, og
@@ -92,7 +100,7 @@ bevis), **derefter** fryses det:
 
    (`model`-feltet er valgfrit — workeren bruger sin default.) Det er samme
    endpoint og samme tool-loop, som appen rammer — appen er UX, ikke beviset.
-3. Testlederen verificerer automatisk: svaret indeholder en gennemført
+2. Testlederen verificerer automatisk: svaret indeholder en gennemført
    `web_research`-kørsel, og audit-databasen har **præcis én** ny post
    (rækketælling før/efter via `sqlite3`). Svar + audit-udtræk →
    `rig-evidence\`.
@@ -119,11 +127,13 @@ Screenshot, kontrakt, plan og afvisning → `rig-evidence\`.
 Begge apps åbne side om side (desktop + Android). Vælg med øjnene:
 Androids mørkere `#5A4831` (AAA) eller tokenets `#6F665C` (AA).
 
-**Dagens leverance er valget**, skrevet i `EVIDENCE.md`. Implementeringen —
-flip af tokenet *eller* tilpasning af Android-temaet — kan testlederen lave
-som udkast samme dag; de fire gates skal være grønne før commit:
+**Dagens leverance er valget**, skrevet i `EVIDENCE.md` — intet andet.
+Implementeringen — flip af tokenet *eller* tilpasning af Android-temaet —
+laver testlederen som udkast i en **separat mappe uden for checkouten** og
+lander den **efter dagen** som normal PR med de fire gates grønne:
 `workflow_design_tokens`, `workflow_design_token_contrast`,
 `workflow_android_palette_divergence`, `workflow_brand_no_token_duplicates`.
+Ingen commits på kandidat-checkouten (SHA-invarianten).
 
 ## Én beslutning på 30 sekunder — memory-pilotens politik
 
@@ -134,10 +144,23 @@ eller revidér med én sætning i `EVIDENCE.md`; testlederen skriver den ind.
 
 ## Dagens slutning
 
-Testlederen færdiggør `EVIDENCE.md` og foreslår commit-tekst; **du** committer
-og pusher evidensen. Promovering — fast-forward, tag, release, aktivering —
-er en separat, eksplicit beslutning og sker **ikke** i dag
-(`STAGED_PHYSICAL_PROMOTION.md`).
+Testlederen færdiggør `EVIDENCE.md`. Evidensen gemmes med
+**`SAVE_STAGE_A_RESULTS.cmd`** og ligger i `rig-evidence\` — **kandidat-
+checkouten forlades urørt** (SHA-invarianten). Promovering — fast-forward,
+tag, release, aktivering — er en separat, eksplicit beslutning og sker
+**ikke** i dag (`STAGED_PHYSICAL_PROMOTION.md`).
+
+## Efter dagen — landinger der bevidst IKKE skete på kandidaten
+
+Claude lander som normale PR'er mod `main`, i denne rækkefølge og først
+**efter** at promoveringen er afgjort:
+
+1. `.retained`-frysningen af `scripts\browser_peer_public_validation.py`
+   (rename + loader efter præcedensen, operatør-referencen opdateret i samme
+   commit, fuld suite grøn).
+2. Palettevalgets implementering fra testlederens udkast, med de fire gates
+   grønne.
+3. Evidens-artefakterne fra `rig-evidence\`, hvis de skal ind i repoet.
 
 ## Hvis noget stopper
 
