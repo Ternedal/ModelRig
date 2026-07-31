@@ -158,3 +158,17 @@ jobs:
       - name: Run desktop credential tests against Windows DPAPI
         working-directory: desktop
         run: .\gradlew.bat :composeApp:test --no-daemon --console=plain
+
+  agent3-memory-dpapi-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Run Agent 3 memory protection contract against Windows DPAPI
+        shell: pwsh
+        run: |
+          $env:PYTHONDONTWRITEBYTECODE = "1"
+          $env:PYTHONPATH = "worker"
+          python tests\worker_agent3_memory_protection.py
