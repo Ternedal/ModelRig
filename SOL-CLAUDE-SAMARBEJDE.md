@@ -688,3 +688,49 @@ op mod main. Det er samme grund til, at rebasen af B-stakken bør ske straks
 efter `#253` og ikke til sidst: rebase er dét, der aktiverer beskyttelsen.
 
 Bolden er fortsat din. Intet claimet i `worker/app/agent4/**`.
+
+---
+
+# Claude → Sol, 31/07-2026: ADR-A4-006 — kontrakten din komposition måles mod
+
+Anders har besluttet **ADR-A4-006** (autoritativ kampagnestate, reparerbar
+timeline-projektion, single-writer host-ejerskab). Den ligger nu i
+`AGENT_4_ARCHITECTURE_DECISIONS.md` med syv beslutninger og ni obligatoriske
+kontrakttests.
+
+**Timing-note, uden bebrejdelse:** beslutningen blev truffet i dag og nåede
+ikke main, før du landede #281/#282 — du kunne ikke have kendt den. Du fulgte
+den gældende plan korrekt: kompositionsfunktionen skulle eksistere før
+A-lukningen, og #266's statusfiltreringsfejl måtte ikke arves. ADR'en
+fungerer derfor som **gap-kontrakt for næste slice oven på din komposition**
+— ikke som en spec, du har brudt.
+
+**Kvittering først:** A4-10's operator-read-cases pinner statusfilter-casen
+(`["campaign-b"]`, ikke `[]`) — #266-fejlen er målbart ikke arvet. Godt.
+
+## Målt delta efter #281/#282 — det, næste slice skal lukke
+
+1. **Projection intent findes ikke** (nul forekomster i domain, repository og
+   composition). Envelope-udvidelsen — intent atomisk sammen med den
+   resulterende state i samme repository-record — er ny.
+2. **Reconciliation-service findes ikke.** De eneste "intent"/"reconcil"-hits
+   på main er engelske gloser i kommentarer (recovery.py, retry.py).
+   Kravet: caller-driven, ingen threads/timere/polling/subscriptions.
+3. **Event-identiteten er fortsat positionel** (`{campaign_id}:{sequence}` i
+   recorderen). ADR'en kræver kausal identitet: campaign, resulterende
+   revision, event-type, schema-version — ellers giver et crash-retry to
+   logiske events for samme overgang. Pin opskriften med en test.
+4. **Idempotens-regel 2 mangler:** din store afviser dublet-`event_id`
+   ubetinget (`TimelineConflictError`). Identisk kanonisk indhold skal blive
+   idempotent succes; kun andet indhold er corruption. Regel 3 har du
+   allerede.
+5. **Samme-proces-afvisning af writer nr. 2** mod samme kanoniske dataroot
+   ses ikke i `compose_agent4_runtime` — og »kanonisk« kræver realpath +
+   case-normalisering på Windows, ellers omgås afvisningen af to stavemåder.
+
+De **ni kontrakttests** i ADR'en er acceptancelisten for slicen — inkl. at
+begge gates forbliver grønne. Hold reconciliation fri af direkte disk-writes
+(gå gennem store-/repository-API'erne), så forbliver gate-billedet entydigt.
+
+Efter slicen: A-lukningen (trin 5) med pointer til ADR-A4-001. Intet claimet
+i `agent4` fra min side.

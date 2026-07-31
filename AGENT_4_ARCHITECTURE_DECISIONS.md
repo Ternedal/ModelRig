@@ -198,11 +198,18 @@ merger ingenting. De fastlægger den arkitektur, det videre arbejde skal
 opfylde — og de to gates gør, at opfyldelsen kan måles i stedet for at blive
 husket.
 
-Agent 4-koden findes **ikke på `main`** endnu. Begge gates passerer derfor
-tomt i dag og er armeret til den dag, laget lander — samme mønster som
-`tests/workflow_agent3_dormant.py`, hvis dormanskrav også landede før koden.
-Hver detektor køres desuden mod overtrædende prøver, fordi *en test, der kun
-kan bestå, ikke er en test.*
+Gates er skrevet, så de passerer tomt, når pakken ikke findes, og scanner
+den fuldt, når den gør — de hævder ingen aktuel merge-status. Aktuel tilstand
+aflæses af de genererede tilstandsdokumenter, aldrig af ADR'er.
+
+**Regel:** ADR'er beskriver beslutninger og deres konsekvenser — de må ikke
+hævde, hvad der aktuelt er merged. En statuspåstand i et beslutningsdokument
+bliver falsk i samme øjeblik, virkeligheden flytter sig, og læses derefter
+som sandhed. (Reglen er indført, efter at netop dette afsnit nåede at blive
+falsk.)
+
+Hver detektor køres mod overtrædende prøver, fordi *en test, der kun kan
+bestå, ikke er en test* — samme mønster som `tests/workflow_agent3_dormant.py`.
 
 ---
 
@@ -302,3 +309,207 @@ gennem kode — aldrig omvendt.
 4. Stabilisering af Agent 4 på `main`.
 
 **Ingen nye funktionelle spor åbnes, før denne proces er afsluttet.**
+
+---
+
+## ADR-A4-006 — Autoritativ kampagnestate, reparerbar timeline-projektion og single-writer host-ejerskab
+
+**Truffet af Anders 31/07-2026. Status: besluttet.** Gælder **før**
+genimplementeringen af Agent 4 runtime composition. Supplerer ADR-A4-001,
+ADR-A4-002, ADR-A4-003 og ADR-A4-005.
+
+### Kontekst — målt, ikke antaget
+
+Agent 4-lifecycle-operationer persisterer i dag kampagnestate og
+timeline-event som **to separate durable writes** (målt: otte steder i
+lifecycle-servicen). Et crash eller en skrivefejl imellem kan efterlade:
+
+- en autoritativ kampagnestate uden det tilsvarende timeline-event;
+- et allerede skrevet timeline-event, som lifecycle-servicen ikke nåede at
+  registrere som leveret;
+- en startet eller forsøgt Agent 3-dispatch, hvis historik endnu ikke er
+  projiceret.
+
+Dagens event-identitet er desuden **positionel** (`{campaign_id}:{sequence}`):
+et retry efter et crash beregner en ny sekvens og skaber dermed et nyt id for
+samme logiske hændelse. Repository-laget gemmer `state.revision`, men bruger
+den ikke som guard.
+
+Timeline-storage må samtidig ikke blive command source, event bus eller
+dispatch-vej. En journal-autoritativ model ville både være en større
+omlægning og skabe en uønsket kobling mellem historik og runtime-adfærd — og
+den ville gøre timelinen til det, systemet *handler* på, i strid med
+ADR-A4-002's ånd.
+
+### Beslutning 1 — Kampagnestate er autoritativ
+
+Den durable kampagnestate er den autoritative sandhed om kampagnens aktuelle
+lifecycle-status, revision, attempt og fejltilstand. Timelinen er en
+immutable **audit-projektion** af allerede besluttede lifecycle-overgange og
+andre eksplicit registrerede hændelser.
+
+Systemet må ikke:
+
+- udlede, at en lifecycle-operation skal udføres, alene fordi et
+  timeline-event findes;
+- bruge timeline-storage som command queue eller dispatch-trigger;
+- betragte fraværet af et timeline-event som bevis for, at en durable
+  state-overgang ikke fandt sted;
+- genafspille timeline-events automatisk som runtime-kommandoer.
+
+Agent 3-dispatch, recovery og intervention styres fortsat af lifecycle-state
+og de eksisterende fail-closed kontrakter — ikke af timeline-projektionen.
+
+### Beslutning 2 — Durable projection intent
+
+Enhver state-overgang, der skal repræsenteres i timelinen, skal gemme en
+**durable projection intent sammen med den resulterende kampagnestate**.
+State-overgangen og projection intent skal være del af samme atomisk
+publicerede repository-record eller envelope.
+
+Projection intent skal mindst indeholde: campaign identity; resulterende
+state-revision; event-type; kanonisk JSON-safe event-payload; deterministic
+event-id; event schema-version.
+
+Dermed kan systemet efter et crash fastslå, at en autoritativ overgang
+mangler sin audit-projektion, uden at rekonstruere hændelsen ud fra fri
+fortolkning af den aktuelle state. **En projection intent er metadata om en
+allerede besluttet state-overgang. Den er ikke en command og må ikke udføre
+eller genudføre Agent 3-arbejde.**
+
+### Beslutning 3 — Deterministisk og idempotent event-identitet
+
+Lifecycle-events skal have en deterministisk identitet baseret på deres
+stabile årsag og resulterende revision. Identiteten skal mindst bindes til:
+campaign identity; resulterende state-revision; event-type; event
+schema-version. Når flere hændelsestyper lovligt kan knyttes til samme
+revision, skal event-type eller en anden stabil producer-identitet indgå.
+
+Timeline-append skal følge disse regler:
+
+1. Et nyt event-id kan appendes normalt.
+2. Et allerede eksisterende event-id med **identisk kanonisk indhold**
+   behandles som idempotent succes.
+3. Et allerede eksisterende event-id med **andet indhold** behandles som
+   corruption og fejler lukket.
+4. Et retry må aldrig skabe to logiske events for samme durable
+   state-overgang.
+
+Entry-hash og event-id har forskellige formål: event-id identificerer den
+logiske hændelse; entry-hash beskytter den konkrete placering og hash-kæde i
+timelinen.
+
+### Beslutning 4 — Eksplicit reconciliation
+
+Runtime composition skal levere en **caller-driven reconciliation-service**,
+som: finder durable projection intents, der endnu ikke er bekræftet i
+timelinen; appenderer dem idempotent; verificerer, at et eksisterende event
+med samme identitet har identisk indhold; markerer eller fjerner en
+projection intent, når projektionen er verificeret; kan gentages efter crash
+uden duplikering eller runtime-side effects; og fejler lukket ved
+identitets-, payload- eller hash-konflikt.
+
+Reconciliation må kun køres ved eksplicit kald — under eksplicit
+startup-recovery, før eller efter en caller-drevet lifecycle-operation, eller
+via en eksplicit operatorhandling.
+
+Der må ikke introduceres: background thread; timer; polling-loop; automatisk
+tailer; event-bus-subscription; implicit runtime-aktivering.
+
+### Beslutning 5 — Crash-semantik
+
+Implementeringen skal kunne håndtere mindst følgende vinduer:
+
+- **State og intent gemt, timeline mangler:** recovery finder den durable
+  intent og projicerer eventet.
+- **Timeline appendet, intent ikke kvitteret:** recovery forsøger samme
+  deterministic event-id igen; identisk event behandles som idempotent
+  succes, hvorefter intent kan kvitteres.
+- **Konfliktende event med samme identitet:** recovery må ikke fortsætte
+  eller overskrive. Kampagnen markeres som krævende operatorintervention
+  eller tilsvarende fail-closed tilstand.
+- **Dispatch-outcome er ukendt:** timeline-reconciliation må ikke afgøre, om
+  dispatch skal gentages. Det håndteres af lifecycle- og recovery-kontrakten
+  for ukendt execution outcome.
+
+**Audit-reparation og execution-recovery er separate ansvar.**
+
+### Beslutning 6 — Single-writer host-ejerskab
+
+Den kanoniske Agent 4 runtime composition skal eje **præcis ét** campaign
+repository, **én** lifecycle-writer/service, **én** timeline-recorder,
+**én** reconciliation-service og **ét** delt sæt process-local
+coordination-objekter — per kanonisk dataroot. Alle Agent 4-services i samme
+runtime-context skal dele disse instanser.
+
+Det er ikke understøttet at komponere flere uafhængige lifecycle-writers mod
+samme dataroot. Kompositionen skal, hvor det er praktisk muligt, afvise flere
+samtidige writer-contexts mod samme kanoniske dataroot i samme proces.
+
+Denne ADR introducerer **ikke**: cross-process filesystem lock; distributed
+lease; global runtime-singleton; polling-baseret lock acquisition; automatisk
+process arbitration. Samtidige writers fra flere processer er fortsat en
+ikke-understøttet deployment-konfiguration. Cross-process fencing genovervejes
+først, hvis et konkret produktkrav kræver flere Agent 4-writerprocesser.
+
+### Beslutning 7 — Revision-CAS
+
+Repository compare-and-swap på campaign revision er **ikke et krav** for den
+første ADR-A4-006-implementering. Det kan senere tilføjes som en defensiv
+stale-writer-guard uden at ændre state-autoriteten,
+timeline-projektionsmodellen eller single-writer host-kontrakten. **CAS må
+ikke bruges som erstatning for entydigt runtime-ejerskab.**
+
+### Obligatoriske kontrakttests
+
+Implementeringen skal mindst bevise:
+
+1. crash efter state/intent-save og før timeline-append repareres;
+2. crash efter timeline-append og før intent-kvittering skaber ikke duplikat;
+3. identisk retry accepteres;
+4. konfliktende event med samme event-id afvises fail-closed;
+5. reconciliation udfører ingen lifecycle-command eller Agent 3-dispatch;
+6. flere services i samme runtime-context deler samme writer og recorder;
+7. en anden writer-context mod samme dataroot afvises i samme proces;
+8. import og composition starter ingen thread, timer eller polling-loop;
+9. storage-boundary- og dormant-runtime-gates forbliver grønne.
+
+### Konsekvenser
+
+**Positive:** durable state og audit-historik kan konvergere efter crash;
+timeline-storage forbliver et separat, read-/append-orienteret lag; recovery
+behøver ikke gætte manglende events ud fra den aktuelle state; duplicate
+projection bliver sikkert og deterministisk; runtime composition får et
+eksplicit ejerskabsansvar; ADR-A4-002 og ADR-A4-003 bevares.
+
+**Accepterede begrænsninger:** state og timeline bliver ikke fysisk atomiske
+på tværs af filer; der kan midlertidigt eksistere en backlog af durable
+projection intents; cross-process concurrent writers understøttes ikke;
+timeline er ikke en event-sourced autoritativ journal; reconciliation kræver
+et eksplicit caller-kald.
+
+### Implementeringsnoter — målt mod den landede kode (noter, ikke beslutninger)
+
+1. **Regel 3 er allerede opfyldt** af den landede store: duplikeret
+   `event_id` afvises ubetinget med `TimelineConflictError`. **Deltaet er
+   regel 2:** identisk kanonisk indhold skal blive idempotent succes i stedet
+   for konflikt. Opslaget pr. event-id findes allerede (lineær scanning ved
+   append) og passer i den accepterede O(n²)-holdning.
+2. **Projection intent findes ikke i dag** — nul forekomster i `domain.py` og
+   `repository.py`. Envelope-udvidelsen af repository-recorden er ny, og den
+   deterministiske id-opskrift (kanonisk hash over campaign identity,
+   resulterende revision, event-type, schema-version) bør pinnes af en test,
+   så to implementeringer ikke kan regne forskelligt.
+3. **»Kanonisk dataroot« i Beslutning 6 kræver en definition** — realpath og,
+   på Windows, case-normalisering — ellers kan samme-proces-afvisningen omgås
+   af to stavemåder af samme sti.
+4. Reconciliation-servicen bør skrive gennem store- og repository-API'erne og
+   ikke selv røre disken; så forbliver den uden for
+   storage-klassifikationen, og gate-billedet forbliver entydigt.
+5. **Sekvensnote:** runtime-kompositionen (A4-09) og operator-læsemodellen
+   (A4-10) landede, før denne ADR var synlig på main — beslutningen var
+   truffet, men endnu ikke landet. ADR'en fungerer derfor som gap-kontrakt
+   for den efterfølgende slice. Målt delta ved denne ADR's landing: ingen
+   projection intent, ingen reconciliation-service, positionel
+   event-identitet, ubetinget dublet-afvisning (regel 2 udestår), ingen
+   samme-proces-afvisning af en anden writer-context.
