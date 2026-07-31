@@ -79,12 +79,11 @@ class Agent4TimelineTests(unittest.TestCase):
             self.assertEqual(replayed, [first, second])
             self.assertFalse(any(Path(directory).rglob("*.tmp")))
 
-    def test_append_rejects_sequence_gaps_and_duplicate_event_ids(self) -> None:
+    def test_append_accepts_identical_retry_but_rejects_gaps_and_conflicts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = JsonCampaignTimelineStore(directory)
-            store.append(_event(1))
-            with self.assertRaises(TimelineConflictError):
-                store.append(_event(1))
+            first = store.append(_event(1))
+            self.assertEqual(store.append(_event(1)), first)
             with self.assertRaises(TimelineConflictError):
                 store.append(_event(3))
             with self.assertRaises(TimelineConflictError):
