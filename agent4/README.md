@@ -19,6 +19,8 @@ The package provides a dormant, standard-library-only orchestration foundation:
 - pure health assessment with caller-driven intervention adapters;
 - append-only, hash-chained campaign timelines with immutable evidence
   references;
+- durable at-least-once delivery cursors and an explicit shared process-local
+  single-flight guard;
 - protocols for repositories, executors, clocks, IDs and event delivery;
 - tests automatically discovered through the shared CI entrypoints.
 
@@ -59,7 +61,10 @@ worker/app/agent4/
 ├── resources.py
 ├── retry.py
 ├── service.py
-└── timeline.py
+├── timeline.py
+├── timeline_delivery.py
+├── timeline_delivery_flights.py
+└── timeline_recorder.py
 ```
 
 ## Test locally
@@ -91,10 +96,13 @@ dormant until a host composes it with repository, executor, event and clock
 implementations. The class name describes its lifecycle-facing API; the passive
 queue it uses lives separately in `campaign_queue.py`.
 
-A4-06 adds explicit timeline append, verification and replay operations. It
-does not subscribe to lifecycle events automatically.
+A4-06 adds explicit timeline append, verification, replay and delivery
+operations. It does not subscribe to lifecycle events automatically. Multiple
+delivery-service instances coordinate only when the host explicitly shares one
+`InMemoryCampaignTimelineDeliverySingleFlight` guard.
 
 See:
 
 - `docs/AGENT_4_A4_01_SCHEDULER.md`;
-- `docs/AGENT_4_A4_06_TIMELINE.md`.
+- `docs/AGENT_4_A4_06_TIMELINE.md`;
+- `docs/AGENT_4_A4_06_DELIVERY_SINGLE_FLIGHT.md`.
