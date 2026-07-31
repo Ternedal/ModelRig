@@ -27,6 +27,7 @@ integration boundaries and `HANDOFF.md` require parity evidence and coordination
 | `A4-06` | append-only campaign timeline, immutable evidence references and durable delivery |
 | `A4-07` | verified, bounded timeline query cursors and stable snapshot paging |
 | `A4-08` | bounded durable consumer batches over the A4-06 delivery cursor |
+| `A4-09` | explicit dormant single-process composition of the B-reference architecture |
 
 ## Retired aliases
 
@@ -43,7 +44,8 @@ must use the `A4-*` IDs and `agent/a4-*` prefix.
 The Agent 4 package remains dormant. Importing it starts no thread, timer, host
 cadence, network request or Agent 3 work. A4-06 adds explicit filesystem and
 caller-driven delivery operations; A4-07 adds read-only query composition;
-A4-08 adds only a bounded caller-driven batch wrapper over existing delivery.
+A4-08 adds only a bounded caller-driven batch wrapper; A4-09 wires these with the
+lifecycle services but performs no recovery, dispatch or intervention itself.
 None subscribes to the event bus, mounts a runtime or activates recurring work.
 Any future host integration or recurring loop is a separate integration decision
 and must be tested against the existing dormant contracts.

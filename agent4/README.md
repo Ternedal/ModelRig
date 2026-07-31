@@ -4,7 +4,7 @@ Agent 4 is the orchestration layer above the validated Agent 3 runtime. It owns
 campaign lifecycle coordination, durable orchestration state, recovery and
 operator-facing control. It does **not** change Agent 3 execution contracts.
 
-## Current milestone: dormant A4-01–A4-08 foundation
+## Current milestone: dormant A4-01–A4-09 foundation
 
 The package provides a dormant, standard-library-only orchestration foundation:
 
@@ -23,6 +23,7 @@ The package provides a dormant, standard-library-only orchestration foundation:
   single-flight guard;
 - verified, bounded timeline query cursors with stable snapshot paging;
 - bounded durable consumer batches over the existing delivery cursor;
+- one explicit dormant composition of the complete B-reference object graph;
 - protocols for repositories, executors, clocks, IDs and event delivery;
 - tests automatically discovered through the shared CI entrypoints.
 
@@ -41,6 +42,7 @@ Agent 4 uses its own namespace so it cannot collide with ModelRig roadmap tasks:
 6. `A4-06` — append-only timeline, evidence references and durable delivery.
 7. `A4-07` — verified bounded timeline query paging.
 8. `A4-08` — bounded durable consumer batches.
+9. `A4-09` — explicit dormant B-reference runtime composition.
 
 Retired aliases and provenance rules are documented only in
 `docs/AGENT_4_IDENTITY.md`.
@@ -52,6 +54,7 @@ worker/app/agent4/
 ├── __init__.py
 ├── campaign_queue.py
 ├── checkpoint.py
+├── composition.py
 ├── contracts.py
 ├── domain.py
 ├── event_bus.py
@@ -113,10 +116,16 @@ optional stable snapshot-head. It writes no delivery progress and mounts no API.
 A4-08 adds a caller-driven bounded batch wrapper that reuses the A4-06 durable
 cursor and shared single-flight guard. It introduces no second progress format.
 
+A4-09 wires lifecycle, checkpoint, failure, health, delivery, query and batch
+services into one explicit object graph. Construction creates no files and calls
+no service method. The composition uses `TimelineCampaignEventRecorder`
+directly; it does not put an event bus inside or in front of timeline storage.
+
 See:
 
 - `docs/AGENT_4_A4_01_SCHEDULER.md`;
 - `docs/AGENT_4_A4_06_TIMELINE.md`;
 - `docs/AGENT_4_A4_06_DELIVERY_SINGLE_FLIGHT.md`;
 - `docs/AGENT_4_A4_07_TIMELINE_QUERY.md`;
-- `docs/AGENT_4_A4_08_BATCH_DELIVERY.md`.
+- `docs/AGENT_4_A4_08_BATCH_DELIVERY.md`;
+- `docs/AGENT_4_A4_09_COMPOSITION.md`.

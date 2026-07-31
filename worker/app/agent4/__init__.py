@@ -9,6 +9,11 @@ from .checkpoint import (
     CheckpointStoreError,
     JsonCheckpointStore,
 )
+from .composition import (
+    Agent4RuntimeContext,
+    Agent4RuntimePaths,
+    compose_agent4_runtime,
+)
 from .contracts import (
     CampaignCheckpointStore,
     CampaignEventHandler,
@@ -143,6 +148,8 @@ from .timeline_query import (
 from .timeline_recorder import TimelineCampaignEventRecorder
 
 __all__ = [
+    "Agent4RuntimeContext",
+    "Agent4RuntimePaths",
     "CampaignCheckpoint",
     "CampaignCheckpointService",
     "CampaignCheckpointStore",
@@ -251,6 +258,7 @@ __all__ = [
     "TimelineDeliveryIntegrityError",
     "TimelineIntegrityError",
     "TimelineStoreError",
+    "compose_agent4_runtime",
     "transition_campaign",
     "utc_now",
 ]
