@@ -4,7 +4,7 @@ Agent 4 is the orchestration layer above the validated Agent 3 runtime. It owns
 campaign lifecycle coordination, durable orchestration state, recovery and
 operator-facing control. It does **not** change Agent 3 execution contracts.
 
-## Current milestone: dormant A4-01–A4-10 foundation
+## Current milestone: dormant A4-01–A4-11 foundation
 
 The package provides a dormant, standard-library-only orchestration foundation:
 
@@ -12,6 +12,8 @@ The package provides a dormant, standard-library-only orchestration foundation:
 - explicit, fail-closed campaign state transitions;
 - a deterministic campaign queue with priority and future start times;
 - atomic JSON campaign persistence with schema and filename binding;
+- authoritative campaign state with durable audit-projection intents;
+- deterministic event identity and caller-driven crash reconciliation;
 - ordered per-campaign event publication;
 - immutable checkpoints;
 - process-local resource leases and caller-driven resource admission;
@@ -24,6 +26,7 @@ The package provides a dormant, standard-library-only orchestration foundation:
 - verified, bounded timeline query cursors with stable snapshot paging;
 - bounded durable consumer batches over the existing delivery cursor;
 - one explicit dormant composition of the complete B-reference object graph;
+- one live writer context per canonical dataroot in a process;
 - bounded transport-independent operator reads over that exact object graph;
 - protocols for repositories, executors, clocks, IDs and event delivery;
 - tests automatically discovered through the shared CI entrypoints.
@@ -45,6 +48,7 @@ Agent 4 uses its own namespace so it cannot collide with ModelRig roadmap tasks:
 8. `A4-08` — bounded durable consumer batches.
 9. `A4-09` — explicit dormant B-reference runtime composition.
 10. `A4-10` — bounded transport-independent operator reads.
+11. `A4-11` — authoritative state and reparable audit projection.
 
 Retired aliases and provenance rules are documented only in
 `docs/AGENT_4_IDENTITY.md`.
@@ -65,6 +69,8 @@ worker/app/agent4/
 ├── health_intervention.py
 ├── health_intervention_adapters.py
 ├── operator.py
+├── projected_services.py
+├── projection.py
 ├── recovery.py
 ├── repository.py
 ├── resource_admission.py
@@ -128,6 +134,14 @@ A4-10 adds a bounded read model over the exact A4-09 scheduler, timeline and
 query instances. Status filtering is applied before limits, and timeline paging
 reuses A4-07 hash-bound cursors rather than defining a parallel offset format.
 
+A4-11 keeps the durable campaign record authoritative and stores any pending
+audit work in the same atomic repository envelope. State-writing services add
+deterministic projection intents and immediately invoke the shared reconciler.
+If timeline append succeeds but acknowledgement does not, the same event-id is
+retried idempotently. If append never happens, the pending intent survives and
+can be repaired through the explicit `reconcile_projections()` call. The
+reconciler never dispatches Agent 3 work and starts no cadence of its own.
+
 See:
 
 - `docs/AGENT_4_A4_01_SCHEDULER.md`;
@@ -136,4 +150,5 @@ See:
 - `docs/AGENT_4_A4_07_TIMELINE_QUERY.md`;
 - `docs/AGENT_4_A4_08_BATCH_DELIVERY.md`;
 - `docs/AGENT_4_A4_09_COMPOSITION.md`;
-- `docs/AGENT_4_A4_10_OPERATOR_READ.md`.
+- `docs/AGENT_4_A4_10_OPERATOR_READ.md`;
+- `docs/agent4/ADR-A4-006_STATE_PROJECTION.md`.
