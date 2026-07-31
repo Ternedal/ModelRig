@@ -172,3 +172,4 @@ jobs:
           $env:PYTHONDONTWRITEBYTECODE = "1"
           $env:PYTHONPATH = "worker"
           python tests\worker_agent3_memory_protection.py
+          python tests\worker_agent3_memory_protection_migration.py
