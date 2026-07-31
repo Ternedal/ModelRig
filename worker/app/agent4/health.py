@@ -1,4 +1,4 @@
-"""Pure health assessment and watchdog decisions for Agent 4 campaigns."""
+"""Pure health assessment and intervention decisions for Agent 4 campaigns."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ class HealthLevel(StrEnum):
     NOT_APPLICABLE = "not_applicable"
 
 
-class WatchdogAction(StrEnum):
+class HealthInterventionAction(StrEnum):
     NONE = "none"
     RENEW_RESOURCES = "renew_resources"
     REQUEST_CHECKPOINT = "request_checkpoint"
@@ -68,7 +68,7 @@ class CampaignHealthObservation:
 
 
 @dataclass(frozen=True, slots=True)
-class WatchdogPolicy:
+class HealthPolicy:
     heartbeat_timeout: timedelta = timedelta(minutes=2)
     progress_timeout: timedelta = timedelta(minutes=15)
     resource_renewal_window: timedelta = timedelta(minutes=1)
@@ -94,9 +94,9 @@ class WatchdogPolicy:
 
 
 @dataclass(frozen=True, slots=True)
-class WatchdogDecision:
+class HealthDecision:
     level: HealthLevel
-    action: WatchdogAction
+    action: HealthInterventionAction
     reason: str
     heartbeat_age: timedelta | None = None
     progress_age: timedelta | None = None
@@ -104,10 +104,10 @@ class WatchdogDecision:
 
     @property
     def actionable(self) -> bool:
-        return self.action is not WatchdogAction.NONE
+        return self.action is not HealthInterventionAction.NONE
 
 
-class CampaignWatchdogPolicy:
+class CampaignHealthPolicy:
     """Deterministically assess one observation without performing side effects."""
 
     _ACTIVE = frozenset(
@@ -118,18 +118,18 @@ class CampaignWatchdogPolicy:
         }
     )
 
-    def __init__(self, policy: WatchdogPolicy | None = None) -> None:
-        self._policy = policy if policy is not None else WatchdogPolicy()
+    def __init__(self, policy: HealthPolicy | None = None) -> None:
+        self._policy = policy if policy is not None else HealthPolicy()
 
-    def assess(self, observation: CampaignHealthObservation) -> WatchdogDecision:
+    def assess(self, observation: CampaignHealthObservation) -> HealthDecision:
         if not isinstance(observation, CampaignHealthObservation):
             raise CampaignValidationError(
                 "observation must be a CampaignHealthObservation"
             )
         if observation.status not in self._ACTIVE:
-            return WatchdogDecision(
+            return HealthDecision(
                 level=HealthLevel.NOT_APPLICABLE,
-                action=WatchdogAction.NONE,
+                action=HealthInterventionAction.NONE,
                 reason=f"{observation.status.value} campaigns are not actively watched",
             )
 
@@ -140,23 +140,23 @@ class CampaignWatchdogPolicy:
             else None
         )
         if heartbeat_age is None:
-            return WatchdogDecision(
+            return HealthDecision(
                 level=HealthLevel.UNRESPONSIVE,
-                action=WatchdogAction.FAIL_CLOSED,
+                action=HealthInterventionAction.FAIL_CLOSED,
                 reason="active campaign has no runtime start or heartbeat evidence",
             )
         if heartbeat_age >= self._policy.heartbeat_timeout:
-            return WatchdogDecision(
+            return HealthDecision(
                 level=HealthLevel.UNRESPONSIVE,
-                action=WatchdogAction.FAIL_CLOSED,
+                action=HealthInterventionAction.FAIL_CLOSED,
                 reason="runtime heartbeat is stale",
                 heartbeat_age=heartbeat_age,
             )
 
         if observation.consecutive_failures >= self._policy.max_consecutive_failures:
-            return WatchdogDecision(
+            return HealthDecision(
                 level=HealthLevel.DEGRADED,
-                action=WatchdogAction.REQUEST_PAUSE,
+                action=HealthInterventionAction.REQUEST_PAUSE,
                 reason="consecutive health failures reached the policy threshold",
                 heartbeat_age=heartbeat_age,
             )
@@ -167,9 +167,9 @@ class CampaignWatchdogPolicy:
             else None
         )
         if progress_age is not None and progress_age >= self._policy.progress_timeout:
-            return WatchdogDecision(
+            return HealthDecision(
                 level=HealthLevel.DEGRADED,
-                action=WatchdogAction.REQUEST_CHECKPOINT,
+                action=HealthInterventionAction.REQUEST_CHECKPOINT,
                 reason="campaign progress is stalled while heartbeat remains live",
                 heartbeat_age=heartbeat_age,
                 progress_age=progress_age,
@@ -181,9 +181,9 @@ class CampaignWatchdogPolicy:
             else None
         )
         if resource_remaining is not None and resource_remaining <= timedelta(0):
-            return WatchdogDecision(
+            return HealthDecision(
                 level=HealthLevel.UNSAFE,
-                action=WatchdogAction.FAIL_CLOSED,
+                action=HealthInterventionAction.FAIL_CLOSED,
                 reason="resource lease has expired",
                 heartbeat_age=heartbeat_age,
                 progress_age=progress_age,
@@ -193,18 +193,18 @@ class CampaignWatchdogPolicy:
             resource_remaining is not None
             and resource_remaining <= self._policy.resource_renewal_window
         ):
-            return WatchdogDecision(
+            return HealthDecision(
                 level=HealthLevel.DEGRADED,
-                action=WatchdogAction.RENEW_RESOURCES,
+                action=HealthInterventionAction.RENEW_RESOURCES,
                 reason="resource lease is inside the renewal window",
                 heartbeat_age=heartbeat_age,
                 progress_age=progress_age,
                 resource_time_remaining=resource_remaining,
             )
 
-        return WatchdogDecision(
+        return HealthDecision(
             level=HealthLevel.HEALTHY,
-            action=WatchdogAction.NONE,
+            action=HealthInterventionAction.NONE,
             reason="runtime heartbeat and progress are within policy",
             heartbeat_age=heartbeat_age,
             progress_age=progress_age,

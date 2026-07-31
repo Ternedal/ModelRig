@@ -10,12 +10,9 @@ from pathlib import Path
 
 from app.agent4 import (
     CampaignEvent,
-    WatchdogPolicy,
-    WatchdogAction,
-    HealthLevel,
-    CampaignWatchdogPolicy,
-    CampaignHealthObservation,
     CampaignEventKind,
+    CampaignHealthObservation,
+    CampaignHealthPolicy,
     CampaignQueue,
     CampaignRecord,
     CampaignRetryPlanner,
@@ -24,6 +21,9 @@ from app.agent4 import (
     CampaignStatus,
     DefaultRetryClassifier,
     FailureDescriptor,
+    HealthInterventionAction,
+    HealthLevel,
+    HealthPolicy,
     InMemoryCampaignEventBus,
     JsonCampaignRepository,
     RetryCategory,
@@ -238,7 +238,7 @@ class Agent4RetryPolicyTests(unittest.TestCase):
             )
 
 
-class Agent4WatchdogPolicyTests(unittest.TestCase):
+class Agent4HealthPolicyTests(unittest.TestCase):
     def observation(self, **changes):
         values = dict(
             campaign_id="campaign-health",
@@ -254,14 +254,14 @@ class Agent4WatchdogPolicyTests(unittest.TestCase):
         return CampaignHealthObservation(**values)
 
     def test_healthy_active_campaign_requires_no_action(self) -> None:
-        decision = CampaignWatchdogPolicy().assess(self.observation())
+        decision = CampaignHealthPolicy().assess(self.observation())
         self.assertEqual(decision.level, HealthLevel.HEALTHY)
-        self.assertEqual(decision.action, WatchdogAction.NONE)
+        self.assertEqual(decision.action, HealthInterventionAction.NONE)
         self.assertFalse(decision.actionable)
 
     def test_stale_or_missing_heartbeat_fails_closed(self) -> None:
-        policy = CampaignWatchdogPolicy(
-            WatchdogPolicy(heartbeat_timeout=timedelta(minutes=2))
+        policy = CampaignHealthPolicy(
+            HealthPolicy(heartbeat_timeout=timedelta(minutes=2))
         )
         stale = policy.assess(
             self.observation(heartbeat_at=BASE_TIME - timedelta(minutes=2))
@@ -269,50 +269,56 @@ class Agent4WatchdogPolicyTests(unittest.TestCase):
         missing = policy.assess(
             self.observation(heartbeat_at=None, runtime_started_at=None)
         )
-        self.assertEqual(stale.action, WatchdogAction.FAIL_CLOSED)
+        self.assertEqual(stale.action, HealthInterventionAction.FAIL_CLOSED)
         self.assertEqual(stale.level, HealthLevel.UNRESPONSIVE)
-        self.assertEqual(missing.action, WatchdogAction.FAIL_CLOSED)
+        self.assertEqual(missing.action, HealthInterventionAction.FAIL_CLOSED)
 
     def test_live_heartbeat_with_stalled_progress_requests_checkpoint(self) -> None:
-        decision = CampaignWatchdogPolicy().assess(
+        decision = CampaignHealthPolicy().assess(
             self.observation(progress_at=BASE_TIME - timedelta(minutes=15))
         )
-        self.assertEqual(decision.action, WatchdogAction.REQUEST_CHECKPOINT)
+        self.assertEqual(
+            decision.action,
+            HealthInterventionAction.REQUEST_CHECKPOINT,
+        )
         self.assertEqual(decision.level, HealthLevel.DEGRADED)
 
     def test_failure_threshold_requests_pause_before_lease_renewal(self) -> None:
-        decision = CampaignWatchdogPolicy().assess(
+        decision = CampaignHealthPolicy().assess(
             self.observation(
                 consecutive_failures=3,
                 resource_lease_expires_at=BASE_TIME + timedelta(seconds=5),
             )
         )
-        self.assertEqual(decision.action, WatchdogAction.REQUEST_PAUSE)
+        self.assertEqual(decision.action, HealthInterventionAction.REQUEST_PAUSE)
 
     def test_lease_inside_window_requests_renewal(self) -> None:
-        decision = CampaignWatchdogPolicy().assess(
+        decision = CampaignHealthPolicy().assess(
             self.observation(
                 resource_lease_expires_at=BASE_TIME + timedelta(seconds=30)
             )
         )
-        self.assertEqual(decision.action, WatchdogAction.RENEW_RESOURCES)
+        self.assertEqual(
+            decision.action,
+            HealthInterventionAction.RENEW_RESOURCES,
+        )
         self.assertEqual(decision.resource_time_remaining, timedelta(seconds=30))
 
     def test_expired_lease_is_unsafe_and_fails_closed(self) -> None:
-        decision = CampaignWatchdogPolicy().assess(
+        decision = CampaignHealthPolicy().assess(
             self.observation(
                 resource_lease_expires_at=BASE_TIME - timedelta(seconds=1)
             )
         )
         self.assertEqual(decision.level, HealthLevel.UNSAFE)
-        self.assertEqual(decision.action, WatchdogAction.FAIL_CLOSED)
+        self.assertEqual(decision.action, HealthInterventionAction.FAIL_CLOSED)
 
     def test_non_active_campaign_is_not_applicable(self) -> None:
-        decision = CampaignWatchdogPolicy().assess(
+        decision = CampaignHealthPolicy().assess(
             self.observation(status=CampaignStatus.PAUSED)
         )
         self.assertEqual(decision.level, HealthLevel.NOT_APPLICABLE)
-        self.assertEqual(decision.action, WatchdogAction.NONE)
+        self.assertEqual(decision.action, HealthInterventionAction.NONE)
 
     def test_future_or_naive_evidence_and_invalid_policy_fail_closed(self) -> None:
         with self.assertRaises(Exception):
@@ -320,10 +326,10 @@ class Agent4WatchdogPolicyTests(unittest.TestCase):
         with self.assertRaises(Exception):
             self.observation(observed_at=BASE_TIME.replace(tzinfo=None))
         with self.assertRaises(Exception):
-            WatchdogPolicy(heartbeat_timeout=timedelta(0))
+            HealthPolicy(heartbeat_timeout=timedelta(0))
 
 
-from support.agent4_watchdog_coordinator_cases import Agent4WatchdogCoordinatorTests
+from support.agent4_health_intervention_cases import Agent4HealthInterventionTests
 
 
 if __name__ == "__main__":

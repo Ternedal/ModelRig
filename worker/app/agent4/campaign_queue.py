@@ -1,4 +1,4 @@
-"""Deterministic in-memory queue for Agent 4 campaign scheduling."""
+"""Deterministic in-memory queue for Agent 4 campaigns."""
 
 from __future__ import annotations
 

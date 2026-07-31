@@ -1,4 +1,4 @@
-"""Agent 4 identity guard plus the existing watchdog coordinator test cases."""
+"""Agent 4 identity guard plus the health intervention test cases."""
 from __future__ import annotations
 
 import importlib.util
@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-CORE = Path(__file__).with_name("agent4_watchdog_coordinator_cases_core.py")
+CORE = Path(__file__).with_name("agent4_health_intervention_cases_core.py")
 LEGACY = re.compile(r"(?:\bT-03\d\b|agent/t03)")
 SKIP = {
     ROOT / "docs" / "AGENT_4_IDENTITY.md",
@@ -20,7 +20,7 @@ ALLOWED_HISTORICAL_COMMENTS = {
     "worker/app/agent4/resources.py": {
         "is deliberately process-local: T-031 startup recovery fails interrupted",
     },
-    "worker/app/agent4/retry_scheduling.py": {
+    "worker/app/agent4/failure_handling.py": {
         "# the existing T-031 startup recovery path.",
     },
 }
@@ -79,10 +79,10 @@ def _verify_agent4_identity() -> None:
 _verify_agent4_identity()
 
 _spec = importlib.util.spec_from_file_location(
-    "agent4_watchdog_coordinator_cases_core",
+    "agent4_health_intervention_cases_core",
     CORE,
 )
 assert _spec is not None and _spec.loader is not None
 _core = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_core)
-Agent4WatchdogCoordinatorTests = _core.Agent4WatchdogCoordinatorTests
+Agent4HealthInterventionTests = _core.Agent4HealthInterventionTests

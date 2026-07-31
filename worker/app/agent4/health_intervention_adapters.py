@@ -1,11 +1,11 @@
-"""Concrete caller-driven adapters for Agent 4 watchdog actions."""
+"""Concrete caller-driven adapters for Agent 4 health interventions."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from types import MappingProxyType
 from threading import RLock
+from types import MappingProxyType
 from typing import Callable, Mapping, Protocol, runtime_checkable
 
 from .checkpoint import CampaignCheckpointService
@@ -20,22 +20,22 @@ from .domain import (
 )
 from .health import (
     CampaignHealthObservation,
-    WatchdogAction,
-    WatchdogDecision,
+    HealthDecision,
+    HealthInterventionAction,
 )
+from .health_intervention import HealthInterventionHandler
 from .service import CampaignConflictError, CampaignNotFoundError
-from .watchdog import WatchdogActionHandler
 
 
 CheckpointPayloadProvider = Callable[
-    [CampaignRecord, CampaignHealthObservation, WatchdogDecision],
+    [CampaignRecord, CampaignHealthObservation, HealthDecision],
     tuple[str, Mapping[str, JsonValue]],
 ]
 ResourceRelease = Callable[[str], object]
 
 
 @runtime_checkable
-class WatchdogLifecycleService(Protocol):
+class HealthInterventionLifecycleService(Protocol):
     def renew_resources(self, campaign_id: str) -> object:
         """Renew resource ownership for one active campaign."""
 
@@ -43,11 +43,11 @@ class WatchdogLifecycleService(Protocol):
         """Persist and signal a pause request."""
 
 
-class WatchdogAdapterCompositionError(RuntimeError):
-    """Raised when concrete watchdog adapters cannot be composed safely."""
+class HealthInterventionAdapterCompositionError(RuntimeError):
+    """Raised when concrete health intervention adapters cannot be composed."""
 
 
-class CampaignWatchdogFailClosedService:
+class CampaignHealthFailClosedService:
     """Durably fail an active campaign after revalidating coordinator state."""
 
     _ACTIVE = frozenset(
@@ -82,11 +82,11 @@ class CampaignWatchdogFailClosedService:
         self,
         record: CampaignRecord,
         observation: CampaignHealthObservation,
-        decision: WatchdogDecision,
+        decision: HealthDecision,
     ) -> CampaignRecord:
-        if decision.action is not WatchdogAction.FAIL_CLOSED:
+        if decision.action is not HealthInterventionAction.FAIL_CLOSED:
             raise CampaignValidationError(
-                "fail_closed requires a FAIL_CLOSED watchdog decision"
+                "fail_closed requires a FAIL_CLOSED health decision"
             )
         with self._lock:
             current = self._repository.get(record.spec.campaign_id)
@@ -96,7 +96,7 @@ class CampaignWatchdogFailClosedService:
                 )
             if current != record:
                 raise CampaignConflictError(
-                    "campaign changed after watchdog evaluation"
+                    "campaign changed after health intervention evaluation"
                 )
             if current.state.status not in self._ACTIVE:
                 raise CampaignConflictError(
@@ -106,7 +106,7 @@ class CampaignWatchdogFailClosedService:
             now = self._now()
             if now < observation.observed_at:
                 raise CampaignConflictError(
-                    "watchdog execution clock predates the observation"
+                    "health intervention clock predates the observation"
                 )
             error = f"watchdog: {decision.reason}"
             failed_state = transition_campaign(
@@ -144,48 +144,50 @@ class CampaignWatchdogFailClosedService:
 
 
 @dataclass(frozen=True, slots=True)
-class WatchdogServiceAdapters:
-    """Bind watchdog actions to existing caller-driven Agent 4 services."""
+class HealthInterventionServiceAdapters:
+    """Bind health interventions to existing caller-driven Agent 4 services."""
 
-    lifecycle: WatchdogLifecycleService
-    fail_closed_service: CampaignWatchdogFailClosedService
+    lifecycle: HealthInterventionLifecycleService
+    fail_closed_service: CampaignHealthFailClosedService
     checkpoints: CampaignCheckpointService | None = None
     checkpoint_payload: CheckpointPayloadProvider | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.lifecycle, WatchdogLifecycleService):
+        if not isinstance(self.lifecycle, HealthInterventionLifecycleService):
             raise CampaignValidationError(
-                "lifecycle must implement the watchdog lifecycle contract"
+                "lifecycle must implement the health intervention lifecycle contract"
             )
         if not isinstance(
             self.fail_closed_service,
-            CampaignWatchdogFailClosedService,
+            CampaignHealthFailClosedService,
         ):
             raise CampaignValidationError(
-                "fail_closed_service must be a CampaignWatchdogFailClosedService"
+                "fail_closed_service must be a CampaignHealthFailClosedService"
             )
         if (self.checkpoints is None) != (self.checkpoint_payload is None):
-            raise WatchdogAdapterCompositionError(
+            raise HealthInterventionAdapterCompositionError(
                 "checkpoints and checkpoint_payload must be configured together"
             )
         if self.checkpoint_payload is not None and not callable(self.checkpoint_payload):
             raise CampaignValidationError("checkpoint_payload must be callable")
 
-    def handlers(self) -> Mapping[WatchdogAction, WatchdogActionHandler]:
-        handlers: dict[WatchdogAction, WatchdogActionHandler] = {
-            WatchdogAction.RENEW_RESOURCES: self._renew_resources,
-            WatchdogAction.REQUEST_PAUSE: self._request_pause,
-            WatchdogAction.FAIL_CLOSED: self.fail_closed_service.fail_closed,
+    def handlers(
+        self,
+    ) -> Mapping[HealthInterventionAction, HealthInterventionHandler]:
+        handlers: dict[HealthInterventionAction, HealthInterventionHandler] = {
+            HealthInterventionAction.RENEW_RESOURCES: self._renew_resources,
+            HealthInterventionAction.REQUEST_PAUSE: self._request_pause,
+            HealthInterventionAction.FAIL_CLOSED: self.fail_closed_service.fail_closed,
         }
         if self.checkpoints is not None:
-            handlers[WatchdogAction.REQUEST_CHECKPOINT] = self._checkpoint
+            handlers[HealthInterventionAction.REQUEST_CHECKPOINT] = self._checkpoint
         return MappingProxyType(handlers)
 
     def _renew_resources(
         self,
         record: CampaignRecord,
         observation: CampaignHealthObservation,
-        decision: WatchdogDecision,
+        decision: HealthDecision,
     ) -> object:
         return self.lifecycle.renew_resources(record.spec.campaign_id)
 
@@ -193,7 +195,7 @@ class WatchdogServiceAdapters:
         self,
         record: CampaignRecord,
         observation: CampaignHealthObservation,
-        decision: WatchdogDecision,
+        decision: HealthDecision,
     ) -> CampaignRecord:
         return self.lifecycle.request_pause(record.spec.campaign_id)
 
@@ -201,7 +203,7 @@ class WatchdogServiceAdapters:
         self,
         record: CampaignRecord,
         observation: CampaignHealthObservation,
-        decision: WatchdogDecision,
+        decision: HealthDecision,
     ) -> CampaignRecord:
         assert self.checkpoints is not None
         assert self.checkpoint_payload is not None

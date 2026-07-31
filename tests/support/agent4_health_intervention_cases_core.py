@@ -1,4 +1,4 @@
-"""Watchdog coordinator and concrete-adapter cases imported by the workflow gate."""
+"""Health intervention and concrete-adapter cases imported by the workflow gate."""
 
 from __future__ import annotations
 
@@ -10,21 +10,21 @@ from pathlib import Path
 from app.agent4 import (
     CampaignCheckpointService,
     CampaignConflictError,
+    CampaignHealthFailClosedService,
+    CampaignHealthInterventionCoordinator,
     CampaignHealthObservation,
     CampaignRecord,
     CampaignSpec,
     CampaignState,
     CampaignStatus,
-    CampaignWatchdogCoordinator,
-    CampaignWatchdogFailClosedService,
+    HealthInterventionAction,
+    HealthInterventionAdapterCompositionError,
+    HealthInterventionCompositionError,
+    HealthInterventionExecutionError,
+    HealthInterventionServiceAdapters,
     InMemoryCampaignEventBus,
     JsonCampaignRepository,
     JsonCheckpointStore,
-    WatchdogAction,
-    WatchdogAdapterCompositionError,
-    WatchdogCompositionError,
-    WatchdogExecutionError,
-    WatchdogServiceAdapters,
 )
 
 BASE_TIME = datetime(2026, 7, 29, 15, 0, tzinfo=timezone.utc)
@@ -63,11 +63,11 @@ class _CoordinatorCases:
         return CampaignHealthObservation(**values)
 
     def test_healthy_observation_does_not_require_handlers(self) -> None:
-        result = CampaignWatchdogCoordinator(
+        result = CampaignHealthInterventionCoordinator(
             repository=self.repository
         ).execute(self.coordinator_observation())
         self.assertFalse(result.executed)
-        self.assertEqual(result.decision.action, WatchdogAction.NONE)
+        self.assertEqual(result.decision.action, HealthInterventionAction.NONE)
 
     def test_each_action_routes_only_to_its_configured_handler(self) -> None:
         calls: list[tuple[str, str]] = []
@@ -76,25 +76,28 @@ class _CoordinatorCases:
                 lambda record, observation, decision, action=action:
                 calls.append((action.value, record.spec.campaign_id)) or action.value
             )
-            for action in WatchdogAction
-            if action is not WatchdogAction.NONE
+            for action in HealthInterventionAction
+            if action is not HealthInterventionAction.NONE
         }
-        coordinator = CampaignWatchdogCoordinator(
+        coordinator = CampaignHealthInterventionCoordinator(
             repository=self.repository, handlers=handlers
         )
         cases = (
             (
                 dict(resource_lease_expires_at=BASE_TIME + timedelta(seconds=5)),
-                WatchdogAction.RENEW_RESOURCES,
+                HealthInterventionAction.RENEW_RESOURCES,
             ),
             (
                 dict(progress_at=BASE_TIME - timedelta(minutes=15)),
-                WatchdogAction.REQUEST_CHECKPOINT,
+                HealthInterventionAction.REQUEST_CHECKPOINT,
             ),
-            (dict(consecutive_failures=3), WatchdogAction.REQUEST_PAUSE),
+            (
+                dict(consecutive_failures=3),
+                HealthInterventionAction.REQUEST_PAUSE,
+            ),
             (
                 dict(heartbeat_at=BASE_TIME - timedelta(minutes=2)),
-                WatchdogAction.FAIL_CLOSED,
+                HealthInterventionAction.FAIL_CLOSED,
             ),
         )
         for changes, expected in cases:
@@ -109,9 +112,9 @@ class _CoordinatorCases:
         )
 
     def test_stale_status_or_timestamp_cannot_execute(self) -> None:
-        coordinator = CampaignWatchdogCoordinator(
+        coordinator = CampaignHealthInterventionCoordinator(
             repository=self.repository,
-            handlers={WatchdogAction.FAIL_CLOSED: lambda *args: None},
+            handlers={HealthInterventionAction.FAIL_CLOSED: lambda *args: None},
         )
         with self.assertRaises(Exception):
             coordinator.execute(
@@ -128,8 +131,10 @@ class _CoordinatorCases:
             )
 
     def test_missing_handler_is_a_composition_error(self) -> None:
-        coordinator = CampaignWatchdogCoordinator(repository=self.repository)
-        with self.assertRaises(WatchdogCompositionError):
+        coordinator = CampaignHealthInterventionCoordinator(
+            repository=self.repository
+        )
+        with self.assertRaises(HealthInterventionCompositionError):
             coordinator.execute(
                 self.coordinator_observation(
                     heartbeat_at=BASE_TIME - timedelta(minutes=2)
@@ -140,18 +145,20 @@ class _CoordinatorCases:
         def fail(*args):
             raise RuntimeError("pause adapter unavailable")
 
-        coordinator = CampaignWatchdogCoordinator(
+        coordinator = CampaignHealthInterventionCoordinator(
             repository=self.repository,
-            handlers={WatchdogAction.REQUEST_PAUSE: fail},
+            handlers={HealthInterventionAction.REQUEST_PAUSE: fail},
         )
-        with self.assertRaises(WatchdogExecutionError) as raised:
+        with self.assertRaises(HealthInterventionExecutionError) as raised:
             coordinator.execute(
                 self.coordinator_observation(consecutive_failures=3)
             )
         self.assertIn("pause adapter unavailable", str(raised.exception))
 
     def test_unknown_campaign_fails_before_policy_execution(self) -> None:
-        coordinator = CampaignWatchdogCoordinator(repository=self.repository)
+        coordinator = CampaignHealthInterventionCoordinator(
+            repository=self.repository
+        )
         with self.assertRaises(Exception):
             coordinator.evaluate(
                 self.coordinator_observation(campaign_id="missing-campaign")
@@ -195,7 +202,7 @@ class _AdapterCases:
             ),
         )
         self.repository.save(self.adapter_record)
-        self.fail_closed = CampaignWatchdogFailClosedService(
+        self.fail_closed = CampaignHealthFailClosedService(
             repository=self.repository,
             events=self.adapter_events,
             clock=_Clock(),
@@ -223,8 +230,12 @@ class _AdapterCases:
         values.update(changes)
         return CampaignHealthObservation(**values)
 
-    def adapters(self, *, checkpoint: bool = True) -> WatchdogServiceAdapters:
-        return WatchdogServiceAdapters(
+    def adapters(
+        self,
+        *,
+        checkpoint: bool = True,
+    ) -> HealthInterventionServiceAdapters:
+        return HealthInterventionServiceAdapters(
             lifecycle=self.lifecycle,
             fail_closed_service=self.fail_closed,
             checkpoints=self.checkpoints if checkpoint else None,
@@ -239,7 +250,7 @@ class _AdapterCases:
         )
 
     def test_adapters_route_renew_and_pause_to_lifecycle_service(self) -> None:
-        coordinator = CampaignWatchdogCoordinator(
+        coordinator = CampaignHealthInterventionCoordinator(
             repository=self.repository,
             handlers=self.adapters().handlers(),
         )
@@ -262,7 +273,7 @@ class _AdapterCases:
         )
 
     def test_adapter_checkpoint_persists_payload_and_pointer(self) -> None:
-        result = CampaignWatchdogCoordinator(
+        result = CampaignHealthInterventionCoordinator(
             repository=self.repository,
             handlers=self.adapters().handlers(),
         ).execute(
@@ -278,7 +289,7 @@ class _AdapterCases:
         self.assertEqual(checkpoint.payload["reason"], result.decision.reason)
 
     def test_adapter_fail_closed_persists_event_and_releases(self) -> None:
-        result = CampaignWatchdogCoordinator(
+        result = CampaignHealthInterventionCoordinator(
             repository=self.repository,
             handlers=self.adapters().handlers(),
         ).execute(
@@ -310,7 +321,7 @@ class _AdapterCases:
                     ),
                 )
                 self.repository.save(record)
-                result = CampaignWatchdogCoordinator(
+                result = CampaignHealthInterventionCoordinator(
                     repository=self.repository,
                     handlers=self.adapters().handlers(),
                 ).execute(
@@ -328,7 +339,7 @@ class _AdapterCases:
         observation = self.adapter_observation(
             heartbeat_at=ADAPTER_TIME - timedelta(minutes=3)
         )
-        evaluated = CampaignWatchdogCoordinator(
+        evaluated = CampaignHealthInterventionCoordinator(
             repository=self.repository,
             handlers=self.adapters().handlers(),
         ).evaluate(observation)
@@ -355,19 +366,19 @@ class _AdapterCases:
         )
 
     def test_adapter_checkpoint_dependencies_are_atomic_pair(self) -> None:
-        with self.assertRaises(WatchdogAdapterCompositionError):
-            WatchdogServiceAdapters(
+        with self.assertRaises(HealthInterventionAdapterCompositionError):
+            HealthInterventionServiceAdapters(
                 lifecycle=self.lifecycle,
                 fail_closed_service=self.fail_closed,
                 checkpoints=self.checkpoints,
             )
         self.assertNotIn(
-            WatchdogAction.REQUEST_CHECKPOINT,
+            HealthInterventionAction.REQUEST_CHECKPOINT,
             self.adapters(checkpoint=False).handlers(),
         )
 
 
-class Agent4WatchdogCoordinatorTests(
+class Agent4HealthInterventionTests(
     _CoordinatorCases,
     _AdapterCases,
     unittest.TestCase,

@@ -1,4 +1,4 @@
-"""Durable, caller-driven scheduling of Agent 4 retry decisions."""
+"""Durable, caller-driven handling of Agent 4 retry decisions."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from threading import RLock
 from typing import Callable
 
+from .campaign_queue import CampaignQueue, DuplicateCampaignError
 from .contracts import CampaignEventRecorder, CampaignRepository, Clock
 from .domain import (
     CampaignEventKind,
@@ -16,7 +17,6 @@ from .domain import (
     transition_campaign,
 )
 from .retry import CampaignRetryPlanner, FailureDescriptor, RetryDecision
-from .scheduler import CampaignQueue, DuplicateCampaignError
 from .service import CampaignConflictError, CampaignNotFoundError
 
 
@@ -24,7 +24,7 @@ ResourceRelease = Callable[[str], bool]
 
 
 @dataclass(frozen=True, slots=True)
-class RetryScheduleResult:
+class FailureHandlingResult:
     record: CampaignRecord
     decision: RetryDecision
 
@@ -33,11 +33,11 @@ class RetryScheduleResult:
         return self.decision.should_retry
 
 
-class CampaignRetrySchedulingService:
+class CampaignFailureHandlingService:
     """Persist one failure decision and optionally return it to the queue.
 
     The host invokes :meth:`handle_failure` explicitly after a delegated attempt
-    has stopped.  The service never sleeps or dispatches work itself.
+    has stopped. The service never sleeps or dispatches work itself.
     """
 
     def __init__(
@@ -62,7 +62,7 @@ class CampaignRetrySchedulingService:
         self,
         campaign_id: str,
         failure: FailureDescriptor,
-    ) -> RetryScheduleResult:
+    ) -> FailureHandlingResult:
         with self._lock:
             current = self._repository.get(campaign_id)
             if current is None:
@@ -85,7 +85,7 @@ class CampaignRetrySchedulingService:
                     failed = self._terminal_failure(current, failure, decision, now=now)
                 finally:
                     self._release(campaign_id)
-                return RetryScheduleResult(record=failed, decision=decision)
+                return FailureHandlingResult(record=failed, decision=decision)
 
             assert decision.ready_at is not None
             retry_spec = replace(current.spec, scheduled_for=decision.ready_at)
@@ -139,7 +139,7 @@ class CampaignRetrySchedulingService:
                 )
             finally:
                 self._release(campaign_id)
-            return RetryScheduleResult(record=scheduled, decision=decision)
+            return FailureHandlingResult(record=scheduled, decision=decision)
 
     def _terminal_failure(
         self,

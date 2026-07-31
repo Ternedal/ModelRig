@@ -1,4 +1,4 @@
-"""Caller-driven execution boundary for Agent 4 watchdog decisions."""
+"""Caller-driven execution boundary for Agent 4 health interventions."""
 
 from __future__ import annotations
 
@@ -10,69 +10,76 @@ from .contracts import CampaignRepository
 from .domain import CampaignRecord, CampaignValidationError
 from .health import (
     CampaignHealthObservation,
-    CampaignWatchdogPolicy,
-    WatchdogAction,
-    WatchdogDecision,
+    CampaignHealthPolicy,
+    HealthDecision,
+    HealthInterventionAction,
 )
 from .service import CampaignConflictError, CampaignNotFoundError
 
 
-WatchdogActionHandler = Callable[
-    [CampaignRecord, CampaignHealthObservation, WatchdogDecision], object
+HealthInterventionHandler = Callable[
+    [CampaignRecord, CampaignHealthObservation, HealthDecision], object
 ]
 
 
-class WatchdogCompositionError(RuntimeError):
+class HealthInterventionCompositionError(RuntimeError):
     """Raised when an actionable decision has no configured handler."""
 
 
-class WatchdogExecutionError(RuntimeError):
-    """Raised when a configured watchdog handler fails."""
+class HealthInterventionExecutionError(RuntimeError):
+    """Raised when a configured health intervention handler fails."""
 
 
 @dataclass(frozen=True, slots=True)
-class WatchdogExecutionResult:
+class HealthInterventionResult:
     record: CampaignRecord
     observation: CampaignHealthObservation
-    decision: WatchdogDecision
+    decision: HealthDecision
     executed: bool
     handler_result: object | None = None
 
 
-class CampaignWatchdogCoordinator:
-    """Validate durable state and explicitly route one watchdog decision."""
+class CampaignHealthInterventionCoordinator:
+    """Validate durable state and explicitly route one health intervention."""
 
     def __init__(
         self,
         *,
         repository: CampaignRepository,
-        policy: CampaignWatchdogPolicy | None = None,
-        handlers: Mapping[WatchdogAction, WatchdogActionHandler] | None = None,
+        policy: CampaignHealthPolicy | None = None,
+        handlers: Mapping[HealthInterventionAction, HealthInterventionHandler]
+        | None = None,
     ) -> None:
         if repository is None:
             raise CampaignValidationError("repository is required")
         self._repository = repository
-        self._policy = policy if policy is not None else CampaignWatchdogPolicy()
-        normalized: dict[WatchdogAction, WatchdogActionHandler] = {}
+        self._policy = policy if policy is not None else CampaignHealthPolicy()
+        normalized: dict[HealthInterventionAction, HealthInterventionHandler] = {}
         for raw_action, handler in (handlers or {}).items():
             try:
-                action = WatchdogAction(raw_action)
+                action = HealthInterventionAction(raw_action)
             except ValueError as exc:
-                raise CampaignValidationError("watchdog handler action is unsupported") from exc
-            if action is WatchdogAction.NONE:
-                raise CampaignValidationError("WatchdogAction.NONE cannot have a handler")
+                raise CampaignValidationError(
+                    "health intervention handler action is unsupported"
+                ) from exc
+            if action is HealthInterventionAction.NONE:
+                raise CampaignValidationError(
+                    "HealthInterventionAction.NONE cannot have a handler"
+                )
             if not callable(handler):
-                raise CampaignValidationError("watchdog handlers must be callable")
+                raise CampaignValidationError(
+                    "health intervention handlers must be callable"
+                )
             normalized[action] = handler
         self._handlers = MappingProxyType(normalized)
 
     def evaluate(
         self,
         observation: CampaignHealthObservation,
-    ) -> WatchdogExecutionResult:
+    ) -> HealthInterventionResult:
         record = self._validated_record(observation)
         decision = self._policy.assess(observation)
-        return WatchdogExecutionResult(
+        return HealthInterventionResult(
             record=record,
             observation=observation,
             decision=decision,
@@ -82,15 +89,15 @@ class CampaignWatchdogCoordinator:
     def execute(
         self,
         observation: CampaignHealthObservation,
-    ) -> WatchdogExecutionResult:
+    ) -> HealthInterventionResult:
         evaluated = self.evaluate(observation)
         action = evaluated.decision.action
-        if action is WatchdogAction.NONE:
+        if action is HealthInterventionAction.NONE:
             return evaluated
         handler = self._handlers.get(action)
         if handler is None:
-            raise WatchdogCompositionError(
-                f"no handler is configured for watchdog action {action.value}"
+            raise HealthInterventionCompositionError(
+                f"no handler is configured for health intervention {action.value}"
             )
         try:
             handler_result = handler(
@@ -99,10 +106,11 @@ class CampaignWatchdogCoordinator:
                 evaluated.decision,
             )
         except Exception as exc:
-            raise WatchdogExecutionError(
-                f"watchdog action {action.value} failed: {type(exc).__name__}: {exc}"
+            raise HealthInterventionExecutionError(
+                f"health intervention {action.value} failed: "
+                f"{type(exc).__name__}: {exc}"
             ) from exc
-        return WatchdogExecutionResult(
+        return HealthInterventionResult(
             record=evaluated.record,
             observation=observation,
             decision=evaluated.decision,

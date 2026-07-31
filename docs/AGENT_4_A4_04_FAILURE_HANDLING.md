@@ -1,8 +1,8 @@
-# A4-04 — durable retry scheduling
+# A4-04 — durable failure handling
 
 This slice applies the pure A4-04 retry decision to durable campaign state. It
 remains caller-driven: the host explicitly reports a stopped runtime attempt,
-and normal explicit scheduler dispatch later starts the next attempt.
+and normal explicit lifecycle dispatch later starts the next attempt.
 
 ## State contract
 
@@ -16,7 +16,7 @@ and normal explicit scheduler dispatch later starts the next attempt.
 
 ## Ordering and crash safety
 
-`CampaignRetrySchedulingService.handle_failure()` performs work in this order:
+`CampaignFailureHandlingService.handle_failure()` performs work in this order:
 
 1. load and validate a durable `RUNNING` campaign;
 2. compute the pure retry decision;
@@ -38,7 +38,7 @@ premature reuse.
 
 ## Validation
 
-The existing Agent 4 foundation workflow gate covers retry scheduling,
+The existing Agent 4 foundation workflow gate covers durable failure handling,
 next-attempt dispatch, terminal failures, exhausted budgets, invalid lifecycle
 states and recovery of a persisted retry whose in-memory queue entry was lost.
 
