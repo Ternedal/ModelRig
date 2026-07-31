@@ -146,8 +146,8 @@ class ResourceAwareCampaignSchedulerService(CampaignSchedulerService):
             if lease is not None:
                 payload["resource_lease_id"] = lease.lease_id
                 payload["resources"] = dict(lease.resources)
-            self._events.record(
-                selected.campaign_id,
+            self._persist_projection(
+                running,
                 CampaignEventKind.STARTED,
                 occurred_at=running_state.updated_at,
                 payload=payload,
@@ -214,8 +214,8 @@ class ResourceAwareCampaignSchedulerService(CampaignSchedulerService):
             if lease is not None:
                 payload["resource_lease_id"] = lease.lease_id
                 payload["resources"] = dict(lease.resources)
-            self._events.record(
-                campaign_id,
+            self._persist_projection(
+                resumed,
                 CampaignEventKind.RESUMED,
                 occurred_at=resumed.state.updated_at,
                 payload=payload,
@@ -304,10 +304,9 @@ class ResourceAwareCampaignSchedulerService(CampaignSchedulerService):
             error=error,
         )
         failed = CampaignRecord(spec=running.spec, state=failed_state)
-        self._repository.save(failed)
         try:
-            self._events.record(
-                running.spec.campaign_id,
+            self._persist_projection(
+                failed,
                 CampaignEventKind.FAILED,
                 occurred_at=failed_state.updated_at,
                 payload={"error": error, "phase": "dispatch"},
