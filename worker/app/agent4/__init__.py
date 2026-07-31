@@ -99,12 +99,22 @@ from .service import (
     DispatchResult,
     SystemClock,
 )
+from .timeline import (
+    CampaignEvidenceReference,
+    CampaignTimelineEntry,
+    CampaignTimelineVerification,
+    JsonCampaignTimelineStore,
+    TimelineConflictError,
+    TimelineIntegrityError,
+    TimelineStoreError,
+)
 
 __all__ = [
     "CampaignCheckpoint",
     "CampaignCheckpointService",
     "CampaignCheckpointStore",
     "CampaignConflictError",
+    "CampaignEvidenceReference",
     "CampaignEvent",
     "CampaignEventHandler",
     "CampaignEventKind",
@@ -135,6 +145,8 @@ __all__ = [
     "CampaignSpec",
     "CampaignState",
     "CampaignStatus",
+    "CampaignTimelineEntry",
+    "CampaignTimelineVerification",
     "CampaignTransitionError",
     "CampaignValidationError",
     "CheckpointConflictError",
@@ -162,6 +174,7 @@ __all__ = [
     "InMemoryCampaignEventBus",
     "InMemoryResourceLeaseManager",
     "JsonCampaignRepository",
+    "JsonCampaignTimelineStore",
     "JsonCheckpointStore",
     "RecoveryAction",
     "ResourceAwareCampaignSchedulerService",
@@ -177,6 +190,9 @@ __all__ = [
     "RetryDisposition",
     "RetryPolicy",
     "SystemClock",
+    "TimelineConflictError",
+    "TimelineIntegrityError",
+    "TimelineStoreError",
     "transition_campaign",
     "utc_now",
 ]

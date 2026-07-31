@@ -23,7 +23,7 @@ Host/backend/client integration outside those paths remains Claude-owned. Shared
 | `A4-03` | resource leases and caller-driven admission |
 | `A4-04` | retry classification and durable failure handling |
 | `A4-05` | health policy, intervention coordinator and service adapters |
-| `A4-06` | reserved for append-only timeline/evidence integration |
+| `A4-06` | append-only campaign timeline and immutable evidence references |
 
 ## Retired aliases
 
@@ -33,4 +33,4 @@ Historical PR numbers and Git branch refs remain useful provenance, but they do 
 
 ## Activation boundary
 
-This identity migration does not activate Agent 4. Importing the package starts no thread, timer, host cadence, network request or Agent 3 work. Any future runtime mount or recurring host loop is a separate integration decision and must be tested against the existing dormant contracts.
+The Agent 4 package remains dormant. Importing it starts no thread, timer, host cadence, network request or Agent 3 work. A4-06 adds explicit filesystem operations only; it does not subscribe to the event bus or mount a runtime. Any future host integration or recurring loop is a separate integration decision and must be tested against the existing dormant contracts.
