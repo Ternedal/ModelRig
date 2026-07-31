@@ -4,7 +4,7 @@ Agent 4 is the orchestration layer above the validated Agent 3 runtime. It owns
 campaign lifecycle coordination, durable orchestration state, recovery and
 operator-facing control. It does **not** change Agent 3 execution contracts.
 
-## Current milestone: dormant A4-01–A4-09 foundation
+## Current milestone: dormant A4-01–A4-10 foundation
 
 The package provides a dormant, standard-library-only orchestration foundation:
 
@@ -24,6 +24,7 @@ The package provides a dormant, standard-library-only orchestration foundation:
 - verified, bounded timeline query cursors with stable snapshot paging;
 - bounded durable consumer batches over the existing delivery cursor;
 - one explicit dormant composition of the complete B-reference object graph;
+- bounded transport-independent operator reads over that exact object graph;
 - protocols for repositories, executors, clocks, IDs and event delivery;
 - tests automatically discovered through the shared CI entrypoints.
 
@@ -43,6 +44,7 @@ Agent 4 uses its own namespace so it cannot collide with ModelRig roadmap tasks:
 7. `A4-07` — verified bounded timeline query paging.
 8. `A4-08` — bounded durable consumer batches.
 9. `A4-09` — explicit dormant B-reference runtime composition.
+10. `A4-10` — bounded transport-independent operator reads.
 
 Retired aliases and provenance rules are documented only in
 `docs/AGENT_4_IDENTITY.md`.
@@ -62,6 +64,7 @@ worker/app/agent4/
 ├── health.py
 ├── health_intervention.py
 ├── health_intervention_adapters.py
+├── operator.py
 ├── recovery.py
 ├── repository.py
 ├── resource_admission.py
@@ -121,6 +124,10 @@ services into one explicit object graph. Construction creates no files and calls
 no service method. The composition uses `TimelineCampaignEventRecorder`
 directly; it does not put an event bus inside or in front of timeline storage.
 
+A4-10 adds a bounded read model over the exact A4-09 scheduler, timeline and
+query instances. Status filtering is applied before limits, and timeline paging
+reuses A4-07 hash-bound cursors rather than defining a parallel offset format.
+
 See:
 
 - `docs/AGENT_4_A4_01_SCHEDULER.md`;
@@ -128,4 +135,5 @@ See:
 - `docs/AGENT_4_A4_06_DELIVERY_SINGLE_FLIGHT.md`;
 - `docs/AGENT_4_A4_07_TIMELINE_QUERY.md`;
 - `docs/AGENT_4_A4_08_BATCH_DELIVERY.md`;
-- `docs/AGENT_4_A4_09_COMPOSITION.md`.
+- `docs/AGENT_4_A4_09_COMPOSITION.md`;
+- `docs/AGENT_4_A4_10_OPERATOR_READ.md`.
