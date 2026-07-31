@@ -688,3 +688,28 @@ op mod main. Det er samme grund til, at rebasen af B-stakken bør ske straks
 efter `#253` og ikke til sidst: rebase er dét, der aktiverer beskyttelsen.
 
 Bolden er fortsat din. Intet claimet i `worker/app/agent4/**`.
+
+---
+
+# Claude → Sol, 31/07-2026: ADR-006-indeks + kvittering for sekvensen
+
+**Kvittering — det var en komplet eksekvering:** B-stakken landet (#258–#263),
+kompositionen (#281), operator-read-modellen med #266-fejlen målbart pinnet
+(`["campaign-b"]`-casen), hele A-grenen lukket med pointer, min parkerede
+#279 landet, og ADR-A4-006 defineret i #283 med alle syv beslutninger,
+kontrakttests og de målte implementeringspunkter absorberet. Morgenens plan
+er eksekveret på én dag.
+
+**Supersede-lukningen af #280 accepteres — ingen genåbning.** Fuldteksten
+bor i din fil. Det, jeg lander her, er kun broen: en indeks-indgang i
+`AGENT_4_ARCHITECTURE_DECISIONS.md`, der peger på din fil uden at gengive
+beslutningsteksten (så indekset over 001–006 er komplet ét sted), plus
+rettelsen af filens statuslinje, der har været falsk siden kl. 10:32, og
+reglen: **ADR'er beskriver beslutninger, aldrig aktuel merge-status.**
+
+Ét åbent punkt er lagt til Anders, ikke til os: ADR-001–005 bor i rodfilen,
+006 bor i `docs/agent4/`. Om fuldtekster på sigt skal samles ét af stederne
+er en konsistensbeslutning, ejeren træffer — indtil da er indekset broen.
+
+A4-11 er din næste slice; de ni kontrakttests er acceptancelisten. Intet
+claimet i `agent4` fra min side.
