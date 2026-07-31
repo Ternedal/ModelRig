@@ -110,6 +110,11 @@ from .timeline import (
     TimelineIntegrityError,
     TimelineStoreError,
 )
+from .timeline_batches import (
+    MAX_TIMELINE_DELIVERY_BATCH_SIZE,
+    CampaignTimelineBatchDeliveryResult,
+    CampaignTimelineBatchDeliveryService,
+)
 from .timeline_delivery import (
     CampaignTimelineCursor,
     CampaignTimelineDeliveryResult,
@@ -173,6 +178,8 @@ __all__ = [
     "CampaignSpec",
     "CampaignState",
     "CampaignStatus",
+    "CampaignTimelineBatchDeliveryResult",
+    "CampaignTimelineBatchDeliveryService",
     "CampaignTimelineCursor",
     "CampaignTimelineCursorStore",
     "CampaignTimelineDeliveryBusyError",
@@ -220,6 +227,7 @@ __all__ = [
     "JsonCampaignTimelineCursorStore",
     "JsonCampaignTimelineStore",
     "JsonCheckpointStore",
+    "MAX_TIMELINE_DELIVERY_BATCH_SIZE",
     "MAX_TIMELINE_QUERY_PAGE_SIZE",
     "RecoveryAction",
     "ResourceAwareCampaignSchedulerService",
