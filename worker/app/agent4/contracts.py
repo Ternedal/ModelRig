@@ -20,6 +20,7 @@ if TYPE_CHECKING:
         CampaignTimelineEntry,
         CampaignTimelineVerification,
     )
+    from .timeline_delivery import CampaignTimelineCursor
 
 from .domain import (
     CampaignEvent,
@@ -93,6 +94,24 @@ class CampaignTimelineStore(Protocol):
         handler: Callable[["CampaignTimelineEntry"], None],
     ) -> int:
         """Replay a validated timeline and return the delivered entry count."""
+
+
+@runtime_checkable
+class CampaignTimelineCursorStore(Protocol):
+    def get(
+        self,
+        consumer_id: str,
+        campaign_id: str,
+    ) -> "CampaignTimelineCursor | None":
+        """Return one durable consumer cursor or none before first delivery."""
+
+    def save(
+        self,
+        cursor: "CampaignTimelineCursor",
+        *,
+        expected_sequence: int | None,
+    ) -> None:
+        """Advance a cursor exactly one entry using compare-and-swap semantics."""
 
 
 CampaignResourceResolver = Callable[[CampaignSpec], Mapping[str, int]]
