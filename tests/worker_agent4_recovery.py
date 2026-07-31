@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Startup recovery and durable retry-scheduling coverage for Agent 4."""
+"""Startup recovery and durable failure-handling coverage for Agent 4."""
 
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ from pathlib import Path
 from app.agent4 import (
     CampaignConflictError,
     CampaignEventKind,
+    CampaignFailureHandlingService,
     CampaignQueue,
     CampaignRecord,
     CampaignRecoveryService,
     CampaignRetryPlanner,
-    CampaignRetrySchedulingService,
     CampaignSchedulerService,
     CampaignSpec,
     CampaignState,
@@ -47,7 +47,7 @@ class Executor:
         return None
 
 
-class Agent4RecoveryAndRetryTests(unittest.TestCase):
+class Agent4RecoveryAndFailureHandlingTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.repository = JsonCampaignRepository(Path(self.temp.name))
@@ -61,7 +61,7 @@ class Agent4RecoveryAndRetryTests(unittest.TestCase):
             clock=self.clock,
         )
         self.released: list[str] = []
-        self.retry = CampaignRetrySchedulingService(
+        self.failure_handling = CampaignFailureHandlingService(
             repository=self.repository,
             queue=self.queue,
             events=self.events,
@@ -193,7 +193,7 @@ class Agent4RecoveryAndRetryTests(unittest.TestCase):
     def test_retryable_failure_becomes_durable_scheduled_work(self) -> None:
         self.record(CampaignStatus.RUNNING)
 
-        result = self.retry.handle_failure(CAMPAIGN_ID, self.failure())
+        result = self.failure_handling.handle_failure(CAMPAIGN_ID, self.failure())
 
         self.assertTrue(result.scheduled)
         self.assertEqual(result.record.state.status, CampaignStatus.SCHEDULED)
@@ -209,7 +209,7 @@ class Agent4RecoveryAndRetryTests(unittest.TestCase):
 
     def test_next_explicit_dispatch_consumes_next_attempt(self) -> None:
         self.record(CampaignStatus.RUNNING)
-        self.retry.handle_failure(CAMPAIGN_ID, self.failure())
+        self.failure_handling.handle_failure(CAMPAIGN_ID, self.failure())
         scheduler = CampaignSchedulerService(
             repository=self.repository,
             queue=self.queue,
@@ -237,7 +237,7 @@ class Agent4RecoveryAndRetryTests(unittest.TestCase):
                     attempt=attempt,
                     max_attempts=max_attempts,
                 )
-                result = self.retry.handle_failure(
+                result = self.failure_handling.handle_failure(
                     CAMPAIGN_ID,
                     self.failure(error_type),
                 )
@@ -249,14 +249,14 @@ class Agent4RecoveryAndRetryTests(unittest.TestCase):
         original = self.record(CampaignStatus.QUEUED)
 
         with self.assertRaises(CampaignConflictError):
-            self.retry.handle_failure(CAMPAIGN_ID, self.failure())
+            self.failure_handling.handle_failure(CAMPAIGN_ID, self.failure())
 
         self.assertEqual(self.repository.get(CAMPAIGN_ID), original)
         self.assertEqual(self.released, [])
 
     def test_durable_scheduled_retry_is_recoverable_if_queue_entry_is_lost(self) -> None:
         self.record(CampaignStatus.RUNNING)
-        result = self.retry.handle_failure(CAMPAIGN_ID, self.failure())
+        result = self.failure_handling.handle_failure(CAMPAIGN_ID, self.failure())
         self.queue.remove(CAMPAIGN_ID)
 
         report = self.recovery.recover()
