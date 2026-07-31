@@ -1,9 +1,11 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // Agent 3.0 is an experimental, feature-flagged worker API. The Go server does
@@ -46,7 +48,9 @@ func agent3ReplanPreviewTarget(r *http.Request) string {
 func agent3MemoryTarget(r *http.Request) string {
 	const publicPrefix = "/api/v1/experimental/agent3/memory"
 	suffix := strings.TrimPrefix(r.URL.Path, publicPrefix)
-	return agent3Target(r, "/experimental/agent3/memory"+suffix)
+	// proxy.Client owns query propagation. Returning it here as well would
+	// duplicate every memory query and break the signed raw-query binding.
+	return "/experimental/agent3/memory" + suffix
 }
 
 func (s *server) handleAgent3Status(w http.ResponseWriter, r *http.Request) {
@@ -101,8 +105,52 @@ func (s *server) handleAgent3PlanStart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleAgent3Memory(w http.ResponseWriter, r *http.Request) {
-	// Memory CRUD is local SQLite work and never calls a model.
-	s.Worker.Forward(w, r, agent3MemoryTarget(r))
+	mode, err := agent3MemoryStoreMode()
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	if mode == "legacy" {
+		// Compatibility mode remains exactly the pre-T-033 route. The narrow
+		// proxy allow-list does not forward a client-supplied internal grant.
+		s.Worker.Forward(w, r, agent3MemoryTarget(r))
+		return
+	}
+	if s.Worker == nil || !scheduleWorkerIsLoopback(s.Worker.BaseURL) {
+		writeErr(w, http.StatusServiceUnavailable,
+			"protected Agent 3 memory requires a loopback worker upstream")
+		return
+	}
+	bodySHA256, err := bindAgent3MemoryRequestBody(r)
+	if err != nil {
+		writeErr(w, http.StatusRequestEntityTooLarge,
+			"protected memory request body is invalid")
+		return
+	}
+	target := agent3MemoryTarget(r)
+	grant, _, err := issueAgent3MemoryGrant(r, target, bodySHA256, time.Now())
+	if err != nil {
+		if errors.Is(err, errAgent3MemoryRouteUnsupported) {
+			writeErr(w, http.StatusNotFound,
+				"protected memory route is not available")
+			return
+		}
+		writeErr(w, http.StatusServiceUnavailable,
+			"protected memory authorization is unavailable")
+		return
+	}
+	// The grant is minted only after authMW has attached the paired device. It is
+	// short-lived and bound to device, method, path, raw query, body digest,
+	// action and request id. The worker must additionally attest that protected
+	// mode—not a mismatched legacy route—served the response.
+	s.Worker.ForwardWithHeadersAndResponseAttestation(
+		w,
+		r,
+		target,
+		map[string]string{agent3MemoryGrantHeader: grant},
+		agent3MemoryStoreAttestationHeader,
+		agent3MemoryStoreAttestationValue,
+	)
 }
 
 func (s *server) handleAgent3RunsList(w http.ResponseWriter, r *http.Request) {

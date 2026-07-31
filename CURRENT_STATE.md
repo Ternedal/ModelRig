@@ -105,12 +105,16 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_memory_api.py`
 - `tests/worker_agent3_memory_context.py`
 - `tests/worker_agent3_memory_protected_api.py`
+- `tests/worker_agent3_memory_protected_gateway.py`
 - `tests/worker_agent3_memory_protected_leak_surfaces.py`
 - `tests/worker_agent3_memory_protected_leak_surfaces_dpapi.py`
+- `tests/worker_agent3_memory_protected_mount_gate.py`
 - `tests/worker_agent3_memory_protected_reader.py`
 - `tests/worker_agent3_memory_protected_writer.py`
 - `tests/worker_agent3_memory_protection.py`
 - `tests/worker_agent3_memory_protection_migration.py`
+- `tests/worker_agent3_memory_store_path_separation.py`
+- `tests/worker_agent3_memory_store_selection.py`
 - `tests/worker_agent3_model_eval.py`
 - `tests/worker_agent3_mount_contract.py`
 - `tests/worker_agent3_outcome_answer.py`
