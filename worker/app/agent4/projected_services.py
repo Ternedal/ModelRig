@@ -15,6 +15,7 @@ from .domain import (
     CampaignEventKind,
     CampaignRecord,
     CampaignStatus,
+    CampaignValidationError,
     transition_campaign,
 )
 from .failure_handling import (
@@ -153,32 +154,32 @@ class ProjectedCampaignFailureHandlingService(CampaignFailureHandlingService):
                 last_error=None,
             )
             scheduled = CampaignRecord(spec=retry_spec, state=scheduled_state)
-            self._projections.persist(
-                scheduled,
-                (
-                    CampaignProjectionSpec(
-                        kind=CampaignEventKind.RETRY_SCHEDULED,
-                        occurred_at=now,
-                        payload={
-                            "category": decision.category.value,
-                            "failed_attempt": decision.failed_attempt,
-                            "remaining_attempts": decision.remaining_attempts,
-                            "ready_at": decision.ready_at.isoformat(),
-                            "delay_seconds": decision.delay.total_seconds()
-                            if decision.delay is not None
-                            else None,
-                            "error_type": failure.error_type,
-                            "phase": failure.phase,
-                        },
-                        producer_id="failure",
-                    ),
-                ),
-            )
-            self._queue.remove(campaign_id)
             try:
-                self._queue.enqueue(retry_spec)
-            except DuplicateCampaignError as exc:
+                self._projections.persist(
+                    scheduled,
+                    (
+                        CampaignProjectionSpec(
+                            kind=CampaignEventKind.RETRY_SCHEDULED,
+                            occurred_at=now,
+                            payload={
+                                "category": decision.category.value,
+                                "failed_attempt": decision.failed_attempt,
+                                "remaining_attempts": decision.remaining_attempts,
+                                "ready_at": decision.ready_at.isoformat(),
+                                "delay_seconds": decision.delay.total_seconds()
+                                if decision.delay is not None
+                                else None,
+                                "error_type": failure.error_type,
+                                "phase": failure.phase,
+                            },
+                            producer_id="failure",
+                        ),
+                    ),
+                )
+                self._queue.remove(campaign_id)
                 try:
+                    self._queue.enqueue(retry_spec)
+                except DuplicateCampaignError as exc:
                     self._terminal_failure(
                         current,
                         FailureDescriptor(
@@ -189,12 +190,10 @@ class ProjectedCampaignFailureHandlingService(CampaignFailureHandlingService):
                         decision,
                         now=self._now(),
                     )
-                finally:
-                    self._release(campaign_id)
-                raise CampaignConflictError(str(exc)) from exc
-
-            self._release(campaign_id)
-            return FailureHandlingResult(record=scheduled, decision=decision)
+                    raise CampaignConflictError(str(exc)) from exc
+                return FailureHandlingResult(record=scheduled, decision=decision)
+            finally:
+                self._release(campaign_id)
 
     def _terminal_failure(
         self,
@@ -250,7 +249,9 @@ class ProjectedCampaignHealthFailClosedService(CampaignHealthFailClosedService):
         decision: HealthDecision,
     ) -> CampaignRecord:
         if decision.action is not HealthInterventionAction.FAIL_CLOSED:
-            raise ValueError("fail_closed requires a FAIL_CLOSED health decision")
+            raise CampaignValidationError(
+                "fail_closed requires a FAIL_CLOSED health decision"
+            )
         with self._lock:
             current = self._repository.get(record.spec.campaign_id)
             if current is None:
