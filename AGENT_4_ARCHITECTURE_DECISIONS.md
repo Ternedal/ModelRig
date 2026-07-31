@@ -198,11 +198,18 @@ merger ingenting. De fastlægger den arkitektur, det videre arbejde skal
 opfylde — og de to gates gør, at opfyldelsen kan måles i stedet for at blive
 husket.
 
-Agent 4-koden findes **ikke på `main`** endnu. Begge gates passerer derfor
-tomt i dag og er armeret til den dag, laget lander — samme mønster som
-`tests/workflow_agent3_dormant.py`, hvis dormanskrav også landede før koden.
-Hver detektor køres desuden mod overtrædende prøver, fordi *en test, der kun
-kan bestå, ikke er en test.*
+Gates er skrevet, så de passerer tomt, når pakken ikke findes, og scanner
+den fuldt, når den gør — de hævder ingen aktuel merge-status. Aktuel tilstand
+aflæses af de genererede tilstandsdokumenter, aldrig af ADR'er.
+
+**Regel:** ADR'er beskriver beslutninger og deres konsekvenser — de må ikke
+hævde, hvad der aktuelt er merged. En statuspåstand i et beslutningsdokument
+bliver falsk i samme øjeblik, virkeligheden flytter sig, og læses derefter
+som sandhed. (Reglen er indført, efter at netop dette afsnit nåede at blive
+falsk.)
+
+Hver detektor køres mod overtrædende prøver, fordi *en test, der kun kan
+bestå, ikke er en test* — samme mønster som `tests/workflow_agent3_dormant.py`.
 
 ---
 
@@ -302,3 +309,17 @@ gennem kode — aldrig omvendt.
 4. Stabilisering af Agent 4 på `main`.
 
 **Ingen nye funktionelle spor åbnes, før denne proces er afsluttet.**
+
+---
+
+## ADR-A4-006 — Autoritativ kampagnestate, reparerbar timeline-projektion og single-writer host-ejerskab
+
+**Truffet af Anders 31/07-2026. Status: besluttet.** Supplerer ADR-A4-001,
+ADR-A4-002, ADR-A4-003 og ADR-A4-005; implementeres af stabiliseringsslicen
+A4-11.
+
+Fuldteksten — de syv beslutninger, crash-semantikken og de obligatoriske
+kontrakttests — bor i `docs/agent4/ADR-A4-006_STATE_PROJECTION.md` og står
+kun dér. Denne indgang gengiver ikke beslutningsteksten; den findes, så
+filen her forbliver det komplette indeks over Agent 4's
+arkitekturbeslutninger.
