@@ -28,6 +28,7 @@ from .health_intervention_adapters import (
     CheckpointPayloadProvider,
     HealthInterventionServiceAdapters,
 )
+from .operator import Agent4OperatorReadService
 from .recovery import CampaignRecoveryReport
 from .repository import JsonCampaignRepository
 from .resource_admission import ResourceAwareCampaignSchedulerService
@@ -100,6 +101,7 @@ class Agent4RuntimeContext:
     guarded_delivery: SingleFlightCampaignTimelineDeliveryService
     batches: CampaignTimelineBatchDeliveryService
     query: CampaignTimelineQueryService
+    operator: Agent4OperatorReadService
 
     def recover(self) -> CampaignRecoveryReport:
         """Explicitly run startup recovery; composition never calls it."""
@@ -209,6 +211,11 @@ def compose_agent4_runtime(
         delivery_flights,
     )
     query = CampaignTimelineQueryService(timeline)
+    operator = Agent4OperatorReadService(
+        scheduler=scheduler,
+        timeline=timeline,
+        query=query,
+    )
 
     return Agent4RuntimeContext(
         paths=paths,
@@ -230,4 +237,5 @@ def compose_agent4_runtime(
         guarded_delivery=guarded_delivery,
         batches=batches,
         query=query,
+        operator=operator,
     )
