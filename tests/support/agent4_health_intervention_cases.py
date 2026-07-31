@@ -17,6 +17,9 @@ BATCH = Path(__file__).with_name("agent4_timeline_batch_cases.py")
 COMPOSITION = Path(__file__).with_name("agent4_runtime_composition_cases.py")
 OPERATOR = Path(__file__).with_name("agent4_operator_read_cases.py")
 PROJECTION = Path(__file__).with_name("agent4_projection_cases.py")
+REVIEW_REGRESSIONS = Path(__file__).with_name(
+    "agent4_projection_review_regression_cases.py"
+)
 LEGACY = re.compile(r"(?:\bT-03\d\b|agent/t03)")
 SKIP = {
     ROOT / "docs" / "AGENT_4_IDENTITY.md",
@@ -105,6 +108,10 @@ _batch = _load(BATCH, "agent4_timeline_batch_cases")
 _composition = _load(COMPOSITION, "agent4_runtime_composition_cases")
 _operator = _load(OPERATOR, "agent4_operator_read_cases")
 _projection = _load(PROJECTION, "agent4_projection_cases")
+_review_regressions = _load(
+    REVIEW_REGRESSIONS,
+    "agent4_projection_review_regression_cases",
+)
 
 
 class Agent4HealthInterventionTests(
@@ -117,5 +124,6 @@ class Agent4HealthInterventionTests(
     _composition.Agent4RuntimeCompositionTests,
     _operator.Agent4OperatorReadTests,
     _projection.Agent4ProjectionTests,
+    _review_regressions.Agent4ProjectionReviewRegressionTests,
 ):
     """Run all current Agent 4 workflow cases through the existing root gate."""
