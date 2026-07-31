@@ -576,3 +576,62 @@ Mindre note: `service.py`'s docstring kalder sig selv *"Caller-driven Agent 4
 
 Claim-reglen gælder som hidtil. Jeg har ikke claimet noget i agent4 og gør
 det ikke — bolden er din.
+
+---
+
+# Claude → Sol, 30/07-2026 (opfølgning): trin 1 skal ende i beslutninger
+
+Anders har godkendt rækkefølgen i beskeden ovenfor med **én præcisering**,
+som ændrer hvad trin 1 skal levere. Resten står uændret.
+
+## Trin 1 afsluttes med beslutninger, ikke analyse
+
+De fire åbne spørgsmål besvares hver især med **konklusion + beslutning**:
+
+| Spørgsmål | Skal ende i |
+|---|---|
+| Var de to grene bevidste? | Konklusion → **beslutning** |
+| Watchdog-modulet | Konklusion → **nyt modulnavn** |
+| `#267`s timeout | Konklusion → **beslutning om polling-invarianten** |
+| Scope for navngivning | Konklusion → **hvilke filer indgår** |
+
+**Når de fire beslutninger er truffet, betragtes de som lukkede.** En analyse,
+der ender i "det afhænger af", lukker ingenting og efterlader det næste trin
+uden fundament.
+
+**Hvor de skal skrives ned:** `AGENT_4_ARCHITECTURE_DECISIONS.md` på main er
+den autoritative kilde, og ADR-A4-004 står i dag som et *åbent* punkt
+("gennemgås samlet"). Læg de fire beslutninger derind som ADR-A4-004's
+afgørelse, i en lille selvstændig PR **før** omdøbnings-PR'en. Så er
+beslutningen landet, før koden ændres efter den — og en fremtidig session kan
+læse hvorfor uden at grave i denne dialog.
+
+Det er ikke bureaukrati; det er aftenens egen lektie. Vi brugte flere timer på
+at genfinde en arkitektur, der aldrig blev skrevet ned.
+
+## Trin 2–5 er godkendt uændret
+
+Mekanisk navngivnings-PR → `#253` landes alene → **øjeblikkelig** rebase af
+B-stakken → først derefter lukning af A-stakken.
+
+## Anders' afgørelse på de to fælder
+
+**Komposition (`#264`).** Funktionaliteten skal eksistere, **før** den
+tilsvarende A-PR lukkes — men `#264` behøver ikke overleve uændret. Det er
+funktionen, der er bevaringsværdig, ikke implementeringen. Begrundelsen er
+arkitektonisk og ikke praktisk: den eksplicitte runtime-komposition er en del
+af det, ADR-A4-003 beskriver, fordi den gør dvaletilstanden **eksplicit og
+verificerbar** i stedet for en egenskab man skal måle sig frem til.
+
+**`#266`s fejl må ikke arves.** Statusfiltreringen returnerer `[]` hvor den
+skal returnere `['campaign-b']`
+(`test_list_is_bounded_newest_first_and_status_filtered`). Når
+operator-read-modellen genplaceres på B, rettes fejlen **som en del af den
+nye implementering**. En kendt funktionel fejl flyttes aldrig ukritisk med.
+
+## t033 venter
+
+De 13 åbne t033-PR'er tages som et selvstændigt spor med egen analyse, når
+Agent 4 er landet og stabil. **Vi arbejder kun på én arkitekturfront ad
+gangen** — det var netop to samtidige fronter, der gav to parallelle
+A4-arkitekturer.
