@@ -1,4 +1,4 @@
-"""Resource-aware admission for the caller-driven Agent 4 scheduler.
+"""Resource-aware admission for caller-driven Agent 4 lifecycle coordination.
 
 This module is deliberately additive.  It composes the T-030 lifecycle service
 with the T-032 lease kernel without activating a background loop or changing the
@@ -42,8 +42,8 @@ class ResourceDispatchResult(DispatchResult):
 class ResourceAwareCampaignSchedulerService(CampaignSchedulerService):
     """Campaign coordinator with atomic resource admission and lease cleanup.
 
-    Admission is caller-driven through :meth:`dispatch_ready`.  Ready campaigns
-    are inspected in the queue's deterministic order.  A blocked campaign stays
+    Admission is caller-driven through :meth:`dispatch_ready`. Ready campaigns
+    are inspected in the queue's deterministic order. A blocked campaign stays
     queued while the next admissible campaign may run, preventing head-of-line
     blocking without weakening priority ordering among admissible work.
     """
