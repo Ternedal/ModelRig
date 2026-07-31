@@ -6,7 +6,6 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Protocol, runtime_checkable
 
 from .contracts import CampaignTimelineStore
@@ -158,7 +157,7 @@ class CampaignProjectionRepository(Protocol):
 
 
 class CampaignProjectionError(RuntimeError):
-    """Raised when audit projection cannot converge safely."""
+    """Raised when durable state cannot converge to its audit projection."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,5 +277,12 @@ class CampaignStateProjectionService:
         )
         self._repository.save_with_projections(record, intents)
         if reconcile:
-            self._reconciler.reconcile(record.spec.campaign_id)
+            try:
+                self._reconciler.reconcile(record.spec.campaign_id)
+            except CampaignProjectionError:
+                raise
+            except Exception as exc:
+                raise CampaignProjectionError(
+                    "campaign state is durable but its audit projection remains pending"
+                ) from exc
         return record
