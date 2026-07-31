@@ -91,16 +91,29 @@ class CampaignRecoveryService:
 
     def recover(self) -> CampaignRecoveryReport:
         started_at = self._now()
+        recovery_producer = f"recovery:{started_at.isoformat()}"
         decisions: list[CampaignRecoveryDecision] = []
         for record in self._repository.list():
-            decisions.append(self._recover_record(record))
+            decisions.append(
+                self._recover_record(
+                    record,
+                    recovered_at=started_at,
+                    producer_id=recovery_producer,
+                )
+            )
         return CampaignRecoveryReport(
             started_at=started_at,
             completed_at=self._now(),
             decisions=tuple(decisions),
         )
 
-    def _recover_record(self, record: CampaignRecord) -> CampaignRecoveryDecision:
+    def _recover_record(
+        self,
+        record: CampaignRecord,
+        *,
+        recovered_at: datetime,
+        producer_id: str,
+    ) -> CampaignRecoveryDecision:
         status = record.state.status
         campaign_id = record.spec.campaign_id
 
@@ -116,11 +129,12 @@ class CampaignRecoveryService:
             self._project(
                 record,
                 CampaignEventKind.RECOVERED,
-                occurred_at=record.state.updated_at,
+                occurred_at=recovered_at,
                 payload={
                     "action": RecoveryAction.REQUEUED.value,
                     "status": status.value,
                 },
+                producer_id=producer_id,
             )
             return CampaignRecoveryDecision(
                 campaign_id=campaign_id,
@@ -133,11 +147,12 @@ class CampaignRecoveryService:
             self._project(
                 record,
                 CampaignEventKind.RECOVERED,
-                occurred_at=record.state.updated_at,
+                occurred_at=recovered_at,
                 payload={
                     "action": RecoveryAction.RETAINED_PAUSED.value,
                     "status": status.value,
                 },
+                producer_id=producer_id,
             )
             return CampaignRecoveryDecision(
                 campaign_id=campaign_id,
@@ -151,7 +166,7 @@ class CampaignRecoveryService:
             failed_state = transition_campaign(
                 record.state,
                 CampaignStatus.FAILED,
-                occurred_at=self._now(),
+                occurred_at=recovered_at,
                 error=error,
             )
             failed = CampaignRecord(spec=record.spec, state=failed_state)
@@ -166,15 +181,15 @@ class CampaignRecoveryService:
                     (
                         CampaignProjectionSpec(
                             kind=CampaignEventKind.RECOVERED,
-                            occurred_at=failed_state.updated_at,
+                            occurred_at=recovered_at,
                             payload=recovered_payload,
-                            producer_id="recovery",
+                            producer_id=producer_id,
                         ),
                         CampaignProjectionSpec(
                             kind=CampaignEventKind.FAILED,
                             occurred_at=failed_state.updated_at,
                             payload=failed_payload,
-                            producer_id="recovery",
+                            producer_id=producer_id,
                         ),
                     ),
                 )
@@ -183,7 +198,7 @@ class CampaignRecoveryService:
                 self._events.record(
                     campaign_id,
                     CampaignEventKind.RECOVERED,
-                    occurred_at=failed_state.updated_at,
+                    occurred_at=recovered_at,
                     payload=recovered_payload,
                 )
                 self._events.record(
@@ -214,6 +229,7 @@ class CampaignRecoveryService:
         *,
         occurred_at: datetime,
         payload: dict[str, str],
+        producer_id: str,
     ) -> None:
         if self._projections is not None:
             self._projections.persist(
@@ -223,7 +239,7 @@ class CampaignRecoveryService:
                         kind=kind,
                         occurred_at=occurred_at,
                         payload=payload,
-                        producer_id="recovery",
+                        producer_id=producer_id,
                     ),
                 ),
             )
