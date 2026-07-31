@@ -1,4 +1,4 @@
-"""Caller-driven Agent 4 scheduler and lifecycle service.
+"""Caller-driven Agent 4 lifecycle coordination service.
 
 The service has no background loop. A host must explicitly call ``dispatch_ready``
 or one of the lifecycle methods, keeping Agent 4 dormant until it is composed by
@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from threading import RLock
 
+from .campaign_queue import CampaignQueue, DuplicateCampaignError
 from .contracts import (
     CampaignEventRecorder,
     CampaignExecutor,
@@ -27,7 +28,6 @@ from .domain import (
     CampaignValidationError,
     transition_campaign,
 )
-from .scheduler import CampaignQueue, DuplicateCampaignError
 
 
 class CampaignNotFoundError(LookupError):
