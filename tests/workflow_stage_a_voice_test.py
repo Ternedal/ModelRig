@@ -69,7 +69,7 @@ validation = ROOT / "validation"
 validation.mkdir(exist_ok=True)
 temp = Path(tempfile.mkdtemp(prefix="stage-a-voice-guided-test-", dir=validation))
 try:
-    candidate = {"version": "1.58.145", "git_sha": "a" * 40}
+    candidate = {"version": "1.58.147", "git_sha": "a" * 40}
     store = temp / "phone-store.json"
     store.write_text(json.dumps({"devices": [], "pairings": {}}), encoding="utf-8")
     state_path = temp / "resume.json"
@@ -108,7 +108,7 @@ try:
     manual = {
         "schema": module.MANUAL_SCHEMA,
         "candidate": candidate,
-        "device": {"model": "Pixel 6a", "os_version": "17", "app_version": "1.58.145"},
+        "device": {"model": "Pixel 6a", "os_version": "17", "app_version": "1.58.147"},
         "trials": good_trials,
         "operator": {"method": "guided-stage-a-launcher", "production_activation": False},
     }

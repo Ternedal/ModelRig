@@ -43,7 +43,7 @@ def valid_report():
     return {
         "schema": "kaliv-desktop-physical-gate-report/v1",
         "candidate_sha": "a" * 40,
-        "version": "1.58.145",
+        "version": "1.58.147",
         "run_id": "dpg_" + "1" * 24,
         "started_at_ms": 1_000_000,
         "finished_at_ms": 1_060_000,

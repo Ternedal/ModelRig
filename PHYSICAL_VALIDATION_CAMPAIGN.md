@@ -33,7 +33,7 @@ og må ikke gøre checkoutet dirty. Flytter HEAD sig, er kampagnen ugyldig.
 ## 0. Release-freeze
 
 Stage A skal være bestået først. Fortsæt kun efter den separate exact-SHA
-fast-forward, tag `v1.58.145` og publicerede release.
+fast-forward, tag `v1.58.147` og publicerede release.
 
 ```powershell
 cd C:\Users\Anders\Desktop\ModelRig
@@ -121,8 +121,8 @@ Gennemfør og dokumentér:
 1. normal reboot → backend og worker ready;
 2. backend supervisor-restart;
 3. worker supervisor-restart;
-4. gyldig updater-update fra `1.58.144` til `1.58.145`;
-5. ugyldig update, som afvises før swap eller rulles helt tilbage til `1.58.145`.
+4. gyldig updater-update fra `1.58.144` til `1.58.147`;
+5. ugyldig update, som afvises før swap eller rulles helt tilbage til `1.58.147`.
 
 ### Lifecycle-JSON
 
@@ -156,7 +156,7 @@ Den gode updater-log skal bevise:
 - `checksums verified for 3 exe(s)`;
 - `build provenance verified for 3 exe(s)`;
 - process-stop før swap;
-- backend og worker på `1.58.145`;
+- backend og worker på `1.58.147`;
 - supervisor-heartbeat, der avancerer efter restart;
 - afsluttende `update OK` uden rollback eller fatal tilstand.
 
@@ -164,7 +164,7 @@ Den ugyldige update accepteres kun som:
 
 - en checksum/provenance/release-integritetsafvisning **før** process-stop/swap; eller
 - en fuldført rollback med backend, worker og supervisor bevist sunde på
-  `1.58.145`.
+  `1.58.147`.
 
 Disse bypasses blokerer altid:
 

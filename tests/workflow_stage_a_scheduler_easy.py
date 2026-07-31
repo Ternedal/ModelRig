@@ -48,7 +48,7 @@ check(not list(state_path.parent.glob("*.tmp")),
 
 check(
     'EXPECTED_BRANCH = "agent/stage-a-checkpoint-ux"' in source
-    and 'EXPECTED_VERSION = "1.58.145"' in source,
+    and 'EXPECTED_VERSION = "1.58.147"' in source,
     "the easy flow is pinned to the validation branch and version",
 )
 check(

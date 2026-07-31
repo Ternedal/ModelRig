@@ -34,7 +34,7 @@ launcher = LAUNCHER.read_text(encoding="utf-8")
 launcher_lower = launcher.lower()
 
 identity = {
-    "version": "1.58.145",
+    "version": "1.58.147",
     "git_sha": "a" * 40,
     "code_sha256": "b" * 64,
 }

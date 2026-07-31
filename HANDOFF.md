@@ -1114,7 +1114,7 @@ Claude som host-ejer EFTER promoveringen. Se `SOL-CLAUDE-SAMARBEJDE.md`.
 computer-use-stakken: **8.671 linjer over 34 filer** (`desktop_action_plan`,
 `desktop_capture`, `desktop_contract`, `desktop_input_execution`,
 `desktop_physical_gate`, `desktop_vision_bridge`, `desktop_win32` m.fl.). Og
-dens base er `agent/unified-candidate-1.58.145` — **den frosne kandidat**.
+dens base er `agent/unified-candidate-1.58.147` — **den frosne kandidat**.
 
 Tre uafhængige grunde: (1) 8.671 nye linjer i kandidaten ville gøre enhver
 rapport fra rig-dagen til evidens for kode der ikke længere findes
@@ -1139,14 +1139,14 @@ klienter, scripts og CI. Fem kontraktpunkter kræver paritetstest FØR ændring.
    overlever genstart, egress kun når TIL) · **E6–E9: klienten er nu STRENGERE
    — fejler noget højlydt, er det et fund, ikke en regression** · #2a trin 3–5
    kun via "test jeg" (to blinde forsøg fejlede før).
-3. **[ANDERS — kandidatkæden]** PR #161 `agent/unified-candidate-1.58.145`
+3. **[ANDERS — kandidatkæden]** PR #161 `agent/unified-candidate-1.58.147`
    (head `8e40103`, 424 foran / 0 bagud main, alle 4 gates grønne på exact
    head, mergeable clean) er den rig-testede kandidat: preflight ✅, Agent 3
    fysisk ✅, model-eval 30/30+30/30, RAG ✅. **Udestår fysisk:** voice
    (Pixel fik `401 invalid token`) + scheduler-pilot. PR #162 (Stage A
    ét-klik, base=#161) fixer netop operatør-frictionen. Flow:
    `START_STAGE_A_TEST.cmd` → `START_REMAINING_PHYSICAL_TESTS.cmd` → review
-   → SEPARAT eksplicit beslutning → ff-merge + tag v1.58.145. **Merges
+   → SEPARAT eksplicit beslutning → ff-merge + tag v1.58.147. **Merges
    ALDRIG autonomt** — PR'en forbyder det selv. De fleste andre åbne PRs
    stacker mod denne kæde; merge dem ikke enkeltvis udenom. PR #1/#3 er
    lukkede (agent3 kom ind via mount, 1.58.131–135).
@@ -1157,7 +1157,7 @@ klienter, scripts og CI. Fem kontraktpunkter kræver paritetstest FØR ændring.
    længere mulig. **Det rammer ikke rig-kørslen** — `freeze_check`
    sammenligner checkout'ens egen HEAD mod tag-SHA'en (linje 273-274), så
    en clean checkout af `8e40103` fryser grønt uanset hvor main står.
-   **Ren løsning: sæt tagget `v1.58.145` direkte på `8e40103`** (build-and-
+   **Ren løsning: sæt tagget `v1.58.147` direkte på `8e40103`** (build-and-
    release trigger er `v*` på enhver commit) — så peger tagget på præcis
    det træ der blev fysisk testet, og main kan merges bagefter med en
    almindelig merge-commit. Tag ALDRIG en merge-commit her: dens træ ville

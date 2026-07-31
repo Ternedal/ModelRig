@@ -38,10 +38,10 @@ def check(condition: bool, message: str) -> None:
 
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
 CANDIDATE = {
-    "version": "1.58.145",
+    "version": "1.58.147",
     "git_sha": "a" * 40,
     "code_sha256": "b" * 64,
-    "branch": "agent/unified-candidate-1.58.145",
+    "branch": "agent/unified-candidate-1.58.147",
     "working_tree_clean": True,
     "dirty_entries": 0,
     "identity_source": "git",

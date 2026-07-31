@@ -1,9 +1,12 @@
 # RIGDAG.md — kørebog
 
+> **Start i `RIGDAG_SIMPEL.md`** — det styrer rækkefølgen og fjerner valgene.
+> Dette dokument er den detaljerede kørebog og fallback, når noget stopper.
+
 **Skrevet ud fra hvad der faktisk står i koden**, ikke hvad jeg troede. Hvert
 krav herunder er slået op i den gate der håndhæver det.
 
-Kandidat: **`60f9b00`** (1.58.145, inkl. voice-fixet). Alle fire CI-gates grønne.
+Kandidat: **`60f9b00`** (1.58.147, inkl. voice-fixet). Alle fire CI-gates grønne.
 
 ---
 
@@ -29,7 +32,7 @@ fejlen, ikke for noget du gjorde.
 
 ### 1. Checkout det du vil validere
 
-**[27/7 — kandidat-modellen er ovre.]** `agent/unified-candidate-1.58.145` blev
+**[27/7 — kandidat-modellen er ovre.]** `agent/unified-candidate-1.58.147` blev
 fast-forwardet ind i main, og main er siden gået 35+ commits videre. Checkout
 `60f9b00` validerer nu gammel kode. Tag i stedet det tag du vil have beviser
 for:
@@ -48,7 +51,7 @@ reproduceres — one-click'en i "Kør beviserne" blokerer på netop det.
 ### 2. Byg backenden fra checkouten
 
 **Springes dette over, validerer du forkert kode.** 25/7 kørte riggen 1.58.141
-mens kandidaten var 1.58.145.
+mens kandidaten var 1.58.147.
 
 ```powershell
 go build -C backend -trimpath -o modelrig-server.exe .\cmd\modelrig-server
@@ -65,7 +68,7 @@ $env:KALIV_SCHEDULER_APPROVAL_SECRET = "kaliv-pilot-approval-secret-2026-07-26-a
 powershell -ExecutionPolicy Bypass -File .\run-windows.ps1
 ```
 
-**Læs opstartslinjen: skal sige `1.58.145`.** Lad vinduet stå.
+**Læs opstartslinjen: skal sige `1.58.147`.** Lad vinduet stå.
 
 Om flagene:
 - `PYTHONDONTWRITEBYTECODE` — `.pyc` i træet fælder freeze-gaten (F-1502)
@@ -276,8 +279,8 @@ hvert bevis er **present, fresh, candidate-bound og green** — og
 ### Promovering
 
 ```powershell
-git tag -a v1.58.145 60f9b00 -m "v1.58.145"
-git push origin v1.58.145
+git tag -a v1.58.147 60f9b00 -m "v1.58.147"
+git push origin v1.58.147
 ```
 
 **Tagget skal sidde direkte på `60f9b00`.** Aldrig på en merge-commit — dens træ

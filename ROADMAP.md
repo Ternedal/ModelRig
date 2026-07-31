@@ -367,7 +367,7 @@ manuelle trin efter genstart.
   udelukket, og to uafhængige mekanismer i repoet afviser den.
 
   `isNewer()` i `backend/cmd/modelrig-updater/main.go` sammenligner semver
-  numerisk felt for felt. Målt: `isNewer("1.58.145", "v1.0.0")` er `false`, så
+  numerisk felt for felt. Målt: `isNewer("1.58.147", "v1.0.0")` er `false`, så
   hver kørende installation ville logge *"already up to date"* og aldrig hente
   noget. Eneste vej derover er manuel geninstallation på rig og telefon. Og
   `tests/workflow_staged_promotion_runbook` afviser selvstændigt et træ der er

@@ -201,13 +201,13 @@ def test_stage_a_overrides_match_current_risk_contract() -> None:
         {
             "enabled": True,
             "experimental": True,
-            "worker_version": "1.58.145",
+            "worker_version": "1.58.147",
             "code_sha256": "a" * 64,
         }
     )
-    assert normalized["version"] == "1.58.145"
+    assert normalized["version"] == "1.58.147"
 
-    already_bound = {"version": "1.58.145", "worker_version": "ignored"}
+    already_bound = {"version": "1.58.147", "worker_version": "ignored"}
     assert wrapper.normalize_stage_a_status(already_bound) is already_bound
 
     try:

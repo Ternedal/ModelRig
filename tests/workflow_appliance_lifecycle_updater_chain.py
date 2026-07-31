@@ -39,10 +39,10 @@ def check(condition: bool, message: str) -> None:
 
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
 CANDIDATE = {
-    "version": "1.58.145",
+    "version": "1.58.147",
     "git_sha": "a" * 40,
     "code_sha256": "b" * 64,
-    "branch": "agent/unified-candidate-1.58.145",
+    "branch": "agent/unified-candidate-1.58.147",
     "working_tree_clean": True,
     "dirty_entries": 0,
     "identity_source": "git",
@@ -50,7 +50,7 @@ CANDIDATE = {
     "version_check_detail": None,
 }
 
-GOOD_LOG = """updater: update available: 1.58.144 -> v1.58.145
+GOOD_LOG = """updater: update available: 1.58.144 -> v1.58.147
 updater: downloading modelrig-server-windows-x64.exe
 updater: downloading modelrig-supervisor-windows-x64.exe
 updater: downloading modelrig-worker-windows-x64.exe
@@ -58,25 +58,25 @@ updater: checksums verified for 3 exe(s)
 updater: build provenance verified for 3 exe(s)
 updater: stopping supervisor + processes so the exes unlock
 updater: supervisor heartbeat advanced past the restart -- crash-recovery is running
-updater: update OK: backend + worker report 1.58.145 and the supervisor is looping. Backup kept at backups/test
+updater: update OK: backend + worker report 1.58.147 and the supervisor is looping. Backup kept at backups/test
 """
 
-BAD_REJECTION_LOG = """updater: update available: 1.58.145 -> v1.58.146
+BAD_REJECTION_LOG = """updater: update available: 1.58.147 -> v1.58.146
 updater: downloading modelrig-server-windows-x64.exe
 updater: downloading modelrig-supervisor-windows-x64.exe
 updater: downloading modelrig-worker-windows-x64.exe
 updater: FATAL: NO BUILD PROVENANCE for modelrig-server-windows-x64.exe -- refusing to install
 """
 
-BAD_ROLLBACK_LOG = """updater: update available: 1.58.145 -> v1.58.146
+BAD_ROLLBACK_LOG = """updater: update available: 1.58.147 -> v1.58.146
 updater: downloading modelrig-server-windows-x64.exe
 updater: downloading modelrig-supervisor-windows-x64.exe
 updater: downloading modelrig-worker-windows-x64.exe
 updater: checksums verified for 3 exe(s)
 updater: build provenance verified for 3 exe(s)
 updater: stopping supervisor + processes so the exes unlock
-updater: update did not come up healthy + alive on 1.58.146 -- ROLLING BACK to 1.58.145
-updater: rolled back to 1.58.145: backend + worker healthy and the supervisor is looping
+updater: update did not come up healthy + alive on 1.58.146 -- ROLLING BACK to 1.58.147
+updater: rolled back to 1.58.147: backend + worker healthy and the supervisor is looping
 """
 
 
