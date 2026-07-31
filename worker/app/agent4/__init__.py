@@ -74,6 +74,15 @@ from .operator import (
     Agent4CampaignOverview,
     Agent4OperatorReadService,
 )
+from .projection import (
+    CampaignProjectionError,
+    CampaignProjectionIntent,
+    CampaignProjectionReconciler,
+    CampaignProjectionReport,
+    CampaignProjectionRepository,
+    CampaignProjectionSpec,
+    CampaignStateProjectionService,
+)
 from .recovery import (
     CampaignRecoveryDecision,
     CampaignRecoveryReport,
@@ -177,6 +186,12 @@ __all__ = [
     "CampaignHealthPolicy",
     "CampaignNotFoundError",
     "CampaignPriority",
+    "CampaignProjectionError",
+    "CampaignProjectionIntent",
+    "CampaignProjectionReconciler",
+    "CampaignProjectionReport",
+    "CampaignProjectionRepository",
+    "CampaignProjectionSpec",
     "CampaignQueue",
     "CampaignRecord",
     "CampaignRecoveryDecision",
@@ -191,6 +206,7 @@ __all__ = [
     "CampaignSchedulerService",
     "CampaignSpec",
     "CampaignState",
+    "CampaignStateProjectionService",
     "CampaignStatus",
     "CampaignTimelineBatchDeliveryResult",
     "CampaignTimelineBatchDeliveryService",
