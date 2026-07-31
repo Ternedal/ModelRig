@@ -30,7 +30,11 @@ from .domain import (
     JsonValue,
     transition_campaign,
 )
-from .projection import CampaignProjectionSpec, CampaignStateProjectionService
+from .projection import (
+    CampaignProjectionError,
+    CampaignProjectionSpec,
+    CampaignStateProjectionService,
+)
 
 
 class CampaignNotFoundError(LookupError):
@@ -337,15 +341,21 @@ class CampaignSchedulerService:
                 )
 
             cancelling = self._transition(current, CampaignStatus.CANCELLING)
-            self._persist_projection(
-                cancelling,
-                CampaignEventKind.CANCEL_REQUESTED,
-                occurred_at=cancelling.state.updated_at,
-            )
+            projection_error: CampaignProjectionError | None = None
+            try:
+                self._persist_projection(
+                    cancelling,
+                    CampaignEventKind.CANCEL_REQUESTED,
+                    occurred_at=cancelling.state.updated_at,
+                )
+            except CampaignProjectionError as exc:
+                projection_error = exc
             try:
                 self._executor.signal(campaign_id, "cancel")
             except Exception as exc:
                 return self._fail_signal(cancelling, "cancel", exc)
+            if projection_error is not None:
+                raise projection_error
             return cancelling
 
     def mark_cancelled(self, campaign_id: str) -> CampaignRecord:
