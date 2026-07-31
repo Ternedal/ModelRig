@@ -53,6 +53,20 @@ sealed class StreamEvent {
     /** The stream reported a failure in-band. Terminal. */
     data class Failure(val message: String, val status: Int = 0) : StreamEvent()
 
+    /**
+     * What the rig is doing right now, in its own words.
+     *
+     * The worker emits this on /rag/chat (`searching` before retrieval,
+     * `generating` before the first token). It is deliberately NOT content: a
+     * phase must never satisfy the terminal guard, or a stream that announced
+     * a phase and then died would look like a truncated answer instead of one
+     * that never started.
+     *
+     * Unknown phase names are kept as-is rather than mapped here. The client
+     * shows server state; it does not reconstruct the vocabulary locally.
+     */
+    data class Phase(val name: String) : StreamEvent()
+
     /** Not part of the contract (keep-alives, unknown shapes, junk). */
     object Ignored : StreamEvent()
 }
@@ -84,6 +98,9 @@ object StreamContract {
         // delta and dropped it, ending the stream with nothing to show.
         val err = o.optString("error")
         if (err.isNotEmpty()) return StreamEvent.Failure(err)
+
+        val phase = o.optString("phase")
+        if (phase.isNotEmpty()) return StreamEvent.Phase(phase)
 
         if (o.optJSONArray("sources") != null) {
             val arr = o.getJSONArray("sources")

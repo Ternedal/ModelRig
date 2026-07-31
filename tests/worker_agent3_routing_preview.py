@@ -9,7 +9,11 @@ from app.agent3.capability_graph import (
     build_capability_graph,
 )
 from app.agent3.core import CapabilitySnapshot, TurnRequest
-from app.agent3.routing_preview import evaluate_routing_preview
+from app.agent3.routing_preview import (
+    ROUTING_PREVIEW_ROUTE_PATH,
+    ROUTING_PREVIEW_STATUS,
+    evaluate_routing_preview,
+)
 
 
 passed = failed = 0
@@ -40,6 +44,15 @@ def graph(caps, *, developer=True, write=False):
         },
     )
 
+
+check(
+    ROUTING_PREVIEW_STATUS == "future_integration_contract_not_runtime_feature",
+    "routing preview declares itself parked contract code",
+)
+check(
+    ROUTING_PREVIEW_ROUTE_PATH is None,
+    "routing preview declares no runtime route path",
+)
 
 ready = CapabilitySnapshot(
     rig_reachable=True,

@@ -146,6 +146,52 @@ slår baseline på tool-disciplin · cloud-routing er synlig + følger skreven p
 - **Integrationer:** Home Assistant read-only → writes m. confirmation gate · scheduler for
   read-only jobs · eksternt API m. scoped credentials + transportbeskyttelse.
 
+### Agent 4 — arkitektur fastlagt 30/7-2026
+
+Referencearkitekturen er valgt: **gren `#258` (B)**. Beslutningerne står i
+`AGENT_4_ARCHITECTURE_DECISIONS.md` (ADR-A4-001 til A4-004) og håndhæves af
+`tests/workflow_agent4_storage_boundary.py` og
+`tests/workflow_agent4_dormant_runtime.py`.
+
+Åbne roadmap-punkter, der følger af beslutningen:
+
+- **Evidens som first-class timeline record** oven på B's lagringsmodel
+  (ADR-A4-001a). Gren A's model gjorde evidens til en selvstændig, adresserbar
+  post i den ordnede strøm; B hænger evidens på en hændelse som reference.
+  A's model er rigere for et kommende operator-/API-lag, og funktionen er
+  udskudt — ikke forkastet.
+- **Omdøbning af `watchdog.py`, `scheduler.py` og `retry_scheduling.py`**
+  (ADR-A4-004), gennemgået samlet og udført **før** `#253` lander.
+- **Genvurdering af den resterende A4-stak** mod B som referencearkitektur.
+
+Bevidst *ikke* på listen nu: de to stores læser og verificerer hele kæden ved
+hver append, så n appends koster O(n²). Det er et accepteret valg —
+korrekthed før performance. Et dvalende system må gerne betale CPU for
+stærkere integritet, og optimeringen kan senere ske bag samme kontrakt.
+Genbesøges når en kampagne bliver lang nok til at det kan måles.
+
+### Computer Use (Tier B) — milepælen, defineret 30/7-2026
+
+Erstatter den udefinerede reference til "F5", som aldrig blev beskrevet noget
+sted. Substratet er **landet dvalende** på main 30/7 (redningen af `#163`s
+brugbare del): ti moduler bag `KALIV_COMPUTER_USE`, som er slukket by default
+og fremgår af `ACTIVATION_READINESS.md`.
+
+| Slice | Indhold | Status |
+|---|---|---|
+| **I3 — se** | signeret, screenshot-bundet kontrakt (HMAC) · capture af ét allowlistet forgrundsvindue · perceptuel hash + korttidsgyldigt `screen_token` · lokal-only vision-bro, der nægter cloud-fortsættelse | **landet dvalende** |
+| **I4 — foreslå** | signerede engangs-planer for ét præcist klik/tekstinput · `consume` kører allowlist-tjekket igen mod et FRISKT capture | **landet dvalende** |
+| **I5 — handle** | Win32 `SendInput` bag fysisk gate-evidens (low-integrity/UIPI) + ét friskt menneskeligt ja bundet til den præcise plan | **ikke bygget** |
+
+I5 er den eneste med reel ny magt, og dens gate kan **ikke** bevises af CI:
+evidensen skal produceres af en probe-runner på en interaktiv Windows-rig.
+Rækkefølgen er derfor: rig-dagen beviser I3's capture og I4's plan-konsumption
+først; I5 åbnes ikke før den fysiske gate har produceret et bevis bundet til
+præcis den commit, den skal beskytte.
+
+`desktop_click` og `desktop_type` findes ikke i `REGISTRY` — pinnet i
+`tests/worker_desktop_screenshot_entrypoint.py`, som prøver en frisk proces.
+
 ---
 
 ## NOT NOW — betingede horisonter (aktiveres kun ved målt behov)
@@ -528,6 +574,36 @@ uanset.
 
 **Ikke bygget endnu, og skal ikke bygges som oprindeligt formuleret.** Den, der
 tager opgaven: læs de to veje igennem selv først — se lektie 32 i `HANDOFF.md`.
+
+**AFGJORT 30/7 (Anders): trin 1 = et ToolGate-værktøj. LANDET 30/7.**
+Kaldestedet er `web_research` i workerens `REGISTRY`, ikke et nyt endpoint og
+ikke en RAG-sidevej: tools-sporet bærer allerede fase-signalet (`tool_run`),
+bekræftelseskortet og den todelte adgangsmodel, så kortet følger af de akser
+der findes i forvejen (`risk=read` **plus** `network=public`) i stedet for af
+en ny regel. Gaten er den **eksisterende** flade-gate
+`KALIV_WEB_RESEARCH_ENABLED` — ruten og værktøjet er én beslutning, og to
+næsten ens flag ville være en forvekslingsfælde. Ovenpå gælder ToolGates
+almindelige lag (`KALIV_TOOLS_ENABLED` + kort per kald).
+
+Værktøjet **arver** den dvalende `WEB_RESEARCH_SPEC` fra
+`web_research_capability.py` frem for at deklarere en konkurrerende kopi;
+specen forbliver dvalende med `run=None`, og en test pinner at de to ikke kan
+glide fra hinanden. To ting måtte rettes ved aktiveringen: specen manglede
+`purpose` (henteren afviser et tomt formål, så kontrakten som landet kunne kun
+producere blokerede kald), og `isolate=True` krævede at `tool_child`
+bootstrapper de gatede registreringer — ellers ville et isoleret kald svare
+`unknown tool` på et godkendt værktøj, først den dag nogen satte
+`KALIV_TOOL_ISOLATION=process`.
+
+D4 holdes strukturelt frem for disciplinært: `run()` tager kun `url` og
+`purpose`, skemaet er lukket (`additionalProperties: false`), og en ukendt
+nøgle afvises **før** kompositionen bygges. Der findes altså ingen kanal
+RAG-kontekst kan rejse i — pinnet i `tests/worker_web_research_tool.py`.
+
+Paritetsgatens del E er flippet: den peger nu på `worker/app/web_research_tool.py`
+som henterens ene produktionskaldested. Dukker der et andet op, er det en ny
+udgående sti og en ny beslutning. **Trin 2 (evidens-konvergens) og rig-dagens
+form (c) står uændret.**
 
 
 *Afgjort 13/7-2026: **D1** keystore = risiko accepteret (`SECURITY.md`) · **D2** VERSION-kilde

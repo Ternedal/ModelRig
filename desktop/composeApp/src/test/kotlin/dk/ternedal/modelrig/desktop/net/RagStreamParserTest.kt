@@ -31,8 +31,10 @@ class RagStreamParserTest {
     @Test
     fun sourcesHeaderSurvivesAPrecedingUnknownLine() {
         // Den regression, formbaseret dispatch findes for at forhindre.
+        // Eksemplet var oprindeligt en fase-linje; den er siden blevet en del af
+        // kontrakten, saa her staar nu en linje vi FAKTISK ikke kender.
         val stream = listOf(
-            """{"phase":"searching"}""",
+            """{"keepalive":true}""",
             """{"sources":[{"source":"noter.pdf"}]}""",
             """{"message":{"content":"svar"}}""",
         )
@@ -79,10 +81,48 @@ class RagStreamParserTest {
     }
 
     @Test
+    fun phaseLineBecomesATypedPhaseEvent() {
+        assertEquals(
+            RagStreamParser.Event.Phase("searching"),
+            RagStreamParser.parse("""{"phase":"searching"}"""),
+        )
+        assertEquals(
+            RagStreamParser.Event.Phase("generating"),
+            RagStreamParser.parse("""{"phase":"generating"}"""),
+        )
+    }
+
+    @Test
+    fun theSourcesHeaderStillSurvivesAPrecedingPhaseLine() {
+        // Praecis den raekkefoelge workeren nu udsender. Med den gamle
+        // positionsafhaengige loekke ville fase-linjen forbruge "first" og
+        // kildechipsene ville forsvinde uden en fejl.
+        val stream = listOf(
+            """{"phase":"searching"}""",
+            """{"sources":[{"source":"noter.pdf"}]}""",
+            """{"phase":"generating"}""",
+            """{"message":{"content":"svar"}}""",
+        ).map { RagStreamParser.parse(it) }
+        assertEquals(RagStreamParser.Event.Phase("searching"), stream[0])
+        assertEquals(RagStreamParser.Event.Sources(listOf("noter.pdf")), stream[1])
+        assertEquals(RagStreamParser.Event.Phase("generating"), stream[2])
+        assertEquals(RagStreamParser.Event.Delta("svar"), stream[3])
+    }
+
+    @Test
     fun unknownEventsAreIgnoredNotShownAsText() {
         // Bagudkompatibilitet: en ny event-type maa aldrig lande i chatteksten.
         assertEquals(
             RagStreamParser.Event.Ignored,
+            RagStreamParser.parse("""{"telemetry":{"tokens_per_second":42}}"""),
+        )
+    }
+
+    @Test
+    fun aPhaseLineWithExtraFieldsStillParsesAsThatPhase() {
+        // Workeren maa gerne udvide fase-linjen senere uden at braekke klienten.
+        assertEquals(
+            RagStreamParser.Event.Phase("tool_run"),
             RagStreamParser.parse("""{"phase":"tool_run","tool":"rig_status"}"""),
         )
     }

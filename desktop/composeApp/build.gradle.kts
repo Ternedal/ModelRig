@@ -25,7 +25,7 @@ dependencies {
     implementation("org.xerial:sqlite-jdbc:3.53.2.0")
     // Windows DPAPI bridge. jna-platform brings the matching core JNA artifact;
     // no secret or encryption key is implemented in application code.
-    implementation("net.java.dev.jna:jna-platform:5.19.0")
+    implementation("net.java.dev.jna:jna-platform:5.19.1")
 
     testImplementation(kotlin("test"))
 }

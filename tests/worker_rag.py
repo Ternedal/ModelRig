@@ -103,14 +103,26 @@ r = client.post("/rag/query", json={"query": "word5 word6", "top_k": 5,
 srcs = {m["source"] for m in r.json()["matches"]}
 check(srcs <= {"big"} and srcs, f"source filter 'big' -> only big (got {srcs})")
 
-# ---- streaming RAG chat: first line = sources, rest = answer deltas ----
+# ---- streaming RAG chat: phase, sources, phase, then answer deltas ----
+# Linjeorden ER kontrakten. "searching" skal komme FOER kildehovedet, ellers
+# beskriver den arbejde der allerede er sket, og "generating" skal komme
+# EFTER, ellers lover den generering foer der er en kontekst at generere fra.
 r = client.post("/rag/chat", json={"query": "xray yankee zulu", "top_k": 2})
 check(r.status_code == 200, "rag-chat -> 200")
-lines = [l for l in r.text.splitlines() if l.strip()]
-head = json.loads(lines[0])
-check("sources" in head and len(head["sources"]) >= 1, "rag-chat first line carries sources")
-answer = "".join(json.loads(l).get("message", {}).get("content", "") for l in lines[1:])
+lines = [json.loads(l) for l in r.text.splitlines() if l.strip()]
+check(lines[0] == {"phase": "searching"},
+      f"rag-chat opens with the searching phase (got {lines[0]})")
+check("sources" in lines[1] and len(lines[1]["sources"]) >= 1,
+      "the sources head follows the searching phase")
+check(lines[2] == {"phase": "generating"},
+      f"generating is announced after retrieval, before any delta (got {lines[2]})")
+phases = [x["phase"] for x in lines if "phase" in x]
+check(phases == ["searching", "generating"],
+      f"exactly two phases, in order, no repeats (got {phases})")
+answer = "".join(x.get("message", {}).get("content", "") for x in lines[3:])
 check(answer == "ctx-ans", f"rag-chat streams the reassembled answer (got {answer!r})")
+check(not any("phase" in x for x in lines[3:]),
+      "no phase line is interleaved with the answer deltas")
 
 # ---- source chips are deduped per source name, not per chunk ----
 # Ingest a doc long enough to split into multiple chunks, all sharing one
@@ -121,7 +133,8 @@ long_text = ("kanariefugl " * 60).strip()  # ~700 chars -> multiple chunks
 client.post("/rag/ingest", json={"documents": [
     {"text": long_text, "source": "dedup-doc"}], "chunk_size": 200, "overlap": 40})
 r = client.post("/rag/chat", json={"query": "kanariefugl", "top_k": 10, "source": "dedup-doc"})
-head = json.loads(r.text.strip().split("\n")[0])
+_dedup_lines = [json.loads(l) for l in r.text.strip().split("\n") if l.strip()]
+head = next(x for x in _dedup_lines if "sources" in x)
 dedup_entries = [s for s in head["sources"] if s["source"] == "dedup-doc"]
 check(len(dedup_entries) == 1,
       f"multiple chunks from one source -> exactly ONE source chip (got {len(dedup_entries)}: {head['sources']})")
@@ -163,11 +176,14 @@ check(r3.status_code == 200 and r3.json()["matches"] == [] and "answer" in r3.js
 rc = client.post("/rag/chat", json={"query": "zzzz", "top_k": 5,
                                      "min_score": 0.3, "source": "vowels"})
 lines_c = [json.loads(l) for l in rc.text.strip().splitlines()]
-head_c = lines_c[0]
-body_c = "".join(x.get("message", {}).get("content", "") for x in lines_c[1:])
+head_c = next((x for x in lines_c if "sources" in x), {})
+body_c = "".join(x.get("message", {}).get("content", "") for x in lines_c)
 has_error = any("error" in x for x in lines_c)
 check(rc.status_code == 200 and head_c.get("sources") == [] and body_c.strip() != "" and not has_error,
       f"rag-chat with no matches streams a don't-know message without hitting Ollama (got {rc.text!r})")
+check([x["phase"] for x in lines_c if "phase" in x] == ["searching"],
+      "no matches -> searching only; generating is never promised when the model "
+      f"is not called (got {[x for x in lines_c if 'phase' in x]})")
 
 # ---------------------------------------------------------------------------
 # HTML ingest (stdlib -- always available, never 501)
@@ -345,6 +361,35 @@ last = json.loads([ln for ln in r.text.strip().split("\n") if ln.strip()][-1])
 check("model not found" in last.get("error", ""), "a known OllamaError still reports as before")
 
 _oc_mod.chat_stream = _real_chat_stream
+
+
+# ---- retrieval failure is now an in-band error line, not a 502 ----
+# Da retrieval flyttede ind i generatoren for at kunne udsende "searching",
+# flyttede fejlvejen med: headers er sendt naar embeddingen fejler, saa 502 er
+# ikke laengere muligt. Kontrakten er, at GRUNDEN stadig naar klienten -- og
+# at "searching" allerede staar paa traaden, saa UI'et ikke haenger i en fase
+# der aldrig afsluttes.
+import app.main_impl as _impl  # noqa: E402
+
+_real_rag_query = _impl.rag.query
+
+
+async def _boom_query(*a, **k):
+    raise _oc_mod.OllamaError("embedding backend down")
+
+
+_impl.rag.query = _boom_query
+r = client.post("/rag/chat", json={"query": "retrieval failure probe", "top_k": 2})
+lines_e = [json.loads(l) for l in r.text.strip().splitlines() if l.strip()]
+check(r.status_code == 200,
+      "retrieval failure: headers already sent -> 200 with an in-band error")
+check(lines_e and lines_e[0] == {"phase": "searching"},
+      f"the searching phase is on the wire before the failure (got {lines_e[:1]})")
+check(any("embedding backend down" in x.get("error", "") for x in lines_e),
+      f"the retrieval reason survives to the client (got {lines_e})")
+check(not any("phase" in x and x["phase"] == "generating" for x in lines_e),
+      "a failed retrieval never announces generating")
+_impl.rag.query = _real_rag_query
 
 
 print(f"\n===== WORKER V1: {passed} passed, {failed} failed =====")

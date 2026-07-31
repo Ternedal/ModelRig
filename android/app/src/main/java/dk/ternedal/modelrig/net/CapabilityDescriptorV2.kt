@@ -143,17 +143,6 @@ data class CapabilityDescriptorV2(
                 "scheduling reason contradicts allowed",
             )
 
-            requireExactKeys(confirmationObject, setOf("mode"), "confirmation")
-            val confirmation = CapabilityConfirmationV2(
-                mode = requireString(confirmationObject, "mode"),
-            )
-            requireContract(confirmation.mode in confirmationModes, "unsupported confirmation.mode")
-            val expectedConfirmation = if (access == "read") "none" else "required"
-            requireContract(
-                confirmation.mode == expectedConfirmation,
-                "confirmation mode contradicts access",
-            )
-
             requireExactKeys(networkObject, setOf("mode", "destinations"), "network")
             val network = CapabilityNetworkV2(
                 mode = requireString(networkObject, "mode"),
@@ -168,6 +157,22 @@ data class CapabilityDescriptorV2(
                 network.mode !in setOf("loopback", "configured_service", "public") ||
                     network.destinations.isNotEmpty(),
                 "networked mode requires a destination",
+            )
+
+            // Rækkefølgen er en forudsætning, ikke en stilart: den toakse-regel
+            // #243 landede læser network.mode, så confirmation SKAL valideres
+            // efter network er parset. #246 flyttede blokken herover og måtte
+            // derfor falde tilbage til enkeltaksen -- se PR-kommentaren.
+            requireExactKeys(confirmationObject, setOf("mode"), "confirmation")
+            val confirmation = CapabilityConfirmationV2(
+                mode = requireString(confirmationObject, "mode"),
+            )
+            requireContract(confirmation.mode in confirmationModes, "unsupported confirmation.mode")
+            val expectedConfirmation =
+                if (access != "read" || network.mode == "public") "required" else "none"
+            requireContract(
+                confirmation.mode == expectedConfirmation,
+                "confirmation mode contradicts access/network",
             )
 
             requireExactKeys(terminationObject, setOf("mode"), "termination")

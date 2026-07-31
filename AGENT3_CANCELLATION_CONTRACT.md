@@ -6,6 +6,8 @@ A stop request has three distinct scopes: the Agent 3 plan, a model stream and t
 
 The existing cancel endpoint stops the **plan** and prevents future steps. The synchronous Agent 3 executor exposes no per-call handle, so an executing tool is never presented as directly interruptible. If a tool is already executing, the plan receipt explicitly states `prevent_future_steps_active_tool_continues`.
 
+`blocked`, `completed`, `failed` and `cancelled` are terminal run outcomes. Their plan scope always returns `state=terminal` and `can_request=false`; a blocked run must never grow a false Stop control merely because it is not `completed` or `cancelled`.
+
 Tool-family semantics are read from the existing registry:
 
 - `none` → `none`

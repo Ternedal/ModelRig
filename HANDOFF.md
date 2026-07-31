@@ -75,6 +75,30 @@ dem, minde om dem eller starte en diskussion om dem.
 push/tag-kommandoer, men **`sed 's/github_pat_[A-Za-z0-9_]*/***REDACTED***/g'`
 når du skal LÆSE tool-output** — ellers redigerer du din egen evidens væk.
 
+10. **Agent 4's arkitektur er fastlagt** (30/7). Se
+   `AGENT_4_ARCHITECTURE_DECISIONS.md` for de gældende arkitekturbeslutninger
+   og CI-gates. Den fil er den autoritative kilde — gengiv ikke
+   beslutningerne her.
+
+**Tre beslutninger truffet af Anders 30/7 — genåbn dem ikke:**
+
+7. **D7 trin 1 = et ToolGate-værktøj.** Henterens produktionskaldested er
+   `web_research` i workerens `REGISTRY`, ikke et nyt endpoint og ikke en
+   RAG-sidevej. Gaten er den eksisterende flade-gate
+   `KALIV_WEB_RESEARCH_ENABLED` — ét navn for én flade. Rig-dagens form er
+   **(c)**: scriptet frosset som `.retained` plus ét separat produktionskald
+   mod en rigtig URL. **Landet 30/7** (se §9).
+8. **`#163` lukkes; desktop-sporet reddes separat.** Research-delen er
+   supersederet, og branchens `capability_schema`-ændring ville tavst
+   genindføre den forkastede `external`-adgangsklasse. De 12 desktop-moduler
+   + 11 testfiler (Computer Use I3/I4) løftes i en frisk branch mod main —
+   kun A-filer, versionsrodet fladet ud undervejs. Milepælen defineres i
+   ROADMAP; navnet `F5` genoplives ikke.
+9. **Android-palettens divergens er et bevidst platformsvalg.** Forskellen i
+   mætning (29,5 % mod 9,4 %) pinnes med dokumenteret override i token-laget
+   plus test, så velmenende oprydning ikke kan slette den tavst. Det
+   æstetiske valg træffes på rig-dagen med begge apps foran sig.
+
 ---
 
 ## 1. Hvad projektet er
@@ -594,7 +618,154 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     §9, 30/7), skal det forventes at listen har flyttet sig mellem måling og
     handling.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 29/7)
+35. **Et rent merge er ikke et review. Diff HELE filen, ikke din hunk.** 30/7
+    landede jeg `#243` efter et grundigt review af dens confirmation-ændring.
+    Samme PR bar en **stale kopi** af `android/.../CapabilityDescriptorV2.kt`,
+    skåret før `3c8a3884` ("fail closed on Android descriptor parse errors",
+    19/7). Målt mod PR'ens egen merge-base var den fil derfor en *revert* af
+    hærdningen — og fordi main ikke havde rørt den region, anvendte git
+    reverten **rent, uden konflikt og uden et ord**. `canonicalize` faldt
+    tilbage til `else -> value.toString()`. Den lå på main i tre timer og blev
+    kun fanget, fordi `#246` tilfældigvis bar den hærdede udgave.
+
+    **Målt bagefter, og det korrigerer min egen første beskrivelse:** ingen
+    digest var nogensinde forkert. Skemaet indeholder kun strenge, booleans,
+    objekter, arrays og null, og for hver af dem giver de to udgaver
+    byte-identisk output (`is Boolean -> toString()` mod `else -> toString()`).
+    Kun tal ville afvige (`numberToString` mod `toString`), og skemaet har
+    ingen numeriske felter. Dertil er inputtet til `canonicalize`
+    `JSONObject(source.toString())` — en genparsning fra JSON-tekst — så en
+    ikke-JSON-native type kan strukturelt ikke nå frem. Den svækkede gren var
+    uopnåelig ved konstruktion.
+
+    Lektien står uændret, for den handler om mekanismen, ikke om skaden: en
+    stale kopi bliver til en tavs revert. Men **skriv altid den målte
+    alvorlighed, ikke den frygtede** — jeg kaldte det først fail-open på
+    digest-stien, og det var mere alarmerende end fakta bar.
+
+    **Reglen:** for hver fil en branch rører, diff hele filen mod main før
+    landing — ikke kun den ændring du kom for. "Ingen konflikter" betyder at
+    git kunne kombinere ændringerne, ikke at kombinationen er rigtig. En
+    branch der er ældre end main i en fil, ser for git ud som en bevidst
+    ændring af den fil.
+
+36. **Stale-tjek før hvert merge — tre kommandoer, syv fund hver gang.**
+    Konsekvensen af lektie 35, gjort mekanisk. For hver berørt fil: er main's
+    seneste commit på filen med i branchens historie?
+
+    ```
+    for f in $(git diff --name-only origin/main $HEAD); do
+      last=$(git log -1 --format=%H origin/main -- "$f")
+      git merge-base --is-ancestor "$last" $HEAD || echo "STALE $f"
+    done
+    ```
+
+    Er en fil stale, afgør ét spørgsmål mere udfaldet: **ændrer branchen den
+    selv** (sammenlign `$HEAD:$f` med `$MB:$f`)? Er den blot gammel, tager git
+    main's udgave rent og alt er godt. Har branchen ændret den, er ændringen
+    en revert af main's nyere arbejde, og git anvender den uden at spørge.
+    Det er hele forskellen mellem `#246` (revert, fangede den i hånden) og
+    `#250`/`#251` (blot gamle, gik rigtigt af sig selv) — samme syv filer,
+    modsat udfald. Kør tjekket; gæt det ikke.
+
+## 9. Kø — hvem har bolden (16/7, opdateret 30/7)
+
+**[30/7, aften — Android-palettens divergens PINNET. claim: Claude 30/7
+23:20 — scope: token-JSON'ens `platformOverrides`, `Theme.kt`-kommentar,
+`tests/workflow_android_palette_divergence.py` (ny).]**
+
+Den tredje af Anders' beslutninger. Divergensen er lys-temaets dæmpede tekst:
+tokenets `color.light.muted` er `#6F665C`, Androids `textMuted` er `#5A4831`.
+
+**Målingen gør den til en beslutning og ikke en smagssag.** Androids værdi
+giver **7,96:1** mod appens lyse baggrund — AAA. Tokenets ville give **5,13:1**
+på samme baggrund — kun AA. Telefonen læses i dagslys, desktoppen sjældent, så
+et "løft" ville koste læsbarhed præcis dér hvor den betyder mest.
+
+**Hvorfor den kunne forsvinde tavst:** `KalivTokens.kt` genereres og ligger
+allerede i Android-temaets pakke, men `Theme.kt` bruger stadig håndskrevne
+`Color(0x…)`-værdier, og *ingen test sammenlignede de to*. En velmenende
+oprydning — "migrér Theme.kt til KalivTokens" — ville have ændret udtrykket
+uden at noget blev rødt.
+
+Gaten er tosidet med vilje: den fælder både hvis Theme.kt migreres til
+tokenets værdi, OG hvis tokenet løftes til Androids (det sidste ville ændre
+desktoppens udtryk uden at nogen bad om det). Begge snubletråde er
+sabotage-prøvet. Det æstetiske valg træffes stadig på rig-dagen med begge apps
+foran sig; når det er truffet, opdateres `platformOverrides` og testen sammen.
+
+**[30/7, aften — Computer Use I3/I4 REDDET fra `#163`. claim: Claude 30/7
+22:55 — scope: `worker/app/desktop_*` (nye), `worker/app/main.py`
+(gated registrering), `tests/worker_desktop_*` (nye), ROADMAP-milepæl.]**
+
+`#163`s brugbare del er løftet i en frisk branch mod main — kun A-filer, ingen
+af de fire tavse overskrivninger. Tre ting måtte gøres, og de er værd at kende:
+
+1. **Registreringshooket lå i branchens `main.py`.** Det var en af de fire
+   overskrivninger, og den bar også `browser_research`-registreringen. Kun
+   desktop-delen er løftet, oven på mains udgave. Registreringen bor i
+   `main.py` og ikke i entrypointet, fordi vision-broen skal wrappe
+   `_run_tool_loop` i selve implementeringsmodulet: en flade monteret senere i
+   ASGI-laget ville lade et enkelt tool-loop slippe uden om broen.
+   `tests/worker_desktop_screenshot_entrypoint.py` prøver præcis det i en
+   frisk proces.
+2. **Versionsrodet er fladet ud.** `desktop_win32.py` var en 14-linjers shim
+   over `_v2` — kollapset til ét modul. `desktop_action_preview_tool.py` var
+   en facade, der rettede én closure-binding-fejl i ToolGate-installeren
+   (screenshot- og preview-wrapperne delte én closure-celle, så den anden
+   tildeling fik screenshot-wrapperen til at kalde sig selv rekursivt);
+   rettelsen ER nu implementeringen, og `_legacy` er slettet. Tolv moduler
+   blev til ti.
+3. **Testene er kørt mod MAINS `capability_schema`** — den todelte model, uden
+   branchens forkastede `external`-klasse. Alle grønne. Det var den måling,
+   der afgjorde om redningen overhovedet var mulig.
+
+Milepælen er defineret i `ROADMAP.md` som Computer Use (Tier B) med tre slices:
+I3 (se) og I4 (foreslå) er landet **dvalende** bag `KALIV_COMPUTER_USE`; I5
+(handle) er ikke bygget, og dens fysiske gate kan ikke bevises af CI. Navnet
+`F5` er ikke genoplivet.
+
+**[30/7, aften — D7 trin 1 LANDET. claim: Claude 30/7 22:32 — scope:
+`worker/app/web_research_tool.py` (ny), `web_research_capability.py`,
+`web_research_mount.py`, `tool_child.py`, `tests/worker_web_research_tool.py`
+(ny), paritetsgatens del E.]**
+
+Anders traf de tre åbne beslutninger (§0 nr. 7–9). Denne blok er trin 1 af
+dem; de to andre venter stadig i køen.
+
+*Hvad der landede:* `web_research` er nu henterens ene produktionskaldested,
+registreret i `REGISTRY` bag `KALIV_WEB_RESEARCH_ENABLED` — samme flag som
+ruten, monteret fra samme selvvagtende sted (`mount_web_research`).
+
+Tre fund undervejs, som ikke stod i oplægget:
+
+1. **Kontrakten fandtes allerede.** `web_research_capability.py` landede
+   `WEB_RESEARCH_SPEC` før featuren, dvalende med `run=None`. Værktøjet
+   **arver** den med `dataclasses.replace` frem for at deklarere en næsten
+   ens kopi (lektie 29). Kontrakten forbliver dvalende, og en test pinner at
+   de to ikke kan glide fra hinanden.
+2. **Kontrakten manglede `purpose`.** Henteren kræver et formål —
+   `build_intent` afviser et tomt — så specen som landet kunne kun producere
+   blokerede kald. `purpose` er tilføjet med `additionalProperties: false`.
+   Formålet er desuden præcis det, mennesket godkender på kortet.
+3. **`isolate=True` var en halv sandhed.** Et isoleret barn bygger sin EGEN
+   `REGISTRY` og kendte derfor ikke et gate-registreret værktøj: kaldet ville
+   svare `unknown tool` på noget forælderen lige havde fået et ja til — og
+   først den dag nogen satte `KALIV_TOOL_ISOLATION=process`. `tool_child`
+   bootstrapper nu de gatede registreringer, og værktøjet navngiver sit eget
+   flag i `env_allow` (`child_env` filtrerer alt andet væk). Bevist
+   ende-til-ende: med flag hentede barnet en rigtig side (200, 559 bytes,
+   ægte binding og opløst IP); uden flag `unknown tool`.
+
+*Verificeret lokalt før landing:* CI's `ruff`-kommando ren, hele
+`tests/worker_*.py` + `tests/workflow_*.py` grøn, paritetsgatens del E flippet
+til at pege på det ene kaldested, `ACTIVATION_READINESS.md` +
+`CURRENT_STATE.md` regenereret med deres egne generatorer (flaget dukkede op
+som switch nr. 14 — det literale `os.getenv` på registreringsstedet er
+grunden; mount-modulets konstant var en blind plet).
+
+*Stadig i Claudes kø:* desktop-redningen (§0 nr. 8) og palette-pinnen
+(§0 nr. 9). Rig-dagens form (c) er uændret og hører til rig-dagen.
 
 **[29/7, sent — Anders har truffet beslutningerne. Otte PRs lukket, fire
 beslutninger registreret, t021 STOPPET af ejerskabsaftalen.]**
@@ -744,6 +915,71 @@ må kun stå åben, hvis den er **aktiv**, **bevidst parkeret med et
 genstartskriterium**, eller **evidence-only for den valgte kandidat**.*
 Historiske og supersederede branches lukkes med en præcis pointer til
 afløseren. 62 åbne PR'er er symptomet på at reglen ikke har været håndhævet.
+
+**[30/7, eftermiddag — Sol-agendaen er gennemført, og fem PR'er er landet.
+Autoritativt: 35 åbne PR'er, ned fra 62 i går.]** Sol reviewede og godkendte
+mount-kontrakten, lukkede `#165`/`#166`/`#167` (t021 dermed helt lukket),
+forkastede `external` til fordel for den stærkere todelte model
+(`access` **plus** `network.mode=public`), tog eksplicit ejerskab af Agent 4 og
+omnummererede `T-030`–`T-034` → `A4-01`–`A4-05` med prefix `agent/a4-*`.
+**Claim-reglen er accepteret** i formen: præcist scope før arbejdet, fire
+timers udløb uden aktivitet, Anders kan altid overstyre.
+
+Landet i dag, hver med sit eget grønne run og bekræftelse ad to veje:
+`#242` (`3dc1e86`, ægte fast-forward), `#243` (`b948a27`), og hele
+`#251`-stakken nedefra — `#246` (`88e9ba0`), `#250` (`b2b4810`), `#251`
+(`d6f2459`).
+
+**To ting er værd at bære videre fra de landinger.** For det første: `#251`
+så ud som seks filer i sin egen diff, men dens reelle delta mod main var 66
+filer i tre lag. Mål altid tre-punkts mod main, aldrig PR-diffen mod dens base
+(lektie 31). For det andet: stale-tjekket (lektie 36) fandt **syv bagudliggende
+filer i hvert eneste lag** — begge `CapabilityDescriptorV2.kt`,
+`capabilityschema/schema.go`, `capability_schema.py`, `routing_preview.py` og
+to tests. I `#246` var en af dem en revert, der skulle rettes i hånden; i
+`#250` og `#251` var de blot gamle og gik rigtigt af sig selv. Samme overflade,
+modsat udfald — det er præcis derfor tjekket skal køres.
+
+**Til protokollen:** landingerne flytter Milestone 3-kandidaten til main; de
+beviser den ikke. Intet fysisk er kørt, ingen kampagne udført,
+`production_activation` er uændret.
+
+**[30/7, sent — oprydningen er færdig. Autoritativt: 19 åbne PR'er, ned fra
+62 i går.]** Ti dependabot-PR'er behandlet (otte landet, `#232` lukket på et
+rødt `android-compile`, `#239` lukket til fordel for at bringe desktops Gradle
+op på Androids 8.14.4 frem for et 8→9-spring på kun den ene klient), og
+t023-stakken `#190`–`#196` lukket: klassifikationen viste nul unikke filer, og
+diskriminatoren fandt præcis **én** afvigende fil — hele stakkens resterende
+bidrag var én sætning i `AGENT3_CANCELLATION_CONTRACT.md`, porteret ordret som
+`1308a554`. Invarianten var allerede håndhævet i `_TERMINAL_RUNS`; dokumentet
+sagde det bare ikke.
+
+**Fælde værd at kende:** "nul unikke filer" betyder kun *ingen nye* filer. Både
+t023-stakken og `#235` (browser-use-bumpet) blev stemplet sådan af den første
+klassifikation — men `#235` er et versionsbump til en eksisterende fil, ikke en
+skal. Diskriminatoren i lektie 36 er den rigtige test, ikke fil-optællingen.
+
+**De 19 tilbage er arbejde, ikke oprydning:** 13 t033 (Sols aktive spor), fire
+Agent 4 (`#253`–`#256`, Sols), `#235` (parkeret til D7's trin 1 er afgjort) og
+`#163`.
+
+**`#163` er den eneste PR, der hviler på "bevidst parkeret"-klausulen — og
+klausulen kræver et genstartskriterium, som ikke findes.** Beslutningen fra
+24/7 var *"merges ikke; desktop beholdes til F5"*, men PR'en havde **nul
+kommentarer**, og **`F5` optræder ikke i hverken ROADMAP eller HANDOFF**.
+Begrundelsen er nu skrevet på PR'en: research-delen er en konkurrerende
+implementering af mains web-research-sti, mens ti `desktop_*`-moduler er reelt
+nyt arbejde, der ikke findes andre steder (28 filer i alt). **Anders' kald:**
+definér F5 i ROADMAP, eller omformulér kriteriet til noget, der findes. Et
+kriterium, der peger på en udefineret milepæl, er en tidsubestemt udsættelse
+med en pænere etiket.
+
+**To udestående verifikationer fra dagens landinger**, begge noteret på deres
+PR'er og i commit-beskederne: `#230`s okhttp-major bærer ti klienter i
+`android/.../net/` — CI beviser compile og mockwebserver, ikke en rigtig
+forbindelse, så én chat-tur og én stemme-tur fra Pixel'en mod riggen mangler.
+Og `#231`s attest-build-provenance kan slet ikke bevises af CI, fordi
+`build-and-release.yml` ikke kører på push: **første rigtige tag er prøven.**
 
 **[30/7, morgen — t021 er AFSLUTTET, og vi kørte om kap med Sol undervejs.]**
 Convergence-merget landede som `4e8acd33` (Sols kontrakt overlevede, verificeret

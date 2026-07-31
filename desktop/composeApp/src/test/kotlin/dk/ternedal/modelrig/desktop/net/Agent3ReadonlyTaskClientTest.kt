@@ -9,11 +9,12 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class Agent3ReadonlyTaskClientTest {
     @Test
-    fun authenticatedPreviewStartStatusAndStopUseOnlyTaskRoutes() {
+    fun authenticatedPreviewStartStatusAndPlanStopUseOnlyTaskRoutes() {
         val requests = CopyOnWriteArrayList<RequestSeen>()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/api/v1/experimental/agent3/task") { exchange ->
@@ -50,9 +51,22 @@ class Agent3ReadonlyTaskClientTest {
             assertEquals("rig_status", preview.plan.single().tool)
             assertFalse(started.terminal)
             assertEquals("running", started.run.state)
+            assertTrue(started.termination.plan.canRequest)
+            assertEquals(
+                "prevent_future_steps_active_tool_continues",
+                started.termination.plan.effect,
+            )
+            assertEquals("none", started.termination.activeTool?.semantics)
+            assertFalse(started.termination.activeTool?.canRequest ?: true)
+
             assertTrue(completed.terminal)
             assertEquals("Rig is ready", completed.run.answer)
+            assertFalse(completed.termination.plan.canRequest)
+            assertNull(completed.termination.activeTool)
+
             assertEquals("cancelled", cancelled.run.state)
+            assertEquals("completed_after_cancel", cancelled.termination.activeTool?.state)
+            assertEquals("terminal", cancelled.termination.activeTool?.requestState)
 
             assertEquals(
                 listOf("POST", "POST", "GET", "POST"),
@@ -79,6 +93,49 @@ class Agent3ReadonlyTaskClientTest {
     }
 
     @Test
+    fun cancelledPlanCanRemainTerminalWhileToolStillExecutes() {
+        val client = Agent3ReadonlyTaskClient("http://127.0.0.1", "token")
+        val value = client.parseSnapshot(
+            snapshotJson(
+                state = "cancelled",
+                terminal = true,
+                stepState = "executing",
+            ),
+        )
+
+        assertTrue(value.terminal)
+        assertFalse(value.termination.plan.canRequest)
+        assertEquals("executing", value.termination.activeTool?.state)
+        assertEquals("unavailable", value.termination.activeTool?.requestState)
+        assertFalse(value.termination.activeTool?.canRequest ?: true)
+    }
+
+    @Test
+    fun completedAfterCancelAndBlockedRunRemainTruthful() {
+        val client = Agent3ReadonlyTaskClient("http://127.0.0.1", "token")
+        val late = client.parseSnapshot(
+            snapshotJson(
+                state = "cancelled",
+                terminal = true,
+                stepState = "completed_after_cancel",
+            ),
+        )
+        val blocked = client.parseSnapshot(
+            snapshotJson(
+                state = "blocked",
+                terminal = true,
+                stepState = "blocked",
+            ),
+        )
+
+        assertEquals("terminal", late.termination.activeTool?.requestState)
+        assertEquals("tool_completed_after_plan_cancel", late.termination.activeTool?.reason)
+        assertEquals("terminal", blocked.termination.plan.state)
+        assertFalse(blocked.termination.plan.canRequest)
+        assertEquals("not_active", blocked.termination.activeTool?.requestState)
+    }
+
+    @Test
     fun unsafeOrInconsistentContractsFailClosed() {
         val client = Agent3ReadonlyTaskClient("http://127.0.0.1", "token")
 
@@ -90,10 +147,46 @@ class Agent3ReadonlyTaskClientTest {
             "\"production_activation\":false",
             "\"production_activation\":true",
         )
+        val missingTermination = snapshotJson(
+            state = "running",
+            terminal = false,
+            includeTermination = false,
+        )
+        val falseHandle = snapshotJson(
+            state = "running",
+            terminal = false,
+            activeCanRequest = true,
+            activeHandlePresent = false,
+            activeRequestState = "available",
+        )
+        val wrongPlanEffect = snapshotJson(
+            state = "running",
+            terminal = false,
+            planEffectOverride = "prevent_future_steps",
+        )
+        val mismatchedStep = snapshotJson(
+            state = "running",
+            terminal = false,
+            activeStepId = "other-step",
+        )
+        val invalidCurrentStep = snapshotJson(
+            state = "running",
+            terminal = false,
+            currentStepOverride = 2,
+        )
 
         assertIs<Agent3Exception>(runCatching { client.parsePreview(writePreview) }.exceptionOrNull())
-        assertIs<Agent3Exception>(runCatching { client.parseSnapshot(confirmation) }.exceptionOrNull())
-        assertIs<Agent3Exception>(runCatching { client.parseSnapshot(terminalMismatch) }.exceptionOrNull())
+        listOf(
+            confirmation,
+            terminalMismatch,
+            missingTermination,
+            falseHandle,
+            wrongPlanEffect,
+            mismatchedStep,
+            invalidCurrentStep,
+        ).forEach { payload ->
+            assertIs<Agent3Exception>(runCatching { client.parseSnapshot(payload) }.exceptionOrNull())
+        }
         assertIs<Agent3Exception>(
             runCatching { client.parseSnapshot(wrongRun, expectedRunId = "run-1") }.exceptionOrNull(),
         )
@@ -206,14 +299,38 @@ class Agent3ReadonlyTaskClientTest {
         state: String,
         terminal: Boolean,
         runId: String = "run-1",
+        stepState: String? = null,
+        includeTermination: Boolean = true,
+        planEffectOverride: String? = null,
+        activeStepId: String = "step-1",
+        activeCanRequest: Boolean = false,
+        activeHandlePresent: Boolean = false,
+        activeRequestState: String? = null,
+        currentStepOverride: Int? = null,
     ): String {
-        val stepState = when (state) {
+        val resolvedStepState = stepState ?: when (state) {
             "running" -> "executing"
             "cancelled" -> "completed_after_cancel"
+            "blocked" -> "blocked"
             else -> "succeeded"
         }
+        val currentStep = currentStepOverride ?: if (state == "completed" || state == "failed") 1 else 0
         val answer = if (state == "completed") "\"Rig is ready\"" else "null"
         val error = if (state == "cancelled") "\"Cancelled by user\"" else "null"
+        val termination = if (includeTermination) {
+            ",\n          \"termination\":${terminationJson(
+                terminal = terminal,
+                stepState = resolvedStepState,
+                currentStep = currentStep,
+                planEffectOverride = planEffectOverride,
+                activeStepId = activeStepId,
+                activeCanRequest = activeCanRequest,
+                activeHandlePresent = activeHandlePresent,
+                activeRequestState = activeRequestState,
+            )}"
+        } else {
+            ""
+        }
         return """
         {
           ${envelope()},
@@ -221,8 +338,8 @@ class Agent3ReadonlyTaskClientTest {
             "id":"$runId",
             "state":"$state",
             "route":{"kind":"rig_tools_local"},
-            "current_step":${if (state == "running") 0 else 1},
-            "steps":[${step(stepState)}],
+            "current_step":$currentStep,
+            "steps":[${step(resolvedStepState)}],
             "answer":$answer,
             "error":$error
           },
@@ -230,8 +347,74 @@ class Agent3ReadonlyTaskClientTest {
             "ts":1.0,
             "kind":"task_surface_bound",
             "payload":{"surface":"agent3_readonly"}
-          }],
+          }]$termination,
           "terminal":$terminal
+        }
+        """.trimIndent()
+    }
+
+    private fun terminationJson(
+        terminal: Boolean,
+        stepState: String,
+        currentStep: Int,
+        planEffectOverride: String?,
+        activeStepId: String,
+        activeCanRequest: Boolean,
+        activeHandlePresent: Boolean,
+        activeRequestState: String?,
+    ): String {
+        val executing = stepState == "executing"
+        val completedAfterCancel = stepState == "completed_after_cancel"
+        val requestState = activeRequestState ?: when {
+            completedAfterCancel -> "terminal"
+            executing -> "unavailable"
+            else -> "not_active"
+        }
+        val activeReason = when {
+            completedAfterCancel -> "tool_completed_after_plan_cancel"
+            executing -> "synchronous_tool_has_no_cancellation_handle"
+            else -> "tool_is_not_executing"
+        }
+        val activeTool = if (currentStep == 0) {
+            """
+            {
+              "step_id":"$activeStepId",
+              "tool":"rig_status",
+              "state":"$stepState",
+              "semantics":"none",
+              "handle_present":$activeHandlePresent,
+              "can_request":$activeCanRequest,
+              "request_state":"$requestState",
+              "reason":"$activeReason"
+            }
+            """.trimIndent()
+        } else {
+            "null"
+        }
+        val effect = planEffectOverride ?: if (executing) {
+            "prevent_future_steps_active_tool_continues"
+        } else {
+            "prevent_future_steps"
+        }
+        return """
+        {
+          "schema":"kaliv-agent3-termination/v1",
+          "plan":{
+            "state":"${if (terminal) "terminal" else "available"}",
+            "can_request":${!terminal},
+            "request_scope":"plan",
+            "effect":"$effect",
+            "reason":"${if (terminal) "run_is_terminal" else "plan_stop_is_available"}"
+          },
+          "model_stream":{
+            "state":"not_active",
+            "active":false,
+            "can_request":false,
+            "handle_present":false,
+            "reason":"agent3_run_has_no_model_stream_handle"
+          },
+          "active_tool":$activeTool,
+          "production_activation":false
         }
         """.trimIndent()
     }

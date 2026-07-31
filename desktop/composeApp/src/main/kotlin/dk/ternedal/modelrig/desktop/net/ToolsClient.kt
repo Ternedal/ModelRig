@@ -43,6 +43,16 @@ private data class ToolChatRequest(
 private data class ToolConfirmRequest(val confirmation_id: String, val decision: String)
 
 @Serializable
+data class ToolStreamLine(
+    // Praecis een af dem er sat pr. linje. Alle tre er nullable, saa en linje
+    // vi ikke kender endnu bliver en tom ToolStreamLine og ignoreres -- nye
+    // linjetyper fra en nyere worker maa ikke braekke en aeldre klient.
+    val phase: String? = null,
+    val result: ToolTurn? = null,
+    val error: String? = null,
+)
+
+@Serializable
 data class ToolTurn(
     val status: String = "",
     val answer: String = "",
@@ -135,6 +145,62 @@ class ToolsClient(baseUrl: String, private val bearer: String?) {
         if (resp.statusCode() !in 200..299)
             throw ToolsException("tools chat failed (${resp.statusCode()}): ${resp.body().take(300)}")
         return json.decodeFromString<ToolTurn>(resp.body())
+    }
+
+    /**
+     * Samme tur som [toolsChat], men riggen fortaeller undervejs hvad den laver.
+     *
+     * En vaerktoejstur kan tage lang tid -- modellen taenker, et vaerktoej
+     * koerer, modellen taenker igen -- og med det gamle endpoint sker alt det
+     * bag en lukket doer: brugeren ser een statisk tekst og ingen tegn paa liv
+     * foer svaret lander. Her kommer fasen loebende.
+     *
+     * [onPhase] kaldes paa laesetraaden, ikke paa UI-traaden. Kalderen laegger
+     * selv opdateringen over paa sin egen scope.
+     *
+     * Fail-closed som resten af stroem-laeserne: en udtoemt stroem UDEN en
+     * resultatlinje er en fejl, ikke en tom succes. Et droppet socket afslutter
+     * body'en praecis som en faerdig tur, saa fravaeret af resultatet er det
+     * eneste der skelner dem.
+     */
+    fun toolsChatStream(
+        message: String,
+        model: String?,
+        history: List<Pair<String, String>>,
+        system: String?,
+        onPhase: (String) -> Unit = {},
+    ): ToolTurn {
+        val body = json.encodeToString(
+            ToolChatRequest(
+                message = message,
+                model = model,
+                history = history.map { ToolMsg(it.first, it.second) },
+                system = system?.takeIf { it.isNotBlank() },
+            ),
+        )
+        val req = builder("/api/v1/tools/chat/stream")
+            .POST(HttpRequest.BodyPublishers.ofString(body))
+            .build()
+        val resp = http.send(req, HttpResponse.BodyHandlers.ofLines())
+        if (resp.statusCode() !in 200..299)
+            throw ToolsException("tools chat failed (${resp.statusCode()})")
+        var turn: ToolTurn? = null
+        resp.body().forEach { line ->
+            if (line.isBlank()) return@forEach
+            runCatching {
+                json.decodeFromString(ToolStreamLine.serializer(), line)
+            }.getOrNull()?.let { parsed ->
+                when {
+                    parsed.error != null ->
+                        throw ToolsException("tools chat: ${parsed.error}")
+                    parsed.result != null -> turn = parsed.result
+                    parsed.phase != null -> onPhase(parsed.phase)
+                }
+            }
+        }
+        return turn ?: throw ToolsException(
+            "vaerktoejsturen blev afbrudt undervejs — forbindelsen lukkede før riggen var færdig; prøv igen",
+        )
     }
 
     /** 409 = already used, 410 = expired -- both surface as thrown text, the

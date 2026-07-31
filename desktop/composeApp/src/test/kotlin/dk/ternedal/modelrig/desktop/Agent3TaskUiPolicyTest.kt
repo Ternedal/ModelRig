@@ -50,17 +50,60 @@ class Agent3TaskUiPolicyTest {
     }
 
     @Test
-    fun persistedRunRemainsPollableAndStoppableAfterFallback() {
+    fun persistedRunKeepsServerAuthorizedPlanStopAfterFallback() {
         assertEquals(Agent3TaskUiPolicy.AGENT2, Agent3TaskUiPolicy.normalizedSurface("stale"))
-        assertTrue(Agent3TaskUiPolicy.shouldPoll(runTerminal = false))
-        assertTrue(Agent3TaskUiPolicy.canStop(runTerminal = false, busy = false))
+        assertTrue(Agent3TaskUiPolicy.canStopPlan(planCanRequest = true, busy = false))
+        assertFalse(Agent3TaskUiPolicy.canStopPlan(planCanRequest = false, busy = false))
+        assertFalse(Agent3TaskUiPolicy.canStopPlan(planCanRequest = true, busy = true))
     }
 
     @Test
-    fun terminalOrBusyRunCannotBeStopped() {
-        assertFalse(Agent3TaskUiPolicy.canStop(runTerminal = true, busy = false))
-        assertFalse(Agent3TaskUiPolicy.canStop(runTerminal = false, busy = true))
-        assertFalse(Agent3TaskUiPolicy.shouldPoll(runTerminal = true))
-        assertFalse(Agent3TaskUiPolicy.shouldPoll(runTerminal = null))
+    fun cancelledPlanKeepsPollingWhileActiveToolStillRuns() {
+        assertTrue(
+            Agent3TaskUiPolicy.shouldPoll(
+                runTerminal = true,
+                activeToolState = "executing",
+                activeToolRequestState = "unavailable",
+            ),
+        )
+        assertTrue(
+            Agent3TaskUiPolicy.shouldPoll(
+                runTerminal = true,
+                activeToolState = "executing",
+                activeToolRequestState = "pending",
+            ),
+        )
+    }
+
+    @Test
+    fun pollingStopsOnlyAfterRunAndToolAreTruthfullyTerminal() {
+        assertTrue(
+            Agent3TaskUiPolicy.shouldPoll(
+                runTerminal = false,
+                activeToolState = null,
+                activeToolRequestState = null,
+            ),
+        )
+        assertFalse(
+            Agent3TaskUiPolicy.shouldPoll(
+                runTerminal = true,
+                activeToolState = "completed_after_cancel",
+                activeToolRequestState = "terminal",
+            ),
+        )
+        assertFalse(
+            Agent3TaskUiPolicy.shouldPoll(
+                runTerminal = true,
+                activeToolState = null,
+                activeToolRequestState = null,
+            ),
+        )
+        assertFalse(
+            Agent3TaskUiPolicy.shouldPoll(
+                runTerminal = null,
+                activeToolState = null,
+                activeToolRequestState = null,
+            ),
+        )
     }
 }

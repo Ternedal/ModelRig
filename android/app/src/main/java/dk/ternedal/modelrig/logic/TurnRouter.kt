@@ -48,7 +48,8 @@ data class TurnInput(
  * Bemaerk at dette ikke er at rekonstruere serverens semantik lokalt: toolsMode
  * og ragMode er toggles brugeren selv har sat, og planen er klientens eget valg
  * af hvilken sti den kalder. Fasen INDE i et kald (henter kontekst kontra
- * genererer) ville kraeve et signal fra serveren; det er en separat beslutning.
+ * genererer) kraevede et signal fra serveren -- det findes nu, og [forPhase]
+ * oversaetter det. [forPlan] er stadig startgaettet, foer riggen har sagt noget.
  */
 object TurnStatus {
     const val THINKING = "Kaliv tænker …"
@@ -64,6 +65,21 @@ object TurnStatus {
         p.useTools -> TOOLS
         p.useRag -> RAG
         else -> THINKING
+    }
+
+    /**
+     * Serverens egen fase, oversat til den streng brugeren ser.
+     *
+     * Null betyder "behold den nuvaerende status". Det er med vilje: en ukendt
+     * fase fra en nyere worker maa ikke blanke UI'et eller tvinge et gaet. Vi
+     * viser det vi kan navngive, og lader resten staa -- klienten oversaetter
+     * serverens ord, den opfinder dem ikke.
+     */
+    fun forPhase(name: String): String? = when (name) {
+        "searching" -> RAG
+        "generating" -> THINKING
+        "tool_run" -> TOOLS
+        else -> null
     }
 }
 

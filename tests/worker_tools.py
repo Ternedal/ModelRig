@@ -216,7 +216,7 @@ check("parkeret" in open(T.note_path(), encoding="utf-8").read(),
       "T13: approval wrote exactly the confirmed text")
 
 # T14: only one tool call per turn is honoured.
-src = inspect.getsource(M.tools_chat)
+src = inspect.getsource(M._tools_chat_turn)
 check("calls[:1]" in inspect.getsource(M._run_tool_loop)
       and "extra_tool_calls_ignored" in inspect.getsource(M._run_tool_loop),
       "T14: at most one tool per turn, and the caller is told")
@@ -255,8 +255,12 @@ check(sorted(origins) == ["cloud", "local"], "T18: audit records who proposed")
 src_pending = inspect.getsource(T.Pending)
 check("key" not in src_pending.lower(), "T19: no cloud key parked on the rig")
 
-# T15: /tools/chat refuses entirely when the layer is off.
+# T15: begge tools-indgange naegter helt naar laget er slaaet fra. Der er to
+# doere siden /tools/chat/stream kom til, og en kill switch der kun bevogter
+# den ene er ingen kill switch.
 check("the tool layer is disabled" in src, "T15: kill switch checked before the LLM")
+check("the tool layer is disabled" in inspect.getsource(M.tools_chat_stream),
+      "T15: the streaming entry checks the same kill switch")
 
 # ---------------------------------------------------------------------------
 # T16-T18: cloud may propose. Risk decides confirmation, not origin.
@@ -410,7 +414,9 @@ check(sum(len(m.content) for m in _trim_history(huge)) > TOOL_HISTORY_MAX_CHARS,
 # never push it out of the context window.
 import inspect as _i  # noqa: E402
 from app import main as _M  # noqa: E402
-src = _i.getsource(_M.tools_chat)
+# Turen bor i _tools_chat_turn, som BAADE /tools/chat og /tools/chat/stream
+# kalder. Invarianten er uaendret; kun funktionen den lever i har faaet navn.
+src = _i.getsource(_M._tools_chat_turn)
 sys_pos = src.index('"role": "system"')
 hist_pos = src.index("_trim_history")
 check(sys_pos < hist_pos,
@@ -422,7 +428,7 @@ check(sys_pos < hist_pos,
 # runs first and the chunks enter the prompt. That means UNTRUSTED text sits
 # next to a model that can call tools, so this is the test that matters.
 # ---------------------------------------------------------------------------
-src = _i.getsource(_M.tools_chat)
+src = _i.getsource(_M._tools_chat_turn)
 check("synthesize=False" in src, "T22: RAG retrieves, it does not pre-answer")
 check(src.index("synthesize=False") < src.index("_run_tool_loop"),
       "T22: retrieval happens before the tool loop, not after")
@@ -468,7 +474,7 @@ check(g.propose("rig_status", {})["status"] == "executed",
 # tools branch was bolted in front of the normal path and never taught what the
 # normal path already did. These assert the plumbing exists at all.
 # ---------------------------------------------------------------------------
-src = _i.getsource(_M.tools_chat)
+src = _i.getsource(_M._tools_chat_turn)
 check("req.image_base64" in src and "images" in src,
       "T23: an attached image rides on the user message, not dropped")
 check(src.index("req.image_base64") > src.index("_trim_history"),
@@ -512,7 +518,7 @@ check(len(_trim_history(plain)) == TOOL_HISTORY_MAX_MESSAGES and
 
 # A system message anywhere but first is demoted, not honoured: a replayed turn
 # must not be able to speak with system authority.
-src = _i.getsource(_M.tools_chat)
+src = _i.getsource(_M._tools_chat_turn)
 check('m.role == "system" and i > 0' in src,
       "T24: a system role mid-history is demoted to user")
 check('if req.system:' in src and 'm.role != "system"' in src,
@@ -790,6 +796,63 @@ for _name, _row in _rows.items():
         _name += f" (missing {_exc})"
     check(_match,
           f"/tools row for {_name} matches the registry -- not a copy that drifts")
+
+
+# ---------------------------------------------------------------------------
+# T23: /tools/chat/stream -- fasen paa traaden, og PRAECIS eet resultat.
+# Nyt endpoint frem for aendret wire-form, fordi telefonen er en installeret
+# APK der opdateres uafhaengigt af riggen: en aeldre app mod en nyere rig maa
+# ikke faa NDJSON hvor den venter eet objekt.
+# ---------------------------------------------------------------------------
+src_stream = inspect.getsource(M.tools_chat_stream)
+check("_tools_chat_turn" in src_stream,
+      "T33: the streaming entry runs the SHARED turn, not a second implementation")
+check('"result"' in src_stream,
+      "T33: the final line carries the same result object as /tools/chat")
+check('"error"' in src_stream,
+      "T33: a failure leaves a reason on the wire, not just a dead stream")
+
+src_loop = inspect.getsource(M._run_tool_loop)
+gen_pos = src_loop.index('_phase("generating")')
+tool_pos = src_loop.index('_phase("tool_run")')
+check(gen_pos < tool_pos,
+      "T33: generating is announced before the model picks, tool_run before the tool runs")
+check("if on_phase is not None" in src_loop,
+      "T33: the phase callback is optional -- the request/response entries are unchanged")
+
+# Selve turen: faserne skal komme i den raekkefoelge en bruger kan tro paa.
+_seen = []
+
+
+async def _probe():
+    async def on_phase(name):
+        _seen.append(name)
+    calls = {"n": 0}
+
+    async def _fake_chat_tools(messages, tools=None, model=None, base_url=None, api_key=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"content": "", "tool_calls": [
+                {"function": {"name": "rig_status", "arguments": {}}}]}
+        return {"content": "faerdig"}
+
+    real = M.oc.chat_tools
+    M.oc.chat_tools = _fake_chat_tools
+    try:
+        return await M._run_tool_loop(
+            [{"role": "user", "content": "hej"}], None, None, None,
+            None, "local", [], [], on_phase=on_phase,
+        )
+    finally:
+        M.oc.chat_tools = real
+
+
+_out = asyncio.run(_probe())
+check(_seen == ["generating", "tool_run", "generating"],
+      f"T33: phases follow the real work: think, run, think (got {_seen})")
+check(_out.get("status") == "answered",
+      f"T33: the shared turn still answers as before (got {_out.get('status')})")
+
 
 print(f"\n===== TOOLS: {passed} passed, {failed} failed =====")
 sys.exit(0 if failed == 0 else 1)

@@ -4,7 +4,7 @@
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
 **Version på main:** `1.58.147`
-**Genereret:** 2026-07-30 05:40 UTC
+**Genereret:** 2026-07-30 21:27 UTC
 
 ---
 
@@ -70,7 +70,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 13 feature-switches er tændt som default.** (13 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 15 feature-switches er tændt som default.** (13 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -78,6 +78,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_AGENT3_TASK_WORKERS` | `2` | indstilling |
 | `KALIV_ALLOW_RAG_CLOUD` | `(tom)` | slukket |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` | slukket |
+| `KALIV_COMPUTER_USE` | `0` | slukket |
 | `KALIV_DATA_DIR` | `(unset)` | slukket |
 | `KALIV_EGRESS_GATE` | `(tom)` | slukket |
 | `KALIV_MAX_UPLOAD_MB` | `25` | indstilling |
@@ -89,6 +90,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_TOOLS_ENABLED` | `0` | slukket |
 | `KALIV_TOOL_ISOLATION` | `(tom)` | slukket |
 | `KALIV_VISION_MODEL` | `(unset)` | slukket |
+| `KALIV_WEB_RESEARCH_ENABLED` | `(tom)` | slukket |
 | `KALIV_WORKER_ALLOW_LAN` | `0` | slukket |
 | `MODELRIG_ADMIN_KEY` | `(unset)` | indstilling |
 | `MODELRIG_CLAIM_MAX` | `(unset)` | indstilling |
