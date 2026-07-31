@@ -54,6 +54,45 @@ func (c *Client) WithAuthToken(t string) *Client {
 
 // Forward proxies r to c.BaseURL+upstreamPath and streams the response to w.
 func (c *Client) Forward(w http.ResponseWriter, r *http.Request, upstreamPath string) {
+	c.forward(w, r, upstreamPath, nil, "", "")
+}
+
+// ForwardWithHeaders is the narrow escape hatch for gateway-created internal
+// claims. Only the explicitly supplied headers are added; arbitrary client
+// headers are still not copied upstream. This lets a handler overwrite a
+// spoofed inbound claim instead of widening the generic proxy trust boundary.
+func (c *Client) ForwardWithHeaders(
+	w http.ResponseWriter,
+	r *http.Request,
+	upstreamPath string,
+	headers map[string]string,
+) {
+	c.forward(w, r, upstreamPath, headers, "", "")
+}
+
+// ForwardWithHeadersAndResponseAttestation forwards gateway-created internal
+// headers and refuses to expose the upstream body unless the worker identifies
+// the exact implementation that served it. It is intentionally header-specific:
+// callers cannot turn this into a generic response-header trust mechanism.
+func (c *Client) ForwardWithHeadersAndResponseAttestation(
+	w http.ResponseWriter,
+	r *http.Request,
+	upstreamPath string,
+	headers map[string]string,
+	requiredHeader string,
+	requiredValue string,
+) {
+	c.forward(w, r, upstreamPath, headers, requiredHeader, requiredValue)
+}
+
+func (c *Client) forward(
+	w http.ResponseWriter,
+	r *http.Request,
+	upstreamPath string,
+	headers map[string]string,
+	requiredHeader string,
+	requiredValue string,
+) {
 	target := c.BaseURL + upstreamPath
 	if r.URL.RawQuery != "" {
 		if strings.Contains(upstreamPath, "?") {
@@ -80,6 +119,14 @@ func (c *Client) Forward(w http.ResponseWriter, r *http.Request, upstreamPath st
 	if rid := r.Header.Get("X-Request-ID"); rid != "" {
 		req.Header.Set("X-Request-ID", rid)
 	}
+	for name, value := range headers {
+		name = strings.TrimSpace(name)
+		if name == "" || strings.ContainsAny(name, "\r\n") || strings.ContainsAny(value, "\r\n") {
+			http.Error(w, "invalid internal upstream header", http.StatusInternalServerError)
+			return
+		}
+		req.Header.Set(name, value)
+	}
 	if c.AuthToken != "" {
 		req.Header.Set("Authorization", "Bearer "+c.AuthToken)
 	}
@@ -91,6 +138,16 @@ func (c *Client) Forward(w http.ResponseWriter, r *http.Request, upstreamPath st
 	}
 	defer resp.Body.Close()
 
+	if requiredHeader != "" {
+		if strings.ContainsAny(requiredHeader, "\r\n") || strings.ContainsAny(requiredValue, "\r\n") {
+			http.Error(w, "invalid upstream response attestation", http.StatusInternalServerError)
+			return
+		}
+		if resp.Header.Get(requiredHeader) != requiredValue {
+			http.Error(w, "upstream response attestation missing", http.StatusBadGateway)
+			return
+		}
+	}
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}

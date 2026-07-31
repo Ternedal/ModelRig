@@ -13,18 +13,36 @@ MAX_SCAN_BYTES = 64 * 1024 * 1024
 _SENSITIVE_SQL_COLUMNS = frozenset(
     {"value", "source_ref", "value_protected", "source_ref_protected"}
 )
-_FORBIDDEN_RUNTIME_SYMBOLS = (
+_PROTECTED_RUNTIME_SYMBOLS = (
+    "memory_protected_api",
     "memory_protected_reader",
     "memory_protected_writer",
+    "build_protected_memory_router",
+    "GatewayProtectedMemoryAuthorizer",
     "ProtectedMemoryReader",
     "ProtectedMemoryWriter",
 )
 _RUNTIME_BOUNDARY_FILES = (
     "worker/app/agent3/production_mount.py",
+    "worker/app/agent3/memory_surface.py",
     "worker/app/agent3/planner.py",
     "worker/app/agent3/memory_api.py",
     "worker/app/agent3/outcome_answer.py",
     "worker/app/agent3/outcome_context.py",
+)
+_AUTHORIZED_PROTECTED_MOUNT_FILE = "worker/app/agent3/memory_surface.py"
+_AUTHORIZED_PROTECTED_MOUNT_MARKERS = (
+    'PROTECTED_MEMORY_MOUNT_CONTRACT = "kaliv-agent3-protected-memory-mount/v1"',
+    "AUTOMATIC_MIGRATION = False",
+    "PROTECTED_TO_LEGACY_FALLBACK = False",
+    "mode = memory_store_mode()",
+    'if mode == "legacy":',
+    "signing_material = protected_memory_secret()",
+    "ProtectedMemoryGrantReplayLedger",
+    "planner_memory_store=None",
+)
+_AUTHORIZED_PROTECTED_MOUNT_FORBIDDEN = (
+    "MemoryProtectionMigrator",
 )
 
 
@@ -200,25 +218,66 @@ def scan_runtime_mounts(
     *,
     files: Iterable[str] = _RUNTIME_BOUNDARY_FILES,
 ) -> list[ProtectedMemoryLeakFinding]:
+    """Reject implicit mounts while allowing one exact promoted boundary.
+
+    Protected symbols may appear only in ``memory_surface.py`` and only while
+    that file carries the explicit no-migration/no-fallback selector contract.
+    Every other runtime boundary remains prohibited from importing or mounting
+    the protected reader/writer/API directly.
+    """
+
     root = Path(repository_root)
     findings: list[ProtectedMemoryLeakFinding] = []
     for relative in files:
         path = root / relative
         raw = _regular_file(path).decode("utf-8", "strict")
-        for symbol in _FORBIDDEN_RUNTIME_SYMBOLS:
-            if symbol in raw:
-                findings.append(
-                    ProtectedMemoryLeakFinding(
-                        surface="runtime_mounts",
-                        kind="implicit_mount",
-                        location=relative,
-                        detail=(
-                            "protected store symbol is present before a dedicated "
-                            "authorization/promotion slice: "
-                            + symbol
-                        ),
-                    )
+        symbols = sorted(
+            symbol for symbol in _PROTECTED_RUNTIME_SYMBOLS if symbol in raw
+        )
+        if not symbols:
+            continue
+        if relative == _AUTHORIZED_PROTECTED_MOUNT_FILE:
+            missing = sorted(
+                marker
+                for marker in _AUTHORIZED_PROTECTED_MOUNT_MARKERS
+                if marker not in raw
+            )
+            forbidden = sorted(
+                marker
+                for marker in _AUTHORIZED_PROTECTED_MOUNT_FORBIDDEN
+                if marker in raw
+            )
+            if not missing and not forbidden:
+                continue
+            detail_parts: list[str] = []
+            if missing:
+                detail_parts.append("missing=" + ",".join(missing))
+            if forbidden:
+                detail_parts.append("forbidden=" + ",".join(forbidden))
+            findings.append(
+                ProtectedMemoryLeakFinding(
+                    surface="runtime_mounts",
+                    kind="implicit_mount",
+                    location=relative,
+                    detail=(
+                        "protected memory mount does not satisfy the exact "
+                        "promotion contract: " + "; ".join(detail_parts)
+                    ),
                 )
+            )
+            continue
+        for symbol in symbols:
+            findings.append(
+                ProtectedMemoryLeakFinding(
+                    surface="runtime_mounts",
+                    kind="implicit_mount",
+                    location=relative,
+                    detail=(
+                        "protected store symbol is present outside the exact "
+                        "authorized mount boundary: " + symbol
+                    ),
+                )
+            )
     return findings
 
 

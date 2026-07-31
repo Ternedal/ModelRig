@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sqlite3
 import tempfile
 from copy import deepcopy
 from types import SimpleNamespace
@@ -163,9 +164,10 @@ check(journal.history(run.id) == [], "preview does not reserve a replan transact
 check(stored.before_digest == before and stored.revision == 0, "preview binds run digest and revision")
 check(stored.removable_step_ids == tuple(item.id for item in run.steps[1:3]), "preview binds removable step ids")
 check([item.tool for item in proposal.steps] == ["rig_status"], "preview retains registry-classified replacement")
-raw_payload = preview_store._conn.execute(
-    "SELECT payload FROM agent_plans WHERE id=?", (preview_id,)
-).fetchone()[0]
+with sqlite3.connect(preview_store.path) as connection:
+    raw_payload = connection.execute(
+        "SELECT payload FROM agent_plans WHERE id=?", (preview_id,)
+    ).fetchone()[0]
 check("IMMUTABLE_SECRET_WRITE_ARG_normal" not in raw_payload, "stored preview excludes immutable write args")
 check(model_calls["count"] == 1, "preview calls the model once")
 
@@ -206,18 +208,18 @@ expect_error(
 tamper_run = make_run("tamper")
 store.save(tamper_run)
 tamper_id, _, _, _ = asyncio.run(service.preview(tamper_run.id))
-row = preview_store._conn.execute(
-    "SELECT payload FROM agent_plans WHERE id=?", (tamper_id,)
-).fetchone()
-payload = json.loads(row[0])
-payload["steps"][0]["tool"] = "note_append"
-payload["steps"][0]["args"] = {"text": "bad"}
-payload["steps"][0]["risk"] = "write"
-preview_store._conn.execute(
-    "UPDATE agent_plans SET payload=? WHERE id=?",
-    (json.dumps(payload), tamper_id),
-)
-preview_store._conn.commit()
+with sqlite3.connect(preview_store.path) as connection:
+    row = connection.execute(
+        "SELECT payload FROM agent_plans WHERE id=?", (tamper_id,)
+    ).fetchone()
+    payload = json.loads(row[0])
+    payload["steps"][0]["tool"] = "note_append"
+    payload["steps"][0]["args"] = {"text": "bad"}
+    payload["steps"][0]["risk"] = "write"
+    connection.execute(
+        "UPDATE agent_plans SET payload=? WHERE id=?",
+        (json.dumps(payload), tamper_id),
+    )
 expect_error(lambda: service.apply(tamper_id), "tampered stored write is rejected")
 check(journal.history(tamper_run.id) == [], "tampered token never reaches replan journal")
 
@@ -266,5 +268,6 @@ expect_error(
 )
 check(model_calls["count"] == calls_before, "conflict is detected before model call")
 
+preview_store.close()
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)

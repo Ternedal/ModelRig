@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
 import time
 from types import SimpleNamespace
@@ -108,13 +109,14 @@ check(run["steps"][0]["args"]["text"] == "original", "stored reviewed args remai
 reused = client.post(f"/experimental/agent3/plans/{plan_id}/start")
 check(reused.status_code == 409, "plan_id is single-use")
 
-expiry_store = PlanStore(os.path.join(root, "expiry.db"), ttl_seconds=30)
+expiry_path = os.path.join(root, "expiry.db")
+expiry_store = PlanStore(expiry_path, ttl_seconds=30)
 expired_id, _ = expiry_store.save("payload")
-expiry_store._conn.execute(
-    "UPDATE agent_plans SET expires_at=? WHERE id=?",
-    (time.time() - 1, expired_id),
-)
-expiry_store._conn.commit()
+with sqlite3.connect(expiry_path) as connection:
+    connection.execute(
+        "UPDATE agent_plans SET expires_at=? WHERE id=?",
+        (time.time() - 1, expired_id),
+    )
 try:
     expiry_store.consume(expired_id)
     expired = False
@@ -122,5 +124,7 @@ except PlanStoreError:
     expired = True
 check(expired, "expired plan is refused")
 
+plan_store.close()
+expiry_store.close()
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)
