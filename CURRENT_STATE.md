@@ -42,6 +42,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_AGENT3_VALIDATION_REPORT` | `(unset)` |
 | `KALIV_ALLOW_RAG_CLOUD` | `` |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` |
+| `KALIV_COMPUTER_USE` | `0` |
 | `KALIV_DATA_DIR` | `(unset)` |
 | `KALIV_EGRESS_GATE` | `` |
 | `KALIV_MAX_UPLOAD_MB` | `25` |
@@ -53,6 +54,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_TOOLS_ENABLED` | `0` |
 | `KALIV_TOOL_ISOLATION` | `` |
 | `KALIV_VISION_MODEL` | `(unset)` |
+| `KALIV_WEB_RESEARCH_ENABLED` | `` |
 | `KALIV_WORKER_ALLOW_LAN` | `0` |
 
 ## Desktop credential storage
@@ -140,6 +142,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_task_readiness_entrypoint.py`
 - `tests/worker_agent3_task_surface.py`
 - `tests/worker_agent3_task_ui_validation.py`
+- `tests/worker_agent3_termination_ui_physical_report.py`
 - `tests/worker_agent3_unattended_execution.py`
 - `tests/worker_agent3_validation_gate.py`
 - `tests/worker_agent3_validation_path_contract.py`
@@ -172,7 +175,18 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_control_center_status.py`
 - `tests/worker_d4_auto_routing.py`
 - `tests/worker_data_sharing_policy.py`
+- `tests/worker_desktop_action_plan.py`
+- `tests/worker_desktop_action_preview_tool.py`
+- `tests/worker_desktop_capture.py`
+- `tests/worker_desktop_contract.py`
+- `tests/worker_desktop_input_execution.py`
+- `tests/worker_desktop_physical_gate.py`
 - `tests/worker_desktop_policy.py`
+- `tests/worker_desktop_screenshot_entrypoint.py`
+- `tests/worker_desktop_screenshot_tool.py`
+- `tests/worker_desktop_vision_bridge.py`
+- `tests/worker_desktop_win32.py`
+- `tests/worker_desktop_win32_abi.py`
 - `tests/worker_eval.py`
 - `tests/worker_hardening.py`
 - `tests/worker_hardening_stream_disconnect.py`
@@ -235,13 +249,28 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_web_research_fetch.py`
 - `tests/worker_web_research_intent.py`
 - `tests/worker_web_research_mount.py`
+- `tests/worker_web_research_tool.py`
 - `tests/workflow_access_derivation_parity.py`
 - `tests/workflow_action_pins.py`
 - `tests/workflow_activation_readiness.py`
+- `tests/workflow_agent3_android_termination_ui.py`
 - `tests/workflow_agent3_dormant.py`
 - `tests/workflow_agent3_readonly_pilot_one_click.py`
+- `tests/workflow_agent3_termination_physical_campaign.py`
+- `tests/workflow_agent3_termination_ui_physical_operator.py`
+- `tests/workflow_agent3_write_pilot_collect_operator.py`
+- `tests/workflow_agent3_write_pilot_current_main_binding.py`
+- `tests/workflow_agent3_write_pilot_final_gate.py`
+- `tests/workflow_agent3_write_pilot_negative_operator.py`
+- `tests/workflow_agent3_write_pilot_positive_operator.py`
+- `tests/workflow_agent3_write_pilot_preflight.py`
+- `tests/workflow_agent3_write_pilot_recorder.py`
+- `tests/workflow_agent3_write_pilot_report.py`
+- `tests/workflow_agent4_dormant_runtime.py`
 - `tests/workflow_agent4_foundation.py`
+- `tests/workflow_agent4_storage_boundary.py`
 - `tests/workflow_android_credential_commit.py`
+- `tests/workflow_android_palette_divergence.py`
 - `tests/workflow_android_scheduler_picker.py`
 - `tests/workflow_appliance_lifecycle_updater_chain.py`
 - `tests/workflow_baseline_one_click.py`
@@ -259,8 +288,11 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_dep_pins.py`
 - `tests/workflow_design_token_contrast.py`
 - `tests/workflow_design_tokens.py`
+- `tests/workflow_desktop_agent3_termination_ui_contract.py`
 - `tests/workflow_doc_authority.py`
 - `tests/workflow_freeze_check.py`
+- `tests/workflow_milestone3_current_main.py`
+- `tests/workflow_milestone3_current_main_handoff.py`
 - `tests/workflow_physical_validation_campaign.py`
 - `tests/workflow_physical_validation_campaign_task_ui.py`
 - `tests/workflow_physical_validation_final_gate.py`
@@ -286,6 +318,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_stage_a_voice_test.py`
 - `tests/workflow_stage_b_physical_gate.py`
 - `tests/workflow_staged_promotion_runbook.py`
+- `tests/workflow_stale_check.py`
 - `tests/workflow_success_harness.py`
 - `tests/workflow_test_coverage.py`
 - `tests/workflow_web_research_parity.py`
