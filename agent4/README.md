@@ -4,7 +4,7 @@ Agent 4 is the orchestration layer above the validated Agent 3 runtime. It owns
 campaign lifecycle coordination, durable orchestration state, recovery and
 operator-facing control. It does **not** change Agent 3 execution contracts.
 
-## Current milestone: dormant A4-01–A4-06 foundation
+## Current milestone: dormant A4-01–A4-07 foundation
 
 The package provides a dormant, standard-library-only orchestration foundation:
 
@@ -21,6 +21,7 @@ The package provides a dormant, standard-library-only orchestration foundation:
   references;
 - durable at-least-once delivery cursors and an explicit shared process-local
   single-flight guard;
+- verified, bounded timeline query cursors with stable snapshot paging;
 - protocols for repositories, executors, clocks, IDs and event delivery;
 - tests automatically discovered through the shared CI entrypoints.
 
@@ -36,7 +37,8 @@ Agent 4 uses its own namespace so it cannot collide with ModelRig roadmap tasks:
 3. `A4-03` — resource leases and caller-driven admission.
 4. `A4-04` — retry classification and durable failure handling.
 5. `A4-05` — health policy, intervention coordination and adapters.
-6. `A4-06` — append-only timeline and evidence references.
+6. `A4-06` — append-only timeline, evidence references and durable delivery.
+7. `A4-07` — verified bounded timeline query paging.
 
 Retired aliases and provenance rules are documented only in
 `docs/AGENT_4_IDENTITY.md`.
@@ -64,6 +66,7 @@ worker/app/agent4/
 ├── timeline.py
 ├── timeline_delivery.py
 ├── timeline_delivery_flights.py
+├── timeline_query.py
 └── timeline_recorder.py
 ```
 
@@ -101,8 +104,12 @@ operations. It does not subscribe to lifecycle events automatically. Multiple
 delivery-service instances coordinate only when the host explicitly shares one
 `InMemoryCampaignTimelineDeliverySingleFlight` guard.
 
+A4-07 adds read-only, bounded query paging with hash-bound cursors and an
+optional stable snapshot-head. It writes no delivery progress and mounts no API.
+
 See:
 
 - `docs/AGENT_4_A4_01_SCHEDULER.md`;
 - `docs/AGENT_4_A4_06_TIMELINE.md`;
-- `docs/AGENT_4_A4_06_DELIVERY_SINGLE_FLIGHT.md`.
+- `docs/AGENT_4_A4_06_DELIVERY_SINGLE_FLIGHT.md`;
+- `docs/AGENT_4_A4_07_TIMELINE_QUERY.md`.
