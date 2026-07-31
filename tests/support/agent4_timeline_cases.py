@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -12,11 +13,14 @@ from app.agent4 import (
     CampaignEvidenceReference,
     CampaignEvent,
     CampaignEventKind,
+    CampaignEventRecorder,
     CampaignTimelineEntry,
+    CampaignTimelineStore,
     CampaignValidationError,
     JsonCampaignTimelineStore,
     TimelineConflictError,
     TimelineIntegrityError,
+    TimelineCampaignEventRecorder,
     TimelineStoreError,
 )
 
@@ -188,3 +192,108 @@ class Agent4TimelineTests(unittest.TestCase):
             self.assertIsNone(verification.head_hash)
             with self.assertRaises(TypeError):
                 store.replay("unknown", None)  # type: ignore[arg-type]
+
+    def test_timeline_recorder_is_protocol_compatible_and_restart_safe(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = JsonCampaignTimelineStore(directory)
+            recorder = TimelineCampaignEventRecorder(store)
+            self.assertIsInstance(store, CampaignTimelineStore)
+            self.assertIsInstance(recorder, CampaignEventRecorder)
+
+            first = recorder.record(
+                " campaign-recorder ",
+                CampaignEventKind.CREATED,
+                occurred_at=BASE_TIME,
+                payload={"phase": "created"},
+            )
+            second = TimelineCampaignEventRecorder(store).record(
+                "campaign-recorder",
+                CampaignEventKind.STARTED,
+                occurred_at=BASE_TIME + timedelta(seconds=1),
+            )
+
+            self.assertEqual(first.event_id, "campaign-recorder:1")
+            self.assertEqual(second.event_id, "campaign-recorder:2")
+            self.assertEqual(
+                [entry.event for entry in store.list("campaign-recorder")],
+                [first, second],
+            )
+
+    def test_timeline_recorder_can_bind_evidence_explicitly(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = JsonCampaignTimelineStore(directory)
+            recorder = TimelineCampaignEventRecorder(store)
+            evidence = CampaignEvidenceReference(
+                evidence_id="report",
+                media_type="application/json",
+                location="evidence/report.json",
+                sha256="c" * 64,
+                size_bytes=512,
+            )
+
+            event = recorder.record_with_evidence(
+                "campaign-evidence",
+                CampaignEventKind.CREATED,
+                occurred_at=BASE_TIME,
+                payload={"phase": "validation"},
+                evidence=(evidence,),
+            )
+
+            entry = store.latest("campaign-evidence")
+            self.assertIsNotNone(entry)
+            self.assertEqual(entry.event, event)
+            self.assertEqual(entry.evidence, (evidence,))
+
+    def test_timeline_recorder_serializes_concurrent_callers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = JsonCampaignTimelineStore(directory)
+            recorder = TimelineCampaignEventRecorder(store)
+
+            def record(index: int) -> CampaignEvent:
+                return recorder.record(
+                    "campaign-concurrent",
+                    CampaignEventKind.STARTED,
+                    occurred_at=BASE_TIME + timedelta(milliseconds=index),
+                    payload={"caller": index},
+                )
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                events = list(pool.map(record, range(16)))
+
+            self.assertEqual(
+                sorted(event.sequence for event in events),
+                list(range(1, 17)),
+            )
+            timeline = store.list("campaign-concurrent")
+            self.assertEqual(
+                [entry.event.sequence for entry in timeline],
+                list(range(1, 17)),
+            )
+            self.assertEqual(
+                [entry.event.event_id for entry in timeline],
+                [f"campaign-concurrent:{number}" for number in range(1, 17)],
+            )
+
+    def test_timeline_recorder_fails_closed_on_corrupt_history(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = JsonCampaignTimelineStore(directory)
+            recorder = TimelineCampaignEventRecorder(store)
+            recorder.record(
+                "campaign-corrupt",
+                CampaignEventKind.CREATED,
+                occurred_at=BASE_TIME,
+            )
+            path = next(Path(directory).rglob("*.timeline.json"))
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload["entry_hash"] = "sha256:" + ("0" * 64)
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+            with self.assertRaises(TimelineIntegrityError):
+                recorder.record(
+                    "campaign-corrupt",
+                    CampaignEventKind.STARTED,
+                    occurred_at=BASE_TIME + timedelta(seconds=1),
+                )
+
+        with self.assertRaises(TypeError):
+            TimelineCampaignEventRecorder(object())  # type: ignore[arg-type]
