@@ -126,30 +126,67 @@ ventemekanismen.
 
 ## ADR-A4-004 — Navngivning
 
-**Beslutning.** Modulnavne skal beskrive adfærd. `watchdog.py`,
-`scheduler.py` og `retry_scheduling.py` gennemgås **samlet**. Er de
-kalder-drevne komponenter uden selvkørende eksekvering, omdøbes de **før**
-landing.
+**Status: afgjort 31/07-2026.** Omdøbningen gennemføres før `#253` lander.
 
-**Kontekst.** Målingen viste, at `watchdog.py` (135 linjer i `#253`) hverken
-har tråde, timere, `sleep` eller `while True`. Docstringen kalder den *"caller-
-driven execution boundary"*, og den offentlige flade er en koordinator med et
-handler-map, som en kalder skal levere. Det er en beslutnings- og
-dispatch-grænse, ikke en vagthund, der selv vågner. Samme mønster gælder
-`scheduler.py` (*"deterministic in-memory queue"* — en passiv prioritetskø) og
-`retry_scheduling.py`.
+### Fire lukkede spørgsmål
 
-**Begrundelse.** En watchdog er en selvkørende overvågningsmekanisme. Gør
-modulet ikke det, skal navnet afspejle det. Et misvisende navn løses ved
-omdøbning, ikke ved en undtagelse til invarianten — for undtagelsen ville
-gælde for altid, mens navnet kun er forkert indtil nogen retter det.
+1. **De to A4-grene var ikke et bevidst design-spike.** De opstod utilsigtet
+   mellem sessioner og skulle ikke have udviklet sig til to merge-klare
+   arkitekturer. Gren B (`#258`-linjen) er referencearkitektur. Gren A er kun
+   kilde til afgrænsede idéer, der genimplementeres bevidst oven på B.
+2. **`watchdog.py` var tænkt som en rent kalder-drevet health/intervention-
+   grænse.** Ingen selvkørende watcher, timer eller intern observationsløkke
+   var planlagt i Agent 4. En fremtidig host må kalde grænsen eksplicit;
+   cadence og scheduling ligger uden for Agent 4.
+3. **`#267`'s timeout var defensiv, ikke et funktionskrav.** Den bæres ikke
+   videre. `#267` ligger på den fravalgte A-gren. Hvis B senere får behov for
+   cross-process writer-arbitration, designes det som en ny afgrænset slice
+   med OS-blokering eller en platformsspecifik primitiv og uden
+   applikationsstyret polling.
+4. **Scopet er den fulde semantiske løsning.** Moduler, offentlige typer,
+   imports, tests og dokumentation omdøbes samlet. Der tilføjes ingen
+   kompatibilitetsaliaser, fordi Agent 4-koden endnu ikke er landet på main.
 
-**Sekvens.** Omdøbningen sker **før** `#253` lander. Det koster en rebase af
-den overlevende stak, men den rebase skal udføres alligevel, og til gengæld
-bliver et navn, vi allerede ved er misvisende, aldrig en del af `main`.
+### Autoritativ navnemapping
 
-Mulige navne, til gennemgangen: `scheduler_boundary.py`, `dispatch_policy.py`,
-`campaign_gate.py`, `campaign_decision.py`, `runtime_gate.py`.
+- `scheduler.py` → `campaign_queue.py`. Den eksisterende `CampaignQueue`-API
+  beholdes; det er modulet og scheduler-ordlyden omkring den passive kø, der
+  var misvisende.
+- `retry_scheduling.py` → `failure_handling.py`.
+  `CampaignRetrySchedulingService` → `CampaignFailureHandlingService` og
+  `RetryScheduleResult` → `FailureHandlingResult`.
+- `WatchdogAction` → `HealthInterventionAction`.
+- `WatchdogPolicy` → `HealthPolicy`.
+- `WatchdogDecision` → `HealthDecision`.
+- `CampaignWatchdogPolicy` → `CampaignHealthPolicy`.
+- `watchdog.py` → `health_intervention.py`:
+  - `WatchdogActionHandler` → `HealthInterventionHandler`;
+  - `WatchdogCompositionError` → `HealthInterventionCompositionError`;
+  - `WatchdogExecutionError` → `HealthInterventionExecutionError`;
+  - `WatchdogExecutionResult` → `HealthInterventionResult`;
+  - `CampaignWatchdogCoordinator` → `CampaignHealthInterventionCoordinator`.
+- `watchdog_adapters.py` → `health_intervention_adapters.py`:
+  - `WatchdogLifecycleService` → `HealthInterventionLifecycleService`;
+  - `WatchdogAdapterCompositionError` →
+    `HealthInterventionAdapterCompositionError`;
+  - `CampaignWatchdogFailClosedService` → `CampaignHealthFailClosedService`;
+  - `WatchdogServiceAdapters` → `HealthInterventionServiceAdapters`.
+
+### Adfærdsgrænse
+
+Omdøbningen er mekanisk. Enum-værdier, persistente payload-felter og øvrige
+wire-formater ændres ikke som en skjult del af navnearbejdet. Den ændrer ingen
+runtime-adfærd, starter intet og udvider ikke Agent 4's scope.
+
+**Begrundelse.** Et modulnavn og en offentlig type skal beskrive den adfærd,
+en kalder faktisk får. En passiv kø er ikke en scheduler, en eksplicit
+fejlhåndteringstjeneste scheduler ikke selv noget, og en kalder-drevet
+interventionsgrænse er ikke en selvkørende watchdog. Et misvisende navn løses
+ved omdøbning, ikke ved en permanent undtagelse til dormans-invarianten.
+
+**Sekvens.** Beslutningen lander i denne ADR først. Derefter gennemføres den
+mekaniske omdøbning på `#253`; testene flytter med. Først når den eksakte
+branch-head er grøn mod de aktive governance-gates, kan `#253` landes.
 
 ---
 
