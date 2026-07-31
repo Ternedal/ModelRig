@@ -29,6 +29,7 @@ integration boundaries and `HANDOFF.md` require parity evidence and coordination
 | `A4-08` | bounded durable consumer batches over the A4-06 delivery cursor |
 | `A4-09` | explicit dormant single-process composition of the B-reference architecture |
 | `A4-10` | bounded transport-independent operator reads over the composed B runtime |
+| `A4-11` | authoritative campaign state, durable audit-projection intents and caller-driven reconciliation |
 
 ## Retired aliases
 
@@ -47,7 +48,9 @@ cadence, network request or Agent 3 work. A4-06 adds explicit filesystem and
 caller-driven delivery operations; A4-07 adds read-only query composition;
 A4-08 adds only a bounded caller-driven batch wrapper; A4-09 wires these with the
 lifecycle services but performs no recovery, dispatch or intervention itself;
-A4-10 adds only bounded read composition over the same object graph.
+A4-10 adds only bounded read composition over the same object graph; A4-11 stores
+audit-projection intents with authoritative campaign state and reconciles them
+only when a caller invokes a state-writing service or `reconcile_projections()`.
 None subscribes to the event bus, mounts a runtime or activates recurring work.
 Any future host integration or recurring loop is a separate integration decision
 and must be tested against the existing dormant contracts.
