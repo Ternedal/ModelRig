@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
 
+from .campaign_queue import CampaignQueue
 from .contracts import CampaignEventRecorder, CampaignRepository, Clock
 from .domain import (
     CampaignEventKind,
@@ -14,7 +15,6 @@ from .domain import (
     CampaignValidationError,
     transition_campaign,
 )
-from .scheduler import CampaignQueue
 
 
 class RecoveryAction(StrEnum):
