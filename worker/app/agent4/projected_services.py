@@ -138,10 +138,8 @@ class ProjectedCampaignFailureHandlingService(CampaignFailureHandlingService):
                 occurred_at=now,
             )
             if not decision.should_retry:
-                try:
-                    failed = self._terminal_failure(current, failure, decision, now=now)
-                finally:
-                    self._release(campaign_id)
+                failed = self._terminal_failure(current, failure, decision, now=now)
+                self._release(campaign_id)
                 return FailureHandlingResult(record=failed, decision=decision)
 
             assert decision.ready_at is not None
@@ -154,6 +152,7 @@ class ProjectedCampaignFailureHandlingService(CampaignFailureHandlingService):
                 last_error=None,
             )
             scheduled = CampaignRecord(spec=retry_spec, state=scheduled_state)
+            durable = False
             try:
                 self._projections.persist(
                     scheduled,
@@ -176,6 +175,7 @@ class ProjectedCampaignFailureHandlingService(CampaignFailureHandlingService):
                         ),
                     ),
                 )
+                durable = True
                 self._queue.remove(campaign_id)
                 try:
                     self._queue.enqueue(retry_spec)
@@ -193,7 +193,8 @@ class ProjectedCampaignFailureHandlingService(CampaignFailureHandlingService):
                     raise CampaignConflictError(str(exc)) from exc
                 return FailureHandlingResult(record=scheduled, decision=decision)
             finally:
-                self._release(campaign_id)
+                if durable:
+                    self._release(campaign_id)
 
     def _terminal_failure(
         self,
@@ -280,24 +281,22 @@ class ProjectedCampaignHealthFailClosedService(CampaignHealthFailClosedService):
                 error=error,
             )
             failed = CampaignRecord(spec=current.spec, state=failed_state)
-            try:
-                self._projections.persist(
-                    failed,
-                    (
-                        CampaignProjectionSpec(
-                            kind=CampaignEventKind.FAILED,
-                            occurred_at=failed_state.updated_at,
-                            payload={
-                                "error": error,
-                                "phase": "watchdog",
-                                "health_level": decision.level.value,
-                                "watchdog_action": decision.action.value,
-                            },
-                            producer_id="health",
-                        ),
+            self._projections.persist(
+                failed,
+                (
+                    CampaignProjectionSpec(
+                        kind=CampaignEventKind.FAILED,
+                        occurred_at=failed_state.updated_at,
+                        payload={
+                            "error": error,
+                            "phase": "watchdog",
+                            "health_level": decision.level.value,
+                            "watchdog_action": decision.action.value,
+                        },
+                        producer_id="health",
                     ),
-                )
-            finally:
-                if self._release_resources is not None:
-                    self._release_resources(current.spec.campaign_id)
+                ),
+            )
+            if self._release_resources is not None:
+                self._release_resources(current.spec.campaign_id)
             return failed
