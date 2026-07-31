@@ -15,6 +15,7 @@ from .domain import (
     CampaignValidationError,
     transition_campaign,
 )
+from .projection import CampaignProjectionSpec, CampaignStateProjectionService
 
 
 class RecoveryAction(StrEnum):
@@ -80,11 +81,13 @@ class CampaignRecoveryService:
         queue: CampaignQueue,
         events: CampaignEventRecorder,
         clock: Clock,
+        projections: CampaignStateProjectionService | None = None,
     ) -> None:
         self._repository = repository
         self._queue = queue
         self._events = events
         self._clock = clock
+        self._projections = projections
 
     def recover(self) -> CampaignRecoveryReport:
         started_at = self._now()
@@ -110,11 +113,14 @@ class CampaignRecoveryService:
                     action=RecoveryAction.ALREADY_QUEUED,
                 )
             self._queue.enqueue(record.spec)
-            self._events.record(
-                campaign_id,
+            self._project(
+                record,
                 CampaignEventKind.RECOVERED,
-                occurred_at=self._now(),
-                payload={"action": RecoveryAction.REQUEUED.value, "status": status.value},
+                occurred_at=record.state.updated_at,
+                payload={
+                    "action": RecoveryAction.REQUEUED.value,
+                    "status": status.value,
+                },
             )
             return CampaignRecoveryDecision(
                 campaign_id=campaign_id,
@@ -124,10 +130,10 @@ class CampaignRecoveryService:
             )
 
         if status is CampaignStatus.PAUSED:
-            self._events.record(
-                campaign_id,
+            self._project(
+                record,
                 CampaignEventKind.RECOVERED,
-                occurred_at=self._now(),
+                occurred_at=record.state.updated_at,
                 payload={
                     "action": RecoveryAction.RETAINED_PAUSED.value,
                     "status": status.value,
@@ -149,22 +155,43 @@ class CampaignRecoveryService:
                 error=error,
             )
             failed = CampaignRecord(spec=record.spec, state=failed_state)
-            self._repository.save(failed)
-            self._events.record(
-                campaign_id,
-                CampaignEventKind.RECOVERED,
-                occurred_at=failed_state.updated_at,
-                payload={
-                    "action": RecoveryAction.MARKED_FAILED.value,
-                    "previous_status": status.value,
-                },
-            )
-            self._events.record(
-                campaign_id,
-                CampaignEventKind.FAILED,
-                occurred_at=failed_state.updated_at,
-                payload={"error": error, "phase": "startup_recovery"},
-            )
+            recovered_payload = {
+                "action": RecoveryAction.MARKED_FAILED.value,
+                "previous_status": status.value,
+            }
+            failed_payload = {"error": error, "phase": "startup_recovery"}
+            if self._projections is not None:
+                self._projections.persist(
+                    failed,
+                    (
+                        CampaignProjectionSpec(
+                            kind=CampaignEventKind.RECOVERED,
+                            occurred_at=failed_state.updated_at,
+                            payload=recovered_payload,
+                            producer_id="recovery",
+                        ),
+                        CampaignProjectionSpec(
+                            kind=CampaignEventKind.FAILED,
+                            occurred_at=failed_state.updated_at,
+                            payload=failed_payload,
+                            producer_id="recovery",
+                        ),
+                    ),
+                )
+            else:
+                self._repository.save(failed)
+                self._events.record(
+                    campaign_id,
+                    CampaignEventKind.RECOVERED,
+                    occurred_at=failed_state.updated_at,
+                    payload=recovered_payload,
+                )
+                self._events.record(
+                    campaign_id,
+                    CampaignEventKind.FAILED,
+                    occurred_at=failed_state.updated_at,
+                    payload=failed_payload,
+                )
             return CampaignRecoveryDecision(
                 campaign_id=campaign_id,
                 previous_status=status,
@@ -178,6 +205,34 @@ class CampaignRecoveryService:
             previous_status=status,
             resulting_status=status,
             action=RecoveryAction.RETAINED_TERMINAL,
+        )
+
+    def _project(
+        self,
+        record: CampaignRecord,
+        kind: CampaignEventKind,
+        *,
+        occurred_at: datetime,
+        payload: dict[str, str],
+    ) -> None:
+        if self._projections is not None:
+            self._projections.persist(
+                record,
+                (
+                    CampaignProjectionSpec(
+                        kind=kind,
+                        occurred_at=occurred_at,
+                        payload=payload,
+                        producer_id="recovery",
+                    ),
+                ),
+            )
+            return
+        self._events.record(
+            record.spec.campaign_id,
+            kind,
+            occurred_at=occurred_at,
+            payload=payload,
         )
 
     def _now(self) -> datetime:

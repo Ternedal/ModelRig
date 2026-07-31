@@ -7,10 +7,13 @@ A host must explicitly call the returned services.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
+from threading import RLock
 from typing import Mapping
+from weakref import WeakValueDictionary
 
 from .campaign_queue import CampaignQueue
 from .checkpoint import CampaignCheckpointService, JsonCheckpointStore
@@ -29,6 +32,16 @@ from .health_intervention_adapters import (
     HealthInterventionServiceAdapters,
 )
 from .operator import Agent4OperatorReadService
+from .projected_services import (
+    ProjectedCampaignCheckpointService,
+    ProjectedCampaignFailureHandlingService,
+    ProjectedCampaignHealthFailClosedService,
+)
+from .projection import (
+    CampaignProjectionReconciler,
+    CampaignProjectionReport,
+    CampaignStateProjectionService,
+)
 from .recovery import CampaignRecoveryReport
 from .repository import JsonCampaignRepository
 from .resource_admission import ResourceAwareCampaignSchedulerService
@@ -47,6 +60,13 @@ from .timeline_delivery_flights import (
 )
 from .timeline_query import CampaignTimelineQueryService
 from .timeline_recorder import TimelineCampaignEventRecorder
+
+_WRITER_ROOTS: WeakValueDictionary[str, JsonCampaignRepository] = WeakValueDictionary()
+_WRITER_ROOTS_LOCK = RLock()
+
+
+def _canonical_root(root: Path) -> str:
+    return os.path.normcase(str(root.resolve(strict=False)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +107,8 @@ class Agent4RuntimeContext:
     checkpoint_store: JsonCheckpointStore
     timeline: JsonCampaignTimelineStore
     event_recorder: TimelineCampaignEventRecorder
+    reconciliation: CampaignProjectionReconciler
+    projections: CampaignStateProjectionService
     delivery_cursor_store: JsonCampaignTimelineCursorStore
     queue: CampaignQueue
     resources: InMemoryResourceLeaseManager
@@ -107,6 +129,11 @@ class Agent4RuntimeContext:
         """Explicitly run startup recovery; composition never calls it."""
 
         return self.scheduler.recover()
+
+    def reconcile_projections(self) -> CampaignProjectionReport:
+        """Explicitly repair pending audit projections; composition never calls it."""
+
+        return self.reconciliation.reconcile()
 
     def health_intervention(
         self,
@@ -157,10 +184,26 @@ def compose_agent4_runtime(
     if not isinstance(runtime_clock, Clock):
         raise CampaignValidationError("clock must implement the Clock contract")
 
+    canonical_root = _canonical_root(paths.root)
     repository = JsonCampaignRepository(paths.campaigns)
+    with _WRITER_ROOTS_LOCK:
+        if _WRITER_ROOTS.get(canonical_root) is not None:
+            raise CampaignValidationError(
+                "an Agent 4 writer context already owns this canonical dataroot"
+            )
+        _WRITER_ROOTS[canonical_root] = repository
+
     checkpoint_store = JsonCheckpointStore(paths.checkpoints)
     timeline = JsonCampaignTimelineStore(paths.timeline)
     event_recorder = TimelineCampaignEventRecorder(timeline)
+    reconciliation = CampaignProjectionReconciler(
+        repository=repository,
+        timeline=timeline,
+    )
+    projections = CampaignStateProjectionService(
+        repository=repository,
+        reconciler=reconciliation,
+    )
     delivery_cursor_store = JsonCampaignTimelineCursorStore(
         paths.delivery_cursors
     )
@@ -172,30 +215,34 @@ def compose_agent4_runtime(
         events=event_recorder,
         clock=runtime_clock,
         queue=queue,
+        projections=projections,
         resource_leases=resources,
         resource_resolver=resource_resolver,
         resource_lease_ttl=resource_lease_ttl,
     )
-    checkpoints = CampaignCheckpointService(
+    checkpoints = ProjectedCampaignCheckpointService(
         repository=repository,
         checkpoints=checkpoint_store,
         events=event_recorder,
         clock=runtime_clock,
+        projections=projections,
     )
     retry_planner = CampaignRetryPlanner(policy=retry_policy)
-    failures = CampaignFailureHandlingService(
+    failures = ProjectedCampaignFailureHandlingService(
         repository=repository,
         queue=queue,
         events=event_recorder,
         clock=runtime_clock,
         planner=retry_planner,
         release_resources=resources.release_campaign,
+        projections=projections,
     )
-    health_fail_closed = CampaignHealthFailClosedService(
+    health_fail_closed = ProjectedCampaignHealthFailClosedService(
         repository=repository,
         events=event_recorder,
         clock=runtime_clock,
         release_resources=resources.release_campaign,
+        projections=projections,
     )
     delivery_flights = InMemoryCampaignTimelineDeliverySingleFlight()
     delivery = CampaignTimelineDeliveryService(
@@ -223,6 +270,8 @@ def compose_agent4_runtime(
         checkpoint_store=checkpoint_store,
         timeline=timeline,
         event_recorder=event_recorder,
+        reconciliation=reconciliation,
+        projections=projections,
         delivery_cursor_store=delivery_cursor_store,
         queue=queue,
         resources=resources,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -115,6 +116,10 @@ class Agent4RuntimeCompositionTests(unittest.TestCase):
                 context.health_fail_closed._events,
                 context.event_recorder,
             )
+            self.assertIs(context.reconciliation._repository, context.repository)
+            self.assertIs(context.reconciliation._timeline, context.timeline)
+            self.assertIs(context.projections._repository, context.repository)
+            self.assertIs(context.projections._reconciler, context.reconciliation)
             self.assertIs(context.delivery._timeline, context.timeline)
             self.assertIs(
                 context.delivery._cursors,
@@ -216,6 +221,8 @@ class Agent4RuntimeCompositionTests(unittest.TestCase):
                     scheduled_for=BASE_TIME + timedelta(hours=1),
                 )
             )
+            del first
+            gc.collect()
 
             second, _, _ = self._compose(root)
             self.assertEqual(second.scheduler.queued_count, 0)
@@ -233,6 +240,17 @@ class Agent4RuntimeCompositionTests(unittest.TestCase):
             self.assertIsNotNone(after)
             assert after is not None
             self.assertEqual(after.event.sequence, 3)
+
+    def test_second_live_writer_context_for_same_root_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "runtime"
+            first, _, _ = self._compose(root)
+
+            with self.assertRaises(CampaignValidationError):
+                self._compose(root / ".." / "runtime")
+
+            self.assertFalse(root.exists())
+            self.assertIsNotNone(first.repository)
 
     def test_health_intervention_is_built_and_executed_explicitly(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

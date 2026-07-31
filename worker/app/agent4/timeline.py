@@ -44,6 +44,16 @@ def _canonical_json(value: Mapping[str, JsonValue]) -> bytes:
     return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
+def _same_logical_event(left: CampaignEvent, right: CampaignEvent) -> bool:
+    return (
+        left.event_id == right.event_id
+        and left.campaign_id == right.campaign_id
+        and left.kind is right.kind
+        and left.occurred_at == right.occurred_at
+        and left.payload == right.payload
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class CampaignEvidenceReference:
     evidence_id: str
@@ -146,12 +156,19 @@ class JsonCampaignTimelineStore:
     def append(self, event: CampaignEvent, *, evidence: Iterable[CampaignEvidenceReference] = ()) -> CampaignTimelineEntry:
         with self._lock:
             timeline = self.list(event.campaign_id)
-            if any(item.event.event_id == event.event_id for item in timeline):
-                raise TimelineConflictError(f"event id {event.event_id!r} already exists in the timeline")
+            evidence_tuple = tuple(evidence)
+            existing = next(
+                (item for item in timeline if item.event.event_id == event.event_id),
+                None,
+            )
+            if existing is not None:
+                if _same_logical_event(existing.event, event) and existing.evidence == evidence_tuple:
+                    return existing
+                raise TimelineConflictError(f"event id {event.event_id!r} already exists in the timeline with different content")
             expected_sequence = timeline[-1].event.sequence + 1 if timeline else 1
             if event.sequence != expected_sequence:
                 raise TimelineConflictError(f"campaign {event.campaign_id!r} expected event sequence {expected_sequence}, got {event.sequence}")
-            entry = CampaignTimelineEntry(event=event, previous_hash=timeline[-1].entry_hash if timeline else None, evidence=tuple(evidence))
+            entry = CampaignTimelineEntry(event=event, previous_hash=timeline[-1].entry_hash if timeline else None, evidence=evidence_tuple)
             campaign_dir = self._campaign_dir(event.campaign_id)
             campaign_dir.mkdir(parents=True, exist_ok=True)
             destination = self._path_for(entry)

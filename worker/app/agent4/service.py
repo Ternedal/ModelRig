@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from threading import RLock
+from typing import Iterable, Mapping
 
 from .campaign_queue import CampaignQueue, DuplicateCampaignError
 from .contracts import (
@@ -26,8 +27,10 @@ from .domain import (
     CampaignStatus,
     CampaignTransitionError,
     CampaignValidationError,
+    JsonValue,
     transition_campaign,
 )
+from .projection import CampaignProjectionSpec, CampaignStateProjectionService
 
 
 class CampaignNotFoundError(LookupError):
@@ -65,12 +68,14 @@ class CampaignSchedulerService:
         events: CampaignEventRecorder,
         clock: Clock | None = None,
         queue: CampaignQueue | None = None,
+        projections: CampaignStateProjectionService | None = None,
     ) -> None:
         self._repository = repository
         self._executor = executor
         self._events = events
         self._clock = clock if clock is not None else SystemClock()
         self._queue = queue if queue is not None else CampaignQueue()
+        self._projections = projections
         self._lock = RLock()
 
     @property
@@ -88,6 +93,7 @@ class CampaignSchedulerService:
                 queue=self._queue,
                 events=self._events,
                 clock=self._clock,
+                projections=self._projections,
             ).recover()
 
     def submit(self, spec: CampaignSpec) -> CampaignRecord:
@@ -114,25 +120,44 @@ class CampaignSchedulerService:
                     updated_at=now,
                 ),
             )
-            self._repository.save(record)
+            if self._projections is not None:
+                projections = [
+                    CampaignProjectionSpec(
+                        kind=CampaignEventKind.CREATED,
+                        occurred_at=now,
+                        payload={"status": status.value},
+                    )
+                ]
+                if status is CampaignStatus.SCHEDULED:
+                    projections.append(
+                        CampaignProjectionSpec(
+                            kind=CampaignEventKind.SCHEDULED,
+                            occurred_at=now,
+                            payload={"ready_at": spec.ready_at.isoformat()},
+                        )
+                    )
+                self._projections.persist(record, projections)
+            else:
+                self._repository.save(record)
             try:
                 self._queue.enqueue(spec)
             except DuplicateCampaignError as exc:
                 raise CampaignConflictError(str(exc)) from exc
 
-            self._events.record(
-                spec.campaign_id,
-                CampaignEventKind.CREATED,
-                occurred_at=now,
-                payload={"status": status.value},
-            )
-            if status is CampaignStatus.SCHEDULED:
+            if self._projections is None:
                 self._events.record(
                     spec.campaign_id,
-                    CampaignEventKind.SCHEDULED,
+                    CampaignEventKind.CREATED,
                     occurred_at=now,
-                    payload={"ready_at": spec.ready_at.isoformat()},
+                    payload={"status": status.value},
                 )
+                if status is CampaignStatus.SCHEDULED:
+                    self._events.record(
+                        spec.campaign_id,
+                        CampaignEventKind.SCHEDULED,
+                        occurred_at=now,
+                        payload={"ready_at": spec.ready_at.isoformat()},
+                    )
             return record
 
     def dispatch_ready(self) -> DispatchResult | None:
@@ -177,9 +202,8 @@ class CampaignSchedulerService:
                     error=error,
                 )
                 failed = CampaignRecord(spec=running.spec, state=failed_state)
-                self._repository.save(failed)
-                self._events.record(
-                    spec.campaign_id,
+                self._persist_projection(
+                    failed,
                     CampaignEventKind.FAILED,
                     occurred_at=failed_state.updated_at,
                     payload={"error": error, "phase": "dispatch"},
@@ -199,9 +223,8 @@ class CampaignSchedulerService:
                     error=error,
                 )
                 failed = CampaignRecord(spec=running.spec, state=failed_state)
-                self._repository.save(failed)
-                self._events.record(
-                    spec.campaign_id,
+                self._persist_projection(
+                    failed,
                     CampaignEventKind.FAILED,
                     occurred_at=failed_state.updated_at,
                     payload={"error": error, "phase": "dispatch"},
@@ -213,8 +236,8 @@ class CampaignSchedulerService:
                 )
 
             runtime_reference = runtime_reference.strip()
-            self._events.record(
-                spec.campaign_id,
+            self._persist_projection(
+                running,
                 CampaignEventKind.STARTED,
                 occurred_at=running_state.updated_at,
                 payload={
@@ -236,25 +259,23 @@ class CampaignSchedulerService:
                     f"{current.state.status.value}"
                 )
             pausing = self._transition(current, CampaignStatus.PAUSING)
-            self._repository.save(pausing)
+            self._persist_projection(
+                pausing,
+                CampaignEventKind.PAUSE_REQUESTED,
+                occurred_at=pausing.state.updated_at,
+            )
             try:
                 self._executor.signal(campaign_id, "pause")
             except Exception as exc:
                 return self._fail_signal(pausing, "pause", exc)
-            self._events.record(
-                campaign_id,
-                CampaignEventKind.PAUSE_REQUESTED,
-                occurred_at=pausing.state.updated_at,
-            )
             return pausing
 
     def mark_paused(self, campaign_id: str) -> CampaignRecord:
         with self._lock:
             current = self._require_record(campaign_id)
             paused = self._transition(current, CampaignStatus.PAUSED)
-            self._repository.save(paused)
-            self._events.record(
-                campaign_id,
+            self._persist_projection(
+                paused,
                 CampaignEventKind.PAUSED,
                 occurred_at=paused.state.updated_at,
             )
@@ -279,8 +300,8 @@ class CampaignSchedulerService:
                 self._executor.signal(campaign_id, "resume")
             except Exception as exc:
                 return self._fail_signal(resumed, "resume", exc)
-            self._events.record(
-                campaign_id,
+            self._persist_projection(
+                resumed,
                 CampaignEventKind.RESUMED,
                 occurred_at=resumed.state.updated_at,
                 payload={"attempt": resumed.state.attempt},
@@ -298,14 +319,13 @@ class CampaignSchedulerService:
                 CampaignStatus.SCHEDULED,
             }:
                 cancelled = self._transition(current, CampaignStatus.CANCELLED)
-                self._repository.save(cancelled)
-                self._queue.remove(campaign_id)
-                self._events.record(
-                    campaign_id,
+                self._persist_projection(
+                    cancelled,
                     CampaignEventKind.CANCELLED,
                     occurred_at=cancelled.state.updated_at,
                     payload={"immediate": True},
                 )
+                self._queue.remove(campaign_id)
                 return cancelled
             if status not in {
                 CampaignStatus.RUNNING,
@@ -317,25 +337,23 @@ class CampaignSchedulerService:
                 )
 
             cancelling = self._transition(current, CampaignStatus.CANCELLING)
-            self._repository.save(cancelling)
+            self._persist_projection(
+                cancelling,
+                CampaignEventKind.CANCEL_REQUESTED,
+                occurred_at=cancelling.state.updated_at,
+            )
             try:
                 self._executor.signal(campaign_id, "cancel")
             except Exception as exc:
                 return self._fail_signal(cancelling, "cancel", exc)
-            self._events.record(
-                campaign_id,
-                CampaignEventKind.CANCEL_REQUESTED,
-                occurred_at=cancelling.state.updated_at,
-            )
             return cancelling
 
     def mark_cancelled(self, campaign_id: str) -> CampaignRecord:
         with self._lock:
             current = self._require_record(campaign_id)
             cancelled = self._transition(current, CampaignStatus.CANCELLED)
-            self._repository.save(cancelled)
-            self._events.record(
-                campaign_id,
+            self._persist_projection(
+                cancelled,
                 CampaignEventKind.CANCELLED,
                 occurred_at=cancelled.state.updated_at,
                 payload={"immediate": False},
@@ -366,9 +384,8 @@ class CampaignSchedulerService:
                 target,
                 error=error,
             )
-            self._repository.save(completed)
-            self._events.record(
-                campaign_id,
+            self._persist_projection(
+                completed,
                 (
                     CampaignEventKind.SUCCEEDED
                     if succeeded
@@ -406,6 +423,36 @@ class CampaignSchedulerService:
             raise CampaignConflictError(str(exc)) from exc
         return CampaignRecord(spec=record.spec, state=state)
 
+    def _persist_projection(
+        self,
+        record: CampaignRecord,
+        kind: CampaignEventKind,
+        *,
+        occurred_at: datetime,
+        payload: Mapping[str, JsonValue] | None = None,
+        producer_id: str = "lifecycle",
+    ) -> CampaignRecord:
+        if self._projections is not None:
+            return self._projections.persist(
+                record,
+                (
+                    CampaignProjectionSpec(
+                        kind=kind,
+                        occurred_at=occurred_at,
+                        payload=payload or {},
+                        producer_id=producer_id,
+                    ),
+                ),
+            )
+        self._repository.save(record)
+        self._events.record(
+            record.spec.campaign_id,
+            kind,
+            occurred_at=occurred_at,
+            payload=payload,
+        )
+        return record
+
     def _fail_signal(
         self,
         record: CampaignRecord,
@@ -418,9 +465,8 @@ class CampaignSchedulerService:
             CampaignStatus.FAILED,
             error=error,
         )
-        self._repository.save(failed)
-        self._events.record(
-            record.spec.campaign_id,
+        self._persist_projection(
+            failed,
             CampaignEventKind.FAILED,
             occurred_at=failed.state.updated_at,
             payload={"error": error, "phase": f"{command}_signal"},
