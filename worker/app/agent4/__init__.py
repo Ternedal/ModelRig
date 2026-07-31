@@ -127,6 +127,14 @@ from .timeline_delivery_flights import (
     InMemoryCampaignTimelineDeliverySingleFlight,
     SingleFlightCampaignTimelineDeliveryService,
 )
+from .timeline_query import (
+    MAX_TIMELINE_QUERY_PAGE_SIZE,
+    CampaignTimelineQueryCursor,
+    CampaignTimelineQueryCursorError,
+    CampaignTimelineQueryError,
+    CampaignTimelineQueryPage,
+    CampaignTimelineQueryService,
+)
 from .timeline_recorder import TimelineCampaignEventRecorder
 
 __all__ = [
@@ -174,6 +182,11 @@ __all__ = [
     "CampaignTimelineDeliveryResult",
     "CampaignTimelineDeliveryService",
     "CampaignTimelineEntry",
+    "CampaignTimelineQueryCursor",
+    "CampaignTimelineQueryCursorError",
+    "CampaignTimelineQueryError",
+    "CampaignTimelineQueryPage",
+    "CampaignTimelineQueryService",
     "CampaignTimelineStore",
     "CampaignTimelineVerification",
     "CampaignTransitionError",
@@ -207,6 +220,7 @@ __all__ = [
     "JsonCampaignTimelineCursorStore",
     "JsonCampaignTimelineStore",
     "JsonCheckpointStore",
+    "MAX_TIMELINE_QUERY_PAGE_SIZE",
     "RecoveryAction",
     "ResourceAwareCampaignSchedulerService",
     "ResourceDispatchResult",
