@@ -323,3 +323,13 @@ kontrakttests — bor i `docs/agent4/ADR-A4-006_STATE_PROJECTION.md` og står
 kun dér. Denne indgang gengiver ikke beslutningsteksten; den findes, så
 filen her forbliver det komplette indeks over Agent 4's
 arkitekturbeslutninger.
+
+**Historik.** Beslutningen blev truffet med klausulen *»gælder før
+genimplementeringen af Agent 4 runtime composition«*. Kompositionen (A4-09)
+og operator-read-modellen (A4-10) landede, før ADR'en var indskrevet.
+Klausulens formål — at kompositionen bygges mod kontrakten — er
+efterfølgende opfyldt ved bevis frem for ved rækkefølge: A4-11's testsuite
+beviser kontrakttest 6-8 (delt writer/recorder pr. kanonisk dataroot,
+afvisning af en anden writer-context i samme proces, ingen tråde ved import
+og komposition). Forløbet er dokumenteret i `SOL-CLAUDE-SAMARBEJDE.md`
+(31/07).
