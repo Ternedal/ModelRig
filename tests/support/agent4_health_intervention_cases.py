@@ -12,6 +12,7 @@ CORE = Path(__file__).with_name("agent4_health_intervention_cases_core.py")
 TIMELINE = Path(__file__).with_name("agent4_timeline_cases.py")
 DELIVERY = Path(__file__).with_name("agent4_timeline_delivery_cases.py")
 FLIGHTS = Path(__file__).with_name("agent4_timeline_delivery_flight_cases.py")
+QUERY = Path(__file__).with_name("agent4_timeline_query_cases.py")
 LEGACY = re.compile(r"(?:\bT-03\d\b|agent/t03)")
 SKIP = {
     ROOT / "docs" / "AGENT_4_IDENTITY.md",
@@ -95,6 +96,7 @@ _core = _load(CORE, "agent4_health_intervention_cases_core")
 _timeline = _load(TIMELINE, "agent4_timeline_cases")
 _delivery = _load(DELIVERY, "agent4_timeline_delivery_cases")
 _flights = _load(FLIGHTS, "agent4_timeline_delivery_flight_cases")
+_query = _load(QUERY, "agent4_timeline_query_cases")
 
 
 class Agent4HealthInterventionTests(
@@ -102,5 +104,6 @@ class Agent4HealthInterventionTests(
     _timeline.Agent4TimelineTests,
     _delivery.Agent4TimelineDeliveryTests,
     _flights.Agent4TimelineDeliveryFlightTests,
+    _query.Agent4TimelineQueryTests,
 ):
     """Run all current Agent 4 workflow cases through the existing root gate."""
