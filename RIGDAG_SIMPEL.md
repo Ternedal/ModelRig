@@ -1,7 +1,7 @@
 # RIGDAG_SIMPEL.md — hele rig-testen, kortest mulige vej
 
-**Én dag. Fire blokke. Ét klik starter hver blok — resten er kun de handlinger,
-et menneske sandfærdigt kan udføre.** Detaljerne bor i `RIGDAG.md` og
+**Én dag. Fire blokke plus én 30-sekunders beslutning. Ét klik starter hver
+blok — resten er kun de handlinger, et menneske sandfærdigt kan udføre.** Detaljerne bor i `RIGDAG.md` og
 `STAGED_PHYSICAL_PROMOTION.md`; dette dokument er rækkefølgen.
 
 **Kandidaten er `1.58.147`** på branchen `agent/unified-candidate-1.58.147`.
@@ -28,6 +28,21 @@ mellem de fysiske handlinger. Vigtig sondring: Cowork kører i en sandkasse-VM
 med adgang kun til tilkoblede mapper — blokke, der rører riggens processer og
 vinduer, hører hjemme i **Code-fanen**.
 
+## Automatikgraden — hvad kører selv
+
+- **Blok 0, 2 og 3 er fuldautomatiske:** testlederen kører alle kommandoer;
+  Code-fanen beder om ét ja pr. kommandobatch — sig ja én gang pr. blok.
+- **Blok 1 er automatisk undtagen dine fem handlinger.** Wizard'en kører
+  selv; testlederen overvåger loggen og siger præcis, hvornår og hvad du
+  skal gøre — du rører kun mikrofon, telefon, app-godkendelse og ur.
+- **Blok 4:** valget er dit; alt omkring det (flip, gates, commit-udkast)
+  er testlederens.
+- **Rapporten:** Cowork-sessionen kan køre Full Auto i sandkassen på
+  `rig-evidence\` og skrive `EVIDENCE.md` løbende, mens Code-fanen kører
+  blokkene.
+- De hårde grænser gælder uanset mode: intet merges, pushes, tagges,
+  releases eller aktiveres, og ingen `KALIV_*`-flag sættes permanent.
+
 ## Blok 0 — fem minutter, én gang
 
 ```powershell
@@ -37,6 +52,10 @@ git switch agent/unified-candidate-1.58.147
 git pull --ff-only origin agent/unified-candidate-1.58.147
 mkdir rig-evidence\<dato>
 ```
+
+Kandidatbranchen holdes på main af Claude frem til dagen. `--ff-only`-pullet
+fejler højlydt, hvis den alligevel er bagud — sig til, så rykkes den, før
+noget andet startes.
 
 ## Blok 1 — Stage A: de syv beviser
 
@@ -59,16 +78,30 @@ bevis), **derefter** fryses det:
    opdaterer operatørens reference i samme commit og kører den fulde suite
    lokalt, før der committes. Kan præcedensen ikke følges 1:1, udskydes
    frysningen til en lille PR — dagen beviser stadig produktionskaldet.
-2. Ét produktionskald ad den rigtige vej: start workeren med
-   `KALIV_WEB_RESEARCH_ENABLED=1` **kun i den session**, åbn Kaliv-desktoppen
-   og bed om én hentning af en offentlig HTTPS-side via `web_research`.
-3. Testlederen verificerer: svaret kom, og audit-loggen har præcis én ny
-   linje. Begge kopieres til `rig-evidence\`.
+2. Ét produktionskald ad den rigtige vej — **fuldautomatisk**: testlederen
+   starter workeren med begge flag kun i den session
+   (`KALIV_TOOLS_ENABLED=1` og `KALIV_WEB_RESEARCH_ENABLED=1`, begge kræver
+   præcis `"1"`), tæller rækkerne i audit-databasen `kaliv-audit.db`, og
+   kalder produktionsstien direkte:
+
+   ```powershell
+   curl.exe -s -X POST http://127.0.0.1:8099/tools/chat/stream `
+     -H "Content-Type: application/json" `
+     -d '{"message":"Hent https://example.com med web_research og opsummer den kort"}'
+   ```
+
+   (`model`-feltet er valgfrit — workeren bruger sin default.) Det er samme
+   endpoint og samme tool-loop, som appen rammer — appen er UX, ikke beviset.
+3. Testlederen verificerer automatisk: svaret indeholder en gennemført
+   `web_research`-kørsel, og audit-databasen har **præcis én** ny post
+   (rækketælling før/efter via `sqlite3`). Svar + audit-udtræk →
+   `rig-evidence\`.
 
 ## Blok 3 — Computer Use I3/I4: første capture + én engangsplan
 
-Med `KALIV_COMPUTER_USE=1` kun i sessionen og Notepad åbent som det
-allowlistede vindue kører testlederen prøven mod worker-modulerne
+Med `KALIV_COMPUTER_USE=1` kun i sessionen starter testlederen selv Notepad
+(`Start-Process notepad`) som det allowlistede vindue og kører prøven mod
+worker-modulerne
 (`desktop_capture`/`desktop_screenshot_tool` → HMAC-kontrakten i
 `desktop_contract` → én plan via `desktop_action_plan` → én konsumption):
 
@@ -91,6 +124,13 @@ flip af tokenet *eller* tilpasning af Android-temaet — kan testlederen lave
 som udkast samme dag; de fire gates skal være grønne før commit:
 `workflow_design_tokens`, `workflow_design_token_contrast`,
 `workflow_android_palette_divergence`, `workflow_brand_no_token_duplicates`.
+
+## Én beslutning på 30 sekunder — memory-pilotens politik
+
+Protect-first-sporet er landet (DPAPI-format, migration, reader, writer,
+leak-gate). Før piloten åbnes, skal politikken bekræftes: **piloten
+begrænses til `public`/`operational` — private/secret holdes ude.** Bekræft
+eller revidér med én sætning i `EVIDENCE.md`; testlederen skriver den ind.
 
 ## Dagens slutning
 
