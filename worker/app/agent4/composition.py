@@ -32,8 +32,14 @@ from .health_intervention_adapters import (
     HealthInterventionServiceAdapters,
 )
 from .operator import Agent4OperatorReadService
+from .projected_services import (
+    ProjectedCampaignCheckpointService,
+    ProjectedCampaignFailureHandlingService,
+    ProjectedCampaignHealthFailClosedService,
+)
 from .projection import (
     CampaignProjectionReconciler,
+    CampaignProjectionReport,
     CampaignStateProjectionService,
 )
 from .recovery import CampaignRecoveryReport
@@ -124,7 +130,7 @@ class Agent4RuntimeContext:
 
         return self.scheduler.recover()
 
-    def reconcile_projections(self):
+    def reconcile_projections(self) -> CampaignProjectionReport:
         """Explicitly repair pending audit projections; composition never calls it."""
 
         return self.reconciliation.reconcile()
@@ -209,30 +215,34 @@ def compose_agent4_runtime(
         events=event_recorder,
         clock=runtime_clock,
         queue=queue,
+        projections=projections,
         resource_leases=resources,
         resource_resolver=resource_resolver,
         resource_lease_ttl=resource_lease_ttl,
     )
-    checkpoints = CampaignCheckpointService(
+    checkpoints = ProjectedCampaignCheckpointService(
         repository=repository,
         checkpoints=checkpoint_store,
         events=event_recorder,
         clock=runtime_clock,
+        projections=projections,
     )
     retry_planner = CampaignRetryPlanner(policy=retry_policy)
-    failures = CampaignFailureHandlingService(
+    failures = ProjectedCampaignFailureHandlingService(
         repository=repository,
         queue=queue,
         events=event_recorder,
         clock=runtime_clock,
         planner=retry_planner,
         release_resources=resources.release_campaign,
+        projections=projections,
     )
-    health_fail_closed = CampaignHealthFailClosedService(
+    health_fail_closed = ProjectedCampaignHealthFailClosedService(
         repository=repository,
         events=event_recorder,
         clock=runtime_clock,
         release_resources=resources.release_campaign,
+        projections=projections,
     )
     delivery_flights = InMemoryCampaignTimelineDeliverySingleFlight()
     delivery = CampaignTimelineDeliveryService(
