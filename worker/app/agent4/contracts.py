@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Callable, Mapping, Protocol, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Callable,
+    Iterable,
+    Mapping,
+    Protocol,
+    runtime_checkable,
+)
 
 if TYPE_CHECKING:
     from .checkpoint import CampaignCheckpoint
     from .resources import ResourceLease
-
+    from .timeline import (
+        CampaignEvidenceReference,
+        CampaignTimelineEntry,
+        CampaignTimelineVerification,
+    )
 
 from .domain import (
     CampaignEvent,
@@ -55,6 +66,33 @@ class CampaignCheckpointStore(Protocol):
 
     def delete(self, campaign_id: str, checkpoint_id: str) -> bool:
         """Delete one checkpoint and report whether it existed."""
+
+
+@runtime_checkable
+class CampaignTimelineStore(Protocol):
+    def append(
+        self,
+        event: CampaignEvent,
+        *,
+        evidence: Iterable["CampaignEvidenceReference"] = (),
+    ) -> "CampaignTimelineEntry":
+        """Append one immutable event and optional evidence references."""
+
+    def list(self, campaign_id: str) -> tuple["CampaignTimelineEntry", ...]:
+        """Return a fully validated timeline snapshot."""
+
+    def latest(self, campaign_id: str) -> "CampaignTimelineEntry | None":
+        """Return the validated timeline head for one campaign."""
+
+    def verify(self, campaign_id: str) -> "CampaignTimelineVerification":
+        """Validate the complete chain and return its summary."""
+
+    def replay(
+        self,
+        campaign_id: str,
+        handler: Callable[["CampaignTimelineEntry"], None],
+    ) -> int:
+        """Replay a validated timeline and return the delivered entry count."""
 
 
 CampaignResourceResolver = Callable[[CampaignSpec], Mapping[str, int]]

@@ -19,6 +19,7 @@ from .contracts import (
     CampaignRepository,
     CampaignResourceLeaseManager,
     CampaignResourceResolver,
+    CampaignTimelineStore,
     Clock,
     IdGenerator,
 )
@@ -108,6 +109,7 @@ from .timeline import (
     TimelineIntegrityError,
     TimelineStoreError,
 )
+from .timeline_recorder import TimelineCampaignEventRecorder
 
 __all__ = [
     "CampaignCheckpoint",
@@ -146,6 +148,7 @@ __all__ = [
     "CampaignState",
     "CampaignStatus",
     "CampaignTimelineEntry",
+    "CampaignTimelineStore",
     "CampaignTimelineVerification",
     "CampaignTransitionError",
     "CampaignValidationError",
@@ -190,6 +193,7 @@ __all__ = [
     "RetryDisposition",
     "RetryPolicy",
     "SystemClock",
+    "TimelineCampaignEventRecorder",
     "TimelineConflictError",
     "TimelineIntegrityError",
     "TimelineStoreError",
