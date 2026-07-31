@@ -149,6 +149,11 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_validation_status.py`
 - `tests/worker_agent3_workflow_completion.py`
 - `tests/worker_agent3_workflow_receipt_integrity.py`
+- `tests/worker_agent4_checkpoints.py`
+- `tests/worker_agent4_foundation.py`
+- `tests/worker_agent4_recovery.py`
+- `tests/worker_agent4_resources.py`
+- `tests/worker_agent4_scheduler_service.py`
 - `tests/worker_agent_continue.py`
 - `tests/worker_agent_multistep.py`
 - `tests/worker_approval_receipts.py`
@@ -262,6 +267,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_agent3_write_pilot_recorder.py`
 - `tests/workflow_agent3_write_pilot_report.py`
 - `tests/workflow_agent4_dormant_runtime.py`
+- `tests/workflow_agent4_foundation.py`
 - `tests/workflow_agent4_storage_boundary.py`
 - `tests/workflow_android_credential_commit.py`
 - `tests/workflow_android_palette_divergence.py`
