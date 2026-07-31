@@ -26,6 +26,7 @@ integration boundaries and `HANDOFF.md` require parity evidence and coordination
 | `A4-05` | health policy, intervention coordinator and service adapters |
 | `A4-06` | append-only campaign timeline, immutable evidence references and durable delivery |
 | `A4-07` | verified, bounded timeline query cursors and stable snapshot paging |
+| `A4-08` | bounded durable consumer batches over the A4-06 delivery cursor |
 
 ## Retired aliases
 
@@ -41,7 +42,8 @@ must use the `A4-*` IDs and `agent/a4-*` prefix.
 
 The Agent 4 package remains dormant. Importing it starts no thread, timer, host
 cadence, network request or Agent 3 work. A4-06 adds explicit filesystem and
-caller-driven delivery operations; A4-07 adds read-only query composition.
-Neither subscribes to the event bus, mounts a runtime or activates recurring
-work. Any future host integration or recurring loop is a separate integration
-decision and must be tested against the existing dormant contracts.
+caller-driven delivery operations; A4-07 adds read-only query composition;
+A4-08 adds only a bounded caller-driven batch wrapper over existing delivery.
+None subscribes to the event bus, mounts a runtime or activates recurring work.
+Any future host integration or recurring loop is a separate integration decision
+and must be tested against the existing dormant contracts.
