@@ -113,11 +113,10 @@ class CampaignRecoveryService:
                     action=RecoveryAction.ALREADY_QUEUED,
                 )
             self._queue.enqueue(record.spec)
-            occurred_at = self._now()
             self._project(
                 record,
                 CampaignEventKind.RECOVERED,
-                occurred_at=occurred_at,
+                occurred_at=record.state.updated_at,
                 payload={
                     "action": RecoveryAction.REQUEUED.value,
                     "status": status.value,
@@ -131,11 +130,10 @@ class CampaignRecoveryService:
             )
 
         if status is CampaignStatus.PAUSED:
-            occurred_at = self._now()
             self._project(
                 record,
                 CampaignEventKind.RECOVERED,
-                occurred_at=occurred_at,
+                occurred_at=record.state.updated_at,
                 payload={
                     "action": RecoveryAction.RETAINED_PAUSED.value,
                     "status": status.value,
