@@ -69,6 +69,11 @@ from .health_intervention_adapters import (
     HealthInterventionLifecycleService,
     HealthInterventionServiceAdapters,
 )
+from .operator import (
+    MAX_OPERATOR_CAMPAIGNS,
+    Agent4CampaignOverview,
+    Agent4OperatorReadService,
+)
 from .recovery import (
     CampaignRecoveryDecision,
     CampaignRecoveryReport,
@@ -148,6 +153,8 @@ from .timeline_query import (
 from .timeline_recorder import TimelineCampaignEventRecorder
 
 __all__ = [
+    "Agent4CampaignOverview",
+    "Agent4OperatorReadService",
     "Agent4RuntimeContext",
     "Agent4RuntimePaths",
     "CampaignCheckpoint",
@@ -234,6 +241,7 @@ __all__ = [
     "JsonCampaignTimelineCursorStore",
     "JsonCampaignTimelineStore",
     "JsonCheckpointStore",
+    "MAX_OPERATOR_CAMPAIGNS",
     "MAX_TIMELINE_DELIVERY_BATCH_SIZE",
     "MAX_TIMELINE_QUERY_PAGE_SIZE",
     "RecoveryAction",
