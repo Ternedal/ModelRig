@@ -29,9 +29,11 @@ flowchart TB
 
     subgraph Worker["Worker (Python) :8099 — mounted from app.entrypoint"]
         Pipe["RAG&nbsp;&nbsp;pdf · docx · pptx · html · foto (vision)<br/>Voice&nbsp;&nbsp;ASR → LLM(stream) → sentence-TTS<br/>buffered: /voice/converse/upload<br/>streamed: /voice/converse/stream (NDJSON)"]
-        Tools["Kaliv Tools<br/>registry (in code)<br/>confirmation gate<br/>audit log (append-only)<br/>Executor seam"]
+        Tools["Kaliv Tools<br/>registry (in code)<br/>confirmation gate<br/>audit log (append-only)<br/>Executor seam<br/>web_research: risk=read + network=public<br/>gated KALIV_WEB_RESEARCH_ENABLED"]
         Sched["Scheduler<br/>at-most-once by construction<br/>claim + budget slot in one transaction<br/>write approvals leave a receipt"]
         A3["Agent 3<br/>mount_agent3() owns the whole surface<br/>DORMANT unless KALIV_AGENT3_ENABLED=1<br/>server-authoritative plan · one confirmation per side effect"]
+        A4["Agent 4 — campaign orchestration (A4-01…A4-10)<br/>on main but NOT MOUNTED: no route exists<br/>timeline · delivery · query · composition · operator reads<br/>one B-reference architecture enforced by CI gates"]
+        CU["Computer Use (Tier B)<br/>I3 see · I4 propose — DORMANT unless KALIV_COMPUTER_USE=1<br/>signed screenshot contract · local-only vision bridge<br/>I5 act: not built"]
         Eval["Eval-harness<br/>tool-discipline · dansk · latency<br/>workflow completion, not tool choice"]
     end
 
@@ -60,6 +62,8 @@ flowchart TB
     class Cloud ext;
     classDef dormant stroke-dasharray: 4 3;
     class A3 dormant;
+    class A4 dormant;
+    class CU dormant;
 ```
 
 **Two cloud roads, and they are not the same thing.**
@@ -83,6 +87,16 @@ card says who asked: *"Cloud-modellen foreslår: …"*
 **Voice** — audio never leaves the house. ASR (faster-whisper, CUDA) and TTS
 (Piper, Danish) always run on the rig. Only the transcribed question may go to
 the cloud, and only with the toggle on.
+
+**Agent 4** — the caller-driven campaign layer (A4-01…A4-10) sits on `main` in
+the strongest form of dormancy: it is not mounted anywhere, so no route exists
+to reach it. The B-reference architecture now includes durable lifecycle state,
+an append-only verified timeline, at-least-once delivery, hash-bound query
+paging, explicit runtime composition and a bounded read-only operator model.
+Its architecture is fixed by ADR before behaviour ships; storage must not know
+subscribers, and application-driven polling is forbidden. Those boundaries are
+not prose alone: CI gates scan the package on every run
+(`AGENT_4_ARCHITECTURE_DECISIONS.md` is the authoritative source).
 
 **Tools** — the model proposes; the gate decides. Reads run. Writes stop at a
 confirmation card and execute the arguments that were shown: the worker parks
