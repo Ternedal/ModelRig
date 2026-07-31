@@ -23,7 +23,7 @@ from app.agent4.projection import (
     CampaignStateProjectionService,
 )
 from app.agent4.repository import JsonCampaignRepository
-from app.agent4.timeline import JsonCampaignTimelineStore
+from app.agent4.timeline import JsonCampaignTimelineStore, TimelineConflictError
 
 
 NOW = datetime(2026, 7, 31, 11, 30, tzinfo=timezone.utc)
@@ -156,6 +156,43 @@ class Agent4ProjectionTests(unittest.TestCase):
             self.assertEqual(report.acknowledged, 1)
             self.assertEqual(len(timeline.list(record.spec.campaign_id)), 1)
             self.assertEqual(repository.pending_projections(), ())
+
+    def test_timeline_append_accepts_identical_event_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            timeline = JsonCampaignTimelineStore(Path(directory) / "timeline")
+            original = CampaignEvent(
+                event_id="projection:stable-event",
+                campaign_id="projection-campaign",
+                kind=CampaignEventKind.STARTED,
+                sequence=1,
+                occurred_at=NOW,
+                payload={"attempt": 1},
+            )
+            first = timeline.append(original)
+            retried = timeline.append(
+                CampaignEvent(
+                    event_id=original.event_id,
+                    campaign_id=original.campaign_id,
+                    kind=original.kind,
+                    sequence=2,
+                    occurred_at=original.occurred_at,
+                    payload=original.payload,
+                )
+            )
+
+            self.assertEqual(retried, first)
+            self.assertEqual(len(timeline.list(original.campaign_id)), 1)
+            with self.assertRaises(TimelineConflictError):
+                timeline.append(
+                    CampaignEvent(
+                        event_id=original.event_id,
+                        campaign_id=original.campaign_id,
+                        kind=original.kind,
+                        sequence=2,
+                        occurred_at=original.occurred_at,
+                        payload={"attempt": 2},
+                    )
+                )
 
     def test_conflicting_content_with_same_event_id_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
