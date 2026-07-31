@@ -4,17 +4,23 @@ Agent 4 is the orchestration layer above the validated Agent 3 runtime. It owns
 campaign lifecycle coordination, durable orchestration state, recovery and
 operator-facing control. It does **not** change Agent 3 execution contracts.
 
-## Current milestone: A4-01 foundation
+## Current milestone: dormant A4-01–A4-06 foundation
 
-The branch currently provides a dormant, standard-library-only foundation:
+The package provides a dormant, standard-library-only orchestration foundation:
 
 - immutable `CampaignSpec`, `CampaignState`, `CampaignEvent` and `CampaignRecord`;
 - explicit, fail-closed campaign state transitions;
 - a deterministic campaign queue with priority and future start times;
 - atomic JSON campaign persistence with schema and filename binding;
 - ordered per-campaign event publication;
+- immutable checkpoints;
+- process-local resource leases and caller-driven resource admission;
+- deterministic retry classification and durable failure handling;
+- pure health assessment with caller-driven intervention adapters;
+- append-only, hash-chained campaign timelines with immutable evidence
+  references;
 - protocols for repositories, executors, clocks, IDs and event delivery;
-- unit and composition tests automatically discovered by the shared CI glob.
+- tests automatically discovered through the shared CI entrypoints.
 
 Runtime activation, API routes and background threads are deliberately absent.
 Importing `app.agent4` has no side effects and cannot start Agent 3 work.
@@ -28,7 +34,7 @@ Agent 4 uses its own namespace so it cannot collide with ModelRig roadmap tasks:
 3. `A4-03` — resource leases and caller-driven admission.
 4. `A4-04` — retry classification and durable failure handling.
 5. `A4-05` — health policy, intervention coordination and adapters.
-6. `A4-06` — future append-only timeline/evidence integration.
+6. `A4-06` — append-only timeline and evidence references.
 
 Retired aliases and provenance rules are documented only in
 `docs/AGENT_4_IDENTITY.md`.
@@ -52,7 +58,8 @@ worker/app/agent4/
 ├── resource_admission.py
 ├── resources.py
 ├── retry.py
-└── service.py
+├── service.py
+└── timeline.py
 ```
 
 ## Test locally
@@ -76,11 +83,18 @@ CampaignExecutor protocol
 Agent 3 runtime             (unchanged)
 ```
 
-## A4-01 lifecycle service
+## Lifecycle and evidence
 
 `CampaignSchedulerService` provides explicit submit, dispatch, pause, resume,
 cancellation and completion commands. It is caller-driven and remains fully
 dormant until a host composes it with repository, executor, event and clock
 implementations. The class name describes its lifecycle-facing API; the passive
-queue it uses lives separately in `campaign_queue.py`. See
-`docs/AGENT_4_A4_01_SCHEDULER.md`.
+queue it uses lives separately in `campaign_queue.py`.
+
+A4-06 adds explicit timeline append, verification and replay operations. It
+does not subscribe to lifecycle events automatically.
+
+See:
+
+- `docs/AGENT_4_A4_01_SCHEDULER.md`;
+- `docs/AGENT_4_A4_06_TIMELINE.md`.

@@ -1,4 +1,4 @@
-"""Agent 4 identity guard plus the health intervention test cases."""
+"""Agent 4 shared workflow support."""
 from __future__ import annotations
 
 import importlib.util
@@ -7,11 +7,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CORE = Path(__file__).with_name("agent4_health_intervention_cases_core.py")
+TIMELINE = Path(__file__).with_name("agent4_timeline_cases.py")
 LEGACY = re.compile(r"(?:\bT-03\d\b|agent/t03)")
-SKIP = {
-    ROOT / "docs" / "AGENT_4_IDENTITY.md",
-    Path(__file__).resolve(),
-}
+SKIP = {ROOT / "docs" / "AGENT_4_IDENTITY.md", Path(__file__).resolve()}
 ALLOWED_HISTORICAL_COMMENTS = {
     "worker/app/agent4/resource_admission.py": {
         "This module is deliberately additive.  It composes the T-030 lifecycle service",
@@ -76,13 +74,21 @@ def _verify_agent4_identity() -> None:
         )
 
 
-_verify_agent4_identity()
+def _load(path: Path, module_name: str):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
-_spec = importlib.util.spec_from_file_location(
-    "agent4_health_intervention_cases_core",
-    CORE,
-)
-assert _spec is not None and _spec.loader is not None
-_core = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_core)
-Agent4HealthInterventionTests = _core.Agent4HealthInterventionTests
+
+_verify_agent4_identity()
+_core = _load(CORE, "agent4_health_intervention_cases_core")
+_timeline = _load(TIMELINE, "agent4_timeline_cases")
+
+
+class Agent4HealthInterventionTests(
+    _core.Agent4HealthInterventionTests,
+    _timeline.Agent4TimelineTests,
+):
+    """Combined Agent 4 workflow cases."""
