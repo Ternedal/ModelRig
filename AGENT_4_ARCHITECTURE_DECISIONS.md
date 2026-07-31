@@ -203,3 +203,102 @@ tomt i dag og er armeret til den dag, laget lander — samme mønster som
 `tests/workflow_agent3_dormant.py`, hvis dormanskrav også landede før koden.
 Hver detektor køres desuden mod overtrædende prøver, fordi *en test, der kun
 kan bestå, ikke er en test.*
+
+---
+
+## ADR-A4-005 — Én referencearkitektur
+
+**Truffet af Anders 31/07-2026**, efter at gennemgangen konstaterede, at Agent
+4 havde udviklet sig i **to parallelle, merge-klare arkitekturer**. ADR-A4-001
+valgte mellem dem. Denne ADR handler om, at situationen ikke må kunne opstå
+igen.
+
+### Beslutning
+
+Der må kun eksistere **én aktiv referencearkitektur** for Agent 4.
+Referencearkitekturen er den eneste retning, som må modtage nye funktionelle
+PR'er.
+
+Alternative implementeringer må kun eksistere som **spikes, eksperimenter
+eller prototyper**. De må ikke udvikle sig til parallelle merge-klare stakke.
+
+### Krav ved en alternativ retning
+
+- Den markeres **eksplicit** som eksperiment.
+- Den må **ikke** blive base for nye stacked PR'er.
+- Den skal enten **adopteres** som ny referencearkitektur gennem en ADR, eller
+  **lukkes**.
+
+### Konsekvens for alle fremtidige Agent 4-PR'er
+
+Hver PR skal angive:
+
+- hvilken ADR den implementerer,
+- hvilken referencearkitektur den bygger på,
+- hvilke eksisterende PR'er den afhænger af.
+
+**Kan en PR ikke placeres entydigt i referencearkitekturen, stoppes den**,
+indtil arkitekturen er afklaret.
+
+### Review-gate
+
+Ved review skal alle fire besvares med **ja**:
+
+1. Bygger PR'en på den aktuelle referencearkitektur?
+2. Implementerer den eksisterende ADR'er?
+3. Introducerer den **ikke** en alternativ arkitektur?
+4. Er dens afhængigheder entydige?
+
+Ét **nej** betyder, at PR'en ikke må landes.
+
+**Note om håndhævelse.** ADR-A4-002 og A4-003 er maskinelt målbare og
+håndhæves af gates. Denne review-gate er det ikke i sin helhed — den kræver et
+menneskes eller en reviewers vurdering. Den ene del, der *kan* automatiseres,
+er dokumentationskravet ovenfor: at hver PR-beskrivelse faktisk indeholder ADR,
+referencearkitektur og afhængigheder. Det er ikke bygget, og det er en åben
+mulighed, ikke en truffet beslutning.
+
+---
+
+## Implementeringsdirektiv — Agent 4
+
+**Anders, 31/07-2026. Governance-fasen er afsluttet.** Fra dette punkt er målet
+ikke at skabe flere arkitekturvalg, men at implementere den vedtagne
+referencearkitektur konsekvent.
+
+### Arbejdsregel — dokumenteres for hver PR
+
+- **Formål** (én sætning)
+- **Implementeret ADR**
+- **Afhængighed** af tidligere PR'er
+- **Påvirkede moduler**
+- **Bekræftelse** af grønne CI-gates
+- **Bekræftelse** af, at dormans-invarianterne fortsat overholdes
+
+Kan en PR ikke beskrives inden for denne ramme, **skal den opdeles** i mindre
+ændringer.
+
+### Review-kriterier for landing
+
+En PR er først klar, når den:
+
+- implementerer **præcis ét** afgrænset skridt,
+- ikke introducerer ny arkitektur,
+- ikke udvider scopet,
+- består **alle** relevante gates,
+- passer ind i B-referencearkitekturen.
+
+### Stopregel
+
+Afdækker implementeringen et behov for at **ændre** en ADR, **stoppes
+implementeringen**. Arkitekturen ændres først gennem en ny ADR og derefter
+gennem kode — aldrig omvendt.
+
+### Fokus indtil videre
+
+1. Landing af fundamentet.
+2. Konsolidering af B-stakken.
+3. Fjernelse af den parallelle A-stak.
+4. Stabilisering af Agent 4 på `main`.
+
+**Ingen nye funktionelle spor åbnes, før denne proces er afsluttet.**

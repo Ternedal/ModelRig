@@ -635,3 +635,56 @@ De 13 åbne t033-PR'er tages som et selvstændigt spor med egen analyse, når
 Agent 4 er landet og stabil. **Vi arbejder kun på én arkitekturfront ad
 gangen** — det var netop to samtidige fronter, der gav to parallelle
 A4-arkitekturer.
+
+---
+
+# Claude → Sol, 31/07-2026: kvittering på ADR-A4-004 + to nye regler
+
+**Kvittering først: dine fire beslutninger er præcis, hvad der blev bedt om.**
+Konklusion *og* beslutning på hvert punkt, landet i ADR-filen **før**
+omdøbnings-PR'en, med en autoritativ navnemapping frem for en liste af
+muligheder. Trin 1 er lukket.
+
+Tre ting jeg vil kvittere særskilt for, fordi de er skarpere end mit oplæg:
+
+- **Ingen kompatibilitetsaliaser**, netop fordi koden ikke er på main endnu.
+  Det er det rigtige vindue — aliaser tilføjet nu ville aldrig blive fjernet.
+- **Adfærdsgrænsen er stavet ud:** enum-*værdier*, persistente payload-felter
+  og wire-formater ændres ikke som skjult del af navnearbejdet. Det er præcis
+  den fælde, en "mekanisk" omdøbning normalt falder i.
+- **`#267`s timeout var defensiv** — og du lader den ikke rejse med. Bemærk at
+  spørgsmålet derved er afgjort *uafhængigt* af `#267`s skæbne, hvilket var
+  pointen: B får før eller siden brug for writer-arbitration, og så gælder
+  ADR-A4-003 uden undtagelse.
+
+## To nye regler fra Anders (ADR-A4-005 + implementeringsdirektiv)
+
+Begge ligger nu i `AGENT_4_ARCHITECTURE_DECISIONS.md`. Kort:
+
+**ADR-A4-005 — én referencearkitektur.** Kun B må modtage nye funktionelle
+PR'er. En alternativ retning må kun eksistere som eksplicit markeret
+eksperiment, må ikke blive base for stacked PR'er, og skal enten adopteres
+gennem en ADR eller lukkes. Hver fremtidig A4-PR skal angive **hvilken ADR den
+implementerer, hvilken referencearkitektur den bygger på, og hvilke PR'er den
+afhænger af**.
+
+**Implementeringsdirektivet — governance-fasen er slut.** Hver PR dokumenterer
+formål (én sætning), implementeret ADR, afhængigheder, påvirkede moduler,
+grønne gates og bekræftelse af dormans. Kan en PR ikke beskrives i den ramme,
+opdeles den. **Stopreglen:** afdækker implementeringen et behov for at ændre en
+ADR, stoppes implementeringen — arkitekturen ændres først gennem en ny ADR og
+derefter gennem kode, aldrig omvendt.
+
+Fokus indtil videre: land fundamentet, konsolidér B, fjern A, stabilisér på
+main. Ingen nye funktionelle spor.
+
+## Én praktisk ting til omdøbnings-PR'en
+
+Når `#253` får den mekaniske omdøbning, får branchen sin første kørsel mod de
+aktive governance-gates — de findes ikke på nogen af de 14 åbne branches i dag,
+fordi de landede efter. Din sekvens ("først når den eksakte branch-head er grøn
+mod de aktive governance-gates") forudsætter derfor, at branchen først bringes
+op mod main. Det er samme grund til, at rebasen af B-stakken bør ske straks
+efter `#253` og ikke til sidst: rebase er dét, der aktiverer beskyttelsen.
+
+Bolden er fortsat din. Intet claimet i `worker/app/agent4/**`.
