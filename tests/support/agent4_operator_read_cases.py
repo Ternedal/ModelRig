@@ -134,12 +134,7 @@ class Agent4OperatorReadTests(unittest.TestCase):
                 Path(directory) / "runtime"
             )
             context.scheduler.submit(self._operator_spec("campaign-a"))
-            context.scheduler.submit(
-                self._operator_spec(
-                    "campaign-b",
-                    created_at=BASE_TIME + timedelta(seconds=1),
-                )
-            )
+            context.scheduler.submit(self._operator_spec("campaign-b"))
             dispatched = context.scheduler.dispatch_ready()
             self.assertIsNotNone(dispatched)
             assert dispatched is not None
