@@ -63,8 +63,13 @@ bekræftelse betyder præcist "outcome ukendt".
 ## Beslutning 5 — Outcome-opslag, caller-driven
 
 Executor-kontrakten får `query_outcome(dispatch_id) ->
-unknown | accepted | running | completed | failed` (med evt.
-runtime-reference/evidens-pointer). Recovery bruger opslaget ved
+not_dispatched | unknown | accepted | running | completed | failed` (med
+evt. runtime-reference/evidens-pointer). **`not_dispatched` er en negativ
+commitment, ikke en observation:** adapteren må kun svare det, hvis
+dispatch_id aldrig er accepteret, og svaret **tombstoner samtidig id'et**,
+så en forsinket original aldrig kan accepteres bagefter. Et tombstonet id
+afvises fremover permanent — dedup-registret er dermed også
+tombstone-registret. Recovery bruger opslaget ved
 REQUESTED-uden-CONFIRMED — **kun ved eksplicit kald** (startup-recovery,
 caller-drevet operation eller operatorhandling). Ingen tråde, timers,
 polling, tailere eller subscriptions (ADR-A4-003 gælder uændret).
@@ -77,6 +82,13 @@ fail-closed mønster). Re-dispatch er altid et nyt attempt med nyt
 dispatch_id og kræver en eksplicit beslutning gennem recovery-kontrakten —
 aldrig et gæt. Audit-reparation og execution-recovery forbliver separate
 ansvar (ADR-A4-006).
+
+Ved `not_dispatched` er "aldrig accepteret" bevist og id'et tombstonet:
+recovery må markere kampagnen **klar til nyt forsøg** — men igangsættelsen
+forbliver caller-driven som al anden lifecycle-operation. Automatisk
+redispatch er fortsat forbudt, også ved bevist negativ. Et nyt forsøg er
+altid et nyt attempt med nyt dispatch_id; et tombstonet id genafsendes
+aldrig.
 
 ## Beslutning 7 — Én mekanik, ingen ny journal
 
@@ -97,8 +109,11 @@ aktivering).
 
 1. RUNNING-state og DISPATCH_REQUESTED-intent er atomiske: intet
    crash-vindue kan give det ene uden det andet.
-2. Crash før eksternt kald: recovery afgør entydigt "aldrig afsendt" og
-   håndterer det uden gæt.
+2. Crash i handoff-vinduet: REQUESTED uden CONFIRMED afgøres **kun** via
+   `query_outcome` — aldrig fra afsenderens durable state alene. Svarer
+   adapteren `not_dispatched`, er "aldrig accepteret" bevist, id'et er
+   tombstonet, og recovery markerer klar til nyt attempt — uden gæt og
+   uden automatisk redispatch.
 3. Dublet-dispatch med samme dispatch_id er idempotent — præcis én runtime.
 4. Crash efter kald, før CONFIRMED: recovery bruger query_outcome og
    handler kun på et entydigt svar.
@@ -111,6 +126,12 @@ aktivering).
 9. Intents projiceres via A4-11-mekanikken — ingen ny storage-flade
    (gate-bevist).
 10. Storage-boundary- og dormant-runtime-gates forbliver grønne.
+11. Tombstone: efter et `not_dispatched`-svar afviser adapteren en
+    forsinket original-dispatch med samme id — permanent.
+12. Nyt forsøg efter `not_dispatched` kræver nyt attempt og giver nyt
+    deterministisk dispatch_id; et tombstonet id genafsendes aldrig.
+13. `not_dispatched` udløser ingen automatisk redispatch — kun en
+    caller-driven klar-markering.
 
 ## Konsekvenser
 
@@ -130,3 +151,18 @@ det fysiske bevis.
 ADR-A4-007 (read-fladen) er uafhængig og allerede besluttet. Denne ADR er
 porten til ADR-A4-007's fremtidige write-udvidelse og til enhver
 production_activation af Agent 4-orkestrering.
+
+## Præcisering 1 — `not_dispatched` som negativ commitment
+
+**Besluttet af Anders 01/08-2026** efter fund under Sols slice-planlægning:
+kontrakttest 2's oprindelige formulering var uopfyldelig, fordi et crash
+før og et crash under det eksterne kald efterlader identisk durable
+tilstand (REQUESTED uden CONFIRMED), og værdisættet havde ingen bevist
+negativ. Samtidig indebærer Beslutning 3's dedup-krav, at adapteren
+besidder svaret. To retninger blev fremlagt; Anders valgte den stærkere
+outcome-kontrakt med tre bindende præciseringer: tombstone-semantikken
+(uden den genopstår vinduet på modtagersiden), altid nyt attempt/id efter
+negativ, og opslagsbaseret entydighed i test 2. `unknown`-semantikken er
+urørt: fail-closed, ingen redispatch, operatorintervention.
+Beslutning 5, Beslutning 6 og kontrakttest 2 ovenfor bærer præciseringen;
+kontrakttest 11–13 beviser den.
