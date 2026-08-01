@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Any, Callable, TypeVar
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .memory import MemoryConflict, MemoryNotFound, MemoryRecord, MemoryStoreError
 from .memory_protected_reader import (
@@ -61,7 +61,11 @@ Clock = Callable[[], float]
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
-class CreateProtectedMemoryReq(BaseModel):
+class _StrictProtectedMemoryWriteReq(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+
+class CreateProtectedMemoryReq(_StrictProtectedMemoryWriteReq):
     subject: str = Field(min_length=1, max_length=200)
     predicate: str = Field(min_length=1, max_length=200)
     value: str = Field(min_length=1, max_length=20_000)
@@ -77,7 +81,7 @@ class CreateProtectedMemoryReq(BaseModel):
     expires_at: float | None = None
 
 
-class CorrectProtectedMemoryReq(BaseModel):
+class CorrectProtectedMemoryReq(_StrictProtectedMemoryWriteReq):
     expected_updated_at: float = Field(ge=0.0)
     value: str = Field(min_length=1, max_length=20_000)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
