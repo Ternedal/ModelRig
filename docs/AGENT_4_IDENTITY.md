@@ -31,6 +31,7 @@ integration boundaries and `HANDOFF.md` require parity evidence and coordination
 | `A4-10` | bounded transport-independent operator reads over the composed B runtime |
 | `A4-11` | authoritative campaign state, durable audit-projection intents and caller-driven reconciliation |
 | `A4-12` | first-class directly addressable evidence records bound to validated timeline heads |
+| `A4-13` | bounded hash-bound evidence query paging and transport-independent operator reads |
 
 ## Retired aliases
 
@@ -53,7 +54,9 @@ A4-10 adds only bounded read composition over the same object graph; A4-11 store
 audit-projection intents with authoritative campaign state and reconciles them
 only when a caller invokes a state-writing service or `reconcile_projections()`;
 A4-12 stores first-class evidence records only when a caller explicitly invokes
-`record(...)`, and it mounts no route or collection cadence.
+`record(...)`, and it mounts no route or collection cadence; A4-13 adds only
+bounded, hash-bound reads over those existing records and persists no cursor or
+operator state.
 None subscribes to the event bus, mounts a runtime or activates recurring work.
 Any future host integration or recurring loop is a separate integration decision
 and must be tested against the existing dormant contracts.
