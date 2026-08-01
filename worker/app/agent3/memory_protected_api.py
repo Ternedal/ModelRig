@@ -70,7 +70,11 @@ ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
 class _StrictProtectedMemoryWriteReq(BaseModel):
-    model_config = ConfigDict(strict=True, extra="forbid")
+    model_config = ConfigDict(
+        strict=True,
+        extra="forbid",
+        allow_inf_nan=False,
+    )
 
 
 class CreateProtectedMemoryReq(_StrictProtectedMemoryWriteReq):
