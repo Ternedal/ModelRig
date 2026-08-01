@@ -51,6 +51,14 @@ def mount_agent4_operator(
         raise CampaignValidationError(
             "Agent 4 runtime context lacks the canonical operator services"
         )
+    if context.operator.timeline is not context.timeline:
+        raise CampaignValidationError(
+            "Agent 4 campaign operator does not share the runtime timeline"
+        )
+    if context.operator.query is not context.query:
+        raise CampaignValidationError(
+            "Agent 4 campaign operator does not share the runtime query service"
+        )
     if context.evidence_operator.scheduler is not context.scheduler:
         raise CampaignValidationError(
             "Agent 4 operator services do not share the runtime scheduler"
