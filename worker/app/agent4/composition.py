@@ -32,6 +32,7 @@ from .health_intervention_adapters import (
     HealthInterventionServiceAdapters,
 )
 from .operator import Agent4OperatorReadService
+from .operator_evidence import Agent4OperatorEvidenceReadService
 from .projected_services import (
     ProjectedCampaignCheckpointService,
     ProjectedCampaignFailureHandlingService,
@@ -58,6 +59,11 @@ from .timeline_delivery_flights import (
     InMemoryCampaignTimelineDeliverySingleFlight,
     SingleFlightCampaignTimelineDeliveryService,
 )
+from .timeline_evidence import (
+    CampaignEvidenceRecordService,
+    JsonCampaignEvidenceRecordStore,
+)
+from .timeline_evidence_query import CampaignEvidenceQueryService
 from .timeline_query import CampaignTimelineQueryService
 from .timeline_recorder import TimelineCampaignEventRecorder
 
@@ -77,6 +83,7 @@ class Agent4RuntimePaths:
     campaigns: Path
     checkpoints: Path
     timeline: Path
+    evidence: Path
     delivery_cursors: Path
 
     @classmethod
@@ -94,6 +101,7 @@ class Agent4RuntimePaths:
             campaigns=normalized / "campaigns",
             checkpoints=normalized / "checkpoints",
             timeline=normalized / "timeline",
+            evidence=normalized / "evidence",
             delivery_cursors=normalized / "delivery-cursors",
         )
 
@@ -106,6 +114,8 @@ class Agent4RuntimeContext:
     repository: JsonCampaignRepository
     checkpoint_store: JsonCheckpointStore
     timeline: JsonCampaignTimelineStore
+    evidence_records: JsonCampaignEvidenceRecordStore
+    evidence_recorder: CampaignEvidenceRecordService
     event_recorder: TimelineCampaignEventRecorder
     reconciliation: CampaignProjectionReconciler
     projections: CampaignStateProjectionService
@@ -123,7 +133,9 @@ class Agent4RuntimeContext:
     guarded_delivery: SingleFlightCampaignTimelineDeliveryService
     batches: CampaignTimelineBatchDeliveryService
     query: CampaignTimelineQueryService
+    evidence_query: CampaignEvidenceQueryService
     operator: Agent4OperatorReadService
+    evidence_operator: Agent4OperatorEvidenceReadService
 
     def recover(self) -> CampaignRecoveryReport:
         """Explicitly run startup recovery; composition never calls it."""
@@ -195,6 +207,11 @@ def compose_agent4_runtime(
 
     checkpoint_store = JsonCheckpointStore(paths.checkpoints)
     timeline = JsonCampaignTimelineStore(paths.timeline)
+    evidence_records = JsonCampaignEvidenceRecordStore(paths.evidence)
+    evidence_recorder = CampaignEvidenceRecordService(
+        timeline=timeline,
+        records=evidence_records,
+    )
     event_recorder = TimelineCampaignEventRecorder(timeline)
     reconciliation = CampaignProjectionReconciler(
         repository=repository,
@@ -258,10 +275,16 @@ def compose_agent4_runtime(
         delivery_flights,
     )
     query = CampaignTimelineQueryService(timeline)
+    evidence_query = CampaignEvidenceQueryService(evidence_records)
     operator = Agent4OperatorReadService(
         scheduler=scheduler,
         timeline=timeline,
         query=query,
+    )
+    evidence_operator = Agent4OperatorEvidenceReadService(
+        scheduler=scheduler,
+        records=evidence_records,
+        query=evidence_query,
     )
 
     return Agent4RuntimeContext(
@@ -269,6 +292,8 @@ def compose_agent4_runtime(
         repository=repository,
         checkpoint_store=checkpoint_store,
         timeline=timeline,
+        evidence_records=evidence_records,
+        evidence_recorder=evidence_recorder,
         event_recorder=event_recorder,
         reconciliation=reconciliation,
         projections=projections,
@@ -286,5 +311,7 @@ def compose_agent4_runtime(
         guarded_delivery=guarded_delivery,
         batches=batches,
         query=query,
+        evidence_query=evidence_query,
         operator=operator,
+        evidence_operator=evidence_operator,
     )
