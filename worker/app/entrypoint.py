@@ -7,6 +7,8 @@ need direct route access may still import ``app.main:app``; process launchers mu
 use this module so parsing, streaming and scheduler lifecycle are guarded at the
 ASGI boundary.
 """
+import os
+
 from .agent3.cancellation_status import install_termination_contract
 from .agent3.production_mount import mount_agent3
 from .control_center_api import build_control_center_router
@@ -35,6 +37,18 @@ install_termination_contract(fastapi_app)
 # mount self-guards on KALIV_AGENT3_ENABLED (default off) and owns the complete
 # production surface; launchers do not add parallel routers.
 mount_agent3(fastapi_app)
+
+# Agent 4 must remain absent from a standard worker boot, including Python's
+# imported-module inventory. Only exact opt-in imports the mount implementation;
+# that implementation then requires the host's already composed A4-09 context
+# and fails closed rather than creating a parallel reader or dataroot.
+if os.getenv("KALIV_AGENT4_OPERATOR_API", "0") == "1":
+    from .agent4.production_mount import mount_agent4_operator
+
+    mount_agent4_operator(
+        fastapi_app,
+        getattr(fastapi_app.state, "agent4_runtime_context", None),
+    )
 
 # Web-research selvvagter paa KALIV_WEB_RESEARCH_ENABLED (default off) paa samme
 # maade. Flaget er en SEPARAT beslutning fra D6: D6 fastlagde politikken for
