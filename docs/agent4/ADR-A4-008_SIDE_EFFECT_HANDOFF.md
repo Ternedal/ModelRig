@@ -105,6 +105,60 @@ write-flader, før denne ADR's kontrakttests er beviste mod en rigtig
 Agent 3-adapter (mock-bevis er nødvendigt, men ikke tilstrækkeligt for
 aktivering).
 
+## Beslutning 9 — Resource reconciliation efter recovery
+
+A4-03-lease-kernen (`InMemoryResourceLeaseManager`) er bevidst
+process-local: et crash sletter alle leases, mens eksterne runtimes kan
+leve videre med de fysiske ressourcer. Outcome-viden genopretter derfor
+ikke ressourceejerskab.
+
+Markøren **`resource_reconciliation_required`** persisteres på kampagnens
+state, når recovery **ikke sikkert kan bevise, at ingen levende runtime
+holder ressourcer** — atomisk med recovery-opdateringen, via den
+eksisterende envelope-mekanik. Konkret pr. opslagssvar:
+
+- `accepted` eller `running`: markør sættes — runtimen er bevist levende.
+- `unknown`: markør sættes — runtimen **kan** være levende og holde
+  ressourcer; fravær kan ikke bevises. `unknown` beholder samtidig sin
+  uændrede execution-semantik fra Præcisering 1 (fail-closed, ingen
+  redispatch, operatorintervention); dette punkt ændrer alene
+  ressourcesikkerheden.
+- `not_dispatched`: ingen markør — svaret tombstoner samtidig id'et, og
+  ingen runtime er nogensinde accepteret.
+- `completed` eller `failed`: ingen markør. Et terminalt svar er
+  adapterens **autoritative attest** for, at runtimen er afsluttet og
+  ikke længere holder ressourcer — samme commitment-semantik som
+  tombstonen i Præcisering 1. En adapter, der ikke kan afgive den attest,
+  **skal** svare `unknown` i stedet; tvivl bliver dermed altid til en
+  markør.
+
+Ingen ny storage-klasse; barrieren afledes af markørerne og er ikke et
+separat globalt flag.
+
+Så længe mindst én kampagne bærer markøren, gælder en **global
+fail-closed dispatchbarriere** for resource-admission-stien:
+
+- ingen nye resource-admitted dispatches (entydig, fast fejl);
+- ingen automatisk lease-reacquire;
+- ingen automatisk redispatch eller cancel.
+
+Den almindelige scheduler uden resource admission er uberørt.
+
+Opløsning er altid en **eksplicit caller-/operatorhandling**, der
+dokumenterer én af tre grunde — ressourcerne er genetableret; runtimen er
+verificeret afsluttet (et terminalt opslagssvar må bruges som bevis);
+konflikten er manuelt håndteret — og fjerner markøren durable. Intet
+clearer markøren automatisk; heller ikke et terminalt
+`query_outcome`-svar i sig selv.
+
+**Fravalgt, med begrundelse:** (i) lease-rekonstruktion fra intent eller
+konfiguration — erklærede krav er ikke fysisk bevis for, hvad en levende
+runtime faktisk holder; (ii) durable leases med fencing tokens — en reel
+arkitekturudvidelse, der kræver sin egen ADR ved målt behov; (iii) en
+per-ressource-barriere — den kræver præcis den ejerskabsviden, som gik
+tabt med processen. Ingen polling, ingen tråde, ingen ny automatik;
+aktiveringsbetingelsen (Beslutning 8) står uændret over alle flag.
+
 ## Obligatoriske kontrakttests
 
 1. RUNNING-state og DISPATCH_REQUESTED-intent er atomiske: intet
@@ -132,6 +186,19 @@ aktivering).
     deterministisk dispatch_id; et tombstonet id genafsendes aldrig.
 13. `not_dispatched` udløser ingen automatisk redispatch — kun en
     caller-driven klar-markering.
+14. Recovery persisterer `resource_reconciliation_required` atomisk med
+    state-opdateringen ved `accepted`, `running` **og** `unknown` — og
+    testen beviser samtidig, at `not_dispatched` (tombstone, ingen
+    accepteret runtime) og terminale svar (adapterens attest) **ikke**
+    skaber markøren.
+15. Med mindst én markør til stede nægter resource-admission-stien alle
+    nye dispatches fail-closed med den faste fejl; den almindelige
+    scheduler uden resource admission er upåvirket.
+16. Ingen kaldevej fra recovery eller barrieren til lease-reacquire,
+    redispatch eller cancel (AST-/kaldegraf-bevist).
+17. Markøren fjernes kun gennem den eksplicitte opløsningsoperation med
+    dokumenteret grund, fjernelsen er durable, og et terminalt
+    opslagssvar alene clearer intet.
 
 ## Konsekvenser
 
@@ -166,3 +233,18 @@ negativ, og opslagsbaseret entydighed i test 2. `unknown`-semantikken er
 urørt: fail-closed, ingen redispatch, operatorintervention.
 Beslutning 5, Beslutning 6 og kontrakttest 2 ovenfor bærer præciseringen;
 kontrakttest 11–13 beviser den.
+
+## Præcisering 2 — resource reconciliation efter recovery
+
+**Besluttet af Anders 01/08-2026** efter Sols preflight-fund til
+slice-planen: ADR'en afgjorde execution-outcome, men ikke hvordan mistet
+ressourceejerskab håndteres efter et process-crash — A4-03-leases er
+process-local, så en levende ekstern runtime efterlader et tomt
+lease-kammer, og resource admission kunne overbooke riggen med nye
+dispatches. Anders skærpede reglen til princippet: markøren sættes, når
+recovery **ikke kan bevise** fravær af ressourcehold — dermed også ved
+`unknown`, hvis execution-semantik er uændret. Beslutning 9 og
+kontrakttest 14–17 ovenfor bærer præciseringen: en afledt, global
+fail-closed dispatchbarriere med caller-driven, dokumenteret opløsning —
+ingen durable leases, ingen fencing, ingen ny automatik.
+`not_dispatched`-semantikken fra Præcisering 1 er urørt.

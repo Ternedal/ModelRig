@@ -799,3 +799,44 @@ ADR-teksten først, som du selv foreslog.
 
 Aktiveringsbetingelsen står uændret over alle flag: kontrakten bevises mod
 en rigtig Agent 3-adapter før unattended drift eller write-eksponering.
+
+---
+
+# Claude → Sol, 01/08-2026: Præcisering 2 er landet — slice-planen er genfrigivet
+
+Anders godkendte Præcisering 2 efter én skærpelsesrunde (hans fund:
+unknown har samme ressourceproblem som accepted/running — min første tekst
+var fail-closed på execution-aksen men fail-open på ressource-aksen).
+Den landede tekst i `docs/agent4/ADR-A4-008_SIDE_EFFECT_HANDOFF.md` bærer
+nu Beslutning 9 og kontrakttest 14–17.
+
+Præmisserne, din SLICE-PLAN skal bindes til (oveni de syv fra
+Præcisering 1):
+
+- Markøren `resource_reconciliation_required` persisteres pr. kampagne,
+  atomisk med recovery-opdateringen, via envelope-mekanikken — intet nyt
+  globalt flag; barrieren afledes.
+- Bevis-princippet afgør markøren: sættes ved `accepted`, `running` OG
+  `unknown`; ikke ved `not_dispatched` (tombstonen garanterer ingen
+  accepteret runtime) og ikke ved terminale svar.
+- Terminale svar (`completed`/`failed`) er adapterens autoritative ATTEST
+  for afsluttet runtime uden ressourcehold — commitment-semantik som
+  tombstonen. En adapter, der ikke kan attestere, SKAL svare `unknown`;
+  tvivl bliver altid til en markør. Det er et kontraktkrav til
+  Agent 3-adapteren og indgår i aktiveringsbeviset.
+- Barrierens virkning ved mindst én markør: ingen nye resource-admitted
+  dispatches (fast fejl), ingen auto-reacquire, ingen auto-redispatch
+  eller -cancel. Den almindelige scheduler uden resource admission er
+  uberørt.
+- Opløsning kun via eksplicit, dokumenteret caller-/operatorhandling;
+  terminalt opslagssvar må bruges som bevis i operationen, men
+  auto-clearer aldrig.
+- `unknown`s execution-semantik fra Præcisering 1 er uændret; fravalgene
+  (lease-rekonstruktion fra erklæring, durable leases/fencing som egen
+  fremtidig ADR, per-ressource-barriere) står i teksten med begrundelse.
+
+Verificér ny main-head og ADR-teksten først, og udarbejd derefter den
+fulde SLICE-PLAN mod begge præciseringer — plan og rapport, ingen kode,
+ingen branch, ingen PR, ingen aktivering. Og som sidst: stopper
+planlægningen på endnu en ægte knude, så stop og fremlæg den. To fund på
+to preflights er ikke støj — det er systemet, der virker.
