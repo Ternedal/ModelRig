@@ -4,7 +4,7 @@ Agent 4 is the orchestration layer above the validated Agent 3 runtime. It owns
 campaign lifecycle coordination, durable orchestration state, recovery and
 operator-facing control. It does **not** change Agent 3 execution contracts.
 
-## Current milestone: dormant A4-01–A4-11 foundation
+## Current milestone: dormant A4-01–A4-12 foundation
 
 The package provides a dormant, standard-library-only orchestration foundation:
 
@@ -28,6 +28,8 @@ The package provides a dormant, standard-library-only orchestration foundation:
 - one explicit dormant composition of the complete B-reference object graph;
 - one live writer context per canonical dataroot in a process;
 - bounded transport-independent operator reads over that exact object graph;
+- first-class, directly addressable evidence records bound to validated
+  timeline heads;
 - protocols for repositories, executors, clocks, IDs and event delivery;
 - tests automatically discovered through the shared CI entrypoints.
 
@@ -49,6 +51,7 @@ Agent 4 uses its own namespace so it cannot collide with ModelRig roadmap tasks:
 9. `A4-09` — explicit dormant B-reference runtime composition.
 10. `A4-10` — bounded transport-independent operator reads.
 11. `A4-11` — authoritative state and reparable audit projection.
+12. `A4-12` — first-class evidence record chain.
 
 Retired aliases and provenance rules are documented only in
 `docs/AGENT_4_IDENTITY.md`.
@@ -81,6 +84,7 @@ worker/app/agent4/
 ├── timeline_batches.py
 ├── timeline_delivery.py
 ├── timeline_delivery_flights.py
+├── timeline_evidence.py
 ├── timeline_query.py
 └── timeline_recorder.py
 ```
@@ -90,6 +94,7 @@ worker/app/agent4/
 ```bash
 PYTHONPATH=worker python tests/worker_agent4_foundation.py
 PYTHONPATH=worker python tests/workflow_agent4_foundation.py
+PYTHONPATH=worker python tests/workflow_agent4_evidence_records.py
 ```
 
 ## Architectural boundary
@@ -142,6 +147,13 @@ retried idempotently. If append never happens, the pending intent survives and
 can be repaired through the explicit `reconcile_projections()` call. The
 reconciler never dispatches Agent 3 work and starts no cadence of its own.
 
+A4-12 adds a separate append-only evidence record chain following the same
+file-per-record B-storage model. Each record is directly addressable by
+`evidence_id`, binds to a validated A4-06 timeline head, and may point to one
+existing event. The sidecar chain deliberately leaves event sequences, delivery
+cursors, query cursors and A4-11 projections unchanged. It is written only by an
+explicit caller and is not mounted into the A4-09 runtime composition.
+
 See:
 
 - `docs/AGENT_4_A4_01_SCHEDULER.md`;
@@ -151,4 +163,5 @@ See:
 - `docs/AGENT_4_A4_08_BATCH_DELIVERY.md`;
 - `docs/AGENT_4_A4_09_COMPOSITION.md`;
 - `docs/AGENT_4_A4_10_OPERATOR_READ.md`;
+- `docs/AGENT_4_A4_12_EVIDENCE_RECORDS.md`;
 - `docs/agent4/ADR-A4-006_STATE_PROJECTION.md`.
