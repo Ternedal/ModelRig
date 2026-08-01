@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable
@@ -134,7 +134,13 @@ class ProtectedMemoryReader:
     @property
     def status(self) -> ProtectedMemoryReaderStatus:
         self._require_open()
-        return self._status
+        counts = self._protection_counts()
+        return replace(
+            self._status,
+            protected_rows=counts.get("protected", 0),
+            redacted_rows=counts.get("redacted", 0),
+            public_operational_rows=counts.get("plaintext", 0),
+        )
 
     def close(self) -> None:
         self._close_connection()
@@ -353,6 +359,21 @@ class ProtectedMemoryReader:
                 "memory database must be a non-empty regular file"
             )
 
+    def _protection_counts(self) -> dict[str, int]:
+        try:
+            rows = self._execute(
+                "SELECT protection_state,COUNT(*) AS count FROM agent_memories "
+                "GROUP BY protection_state"
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise ProtectedMemoryReadError(
+                "protected memory status could not be refreshed"
+            ) from exc
+        return {
+            str(row["protection_state"]): int(row["count"])
+            for row in rows
+        }
+
     def _validate_store(self) -> ProtectedMemoryReaderStatus:
         columns = {
             str(row[1]) for row in self._execute("PRAGMA table_info(agent_memories)")
@@ -427,13 +448,7 @@ class ProtectedMemoryReader:
             raise ProtectedMemoryReadError(
                 "public/operational memory contains partial protection metadata"
             )
-        counts = {
-            str(row["protection_state"]): int(row["count"])
-            for row in self._execute(
-                "SELECT protection_state,COUNT(*) AS count FROM agent_memories "
-                "GROUP BY protection_state"
-            ).fetchall()
-        }
+        counts = self._protection_counts()
         return ProtectedMemoryReaderStatus(
             schema=MIGRATION_SCHEMA,
             migration_id=MIGRATION_ID,
