@@ -51,6 +51,7 @@ _CLEAR_STATE_NAMES = _RESOURCE_STATE_NAMES + (
     "agent3_replanner",
     "agent3_read_review_store",
     "agent3_protected_memory_grant_db",
+    "agent3_planner_memory_context_provider",
     "agent3_replan_preview_service",
 )
 
@@ -191,8 +192,17 @@ def mount_agent3(
         app.state.agent3_protected_memory_reader = memory_surface.protected_reader
         app.state.agent3_protected_memory_writer = memory_surface.protected_writer
         app.state.agent3_protected_memory_grant_db = memory_surface.grant_db_path
+        app.state.agent3_planner_memory_context_provider = (
+            memory_surface.planner_context_provider
+        )
         app.state.agent3_planner_memory_enabled = (
             memory_surface.planner_memory_store is not None
+            or memory_surface.planner_context_provider is not None
+        )
+        app.state.agent3_planner_memory_mode = (
+            "protected-local"
+            if memory_surface.planner_context_provider is not None
+            else "legacy"
         )
 
         plan_store = PlanStore(str(plan_path))
@@ -226,6 +236,7 @@ def mount_agent3(
                 orchestrator=orchestrator,
                 plan_store=plan_store,
                 memory_store=memory_surface.planner_memory_store,
+                memory_context_provider=memory_surface.planner_context_provider,
                 capability_graph_provider=graph_provider,
             )
         )

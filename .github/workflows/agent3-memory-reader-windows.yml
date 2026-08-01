@@ -9,11 +9,13 @@ on:
       - "backend/internal/proxy/proxy.go"
       - "worker/app/agent3/memory_protected_api.py"
       - "worker/app/agent3/memory_protected_context.py"
+      - "worker/app/agent3/memory_protected_planner.py"
       - "worker/app/agent3/memory_protected_gateway.py"
       - "worker/app/agent3/memory_protected_reader.py"
       - "worker/app/agent3/memory_protected_writer.py"
       - "worker/app/agent3/memory_protected_leak_gate.py"
       - "worker/app/agent3/memory_surface.py"
+      - "worker/app/agent3/planner.py"
       - "worker/app/agent3/production_mount.py"
       - "worker/app/agent3/memory_protection.py"
       - "worker/app/agent3/memory_protection_migration.py"
@@ -21,6 +23,7 @@ on:
       - "tests/worker_agent3_memory_protected_context.py"
       - "tests/worker_agent3_memory_protected_context_dpapi.py"
       - "tests/worker_agent3_memory_protected_context_mount_gate.py"
+      - "tests/worker_agent3_memory_protected_planner.py"
       - "tests/worker_agent3_memory_protected_gateway.py"
       - "tests/worker_agent3_memory_protected_mount_gate.py"
       - "tests/worker_agent3_memory_store_path_separation.py"
@@ -39,11 +42,13 @@ on:
       - "backend/internal/proxy/proxy.go"
       - "worker/app/agent3/memory_protected_api.py"
       - "worker/app/agent3/memory_protected_context.py"
+      - "worker/app/agent3/memory_protected_planner.py"
       - "worker/app/agent3/memory_protected_gateway.py"
       - "worker/app/agent3/memory_protected_reader.py"
       - "worker/app/agent3/memory_protected_writer.py"
       - "worker/app/agent3/memory_protected_leak_gate.py"
       - "worker/app/agent3/memory_surface.py"
+      - "worker/app/agent3/planner.py"
       - "worker/app/agent3/production_mount.py"
       - "worker/app/agent3/memory_protection.py"
       - "worker/app/agent3/memory_protection_migration.py"
@@ -51,6 +56,7 @@ on:
       - "tests/worker_agent3_memory_protected_context.py"
       - "tests/worker_agent3_memory_protected_context_dpapi.py"
       - "tests/worker_agent3_memory_protected_context_mount_gate.py"
+      - "tests/worker_agent3_memory_protected_planner.py"
       - "tests/worker_agent3_memory_protected_gateway.py"
       - "tests/worker_agent3_memory_protected_mount_gate.py"
       - "tests/worker_agent3_memory_store_path_separation.py"
@@ -84,7 +90,7 @@ jobs:
         shell: pwsh
         run: go test ./internal/httpapi ./internal/proxy
         working-directory: backend
-      - name: Run protected gateway context API selection reader writer and leak gates against Windows DPAPI
+      - name: Run protected gateway planner context API selection reader writer and leak gates against Windows DPAPI
         shell: pwsh
         run: |
           $env:PYTHONDONTWRITEBYTECODE = "1"
@@ -95,6 +101,7 @@ jobs:
             "tests\worker_agent3_memory_protected_context.py",
             "tests\worker_agent3_memory_protected_context_dpapi.py",
             "tests\worker_agent3_memory_protected_context_mount_gate.py",
+            "tests\worker_agent3_memory_protected_planner.py",
             "tests\worker_agent3_memory_protected_gateway.py",
             "tests\worker_agent3_memory_protected_mount_gate.py",
             "tests\worker_agent3_memory_store_path_separation.py",
@@ -110,7 +117,7 @@ jobs:
             python $test *>> $log
             $status = $LASTEXITCODE
           }
-          Get-Content $log -Tail 620
+          Get-Content $log -Tail 700
           exit $status
       - name: Upload protected store failure log
         if: failure()

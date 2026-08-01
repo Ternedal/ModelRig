@@ -213,8 +213,10 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-selection-protected-") as ra
             "protected mode installs reader/writer and no legacy MemoryStore",
         )
         check(
-            app.state.agent3_planner_memory_enabled is False,
-            "legacy plaintext planner memory is deliberately disabled in protected mode",
+            app.state.agent3_planner_memory_enabled is True
+            and app.state.agent3_planner_memory_mode == "protected-local"
+            and app.state.agent3_planner_memory_context_provider is not None,
+            "protected mode mounts only the bounded local planner context provider",
         )
         check(
             Path(app.state.agent3_protected_memory_grant_db) == grant_path,
@@ -356,6 +358,8 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-selection-legacy-") as raw:
             app.state.agent3_memory_store_mode == "legacy"
             and type(app.state.agent3_memory_store).__name__ == "MemoryStore"
             and app.state.agent3_planner_memory_enabled is True
+            and app.state.agent3_planner_memory_mode == "legacy"
+            and app.state.agent3_planner_memory_context_provider is None
             and app.state.agent3_protected_memory_grant_db is None,
             "legacy mode retains existing store/planner and creates no grant ledger",
         )

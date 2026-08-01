@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from dataclasses import asdict, dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Protocol
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -22,7 +22,7 @@ from .core import (
     TurnRequest,
 )
 from .integration import Agent3PlanError, PlannedToolCall, V2ToolAdapter
-from .memory import MemoryStore
+from .memory import MemoryStore, MemoryStoreError
 from .memory_context import ContextTarget, MemoryContext, MemoryContextCompiler
 from .plan_store import PlanStore, PlanStoreError
 from .review_orchestrator import ReviewingAgent3Orchestrator
@@ -41,6 +41,20 @@ class PlanProposal:
 
 ChatFn = Callable[[list[dict], str | None], Awaitable[str]]
 CapabilityGraphProvider = Callable[[], CapabilityGraph]
+
+
+class PlannerMemoryContextProvider(Protocol):
+    """Server-owned source that applies egress policy before reading values."""
+
+    def compile(
+        self,
+        *,
+        subjects: list[str] | None,
+        target: ContextTarget,
+        allow_private_cloud: bool,
+        max_chars: int,
+        max_records: int,
+    ) -> MemoryContext: ...
 
 
 def _strip_code_fence(text: str) -> str:
@@ -187,8 +201,13 @@ def build_planner_router(
     plan_store: PlanStore | None = None,
     memory_store: MemoryStore | None = None,
     memory_compiler: MemoryContextCompiler | None = None,
+    memory_context_provider: PlannerMemoryContextProvider | None = None,
     capability_graph_provider: CapabilityGraphProvider | None = None,
 ) -> APIRouter:
+    if memory_store is not None and memory_context_provider is not None:
+        raise PlannerError(
+            "planner memory source is ambiguous: choose legacy store or context provider"
+        )
     router = APIRouter(prefix="/experimental/agent3", tags=["experimental-agent3"])
     planner = planner or TypedPlanner(adapter)
     plan_store = plan_store or PlanStore(":memory:")
@@ -242,26 +261,45 @@ def build_planner_router(
         memory_context = ""
         memory_receipt = _empty_memory_receipt(requested=req.use_memory)
         if req.use_memory:
-            if memory_store is None:
-                raise HTTPException(status_code=409, detail="memory planning is not mounted")
-            subjects = req.memory_subjects or None
-            # Retrieve a wider bounded candidate set, then let the compiler enforce
-            # the exact rendered prompt budget and target-specific privacy rules.
-            candidates = memory_store.context_records(
-                subjects=subjects,
-                include_private=True,
-                include_secret=False,
-                limit=min(max(req.memory_max_records * 4, 1), 200),
-                max_chars=200_000,
-            )
             target = ContextTarget.CLOUD if route.uses_cloud else ContextTarget.LOCAL
-            compiled = memory_compiler.compile(
-                candidates,
-                target=target,
-                allow_private_cloud=req.allow_private_cloud,
-                max_chars=req.memory_max_chars,
-                max_records=req.memory_max_records,
-            )
+            subjects = req.memory_subjects or None
+            try:
+                if memory_context_provider is not None:
+                    # The provider sees the target before it reads/decrypts any
+                    # value, so a local-only protected source can reject cloud
+                    # planning without creating a plaintext candidate set.
+                    compiled = memory_context_provider.compile(
+                        subjects=subjects,
+                        target=target,
+                        allow_private_cloud=req.allow_private_cloud,
+                        max_chars=req.memory_max_chars,
+                        max_records=req.memory_max_records,
+                    )
+                elif memory_store is not None:
+                    # Legacy compatibility path. Retrieve a wider bounded
+                    # candidate set, then let the compiler enforce exact prompt
+                    # budget and its existing target-specific privacy policy.
+                    candidates = memory_store.context_records(
+                        subjects=subjects,
+                        include_private=True,
+                        include_secret=False,
+                        limit=min(max(req.memory_max_records * 4, 1), 200),
+                        max_chars=200_000,
+                    )
+                    compiled = memory_compiler.compile(
+                        candidates,
+                        target=target,
+                        allow_private_cloud=req.allow_private_cloud,
+                        max_chars=req.memory_max_chars,
+                        max_records=req.memory_max_records,
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="memory planning is not mounted",
+                    )
+            except MemoryStoreError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
             memory_context = compiled.text
             memory_receipt = _memory_receipt(compiled)
 
