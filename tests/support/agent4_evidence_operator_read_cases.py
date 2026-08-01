@@ -47,7 +47,7 @@ class _Executor:
 
 class Agent4EvidenceOperatorReadTests(unittest.TestCase):
     @staticmethod
-    def _spec(campaign_id: str) -> CampaignSpec:
+    def _evidence_read_spec(campaign_id: str) -> CampaignSpec:
         return CampaignSpec(
             campaign_id=campaign_id,
             name=f"Campaign {campaign_id}",
@@ -56,7 +56,10 @@ class Agent4EvidenceOperatorReadTests(unittest.TestCase):
         )
 
     @staticmethod
-    def _reference(evidence_id: str, digest: str) -> CampaignEvidenceReference:
+    def _evidence_read_reference(
+        evidence_id: str,
+        digest: str,
+    ) -> CampaignEvidenceReference:
         return CampaignEvidenceReference(
             evidence_id=evidence_id,
             media_type="application/json",
@@ -104,13 +107,13 @@ class Agent4EvidenceOperatorReadTests(unittest.TestCase):
                 Path(directory)
             )
             campaign_id = "campaign-evidence-read"
-            context.scheduler.submit(self._spec(campaign_id))
+            context.scheduler.submit(self._evidence_read_spec(campaign_id))
             event = context.timeline.latest(campaign_id)
             self.assertIsNotNone(event)
             assert event is not None
             record = recorder.record(
                 campaign_id,
-                self._reference("report", "a" * 64),
+                self._evidence_read_reference("report", "a" * 64),
                 recorded_at=BASE_TIME + timedelta(minutes=1),
                 related_event_id=event.event.event_id,
             )
@@ -130,15 +133,15 @@ class Agent4EvidenceOperatorReadTests(unittest.TestCase):
                 Path(directory)
             )
             campaign_id = "campaign-evidence-page"
-            context.scheduler.submit(self._spec(campaign_id))
+            context.scheduler.submit(self._evidence_read_spec(campaign_id))
             first = recorder.record(
                 campaign_id,
-                self._reference("first", "a" * 64),
+                self._evidence_read_reference("first", "a" * 64),
                 recorded_at=BASE_TIME + timedelta(minutes=1),
             )
             second = recorder.record(
                 campaign_id,
-                self._reference("second", "b" * 64),
+                self._evidence_read_reference("second", "b" * 64),
                 recorded_at=BASE_TIME + timedelta(minutes=2),
             )
 
@@ -149,7 +152,7 @@ class Agent4EvidenceOperatorReadTests(unittest.TestCase):
 
             third = recorder.record(
                 campaign_id,
-                self._reference("third", "c" * 64),
+                self._evidence_read_reference("third", "c" * 64),
                 recorded_at=BASE_TIME + timedelta(minutes=3),
             )
             stable = operator.evidence_page(
@@ -176,10 +179,10 @@ class Agent4EvidenceOperatorReadTests(unittest.TestCase):
                 self._compose_evidence_read(Path(directory))
             )
             campaign_id = "campaign-cursor"
-            context.scheduler.submit(self._spec(campaign_id))
+            context.scheduler.submit(self._evidence_read_spec(campaign_id))
             record = recorder.record(
                 campaign_id,
-                self._reference("proof", "d" * 64),
+                self._evidence_read_reference("proof", "d" * 64),
                 recorded_at=BASE_TIME + timedelta(minutes=1),
             )
             cursor = query.cursor_at(campaign_id, 1)
