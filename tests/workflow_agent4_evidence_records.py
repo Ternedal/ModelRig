@@ -94,10 +94,7 @@ class Agent4EvidenceRecordTests(unittest.TestCase):
             self.assertEqual(second.sequence, 2)
             self.assertEqual(second.previous_hash, first.record_hash)
             self.assertEqual(second.timeline_head_hash, second_event.entry_hash)
-            self.assertEqual(
-                records.get("campaign-evidence", "report"),
-                first,
-            )
+            self.assertEqual(records.get("campaign-evidence", "report"), first)
             self.assertEqual(
                 records.list("campaign-evidence"),
                 (first, second),
@@ -310,7 +307,7 @@ class Agent4EvidenceRecordTests(unittest.TestCase):
             timeline = JsonCampaignTimelineStore(root / "timeline")
             records = JsonCampaignEvidenceRecordStore(root / "evidence")
             CampaignEvidenceRecordService(timeline=timeline, records=records)
-            self.assertFalse(root.exists())
+            self.assertEqual(list(root.iterdir()), [])
 
         with self.assertRaises(TypeError):
             CampaignEvidenceRecordService(
