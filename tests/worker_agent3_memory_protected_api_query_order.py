@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import hashlib
 import sys
 from pathlib import Path
 
@@ -77,12 +78,25 @@ def authorizer(request, action):
         principal="device:query-order",
         action=action,
         request_id=request_id,
+        method=request.method.upper(),
+        path=request.url.path,
+        query=request.url.query,
+        body_sha256=request.state.agent3_memory_body_sha256,
         issued_at=now - 1,
         expires_at=now + 30,
     )
 
 
 app = FastAPI()
+
+
+@app.middleware("http")
+async def bind_request_body(request, call_next):
+    body = await request.body()
+    request.state.agent3_memory_body_sha256 = hashlib.sha256(body).hexdigest()
+    return await call_next(request)
+
+
 app.include_router(
     build_protected_memory_router(
         reader,  # type: ignore[arg-type]
