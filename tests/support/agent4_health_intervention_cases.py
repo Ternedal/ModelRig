@@ -16,6 +16,9 @@ QUERY = Path(__file__).with_name("agent4_timeline_query_cases.py")
 BATCH = Path(__file__).with_name("agent4_timeline_batch_cases.py")
 COMPOSITION = Path(__file__).with_name("agent4_runtime_composition_cases.py")
 OPERATOR = Path(__file__).with_name("agent4_operator_read_cases.py")
+EVIDENCE_OPERATOR = Path(__file__).with_name(
+    "agent4_evidence_operator_read_cases.py"
+)
 PROJECTION = Path(__file__).with_name("agent4_projection_cases.py")
 REVIEW_REGRESSIONS = Path(__file__).with_name(
     "agent4_projection_review_regression_cases.py"
@@ -107,6 +110,10 @@ _query = _load(QUERY, "agent4_timeline_query_cases")
 _batch = _load(BATCH, "agent4_timeline_batch_cases")
 _composition = _load(COMPOSITION, "agent4_runtime_composition_cases")
 _operator = _load(OPERATOR, "agent4_operator_read_cases")
+_evidence_operator = _load(
+    EVIDENCE_OPERATOR,
+    "agent4_evidence_operator_read_cases",
+)
 _projection = _load(PROJECTION, "agent4_projection_cases")
 _review_regressions = _load(
     REVIEW_REGRESSIONS,
@@ -123,6 +130,7 @@ class Agent4HealthInterventionTests(
     _batch.Agent4TimelineBatchDeliveryTests,
     _composition.Agent4RuntimeCompositionTests,
     _operator.Agent4OperatorReadTests,
+    _evidence_operator.Agent4EvidenceOperatorReadTests,
     _projection.Agent4ProjectionTests,
     _review_regressions.Agent4ProjectionReviewRegressionTests,
 ):
