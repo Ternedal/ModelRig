@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import time
@@ -22,6 +23,7 @@ from .memory_protected_writer import (
 
 
 MAX_PROTECTED_MEMORY_API_BODY_BYTES = 64 * 1024
+_SHA256_HEX_LENGTH = hashlib.sha256().digest_size * 2
 
 
 class ProtectedMemoryApiAuthorizationError(MemoryStoreError):
@@ -40,16 +42,21 @@ class ProtectedMemoryApiAction(str, Enum):
 
 @dataclass(frozen=True)
 class ProtectedMemoryApiGrant:
-    """Request-bound proof produced by the authenticated gateway boundary.
+    """Full request-bound proof produced by the authenticated gateway boundary.
 
-    This is deliberately not a boolean. A caller must bind the principal, exact
-    action and request id to a short validity window. The router validates the
-    returned grant again and never accepts a string in place of an enum.
+    This is deliberately not a boolean. A caller must bind the principal,
+    exact action, request id, HTTP method, worker path, raw query and bounded
+    request-body digest to a short validity window. The router independently
+    validates every binding and never accepts a string in place of an action.
     """
 
     principal: str
     action: ProtectedMemoryApiAction
     request_id: str
+    method: str
+    path: str
+    query: str
+    body_sha256: str
     issued_at: float
     expires_at: float
 
@@ -100,6 +107,45 @@ def _request_id(request: Request) -> str:
     return value
 
 
+def _binding_text(
+    name: str,
+    value: object,
+    *,
+    maximum: int,
+    allow_empty: bool = False,
+) -> str:
+    if not isinstance(value, str):
+        raise ProtectedMemoryApiAuthorizationError(
+            f"protected memory grant {name} is invalid"
+        )
+    cleaned = value.strip()
+    if (
+        (not allow_empty and not cleaned)
+        or (value and cleaned != value)
+        or len(value) > maximum
+        or any(character in value for character in ("\x00", "\r", "\n"))
+    ):
+        raise ProtectedMemoryApiAuthorizationError(
+            f"protected memory grant {name} is invalid"
+        )
+    return value
+
+
+def _body_digest(value: object) -> str:
+    digest = _binding_text(
+        "body digest",
+        value,
+        maximum=_SHA256_HEX_LENGTH,
+    )
+    if len(digest) != _SHA256_HEX_LENGTH or any(
+        character not in "0123456789abcdef" for character in digest
+    ):
+        raise ProtectedMemoryApiAuthorizationError(
+            "protected memory grant body digest is invalid"
+        )
+    return digest
+
+
 def _authorize(
     request: Request,
     action: ProtectedMemoryApiAction,
@@ -136,6 +182,38 @@ def _authorize(
         raise ProtectedMemoryApiAuthorizationError(
             "protected memory grant request mismatch"
         )
+
+    method = _binding_text("method", grant.method, maximum=16)
+    path = _binding_text("path", grant.path, maximum=1_000)
+    query = _binding_text(
+        "query",
+        grant.query,
+        maximum=4_096,
+        allow_empty=True,
+    )
+    body_sha256 = _body_digest(grant.body_sha256)
+    if method != method.upper() or method != request.method.upper():
+        raise ProtectedMemoryApiAuthorizationError(
+            "protected memory grant method mismatch"
+        )
+    if path != request.url.path:
+        raise ProtectedMemoryApiAuthorizationError(
+            "protected memory grant path mismatch"
+        )
+    if query != request.url.query:
+        raise ProtectedMemoryApiAuthorizationError(
+            "protected memory grant query mismatch"
+        )
+    actual_body_sha256 = getattr(
+        request.state,
+        "agent3_memory_body_sha256",
+        None,
+    )
+    if _body_digest(actual_body_sha256) != body_sha256:
+        raise ProtectedMemoryApiAuthorizationError(
+            "protected memory grant body mismatch"
+        )
+
     if (
         isinstance(grant.issued_at, bool)
         or isinstance(grant.expires_at, bool)
@@ -273,6 +351,7 @@ def _required_finite_float_query(
 async def _validated_body(
     request: Request,
     model_type: type[ModelT],
+    grant: ProtectedMemoryApiGrant,
 ) -> ModelT:
     try:
         raw = await request.body()
@@ -284,6 +363,13 @@ async def _validated_body(
         raise ProtectedMemoryApiRequestError(
             "protected memory request body is outside the allowed size"
         )
+    if not hmac_compare_digest(
+        hashlib.sha256(raw).hexdigest(),
+        grant.body_sha256,
+    ):
+        raise ProtectedMemoryApiAuthorizationError(
+            "protected memory grant body mismatch"
+        )
     try:
         decoded = json.loads(raw)
         return model_type.model_validate(decoded)
@@ -291,6 +377,12 @@ async def _validated_body(
         raise ProtectedMemoryApiRequestError(
             "protected memory request body is invalid"
         ) from exc
+
+
+def hmac_compare_digest(left: str, right: str) -> bool:
+    return hashlib.sha256(left.encode("ascii")).digest() == hashlib.sha256(
+        right.encode("ascii")
+    ).digest()
 
 
 def _metadata_payload(record: MemoryRecord) -> dict[str, Any]:
@@ -420,7 +512,11 @@ def build_protected_memory_router(
     async def create_memory(request: Request) -> dict[str, Any]:
         try:
             authorized = grant(request, ProtectedMemoryApiAction.WRITE_PRIVATE)
-            req = await _validated_body(request, CreateProtectedMemoryReq)
+            req = await _validated_body(
+                request,
+                CreateProtectedMemoryReq,
+                authorized,
+            )
             record = writer.create(
                 access=MemoryWriteAccess.LOCAL_MANAGEMENT,
                 subject=req.subject,
@@ -506,7 +602,11 @@ def build_protected_memory_router(
     ) -> dict[str, Any]:
         try:
             authorized = grant(request, ProtectedMemoryApiAction.WRITE_PRIVATE)
-            req = await _validated_body(request, CorrectProtectedMemoryReq)
+            req = await _validated_body(
+                request,
+                CorrectProtectedMemoryReq,
+                authorized,
+            )
             current = visible(
                 reader.get(
                     memory_id,
