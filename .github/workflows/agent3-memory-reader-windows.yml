@@ -3,26 +3,70 @@ name: agent3-memory-protected-store-windows
 on:
   pull_request:
     paths:
+      - "backend/internal/httpapi/agent3.go"
+      - "backend/internal/httpapi/agent3_memory_grants.go"
+      - "backend/internal/httpapi/agent3_memory_grants_test.go"
+      - "backend/internal/proxy/proxy.go"
+      - "worker/app/agent3/memory_protected_api.py"
+      - "worker/app/agent3/memory_protected_context.py"
+      - "worker/app/agent3/memory_protected_planner.py"
+      - "worker/app/agent3/memory_protected_gateway.py"
       - "worker/app/agent3/memory_protected_reader.py"
       - "worker/app/agent3/memory_protected_writer.py"
-      - "worker/app/agent3/memory_protected_planner.py"
+      - "worker/app/agent3/memory_protected_leak_gate.py"
+      - "worker/app/agent3/memory_surface.py"
+      - "worker/app/agent3/planner.py"
+      - "worker/app/agent3/production_mount.py"
       - "worker/app/agent3/memory_protection.py"
       - "worker/app/agent3/memory_protection_migration.py"
+      - "tests/worker_agent3_memory_protected_api.py"
+      - "tests/worker_agent3_memory_protected_context.py"
+      - "tests/worker_agent3_memory_protected_context_dpapi.py"
+      - "tests/worker_agent3_memory_protected_context_mount_gate.py"
+      - "tests/worker_agent3_memory_protected_planner.py"
+      - "tests/worker_agent3_memory_protected_planner_dpapi.py"
+      - "tests/worker_agent3_memory_protected_gateway.py"
+      - "tests/worker_agent3_memory_protected_mount_gate.py"
+      - "tests/worker_agent3_memory_store_path_separation.py"
+      - "tests/worker_agent3_memory_store_selection.py"
       - "tests/worker_agent3_memory_protected_reader.py"
       - "tests/worker_agent3_memory_protected_writer.py"
-      - "tests/worker_agent3_memory_protected_planner_dpapi.py"
+      - "tests/worker_agent3_memory_protected_leak_surfaces.py"
+      - "tests/worker_agent3_memory_protected_leak_surfaces_dpapi.py"
       - ".github/workflows/agent3-memory-reader-windows.yml"
   push:
     branches: [main]
     paths:
+      - "backend/internal/httpapi/agent3.go"
+      - "backend/internal/httpapi/agent3_memory_grants.go"
+      - "backend/internal/httpapi/agent3_memory_grants_test.go"
+      - "backend/internal/proxy/proxy.go"
+      - "worker/app/agent3/memory_protected_api.py"
+      - "worker/app/agent3/memory_protected_context.py"
+      - "worker/app/agent3/memory_protected_planner.py"
+      - "worker/app/agent3/memory_protected_gateway.py"
       - "worker/app/agent3/memory_protected_reader.py"
       - "worker/app/agent3/memory_protected_writer.py"
-      - "worker/app/agent3/memory_protected_planner.py"
+      - "worker/app/agent3/memory_protected_leak_gate.py"
+      - "worker/app/agent3/memory_surface.py"
+      - "worker/app/agent3/planner.py"
+      - "worker/app/agent3/production_mount.py"
       - "worker/app/agent3/memory_protection.py"
       - "worker/app/agent3/memory_protection_migration.py"
+      - "tests/worker_agent3_memory_protected_api.py"
+      - "tests/worker_agent3_memory_protected_context.py"
+      - "tests/worker_agent3_memory_protected_context_dpapi.py"
+      - "tests/worker_agent3_memory_protected_context_mount_gate.py"
+      - "tests/worker_agent3_memory_protected_planner.py"
+      - "tests/worker_agent3_memory_protected_planner_dpapi.py"
+      - "tests/worker_agent3_memory_protected_gateway.py"
+      - "tests/worker_agent3_memory_protected_mount_gate.py"
+      - "tests/worker_agent3_memory_store_path_separation.py"
+      - "tests/worker_agent3_memory_store_selection.py"
       - "tests/worker_agent3_memory_protected_reader.py"
       - "tests/worker_agent3_memory_protected_writer.py"
-      - "tests/worker_agent3_memory_protected_planner_dpapi.py"
+      - "tests/worker_agent3_memory_protected_leak_surfaces.py"
+      - "tests/worker_agent3_memory_protected_leak_surfaces_dpapi.py"
       - ".github/workflows/agent3-memory-reader-windows.yml"
   workflow_dispatch:
 
@@ -32,29 +76,51 @@ permissions:
 jobs:
   protected-store-dpapi:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Run protected reader writer and planner against Windows DPAPI
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v6.1.0
+        with:
+          go-version-file: "backend/go.mod"
+      - name: Install exact worker API dependencies
+        shell: pwsh
+        run: python -m pip install -r worker\requirements.txt
+      - name: Validate protected gateway Go contract
+        shell: pwsh
+        run: go test ./internal/httpapi ./internal/proxy
+        working-directory: backend
+      - name: Run protected gateway planner context API selection reader writer and leak gates against Windows DPAPI
         shell: pwsh
         run: |
           $env:PYTHONDONTWRITEBYTECODE = "1"
           $env:PYTHONPATH = "worker"
           $log = Join-Path $env:RUNNER_TEMP "agent3-memory-protected-store.log"
-          python tests\worker_agent3_memory_protected_reader.py *> $log
-          $status = $LASTEXITCODE
-          if ($status -eq 0) {
-            python tests\worker_agent3_memory_protected_writer.py *>> $log
+          $tests = @(
+            "tests\worker_agent3_memory_protected_api.py",
+            "tests\worker_agent3_memory_protected_context.py",
+            "tests\worker_agent3_memory_protected_context_dpapi.py",
+            "tests\worker_agent3_memory_protected_context_mount_gate.py",
+            "tests\worker_agent3_memory_protected_planner.py",
+            "tests\worker_agent3_memory_protected_planner_dpapi.py",
+            "tests\worker_agent3_memory_protected_gateway.py",
+            "tests\worker_agent3_memory_protected_mount_gate.py",
+            "tests\worker_agent3_memory_store_path_separation.py",
+            "tests\worker_agent3_memory_store_selection.py",
+            "tests\worker_agent3_memory_protected_reader.py",
+            "tests\worker_agent3_memory_protected_writer.py",
+            "tests\worker_agent3_memory_protected_leak_surfaces.py",
+            "tests\worker_agent3_memory_protected_leak_surfaces_dpapi.py"
+          )
+          $status = 0
+          foreach ($test in $tests) {
+            if ($status -ne 0) { break }
+            python $test *>> $log
             $status = $LASTEXITCODE
           }
-          if ($status -eq 0) {
-            python tests\worker_agent3_memory_protected_planner_dpapi.py *>> $log
-            $status = $LASTEXITCODE
-          }
-          Get-Content $log -Tail 320
+          Get-Content $log -Tail 700
           exit $status
       - name: Upload protected store failure log
         if: failure()
