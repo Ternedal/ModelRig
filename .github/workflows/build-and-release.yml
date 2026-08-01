@@ -5,9 +5,9 @@ name: build-and-release
 # creates the underlying tag, which fires this same trigger).
 #
 # Removes the sandbox-toolchain dependency this project has had all along:
-# server tests, the Android APK, and now genuinely cross-platform desktop
-# jars (built natively on Windows/macOS/Linux runners -- something the
-# Linux-only build sandbox could never produce) all happen here instead.
+# server tests, the Android APK, and the Windows desktop artifact all happen
+# here instead. The release matrix is Windows + Android; determine-matrix
+# below documents that reduction honestly.
 on:
   push:
     tags:
