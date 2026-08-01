@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -63,10 +64,52 @@ def changed_files(base_sha: str, base_ref: str) -> list[str] | None:
         _run("git", "fetch", "--depth=1", "origin", base_sha)
     if _run("git", "cat-file", "-e", f"{base_sha}^{{commit}}").returncode != 0 and base_ref:
         _run("git", "fetch", "--depth=1", "origin", base_ref)
-    diff = _run("git", "diff", "--name-only", f"{base_sha}...HEAD")
+    # Tre-punktums-diff kræver en merge-base. Efter to uafhængige
+    # --depth=1-fetches FINDES der ingen fælles historik, så ``A...HEAD``
+    # fejler i CI's shallow checkout — det fældede alle PR'er (målt 01/08).
+    # I pull_request-events er HEAD merge-committen af PR'en ind i basen,
+    # så en DIREKTE diff mod base_sha giver præcis PR'ens fillist og
+    # kræver ingen merge-base.
+    diff = _run("git", "diff", "--name-only", base_sha, "HEAD")
+    if diff.returncode != 0:
+        diff = _run("git", "diff", "--name-only", f"{base_sha}...HEAD")
     if diff.returncode != 0:
         return None
     return [line.strip() for line in diff.stdout.splitlines() if line.strip()]
+
+
+def _selftest_shallow_disjoint_diff() -> tuple[bool, str]:
+    """Bevis: changed_files virker uden merge-base (CI's shallow-scenarie)."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        def g(*args: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                ("git", "-C", td, *args), capture_output=True, text=True, check=False
+            )
+
+        g("init", "-q")
+        g("config", "user.email", "gate@test")
+        g("config", "user.name", "gate")
+        pathlib.Path(td, "a.txt").write_text("base\n", encoding="utf-8")
+        g("add", "."); g("commit", "-qm", "base")
+        base = g("rev-parse", "HEAD").stdout.strip()
+        # Orphan-gren = ingen fælles historik med base — som to depth=1-fetches
+        g("checkout", "-q", "--orphan", "pr")
+        pathlib.Path(td, "worker").mkdir()
+        pathlib.Path(td, "worker", "b.txt").write_text("pr\n", encoding="utf-8")
+        g("add", "."); g("commit", "-qm", "pr-head")
+        cwd = os.getcwd()
+        try:
+            os.chdir(td)
+            files = changed_files(base, "")
+        finally:
+            os.chdir(cwd)
+        if files is None:
+            return False, "shallow/disjoint diff: fillisten kunne ikke afgøres"
+        if "worker/b.txt" not in files:
+            return False, f"shallow/disjoint diff: uventet fillist {files!r}"
+        return True, "shallow/disjoint diff afgøres uden merge-base"
 
 
 def evaluate_event() -> tuple[bool, str]:
@@ -117,6 +160,9 @@ def main() -> int:
         gaps = missing_requirements(body)
         check(f"sabotage fældes: {label}", len(gaps) == 1, f"(fandt: {gaps})")
     check("tom beskrivelse fælder alle tre", len(missing_requirements("")) == 3)
+
+    st_ok, st_msg = _selftest_shallow_disjoint_diff()
+    check(f"shallow-selvtest: {st_msg}", st_ok)
 
     ok, message = evaluate_event()
     check(f"live event: {message}", ok)
