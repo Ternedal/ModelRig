@@ -242,6 +242,20 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-api-") as tmp:
         grant_request = (
             "different-request" if mode["value"] == "wrong_request" else request_id
         )
+        grant_method = request.method.upper()
+        if mode["value"] == "wrong_method":
+            grant_method = "POST" if grant_method != "POST" else "GET"
+        grant_path = (
+            "/experimental/agent3/memory/different"
+            if mode["value"] == "wrong_path"
+            else request.url.path
+        )
+        grant_query = (
+            "different=1" if mode["value"] == "wrong_query" else request.url.query
+        )
+        grant_body_sha256 = request.state.agent3_memory_body_sha256
+        if mode["value"] == "wrong_body":
+            grant_body_sha256 = "0" * 64
         issued_at, expires_at = now - 1, now + 30
         if mode["value"] == "expired":
             issued_at, expires_at = now - 60, now - 1
@@ -257,11 +271,22 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-api-") as tmp:
             principal=principal,
             action=grant_action,
             request_id=grant_request,
+            method=grant_method,
+            path=grant_path,
+            query=grant_query,
+            body_sha256=grant_body_sha256,
             issued_at=issued_at,
             expires_at=expires_at,
         )
 
     app = FastAPI()
+
+    @app.middleware("http")
+    async def bind_request_body(request, call_next):
+        body = await request.body()
+        request.state.agent3_memory_body_sha256 = hashlib.sha256(body).hexdigest()
+        return await call_next(request)
+
     app.include_router(
         build_protected_memory_router(
             reader,
@@ -298,6 +323,10 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-api-") as tmp:
         ("wrong_action", "grant is bound to the exact API action"),
         ("blank_principal", "grant requires a canonical principal"),
         ("wrong_request", "grant is bound to the exact request id"),
+        ("wrong_method", "grant is bound to the exact HTTP method"),
+        ("wrong_path", "grant is bound to the exact worker path"),
+        ("wrong_query", "grant is bound to the exact raw query"),
+        ("wrong_body", "grant is bound to the exact bounded body digest"),
         ("expired", "expired grant is refused"),
         ("future", "future-dated grant is refused"),
         ("long_lived", "grant lifetime is capped"),
