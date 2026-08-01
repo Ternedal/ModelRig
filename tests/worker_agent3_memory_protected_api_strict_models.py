@@ -154,6 +154,7 @@ app.include_router(
 )
 client = TestClient(app)
 headers = {"X-Request-ID": "strict-model-001"}
+raw_headers = {**headers, "Content-Type": "application/json"}
 marker = "T033-STRICT-MODEL-MARKER-3f81"
 
 
@@ -195,6 +196,30 @@ for body, label in (
         f"{label} before protected writer create",
     )
 
+for token in ("NaN", "Infinity", "-Infinity"):
+    before = len(writer.create_calls)
+    raw_body = (
+        '{"subject":"Anders","predicate":"strict_create",'
+        '"value":"private value","kind":"fact",'
+        '"sensitivity":"private","confidence":0.75,'
+        f'"expires_at":{token}}}'
+    )
+    response = client.post(
+        "/experimental/agent3/memory",
+        headers=raw_headers,
+        content=raw_body,
+    )
+    check(
+        response.status_code == 422
+        and response.json() == {"detail": "protected memory request rejected"}
+        and token not in response.text,
+        f"create rejects non-finite expiration {token} without echo",
+    )
+    check(
+        len(writer.create_calls) == before,
+        f"create rejects non-finite expiration {token} before protected writer",
+    )
+
 base_correct = {
     "expected_updated_at": 20_000.0,
     "value": "corrected private value",
@@ -221,6 +246,31 @@ for body, label in (
         reader.get_calls == before_get
         and len(writer.correct_calls) == before_correct,
         f"{label} before protected reader or writer",
+    )
+
+for token in ("NaN", "Infinity", "-Infinity"):
+    before_get = reader.get_calls
+    before_correct = len(writer.correct_calls)
+    raw_body = (
+        '{"expected_updated_at":20000.0,'
+        '"value":"corrected private value","confidence":0.5,'
+        f'"expires_at":{token}}}'
+    )
+    response = client.post(
+        "/experimental/agent3/memory/memory-1/correct",
+        headers=raw_headers,
+        content=raw_body,
+    )
+    check(
+        response.status_code == 422
+        and response.json() == {"detail": "protected memory request rejected"}
+        and token not in response.text,
+        f"correct rejects non-finite expiration {token} without echo",
+    )
+    check(
+        reader.get_calls == before_get
+        and len(writer.correct_calls) == before_correct,
+        f"correct rejects non-finite expiration {token} before protected reader or writer",
     )
 
 valid_create = client.post(
