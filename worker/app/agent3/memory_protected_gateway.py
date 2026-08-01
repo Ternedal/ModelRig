@@ -450,6 +450,10 @@ class GatewayProtectedMemoryAuthorizer:
             principal=f"device:{device_id}",
             action=granted_action,
             request_id=request_id,
+            method=method,
+            path=path,
+            query=query,
+            body_sha256=body_sha256,
             issued_at=issued_at,
             expires_at=expires_at,
         )
