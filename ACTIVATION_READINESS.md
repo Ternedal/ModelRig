@@ -4,7 +4,7 @@
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
 **Version på main:** `1.58.147`
-**Genereret:** 2026-07-30 21:27 UTC
+**Genereret:** 2026-08-01 14:13 UTC
 
 ---
 
@@ -36,7 +36,7 @@ Hver probe bygger de RIGTIGE komponenter mod engangs-databaser og injicerer fejl
 | Samme occurrence kan ikke claimes to gange | ✅ | samme occurrence kan ikke claimes to gange |
 | Crash før kørsel: opgives og refunderes | ✅ | crash før kørsel: occurrence opgives og slot refunderes |
 | Crash efter kørsel: evidens holder budgettet brugt | ✅ | crash efter kørsel: audit-evidens holder budgettet brugt |
-| Pause efter claim stopper in-flight occurrence | ✅ | pause efter claim stopper in-flight occurrence og refunderes |
+| Pause efter claim stopper in-flight occurrence | ✅ | pause efter claim stopper in-flight occurrence og refunderer |
 | Budgetloft holder på tværs af claims | ✅ | max_runs kan ikke overskrides på tværs af claims |
 | Ukendt udfald: slot beholdes og granten pauses | ✅ | ukendt udfald: slot beholdes og granten pauses — max_runs kan ikke blive N+1 via crash |
 | Recovery respekterer en levende ejers lease | ✅ | recovery uden lease rører intet — en levende ejers in-flight claims kan ikke opgives |
