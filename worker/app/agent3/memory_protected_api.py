@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import math
 import time
@@ -209,7 +210,10 @@ def _authorize(
         "agent3_memory_body_sha256",
         None,
     )
-    if _body_digest(actual_body_sha256) != body_sha256:
+    if not hmac.compare_digest(
+        _body_digest(actual_body_sha256),
+        body_sha256,
+    ):
         raise ProtectedMemoryApiAuthorizationError(
             "protected memory grant body mismatch"
         )
@@ -363,7 +367,7 @@ async def _validated_body(
         raise ProtectedMemoryApiRequestError(
             "protected memory request body is outside the allowed size"
         )
-    if not hmac_compare_digest(
+    if not hmac.compare_digest(
         hashlib.sha256(raw).hexdigest(),
         grant.body_sha256,
     ):
@@ -377,12 +381,6 @@ async def _validated_body(
         raise ProtectedMemoryApiRequestError(
             "protected memory request body is invalid"
         ) from exc
-
-
-def hmac_compare_digest(left: str, right: str) -> bool:
-    return hashlib.sha256(left.encode("ascii")).digest() == hashlib.sha256(
-        right.encode("ascii")
-    ).digest()
 
 
 def _metadata_payload(record: MemoryRecord) -> dict[str, Any]:
