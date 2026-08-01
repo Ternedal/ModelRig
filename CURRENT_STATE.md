@@ -40,6 +40,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_AGENT3_TASK_WORKERS` | `2` |
 | `KALIV_AGENT3_VALIDATION_MAX_AGE_HOURS` | `(unset)` |
 | `KALIV_AGENT3_VALIDATION_REPORT` | `(unset)` |
+| `KALIV_AGENT4_OPERATOR_API` | `0` |
 | `KALIV_ALLOW_RAG_CLOUD` | `` |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` |
 | `KALIV_COMPUTER_USE` | `0` |
@@ -172,6 +173,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_workflow_receipt_integrity.py`
 - `tests/worker_agent4_checkpoints.py`
 - `tests/worker_agent4_foundation.py`
+- `tests/worker_agent4_operator_api.py`
 - `tests/worker_agent4_recovery.py`
 - `tests/worker_agent4_resources.py`
 - `tests/worker_agent4_scheduler_service.py`
