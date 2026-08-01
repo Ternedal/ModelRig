@@ -9,15 +9,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "worker"))
 
-from app.agent3.memory import MemoryStore  # noqa: E402
+from app.agent3.memory import MemoryStore, MemoryStoreError  # noqa: E402
 from app.agent3.memory_context import ContextTarget  # noqa: E402
 from app.agent3.memory_protected_planner import (  # noqa: E402
     ProtectedPlannerMemoryContextProvider,
 )
-from app.agent3.memory_protected_reader import (  # noqa: E402
-    ProtectedMemoryReadError,
-    ProtectedMemoryReader,
-)
+from app.agent3.memory_protected_reader import ProtectedMemoryReader  # noqa: E402
 from app.agent3.memory_protection import (  # noqa: E402
     KEY_SCOPE_CURRENT_USER,
     WINDOWS_PROVIDER,
@@ -47,7 +44,7 @@ def check(label: str, condition: object) -> None:
 def expect_refusal(label: str, fn, contains: str) -> None:
     try:
         fn()
-    except ProtectedMemoryReadError as exc:
+    except MemoryStoreError as exc:
         check(label, contains in str(exc))
     except Exception:
         check(label, False)
@@ -221,7 +218,7 @@ else:
                     max_chars=4_000,
                     max_records=25,
                 ),
-                "not accepted",
+                "cannot widen",
             )
             check(
                 "consent refusal performs zero real DPAPI opens",
