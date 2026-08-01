@@ -54,7 +54,9 @@ A4-12-storen.
 - `worker/app/agent4/operator_evidence.py`
   - `Agent4OperatorEvidenceReadService`
   - `CampaignEvidenceRecordNotFoundError`
-- `tests/workflow_agent4_evidence_operator_read.py`
+- `tests/support/agent4_evidence_operator_read_cases.py`
+  - indlæses af den eksisterende `workflow_agent4_foundation.py`-gate;
+  - opretter ikke et parallelt root-entrypoint eller nyt testinventar.
 
 ## Senere integration
 
