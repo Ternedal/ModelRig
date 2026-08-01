@@ -40,6 +40,10 @@ _PROTECTED_MEMORY_PREFIX = "/experimental/agent3/memory"
 ProviderFactory = Callable[[], MemoryProtectionProvider]
 
 
+class _ProtectedMemoryBodyTooLarge(Exception):
+    """The protected request exceeded the worker boundary's hard body cap."""
+
+
 @dataclass(frozen=True)
 class Agent3MemorySurface:
     mode: str
@@ -57,6 +61,34 @@ def _is_protected_memory_path(path: str) -> bool:
     )
 
 
+async def _cache_bounded_protected_body(request: Request) -> str:
+    declared = request.headers.get("content-length")
+    if declared and declared.isascii() and declared.isdecimal():
+        if int(declared, 10) > MEMORY_REQUEST_BODY_MAX_BYTES:
+            raise _ProtectedMemoryBodyTooLarge
+
+    buffered = bytearray()
+    digest = hashlib.sha256()
+    async for chunk in request.stream():
+        if len(buffered) + len(chunk) > MEMORY_REQUEST_BODY_MAX_BYTES:
+            raise _ProtectedMemoryBodyTooLarge
+        buffered.extend(chunk)
+        digest.update(chunk)
+
+    body = bytes(buffered)
+    # FastAPI's function middleware wraps this request in Starlette's cached
+    # request type. Populate the same body cache used by Request.body() so the
+    # bounded payload can be replayed downstream without touching receive again.
+    request._body = body
+    return digest.hexdigest()
+
+
+def _protected_boundary_response(status_code: int, detail: str) -> JSONResponse:
+    response = JSONResponse(status_code=status_code, content={"detail": detail})
+    response.headers[MEMORY_STORE_ATTESTATION_HEADER] = MEMORY_STORE_ATTESTATION_VALUE
+    return response
+
+
 def _install_protected_request_boundary(app: FastAPI) -> None:
     if getattr(app.state, "agent3_protected_memory_boundary_installed", False):
         return
@@ -66,26 +98,18 @@ def _install_protected_request_boundary(app: FastAPI) -> None:
         if not _is_protected_memory_path(request.url.path):
             return await call_next(request)
         try:
-            body = await request.body()
+            body_sha256 = await _cache_bounded_protected_body(request)
+        except _ProtectedMemoryBodyTooLarge:
+            return _protected_boundary_response(
+                413,
+                "protected memory request body is too large",
+            )
         except Exception:
-            response = JSONResponse(
-                status_code=400,
-                content={"detail": "protected memory request body could not be read"},
+            return _protected_boundary_response(
+                400,
+                "protected memory request body could not be read",
             )
-            response.headers[
-                MEMORY_STORE_ATTESTATION_HEADER
-            ] = MEMORY_STORE_ATTESTATION_VALUE
-            return response
-        if len(body) > MEMORY_REQUEST_BODY_MAX_BYTES:
-            response = JSONResponse(
-                status_code=413,
-                content={"detail": "protected memory request body is too large"},
-            )
-            response.headers[
-                MEMORY_STORE_ATTESTATION_HEADER
-            ] = MEMORY_STORE_ATTESTATION_VALUE
-            return response
-        request.state.agent3_memory_body_sha256 = hashlib.sha256(body).hexdigest()
+        request.state.agent3_memory_body_sha256 = body_sha256
         response = await call_next(request)
         response.headers[MEMORY_STORE_ATTESTATION_HEADER] = (
             MEMORY_STORE_ATTESTATION_VALUE
