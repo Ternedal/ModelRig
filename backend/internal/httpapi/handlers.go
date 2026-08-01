@@ -204,7 +204,7 @@ func (s *server) handleModelsPull(w http.ResponseWriter, r *http.Request) {
 	// -- showed "Færdig" for a model that was never installed (audit 1.58.36
 	// #7). Two hours is a deliberate ceiling, not "no timeout": a wedged pull
 	// still ends, and a client disconnect cancels via r.Context() before that.
-	s.Ollama.WithTimeout(2 * time.Hour).Forward(w, r, "/api/pull")
+	s.Ollama.WithTimeout(2*time.Hour).Forward(w, r, "/api/pull")
 }
 
 // handleModelsDelete proxies model removal (DELETE /api/delete, body

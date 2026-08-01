@@ -80,10 +80,10 @@ func TestControlCenterStatusProxyStampsAndValidates(t *testing.T) {
 
 func TestControlCenterStatusProxyFailsClosed(t *testing.T) {
 	tests := []struct {
-		name    string
-		status  int
-		body    string
-		worker  bool
+		name   string
+		status int
+		body   string
+		worker bool
 	}{
 		{name: "missing worker", worker: false},
 		{name: "upstream error", worker: true, status: http.StatusInternalServerError, body: `secret worker failure`},

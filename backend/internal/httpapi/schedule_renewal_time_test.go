@@ -31,7 +31,7 @@ func TestScheduleRenewalApprovalInheritsPersistedTimeTerms(t *testing.T) {
 					"tool": "note_append", "args": map[string]any{"text": "persisted"},
 					"cadence": "daily:02:30", "timezone": "America/New_York",
 					"misfire_policy": "run_once", "requires_approval": true,
-					"action_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+					"action_fingerprint":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 					"approval_fingerprint": fingerprint, "ttl_days": 60,
 					"max_runs": 2, "enable": &enable,
 				},

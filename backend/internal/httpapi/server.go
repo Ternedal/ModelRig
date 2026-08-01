@@ -112,6 +112,19 @@ func (s *server) routes() {
 	s.mux.Handle("POST /api/v1/voice/converse", s.authMW(http.HandlerFunc(s.handleVoiceConverse)))
 	s.mux.Handle("POST /api/v1/voice/converse/stream", s.authMW(http.HandlerFunc(s.handleVoiceConverseStream)))
 
+	// Agent 4 operator reads (ADR-A4-007): default-off, GET-only, proxied to
+	// the loopback worker, and additionally gated by the explicit per-device
+	// ``agent4:read`` grant inside the handler. Same env switch as the worker
+	// mount, so one flag governs both processes.
+	if os.Getenv("KALIV_AGENT4_OPERATOR_API") == "1" {
+		s.mux.Handle("GET /api/v1/experimental/agent4/operator/campaigns", s.authMW(http.HandlerFunc(s.handleAgent4OperatorRead)))
+		s.mux.Handle("GET /api/v1/experimental/agent4/operator/campaigns/{id}", s.authMW(http.HandlerFunc(s.handleAgent4OperatorRead)))
+		s.mux.Handle("GET /api/v1/experimental/agent4/operator/campaigns/{id}/timeline", s.authMW(http.HandlerFunc(s.handleAgent4OperatorRead)))
+		s.mux.Handle("GET /api/v1/experimental/agent4/operator/campaigns/{id}/evidence", s.authMW(http.HandlerFunc(s.handleAgent4OperatorRead)))
+		s.mux.Handle("GET /api/v1/experimental/agent4/operator/campaigns/{id}/evidence/verification", s.authMW(http.HandlerFunc(s.handleAgent4OperatorRead)))
+		s.mux.Handle("GET /api/v1/experimental/agent4/operator/campaigns/{id}/evidence/{evidenceID}", s.authMW(http.HandlerFunc(s.handleAgent4OperatorRead)))
+	}
+
 	// Agent 3.0 is deliberately absent from the normal API surface unless the
 	// operator opts into the experimental worker and backend together. Even when
 	// enabled, every route remains behind the same Bearer-token middleware.

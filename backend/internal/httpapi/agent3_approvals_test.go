@@ -43,7 +43,7 @@ func (s *approvalWorkerState) handler(w http.ResponseWriter, r *http.Request) {
 				"id": s.runID, "state": "waiting_confirmation", "current_step": 0,
 				"steps": []any{map[string]any{
 					"id": s.stepID, "tool": s.tool, "args": s.args, "risk": "write",
-					"confirmation_digest": s.digest,
+					"confirmation_digest":     s.digest,
 					"confirmation_expires_at": float64(time.Now().Add(90 * time.Second).Unix()),
 				}},
 			},

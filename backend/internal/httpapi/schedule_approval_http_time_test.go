@@ -51,10 +51,10 @@ func TestScheduleCreateApprovalForwardsAndMatchesTimeTerms(t *testing.T) {
 			}
 			writeJSON(w, http.StatusOK, map[string]any{
 				"schedule": map[string]any{
-					"schedule_id":     "t017newyork",
-					"timezone":        "America/New_York",
-					"misfire_policy":  "run_once",
-					"due_at_local":    "2026-07-22T02:30:00-04:00",
+					"schedule_id":    "t017newyork",
+					"timezone":       "America/New_York",
+					"misfire_policy": "run_once",
+					"due_at_local":   "2026-07-22T02:30:00-04:00",
 				},
 				"executed": false,
 			})
@@ -98,14 +98,14 @@ func TestScheduleCreateApprovalForwardsAndMatchesTimeTerms(t *testing.T) {
 	}
 
 	baseCreate := map[string]any{
-		"tool":            "note_append",
-		"args":            map[string]any{"text": "New York HTTP"},
-		"cadence":         "daily:02:30",
-		"timezone":        "America/New_York",
-		"misfire_policy":  "run_once",
-		"ttl_days":        30,
-		"max_runs":        3,
-		"approval_token":  approvalResp.ApprovalToken,
+		"tool":           "note_append",
+		"args":           map[string]any{"text": "New York HTTP"},
+		"cadence":        "daily:02:30",
+		"timezone":       "America/New_York",
+		"misfire_policy": "run_once",
+		"ttl_days":       30,
+		"max_runs":       3,
+		"approval_token": approvalResp.ApprovalToken,
 	}
 	for name, mutate := range map[string]func(map[string]any){
 		"timezone": func(body map[string]any) { body["timezone"] = "Europe/Copenhagen" },
@@ -156,7 +156,7 @@ func TestScheduleCreateApprovalNormalizesLegacyTimeDefaults(t *testing.T) {
 				"tool": "note_append", "args": map[string]any{"text": "legacy"},
 				"cadence": "daily:08:00", "timezone": "Europe/Copenhagen",
 				"misfire_policy": "run_once", "requires_approval": true,
-				"action_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"action_fingerprint":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 				"approval_fingerprint": fingerprint, "ttl_days": 30,
 				"max_runs": 1, "enable": &enable,
 			},

@@ -16,6 +16,21 @@ type Device struct {
 	TokenHash string    `json:"token_hash"` // hex(sha256(token))
 	CreatedAt time.Time `json:"created_at"`
 	LastSeen  time.Time `json:"last_seen"`
+	// Grants are explicit per-device authorizations (ADR-A4-007). Absent or
+	// empty means no grants: every scope is default-deny, also for devices
+	// paired before this field existed. Granting is an explicit operator
+	// action; nothing mints grants automatically.
+	Grants []string `json:"grants,omitempty"`
+}
+
+// HasGrant reports whether the device carries the named grant.
+func (d Device) HasGrant(name string) bool {
+	for _, g := range d.Grants {
+		if g == name {
+			return true
+		}
+	}
+	return false
 }
 
 // Pairing is a pending, single-use pairing code.
