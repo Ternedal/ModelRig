@@ -114,10 +114,12 @@ class FakeWriter:
 reader = FakeReader()
 writer = FakeWriter()
 now = 10_000.0
+authorizer_actions: list[ProtectedMemoryApiAction] = []
 
 
 def authorizer(request, action):
     request_id = request.headers.get("X-Request-ID", "")
+    authorizer_actions.append(action)
     return ProtectedMemoryApiGrant(
         principal="device:strict-model",
         action=action,
@@ -232,8 +234,12 @@ check(
     "strict correction preserves canonical numeric values",
 )
 check(
-    all(action is ProtectedMemoryApiAction.WRITE_PRIVATE for _, action in []),
-    "strict-model fixture introduces no alternate action type",
+    bool(authorizer_actions)
+    and all(
+        action is ProtectedMemoryApiAction.WRITE_PRIVATE
+        for action in authorizer_actions
+    ),
+    "strict-model requests retain the typed write-private authorization action",
 )
 
 print(
