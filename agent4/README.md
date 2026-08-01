@@ -99,8 +99,11 @@ worker/app/agent4/
 PYTHONPATH=worker python tests/worker_agent4_foundation.py
 PYTHONPATH=worker python tests/workflow_agent4_foundation.py
 PYTHONPATH=worker python tests/workflow_agent4_evidence_records.py
-PYTHONPATH=worker python tests/workflow_agent4_evidence_operator_read.py
 ```
+
+A4-13's cases live under `tests/support/` and are loaded by the existing
+`workflow_agent4_foundation.py` root gate. They do not create a parallel CI
+entrypoint.
 
 ## Architectural boundary
 
