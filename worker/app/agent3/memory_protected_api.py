@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, TypeVar
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError
 
 from .memory import MemoryConflict, MemoryNotFound, MemoryRecord, MemoryStoreError
@@ -173,6 +173,99 @@ def _authorize(
     return grant
 
 
+def _query_value(
+    request: Request,
+    name: str,
+    *,
+    default: str | None = None,
+    required: bool = False,
+) -> str | None:
+    values = request.query_params.getlist(name)
+    if len(values) > 1:
+        raise ProtectedMemoryApiRequestError(
+            "protected memory query parameter is repeated"
+        )
+    if not values:
+        if required:
+            raise ProtectedMemoryApiRequestError(
+                "protected memory query parameter is required"
+            )
+        return default
+    return values[0]
+
+
+def _int_query(
+    request: Request,
+    name: str,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    raw = _query_value(request, name)
+    if raw is None:
+        return default
+    if not raw or raw.strip() != raw or not raw.isascii() or not raw.isdecimal():
+        raise ProtectedMemoryApiRequestError(
+            "protected memory integer query parameter is invalid"
+        )
+    try:
+        value = int(raw, 10)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ProtectedMemoryApiRequestError(
+            "protected memory integer query parameter is invalid"
+        ) from exc
+    if not minimum <= value <= maximum:
+        raise ProtectedMemoryApiRequestError(
+            "protected memory integer query parameter is outside the allowed range"
+        )
+    return value
+
+
+def _bool_query(
+    request: Request,
+    name: str,
+    *,
+    default: bool,
+) -> bool:
+    raw = _query_value(request, name)
+    if raw is None:
+        return default
+    normalized = raw.casefold()
+    if normalized in {"1", "true", "on", "yes"}:
+        return True
+    if normalized in {"0", "false", "off", "no"}:
+        return False
+    raise ProtectedMemoryApiRequestError(
+        "protected memory boolean query parameter is invalid"
+    )
+
+
+def _required_finite_float_query(
+    request: Request,
+    name: str,
+    *,
+    minimum: float,
+) -> float:
+    raw = _query_value(request, name, required=True)
+    assert raw is not None
+    if not raw or raw.strip() != raw:
+        raise ProtectedMemoryApiRequestError(
+            "protected memory numeric query parameter is invalid"
+        )
+    try:
+        value = float(raw)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ProtectedMemoryApiRequestError(
+            "protected memory numeric query parameter is invalid"
+        ) from exc
+    if not math.isfinite(value) or value < minimum:
+        raise ProtectedMemoryApiRequestError(
+            "protected memory numeric query parameter is invalid"
+        )
+    return value
+
+
 async def _validated_body(
     request: Request,
     model_type: type[ModelT],
@@ -282,17 +375,29 @@ def build_protected_memory_router(
             _raise(exc)
 
     @router.get("")
-    def list_memories(
-        request: Request,
-        subject: str | None = None,
-        predicate: str | None = None,
-        review_status: str | None = None,
-        lifecycle_status: str | None = "active",
-        include_expired: bool = False,
-        limit: int = Query(default=100, ge=1, le=500),
-    ) -> dict[str, Any]:
+    def list_memories(request: Request) -> dict[str, Any]:
         try:
             grant(request, ProtectedMemoryApiAction.READ_METADATA)
+            subject = _query_value(request, "subject")
+            predicate = _query_value(request, "predicate")
+            review_status = _query_value(request, "review_status")
+            lifecycle_status = _query_value(
+                request,
+                "lifecycle_status",
+                default="active",
+            )
+            include_expired = _bool_query(
+                request,
+                "include_expired",
+                default=False,
+            )
+            limit = _int_query(
+                request,
+                "limit",
+                default=100,
+                minimum=1,
+                maximum=500,
+            )
             records = reader.list(
                 access=MemoryReadAccess.METADATA_ONLY,
                 subject=subject,
@@ -331,13 +436,18 @@ def build_protected_memory_router(
 
     # Static route must be registered before /{memory_id}.
     @router.get("/search")
-    def search_memories(
-        request: Request,
-        q: str,
-        limit: int = Query(default=50, ge=1, le=200),
-    ) -> dict[str, Any]:
+    def search_memories(request: Request) -> dict[str, Any]:
         try:
             grant(request, ProtectedMemoryApiAction.READ_METADATA)
+            q = _query_value(request, "q", required=True)
+            assert q is not None
+            limit = _int_query(
+                request,
+                "limit",
+                default=50,
+                minimum=1,
+                maximum=200,
+            )
             records = reader.search_metadata(
                 q,
                 access=MemoryReadAccess.METADATA_ONLY,
@@ -421,10 +531,14 @@ def build_protected_memory_router(
     def delete_memory(
         memory_id: str,
         request: Request,
-        expected_updated_at: float = Query(ge=0.0),
     ) -> dict[str, Any]:
         try:
             grant(request, ProtectedMemoryApiAction.WRITE_PRIVATE)
+            expected_updated_at = _required_finite_float_query(
+                request,
+                "expected_updated_at",
+                minimum=0.0,
+            )
             current = visible(
                 reader.get(
                     memory_id,
