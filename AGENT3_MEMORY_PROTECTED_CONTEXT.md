@@ -1,53 +1,78 @@
 # T-033 protected local memory context
 
-**Status:** dormant local-only compiler boundary. The protected store can be selected by the landed authenticated gateway/store slice, but this compiler is not injected into production startup, planner routes, normal chat or any API surface.
+**Status:** conditionally mounted planner-only boundary. The protected store can
+be selected only behind the global Agent 3 feature flag and exact `protected`
+store mode. The compiler is injected into the planner through one reviewed
+adapter; it is not exposed through normal chat, a preview API, outcome paths or
+cloud routing.
 
 ## Privacy contract
 
-`ProtectedMemoryContextCompiler` accepts only `ContextTarget.LOCAL`. A cloud target is rejected before the reader decrypts any envelope, and there is no private-cloud override.
+`ProtectedMemoryContextCompiler` accepts only `ContextTarget.LOCAL`. A cloud
+target is rejected before the reader decrypts any envelope, and there is no
+private-cloud override.
 
 The compiler:
 
 - requires a real `ProtectedMemoryReader` opened against a completed migration;
 - requests exact `MemoryReadAccess.LOCAL_CONTEXT`;
 - filters secret rows in SQL before decryption;
-- bounds candidate reads to a 1–8 multiplier, at most 200 rows and 50,000 candidate characters;
+- bounds candidate reads to a multiplier of the final request, never more than
+  200 rows or 50,000 candidate characters;
 - separately bounds final output to at most 50 records and 12,000 characters;
 - accepts only active, confirmed, unexpired public/operational/private records;
-- fails closed on secret sensitivity, source provenance, duplicate identity or unsupported state;
+- fails closed on secret sensitivity, source provenance, duplicate identity or
+  unsupported state;
 - reuses the existing untrusted-memory JSON renderer and markup escaping;
-- returns a plaintext-free receipt containing IDs, counts, target, character count and SHA-256 only;
-- always reports `secret_included=false`, `source_provenance_included=false` and `production_activation=false`.
+- returns plaintext-free receipt data containing IDs, counts, target, character
+  count and SHA-256 only;
+- never performs migration, fallback, remote disclosure or value search.
 
-A zero character or record budget returns an empty local context without opening an envelope.
+A zero character or record budget returns an empty local context without opening
+an envelope.
 
-## Dormancy contract
+## Planner promotion contract
 
-The module declares:
+The planner adapter declares:
 
-- `PROTECTED_CONTEXT_BOUNDARY = "dormant-local-only"`;
-- `PRODUCTION_MOUNT = False`;
-- `CLOUD_CONTEXT_ALLOWED = False`.
+- `PROTECTED_PLANNER_CONTEXT_CONTRACT = "kaliv-agent3-protected-planner-context/v1"`;
+- `CLOUD_CONTEXT_ALLOWED = False`;
+- `LEGACY_STORE_FALLBACK = False`;
+- an exact candidate multiplier of two.
 
-A dedicated static mutation gate verifies those markers and rejects imports from `production_mount.py`, `memory_surface.py`, `planner.py` or outcome boundaries. Promotion therefore requires a separate reviewed slice rather than a silent import.
+The authorized composition chain is:
+
+1. `memory_surface.py` validates and opens the protected reader/writer;
+2. it constructs `ProtectedPlannerMemoryContextProvider` over that same reader;
+3. `production_mount.py` passes the neutral provider into `build_planner_router`;
+4. the planner resolves its route before asking the provider to compile memory.
+
+Direct imports from planner, production mount or outcome modules into the
+protected compiler are rejected by a static mutation gate. Protected and legacy
+planner sources cannot be configured simultaneously.
 
 ## Adversarial coverage
 
-The repository and Windows fixtures prove:
+Repository and Windows fixtures prove:
 
 - private values may enter only the local untrusted-data block;
-- secret, pending, unrelated-subject and source-provenance markers never appear;
-- candidate decryption is bounded before final rendering;
+- secret, pending, expired, superseded, unrelated-subject and provenance markers
+  never enter the prompt;
+- candidate decryption and final rendering are independently bounded;
 - prompt/markup-looking values remain escaped JSON data;
-- receipts contain hashes and identifiers, never protected plaintext;
-- cloud refusal performs zero envelope opens;
-- duplicate/non-canonical subjects, invalid budgets and a closed reader fail closed;
-- real current-user Windows DPAPI can reopen a private value locally while keeping secret and provenance markers out of context and receipt.
+- receipts and plan persistence contain hashes and identifiers, never protected
+  plaintext;
+- cloud routing and private-cloud consent fail before decrypt and before the
+  planner model call;
+- real current-user Windows DPAPI can reopen eligible private values locally;
+- legacy mode remains unchanged and protected mode mounts no legacy context
+  preview or plaintext planner store.
 
 ## Deliberate remaining boundaries
 
-- no planner or production-mount injection;
-- no remote context-preview, cloud memory, secret reveal, embeddings or outcome injection;
-- no automatic migration, key rotation, backup/restore operation, release or production activation;
-- legacy remains the default store mode;
-- protected planner memory remains disabled by the landed mount contract.
+- no remote context preview, secret reveal, embeddings or outcome injection;
+- no automatic migration, key rotation, backup/restore operation or recovery
+  bypass;
+- no normal-chat routing change;
+- no release, physical-rig proof or production-readiness claim;
+- `legacy` remains the default store mode.

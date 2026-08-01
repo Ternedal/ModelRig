@@ -21,6 +21,7 @@ from .memory_protected_gateway import (
     protected_memory_grant_db,
     protected_memory_secret,
 )
+from .memory_protected_planner import ProtectedPlannerMemoryContextProvider
 from .memory_protected_reader import ProtectedMemoryReader
 from .memory_protected_writer import ProtectedMemoryWriter
 from .memory_protection import (
@@ -31,8 +32,10 @@ from .memory_protection import (
 
 
 PROTECTED_MEMORY_MOUNT_CONTRACT = "kaliv-agent3-protected-memory-mount/v1"
+PROTECTED_PLANNER_MOUNT_CONTRACT = "kaliv-agent3-protected-planner-mount/v1"
 AUTOMATIC_MIGRATION = False
 PROTECTED_TO_LEGACY_FALLBACK = False
+PROTECTED_PLANNER_CLOUD_ALLOWED = False
 _PROTECTED_MEMORY_PREFIX = "/experimental/agent3/memory"
 ProviderFactory = Callable[[], MemoryProtectionProvider]
 
@@ -44,6 +47,7 @@ class Agent3MemorySurface:
     protected_reader: ProtectedMemoryReader | None
     protected_writer: ProtectedMemoryWriter | None
     planner_memory_store: MemoryStore | None
+    planner_context_provider: ProtectedPlannerMemoryContextProvider | None
     grant_db_path: Path | None
 
 
@@ -103,8 +107,9 @@ def mount_memory_surface(
     Empty/``legacy`` preserves the historical plaintext routes and planner
     source. Exact ``protected`` validates the shared grant material, completed
     migration, provider/key scope and separate durable replay ledger before the
-    protected router becomes visible. A protected failure is propagated; this
-    function never catches it to instantiate ``MemoryStore``.
+    protected router becomes visible. It also creates the exact local-only
+    planner adapter over the same validated reader. A protected failure is
+    propagated; this function never catches it to instantiate ``MemoryStore``.
     """
 
     mode = memory_store_mode()
@@ -119,6 +124,7 @@ def mount_memory_surface(
             protected_reader=None,
             protected_writer=None,
             planner_memory_store=store,
+            planner_context_provider=None,
             grant_db_path=None,
         )
 
@@ -138,11 +144,13 @@ def mount_memory_surface(
     codec = MemoryProtectionCodec(provider)
     reader: ProtectedMemoryReader | None = None
     writer: ProtectedMemoryWriter | None = None
+    planner_context_provider: ProtectedPlannerMemoryContextProvider | None = None
     try:
         # Reader and writer independently require a completed migration and a
         # matching provider/key scope. No migrator is imported or invoked here.
         reader = ProtectedMemoryReader(memory, codec)
         writer = ProtectedMemoryWriter(memory, codec)
+        planner_context_provider = ProtectedPlannerMemoryContextProvider(reader)
         authorizer = GatewayProtectedMemoryAuthorizer(
             signing_material,
             replay_ledger=ProtectedMemoryGrantReplayLedger(replay_path),
@@ -167,9 +175,9 @@ def mount_memory_surface(
         legacy_store=None,
         protected_reader=reader,
         protected_writer=writer,
-        # The legacy planner compiler expects plaintext MemoryStore rows. A
-        # separate bounded local protected compiler is required before this can
-        # become non-None.
+        # Protected planning never reopens or emulates the legacy plaintext
+        # store. It receives only the exact local-only context provider.
         planner_memory_store=None,
+        planner_context_provider=planner_context_provider,
         grant_db_path=replay_path,
     )

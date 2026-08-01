@@ -16,9 +16,9 @@ verifies them before exposing the metadata-only API delivered by #296.
 
 - empty or `legacy`: the historical plaintext `MemoryStore`, legacy CRUD/context
   routes and legacy planner-memory source remain unchanged;
-- `protected`: the completed protected store, protected reader/writer and
-  metadata-only API are selected. The legacy store and legacy context-preview
-  are absent, and protected planner memory remains disabled.
+- `protected`: the completed protected store, protected reader/writer,
+  metadata-only API and bounded local-only planner provider are selected. The
+  legacy store and legacy context-preview are absent.
 
 Protected startup also requires:
 
@@ -110,32 +110,60 @@ value and server-owned device/request provenance before commit. Corrections and
 deletes require exact `expected_updated_at` compare-and-swap. Stale operations
 leave no partial replacement, and responses never echo submitted plaintext.
 
-## Promoted leak gate
+## Bounded local planner context
 
-The #291 leak gate remains active. It now permits protected reader/writer/API
-symbols only inside `worker/app/agent3/memory_surface.py` and only while that
-file declares the exact mount contract, no automatic migration, no fallback,
-separate replay state and disabled protected planner memory. A missing marker,
-a migrator import or protected symbol in another runtime boundary fails closed.
+Protected planner memory is a server-owned provider, not a remote memory route
+and not a duck-typed legacy `MemoryStore`. It reuses the proven
+`ProtectedMemoryContextCompiler` through one exact adapter.
 
-API responses and SQLite/WAL/SHM/journal surfaces continue to be scanned with
-synthetic markers. The dedicated Windows workflow remains `contents: read` and
-runs the Go grant tests, gateway verifier, store selection, API boundary,
+The planner resolves its route target before asking the provider for values.
+The provider accepts only `local`; a cloud target or `allow_private_cloud=true`
+is rejected before the first decrypt operation and before the planner model is
+called.
+
+For an accepted local request:
+
+- only active, confirmed, unexpired, non-secret rows are eligible;
+- public, operational and private values may be used locally;
+- source provenance is never rendered;
+- output is capped at 12,000 characters and 50 records;
+- candidate decryption is capped at exactly twice the requested output budget,
+  never more than 24,000 characters or 100 records;
+- subject filters are canonical, unique and capped at 20;
+- values are rendered by the existing untrusted JSON memory envelope with
+  markup characters escaped;
+- the plan store persists only included/excluded ids, character count, target
+  and SHA-256 receipt — never the decrypted context text.
+
+A zero budget returns an empty receipt without decrypting. Protected and legacy
+planner sources cannot be configured simultaneously. In protected mode the
+legacy context-preview route and plaintext planner store remain absent.
+
+## Promoted gates
+
+The #291 leak gate remains active for API responses, SQLite/WAL/SHM/journal
+surfaces and the exact protected reader/writer/API mount in
+`memory_surface.py`. Missing no-migration/no-fallback markers or protected store
+symbols outside that authorized boundary fail closed.
+
+The #300 context gate is promoted in this slice. It permits the protected
+compiler only through `memory_protected_planner.py`, permits that adapter only
+inside `memory_surface.py`, and requires exact local-only, no-cloud and
+no-legacy-fallback markers. Direct compiler/provider imports from planner,
+production mount or outcome paths fail closed.
+
+The dedicated Windows workflow remains `contents: read` and runs the Go grant
+tests, protected API, context compiler, planner promotion, store selection,
 reader/writer and leak gates, including real current-user DPAPI coverage.
 
 ## Deliberate remaining boundaries
 
 - `legacy` remains the default and protected selection remains behind
   `KALIV_AGENT3_ENABLED=1`;
-- protected planner/context is disabled; no private protected memory is sent to
-  local or cloud model prompts by this slice;
-- no secret reveal, bulk decrypt, value search, embeddings, outcome injection or
-  plaintext logging;
+- protected memory is never sent to cloud, including with a consent flag;
+- no remote context preview, secret reveal, bulk decrypt, value search,
+  embeddings, outcome injection or plaintext logging;
 - no automatic migration, key rotation, backup/restore operation or recovery
   bypass;
 - no normal-chat routing change;
 - no release, physical-rig proof or production-readiness claim.
-
-A later slice must separately prove any bounded protected planner context. It
-must not broaden this gateway/API boundary or introduce a protected-to-legacy
-fallback.

@@ -14,8 +14,8 @@ from .memory_protected_reader import (
 )
 
 PROTECTED_CONTEXT_SCHEMA = "kaliv-agent3-protected-memory-context/v1"
-PROTECTED_CONTEXT_BOUNDARY = "dormant-local-only"
-PRODUCTION_MOUNT = False
+PROTECTED_CONTEXT_BOUNDARY = "planner-local-only"
+PRODUCTION_MOUNT = True
 CLOUD_CONTEXT_ALLOWED = False
 _MAX_SUBJECTS = 20
 _MAX_CHARS = 12_000
@@ -58,8 +58,9 @@ class ProtectedMemoryContextCompiler:
 
     The reader filters secret rows in SQL and decrypts only the bounded candidate
     set. The generic renderer then applies the final record/character budget and
-    escapes marker-looking value content. This class is intentionally not mounted
-    by production startup in this slice.
+    escapes marker-looking value content. Production startup may use this class
+    only through the exact protected planner adapter; it is not exposed through
+    an API, normal chat, outcome path or cloud route.
     """
 
     def __init__(
