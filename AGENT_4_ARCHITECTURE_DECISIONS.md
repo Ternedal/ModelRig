@@ -324,6 +324,20 @@ kun dér. Denne indgang gengiver ikke beslutningsteksten; den findes, så
 filen her forbliver det komplette indeks over Agent 4's
 arkitekturbeslutninger.
 
+## ADR-A4-007 — Operator-API'ets host-, transport- og auth-grænse efter A4-13
+
+**Truffet af Anders 01/08-2026. Status: besluttet** (issue #308). Supplerer
+ADR-A4-005 og ADR-A4-006; implementeres af A4-14 (worker-mount) og en
+separat backend-slice (proxy + `agent4:read`-grant).
+
+Fuldteksten — de syv beslutninger (worker-hostet, kun backend-proxied,
+paired-device Bearer + eksplicit grant, default-off flag med én mount-ejer,
+kun read, kanoniske hash-bound cursors, én injiceret context) og de ni
+obligatoriske kontrakttests — bor i
+`docs/agent4/ADR-A4-007_OPERATOR_API_BOUNDARY.md` og står kun dér. Denne
+indgang gengiver ikke beslutningsteksten; den findes, så filen her forbliver
+det komplette indeks.
+
 **Historik.** Beslutningen blev truffet med klausulen *»gælder før
 genimplementeringen af Agent 4 runtime composition«*. Kompositionen (A4-09)
 og operator-read-modellen (A4-10) landede, før ADR'en var indskrevet.
