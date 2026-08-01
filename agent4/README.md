@@ -4,7 +4,7 @@ Agent 4 is the orchestration layer above the validated Agent 3 runtime. It owns
 campaign lifecycle coordination, durable orchestration state, recovery and
 operator-facing control. It does **not** change Agent 3 execution contracts.
 
-## Current milestone: dormant A4-01–A4-12 foundation
+## Current milestone: dormant A4-01–A4-13 foundation
 
 The package provides a dormant, standard-library-only orchestration foundation:
 
@@ -30,6 +30,7 @@ The package provides a dormant, standard-library-only orchestration foundation:
 - bounded transport-independent operator reads over that exact object graph;
 - first-class, directly addressable evidence records bound to validated
   timeline heads;
+- bounded hash-bound evidence paging and transport-independent evidence reads;
 - protocols for repositories, executors, clocks, IDs and event delivery;
 - tests automatically discovered through the shared CI entrypoints.
 
@@ -52,6 +53,7 @@ Agent 4 uses its own namespace so it cannot collide with ModelRig roadmap tasks:
 10. `A4-10` — bounded transport-independent operator reads.
 11. `A4-11` — authoritative state and reparable audit projection.
 12. `A4-12` — first-class evidence record chain.
+13. `A4-13` — bounded evidence query and operator reads.
 
 Retired aliases and provenance rules are documented only in
 `docs/AGENT_4_IDENTITY.md`.
@@ -72,6 +74,7 @@ worker/app/agent4/
 ├── health_intervention.py
 ├── health_intervention_adapters.py
 ├── operator.py
+├── operator_evidence.py
 ├── projected_services.py
 ├── projection.py
 ├── recovery.py
@@ -85,6 +88,7 @@ worker/app/agent4/
 ├── timeline_delivery.py
 ├── timeline_delivery_flights.py
 ├── timeline_evidence.py
+├── timeline_evidence_query.py
 ├── timeline_query.py
 └── timeline_recorder.py
 ```
@@ -95,6 +99,7 @@ worker/app/agent4/
 PYTHONPATH=worker python tests/worker_agent4_foundation.py
 PYTHONPATH=worker python tests/workflow_agent4_foundation.py
 PYTHONPATH=worker python tests/workflow_agent4_evidence_records.py
+PYTHONPATH=worker python tests/workflow_agent4_evidence_operator_read.py
 ```
 
 ## Architectural boundary
@@ -154,6 +159,12 @@ existing event. The sidecar chain deliberately leaves event sequences, delivery
 cursors, query cursors and A4-11 projections unchanged. It is written only by an
 explicit caller and is not mounted into the A4-09 runtime composition.
 
+A4-13 adds bounded, hash-bound query cursors and a transport-independent
+operator read-service over the A4-12 record chain. Stable snapshot paging can
+continue while later evidence is appended. The service persists no cursor or
+operator state, mounts no route and is deliberately not added to A4-09 runtime
+composition.
+
 See:
 
 - `docs/AGENT_4_A4_01_SCHEDULER.md`;
@@ -164,4 +175,5 @@ See:
 - `docs/AGENT_4_A4_09_COMPOSITION.md`;
 - `docs/AGENT_4_A4_10_OPERATOR_READ.md`;
 - `docs/AGENT_4_A4_12_EVIDENCE_RECORDS.md`;
+- `docs/AGENT_4_A4_13_EVIDENCE_OPERATOR_READ.md`;
 - `docs/agent4/ADR-A4-006_STATE_PROJECTION.md`.
