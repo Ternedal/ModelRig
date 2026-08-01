@@ -57,13 +57,20 @@ def _run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, capture_output=True, text=True, check=False)
 
 
+def _tree_diff_args(base_sha: str) -> tuple[str, ...]:
+    # A pull_request checkout and a separately fetched base can both be shallow.
+    # Compare the two exact trees directly; triple-dot would require ancestry
+    # that a depth-1 checkout deliberately does not contain.
+    return ("git", "diff", "--name-only", base_sha, "HEAD", "--")
+
+
 def changed_files(base_sha: str, base_ref: str) -> list[str] | None:
-    """Return PR-changed files, fetching the base if the checkout is shallow."""
+    """Return exact base-to-HEAD changes, fetching the base tree if needed."""
     if _run("git", "cat-file", "-e", f"{base_sha}^{{commit}}").returncode != 0:
         _run("git", "fetch", "--depth=1", "origin", base_sha)
     if _run("git", "cat-file", "-e", f"{base_sha}^{{commit}}").returncode != 0 and base_ref:
         _run("git", "fetch", "--depth=1", "origin", base_ref)
-    diff = _run("git", "diff", "--name-only", f"{base_sha}...HEAD")
+    diff = _run(*_tree_diff_args(base_sha))
     if diff.returncode != 0:
         return None
     return [line.strip() for line in diff.stdout.splitlines() if line.strip()]
@@ -117,6 +124,11 @@ def main() -> int:
         gaps = missing_requirements(body)
         check(f"sabotage fældes: {label}", len(gaps) == 1, f"(fandt: {gaps})")
     check("tom beskrivelse fælder alle tre", len(missing_requirements("")) == 3)
+    check(
+        "filliste-diff kræver ikke en merge-base",
+        _tree_diff_args("base-sha")
+        == ("git", "diff", "--name-only", "base-sha", "HEAD", "--"),
+    )
 
     ok, message = evaluate_event()
     check(f"live event: {message}", ok)
