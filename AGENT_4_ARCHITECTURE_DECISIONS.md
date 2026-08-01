@@ -338,6 +338,23 @@ obligatoriske kontrakttests — bor i
 indgang gengiver ikke beslutningsteksten; den findes, så filen her forbliver
 det komplette indeks.
 
+## ADR-A4-008 — External side-effect handoff and unknown outcome
+
+**Truffet af Anders 01/08-2026. Status: besluttet** (issue #321). Supplerer
+ADR-A4-003 og ADR-A4-006; port for enhver Agent 4-aktivering og for
+write-udvidelse af operator-API'et. Enhver executor-implementering bygges
+mod denne kontrakt.
+
+Fuldteksten — de otte beslutninger (deterministisk dispatch-identitet;
+DISPATCH_REQUESTED atomisk med RUNNING før det eksterne kald;
+executor-kontrakt med dedup på modtagersiden; persisteret bekræftelse;
+caller-driven outcome-opslag; unknown fejler lukket til
+operatorintervention; A4-11-mekanikken genbruges uden ny journal;
+aktiveringsbetingelse mod rigtig adapter) og de ti obligatoriske
+kontrakttests — bor i `docs/agent4/ADR-A4-008_SIDE_EFFECT_HANDOFF.md` og
+står kun dér. Denne indgang gengiver ikke beslutningsteksten; den findes,
+så filen her forbliver det komplette indeks.
+
 **Historik.** Beslutningen blev truffet med klausulen *»gælder før
 genimplementeringen af Agent 4 runtime composition«*. Kompositionen (A4-09)
 og operator-read-modellen (A4-10) landede, før ADR'en var indskrevet.

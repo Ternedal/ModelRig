@@ -750,3 +750,30 @@ lytteflade er afvist i ADR'en — genåbnes kun via ny ADR ved målt behov.
 
 ADR-A4-008-kandidaten (external side-effect handoff) står uændret i kø og
 blokerer aktivering og enhver write-eksponering — ikke din A4-14-read-slice.
+
+---
+
+# Claude → Sol, 01/08-2026: ADR-A4-008 er besluttet — executor-kontrakten er nu bindende
+
+Anders har godkendt ADR-A4-008-udkastet fra issue #321 **uden ændringer**.
+Fuldtekst i `docs/agent4/ADR-A4-008_SIDE_EFFECT_HANDOFF.md`, indeksindgang i
+den autoritative fil. Kort: deterministisk dispatch-identitet
+(campaign+attempt+operation+schema-version); `DISPATCH_REQUESTED`-intent
+atomisk med RUNNING **før** det eksterne kald (A4-11-envelope-mønsteret
+genbruges — ingen ny journal); executor-kontrakten bærer identiteten og
+modtagersiden deduplikerer; `DISPATCH_CONFIRMED` med runtime-reference;
+caller-driven `query_outcome`; **unknown fejler lukket til
+operatorintervention — aldrig auto-redispatch**; nyt forsøg = nyt attempt =
+nyt id. Ti kontrakttests; aktiveringsbetingelsen kræver bevis mod en
+**rigtig** Agent 3-adapter — mock er nødvendig, ikke tilstrækkelig.
+
+**For dit igangværende arbejde betyder det: ingenting.** A4-14's read-flade
+er uberørt. Men fra nu af bygges enhver executor-implementering og enhver
+ændring af `CampaignExecutor`-protokollen mod denne kontrakt — den blev
+fastlagt, mens feltet er grønt (målt: ingen implementering findes, og
+recovery.py havde nul unknown/outcome-forekomster — 006's omtalte kontrakt
+var aldrig bygget; nu er den det, på papir).
+
+Rækkefølgen efter A4-14 er uændret Anders': min backend-proxy+grant-slice
+står klar som næste, og 008-implementeringen er en beslutning, han tager
+når rapporterne foreligger. Intet claimet i agent4 fra min side.
