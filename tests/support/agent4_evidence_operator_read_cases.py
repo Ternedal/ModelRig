@@ -66,7 +66,7 @@ class Agent4EvidenceOperatorReadTests(unittest.TestCase):
             metadata={"source": "operator-test"},
         )
 
-    def _compose(self, root: Path):
+    def _compose_evidence_read(self, root: Path):
         context = compose_agent4_runtime(
             root / "runtime",
             executor=_Executor(),
@@ -90,7 +90,7 @@ class Agent4EvidenceOperatorReadTests(unittest.TestCase):
 
     def test_construction_is_dormant_and_uses_one_store(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            context, records, _, query, operator = self._compose(
+            context, records, _, query, operator = self._compose_evidence_read(
                 Path(directory) / "agent4"
             )
             self.assertIs(operator.scheduler, context.scheduler)
@@ -100,7 +100,9 @@ class Agent4EvidenceOperatorReadTests(unittest.TestCase):
 
     def test_direct_lookup_and_verification_are_campaign_bound(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            context, _, recorder, _, operator = self._compose(Path(directory))
+            context, _, recorder, _, operator = self._compose_evidence_read(
+                Path(directory)
+            )
             campaign_id = "campaign-evidence-read"
             context.scheduler.submit(self._spec(campaign_id))
             event = context.timeline.latest(campaign_id)
@@ -124,7 +126,9 @@ class Agent4EvidenceOperatorReadTests(unittest.TestCase):
 
     def test_pages_are_hash_bound_bounded_and_snapshot_stable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            context, _, recorder, _, operator = self._compose(Path(directory))
+            context, _, recorder, _, operator = self._compose_evidence_read(
+                Path(directory)
+            )
             campaign_id = "campaign-evidence-page"
             context.scheduler.submit(self._spec(campaign_id))
             first = recorder.record(
@@ -168,8 +172,8 @@ class Agent4EvidenceOperatorReadTests(unittest.TestCase):
 
     def test_cursor_tampering_limits_and_composition_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            context, records, recorder, query, operator = self._compose(
-                Path(directory)
+            context, records, recorder, query, operator = (
+                self._compose_evidence_read(Path(directory))
             )
             campaign_id = "campaign-cursor"
             context.scheduler.submit(self._spec(campaign_id))
