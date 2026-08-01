@@ -32,7 +32,7 @@ flowchart TB
         Tools["Kaliv Tools<br/>registry (in code)<br/>confirmation gate<br/>audit log (append-only)<br/>Executor seam<br/>web_research: risk=read + network=public<br/>gated KALIV_WEB_RESEARCH_ENABLED"]
         Sched["Scheduler<br/>at-most-once by construction<br/>claim + budget slot in one transaction<br/>write approvals leave a receipt"]
         A3["Agent 3<br/>mount_agent3() owns the whole surface<br/>DORMANT unless KALIV_AGENT3_ENABLED=1<br/>server-authoritative plan · one confirmation per side effect"]
-        A4["Agent 4 — campaign orchestration (A4-01…A4-10)<br/>on main but NOT MOUNTED: no route exists<br/>timeline · delivery · query · composition · operator reads<br/>one B-reference architecture enforced by CI gates"]
+        A4["Agent 4 — campaign orchestration (A4-01…A4-13)<br/>on main but NOT MOUNTED: no route exists<br/>timeline · delivery · query · composition<br/>evidence chain · hash-bound operator+evidence reads<br/>one B-reference architecture enforced by CI gates"]
         CU["Computer Use (Tier B)<br/>I3 see · I4 propose — DORMANT unless KALIV_COMPUTER_USE=1<br/>signed screenshot contract · local-only vision bridge<br/>I5 act: not built"]
         Eval["Eval-harness<br/>tool-discipline · dansk · latency<br/>workflow completion, not tool choice"]
     end
@@ -88,7 +88,7 @@ card says who asked: *"Cloud-modellen foreslår: …"*
 (Piper, Danish) always run on the rig. Only the transcribed question may go to
 the cloud, and only with the toggle on.
 
-**Agent 4** — the caller-driven campaign layer (A4-01…A4-10) sits on `main` in
+**Agent 4** — the caller-driven campaign layer (A4-01…A4-13) sits on `main` in
 the strongest form of dormancy: it is not mounted anywhere, so no route exists
 to reach it. The B-reference architecture now includes durable lifecycle state,
 an append-only verified timeline, at-least-once delivery, hash-bound query
