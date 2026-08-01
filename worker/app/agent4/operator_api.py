@@ -20,6 +20,7 @@ from .operator_evidence import (
     Agent4OperatorEvidenceReadService,
     CampaignEvidenceRecordNotFoundError,
 )
+from .repository import CampaignRepositoryError
 from .service import CampaignNotFoundError
 from .timeline import TimelineStoreError
 from .timeline_evidence import EvidenceRecordStoreError
@@ -193,7 +194,10 @@ def _raise_public(exc: Exception) -> NoReturn:
             status_code=422,
             detail="agent4 operator request rejected",
         ) from exc
-    if isinstance(exc, (TimelineStoreError, EvidenceRecordStoreError)):
+    if isinstance(
+        exc,
+        (CampaignRepositoryError, TimelineStoreError, EvidenceRecordStoreError),
+    ):
         raise HTTPException(
             status_code=503,
             detail="agent4 operator read unavailable",
