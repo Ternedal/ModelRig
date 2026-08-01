@@ -36,7 +36,7 @@ Hver probe bygger de RIGTIGE komponenter mod engangs-databaser og injicerer fejl
 | Samme occurrence kan ikke claimes to gange | ✅ | samme occurrence kan ikke claimes to gange |
 | Crash før kørsel: opgives og refunderes | ✅ | crash før kørsel: occurrence opgives og slot refunderes |
 | Crash efter kørsel: evidens holder budgettet brugt | ✅ | crash efter kørsel: audit-evidens holder budgettet brugt |
-| Pause efter claim stopper in-flight occurrence | ✅ | pause efter claim stopper in-flight occurrence og refunderer |
+| Pause efter claim stopper in-flight occurrence | ✅ | pause efter claim stopper in-flight occurrence og refunderes |
 | Budgetloft holder på tværs af claims | ✅ | max_runs kan ikke overskrides på tværs af claims |
 | Ukendt udfald: slot beholdes og granten pauses | ✅ | ukendt udfald: slot beholdes og granten pauses — max_runs kan ikke blive N+1 via crash |
 | Recovery respekterer en levende ejers lease | ✅ | recovery uden lease rører intet — en levende ejers in-flight claims kan ikke opgives |
@@ -70,12 +70,13 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 15 feature-switches er tændt som default.** (13 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 16 feature-switches er tændt som default.** (13 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
 | `KALIV_AGENT3_ENABLED` | `0` | slukket |
 | `KALIV_AGENT3_TASK_WORKERS` | `2` | indstilling |
+| `KALIV_AGENT4_OPERATOR_API` | `0` | slukket |
 | `KALIV_ALLOW_RAG_CLOUD` | `(tom)` | slukket |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` | slukket |
 | `KALIV_COMPUTER_USE` | `0` | slukket |
