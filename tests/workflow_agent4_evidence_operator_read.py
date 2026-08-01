@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+"""A4-13 bounded evidence query and operator-read contract tests."""
+
+from __future__ import annotations
+
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from app.agent4 import (
+    CampaignEvidenceReference,
+    CampaignNotFoundError,
+    CampaignSpec,
+    CampaignValidationError,
+    compose_agent4_runtime,
+)
+from app.agent4.operator_evidence import (
+    Agent4OperatorEvidenceReadService,
+    CampaignEvidenceRecordNotFoundError,
+)
+from app.agent4.timeline_evidence import (
+    CampaignEvidenceRecordService,
+    JsonCampaignEvidenceRecordStore,
+)
+from app.agent4.timeline_evidence_query import (
+    MAX_EVIDENCE_QUERY_PAGE_SIZE,
+    CampaignEvidenceQueryCursor,
+    CampaignEvidenceQueryCursorError,
+    CampaignEvidenceQueryService,
+)
+
+BASE_TIME = datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc)
+
+
+class _EvidenceClock:
+    def __init__(self, value: datetime = BASE_TIME) -> None:
+        self.value = value
+
+    def now(self) -> datetime:
+        return self.value
+
+
+class _EvidenceExecutor:
+    def dispatch(self, spec, state) -> str:
+        return f"runtime:{spec.campaign_id}:{state.attempt}"
+
+    def signal(self, campaign_id: str, command: str) -> None:
+        return None
+
+
+class Agent4EvidenceOperatorReadTests(unittest.TestCase):
+    @staticmethod
+    def _spec(campaign_id: str) -> CampaignSpec:
+        return CampaignSpec(
+            campaign_id=campaign_id,
+            name=f"Campaign {campaign_id}",
+            workflow="agent3.write-pilot",
+            created_at=BASE_TIME,
+        )
+
+    @staticmethod
+    def _reference(
+        evidence_id: str,
+        *,
+        digest: str,
+    ) -> CampaignEvidenceReference:
+        return CampaignEvidenceReference(
+            evidence_id=evidence_id,
+            media_type="application/json",
+            location=f"evidence/{evidence_id}.json",
+            sha256=digest,
+            size_bytes=128,
+            metadata={"source": "operator-test"},
+        )
+
+    def _compose(self, root: Path):
+        clock = _EvidenceClock()
+        context = compose_agent4_runtime(
+            root / "runtime",
+            executor=_EvidenceExecutor(),
+            resource_capacities={"gpu": 1},
+            resource_resolver=lambda spec: {"gpu": 1},
+            clock=clock,
+            resource_lease_ttl=timedelta(minutes=15),
+        )
+        records = JsonCampaignEvidenceRecordStore(root / "evidence")
+        recorder = CampaignEvidenceRecordService(
+            timeline=context.timeline,
+            records=records,
+        )
+        query = CampaignEvidenceQueryService(records)
+        operator = Agent4OperatorEvidenceReadService(
+            scheduler=context.scheduler,
+            records=records,
+            query=query,
+        )
+        return context, records, recorder, query, operator
+
+    def test_construction_is_dormant_and_uses_one_record_store(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "agent4"
+            context, records, _, query, operator = self._compose(root)
+
+            self.assertIs(operator.scheduler, context.scheduler)
+            self.assertIs(operator.records, records)
+            self.assertIs(operator.query, query)
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_direct_lookup_and_verification_are_campaign_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            context, _, recorder, _, operator = self._compose(Path(directory))
+            context.scheduler.submit(self._spec("campaign-evidence-read"))
+            first = recorder.record(
+                "campaign-evidence-read",
+                self._reference("report", digest="a" * 64),
+                recorded_at=BASE_TIME + timedelta(minutes=1),
+                related_event_id="campaign-evidence-read:1",
+            )
+
+            self.assertEqual(
+                operator.evidence("campaign-evidence-read", "report"),
+                first,
+            )
+            verification = operator.verification("campaign-evidence-read")
+            self.assertEqual(verification.record_count, 1)
+            self.assertEqual(verification.head_hash, first.record_hash)
+
+            with self.assertRaises(CampaignEvidenceRecordNotFoundError):
+                operator.evidence("campaign-evidence-read", "missing")
+            with self.assertRaises(CampaignNotFoundError):
+                operator.evidence("missing-campaign", "report")
+
+    def test_pages_are_bounded_hash_bound_and_snapshot_stable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            context, _, recorder, _, operator = self._compose(Path(directory))
+            campaign_id = "campaign-evidence-page"
+            context.scheduler.submit(self._spec(campaign_id))
+            first_record = recorder.record(
+                campaign_id,
+                self._reference("first", digest="a" * 64),
+                recorded_at=BASE_TIME + timedelta(minutes=1),
+            )
+            second_record = recorder.record(
+                campaign_id,
+                self._reference("second", digest="b" * 64),
+                recorded_at=BASE_TIME + timedelta(minutes=2),
+            )
+
+            first_page = operator.evidence_page(campaign_id, limit=1)
+            self.assertEqual(first_page.records, (first_record,))
+            self.assertEqual(first_page.next_cursor.sequence, 1)
+            self.assertEqual(first_page.head_cursor.sequence, 2)
+            self.assertTrue(first_page.has_more)
+
+            third_record = recorder.record(
+                campaign_id,
+                self._reference("third", digest="c" * 64),
+                recorded_at=BASE_TIME + timedelta(minutes=3),
+            )
+
+            stable = operator.evidence_page(
+                campaign_id,
+                after=first_page.next_cursor,
+                snapshot_head=first_page.head_cursor,
+                limit=10,
+            )
+            self.assertEqual(stable.records, (second_record,))
+            self.assertEqual(stable.head_cursor.sequence, 2)
+            self.assertFalse(stable.has_more)
+
+            fresh = operator.evidence_page(
+                campaign_id,
+                after=first_page.next_cursor,
+                limit=10,
+            )
+            self.assertEqual(fresh.records, (second_record, third_record))
+            self.assertEqual(fresh.head_cursor.sequence, 3)
+            self.assertFalse(fresh.has_more)
+
+    def test_empty_existing_campaign_has_a_genesis_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            context, _, _, _, operator = self._compose(Path(directory))
+            campaign_id = "campaign-no-evidence"
+            context.scheduler.submit(self._spec(campaign_id))
+
+            page = operator.evidence_page(campaign_id)
+            self.assertEqual(page.records, ())
+            self.assertEqual(page.start_cursor.sequence, 0)
+            self.assertEqual(page.next_cursor.sequence, 0)
+            self.assertEqual(page.head_cursor.sequence, 0)
+            self.assertFalse(page.has_more)
+
+    def test_cursor_round_trip_and_tampering_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            context, _, recorder, query, operator = self._compose(Path(directory))
+            campaign_id = "campaign-cursor"
+            context.scheduler.submit(self._spec(campaign_id))
+            record = recorder.record(
+                campaign_id,
+                self._reference("cursor-proof", digest="d" * 64),
+                recorded_at=BASE_TIME + timedelta(minutes=1),
+            )
+            cursor = query.cursor_at(campaign_id, 1)
+            self.assertEqual(
+                CampaignEvidenceQueryCursor.from_dict(cursor.to_dict()),
+                cursor,
+            )
+            self.assertEqual(cursor.record_hash, record.record_hash)
+
+            with self.assertRaises(CampaignEvidenceQueryCursorError):
+                operator.evidence_page(
+                    campaign_id,
+                    after=CampaignEvidenceQueryCursor(
+                        campaign_id=campaign_id,
+                        sequence=1,
+                        record_hash="e" * 64,
+                    ),
+                )
+            with self.assertRaises(CampaignEvidenceQueryCursorError):
+                operator.evidence_page(
+                    campaign_id,
+                    after=CampaignEvidenceQueryCursor(
+                        campaign_id="other",
+                        sequence=0,
+                        record_hash=None,
+                    ),
+                )
+            with self.assertRaises(CampaignValidationError):
+                CampaignEvidenceQueryCursor.from_dict(
+                    {
+                        "schema": "unknown",
+                        "campaign_id": campaign_id,
+                        "sequence": 0,
+                        "record_hash": None,
+                    }
+                )
+
+    def test_limits_unknown_campaigns_and_composition_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            context, records, _, query, operator = self._compose(Path(directory))
+            campaign_id = "campaign-bounds"
+            context.scheduler.submit(self._spec(campaign_id))
+
+            for invalid in (0, MAX_EVIDENCE_QUERY_PAGE_SIZE + 1, True):
+                with self.assertRaises(CampaignValidationError):
+                    operator.evidence_page(campaign_id, limit=invalid)
+            with self.assertRaises(CampaignNotFoundError):
+                operator.evidence_page("missing")
+            with self.assertRaises(CampaignEvidenceQueryCursorError):
+                query.cursor_at(campaign_id, 1)
+
+            other_records = JsonCampaignEvidenceRecordStore(
+                Path(directory) / "other-evidence"
+            )
+            with self.assertRaises(CampaignValidationError):
+                Agent4OperatorEvidenceReadService(
+                    scheduler=context.scheduler,
+                    records=records,
+                    query=CampaignEvidenceQueryService(other_records),
+                )
+
+        with self.assertRaises(TypeError):
+            CampaignEvidenceQueryService(object())  # type: ignore[arg-type]
+
+
+if __name__ == "__main__":
+    unittest.main()
