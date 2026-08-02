@@ -61,8 +61,15 @@ cd C:\Users\Anders\Desktop\ModelRig
 git fetch origin
 git switch agent/unified-candidate-1.58.147
 git pull --ff-only origin agent/unified-candidate-1.58.147
-mkdir rig-evidence\<dato>
+mkdir ..\rig-evidence\<dato>
 ```
+
+**Evidensmappen ligger UDEN FOR checkouten** — som nabo til repoet. Freeze-
+gaten og attestations-laeseren scanner begge filsystemet direkte og
+sanktionerer kun `.git` og `validation/`; en `rig-evidence\`-mappe inde i
+repoet ville derfor faelde frysningen i blok 1. En lokal `.git/info/exclude`
+loeser det ikke: den skjuler kun mappen for `git status`, ikke for
+attestations-laeserens egen scanning senere paa dagen.
 
 Kandidatbranchen holdes på main af Claude frem til dagen. `--ff-only`-pullet
 fejler højlydt, hvis den alligevel er bagud — sig til, så rykkes den, før

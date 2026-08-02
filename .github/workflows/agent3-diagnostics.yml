@@ -1,11 +1,14 @@
 name: agent3-diagnostics
 
+# candidate_freeze_check.py kraever dette workflow GROENT paa kandidatens
+# eksakte head. Et path-filter gjorde det kravet uopfyldeligt: enhver landing
+# der ikke roerte agent3-stier (fx en docs-commit) efterlod en head uden
+# koersel, og frysningen kunne ikke passere uden at flytte SHA'en. Trigger
+# derfor paa hver PR — som agent3-full-diagnostics allerede goer — plus
+# workflow_dispatch som manuel udvej for en head der allerede findes.
 on:
   pull_request:
-    paths:
-      - "worker/app/agent3/**"
-      - "tests/worker_agent3_*.py"
-      - ".github/workflows/agent3-diagnostics.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
