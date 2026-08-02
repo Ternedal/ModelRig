@@ -20,6 +20,14 @@ sys.path.insert(0, str(ROOT / "worker"))
 
 from app.agent4.composition import compose_agent4_runtime  # noqa: E402
 from app.agent4.domain import CampaignValidationError  # noqa: E402
+from app.agent4.handoff import (  # noqa: E402
+    CampaignDispatchAcknowledgement,
+    CampaignDispatchOutcome,
+    CampaignDispatchRequest,
+    CampaignSignalAcknowledgement,
+    CampaignSignalRequest,
+    DispatchOutcomeKind,
+)
 from app.agent4.operator import Agent4OperatorReadService  # noqa: E402
 from app.agent4.production_mount import mount_agent4_operator  # noqa: E402
 from app.agent4.repository import CampaignRepositoryError  # noqa: E402
@@ -30,11 +38,43 @@ PREFIX = "/experimental/agent4/operator"
 
 
 class _Executor:
-    def dispatch(self, spec, state) -> str:
-        return f"runtime:{spec.campaign_id}:{state.attempt}"
+    def __init__(self) -> None:
+        self.outcomes: dict[str, CampaignDispatchOutcome] = {}
 
-    def signal(self, campaign_id: str, command: str) -> None:
-        return None
+    def dispatch(
+        self,
+        request: CampaignDispatchRequest,
+    ) -> CampaignDispatchAcknowledgement:
+        acknowledgement = CampaignDispatchAcknowledgement(
+            dispatch_id=request.dispatch_id,
+            runtime_reference=f"runtime:{request.campaign_id}:{request.attempt}",
+            evidence_pointer=f"evidence:{request.dispatch_id}",
+        )
+        self.outcomes[request.dispatch_id] = CampaignDispatchOutcome(
+            dispatch_id=request.dispatch_id,
+            kind=DispatchOutcomeKind.RUNNING,
+            runtime_reference=acknowledgement.runtime_reference,
+            evidence_pointer=acknowledgement.evidence_pointer,
+        )
+        return acknowledgement
+
+    def signal(
+        self,
+        request: CampaignSignalRequest,
+    ) -> CampaignSignalAcknowledgement:
+        return CampaignSignalAcknowledgement(
+            signal_id=request.signal_id,
+            evidence_pointer=f"evidence:{request.signal_id}",
+        )
+
+    def query_outcome(self, dispatch_id: str) -> CampaignDispatchOutcome:
+        return self.outcomes.get(
+            dispatch_id,
+            CampaignDispatchOutcome(
+                dispatch_id=dispatch_id,
+                kind=DispatchOutcomeKind.UNKNOWN,
+            ),
+        )
 
 
 def _compose(root: Path):

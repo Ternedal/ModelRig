@@ -27,6 +27,14 @@ from app.agent4 import (  # noqa: E402
     CampaignValidationError,
     compose_agent4_runtime,
 )
+from app.agent4.handoff import (  # noqa: E402
+    CampaignDispatchAcknowledgement,
+    CampaignDispatchOutcome,
+    CampaignDispatchRequest,
+    CampaignSignalAcknowledgement,
+    CampaignSignalRequest,
+    DispatchOutcomeKind,
+)
 from app.agent4.operator_api import (  # noqa: E402
     OPERATOR_API_SCHEMA,
     OPERATOR_MEDIA_TYPE,
@@ -44,15 +52,46 @@ class _Clock:
 
 class _Executor:
     def __init__(self) -> None:
-        self.dispatched: list[str] = []
-        self.signals: list[tuple[str, str]] = []
+        self.dispatched: list[CampaignDispatchRequest] = []
+        self.signals: list[CampaignSignalRequest] = []
+        self.outcomes: dict[str, CampaignDispatchOutcome] = {}
 
-    def dispatch(self, spec, state) -> str:
-        self.dispatched.append(spec.campaign_id)
-        return f"runtime:{spec.campaign_id}:{state.attempt}"
+    def dispatch(
+        self,
+        request: CampaignDispatchRequest,
+    ) -> CampaignDispatchAcknowledgement:
+        self.dispatched.append(request)
+        acknowledgement = CampaignDispatchAcknowledgement(
+            dispatch_id=request.dispatch_id,
+            runtime_reference=f"runtime:{request.campaign_id}:{request.attempt}",
+            evidence_pointer=f"evidence:{request.dispatch_id}",
+        )
+        self.outcomes[request.dispatch_id] = CampaignDispatchOutcome(
+            dispatch_id=request.dispatch_id,
+            kind=DispatchOutcomeKind.RUNNING,
+            runtime_reference=acknowledgement.runtime_reference,
+            evidence_pointer=acknowledgement.evidence_pointer,
+        )
+        return acknowledgement
 
-    def signal(self, campaign_id: str, command: str) -> None:
-        self.signals.append((campaign_id, command))
+    def signal(
+        self,
+        request: CampaignSignalRequest,
+    ) -> CampaignSignalAcknowledgement:
+        self.signals.append(request)
+        return CampaignSignalAcknowledgement(
+            signal_id=request.signal_id,
+            evidence_pointer=f"evidence:{request.signal_id}",
+        )
+
+    def query_outcome(self, dispatch_id: str) -> CampaignDispatchOutcome:
+        return self.outcomes.get(
+            dispatch_id,
+            CampaignDispatchOutcome(
+                dispatch_id=dispatch_id,
+                kind=DispatchOutcomeKind.UNKNOWN,
+            ),
+        )
 
 
 def _compose(root: Path):

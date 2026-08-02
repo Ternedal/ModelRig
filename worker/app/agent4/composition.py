@@ -17,13 +17,14 @@ from weakref import WeakValueDictionary
 
 from .campaign_queue import CampaignQueue
 from .checkpoint import CampaignCheckpointService, JsonCheckpointStore
-from .contracts import (
-    CampaignExecutor,
-    CampaignResourceResolver,
-    Clock,
-)
+from .contracts import CampaignResourceResolver, Clock
 from .domain import CampaignValidationError
 from .failure_handling import CampaignFailureHandlingService
+from .handoff import CampaignHandoffExecutor
+from .handoff_runtime import (
+    CampaignHandoffRecoveryReport,
+    ResourceAwareCampaignHandoffSchedulerService,
+)
 from .health import CampaignHealthPolicy
 from .health_intervention import CampaignHealthInterventionCoordinator
 from .health_intervention_adapters import (
@@ -43,9 +44,7 @@ from .projection import (
     CampaignProjectionReport,
     CampaignStateProjectionService,
 )
-from .recovery import CampaignRecoveryReport
 from .repository import JsonCampaignRepository
-from .resource_admission import ResourceAwareCampaignSchedulerService
 from .resources import InMemoryResourceLeaseManager
 from .retry import CampaignRetryPlanner, RetryPolicy
 from .service import SystemClock
@@ -123,7 +122,7 @@ class Agent4RuntimeContext:
     queue: CampaignQueue
     resources: InMemoryResourceLeaseManager
     clock: Clock
-    scheduler: ResourceAwareCampaignSchedulerService
+    scheduler: ResourceAwareCampaignHandoffSchedulerService
     checkpoints: CampaignCheckpointService
     retry_planner: CampaignRetryPlanner
     failures: CampaignFailureHandlingService
@@ -137,7 +136,7 @@ class Agent4RuntimeContext:
     operator: Agent4OperatorReadService
     evidence_operator: Agent4OperatorEvidenceReadService
 
-    def recover(self) -> CampaignRecoveryReport:
+    def recover(self) -> CampaignHandoffRecoveryReport:
         """Explicitly run startup recovery; composition never calls it."""
 
         return self.scheduler.recover()
@@ -173,18 +172,18 @@ class Agent4RuntimeContext:
 def compose_agent4_runtime(
     root: Path | str,
     *,
-    executor: CampaignExecutor,
+    executor: CampaignHandoffExecutor,
     resource_capacities: Mapping[str, int],
     resource_resolver: CampaignResourceResolver,
     clock: Clock | None = None,
     resource_lease_ttl: timedelta = timedelta(minutes=15),
     retry_policy: RetryPolicy | None = None,
 ) -> Agent4RuntimeContext:
-    """Wire the dormant B-reference runtime around one executor boundary."""
+    """Wire the dormant B-reference runtime around the typed handoff boundary."""
 
-    if not isinstance(executor, CampaignExecutor):
+    if not isinstance(executor, CampaignHandoffExecutor):
         raise CampaignValidationError(
-            "executor must implement the CampaignExecutor contract"
+            "executor must implement the CampaignHandoffExecutor contract"
         )
     if not callable(resource_resolver):
         raise CampaignValidationError("resource_resolver must be callable")
@@ -226,13 +225,14 @@ def compose_agent4_runtime(
     )
     queue = CampaignQueue()
     resources = InMemoryResourceLeaseManager(resource_capacities)
-    scheduler = ResourceAwareCampaignSchedulerService(
+    scheduler = ResourceAwareCampaignHandoffSchedulerService(
         repository=repository,
         executor=executor,
         events=event_recorder,
         clock=runtime_clock,
         queue=queue,
         projections=projections,
+        reconciler=reconciliation,
         resource_leases=resources,
         resource_resolver=resource_resolver,
         resource_lease_ttl=resource_lease_ttl,

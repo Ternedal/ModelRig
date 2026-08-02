@@ -14,14 +14,19 @@ from app.agent4 import (
     CampaignValidationError,
     compose_agent4_runtime,
 )
+from app.agent4.handoff import (
+    CampaignDispatchAcknowledgement,
+    CampaignDispatchOutcome,
+    CampaignDispatchRequest,
+    CampaignSignalAcknowledgement,
+    CampaignSignalRequest,
+    DispatchOutcomeKind,
+)
 from app.agent4.operator_evidence import (
     Agent4OperatorEvidenceReadService,
     CampaignEvidenceRecordNotFoundError,
 )
-from app.agent4.timeline_evidence import (
-    CampaignEvidenceRecordService,
-    JsonCampaignEvidenceRecordStore,
-)
+from app.agent4.timeline_evidence import JsonCampaignEvidenceRecordStore
 from app.agent4.timeline_evidence_query import (
     MAX_EVIDENCE_QUERY_PAGE_SIZE,
     CampaignEvidenceQueryCursor,
@@ -38,11 +43,43 @@ class _Clock:
 
 
 class _Executor:
-    def dispatch(self, spec, state) -> str:
-        return f"runtime:{spec.campaign_id}:{state.attempt}"
+    def __init__(self) -> None:
+        self.outcomes: dict[str, CampaignDispatchOutcome] = {}
 
-    def signal(self, campaign_id: str, command: str) -> None:
-        return None
+    def dispatch(
+        self,
+        request: CampaignDispatchRequest,
+    ) -> CampaignDispatchAcknowledgement:
+        acknowledgement = CampaignDispatchAcknowledgement(
+            dispatch_id=request.dispatch_id,
+            runtime_reference=f"runtime:{request.campaign_id}:{request.attempt}",
+            evidence_pointer=f"evidence:{request.dispatch_id}",
+        )
+        self.outcomes[request.dispatch_id] = CampaignDispatchOutcome(
+            dispatch_id=request.dispatch_id,
+            kind=DispatchOutcomeKind.RUNNING,
+            runtime_reference=acknowledgement.runtime_reference,
+            evidence_pointer=acknowledgement.evidence_pointer,
+        )
+        return acknowledgement
+
+    def signal(
+        self,
+        request: CampaignSignalRequest,
+    ) -> CampaignSignalAcknowledgement:
+        return CampaignSignalAcknowledgement(
+            signal_id=request.signal_id,
+            evidence_pointer=f"evidence:{request.signal_id}",
+        )
+
+    def query_outcome(self, dispatch_id: str) -> CampaignDispatchOutcome:
+        return self.outcomes.get(
+            dispatch_id,
+            CampaignDispatchOutcome(
+                dispatch_id=dispatch_id,
+                kind=DispatchOutcomeKind.UNKNOWN,
+            ),
+        )
 
 
 class Agent4EvidenceOperatorReadTests(unittest.TestCase):
@@ -78,18 +115,13 @@ class Agent4EvidenceOperatorReadTests(unittest.TestCase):
             clock=_Clock(),
             resource_lease_ttl=timedelta(minutes=15),
         )
-        records = JsonCampaignEvidenceRecordStore(root / "evidence")
-        recorder = CampaignEvidenceRecordService(
-            timeline=context.timeline,
-            records=records,
+        return (
+            context,
+            context.evidence_records,
+            context.evidence_recorder,
+            context.evidence_query,
+            context.evidence_operator,
         )
-        query = CampaignEvidenceQueryService(records)
-        operator = Agent4OperatorEvidenceReadService(
-            scheduler=context.scheduler,
-            records=records,
-            query=query,
-        )
-        return context, records, recorder, query, operator
 
     def test_construction_is_dormant_and_uses_one_store(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

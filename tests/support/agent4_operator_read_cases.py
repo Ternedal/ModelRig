@@ -20,6 +20,14 @@ from app.agent4 import (
     CampaignValidationError,
     compose_agent4_runtime,
 )
+from app.agent4.handoff import (
+    CampaignDispatchAcknowledgement,
+    CampaignDispatchOutcome,
+    CampaignDispatchRequest,
+    CampaignSignalAcknowledgement,
+    CampaignSignalRequest,
+    DispatchOutcomeKind,
+)
 
 
 BASE_TIME = datetime(2026, 7, 31, 10, 0, tzinfo=timezone.utc)
@@ -35,14 +43,44 @@ class _OperatorClock:
 
 class _OperatorExecutor:
     def __init__(self) -> None:
-        self.dispatched: list[str] = []
+        self.dispatched: list[CampaignDispatchRequest] = []
+        self.outcomes: dict[str, CampaignDispatchOutcome] = {}
 
-    def dispatch(self, spec, state) -> str:
-        self.dispatched.append(spec.campaign_id)
-        return f"runtime:{spec.campaign_id}:{state.attempt}"
+    def dispatch(
+        self,
+        request: CampaignDispatchRequest,
+    ) -> CampaignDispatchAcknowledgement:
+        self.dispatched.append(request)
+        acknowledgement = CampaignDispatchAcknowledgement(
+            dispatch_id=request.dispatch_id,
+            runtime_reference=f"runtime:{request.campaign_id}:{request.attempt}",
+            evidence_pointer=f"evidence:{request.dispatch_id}",
+        )
+        self.outcomes[request.dispatch_id] = CampaignDispatchOutcome(
+            dispatch_id=request.dispatch_id,
+            kind=DispatchOutcomeKind.RUNNING,
+            runtime_reference=acknowledgement.runtime_reference,
+            evidence_pointer=acknowledgement.evidence_pointer,
+        )
+        return acknowledgement
 
-    def signal(self, campaign_id: str, command: str) -> None:
-        return None
+    def signal(
+        self,
+        request: CampaignSignalRequest,
+    ) -> CampaignSignalAcknowledgement:
+        return CampaignSignalAcknowledgement(
+            signal_id=request.signal_id,
+            evidence_pointer=f"evidence:{request.signal_id}",
+        )
+
+    def query_outcome(self, dispatch_id: str) -> CampaignDispatchOutcome:
+        return self.outcomes.get(
+            dispatch_id,
+            CampaignDispatchOutcome(
+                dispatch_id=dispatch_id,
+                kind=DispatchOutcomeKind.UNKNOWN,
+            ),
+        )
 
 
 class Agent4OperatorReadTests(unittest.TestCase):
@@ -118,8 +156,8 @@ class Agent4OperatorReadTests(unittest.TestCase):
 
             self.assertEqual(overview.campaign_id, "campaign-overview")
             self.assertEqual(overview.status, CampaignStatus.RUNNING)
-            self.assertEqual(overview.timeline_entries, 4)
-            self.assertEqual(overview.event_entries, 4)
+            self.assertEqual(overview.timeline_entries, 6)
+            self.assertEqual(overview.event_entries, 6)
             self.assertEqual(overview.evidence_entries, 1)
             self.assertIsNotNone(latest)
             assert latest is not None
@@ -208,10 +246,10 @@ class Agent4OperatorReadTests(unittest.TestCase):
             )
             self.assertEqual(
                 [entry.event.kind for entry in fresh.entries],
-                [CampaignEventKind.STARTED],
+                [CampaignEventKind.DISPATCH_REQUESTED],
             )
-            self.assertEqual(fresh.head_cursor.sequence, 2)
-            self.assertFalse(fresh.has_more)
+            self.assertEqual(fresh.head_cursor.sequence, 4)
+            self.assertTrue(fresh.has_more)
 
     def test_operator_rejects_unknown_campaigns_and_invalid_query_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

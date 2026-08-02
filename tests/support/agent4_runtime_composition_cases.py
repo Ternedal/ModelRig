@@ -18,6 +18,14 @@ from app.agent4 import (
     FailureDescriptor,
     compose_agent4_runtime,
 )
+from app.agent4.handoff import (
+    CampaignDispatchAcknowledgement,
+    CampaignDispatchOutcome,
+    CampaignDispatchRequest,
+    CampaignSignalAcknowledgement,
+    CampaignSignalRequest,
+    DispatchOutcomeKind,
+)
 
 
 BASE_TIME = datetime(2026, 7, 31, 9, 0, tzinfo=timezone.utc)
@@ -33,15 +41,48 @@ class _CompositionClock:
 
 class _CompositionExecutor:
     def __init__(self) -> None:
-        self.dispatched: list[tuple[str, int]] = []
-        self.signals: list[tuple[str, str]] = []
+        self.dispatched: list[CampaignDispatchRequest] = []
+        self.signals: list[CampaignSignalRequest] = []
+        self.outcomes: dict[str, CampaignDispatchOutcome] = {}
 
-    def dispatch(self, spec, state) -> str:
-        self.dispatched.append((spec.campaign_id, state.attempt))
-        return f"runtime:{spec.campaign_id}:{state.attempt}"
+    def dispatch(
+        self,
+        request: CampaignDispatchRequest,
+    ) -> CampaignDispatchAcknowledgement:
+        self.dispatched.append(request)
+        acknowledgement = CampaignDispatchAcknowledgement(
+            dispatch_id=request.dispatch_id,
+            runtime_reference=(
+                f"runtime:{request.campaign_id}:{request.attempt}"
+            ),
+            evidence_pointer=f"evidence:{request.dispatch_id}",
+        )
+        self.outcomes[request.dispatch_id] = CampaignDispatchOutcome(
+            dispatch_id=request.dispatch_id,
+            kind=DispatchOutcomeKind.RUNNING,
+            runtime_reference=acknowledgement.runtime_reference,
+            evidence_pointer=acknowledgement.evidence_pointer,
+        )
+        return acknowledgement
 
-    def signal(self, campaign_id: str, command: str) -> None:
-        self.signals.append((campaign_id, command))
+    def signal(
+        self,
+        request: CampaignSignalRequest,
+    ) -> CampaignSignalAcknowledgement:
+        self.signals.append(request)
+        return CampaignSignalAcknowledgement(
+            signal_id=request.signal_id,
+            evidence_pointer=f"evidence:{request.signal_id}",
+        )
+
+    def query_outcome(self, dispatch_id: str) -> CampaignDispatchOutcome:
+        return self.outcomes.get(
+            dispatch_id,
+            CampaignDispatchOutcome(
+                dispatch_id=dispatch_id,
+                kind=DispatchOutcomeKind.UNKNOWN,
+            ),
+        )
 
 
 class Agent4RuntimeCompositionTests(unittest.TestCase):
@@ -147,7 +188,13 @@ class Agent4RuntimeCompositionTests(unittest.TestCase):
                 dispatched.runtime_reference,
                 "runtime:campaign-composed:1",
             )
-            self.assertEqual(executor.dispatched, [("campaign-composed", 1)])
+            self.assertEqual(
+                [
+                    (request.campaign_id, request.attempt)
+                    for request in executor.dispatched
+                ],
+                [("campaign-composed", 1)],
+            )
             context.checkpoints.checkpoint(
                 "campaign-composed",
                 "checkpoint-1",
@@ -159,6 +206,8 @@ class Agent4RuntimeCompositionTests(unittest.TestCase):
                 [entry.event.kind for entry in entries],
                 [
                     CampaignEventKind.CREATED,
+                    CampaignEventKind.DISPATCH_REQUESTED,
+                    CampaignEventKind.DISPATCH_CONFIRMED,
                     CampaignEventKind.STARTED,
                     CampaignEventKind.CHECKPOINTED,
                 ],
@@ -174,10 +223,10 @@ class Agent4RuntimeCompositionTests(unittest.TestCase):
                 acknowledged_at=clock.now(),
                 max_entries=10,
             )
-            self.assertEqual(delivered, [1, 2, 3])
-            self.assertEqual(batch.delivered_count, 3)
+            self.assertEqual(delivered, [1, 2, 3, 4, 5])
+            self.assertEqual(batch.delivered_count, 5)
             self.assertTrue(batch.completed)
-            self.assertEqual(batch.cursor.sequence, 3)
+            self.assertEqual(batch.cursor.sequence, 5)
 
     def test_failure_handling_reuses_queue_timeline_and_resource_release(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
