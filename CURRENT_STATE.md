@@ -177,6 +177,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent4_foundation.py`
 - `tests/worker_agent4_handoff_barrier_placement.py`
 - `tests/worker_agent4_handoff_contract.py`
+- `tests/worker_agent4_handoff_e2e.py`
+- `tests/worker_agent4_handoff_mutation_contract.py`
 - `tests/worker_agent4_handoff_persistence.py`
 - `tests/worker_agent4_handoff_persistence_regressions.py`
 - `tests/worker_agent4_handoff_runtime.py`
