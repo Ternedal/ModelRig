@@ -32,7 +32,7 @@ flowchart TB
         Tools["Kaliv Tools<br/>registry (in code)<br/>confirmation gate<br/>audit log (append-only)<br/>Executor seam<br/>web_research: risk=read + network=public<br/>gated KALIV_WEB_RESEARCH_ENABLED"]
         Sched["Scheduler<br/>at-most-once by construction<br/>claim + budget slot in one transaction<br/>write approvals leave a receipt"]
         A3["Agent 3<br/>mount_agent3() owns the whole surface<br/>DORMANT unless KALIV_AGENT3_ENABLED=1<br/>server-authoritative plan · one confirmation per side effect"]
-        A4["Agent 4 — campaign orchestration (A4-01…A4-13)<br/>on main but NOT MOUNTED: no route exists<br/>timeline · delivery · query · composition<br/>evidence chain · hash-bound operator+evidence reads<br/>one B-reference architecture enforced by CI gates"]
+        A4["Agent 4 — campaign orchestration (A4-01…A4-14)<br/>on main, dormant: operator reads only behind a default-off flag<br/>timeline · delivery · query · composition · evidence chain<br/>ADR-A4-008 handoff: deterministic dispatch ids · durable intents<br/>real Agent 3 receiver adapter · caller-driven recovery<br/>one B-reference architecture enforced by CI gates"]
         CU["Computer Use (Tier B)<br/>I3 see · I4 propose — DORMANT unless KALIV_COMPUTER_USE=1<br/>signed screenshot contract · local-only vision bridge<br/>I5 act: not built"]
         Eval["Eval-harness<br/>tool-discipline · dansk · latency<br/>workflow completion, not tool choice"]
     end
@@ -88,11 +88,20 @@ card says who asked: *"Cloud-modellen foreslår: …"*
 (Piper, Danish) always run on the rig. Only the transcribed question may go to
 the cloud, and only with the toggle on.
 
-**Agent 4** — the caller-driven campaign layer (A4-01…A4-13) sits on `main` in
-the strongest form of dormancy: it is not mounted anywhere, so no route exists
-to reach it. The B-reference architecture now includes durable lifecycle state,
-an append-only verified timeline, at-least-once delivery, hash-bound query
-paging, explicit runtime composition and a bounded read-only operator model.
+**Agent 4** — the caller-driven campaign layer (A4-01…A4-14) sits on `main` in
+deliberate dormancy: nothing runs on its own, and the only surface that can be
+reached is a read-only operator API that exists solely while
+`KALIV_AGENT4_OPERATOR_API=1` — off by default, in both the worker and the
+backend proxy, and additionally gated per device by an explicit `agent4:read`
+grant. The B-reference architecture now includes durable lifecycle state, an
+append-only verified timeline, at-least-once delivery, hash-bound query paging,
+explicit runtime composition, a bounded read-only operator model, and the
+complete ADR-A4-008 external side-effect handoff: deterministic dispatch and
+signal identities, durable intents written before any external call, a real
+Agent 3 receiver adapter with a SQLite dedup/tombstone registry, and
+caller-driven recovery that never redispatches on its own. Orchestrating real
+side effects additionally requires physical rig evidence bound to an exact SHA
+and a separate, explicit activation decision.
 Its architecture is fixed by ADR before behaviour ships; storage must not know
 subscribers, and application-driven polling is forbidden. Those boundaries are
 not prose alone: CI gates scan the package on every run

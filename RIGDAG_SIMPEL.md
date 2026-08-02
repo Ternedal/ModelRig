@@ -150,6 +150,13 @@ checkouten forlades urørt** (SHA-invarianten). Promovering — fast-forward,
 tag, release, aktivering — er en separat, eksplicit beslutning og sker
 **ikke** i dag (`STAGED_PHYSICAL_PROMOTION.md`).
 
+**Dagen aktiverer ikke Agent 4.** Kandidaten bærer nu hele ADR-A4-008-stakken
+i dvale — handoff-kontrakter, durable intents, resource-barriere og en rigtig
+Agent 3-modtageradapter. Dagens beviser gælder Agent 3's Stage A, ikke Agent 4.
+ADR-A4-008's aktiveringsport kræver sit eget fysiske bevis bundet til eksakt
+SHA **og** en separat, eksplicit beslutning; et grønt rig-resultat er derfor
+aldrig i sig selv en godkendelse af Agent 4-orkestrering.
+
 ## Efter dagen — landinger der bevidst IKKE skete på kandidaten
 
 Claude lander som normale PR'er mod `main`, i denne rækkefølge og først
