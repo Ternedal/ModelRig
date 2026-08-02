@@ -56,6 +56,12 @@ class CampaignEventKind(StrEnum):
     CREATED = "created"
     SCHEDULED = "scheduled"
     STARTED = "started"
+    DISPATCH_REQUESTED = "dispatch_requested"
+    DISPATCH_CONFIRMED = "dispatch_confirmed"
+    SIGNAL_REQUESTED = "signal_requested"
+    SIGNAL_CONFIRMED = "signal_confirmed"
+    RESOURCE_RECONCILIATION_REQUIRED = "resource_reconciliation_required"
+    RESOURCE_RECONCILIATION_RESOLVED = "resource_reconciliation_resolved"
     PAUSE_REQUESTED = "pause_requested"
     PAUSED = "paused"
     RESUMED = "resumed"
@@ -270,6 +276,8 @@ class CampaignState:
     updated_at: datetime = field(default_factory=utc_now)
     checkpoint_id: str | None = None
     last_error: str | None = None
+    execution_intervention_required: bool = False
+    resource_reconciliation_required: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -309,6 +317,12 @@ class CampaignState:
             raise CampaignValidationError("failed state requires last_error")
         if self.status is not CampaignStatus.FAILED and self.last_error is not None:
             raise CampaignValidationError("last_error is only valid for failed state")
+        for name in (
+            "execution_intervention_required",
+            "resource_reconciliation_required",
+        ):
+            if not isinstance(getattr(self, name), bool):
+                raise CampaignValidationError(f"{name} must be a boolean")
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
@@ -319,6 +333,8 @@ class CampaignState:
             "updated_at": _format_datetime(self.updated_at),
             "checkpoint_id": self.checkpoint_id,
             "last_error": self.last_error,
+            "execution_intervention_required": self.execution_intervention_required,
+            "resource_reconciliation_required": self.resource_reconciliation_required,
         }
 
     @classmethod
@@ -338,6 +354,12 @@ class CampaignState:
                 str(value["last_error"])
                 if value.get("last_error") is not None
                 else None
+            ),
+            execution_intervention_required=value.get(
+                "execution_intervention_required", False
+            ),
+            resource_reconciliation_required=value.get(
+                "resource_reconciliation_required", False
             ),
         )
 

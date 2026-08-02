@@ -173,6 +173,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_workflow_receipt_integrity.py`
 - `tests/worker_agent4_checkpoints.py`
 - `tests/worker_agent4_foundation.py`
+- `tests/worker_agent4_handoff_contract.py`
 - `tests/worker_agent4_operator_api.py`
 - `tests/worker_agent4_operator_api_review.py`
 - `tests/worker_agent4_recovery.py`
