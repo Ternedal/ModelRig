@@ -23,7 +23,7 @@ import os
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 
-from .windows_capture import WindowsOutputCapture, WindowsOutputCaptureError
+from .windows_capture import WindowsOutputCapture
 from .windows_job import JobLimits, terminate_attached_job
 from .windows_restricted import (
     AppContainerProcess,
@@ -34,9 +34,6 @@ from .windows_restricted import (
     spawn_restricted_in_job,
 )
 
-# Values required by ordinary Windows process/profile initialization or native
-# runtime discovery. This is intentionally a positive list. Adding a variable
-# is a security-policy change and must be backed by the Windows kernel gate.
 WINDOWS_TIER_A_ENV_NAMES = frozenset(
     name.casefold()
     for name in (
@@ -77,8 +74,6 @@ WINDOWS_TIER_A_ENV_NAMES = frozenset(
     )
 )
 
-# The catalog may request only these exact non-secret values. This is not a
-# prefix allowlist and it is deliberately too small to carry credentials.
 WINDOWS_TIER_A_APPLICATION_ENVIRONMENT = MappingProxyType(
     {
         "CI": "1",
@@ -88,9 +83,6 @@ WINDOWS_TIER_A_APPLICATION_ENVIRONMENT = MappingProxyType(
     }
 )
 
-# These were the smallest stable initialization spine proven on the Windows
-# candidate. Missing one is configuration drift; inheriting everything as a
-# fallback would reintroduce credentials, so the launcher fails closed.
 _REQUIRED_WINDOWS_ENV = frozenset(
     name.casefold()
     for name in (
