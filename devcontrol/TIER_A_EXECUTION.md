@@ -1,162 +1,139 @@
 # Tier-A execution bridge
 
-Slice 9 connects signed physical-isolation evidence to the dormant Windows
-AppContainer launcher. Slice 10A adds deterministic trusted-runtime staging,
-Slice 10B makes that staging mandatory in the only public execution path, and
-Slice 10C adds bounded native stdout/stderr evidence.
+The Development Control Plane is dormant and fail closed. Slices 9 through 10D
+connect fresh signed Windows-isolation evidence to one private AppContainer launch
+path. Slice 10D adds a signed exact-file runtime closure and an exact
+workspace-relative working directory without introducing another executor.
 
-None of these slices activates autonomous development, registered tools, Agent 3,
-Agent 4, GitHub writes, releases, merges or production deployment.
+Nothing here registers a ModelRig tool, activates Agent 3 or Agent 4, writes to
+GitHub, merges, releases or deploys code.
 
-## Authority chain
+## Executable authority chain
 
-A command can reach the Windows launch boundary only through this chain:
+A command can cross the Windows process boundary only through this complete chain:
 
-1. an immutable `kaliv-development-task/v1` grants one reviewed command ID and
-   fixed runtime/output budgets;
-2. the command exists in an immutable `ModelRigCommandCatalog`;
-3. the operator-controlled `Toolchain` binds its tool ID to one absolute source
-   executable and SHA-256;
-4. `WindowsPhysicalIsolationVerifier` reloads exactly one canonical signed
-   physical report named by the task's isolation attestation;
-5. the report signature, freshness, task SHA, base SHA, catalog SHA, toolchain
-   SHA, boundary, network mode and all eleven physical probes are verified;
-6. verification issues a `kaliv-development-execution-lease/v1` artifact;
-7. `TrustedRuntimeStager` verifies the exact lease and source executable, copies
-   it to the signed workspace and emits a
-   `kaliv-development-runtime-staging-receipt/v1`;
-8. that receipt is revalidated and exactly one leased command template is rebound
-   to the verified staged executable, without mutating the original registry;
-9. a `kaliv-development-tier-a-launch-plan/v2` is built from that staged registry
-   and binds workspace, executable, timeout, output budget and authority bundle;
-10. the private executor rehashes workspace authority, code identity and executable
-    immediately before launch;
-11. Windows creates the command suspended in a zero-capability AppContainer with
-    an exact three-handle inheritance list;
-12. the configured Job Object is assigned before the child is resumed;
-13. stdout and stderr are concurrently drained to EOF, fully hashed and only
-    bounded prefixes are retained;
-14. execution emits a canonical
-    `kaliv-development-tier-a-execution-result/v1` artifact.
+1. `kaliv-development-task/v1` grants one reviewed command ID plus fixed runtime
+   and output budgets.
+2. The command exists in an immutable `ModelRigCommandCatalog`.
+3. An operator `Toolchain` binds its tool ID to one absolute source entrypoint and
+   SHA-256.
+4. `WindowsPhysicalIsolationVerifier` reloads the exact signed report referenced by
+   the task attestation.
+5. Signature, freshness, task SHA, base SHA, catalog SHA, toolchain SHA, boundary,
+   network mode and all eleven physical probes are verified.
+6. Verification issues `kaliv-development-execution-lease/v1`, binding the rig,
+   workspace and complete Tier-A authority bundle.
+7. A command-specific `kaliv-development-runtime-closure-manifest/v1` names the
+   exact entrypoint, support files, sizes, hashes and workspace-relative cwd.
+8. An independent HMAC signature produces
+   `kaliv-development-signed-runtime-closure-manifest/v1`.
+9. `RuntimeClosureVerifier` binds the signed closure to the exact task, command,
+   catalog, toolchain, lease, workspace and trusted runtime root.
+10. `TrustedRuntimeClosureStager` copies every manifested file to:
 
-A persisted launch plan is audit evidence, not independently executable authority.
-The low-level plan executor remains private and is not exported by the package.
-The public `run_verified_tier_a_command` function requires an explicit, separate
-`trusted_runtime_root`; callers cannot supply a pre-staged executable as a
-substitute for the receipt flow.
+    ```text
+    .kaliv/runtime-closures/<tool-id>/<manifest-sha256>/...
+    ```
 
-## Code identity
+11. Staging emits
+    `kaliv-development-runtime-closure-staging-receipt/v1`; the staged tree is
+    rejected if a file is missing, extra, linked, hardlinked or changed.
+12. A new one-command leased registry changes only `argv[0]` to the verified staged
+    entrypoint. Fixed arguments, cwd, timeout, environment and lease remain exact.
+13. `kaliv-development-tier-a-launch-plan/v3` binds manifest, signature, staging
+    receipt, cwd identity, workspace, executable, timeout, output budget and the
+    full authority-code identity.
+14. Immediately before launch, the private executor rehashes the authority bundle,
+    workspace identity, complete staged closure, entrypoint and working directory.
+15. Windows creates the child suspended in a zero-capability AppContainer, with an
+    exact three-handle inheritance list, then assigns the Job Object before resume.
+16. stdout and stderr are drained concurrently to EOF, fully hashed and retained
+    only within the signed output budget. Execution emits
+    `kaliv-development-tier-a-execution-result/v1`.
 
-The physical report's `toolhost_sha256` v3 covers every source file that can
-issue, transform, launch or report Tier-A authority:
+A serialized launch plan is review evidence, not reusable execution authority.
+Plans lacking a verified closure remain serializable for inspection but the only
+runtime path rejects them.
 
-- Windows Job Object, AppContainer, environment and output-capture modules;
-- package initialization code;
-- task, catalog, command, workspace and signed-evidence validation;
-- trusted-runtime staging and receipt rebinding;
-- the private byte-identical lease/materialization core;
-- launch-plan v2, result validation and the single public runtime bridge.
+## Runtime closure rules
 
-Adding `windows_capture.py`, `tier_a_result.py` and the v2 bridge invalidates every
-older physical report. A new lease or launch requires a fresh exact-bundle report
-and attestation.
+Manifest paths are POSIX-style, relative and bounded. The parser rejects absolute
+paths, traversal, backslashes, NUL, NTFS alternate-data-stream syntax, trailing
+dot/space components and Windows reserved device names. File paths must be sorted
+and unique, cannot collide under Windows case folding, and cannot conflict with a
+parent path that is itself a file.
 
-## Environment boundary
+The trusted runtime root and workspace must be separate link-free directory trees.
+Every source file must be regular, non-empty, physically inside the trusted root
+and match its manifest hash and size. The entrypoint must also match the operator
+toolchain binding.
 
-The Windows initialization environment is derived from a fixed positive list.
-The command may additionally receive only these exact reviewed values:
+Staging is deterministic and no-overwrite. Files are hashed while copied, flushed,
+fsynced and atomically published. Existing different bytes fail closed. A complete
+post-stage walk rejects unmanifested entries. Destination files must have exactly
+one hardlink and are rehashed again immediately before process creation.
 
-- `CI=1`;
-- `MODELRIG_DEVCONTROL=1`;
-- `GOTOOLCHAIN=local`;
-- `PYTHONDONTWRITEBYTECODE=1`.
+These checks guarantee the exact signed bytes at staging and prelaunch. They do
+not yet keep the staged tree read-only with a dedicated ACL for the entire child
+lifetime.
 
-Unknown keys, altered values, case-insensitive duplicates and collisions with
-Windows initialization fields fail closed. Parent credentials such as GitHub
-tokens, model keys, cookies, authorization headers and signing keys are not
-inherited.
+## Working-directory authority
 
-## Trusted runtime staging
+The catalog still chooses cwd; the model or caller cannot supply it dynamically.
+A cwd is either `.` or a normalized repository-relative path. Absolute paths,
+traversal, backslashes, links, junctions, reparse points, missing directories and
+workspace escapes fail closed.
 
-The source executable must be regular, non-empty, link-free, physically inside a
-separate operator-controlled root and match the toolchain SHA-256. It is copied to:
+The launch plan records `working_directory_sha256`, derived from the canonical
+workspace-relative value and its exact physical path. The directory is validated
+when planning, when building the output-capture wrapper and immediately inside the
+`CreateProcessW` wrapper. The wrapper accepts only the lower launcher's already
+verified workspace root and may replace it only with the prevalidated descendant.
+Executable selection, arguments, environment, AppContainer identity and Job Object
+configuration remain outside the wrapper.
 
-```text
-.kaliv/runtime/<tool-id>/<executable-sha256>/<source-basename>
-```
+## Native output and timeout boundary
 
-The copy is hashed while written, flushed, fsynced and published with an atomic
-no-overwrite hard link. Existing matching bytes are reusable. Existing different
-bytes fail closed and are never replaced.
+The child inherits only read-only `NUL` stdin plus stdout and stderr pipe write
+handles through `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`. Unrelated inheritable parent
+handles cannot enter the child.
 
-The receipt binds task, command, catalog, toolchain, execution lease, signed
-workspace authority, hashed source-path identity, executable bytes and destination.
-Before launch, `bind_for_launch` rehashes both the operator source and workspace
-copy, then creates a new one-command `LeasedCommandRegistry` whose only difference
-is `argv[0]`. Arguments, cwd, timeout, environment, lease, catalog, toolchain and
-attestation are preserved exactly.
-
-The stager has no process-launch method and is not exported through the package
-top level.
-
-## Native output boundary
-
-The capture layer cannot create a process or select command authority. It wraps
-the existing AppContainer `CreateProcessW` call only to add:
-
-- an inherited read-only `NUL` handle for stdin;
-- one inherited stdout pipe write handle;
-- one inherited stderr pipe write handle;
-- `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` containing exactly those three handles.
-
-`bInheritHandles=TRUE` is accepted only together with that exact handle list.
-Unrelated inheritable handles in the parent therefore cannot enter the child.
-Parent-side pipe write handles are closed immediately after `CreateProcessW`, so
-EOF depends only on the isolated Job Object process tree.
-
-Two non-daemon reader threads drain stdout and stderr concurrently. Every byte is
-included in its stream's SHA-256 and total byte count. Memory retention is split
-deterministically across the signed task budget:
+Two non-daemon reader threads drain the streams concurrently. Every byte contributes
+to the full stream SHA-256 and total byte count. Retained memory is split
+predictably:
 
 ```text
 stdout prefix = ceil(max_output_bytes / 2)
 stderr prefix = floor(max_output_bytes / 2)
 ```
 
-The result stores binary prefixes as canonical base64. It also records full stream
-hashes, full byte counts, retained byte counts and explicit truncation flags.
-A truncated stream therefore remains identifiable without retaining unbounded
-output.
+Binary prefixes are canonical base64. On timeout, the complete Job Object is
+terminated, the process is reaped and both streams reach EOF before a non-passing
+result is finalized. `TierAExecutionTimeout` carries that evidence so timeout
+output remains auditable but cannot be mistaken for success.
 
-## Timeout behavior
+## Code identity
 
-The fixed launch timeout is the smaller of the task budget and catalog template.
-On timeout, the complete Job Object is terminated and closed before capture waits
-for EOF. The process is reaped, both stream hashes are finalized and a canonical
-result with `timed_out=true` and `passed=false` is produced.
-
-The public runtime then raises `TierAExecutionTimeout` carrying that result. A
-caller cannot mistake timeout evidence for a successful command, while the audit
-chain still retains output emitted before termination.
+`tier_a_toolhost_sha256` v4 covers all modules that can issue, transform, stage,
+launch or report Tier-A authority, including the runtime-closure model, verifier,
+stager, launch-plan v3, cwd binding, output capture and public facade. Every report
+issued for an earlier authority bundle is therefore invalid.
 
 ## Current limitations
 
-The bridge remains deliberately dormant.
-
 - No registered ModelRig tool calls `run_verified_tier_a_command`.
-- The hosted Windows proof uses synthetic signed evidence to test software wiring;
-  it is not the physical I0b result required for activation.
-- Staging one executable is not a complete Python or Go runtime closure; dependent
-  DLLs, Python libraries and Go toolchain trees remain unprovisioned.
-- Launch plans currently require workspace-root working directory. Existing
-  backend commands use `backend/` and remain unavailable through this bridge.
-- `TierAExecutionResult` does not yet claim a complete development
-  `CommandReceipt`: workspace-before/after Git identities and reset evidence remain
-  owned by the separate command executor.
-- No GitHub write, branch push, draft-PR creation, merge, release, settings or
-  feature-switch authority is granted.
+- Hosted Windows CI uses synthetic signed evidence; it does not replace the
+  selected rig's independent eleven-probe I0b campaign.
+- The closure is exact-file based, not yet an automatically discovered transitive
+  PE/DLL, Python or Go runtime closure.
+- Staged bytes are revalidated before launch, but a lifetime read-only ACL and
+  immutable mounted runtime are not yet proven.
+- `TierAExecutionResult` is not a complete development `CommandReceipt`; Git
+  before/after identity and reset evidence remain owned by the separate command
+  executor.
+- No branch push, pull-request write, merge, release, settings, feature-switch or
+  deployment authority is granted.
 
-The next safe slice is a signed runtime-closure manifest plus bounded
-workspace-relative working-directory support, beginning with one independently
-reviewed self-contained command. It must not weaken staging, output capture or the
-fresh physical-evidence requirement.
+The next safe unit is a reviewed closure builder for one concrete self-contained
+command, followed by lifetime runtime-file immutability. It must preserve the same
+fresh signed-evidence, exact staging, cwd, output and Job Object boundaries.

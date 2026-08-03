@@ -1,107 +1,132 @@
-# Trusted runtime staging
+# Trusted runtime staging and signed closures
 
-Slice 10A adds deterministic runtime staging. Slice 10B makes the resulting
-receipt mandatory in the single public Tier-A execution path. The stager itself
-still cannot launch a process, activate a tool, write to GitHub, alter a feature
-switch, merge, release or deploy anything.
+The original Slice 10A stager proved deterministic staging for one executable.
+Slice 10B made its receipt mandatory in the public Tier-A path. Slice 10D extends
+that boundary to an independently signed, command-specific set of exact files and
+a reviewed workspace-relative working directory.
 
-## Authority chain
+The staging code cannot create a process, register a ModelRig tool, write to
+GitHub, alter feature switches, merge, release or deploy.
 
-`TrustedRuntimeStager` accepts only:
+## Legacy executable staging
 
-1. an already validated `kaliv-development-task/v1` task;
-2. a `LeasedCommandRegistry` issued from exact signed physical evidence;
-3. one command ID already granted by that task;
-4. the command's immutable catalog specification and exact toolchain binding;
-5. a separate absolute operator-controlled runtime root;
-6. the workspace root named by the signed physical report.
-
-The operator runtime root and workspace must be separate directory trees. The
-source executable must be a regular, non-empty file physically inside the
-operator root, contain no symlink or junction component and match the exact
-SHA-256 stored in the toolchain binding.
-
-## Deterministic destination
-
-The executable is staged under:
+`TrustedRuntimeStager` remains the narrow single-executable primitive used by the
+earlier contract. It verifies an operator-bound executable and publishes it under:
 
 ```text
 .kaliv/runtime/<tool-id>/<executable-sha256>/<source-basename>
 ```
 
-No task, model or command argument chooses this path. Parent directories are
-created one component at a time and rejected if any component becomes a link,
-junction or non-directory.
+It produces `kaliv-development-runtime-staging-receipt/v1`. This contract remains
+useful as a low-level staging primitive, but the Slice 10D runtime path now requires
+the stronger signed-closure flow below.
 
-The copy is written to a private temporary file, hashed while copying, flushed,
-fsynced and published with an atomic no-overwrite hard link. An existing matching
-destination is reusable. An existing destination with different bytes fails
-closed and is never overwritten.
+## Signed runtime closure
 
-## Receipt
+`RuntimeClosureManifest` describes one command's complete reviewed file set:
 
-A successful stage produces a canonical
-`kaliv-development-runtime-staging-receipt/v1` artifact binding:
-
-- task ID, canonical task SHA-256 and base commit;
+- task ID, canonical task SHA and base commit;
 - command ID and tool ID;
-- catalog, toolchain and execution-lease SHA-256;
-- signed workspace-root authority SHA-256;
-- a hash of the canonical operator source path, without disclosing that path;
-- executable SHA-256 and byte size;
-- the deterministic workspace-relative destination.
+- catalog, toolchain, execution-lease and workspace identities;
+- a hashed identity for the separate trusted runtime root;
+- exact entrypoint relative path;
+- exact workspace-relative working directory;
+- sorted file paths, SHA-256 values and byte sizes;
+- exact total file bytes.
 
-Reload verification rebinds every authority field and rehashes both the operator
-source and staged copy. Changing either side invalidates the receipt.
+`HmacRuntimeClosureSigner` wraps this manifest in
+`kaliv-development-signed-runtime-closure-manifest/v1`. The key ID and signature
+are separate from the task and physical-isolation evidence. A valid signature does
+not authorize another command, cwd, lease, workspace or base commit because all of
+those fields are inside the signed canonical payload.
 
-## Launch binding
+HMAC is appropriate only while its secret is protected by the independent operator
+boundary. A secret placed in the agent workspace destroys that independence claim.
 
-`bind_for_launch` accepts only a valid receipt plus the same leased registry, task
-and command ID. It verifies the receipt again, resolves the staged executable and
-constructs a new one-command `LeasedCommandRegistry`.
+## Path and tree safety
 
-Only `argv[0]` changes. Fixed arguments, cwd, timeout, environment, lease, catalog,
-toolchain and attestation are copied exactly from the original materialized
-command. The original registry is never mutated.
+Every relative path is validated before filesystem access. The closure rejects:
 
-The public `run_verified_tier_a_command` path now performs this sequence every
-time it is called:
+- absolute paths, `..`, `.`, backslashes and NUL;
+- NTFS alternate-data-stream syntax;
+- trailing spaces or dots;
+- Windows device names such as `CON`, `NUL`, `COM1` and `LPT1`;
+- duplicate paths and Windows case-fold collisions;
+- a file path that is also the parent of another manifested file;
+- more than 512 files, per-file overflow or total closure overflow.
 
-1. reload and verify signed physical evidence;
-2. issue a fresh execution lease;
-3. stage the operator-bound executable;
-4. reverify the receipt and bind the staged registry;
-5. build a fresh launch plan;
-6. rehash code, workspace and executable;
-7. enter the zero-capability AppContainer and Job Object boundary.
+The trusted runtime root and workspace must be separate absolute directory trees
+without symlink or junction components. Source files must be regular, non-empty,
+physically inside the trusted root and match the signed hash and size. The signed
+entrypoint must additionally match the exact operator toolchain binding.
 
-There is still no public function that executes a persisted launch plan.
+## Deterministic closure destination
 
-## Signed code identity
+The complete closure is staged under:
 
-`runtime_staging.py` is now included in `tier_a_toolhost_sha256`. Any staging-code
-change therefore invalidates older physical reports and prevents a lease from
-being issued until fresh exact-bundle evidence is collected and attested.
+```text
+.kaliv/runtime-closures/<tool-id>/<manifest-sha256>/...
+```
 
-The staging module remains absent from the package top-level exports. Its import
-inside the public runtime is local to avoid a circular package initialization
-path, not to exclude it from signed authority.
+No model-selected argument chooses this location. Parent directories are built one
+component at a time and rejected if a component is a link, junction or non-directory.
+Each file is copied to a private temporary file, hashed during copying, flushed,
+fsynced and atomically published without overwrite. Existing identical bytes can
+be reused; existing different bytes fail closed.
 
-## Deliberate non-goals
+The publisher removes its private hardlink name before locking the final file,
+avoiding the Windows read-only hardlink-ordering failure previously caught in the
+single-executable stager.
 
-This slice does not:
+## Staging receipt and revalidation
 
-- stage dependent DLLs, Python standard libraries, Go toolchain trees or another
-  complete runtime closure;
-- support non-root command working directories;
-- capture or expose stdout and stderr;
-- create a complete `CommandReceipt`;
-- activate a registered ModelRig tool;
-- perform the selected rig's physical eleven-probe I0b campaign;
+A successful stage emits
+`kaliv-development-runtime-closure-staging-receipt/v1`, binding:
+
+- exact task, command, catalog, toolchain and lease;
+- signed workspace authority;
+- manifest and signed-manifest hashes;
+- deterministic closure root and staged entrypoint;
+- working directory;
+- complete exact file list and total bytes.
+
+Verification performs a full recursive walk. Missing and unmanifested files fail
+closed. Files must be regular, link-free and have exactly one hardlink. Every file
+is rehashed and resized. `bind_for_launch` then creates a new one-command leased
+registry whose only runtime change is `argv[0]` pointing at the staged entrypoint.
+Arguments, cwd, timeout, environment, lease, catalog, toolchain and attestation are
+preserved.
+
+The launch plan stores the receipt hash and both closure hashes. Immediately before
+`CreateProcessW`, the private executor walks and rehashes the closure again. A
+persisted staging receipt cannot authorize changed bytes or an extra file.
+
+## Working directory
+
+The catalog supplies the only allowed cwd. `.` denotes the workspace root; another
+value must be a normalized workspace-relative descendant. Planning binds both the
+relative value and canonical physical directory into
+`working_directory_sha256`.
+
+The directory is checked for existence, containment, links, junctions and reparse
+points during planning and again at process creation. The output-capture wrapper
+may replace the lower launcher's verified workspace-root `lpCurrentDirectory` only
+with that exact prevalidated descendant.
+
+## Deliberate limitations
+
+This slice does not yet:
+
+- discover transitive imported DLLs or build Python/Go runtime closures
+  automatically;
+- prove that the staged closure remains read-only for the complete child lifetime;
+- provide a general model-authored manifest or arbitrary executable arguments;
+- produce a complete Git-aware development `CommandReceipt`;
+- activate any registered ModelRig command;
+- replace the selected rig's physical eleven-probe I0b campaign;
 - grant GitHub write, merge, release or deployment authority.
 
-## Next safe slice
-
-The next step is bounded native stdout/stderr capture. Pipe handles, inheritance,
-reader lifecycle, timeout cleanup and byte budgets must be proven together in the
-real Windows isolation gate without introducing a second public execution path.
+The native Windows contract currently proves a two-file closure, distinct
+command/cwd signature identities, actual nested `backend/` cwd at `CreateProcessW`,
+bounded parallel output capture and timeout EOF cleanup through the same public
+runtime path.
