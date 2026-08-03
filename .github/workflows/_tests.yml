@@ -119,7 +119,9 @@ jobs:
   # The Job Object boundary is a Windows kernel property; Linux mocks prove the
   # call contract but cannot prove suspended assignment, process/memory limits,
   # or kill-on-close across a real process tree. Keep those proofs in the same
-  # reusable gate used by both PRs and releases.
+  # reusable gate used by both PRs and releases. The support suite lives outside
+  # the root tests/*.py inventory because it is platform-specific and is wired
+  # here explicitly rather than masquerading as part of the portable glob.
   test-windows-tool-isolation:
     runs-on: windows-latest
     steps:
@@ -137,7 +139,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $env:PYTHONPATH = "worker"
-          python tests/worker_windows_job.py
+          python tests/support/windows_job_contract.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/worker_toolhost.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
