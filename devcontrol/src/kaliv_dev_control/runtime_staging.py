@@ -165,6 +165,23 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
+def _fix_published_permissions(destination: Path, *, published_here: bool) -> None:
+    """Make the final name read-only without blocking Windows temp-name cleanup."""
+
+    try:
+        os.chmod(destination, 0o555)
+    except OSError as exc:
+        if published_here:
+            try:
+                os.chmod(destination, 0o755)
+                destination.unlink()
+            except OSError:
+                pass
+        raise RuntimeStagingError(
+            "staged runtime permissions could not be fixed"
+        ) from exc
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeStagingReceipt:
     task_id: str
@@ -430,6 +447,7 @@ class TrustedRuntimeStager:
         if _is_linkish(destination):
             raise RuntimeStagingError("staged runtime destination is a link")
 
+        published_here = False
         if destination.exists():
             if not destination.is_file():
                 raise RuntimeStagingError(
@@ -468,14 +486,11 @@ class TrustedRuntimeStager:
                     raise RuntimeStagingError(
                         "trusted runtime changed while it was being staged"
                     )
-                try:
-                    os.chmod(temporary, 0o555)
-                except OSError as exc:
-                    raise RuntimeStagingError(
-                        "staged runtime permissions could not be fixed"
-                    ) from exc
+                if os.name != "nt":
+                    _fix_published_permissions(temporary, published_here=False)
                 try:
                     os.link(temporary, destination)
+                    published_here = True
                 except FileExistsError:
                     existing_hash, existing_size = _file_hash_and_size(
                         destination, maximum=self.max_executable_bytes
@@ -495,6 +510,13 @@ class TrustedRuntimeStager:
                     temporary.unlink()
                 except FileNotFoundError:
                     pass
+
+        # Windows' read-only attribute applies to every hard-link name. Setting it
+        # on the temporary name before unlink would make temp cleanup fail with
+        # WinError 5. Publish without overwrite, remove the private name, then lock
+        # the final name. The receipt verification below rehashes the final bytes.
+        if os.name == "nt":
+            _fix_published_permissions(destination, published_here=published_here)
 
         receipt = self._receipt(
             registry,
