@@ -1,7 +1,7 @@
 """Trusted, deterministic runtime staging for dormant Tier-A commands.
 
-This module does not execute a process and does not grant repository or GitHub
-write authority. It copies one operator-bound executable into a deterministic
+This module does not execute a process and grants no repository or GitHub write
+authority. It copies one operator-bound executable into a deterministic
 workspace location only after the exact task, leased command registry, catalog,
 toolchain and signed workspace authority agree.
 
@@ -254,7 +254,23 @@ class RuntimeStagingReceipt:
         }
         if set(value) != fields:
             raise RuntimeStagingError("runtime staging receipt fields mismatch")
-        return cls(**{name: value[name] for name in fields})
+        return cls(
+            schema=value["schema"],
+            task_id=value["task_id"],
+            task_sha256=value["task_sha256"],
+            repository=value["repository"],
+            base_sha=value["base_sha"],
+            command_id=value["command_id"],
+            tool_id=value["tool_id"],
+            catalog_sha256=value["catalog_sha256"],
+            toolchain_sha256=value["toolchain_sha256"],
+            lease_sha256=value["lease_sha256"],
+            workspace_root_sha256=value["workspace_root_sha256"],
+            source_path_sha256=value["source_path_sha256"],
+            executable_sha256=value["executable_sha256"],
+            staged_relative_path=value["staged_relative_path"],
+            size_bytes=value["size_bytes"],
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -344,7 +360,7 @@ class TrustedRuntimeStager:
             raise RuntimeStagingError(
                 "materialized command executable does not match the tool binding"
             )
-        return template, specification, binding, task_sha256
+        return specification, binding, task_sha256
 
     def _receipt(
         self,
@@ -384,7 +400,7 @@ class TrustedRuntimeStager:
     ) -> RuntimeStagingReceipt:
         """Copy one exact trusted executable into its deterministic workspace slot."""
 
-        _, specification, binding, task_sha256 = self._authority(
+        specification, binding, task_sha256 = self._authority(
             registry, task, command_id
         )
         source = _canonical_source(
@@ -420,10 +436,7 @@ class TrustedRuntimeStager:
             existing_hash, existing_size = _file_hash_and_size(
                 destination, maximum=self.max_executable_bytes
             )
-            if (
-                existing_hash != executable_sha256
-                or existing_size != size_bytes
-            ):
+            if existing_hash != executable_sha256 or existing_size != size_bytes:
                 raise RuntimeStagingError(
                     "staged runtime destination already exists with different bytes"
                 )
@@ -502,25 +515,30 @@ class TrustedRuntimeStager:
         task: DevelopmentTask,
         command_id: str,
     ) -> Path:
-        """Rebind a persisted receipt and rehash the staged executable."""
+        """Rebind a persisted receipt and rehash source and staged executable."""
 
         if not isinstance(receipt, RuntimeStagingReceipt):
             raise RuntimeStagingError("runtime staging verification requires a receipt")
-        _, specification, binding, task_sha256 = self._authority(
+        specification, binding, task_sha256 = self._authority(
             registry, task, command_id
         )
         source = _canonical_source(
             Path(binding.executable), self.trusted_runtime_root
         )
+        source_sha256, source_size = _file_hash_and_size(
+            source, maximum=self.max_executable_bytes
+        )
+        if source_sha256 != binding.executable_sha256:
+            raise RuntimeStagingError("trusted runtime source hash mismatch")
         expected = self._receipt(
             registry,
             task,
             command_id,
             tool_id=specification.tool_id,
             source=source,
-            executable_sha256=binding.executable_sha256,
+            executable_sha256=source_sha256,
             staged_relative_path=receipt.staged_relative_path,
-            size_bytes=receipt.size_bytes,
+            size_bytes=source_size,
             task_sha256=task_sha256,
         )
         if receipt != expected:
