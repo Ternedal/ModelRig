@@ -13,22 +13,24 @@ from kaliv_dev_control.catalog import (
     ProjectCommandSpec,
     ToolBinding,
     Toolchain,
-    modelrig_command_catalog,
 )
 from kaliv_dev_control.commands import CommandRegistry, CommandTemplate
 from kaliv_dev_control.contract import DevelopmentTask
 from kaliv_dev_control.tier_a_execution import (
     HmacRuntimeClosureSigner,
     LeasedCommandRegistry,
-    ModelRigVersionCheckClosureBuilder,
     RuntimeClosureError,
     RuntimeClosureVerifier,
     TierAExecutionLease,
     TrustedRuntimeClosureStager,
-    VERSION_CHECK_COMMAND_ID,
-    VERSION_CHECK_TOOL_ID,
     tier_a_toolhost_sha256,
     workspace_root_authority_sha256,
+)
+from kaliv_dev_control.runtime_closure_builder import (
+    ModelRigVersionCheckClosureBuilder,
+    VERSION_CHECK_COMMAND_ID,
+    VERSION_CHECK_TOOL_ID,
+    modelrig_version_check_closure_catalog,
 )
 from test_slice9 import create_control_plane
 
@@ -93,7 +95,7 @@ def make_authority(root: Path, *, legacy_profile: bool = False):
             "python", str(executable.resolve()), executable_sha256
         )
     else:
-        catalog = modelrig_command_catalog()
+        catalog = modelrig_version_check_closure_catalog()
         binding = ToolBinding(
             VERSION_CHECK_TOOL_ID,
             str(executable.resolve()),
