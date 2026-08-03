@@ -95,6 +95,16 @@ def _clean_text(value: Any, *, name: str, maximum: int) -> str:
     return value
 
 
+def _has_symlink_component(path: Path) -> bool:
+    current = path.absolute()
+    while True:
+        if current.is_symlink():
+            return True
+        if current.parent == current:
+            return False
+        current = current.parent
+
+
 def _utc(value: Any, *, name: str) -> datetime:
     text = _clean_text(value, name=name, maximum=20)
     if _UTC_SECONDS.fullmatch(text) is None:
@@ -228,6 +238,8 @@ class WindowsIsolationPhysicalReport:
             raise PhysicalIsolationError("physical report network mode is not deny")
         if not isinstance(self.probes, tuple):
             raise PhysicalIsolationError("physical probes must be an immutable tuple")
+        if any(not isinstance(probe, PhysicalProbeResult) for probe in self.probes):
+            raise PhysicalIsolationError("physical probes contain an invalid result")
         names = tuple(probe.name for probe in self.probes)
         if len(names) != len(set(names)):
             raise PhysicalIsolationError("physical report contains duplicate probes")
@@ -458,7 +470,7 @@ class WindowsPhysicalIsolationVerifier:
         max_file_bytes: int = 2_000_000,
     ) -> None:
         root = evidence_root.resolve()
-        if evidence_root.is_symlink() or not root.is_dir():
+        if _has_symlink_component(evidence_root) or not root.is_dir():
             raise PhysicalIsolationError("evidence root must be an existing non-symlink directory")
         if not isinstance(max_age, timedelta) or not timedelta(0) < max_age <= timedelta(days=366):
             raise PhysicalIsolationError("physical evidence max age is invalid")
@@ -560,7 +572,7 @@ def load_unsigned_report(path: Path) -> WindowsIsolationPhysicalReport:
 def load_signing_secret(path: Path) -> bytes:
     """Load an operator secret without accepting links or weak key material."""
 
-    if not path.is_absolute() or path.is_symlink() or not path.is_file():
+    if not path.is_absolute() or _has_symlink_component(path) or not path.is_file():
         raise PhysicalIsolationError("signing key must be an absolute regular non-symlink file")
     secret = path.read_bytes()
     if not 32 <= len(secret) <= 4096:
@@ -571,7 +583,7 @@ def load_signing_secret(path: Path) -> bytes:
 def write_signed_report(path: Path, signed: SignedWindowsIsolationReport) -> str:
     """Atomically create one canonical evidence file and return its SHA-256."""
 
-    if not path.is_absolute() or path.exists() or path.parent.is_symlink() or not path.parent.is_dir():
+    if not path.is_absolute() or path.exists() or _has_symlink_component(path.parent) or not path.parent.is_dir():
         raise PhysicalIsolationError("signed report output path is unsafe or already exists")
     payload = signed.canonical_json().encode("utf-8")
     descriptor, temporary = tempfile.mkstemp(prefix=".isolation-", suffix=".tmp", dir=path.parent)
