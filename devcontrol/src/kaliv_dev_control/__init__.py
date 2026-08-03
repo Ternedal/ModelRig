@@ -62,11 +62,17 @@ from .tier_a_execution import (
     TIER_A_APPLICATION_ENVIRONMENT,
     TierAExecutionError,
     TierAExecutionLease,
+    TierAExecutionTimeout,
     TierALaunchPlan,
     build_tier_a_launch_plan,
     run_verified_tier_a_command,
     tier_a_toolhost_sha256,
     workspace_root_authority_sha256,
+)
+from .tier_a_result import (
+    TierAExecutionResult,
+    TierAOutputStream,
+    TierAResultError,
 )
 from .workspace import CommandResult, SubprocessRunner, WorkspaceManager
 
@@ -125,7 +131,11 @@ __all__ = [
     "TaskBudget",
     "TierAExecutionError",
     "TierAExecutionLease",
+    "TierAExecutionResult",
+    "TierAExecutionTimeout",
     "TierALaunchPlan",
+    "TierAOutputStream",
+    "TierAResultError",
     "ToolBinding",
     "Toolchain",
     "UrllibReadOnlyTransport",
