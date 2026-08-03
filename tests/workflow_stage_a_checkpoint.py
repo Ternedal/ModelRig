@@ -126,6 +126,28 @@ try:
     check(report["gate"]["promotion_ready"] is False and report["gate"]["production_activation"] is False,
           "a checkpoint can never claim promotion or activate production")
 
+    # Regression: the campaign report is serialized with json.dumps(sort_keys=True),
+    # so evidence keys arrive ALPHABETICALLY on disk, not in PROOFS order. The
+    # checkpoint must validate membership of the fixed allowlist, not key order.
+    sorted_keys = campaign(
+        passed_names=["preflight", "agent3", "model_eval", "rag"],
+        failed_names=[],
+        missing_names=["voice", "scheduler_pilot"],
+    )
+    sorted_keys["evidence"] = {name: sorted_keys["evidence"][name] for name in sorted(module.PROOFS)}
+    check(tuple(sorted_keys["evidence"]) != module.PROOFS,
+          "fixture reproduces the on-disk alphabetical evidence key order")
+    raw = write(campaign_path, sorted_keys)
+    report, code = module.build_checkpoint(
+        sorted_keys,
+        source_path=campaign_path,
+        source_raw=raw,
+        voice_fixture_path=voice_path,
+        now=NOW,
+    )
+    check(code == 0 and report["checkpoint"]["valid"] is True,
+          "alphabetically-ordered evidence keys (sort_keys=True on disk) still validate")
+
     broken = campaign(
         passed_names=["preflight", "agent3", "model_eval", "rag"],
         failed_names=["voice"],

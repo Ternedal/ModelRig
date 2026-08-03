@@ -116,7 +116,10 @@ def _validate_campaign(campaign: dict[str, Any]) -> dict[str, Any]:
     combined = passed + failed + missing
     if set(combined) != set(PROOFS) or len(combined) != len(PROOFS):
         raise CheckpointError("campaign proof lists do not partition the fixed allowlist")
-    if tuple(evidence) != PROOFS:
+    # Membership, not serialized key order: the campaign report is written with
+    # json.dumps(sort_keys=True), so evidence keys arrive alphabetically on disk.
+    # The fixed allowlist is what matters here; per-proof access below is by name.
+    if set(evidence) != set(PROOFS):
         raise CheckpointError("campaign evidence allowlist drifted")
 
     expected_by_name = {
