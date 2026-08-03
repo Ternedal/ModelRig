@@ -16,7 +16,7 @@
       "const": "kaliv-windows-isolation-signed-report/v1"
     },
     "report": {
-      "$ref": "kaliv-windows-isolation-physical-report-v1.json"
+      "$ref": "windows-isolation-physical-report-v1.schema.json"
     },
     "key_id": {
       "type": "string",
