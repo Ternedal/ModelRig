@@ -35,6 +35,7 @@ release, merge, or production activation.
 - a SHA-256 hash chain over every state transition and evidence reference;
 - terminal failed and cancelled states that cannot silently resume;
 - review requests bound to the task, staged patch and command receipts;
+- strict reload validation for persisted review requests and verdicts;
 - a reviewer actor that must differ from the developer actor;
 - a structural reviewer that refuses missing or failed command evidence;
 - a gate that can only declare `ready_for_draft_pr`;
@@ -44,6 +45,21 @@ The reviewer in this slice checks evidence consistency and separation of roles. 
 does **not** claim to understand whether the implementation is semantically good.
 A later semantic reviewer must remain separate from the developer execution and
 must not be allowed to rewrite the task, tests or protected evaluation policy.
+
+### Slice 4 — durable campaign state and draft proposal
+
+- canonical campaign JSON persisted under a controlled root;
+- exclusive per-campaign file locks;
+- compare-and-swap updates that permit exactly one hash-chained append;
+- rejection of stale writers, tampered records, irregular files and symlink roots;
+- a deterministic `kaliv-development-draft-pr-proposal/v1` artifact;
+- proposal hashes bind task, campaign head, review request and review verdict;
+- branch names use the dedicated `kaliv-dev/` namespace;
+- generated PR text explicitly preserves human review and merge authority.
+
+The proposal builder performs no Git or GitHub write. It creates reviewable data
+only. A later GitHub adapter must consume this artifact with a credential that
+cannot merge, release, modify repository settings or write to `main`.
 
 ## Command authority
 
