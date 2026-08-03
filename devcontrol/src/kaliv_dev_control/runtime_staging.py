@@ -5,8 +5,9 @@ authority. It copies one operator-bound executable into a deterministic
 workspace location only after the exact task, leased command registry, catalog,
 toolchain and signed workspace authority agree.
 
-A later execution slice may consume the immutable receipt. Until then, staging
-is an auditable preparation primitive rather than executable authority.
+The public Tier-A runtime consumes the immutable receipt by rebinding exactly one
+leased command template to the verified staged path. Staging still cannot launch
+a process by itself.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from .catalog import CatalogError
+from .commands import CommandRegistry, CommandTemplate
 from .contract import DevelopmentTask
 from .tier_a_execution import (
     LeasedCommandRegistry,
@@ -559,3 +561,30 @@ class TrustedRuntimeStager:
         if digest != receipt.executable_sha256 or size != receipt.size_bytes:
             raise RuntimeStagingError("staged runtime bytes no longer match the receipt")
         return destination.resolve()
+
+    def bind_for_launch(
+        self,
+        receipt: RuntimeStagingReceipt,
+        registry: LeasedCommandRegistry,
+        task: DevelopmentTask,
+        command_id: str,
+    ) -> LeasedCommandRegistry:
+        """Rebind exactly one leased template to its verified staged executable."""
+
+        destination = self.verify(receipt, registry, task, command_id)
+        original = registry.resolve(task, command_id)
+        staged_template = CommandTemplate(
+            command_id=original.command_id,
+            argv=(os.fspath(destination), *original.argv[1:]),
+            cwd=original.cwd,
+            max_timeout_seconds=original.max_timeout_seconds,
+            env=original.env,
+        )
+        return LeasedCommandRegistry(
+            CommandRegistry((staged_template,)),
+            registry.lease,
+            task=task,
+            catalog=registry.catalog,
+            toolchain=registry.toolchain,
+            attestation=registry.attestation,
+        )
