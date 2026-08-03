@@ -24,11 +24,33 @@ from ._tier_a_execution_core import (
     LeasedCommandRegistry,
     workspace_root_authority_sha256,
 )
+from .catalog import ModelRigCommandCatalog, ProjectCommandSpec
 from .contract import DevelopmentTask
 from .runtime_closure_model import RuntimeClosureFile, RuntimeClosureManifest
 
 VERSION_CHECK_COMMAND_ID = "modelrig.version.check"
 VERSION_CHECK_TOOL_ID = "modelrig-version-check"
+
+
+def modelrig_version_check_closure_catalog() -> ModelRigCommandCatalog:
+    """Return the isolated one-command catalog for the standalone checker.
+
+    This does not modify the default ModelRig catalog. Selecting this profile
+    therefore requires a new exact catalog hash, toolchain and physical report.
+    """
+
+    return ModelRigCommandCatalog(
+        (
+            ProjectCommandSpec(
+                VERSION_CHECK_COMMAND_ID,
+                VERSION_CHECK_TOOL_ID,
+                (),
+                ".",
+                120,
+                {"CI": "1", "MODELRIG_DEVCONTROL": "1"},
+            ),
+        )
+    )
 
 
 class ModelRigVersionCheckClosureBuilder:
