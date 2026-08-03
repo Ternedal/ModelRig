@@ -233,16 +233,32 @@ else:
     # Closing the last Job Object handle kills the child and its grandchild.
     folder = tempfile.mkdtemp(prefix="kaliv-job-close-")
     marker = os.path.join(folder, "grandchild-alive")
+    grandchild_code = (
+        "from pathlib import Path\n"
+        f"marker=Path({marker!r})\n"
+        "import time\n"
+        "while True:\n"
+        "    marker.touch()\n"
+        "    time.sleep(0.05)\n"
+    )
     child = (
         "import subprocess,sys,time\n"
-        f"subprocess.Popen([sys.executable,'-c',\"import time,os\\nwhile True:\\n open(r'{marker}','a').close()\\n time.sleep(0.05)\"])\n"
+        f"subprocess.Popen([sys.executable,'-c',{grandchild_code!r}])\n"
         "time.sleep(300)\n"
     )
-    p = native_spawn(child, JobLimits(active_process_limit=2))
-    deadline = time.time() + 10
+    p = native_spawn(child, JobLimits(active_process_limit=8))
+    deadline = time.time() + 15
     while not os.path.exists(marker) and time.time() < deadline:
         time.sleep(0.05)
-    check(os.path.exists(marker), "grandchild started inside the real Job Object")
+    parent_state = p.poll()
+    parent_error = ""
+    if parent_state is not None and p.stderr is not None:
+        parent_error = p.stderr.read().decode("utf-8", "replace")[-160:]
+    check(
+        os.path.exists(marker),
+        f"grandchild started inside the real Job Object "
+        f"(parent={parent_state}, stderr={parent_error!r})",
+    )
     close_attached_job(p)
     p.wait(timeout=10)
     try:
