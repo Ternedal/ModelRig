@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -9,6 +10,10 @@ from kaliv_dev_control.catalog import IsolationBoundary, NetworkMode
 from kaliv_dev_control.tier_a_execution import (
     TierAExecutionLease,
     TierALaunchPlan,
+)
+from kaliv_dev_control.tier_a_result import (
+    TierAExecutionResult,
+    TierAOutputStream,
 )
 
 HASH_A = "a" * 64
@@ -65,6 +70,7 @@ class TierASchemaParityTests(unittest.TestCase):
                 argv=(str((Path(directory) / "probe.exe").resolve()), "--version"),
                 cwd=".",
                 max_timeout_seconds=30,
+                max_output_bytes=4096,
                 env={"CI": "1", "PYTHONDONTWRITEBYTECODE": "1"},
                 catalog_sha256=HASH_B,
                 toolchain_sha256=HASH_C,
@@ -81,7 +87,7 @@ class TierASchemaParityTests(unittest.TestCase):
             schema = json.loads(
                 (
                     root
-                    / "devcontrol/schemas/development-tier-a-launch-plan-v1.schema.json"
+                    / "devcontrol/schemas/development-tier-a-launch-plan-v2.schema.json"
                 ).read_text(encoding="utf-8")
             )
             fields = set(plan.to_dict())
@@ -92,6 +98,54 @@ class TierASchemaParityTests(unittest.TestCase):
                 TierALaunchPlan.from_mapping(plan.to_dict()).canonical_json(),
                 plan.canonical_json(),
             )
+
+    def test_execution_result_schema_matches_canonical_artifact(self):
+        stdout_bytes = b"captured stdout\n"
+        stderr_bytes = b""
+        stdout = TierAOutputStream(
+            captured=stdout_bytes,
+            sha256=hashlib.sha256(stdout_bytes).hexdigest(),
+            total_bytes=len(stdout_bytes),
+            truncated=False,
+        )
+        stderr = TierAOutputStream(
+            captured=stderr_bytes,
+            sha256=hashlib.sha256(stderr_bytes).hexdigest(),
+            total_bytes=0,
+            truncated=False,
+        )
+        result = TierAExecutionResult.create(
+            task_id="A9_SCHEMA",
+            task_sha256=HASH_A,
+            base_sha="1" * 40,
+            command_id="modelrig.schema.probe",
+            plan_sha256=HASH_B,
+            lease_sha256=HASH_C,
+            signed_report_sha256=HASH_D,
+            returncode=0,
+            duration_ms=25,
+            timed_out=False,
+            max_output_bytes=4096,
+            stdout=stdout,
+            stderr=stderr,
+        )
+        root = Path(__file__).resolve().parents[2]
+        schema = json.loads(
+            (
+                root
+                / "devcontrol/schemas/development-tier-a-execution-result-v1.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+        fields = set(result.to_dict())
+        self.assertEqual(set(schema["required"]), fields)
+        self.assertEqual(set(schema["properties"]), fields)
+        stream_fields = set(result.stdout.to_dict())
+        self.assertEqual(set(schema["$defs"]["stream"]["required"]), stream_fields)
+        self.assertEqual(set(schema["$defs"]["stream"]["properties"]), stream_fields)
+        self.assertEqual(
+            TierAExecutionResult.from_mapping(result.to_dict()).canonical_json(),
+            result.canonical_json(),
+        )
 
 
 if __name__ == "__main__":
