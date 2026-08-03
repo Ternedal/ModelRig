@@ -1,11 +1,11 @@
 # Tier-A execution bridge
 
-Slice 9 connects the signed physical-isolation evidence contract to the dormant
-Windows AppContainer launcher. It does **not** activate autonomous development,
-registered tools, Agent 3, Agent 4, releases, merges or production deployment.
+Slice 9 connects signed physical-isolation evidence to the dormant Windows
+AppContainer launcher. Slice 10A adds deterministic trusted-runtime staging, and
+Slice 10B makes that staging mandatory in the only public execution path.
 
-Slice 10A adds deterministic trusted-runtime staging as a separate preparation
-primitive. It deliberately does not change the public execution path yet.
+None of these slices activates autonomous development, registered tools, Agent 3,
+Agent 4, GitHub writes, releases, merges or production deployment.
 
 ## Authority chain
 
@@ -13,41 +13,45 @@ A command can reach the Windows launch boundary only through this chain:
 
 1. an immutable `kaliv-development-task/v1` grants one reviewed command ID;
 2. the command exists in an immutable `ModelRigCommandCatalog`;
-3. the operator-controlled `Toolchain` binds its tool ID to one absolute binary
-   and SHA-256;
+3. the operator-controlled `Toolchain` binds its tool ID to one absolute source
+   executable and SHA-256;
 4. `WindowsPhysicalIsolationVerifier` reloads exactly one canonical signed
    physical report named by the task's isolation attestation;
 5. the report signature, freshness, task SHA, base SHA, catalog SHA, toolchain
    SHA, boundary, network mode and all eleven physical probes are verified;
 6. verification issues a `kaliv-development-execution-lease/v1` artifact;
-7. the lease is converted into a
-   `kaliv-development-tier-a-launch-plan/v1` artifact bound to the canonical
-   workspace path, staged executable hash and complete Tier-A authority bundle;
-8. the public runtime API repeats steps 4–7 immediately before launch;
-9. Windows creates the command in a zero-capability AppContainer, suspended,
-   assigns its Job Object limits and only then resumes it.
+7. `TrustedRuntimeStager` verifies the exact lease and source executable, copies
+   it to the signed workspace and emits a
+   `kaliv-development-runtime-staging-receipt/v1`;
+8. that receipt is revalidated and exactly one leased command template is rebound
+   to the verified staged executable, without mutating the original registry;
+9. a `kaliv-development-tier-a-launch-plan/v1` is built from that staged registry
+   and binds the canonical workspace, executable SHA and complete authority bundle;
+10. the private executor rehashes workspace authority, code identity and executable
+    immediately before launch;
+11. Windows creates the command suspended in a zero-capability AppContainer,
+    assigns its Job Object limits and only then resumes it.
 
-A persisted launch plan is audit evidence. It is not independently executable
-authority. The low-level plan executor is private and is not exported by the
-package.
+A persisted launch plan is audit evidence, not independently executable authority.
+The low-level plan executor remains private and is not exported by the package.
+The public `run_verified_tier_a_command` function now requires an explicit,
+separate `trusted_runtime_root`; callers cannot supply a pre-staged executable as
+a substitute for the receipt flow.
 
 ## Code identity
 
-The physical report's `toolhost_sha256` covers all source files that can issue,
+The physical report's `toolhost_sha256` covers every source file that can issue,
 transform or execute Tier-A authority:
 
 - Windows Job Object, AppContainer and Tier-A environment modules;
 - package initialization code;
 - task, catalog, command, workspace and signed-evidence validation;
+- trusted-runtime staging and receipt rebinding;
 - the lease, plan and verified runtime bridge itself.
 
-Changing any one of these files invalidates the physical report and prevents a
-new lease or launch plan from being issued.
-
-`runtime_staging.py` is intentionally not in this bundle yet because Slice 10A
-cannot issue or execute a launch plan and is not imported by the package
-initialization path. The integration slice must add it to the bundle and require
-fresh physical evidence in the same change.
+`runtime_staging.py` is now inside this signed bundle. The Slice 10B change
+therefore invalidates every older physical report. A new lease or launch requires
+a fresh exact-bundle report and attestation.
 
 ## Environment boundary
 
@@ -66,51 +70,45 @@ inherited.
 
 ## Trusted runtime staging
 
-`TrustedRuntimeStager` can prepare one executable from a separate absolute
-operator-controlled runtime root. It verifies the exact leased task, command,
-catalog, toolchain and signed workspace root before copying anything.
-
-The source executable must be regular, non-empty, link-free, physically inside
-the operator root and match its toolchain SHA-256. It is copied to the
-deterministic path:
+The source executable must be regular, non-empty, link-free, physically inside a
+separate operator-controlled root and match the toolchain SHA-256. It is copied to:
 
 ```text
 .kaliv/runtime/<tool-id>/<executable-sha256>/<source-basename>
 ```
 
 The copy is hashed while written, flushed, fsynced and published with an atomic
-no-overwrite hard link. Existing matching bytes are reusable; existing different
+no-overwrite hard link. Existing matching bytes are reusable. Existing different
 bytes fail closed and are never replaced.
 
-The canonical `kaliv-development-runtime-staging-receipt/v1` artifact binds the
-task, command, catalog, toolchain, execution lease, signed workspace authority,
-hashed source-path identity, executable bytes and deterministic destination.
-Reload verification rehashes both the operator source and the staged copy.
+The receipt binds task, command, catalog, toolchain, execution lease, signed
+workspace authority, hashed source-path identity, executable bytes and destination.
+Before launch, `bind_for_launch` rehashes both the operator source and workspace
+copy, then creates a new one-command `LeasedCommandRegistry` whose only difference
+is `argv[0]`. Arguments, cwd, timeout, environment, lease, catalog, toolchain and
+attestation are preserved exactly.
 
-This receipt is not executable authority. See `RUNTIME_STAGING.md` for the full
-boundary and non-goals.
+The stager still has no process-launch method and is not exported through the
+package top level.
 
 ## Current limitations
 
 The bridge remains deliberately dormant.
 
 - No registered ModelRig tool calls `run_verified_tier_a_command`.
-- The hosted Windows proof uses a synthetic signed report to test the complete
-  software wiring. It is not the physical I0b result required for activation.
-- Trusted standalone executable staging exists, but the public fresh-verification
-  runtime path does not consume its receipt yet.
-- Staging a single executable is not a complete Python or Go runtime closure;
-  dependent DLLs, Python libraries and Go toolchain trees remain unprovisioned.
-- Launch plans currently require workspace-root working directory. The existing
-  backend Go commands use `backend/` and therefore remain unavailable through
-  this bridge.
-- Standard output and standard error capture are not yet part of the native
-  AppContainer process wrapper, so Slice 9 proves exit status and boundary
-  enforcement rather than a complete `CommandReceipt` execution path.
+- The hosted Windows proof uses a synthetic signed report to test software wiring;
+  it is not the physical I0b result required for activation.
+- Staging one executable is not a complete Python or Go runtime closure; dependent
+  DLLs, Python libraries and Go toolchain trees remain unprovisioned.
+- Launch plans currently require workspace-root working directory. Existing
+  backend commands use `backend/` and remain unavailable through this bridge.
+- Standard output and error capture are not yet part of the native AppContainer
+  wrapper, so execution returns an exit code rather than a complete
+  `CommandReceipt`.
 - No GitHub write, branch push, draft-PR creation, merge, release, settings or
   feature-switch authority is granted.
 
-The next safe slice is to integrate the staging receipt into the single public
-fresh-verification path, add `runtime_staging.py` to the signed authority bundle,
-and add bounded stdout/stderr capture. That must be followed by a complete
-physical eleven-probe campaign on the selected rig.
+The next safe slice is bounded native stdout/stderr capture with strict byte
+budgets and deterministic hashes, without creating a second public execution
+surface. It must then be followed by the complete physical eleven-probe campaign
+on the selected rig.
