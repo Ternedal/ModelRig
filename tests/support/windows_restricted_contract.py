@@ -1,7 +1,7 @@
-"""Contract and real-Windows proofs for restricted token + workspace SID.
+"""Contract and real-Windows proofs for the Tier-A AppContainer boundary.
 
-The deterministic policy checks run on every platform. Native ACL, token,
-private-desktop and CreateProcessAsUser proofs run in the Windows gate.
+The deterministic authority checks run on every platform. Native profile,
+package-SID ACL, process creation and filesystem proofs run in Windows CI.
 """
 from __future__ import annotations
 
@@ -14,14 +14,12 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "worker"))
 
-import app.windows_restricted as WR  # noqa: E402
 from app.windows_job import JobLimits, close_attached_job  # noqa: E402
 from app.windows_restricted import (  # noqa: E402
-    RESTRICTED_CODE_SID,
+    AppContainerProfile,
     RestrictedLaunchError,
     RestrictedLaunchPolicy,
-    RestrictedToken,
-    derive_workspace_sid,
+    derive_profile_name,
     provision_workspace_acl,
     spawn_restricted_in_job,
 )
@@ -49,12 +47,7 @@ def rejects(fn, text, message):
 
 
 def build_static_helper(workspace: str) -> str:
-    """Build a statically linked Win32 fixture with the hosted MSVC toolchain.
-
-    The previous Go fixture died during loader initialization before main. A
-    minimal /MT executable separates a token/ACL design failure from a language
-    runtime that needs broader Windows resources.
-    """
+    """Build a statically linked fixture with the hosted MSVC toolchain."""
 
     root = Path(__file__).resolve().parents[2]
     source = root / "tests" / "support" / "windows_restricted_helper.c"
@@ -85,18 +78,18 @@ def build_static_helper(workspace: str) -> str:
         text=True,
         check=False,
     )
-    installation = discovered.stdout.strip().splitlines()
-    if discovered.returncode != 0 or not installation:
+    installations = discovered.stdout.strip().splitlines()
+    if discovered.returncode != 0 or not installations:
         raise RuntimeError(
             "Visual Studio C++ toolchain not found: "
             + discovered.stderr.strip()[-400:]
         )
-    devcmd = Path(installation[-1]) / "Common7" / "Tools" / "VsDevCmd.bat"
+    devcmd = Path(installations[-1]) / "Common7" / "Tools" / "VsDevCmd.bat"
     if not devcmd.is_file():
         raise RuntimeError("VsDevCmd.bat is missing")
 
-    output = Path(workspace) / "restricted-helper.exe"
-    build_dir = Path(tempfile.mkdtemp(prefix="kaliv-restricted-build-"))
+    output = Path(workspace) / "appcontainer-helper.exe"
+    build_dir = Path(tempfile.mkdtemp(prefix="kaliv-appcontainer-build-"))
     script = build_dir / "build-helper.cmd"
     script.write_text(
         "@echo off\r\n"
@@ -122,25 +115,24 @@ def build_static_helper(workspace: str) -> str:
     return str(output)
 
 
-with tempfile.TemporaryDirectory(prefix="kaliv-sid-contract-") as first:
+with tempfile.TemporaryDirectory(prefix="kaliv-appcontainer-policy-") as first:
     first_root = os.path.abspath(first)
-    sid_a = derive_workspace_sid(first_root)
-    sid_b = derive_workspace_sid(first_root)
-    check(sid_a == sid_b, "workspace SID derivation is deterministic")
+    name_a = derive_profile_name(first_root)
+    name_b = derive_profile_name(first_root)
+    check(name_a == name_b, "AppContainer profile derivation is deterministic")
     check(
-        sid_a.startswith("S-1-5-21-"),
-        "workspace authority is a valid private SID shape",
+        name_a.startswith("Kaliv.ModelRig.") and len(name_a) <= 64,
+        "profile moniker is valid and bounded",
     )
     policy = RestrictedLaunchPolicy(first_root)
-    check(policy.workspace_sid == sid_a, "policy binds the SID to the canonical root")
     check(
-        policy.restricting_sids == (RESTRICTED_CODE_SID, sid_a),
-        "policy combines Restricted Code with the dedicated workspace SID",
+        policy.profile_name == name_a,
+        "policy binds the profile to the canonical root",
     )
     rejects(
-        lambda: RestrictedLaunchPolicy(first_root, "S-1-5-21-1-2-3-4"),
+        lambda: RestrictedLaunchPolicy(first_root, "Kaliv.ModelRig.unrelated"),
         "does not match",
-        "a caller cannot substitute a broader or unrelated SID",
+        "a caller cannot substitute an unrelated AppContainer profile",
     )
 
 rejects(
@@ -150,9 +142,9 @@ rejects(
 )
 
 if os.name != "nt":
-    check(True, "native restricted-token proofs are reserved for Windows CI")
+    check(True, "native AppContainer proofs are reserved for Windows CI")
 else:
-    sandbox_parent = tempfile.mkdtemp(prefix="kaliv-restricted-parent-")
+    sandbox_parent = tempfile.mkdtemp(prefix="kaliv-appcontainer-parent-")
     workspace = os.path.join(sandbox_parent, "workspace")
     outside = os.path.join(sandbox_parent, "outside")
     os.mkdir(workspace)
@@ -174,61 +166,33 @@ else:
     Path(outside_read).write_text("outside", encoding="utf-8")
     Path(result_path).write_text('{"sentinel":true}', encoding="utf-8")
 
-    receipt = provision_workspace_acl(workspace)
-    policy = RestrictedLaunchPolicy(workspace, receipt.workspace_sid)
+    policy = RestrictedLaunchPolicy(workspace)
+    profile = AppContainerProfile(policy)
+    check(not profile.closed, "AppContainer profile and Package SID resolved")
+    check(
+        profile.sid_string.startswith("S-1-15-2-"),
+        "profile exposes an AppContainer Package SID",
+    )
+    receipt = provision_workspace_acl(policy, profile)
     check(
         receipt.paths_updated >= 4,
-        "ACL provisioning covered root, executable, input and receipt",
+        "Package SID ACL covers root, executable, input and receipt",
     )
     check(
-        receipt.root == policy.workspace_root,
-        "ACL receipt and launch policy share one canonical root",
+        receipt.root == policy.workspace_root
+        and receipt.profile_name == policy.profile_name
+        and receipt.appcontainer_sid == profile.sid_string,
+        "ACL receipt is bound to the exact root and profile",
     )
-
-    with RestrictedToken(policy) as token:
-        check(not token.closed, "restricted primary token was created")
-        with token.impersonate():
-            check(
-                Path(inside_read).read_text(encoding="utf-8") == "inside",
-                "restricted thread can read inside the provisioned workspace",
-            )
-            try:
-                Path(outside_read).read_text(encoding="utf-8")
-            except OSError:
-                outside_read_denied = True
-            else:
-                outside_read_denied = False
-            check(
-                outside_read_denied,
-                "restricted thread is OS-denied outside the workspace",
-            )
-            Path(inside_write).write_text("inside-write", encoding="utf-8")
-            check(
-                os.path.isfile(inside_write),
-                "restricted thread can write inside workspace",
-            )
-            try:
-                Path(outside_write).write_text("outside-write", encoding="utf-8")
-            except OSError:
-                outside_write_denied = True
-            else:
-                outside_write_denied = False
-            check(
-                outside_write_denied,
-                "restricted thread cannot write outside workspace",
-            )
-
-    # Keep the broad user-object diagnostic while changing only the executable
-    # runtime. A green child proves the SID model and allows the rights to be
-    # tightened afterwards; another 0xC0000142 proves the token model itself is
-    # missing system authority.
-    WR.WINDOW_STATION_CHILD_ACCESS = 0x000F037F
-    WR.DESKTOP_CHILD_ACCESS = 0x000F01FF
+    check(
+        receipt.capability_count == 0,
+        "profile declares zero capabilities, including zero network capabilities",
+    )
 
     env = {
         key: value
         for key, value in os.environ.items()
-        if key in {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATH"}
+        if key in {"SYSTEMROOT", "WINDIR", "PATH"}
     }
     proc = spawn_restricted_in_job(
         [helper, inside_read, outside_read, inside_write, outside_write, result_path],
@@ -238,20 +202,17 @@ else:
             active_process_limit=1,
         ),
         policy=policy,
+        profile=profile,
+        acl_receipt=receipt,
     )
-    private_desktop = getattr(proc, "_desktop_lease", None)
     check(
-        private_desktop is not None
-        and "\\KalivRestricted-" in private_desktop.full_name,
-        "restricted child is bound to a private non-default desktop",
+        proc.profile_name == policy.profile_name,
+        "child process remains bound to the expected profile",
     )
     exit_code = proc.wait(timeout=30)
     close_attached_job(proc)
     proc.close()
-    check(
-        private_desktop is not None and private_desktop.closed,
-        "private desktop and temporary DACL grants are restored after exit",
-    )
+
     result_exists = Path(result_path).is_file()
     result_text = (
         Path(result_path).read_text(encoding="utf-8") if result_exists else ""
@@ -260,26 +221,33 @@ else:
         payload = json.loads(result_text)
     except (TypeError, ValueError):
         payload = {}
-    check(exit_code == 0, f"restricted child exits normally (exit={exit_code})")
-    check(result_exists, "restricted child receipt path still exists")
+    check(exit_code == 0, f"AppContainer child exits normally (exit={exit_code})")
+    check(result_exists, "AppContainer receipt path still exists")
     check(
         payload.get("sentinel") is not True,
-        f"restricted child replaced the provisioned receipt ({result_text[:120]!r})",
+        f"AppContainer child replaced the provisioned receipt ({result_text[:120]!r})",
     )
     check(
-        payload.get("restricted") is True,
-        "child sees a real restricted primary token",
+        payload.get("appcontainer") is True,
+        "child token is a real AppContainer token",
     )
-    check(payload.get("inside_read") is True, "restricted child reads inside")
+    check(
+        payload.get("lpac") is False,
+        "boundary uses regular AppContainer system compatibility, not LPAC",
+    )
+    check(payload.get("inside_read") is True, "AppContainer child reads inside")
     check(
         payload.get("outside_read") is False,
-        "restricted child cannot read outside",
+        "AppContainer child is OS-denied reading outside",
     )
-    check(payload.get("inside_write") is True, "restricted child writes inside")
+    check(payload.get("inside_write") is True, "AppContainer child writes inside")
     check(
         payload.get("outside_write") is False,
-        "restricted child cannot write outside",
+        "AppContainer child is OS-denied writing outside",
     )
 
-print(f"\n===== WINDOWS RESTRICTED TOKEN: {passed} passed, {failed} failed =====")
+    profile.delete()
+    check(profile.deleted and profile.closed, "test AppContainer profile is deleted")
+
+print(f"\n===== WINDOWS APPCONTAINER: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
