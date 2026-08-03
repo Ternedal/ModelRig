@@ -43,10 +43,14 @@ NOW = datetime(2026, 8, 3, 12, 15, tzinfo=timezone.utc)
 SECRET = b"x" * 32
 KEY_ID = "operator-key-test"
 
+# This fixture deliberately mirrors the complete signed v3 authority bundle.
+# A missing entry must make the test authority root fail closed just like a real
+# operator root, rather than silently weakening physical-evidence identity.
 BUNDLE_FILES = (
     "worker/app/__init__.py",
     "worker/app/windows_job.py",
     "worker/app/windows_restricted.py",
+    "worker/app/windows_capture.py",
     "worker/app/windows_tier_a.py",
     "devcontrol/src/kaliv_dev_control/__init__.py",
     "devcontrol/src/kaliv_dev_control/catalog.py",
@@ -54,6 +58,8 @@ BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/contract.py",
     "devcontrol/src/kaliv_dev_control/physical_isolation.py",
     "devcontrol/src/kaliv_dev_control/runtime_staging.py",
+    "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_result.py",
     "devcontrol/src/kaliv_dev_control/tier_a_execution.py",
     "devcontrol/src/kaliv_dev_control/workspace.py",
 )
@@ -212,7 +218,15 @@ class TierAExecutionLeaseTests(unittest.TestCase):
     def test_signed_report_becomes_immutable_launch_plan(self):
         with tempfile.TemporaryDirectory() as directory:
             values = issue(Path(directory))
-            development_task, catalog, toolchain, attestation, verifier, workspace, control = values
+            (
+                development_task,
+                catalog,
+                toolchain,
+                attestation,
+                verifier,
+                workspace,
+                control,
+            ) = values
             registry = LeasedCatalogMaterializer(
                 catalog, verifier
             ).materialize(development_task, toolchain, attestation)
@@ -230,6 +244,10 @@ class TierAExecutionLeaseTests(unittest.TestCase):
             self.assertEqual(
                 plan.workspace_root_sha256,
                 workspace_root_authority_sha256(workspace),
+            )
+            self.assertEqual(
+                plan.max_output_bytes,
+                development_task.budget.max_output_bytes,
             )
             self.assertEqual(dict(plan.env), dict(TIER_A_APPLICATION_ENVIRONMENT))
             self.assertEqual(
@@ -257,13 +275,19 @@ class TierAExecutionLeaseTests(unittest.TestCase):
 
     def test_any_authority_source_change_after_report_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
-            development_task, catalog, toolchain, attestation, verifier, workspace, control = issue(
-                Path(directory)
-            )
+            (
+                development_task,
+                catalog,
+                toolchain,
+                attestation,
+                verifier,
+                workspace,
+                control,
+            ) = issue(Path(directory))
             registry = LeasedCatalogMaterializer(
                 catalog, verifier
             ).materialize(development_task, toolchain, attestation)
-            (control / "devcontrol/src/kaliv_dev_control/catalog.py").write_text(
+            (control / "worker/app/windows_capture.py").write_text(
                 "# changed after evidence\n", encoding="utf-8"
             )
             with self.assertRaisesRegex(TierAExecutionError, "authority code"):
@@ -275,11 +299,27 @@ class TierAExecutionLeaseTests(unittest.TestCase):
                     control_plane_root=control.resolve(),
                 )
 
+    def test_missing_capture_authority_source_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            control = Path(directory) / "control"
+            control.mkdir()
+            create_control_plane(control)
+            (control / "devcontrol/src/kaliv_dev_control/tier_a_result.py").unlink()
+
+            with self.assertRaisesRegex(TierAExecutionError, "missing or unsafe"):
+                tier_a_toolhost_sha256(control)
+
     def test_executable_change_after_materialization_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
-            development_task, catalog, toolchain, attestation, verifier, workspace, control = issue(
-                Path(directory)
-            )
+            (
+                development_task,
+                catalog,
+                toolchain,
+                attestation,
+                verifier,
+                workspace,
+                control,
+            ) = issue(Path(directory))
             registry = LeasedCatalogMaterializer(
                 catalog, verifier
             ).materialize(development_task, toolchain, attestation)
@@ -296,7 +336,15 @@ class TierAExecutionLeaseTests(unittest.TestCase):
     def test_unreviewed_application_environment_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             values = issue(Path(directory), env={"API_TOKEN": "secret"})
-            development_task, catalog, toolchain, attestation, verifier, workspace, control = values
+            (
+                development_task,
+                catalog,
+                toolchain,
+                attestation,
+                verifier,
+                workspace,
+                control,
+            ) = values
             registry = LeasedCatalogMaterializer(
                 catalog, verifier
             ).materialize(development_task, toolchain, attestation)
@@ -321,9 +369,15 @@ class TierAExecutionLeaseTests(unittest.TestCase):
 
     def test_plan_reload_rejects_extra_authority(self):
         with tempfile.TemporaryDirectory() as directory:
-            development_task, catalog, toolchain, attestation, verifier, workspace, control = issue(
-                Path(directory)
-            )
+            (
+                development_task,
+                catalog,
+                toolchain,
+                attestation,
+                verifier,
+                workspace,
+                control,
+            ) = issue(Path(directory))
             registry = LeasedCatalogMaterializer(
                 catalog, verifier
             ).materialize(development_task, toolchain, attestation)
