@@ -1,6 +1,20 @@
 """Kaliv Development Control Plane primitives."""
 
 from .campaign import CampaignEvent, CampaignState, DevelopmentCampaign
+from .catalog import (
+    CatalogError,
+    CatalogMaterializer,
+    IsolationAttestation,
+    IsolationBoundary,
+    LocalExecutableHashVerifier,
+    ModelRigCommandCatalog,
+    NetworkMode,
+    ProjectCommandSpec,
+    RejectUnverifiedIsolation,
+    ToolBinding,
+    Toolchain,
+    modelrig_command_catalog,
+)
 from .commands import (
     CommandExecutor,
     CommandPolicyError,
@@ -11,6 +25,13 @@ from .commands import (
 from .contract import DevelopmentTask, MergeAuthority, Risk, TaskBudget
 from .evidence import ScopeReceipt, build_scope_receipt
 from .files import SearchMatch, WorkspaceFiles
+from .github_read import (
+    GitHubReadAdapter,
+    GitHubReadError,
+    GitHubReadReceipt,
+    HttpResponse,
+    UrllibReadOnlyTransport,
+)
 from .patch import PatchApplier, PatchReceipt, PatchSummary
 from .policy import PathPolicy, ScopeDecision, ScopeViolation
 from .proposal import DraftProposalBuilder, DraftPullRequestProposal
@@ -28,6 +49,8 @@ __all__ = [
     "CampaignEvent",
     "CampaignState",
     "CampaignStore",
+    "CatalogError",
+    "CatalogMaterializer",
     "CommandExecutor",
     "CommandPolicyError",
     "CommandReceipt",
@@ -39,12 +62,23 @@ __all__ = [
     "DraftPrGate",
     "DraftProposalBuilder",
     "DraftPullRequestProposal",
+    "GitHubReadAdapter",
+    "GitHubReadError",
+    "GitHubReadReceipt",
+    "HttpResponse",
     "IndependentPolicyReviewer",
+    "IsolationAttestation",
+    "IsolationBoundary",
+    "LocalExecutableHashVerifier",
     "MergeAuthority",
+    "ModelRigCommandCatalog",
+    "NetworkMode",
     "PatchApplier",
     "PatchReceipt",
     "PatchSummary",
     "PathPolicy",
+    "ProjectCommandSpec",
+    "RejectUnverifiedIsolation",
     "ReviewDecision",
     "ReviewRequest",
     "ReviewVerdict",
@@ -55,7 +89,11 @@ __all__ = [
     "SearchMatch",
     "SubprocessRunner",
     "TaskBudget",
+    "ToolBinding",
+    "Toolchain",
+    "UrllibReadOnlyTransport",
     "WorkspaceFiles",
     "WorkspaceManager",
     "build_scope_receipt",
+    "modelrig_command_catalog",
 ]
