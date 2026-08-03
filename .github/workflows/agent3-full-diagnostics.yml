@@ -2,6 +2,7 @@ name: agent3-full-diagnostics
 
 on:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
