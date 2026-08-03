@@ -246,12 +246,13 @@ class GitHubReadTests(unittest.TestCase):
             GitHubReadAdapter(task(), transport=transport).verify_base_commit()
 
     def test_read_text_is_scoped_and_bound_to_base_sha(self):
+        encoded = base64.b64encode(b"print('ok')\n").decode()
         payload = {
             "type": "file",
             "path": "devcontrol/src/demo.py",
             "sha": BLOB_SHA,
             "encoding": "base64",
-            "content": base64.b64encode(b"print('ok')\n").decode(),
+            "content": encoded[:8] + "\n" + encoded[8:],
             "size": 12,
         }
         transport = FakeTransport(response(payload))
@@ -265,6 +266,18 @@ class GitHubReadTests(unittest.TestCase):
         self.assertEqual(headers["Authorization"], "Bearer secret-token")
         self.assertNotIn("secret-token", receipt.canonical_json())
         self.assertEqual(receipt.subject_sha, BLOB_SHA)
+        receipt.verify_task(task())
+
+    def test_receipt_task_rebinding_rejects_another_task(self):
+        original = task()
+        receipt = GitHubReadAdapter(
+            original, transport=FakeTransport(response({"sha": BASE_SHA}))
+        ).verify_base_commit()
+        other = DevelopmentTask.from_mapping(
+            {**original.to_dict(), "task_id": "OTHER_TASK"}
+        )
+        with self.assertRaisesRegex(GitHubReadError, "exact task"):
+            receipt.verify_task(other)
 
     def test_protected_path_is_denied_before_network(self):
         transport = FakeTransport()
