@@ -10,7 +10,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -155,26 +154,9 @@ class CommandRegistry:
 
 
 def default_registry() -> CommandRegistry:
-    """Return the deliberately small read-only command registry."""
+    """Return an empty registry until templates are separately reviewed."""
 
-    return CommandRegistry(
-        (
-            CommandTemplate(
-                command_id="python.unittest",
-                argv=(
-                    sys.executable,
-                    "-m",
-                    "unittest",
-                    "discover",
-                    "-s",
-                    "devcontrol/tests",
-                    "-v",
-                ),
-                max_timeout_seconds=1_800,
-                env={"PYTHONHASHSEED": "0", "NO_COLOR": "1"},
-            ),
-        )
-    )
+    return CommandRegistry(())
 
 
 class CommandExecutor:
