@@ -14,6 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "worker"))
 
+import app.windows_restricted as WR  # noqa: E402
 from app.windows_job import JobLimits, close_attached_job  # noqa: E402
 from app.windows_restricted import (  # noqa: E402
     RESTRICTED_CODE_SID,
@@ -123,6 +124,12 @@ else:
                 outside_write_denied = False
             check(outside_write_denied, "restricted thread cannot write outside workspace")
 
+    # Diagnostic matrix: grant the restricting SID the complete documented
+    # window-station/desktop rights, but keep the Job Object's full UI mask.
+    # If this starts, the permanent mask is tightened from this known-good set.
+    WR.WINDOW_STATION_CHILD_ACCESS = 0x000F037F
+    WR.DESKTOP_CHILD_ACCESS = 0x000F01FF
+
     env = {
         key: value
         for key, value in os.environ.items()
@@ -131,13 +138,9 @@ else:
     proc = spawn_restricted_in_job(
         [helper, inside_read, outside_read, inside_write, outside_write, result_path],
         env=env,
-        # Diagnostic matrix: the private desktop is present, but Job Object UI
-        # restrictions are temporarily absent. This isolates whether the
-        # desktop UI bit blocks loader attachment after assignment.
         limits=JobLimits(
             process_memory_bytes=128 * 1024 * 1024,
             active_process_limit=1,
-            ui_restrictions=0,
         ),
         policy=policy,
     )
