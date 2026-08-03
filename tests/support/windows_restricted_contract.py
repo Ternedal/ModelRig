@@ -1,7 +1,7 @@
 """Contract and real-Windows proofs for restricted token + workspace SID.
 
 The deterministic policy checks run on every platform. Native ACL, token,
-impersonation and CreateProcessAsUser proofs run in the dedicated Windows gate.
+private-desktop and CreateProcessAsUser proofs run in the Windows gate.
 """
 from __future__ import annotations
 
@@ -162,20 +162,25 @@ else:
             result_path,
         ],
         env=env,
-        # A/B diagnostic: keep the restricted token, workspace SID and every
-        # Job Object resource limit, but remove only the UI mask. If the loader
-        # still returns STATUS_DLL_INIT_FAILED, the missing authority is the
-        # window-station/desktop DACL rather than the Job UI policy.
         limits=JobLimits(
             process_memory_bytes=128 * 1024 * 1024,
             active_process_limit=1,
-            ui_restrictions=0,
         ),
         policy=policy,
+    )
+    private_desktop = getattr(proc, "_desktop_lease", None)
+    check(
+        private_desktop is not None
+        and "\\KalivRestricted-" in private_desktop.full_name,
+        "restricted child is bound to a private non-default desktop",
     )
     exit_code = proc.wait(timeout=30)
     close_attached_job(proc)
     proc.close()
+    check(
+        private_desktop is not None and private_desktop.closed,
+        "private desktop and temporary DACL grants are restored after exit",
+    )
     result_exists = Path(result_path).is_file()
     result_text = (
         Path(result_path).read_text(encoding="utf-8") if result_exists else ""
