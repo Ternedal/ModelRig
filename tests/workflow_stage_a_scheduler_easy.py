@@ -47,9 +47,13 @@ check(not list(state_path.parent.glob("*.tmp")),
       "atomic state updates leave no temporary file")
 
 check(
-    'EXPECTED_BRANCH = "agent/stage-a-checkpoint-ux"' in source
-    and 'EXPECTED_VERSION = "1.58.147"' in source,
-    "the easy flow is pinned to the validation branch and version",
+    'CANDIDATE_BRANCH_PREFIX = "agent/unified-candidate-"' in source
+    and 'EXPECTED_VERSION = "1.58.147"' in source
+    and 'stage-a-checkpoint-ux' not in source
+    and 'current.startswith(CANDIDATE_BRANCH_PREFIX)' in source
+    and '"git", "switch"' not in source
+    and '"git", "fetch"' not in source,
+    "the easy flow binds to the checked-out rig candidate and never switches or fetches a branch",
 )
 check(
     'if stack_ready()' in source
@@ -98,14 +102,16 @@ check(
     "the PowerShell entrypoint requests UAC elevation itself",
 )
 check(
-    ps.index('git pull --ff-only origin $branch')
-    < ps.index('& python $pythonScript'),
-    "the entrypoint updates exact head before loading the Python orchestrator",
+    'git switch' not in ps
+    and 'git pull' not in ps
+    and 'git rev-parse HEAD' in ps
+    and ps.index('git rev-parse HEAD') < ps.index('& python $pythonScript'),
+    "the entrypoint binds to the checked-out candidate head without switching branches",
 )
 check(
     'git status --porcelain --untracked-files=no' in ps
-    and '$actual -ne $expected' in ps,
-    "the elevated entrypoint rejects a dirty or non-origin checkout",
+    and "notmatch '^[0-9a-f]{40}" in ps,
+    "the elevated entrypoint rejects a dirty checkout and requires a valid exact head",
 )
 check(
     'run-stage-a-scheduler-pilot.ps1' in launcher
