@@ -263,8 +263,12 @@ class WindowsJob:
         handle = self._handle
         if handle is None:
             return
-        self._handle = None
+        # Do not discard the only authority over the process tree until the OS
+        # confirms that the handle is closed. A failed CloseHandle must remain
+        # retryable; claiming `closed` first could turn a native error into a
+        # process-tree leak that later cleanup can no longer address.
         self._api.close_handle(handle)
+        self._handle = None
 
     def __enter__(self) -> "WindowsJob":
         return self
