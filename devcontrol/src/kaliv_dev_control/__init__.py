@@ -13,6 +13,7 @@ from .evidence import ScopeReceipt, build_scope_receipt
 from .files import SearchMatch, WorkspaceFiles
 from .patch import PatchApplier, PatchReceipt, PatchSummary
 from .policy import PathPolicy, ScopeDecision, ScopeViolation
+from .proposal import DraftProposalBuilder, DraftPullRequestProposal
 from .review import (
     DraftPrGate,
     IndependentPolicyReviewer,
@@ -20,11 +21,13 @@ from .review import (
     ReviewRequest,
     ReviewVerdict,
 )
+from .store import CampaignStore
 from .workspace import CommandResult, SubprocessRunner, WorkspaceManager
 
 __all__ = [
     "CampaignEvent",
     "CampaignState",
+    "CampaignStore",
     "CommandExecutor",
     "CommandPolicyError",
     "CommandReceipt",
@@ -34,6 +37,8 @@ __all__ = [
     "DevelopmentCampaign",
     "DevelopmentTask",
     "DraftPrGate",
+    "DraftProposalBuilder",
+    "DraftPullRequestProposal",
     "IndependentPolicyReviewer",
     "MergeAuthority",
     "PatchApplier",
