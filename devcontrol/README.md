@@ -80,6 +80,28 @@ The GitHub adapter is deliberately not a generic HTTP client. A model cannot
 choose its host, repository, HTTP method or ref. This slice grants no branch,
 push, pull-request, review, merge, release or repository-settings operation.
 
+### Slice 6 — signed physical Windows-isolation evidence
+
+- strict `kaliv-windows-isolation-physical-report/v1` contract;
+- exact binding to task, base SHA, command catalog and toolchain;
+- eleven mandatory I0b probes covering token, workspace, network, lifecycle,
+  reboot, memory, process limits and compatibility;
+- failed probes remain representable as evidence but can never authorize execution;
+- collector and approver must be separate actors;
+- reboot markers must prove a changed boot boundary;
+- canonical HMAC-signed evidence envelope with operator-controlled key ID;
+- operator keys are loaded only from absolute, non-symlink regular files;
+- evidence is accepted only from a non-symlink operator-owned root;
+- evidence hash must already be named by the task's isolation attestation;
+- signature, freshness, exact authority and all probes are verified again;
+- exactly one matching report is required; ambiguity fails closed;
+- the verifier plugs directly into `CatalogMaterializer`.
+
+This slice defines and verifies physical evidence. It does not manufacture a
+physical result and does not implement the Windows Job Object or restricted-token
+boundary. Until the real rig produces and an operator approves a complete report,
+the default verifier still rejects all project-command execution.
+
 ## Command authority
 
 The default command registry remains intentionally empty. A task may name command
@@ -101,11 +123,39 @@ In task schema v1, every command ID granted to a task is also required evidence
 for draft-PR readiness. Optional commands are deliberately deferred to a future
 schema version instead of being introduced through an ambiguous in-place change.
 
-This control plane proves Git/worktree and policy isolation with fixture
-repositories. It is **not** proof of an operating-system security boundary.
-Running modified project code on the production rig remains blocked until Windows
-isolation I0b has been physically validated and connected through an independent
-`IsolationVerifier`.
+## Physical evidence operator flow
+
+The physical harness must first write one canonical unsigned report matching
+`schemas/windows-isolation-physical-report-v1.schema.json`. Signing is a separate
+operator action and the key file must live outside the developer workspace.
+
+```bash
+cd devcontrol
+PYTHONPATH=src python -m kaliv_dev_control sign-physical-report \
+  C:/ModelRigEvidence/i0b-unsigned.json \
+  C:/ModelRigEvidence/i0b-signed.json \
+  --key-file C:/ModelRigOperator/isolation.key \
+  --key-id operator-key-2026
+```
+
+The command prints only the signed artifact SHA-256. That hash must be included in
+the exact task's `kaliv-development-isolation-attestation/v1` evidence list.
+
+An operator can verify the finished evidence independently:
+
+```bash
+cd devcontrol
+PYTHONPATH=src python -m kaliv_dev_control verify-physical-report \
+  C:/ModelRigEvidence/attestation.json \
+  --evidence-root C:/ModelRigEvidence \
+  --key-file C:/ModelRigOperator/isolation.key \
+  --key-id operator-key-2026
+```
+
+HMAC is suitable here only when the signing key is protected by the separate
+operator account/process boundary described by I0b. A key copied into the agent
+workspace would invalidate the independence claim even though the signature is
+mathematically valid.
 
 ## Explicit non-goals
 
@@ -114,12 +164,13 @@ The current control plane cannot:
 - run an arbitrary shell command;
 - obtain command arguments from a model;
 - execute a ModelRig catalog command without verified OS isolation;
+- create a genuine I0b result without running the physical probes;
 - use GitHub as a generic URL or repository browser;
 - push branches;
 - create, update or merge pull requests;
 - alter ModelRig runtime or feature switches;
 - discover or persist credentials;
-- provide proven process, account or network isolation;
+- provide the Windows Job Object, restricted-token or network boundary itself;
 - perform semantic code review;
 - release or activate any change.
 
