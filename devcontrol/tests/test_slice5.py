@@ -213,6 +213,14 @@ class CatalogTests(unittest.TestCase):
                     ToolBinding("python", str(path.resolve()), "0" * 64)
                 )
 
+    def test_catalog_objects_reject_mutable_or_boolean_authority(self):
+        from kaliv_dev_control.catalog import ProjectCommandSpec
+
+        with self.assertRaises(CatalogError):
+            ProjectCommandSpec("modelrig.demo", "python", ["-V"], ".", 10)
+        with self.assertRaises(CatalogError):
+            ProjectCommandSpec("modelrig.demo", "python", ("-V",), ".", True)
+
     def test_attestation_reload_is_strict(self):
         t = task()
         tc = toolchain()
@@ -226,6 +234,14 @@ class CatalogTests(unittest.TestCase):
 
 
 class GitHubReadTests(unittest.TestCase):
+    def test_boolean_http_bounds_are_rejected(self):
+        with self.assertRaises(GitHubReadError):
+            GitHubReadAdapter(task(), transport=FakeTransport(), timeout_seconds=True)
+        with self.assertRaises(GitHubReadError):
+            GitHubReadAdapter(task(), transport=FakeTransport()).read_bytes(
+                "devcontrol/readme.txt", max_bytes=True
+            )
+
     def test_verify_base_commit_is_exact_sha_get(self):
         transport = FakeTransport(response({"sha": BASE_SHA}))
         receipt = GitHubReadAdapter(task(), transport=transport).verify_base_commit()
@@ -246,13 +262,14 @@ class GitHubReadTests(unittest.TestCase):
             GitHubReadAdapter(task(), transport=transport).verify_base_commit()
 
     def test_read_text_is_scoped_and_bound_to_base_sha(self):
-        encoded = base64.b64encode(b"print('ok')\n").decode()
         payload = {
             "type": "file",
             "path": "devcontrol/src/demo.py",
             "sha": BLOB_SHA,
             "encoding": "base64",
-            "content": encoded[:8] + "\n" + encoded[8:],
+            "content": base64.b64encode(b"print('ok')\n").decode()[:8]
+            + "\n"
+            + base64.b64encode(b"print('ok')\n").decode()[8:],
             "size": 12,
         }
         transport = FakeTransport(response(payload))
