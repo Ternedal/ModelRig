@@ -27,7 +27,7 @@ release, merge, or production activation.
 - immutable command templates with fixed arguments and environment;
 - command receipts containing output hashes, duration and workspace fingerprints;
 - automatic reset to the exact task base SHA if a command changes repository state;
-- a shared-CI bridge that makes all `devcontrol/tests` mandatory in PR and release gates.
+- the existing CI test-coverage contract runs all `devcontrol/tests` in PR and release gates.
 
 ### Slice 3 — campaign integrity and structural review
 
@@ -98,8 +98,8 @@ cd devcontrol
 python -m unittest discover -s tests -v
 ```
 
-The same suite is also run by `tests/workflow_devcontrol.py` inside ModelRig's
-shared CI and release test gate.
+The same suite is executed by the existing `tests/workflow_test_coverage.py`
+contract inside ModelRig's shared CI and release test gate.
 
 ## Validate a task
 
