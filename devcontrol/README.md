@@ -5,10 +5,10 @@ self-development in ModelRig. It is deliberately **not** connected to ordinary
 ModelRig tool registration, Agent 3, Agent 4, GitHub writes, merge, release or
 production activation.
 
-The implementation currently reaches Slice 10B: a reviewed catalog command can
+The implementation currently reaches Slice 10C: a reviewed catalog command can
 only enter the Windows Tier-A boundary after exact signed physical evidence has
-been freshly verified and its operator-bound executable has been deterministically
-staged into the signed workspace.
+been freshly verified, its operator-bound executable has been staged into the
+signed workspace, and its native output is captured under the signed task budget.
 
 ## Current slices
 
@@ -107,9 +107,8 @@ code understanding and cannot rewrite the task, tests or protected policy.
   `kaliv-development-execution-lease/v1`;
 - lease binds task, base SHA, catalog, toolchain, report, rig, workspace and full
   Tier-A authority-code hash;
-- launch planning produces a canonical
-  `kaliv-development-tier-a-launch-plan/v1`;
-- persisted plans are audit evidence, not independently executable authority;
+- launch planning produces canonical audit evidence;
+- persisted plans are not independently executable authority;
 - the low-level plan executor is private;
 - the only public runtime path repeats signed-evidence verification immediately
   before launch;
@@ -146,6 +145,25 @@ code understanding and cannot rewrite the task, tests or protected policy.
   remain exact;
 - the original registry is not mutated;
 - no second public execution surface is introduced.
+
+### Slice 10C — bounded native output evidence
+
+- launch-plan schema v2 binds the task's exact `max_output_bytes` budget;
+- the authority bundle is bumped to v3, invalidating all older reports;
+- the prior lease/materialization implementation remains byte-identical in a
+  private core module, while the public bridge owns the only runtime entry point;
+- `CreateProcessW` receives only three inherited standard handles through
+  `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`;
+- unrelated parent handles cannot be inherited;
+- stdout and stderr are drained concurrently to EOF;
+- every byte contributes to a full stream SHA-256 and total byte count;
+- only deterministic per-stream prefixes are retained in memory;
+- binary prefixes are stored as canonical base64 in
+  `kaliv-development-tier-a-execution-result/v1`;
+- timeout terminates and closes the Job Object, finalizes both stream identities
+  and raises `TierAExecutionTimeout` carrying non-passing evidence;
+- a statically linked real-Windows fixture proves output beyond pipe-buffer size,
+  truncation, separate stream hashes and timeout EOF cleanup.
 
 See `TIER_A_EXECUTION.md` and `RUNTIME_STAGING.md` for the complete authority
 chains and deliberate limitations.
@@ -208,8 +226,8 @@ The current control plane cannot:
 - manufacture a genuine I0b result without physical probes;
 - stage a complete DLL, Python or Go runtime closure;
 - execute catalog commands whose working directory is not the workspace root;
-- capture bounded native stdout/stderr or produce a complete Tier-A
-  `CommandReceipt`;
+- claim a complete development `CommandReceipt` from output alone; Git workspace
+  before/after identity and reset evidence remain separate;
 - perform independent semantic AI review;
 - push branches or create/update/merge pull requests;
 - alter repository settings, runtime feature switches or production deployment;
@@ -226,9 +244,10 @@ cd devcontrol
 python -m unittest discover -s tests -v
 ```
 
-The same suite is automatically included in ModelRig's shared PR and release gate.
-The real-Windows gate separately proves Job Object, AppContainer, environment,
-signed-evidence, trusted-staging and existing ToolHost behavior.
+The same portable suite is automatically included in ModelRig's shared PR and
+release gate. The real-Windows gate separately proves Job Object, AppContainer,
+environment, signed evidence, trusted staging, strict inherited handles, bounded
+output, timeout cleanup and existing ToolHost behavior.
 
 ## Validate a task
 
