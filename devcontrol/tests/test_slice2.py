@@ -227,7 +227,23 @@ class Slice2Tests(unittest.TestCase):
             CommandRegistry((template, template))
 
     def test_registered_command_passes_and_keeps_workspace_unchanged(self) -> None:
-        receipt = CommandExecutor().execute(
+        template = CommandTemplate(
+            command_id="python.unittest",
+            argv=(
+                sys.executable,
+                "-m",
+                "unittest",
+                "discover",
+                "-s",
+                "devcontrol/tests",
+                "-p",
+                "test_dummy.py",
+                "-v",
+            ),
+        )
+        receipt = CommandExecutor(
+            registry=CommandRegistry((template,))
+        ).execute(
             self.task,
             self.repo,
             "python.unittest",
