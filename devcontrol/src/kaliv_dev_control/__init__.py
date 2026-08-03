@@ -55,6 +55,12 @@ from .review import (
     ReviewRequest,
     ReviewVerdict,
 )
+from .runtime_staging import (
+    RUNTIME_STAGING_SCHEMA,
+    RuntimeStagingError,
+    RuntimeStagingReceipt,
+    TrustedRuntimeStager,
+)
 from .store import CampaignStore
 from .tier_a_execution import (
     LeasedCatalogMaterializer,
@@ -110,11 +116,14 @@ __all__ = [
     "ProbeName",
     "ProjectCommandSpec",
     "REQUIRED_PROBES",
+    "RUNTIME_STAGING_SCHEMA",
     "RejectUnverifiedIsolation",
     "ReviewDecision",
     "ReviewRequest",
     "ReviewVerdict",
     "Risk",
+    "RuntimeStagingError",
+    "RuntimeStagingReceipt",
     "ScopeDecision",
     "ScopeReceipt",
     "ScopeViolation",
@@ -128,6 +137,7 @@ __all__ = [
     "TierALaunchPlan",
     "ToolBinding",
     "Toolchain",
+    "TrustedRuntimeStager",
     "UrllibReadOnlyTransport",
     "WindowsIsolationPhysicalReport",
     "WindowsPhysicalIsolationVerifier",
