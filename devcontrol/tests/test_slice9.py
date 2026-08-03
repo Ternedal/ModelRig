@@ -43,7 +43,7 @@ NOW = datetime(2026, 8, 3, 12, 15, tzinfo=timezone.utc)
 SECRET = b"x" * 32
 KEY_ID = "operator-key-test"
 
-# This fixture deliberately mirrors the complete signed v3 authority bundle.
+# This fixture deliberately mirrors the complete signed v4 authority bundle.
 # A missing entry must make the test authority root fail closed just like a real
 # operator root, rather than silently weakening physical-evidence identity.
 BUNDLE_FILES = (
@@ -58,6 +58,14 @@ BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/contract.py",
     "devcontrol/src/kaliv_dev_control/physical_isolation.py",
     "devcontrol/src/kaliv_dev_control/runtime_staging.py",
+    "devcontrol/src/kaliv_dev_control/_runtime_closure_common.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure_model.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure_verify.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure_staging.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_plan.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
     "devcontrol/src/kaliv_dev_control/tier_a_result.py",
     "devcontrol/src/kaliv_dev_control/tier_a_execution.py",

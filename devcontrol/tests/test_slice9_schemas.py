@@ -10,6 +10,7 @@ from kaliv_dev_control.catalog import IsolationBoundary, NetworkMode
 from kaliv_dev_control.tier_a_execution import (
     TierAExecutionLease,
     TierALaunchPlan,
+    working_directory_authority_sha256,
 )
 from kaliv_dev_control.tier_a_result import (
     TierAExecutionResult,
@@ -62,12 +63,13 @@ class TierASchemaParityTests(unittest.TestCase):
 
     def test_launch_plan_schema_matches_canonical_artifact(self):
         with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory).resolve()
             plan = TierALaunchPlan(
                 task_id="A9_SCHEMA",
                 task_sha256=HASH_A,
                 base_sha="1" * 40,
                 command_id="modelrig.schema.probe",
-                argv=(str((Path(directory) / "probe.exe").resolve()), "--version"),
+                argv=(str((workspace / "probe.exe").resolve()), "--version"),
                 cwd=".",
                 max_timeout_seconds=30,
                 max_output_bytes=4096,
@@ -76,10 +78,13 @@ class TierASchemaParityTests(unittest.TestCase):
                 toolchain_sha256=HASH_C,
                 lease_sha256=HASH_D,
                 signed_report_sha256=HASH_E,
-                workspace_root=str(Path(directory).resolve()),
+                workspace_root=str(workspace),
                 workspace_root_sha256=HASH_F,
                 executable_sha256="0" * 64,
                 toolhost_sha256="1" * 64,
+                working_directory_sha256=working_directory_authority_sha256(
+                    workspace, "."
+                ),
                 boundary=IsolationBoundary.OS_ISOLATED,
                 network_mode=NetworkMode.DENY,
             )
@@ -87,7 +92,7 @@ class TierASchemaParityTests(unittest.TestCase):
             schema = json.loads(
                 (
                     root
-                    / "devcontrol/schemas/development-tier-a-launch-plan-v2.schema.json"
+                    / "devcontrol/schemas/development-tier-a-launch-plan-v3.schema.json"
                 ).read_text(encoding="utf-8")
             )
             fields = set(plan.to_dict())

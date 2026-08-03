@@ -215,7 +215,6 @@ def _closure_publish_exact_file(
         prefix=".kaliv-stage-", suffix=".tmp", dir=destination.parent
     )
     temporary = Path(temporary_name)
-    published = False
     try:
         with os.fdopen(descriptor, "wb", closefd=True) as output, source.open(
             "rb"
@@ -249,10 +248,19 @@ def _closure_publish_exact_file(
                     "concurrent runtime staging produced an unsafe destination"
                 )
         else:
-            published = True
+            temporary.unlink()
             _closure_fsync_directory(destination.parent)
-        if published:
-            os.chmod(destination, 0o555)
+            try:
+                os.chmod(destination, 0o555)
+            except OSError as exc:
+                try:
+                    os.chmod(destination, 0o755)
+                    destination.unlink()
+                except OSError:
+                    pass
+                raise RuntimeClosureError(
+                    "staged runtime permissions could not be fixed"
+                ) from exc
     finally:
         try:
             temporary.unlink()

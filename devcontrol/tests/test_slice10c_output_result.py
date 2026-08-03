@@ -133,8 +133,8 @@ class TierAOutputResultTests(unittest.TestCase):
         self.assertTrue(result.timed_out)
         self.assertFalse(result.passed)
 
-    def test_only_public_runtime_path_uses_the_v2_plan(self):
-        self.assertEqual(PLAN_SCHEMA, "kaliv-development-tier-a-launch-plan/v2")
+    def test_only_public_runtime_path_uses_the_v3_plan(self):
+        self.assertEqual(PLAN_SCHEMA, "kaliv-development-tier-a-launch-plan/v3")
         self.assertTrue(callable(run_verified_tier_a_command))
         self.assertFalse(hasattr(legacy_core, "run_verified_tier_a_command"))
         self.assertFalse(hasattr(legacy_core, "_run_tier_a_launch_plan"))

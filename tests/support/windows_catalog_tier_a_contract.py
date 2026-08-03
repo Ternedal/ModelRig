@@ -1,10 +1,10 @@
-"""End-to-end signed-evidence -> staging -> captured Tier-A execution proof.
+"""End-to-end signed evidence -> closure -> cwd -> captured Tier-A proof.
 
-A statically linked helper begins only in the separate operator runtime root.
-The public runtime stages it into the signed workspace and proves, on real
-Windows, strict inherited handles, separate concurrent stdout/stderr drains,
-full-stream hashes, bounded prefixes, deterministic truncation and timeout Job
-Object cleanup. No external network is used.
+A statically linked helper and one support file begin only in a separate operator
+runtime root. The public runtime verifies a command-specific HMAC-signed exact
+file manifest, stages the complete closure, binds a workspace-relative working
+directory, and then uses the existing AppContainer + Job Object + bounded-output
+path. No external network is used.
 """
 from __future__ import annotations
 
@@ -42,19 +42,26 @@ from kaliv_dev_control.physical_isolation import (  # noqa: E402
     WindowsPhysicalIsolationVerifier,
     write_signed_report,
 )
-from kaliv_dev_control.runtime_staging import TrustedRuntimeStager  # noqa: E402
 from kaliv_dev_control.tier_a_execution import (  # noqa: E402
+    HmacRuntimeClosureSigner,
     LeasedCatalogMaterializer,
+    RuntimeClosureFile,
+    RuntimeClosureManifest,
+    RuntimeClosureVerifier,
     TIER_A_APPLICATION_ENVIRONMENT,
     TierAExecutionTimeout,
+    TrustedRuntimeClosureStager,
     build_tier_a_launch_plan,
     run_verified_tier_a_command,
     tier_a_toolhost_sha256,
+    trusted_runtime_root_sha256,
+    working_directory_authority_sha256,
     workspace_root_authority_sha256,
 )
 
 passed = failed = 0
 BURST_COMMAND = "modelrig.tier-a.capture-burst"
+CWD_COMMAND = "modelrig.tier-a.cwd-probe"
 TIMEOUT_COMMAND = "modelrig.tier-a.capture-timeout"
 OUTPUT_BUDGET = 4096
 CHUNK_BYTES = 4096
@@ -62,6 +69,8 @@ CHUNK_COUNT = 64
 EXPECTED_STDOUT = b"STDOUT-BEGIN\n" + (b"A" * CHUNK_BYTES * CHUNK_COUNT)
 EXPECTED_STDERR = b"STDERR-BEGIN\n" + (b"B" * CHUNK_BYTES * CHUNK_COUNT)
 TIMEOUT_MARKER = b"BEFORE-TIMEOUT\n"
+CLOSURE_KEY_ID = "slice-10d-runtime-key"
+CLOSURE_SECRET = b"slice-10d-runtime-closure-secret-01"
 
 
 def check(condition, message):
@@ -141,30 +150,45 @@ def build_static_capture_helper(destination: Path) -> Path:
     return destination.resolve()
 
 
+def closure_file(root: Path, relative: str) -> RuntimeClosureFile:
+    payload = root.joinpath(*Path(relative).parts).read_bytes()
+    return RuntimeClosureFile(
+        relative_path=relative,
+        sha256=hashlib.sha256(payload).hexdigest(),
+        size_bytes=len(payload),
+    )
+
+
 base_sha = "a" * 40
 started = "2026-08-03T18:00:00Z"
 completed = "2026-08-03T18:10:00Z"
-secret = b"slice-10c-windows-test-secret-01"
-key_id = "slice-10c-windows-test-key"
+secret = b"slice-10d-windows-test-secret-01"
+key_id = "slice-10d-windows-test-key"
 
-parent = Path(tempfile.mkdtemp(prefix="kaliv-tier-a-capture-"))
+parent = Path(tempfile.mkdtemp(prefix="kaliv-tier-a-closure-"))
 trusted_runtime_root = parent / "trusted-runtime"
 workspace = parent / "workspace"
 evidence_root = parent / "evidence"
-trusted_runtime_root.mkdir()
-workspace.mkdir()
+(trusted_runtime_root / "support").mkdir(parents=True)
+(workspace / "backend").mkdir(parents=True)
 evidence_root.mkdir()
 source_executable = build_static_capture_helper(
     trusted_runtime_root / "capture-helper.exe"
 )
+support_file = trusted_runtime_root / "support" / "runtime.dat"
+support_file.write_bytes(b"exact signed runtime support file\n")
 executable_hash = hashlib.sha256(source_executable.read_bytes()).hexdigest()
 check(
     source_executable.is_file(),
     "exact static helper is held in the separate operator runtime root",
 )
 check(
-    not any(workspace.iterdir()),
-    "signed workspace starts without a caller-prestaged executable",
+    support_file.is_file(),
+    "runtime closure contains a second exact non-entrypoint file",
+)
+check(
+    not any(path.is_file() for path in workspace.rglob("*")),
+    "signed workspace starts without a caller-prestaged runtime file",
 )
 
 catalog_env = {
@@ -178,6 +202,14 @@ catalog = ModelRigCommandCatalog(
             "capture-helper",
             ("burst",),
             ".",
+            30,
+            catalog_env,
+        ),
+        ProjectCommandSpec(
+            CWD_COMMAND,
+            "capture-helper",
+            ("cwd",),
+            "backend",
             30,
             catalog_env,
         ),
@@ -203,24 +235,25 @@ toolchain = Toolchain(
 task = DevelopmentTask.from_mapping(
     {
         "schema": "kaliv-development-task/v1",
-        "task_id": "A10C_WINDOWS",
+        "task_id": "A10D_WINDOWS",
         "repository": "Ternedal/ModelRig",
         "base_sha": base_sha,
-        "goal": "Prove bounded native Tier-A output and timeout cleanup.",
+        "goal": "Prove exact runtime closure, nested cwd and bounded output.",
         "acceptance_criteria": [
-            "Both streams are fully hashed and only bounded prefixes retained.",
-            "Timeout cleanup reaches EOF without leaking the process tree."
+            "Only signed runtime files launch.",
+            "The nested working directory reaches CreateProcessW exactly.",
+            "Both streams remain bounded and timeout cleanup reaches EOF.",
         ],
         "risk": "low",
         "allowed_paths": ["devcontrol/**"],
         "protected_paths": ["devcontrol/secrets/**"],
-        "allowed_command_ids": [BURST_COMMAND, TIMEOUT_COMMAND],
-        "required_tests": [BURST_COMMAND, TIMEOUT_COMMAND],
+        "allowed_command_ids": [BURST_COMMAND, CWD_COMMAND, TIMEOUT_COMMAND],
+        "required_tests": [BURST_COMMAND, CWD_COMMAND, TIMEOUT_COMMAND],
         "budget": {
-            "max_changed_files": 20,
-            "max_added_lines": 5000,
-            "max_deleted_lines": 5000,
-            "max_attempts": 2,
+            "max_changed_files": 30,
+            "max_added_lines": 8000,
+            "max_deleted_lines": 8000,
+            "max_attempts": 3,
             "max_runtime_seconds": 120,
             "max_output_bytes": OUTPUT_BUDGET,
         },
@@ -234,7 +267,7 @@ probes = tuple(
         name=name,
         passed=True,
         receipt_sha256=hashlib.sha256(
-            ("slice10c:" + name.value).encode("utf-8")
+            ("slice10d:" + name.value).encode("utf-8")
         ).hexdigest(),
         detail=f"CI fixture for {name.value}",
         observed_at=completed,
@@ -242,7 +275,7 @@ probes = tuple(
     for name in ProbeName
 )
 report = WindowsIsolationPhysicalReport(
-    report_id="slice-10c-windows-kernel-proof",
+    report_id="slice-10d-windows-kernel-proof",
     task_id=task.task_id,
     task_sha256=task_sha,
     repository=task.repository,
@@ -251,7 +284,7 @@ report = WindowsIsolationPhysicalReport(
     toolchain_sha256=toolchain.sha256,
     rig_id="github-windows-server-2025",
     rig_fingerprint_sha256="1" * 64,
-    candidate_version="slice-10c-ci",
+    candidate_version="slice-10d-ci",
     windows_build="GitHub Windows Server 2025",
     toolhost_sha256=tier_a_toolhost_sha256(ROOT),
     workspace_root_sha256=workspace_root_authority_sha256(workspace),
@@ -285,16 +318,71 @@ verifier = WindowsPhysicalIsolationVerifier(
     max_age=timedelta(days=366),
     now=lambda: datetime(2026, 8, 3, 18, 15, tzinfo=timezone.utc),
 )
-
-# Structural inspection uses one plan, while the public call below must reverify,
-# restage/recheck and rebuild independently before it receives launch authority.
 leased = LeasedCatalogMaterializer(catalog, verifier).materialize(
     task, toolchain, attestation
 )
-stager = TrustedRuntimeStager(trusted_runtime_root.resolve(), workspace.resolve())
-staging_receipt = stager.stage(leased, task, BURST_COMMAND)
+closure_verifier = RuntimeClosureVerifier({CLOSURE_KEY_ID: CLOSURE_SECRET})
+closure_entries = tuple(
+    sorted(
+        (
+            closure_file(trusted_runtime_root, "capture-helper.exe"),
+            closure_file(trusted_runtime_root, "support/runtime.dat"),
+        ),
+        key=lambda item: item.relative_path,
+    )
+)
+
+
+def command_closure(command_id: str):
+    template = leased.resolve(task, command_id)
+    manifest = RuntimeClosureManifest(
+        task_id=task.task_id,
+        task_sha256=task_sha,
+        repository=task.repository,
+        base_sha=task.base_sha,
+        command_id=command_id,
+        tool_id="capture-helper",
+        catalog_sha256=catalog.sha256,
+        toolchain_sha256=toolchain.sha256,
+        lease_sha256=leased.lease.sha256,
+        workspace_root_sha256=leased.lease.workspace_root_sha256,
+        trusted_runtime_root_sha256=trusted_runtime_root_sha256(
+            trusted_runtime_root
+        ),
+        entrypoint_relative_path="capture-helper.exe",
+        working_directory=template.cwd,
+        files=closure_entries,
+        total_bytes=sum(item.size_bytes for item in closure_entries),
+    )
+    return HmacRuntimeClosureSigner(CLOSURE_KEY_ID, CLOSURE_SECRET).sign(manifest)
+
+
+burst_closure = command_closure(BURST_COMMAND)
+cwd_closure = command_closure(CWD_COMMAND)
+timeout_closure = command_closure(TIMEOUT_COMMAND)
+check(
+    burst_closure.manifest.files == cwd_closure.manifest.files,
+    "distinct commands bind the same exact file closure independently",
+)
+check(
+    burst_closure.sha256 != cwd_closure.sha256,
+    "command and working-directory authority change the signed closure identity",
+)
+
+stager = TrustedRuntimeClosureStager(
+    trusted_runtime_root.resolve(), workspace.resolve()
+)
+staging_receipt = stager.stage(
+    burst_closure,
+    closure_verifier,
+    leased,
+    task,
+    BURST_COMMAND,
+)
 staged_leased = stager.bind_for_launch(
     staging_receipt,
+    burst_closure,
+    closure_verifier,
     leased,
     task,
     BURST_COMMAND,
@@ -305,6 +393,17 @@ plan = build_tier_a_launch_plan(
     BURST_COMMAND,
     workspace_root=workspace.resolve(),
     control_plane_root=ROOT,
+    runtime_closure_receipt=staging_receipt,
+)
+check(
+    plan.runtime_closure_verified,
+    "launch plan refuses to imply runtime authority without a verified closure",
+)
+check(
+    plan.runtime_closure_sha256 == burst_closure.manifest.sha256
+    and plan.signed_runtime_closure_sha256 == burst_closure.sha256
+    and plan.runtime_closure_staging_receipt_sha256 == staging_receipt.sha256,
+    "launch plan retains exact manifest, signature and staging identities",
 )
 check(
     plan.signed_report_sha256 == signed_hash,
@@ -320,16 +419,12 @@ check(
 )
 check(
     Path(plan.argv[0]).is_relative_to(workspace.resolve()),
-    "launch plan executable is the receipt-verified workspace copy",
-)
-check(
-    Path(plan.argv[0]).read_bytes() == source_executable.read_bytes(),
-    "staged launch bytes equal the operator-bound source bytes",
+    "launch plan executable is the closure-verified workspace copy",
 )
 check(
     dict(WINDOWS_TIER_A_APPLICATION_ENVIRONMENT)
     == dict(TIER_A_APPLICATION_ENVIRONMENT),
-    "catalog and worker agree on the exact reviewed application environment",
+    "catalog and worker agree on the reviewed application environment",
 )
 filtered = appcontainer_environment(
     dict(os.environ),
@@ -341,6 +436,14 @@ check(
     "parent credentials remain excluded from the Tier-A environment",
 )
 
+common_run = {
+    "trusted_runtime_root": trusted_runtime_root.resolve(),
+    "workspace_root": workspace.resolve(),
+    "control_plane_root": ROOT,
+    "source_env": dict(os.environ),
+    "process_memory_bytes": 128 * 1024 * 1024,
+    "active_process_limit": 1,
+}
 burst_result = run_verified_tier_a_command(
     task,
     catalog,
@@ -348,22 +451,13 @@ burst_result = run_verified_tier_a_command(
     attestation,
     verifier,
     BURST_COMMAND,
-    trusted_runtime_root=trusted_runtime_root.resolve(),
-    workspace_root=workspace.resolve(),
-    control_plane_root=ROOT,
-    source_env=dict(os.environ),
-    process_memory_bytes=128 * 1024 * 1024,
-    active_process_limit=1,
+    signed_runtime_closure=burst_closure,
+    runtime_closure_verifier=closure_verifier,
+    **common_run,
 )
 check(
     burst_result.returncode == 0 and burst_result.passed,
-    "freshly verified burst command exits successfully through Tier-A",
-)
-check(
-    burst_result.plan_sha256 == plan.sha256
-    and burst_result.lease_sha256 == leased.lease.sha256
-    and burst_result.signed_report_sha256 == signed_hash,
-    "execution result remains bound to plan, lease and signed report",
+    "freshly verified closure burst exits successfully through Tier-A",
 )
 check(
     burst_result.stdout.total_bytes == len(EXPECTED_STDOUT)
@@ -388,6 +482,34 @@ check(
     "combined retained bytes never exceed the signed output budget",
 )
 
+cwd_result = run_verified_tier_a_command(
+    task,
+    catalog,
+    toolchain,
+    attestation,
+    verifier,
+    CWD_COMMAND,
+    signed_runtime_closure=cwd_closure,
+    runtime_closure_verifier=closure_verifier,
+    **common_run,
+)
+expected_cwd = (workspace / "backend").resolve()
+observed_cwd = Path(cwd_result.stdout.captured.decode("utf-8"))
+check(
+    cwd_result.passed and cwd_result.stderr.total_bytes == 0,
+    "nested cwd probe exits cleanly without stderr",
+)
+check(
+    os.path.normcase(os.fspath(observed_cwd))
+    == os.path.normcase(os.fspath(expected_cwd)),
+    "CreateProcessW receives the exact reviewed workspace-relative directory",
+)
+check(
+    working_directory_authority_sha256(workspace, "backend")
+    != working_directory_authority_sha256(workspace, "."),
+    "nested and root working directories have distinct signed identities",
+)
+
 try:
     run_verified_tier_a_command(
         task,
@@ -396,12 +518,9 @@ try:
         attestation,
         verifier,
         TIMEOUT_COMMAND,
-        trusted_runtime_root=trusted_runtime_root.resolve(),
-        workspace_root=workspace.resolve(),
-        control_plane_root=ROOT,
-        source_env=dict(os.environ),
-        process_memory_bytes=128 * 1024 * 1024,
-        active_process_limit=1,
+        signed_runtime_closure=timeout_closure,
+        runtime_closure_verifier=closure_verifier,
+        **common_run,
     )
 except TierAExecutionTimeout as exc:
     timeout_result = exc.result

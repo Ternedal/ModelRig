@@ -1,22 +1,24 @@
-"""Bounded stdout/stderr capture for the dormant Tier-A Windows launcher.
+"""Bounded Tier-A output capture and exact working-directory binding.
 
-This module does not create processes. It wraps the already-authoritative
-AppContainer Win32 API narrowly enough to supply three inherited standard
-handles to the existing ``CreateProcessW`` call. Executable selection,
-arguments, environment construction, AppContainer identity and Job Object
-assignment remain owned by the existing launch substrate.
+This module still does not create or select processes. It wraps the existing
+AppContainer Win32 API narrowly enough to inject three reviewed standard handles
+and, when explicitly configured, replace the lower launcher's workspace-root
+``lpCurrentDirectory`` with one prevalidated directory inside that same
+workspace. Executable selection, arguments, environment construction,
+AppContainer identity and Job Object assignment remain outside this wrapper.
 
-Both output pipes are drained concurrently until EOF so a child cannot block on
-a full pipe. Every byte contributes to the stream hash and total byte count,
-while only a deterministic prefix budget is retained in memory. The total
-retained bytes can therefore never exceed the signed task output budget.
+Both output pipes are drained concurrently until EOF. Every byte contributes to
+the stream hash and total byte count, while only a deterministic prefix budget is
+retained in memory.
 """
 from __future__ import annotations
 
 import ctypes
 import hashlib
+import os
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from .windows_job import WindowsIsolationError
@@ -38,7 +40,7 @@ _MAX_CAPTURE_BYTES = 100_000_000
 
 
 class WindowsOutputCaptureError(WindowsIsolationError):
-    """Native output handles could not be created, drained or closed safely."""
+    """Native output handles or launch-directory binding failed safely."""
 
 
 class _SECURITY_ATTRIBUTES(ctypes.Structure):
@@ -47,6 +49,43 @@ class _SECURITY_ATTRIBUTES(ctypes.Structure):
         ("lpSecurityDescriptor", ctypes.c_void_p),
         ("bInheritHandle", ctypes.c_int),
     ]
+
+
+def _is_linkish(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    is_junction = getattr(path, "is_junction", None)
+    return bool(is_junction is not None and is_junction())
+
+
+def _has_linkish_component(path: Path) -> bool:
+    current = path.absolute()
+    while True:
+        if _is_linkish(current):
+            return True
+        if current.parent == current:
+            return False
+        current = current.parent
+
+
+def _canonical_directory(path: Path, *, name: str) -> Path:
+    raw = Path(path)
+    if not raw.is_absolute():
+        raise WindowsOutputCaptureError(f"{name} must be absolute")
+    if _has_linkish_component(raw):
+        raise WindowsOutputCaptureError(f"{name} contains a link or junction")
+    resolved = raw.resolve()
+    if not resolved.is_dir():
+        raise WindowsOutputCaptureError(f"{name} must be an existing directory")
+    return resolved
+
+
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +118,10 @@ class CapturedStream:
             raise WindowsOutputCaptureError(
                 "captured stream truncation flag does not match its byte counts"
             )
-        if not self.truncated and hashlib.sha256(self.captured).hexdigest() != self.sha256:
+        if (
+            not self.truncated
+            and hashlib.sha256(self.captured).hexdigest() != self.sha256
+        ):
             raise WindowsOutputCaptureError(
                 "complete captured stream bytes do not match their hash"
             )
@@ -130,7 +172,7 @@ class _PipeReader:
                 remaining = self._limit - len(self._captured)
                 if remaining > 0:
                     self._captured.extend(chunk[:remaining])
-        except BaseException as exc:  # retained and re-raised on the owner thread
+        except BaseException as exc:
             self._error = exc
         finally:
             handle = self._handle
@@ -162,7 +204,7 @@ class _PipeReader:
 
 
 class _CaptureKernel32:
-    """Delegate Win32 calls while adding std handles and a strict handle list."""
+    """Delegate Win32 calls while adding std handles and exact cwd binding."""
 
     def __init__(self, owner: "WindowsOutputCapture", delegate: Any) -> None:
         self._owner = owner
@@ -232,12 +274,43 @@ class _CaptureKernel32:
         startup.hStdError = self._owner._stderr_write
         forwarded = list(arguments)
         forwarded[4] = 1
+        if self._owner.working_directory is not None:
+            requested = arguments[7]
+            if not isinstance(requested, str):
+                raise WindowsOutputCaptureError(
+                    "lower Tier-A launcher supplied an invalid current directory"
+                )
+            requested_path = _canonical_directory(
+                Path(requested), name="lower Tier-A workspace directory"
+            )
+            if os.path.normcase(os.fspath(requested_path)) != os.path.normcase(
+                os.fspath(self._owner.workspace_root)
+            ):
+                raise WindowsOutputCaptureError(
+                    "working-directory wrapper refused a mismatched workspace root"
+                )
+            directory = _canonical_directory(
+                self._owner.working_directory,
+                name="capture working directory at CreateProcessW",
+            )
+            if (
+                not _inside(directory, requested_path)
+                or os.path.normcase(os.fspath(directory))
+                != os.path.normcase(os.fspath(self._owner.working_directory))
+            ):
+                raise WindowsOutputCaptureError(
+                    "working directory changed after capture validation"
+                )
+            is_reparse = getattr(self._owner.native_api, "is_reparse", None)
+            if callable(is_reparse) and is_reparse(os.fspath(directory)):
+                raise WindowsOutputCaptureError(
+                    "working-directory wrapper refused a reparse point"
+                )
+            forwarded[7] = os.fspath(directory)
+            self._owner._working_directory_bound = True
         try:
             return int(self._delegate.CreateProcessW(*forwarded))
         finally:
-            # Do not throw from inside CreateProcessW after it may have created a
-            # child. Record close failure and let the caller terminate the now
-            # fully-owned Job Object before surfacing the error.
             self._owner._close_child_ends(suppress=True)
 
 
@@ -251,9 +324,16 @@ class _CaptureApi:
 
 
 class WindowsOutputCapture:
-    """Own two concurrent pipe drains and one inherited NUL stdin handle."""
+    """Own concurrent pipe drains, strict handles and optional exact cwd binding."""
 
-    def __init__(self, native_api: Any, max_output_bytes: int) -> None:
+    def __init__(
+        self,
+        native_api: Any,
+        max_output_bytes: int,
+        *,
+        workspace_root: Path | None = None,
+        working_directory: Path | None = None,
+    ) -> None:
         if native_api is None or not hasattr(native_api, "kernel32"):
             raise WindowsOutputCaptureError("capture requires the launcher's native API")
         if (
@@ -264,8 +344,33 @@ class WindowsOutputCapture:
             raise WindowsOutputCaptureError(
                 "capture budget must be 1024..100000000 bytes"
             )
+        if (workspace_root is None) != (working_directory is None):
+            raise WindowsOutputCaptureError(
+                "workspace root and working directory must be supplied together"
+            )
         self.native_api = native_api
         self.max_output_bytes = max_output_bytes
+        self.workspace_root: Path | None = None
+        self.working_directory: Path | None = None
+        self._working_directory_bound = False
+        if workspace_root is not None and working_directory is not None:
+            root = _canonical_directory(workspace_root, name="capture workspace root")
+            directory = _canonical_directory(
+                working_directory, name="capture working directory"
+            )
+            if not _inside(directory, root):
+                raise WindowsOutputCaptureError(
+                    "capture working directory escaped the workspace"
+                )
+            is_reparse = getattr(native_api, "is_reparse", None)
+            if callable(is_reparse) and (
+                is_reparse(os.fspath(root)) or is_reparse(os.fspath(directory))
+            ):
+                raise WindowsOutputCaptureError(
+                    "capture refuses reparse-point workspace directories"
+                )
+            self.workspace_root = root
+            self.working_directory = directory
         self.stdout_limit = (max_output_bytes + 1) // 2
         self.stderr_limit = max_output_bytes // 2
         self._started = False
@@ -343,7 +448,7 @@ class WindowsOutputCapture:
         kernel32.CreateFileW.restype = ctypes.c_void_p
 
     @staticmethod
-    def _security_attributes() -> _SECURITY_ATTRIBUTES:
+    def _security_attributes() -> "_SECURITY_ATTRIBUTES":
         return _SECURITY_ATTRIBUTES(ctypes.sizeof(_SECURITY_ATTRIBUTES), None, 1)
 
     def _create_pipe(self, name: str) -> tuple[int, int]:
@@ -426,6 +531,10 @@ class WindowsOutputCapture:
             raise WindowsOutputCaptureError(
                 "capture was not bound to one strict completed CreateProcessW call"
             )
+        if self.working_directory is not None and not self._working_directory_bound:
+            raise WindowsOutputCaptureError(
+                "capture working directory was not bound to CreateProcessW"
+            )
         if self._child_close_error is not None:
             raise WindowsOutputCaptureError(
                 "child-side capture handles could not be closed"
@@ -438,7 +547,10 @@ class WindowsOutputCapture:
         self._stdout_reader.start()
         self._stderr_reader.start()
 
-    def finish(self, timeout_seconds: float = 10.0) -> tuple[CapturedStream, CapturedStream]:
+    def finish(
+        self,
+        timeout_seconds: float = 10.0,
+    ) -> tuple[CapturedStream, CapturedStream]:
         if not self._started or self._finished:
             raise WindowsOutputCaptureError("capture is not in a finishable state")
         if timeout_seconds <= 0:

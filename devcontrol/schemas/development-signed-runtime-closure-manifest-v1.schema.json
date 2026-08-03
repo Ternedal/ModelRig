@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/kaliv-development-signed-runtime-closure-manifest-v1.json",
+  "title": "Kaliv signed runtime closure manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "manifest",
+    "key_id",
+    "signature_algorithm",
+    "signature_sha256"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-development-signed-runtime-closure-manifest/v1"},
+    "manifest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "https://modelrig.local/schemas/kaliv-development-runtime-closure-manifest-v1.json",
+      "title": "Kaliv development runtime closure manifest v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "task_id",
+        "task_sha256",
+        "repository",
+        "base_sha",
+        "command_id",
+        "tool_id",
+        "catalog_sha256",
+        "toolchain_sha256",
+        "lease_sha256",
+        "workspace_root_sha256",
+        "trusted_runtime_root_sha256",
+        "entrypoint_relative_path",
+        "working_directory",
+        "files",
+        "total_bytes"
+      ],
+      "$defs": {
+        "file": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["relative_path", "sha256", "size_bytes"],
+          "properties": {
+            "relative_path": {"type": "string", "minLength": 1, "maxLength": 1024},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "size_bytes": {"type": "integer", "minimum": 1, "maximum": 536870912}
+          }
+        }
+      },
+      "properties": {
+        "schema": {"const": "kaliv-development-runtime-closure-manifest/v1"},
+        "task_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]{2,63}$"},
+        "task_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "repository": {"const": "Ternedal/ModelRig"},
+        "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "command_id": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,63}$"},
+        "tool_id": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,63}$"},
+        "catalog_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "toolchain_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "lease_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "workspace_root_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "trusted_runtime_root_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "entrypoint_relative_path": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "working_directory": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 512,
+          "items": {"$ref": "#/$defs/file"}
+        },
+        "total_bytes": {"type": "integer", "minimum": 1, "maximum": 2147483648}
+      }
+    },
+    "key_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"},
+    "signature_algorithm": {"const": "hmac-sha256"},
+    "signature_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}
