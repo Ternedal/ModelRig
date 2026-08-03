@@ -21,63 +21,12 @@ from app.windows_restricted import (  # noqa: E402
     RestrictedLaunchPolicy,
     derive_profile_name,
     provision_workspace_acl,
-    spawn_restricted_in_job,
 )
-
-passed = failed = 0
-
-# Exact names needed by Windows/profile initialization or ordinary native
-# process discovery. This is a positive list, not a credential denylist.
-_SAFE_WINDOWS_ENV = frozenset(
-    name.casefold()
-    for name in (
-        "ALLUSERSPROFILE",
-        "APPDATA",
-        "CommonProgramFiles",
-        "CommonProgramFiles(x86)",
-        "CommonProgramW6432",
-        "COMPUTERNAME",
-        "ComSpec",
-        "DriverData",
-        "HOMEDRIVE",
-        "HOMEPATH",
-        "LOCALAPPDATA",
-        "LOGONSERVER",
-        "NUMBER_OF_PROCESSORS",
-        "OS",
-        "Path",
-        "PATHEXT",
-        "PROCESSOR_ARCHITECTURE",
-        "PROCESSOR_IDENTIFIER",
-        "PROCESSOR_LEVEL",
-        "PROCESSOR_REVISION",
-        "ProgramData",
-        "ProgramFiles",
-        "ProgramFiles(x86)",
-        "ProgramW6432",
-        "PUBLIC",
-        "SystemDrive",
-        "SystemRoot",
-        "TEMP",
-        "TMP",
-        "USERDOMAIN",
-        "USERDOMAIN_ROAMINGPROFILE",
-        "USERNAME",
-        "USERPROFILE",
-        "windir",
-    )
+from app.windows_tier_a import (  # noqa: E402
+    WINDOWS_TIER_A_ENV_NAMES,
+    appcontainer_environment,
+    spawn_tier_a_in_job,
 )
-
-
-def safe_windows_environment(source):
-    """Copy only named non-secret Windows launch fields."""
-
-    result = {}
-    for key, value in source.items():
-        if isinstance(key, str) and key.casefold() in _SAFE_WINDOWS_ENV:
-            result[key] = value
-    return result
-
 
 passed = failed = 0
 
@@ -170,25 +119,40 @@ def build_static_helper(workspace: str) -> str:
     return str(output)
 
 
-fake_source = {
-    "SystemRoot": r"C:\Windows",
+# --- Environment authority: positive list, never a credential denylist -------
+fake_required = {
+    "APPDATA": r"C:\Users\operator\AppData\Roaming",
+    "ComSpec": r"C:\Windows\System32\cmd.exe",
+    "HOMEDRIVE": "C:",
+    "HOMEPATH": r"\Users\operator",
     "LOCALAPPDATA": r"C:\Users\operator\AppData\Local",
     "Path": r"C:\Windows\System32",
-    "GITHUB_TOKEN": "ghs-must-not-travel",
-    "ACTIONS_RUNTIME_TOKEN": "jwt-must-not-travel",
-    "OLLAMA_API_KEY": "sk-must-not-travel",
-    "HTTP_COOKIE": "cookie-must-not-travel",
-    "AUTH_HEADER": "bearer-must-not-travel",
-    "KALIV_SIGNING_KEY": "key-must-not-travel",
+    "SystemDrive": "C:",
+    "SystemRoot": r"C:\Windows",
+    "TEMP": r"C:\Users\operator\AppData\Local\Temp",
+    "TMP": r"C:\Users\operator\AppData\Local\Temp",
+    "USERPROFILE": r"C:\Users\operator",
+    "windir": r"C:\Windows",
 }
-filtered = safe_windows_environment(fake_source)
+fake_source = dict(fake_required)
+fake_source.update(
+    {
+        "GITHUB_TOKEN": "ghs-must-not-travel",
+        "ACTIONS_RUNTIME_TOKEN": "jwt-must-not-travel",
+        "OLLAMA_API_KEY": "sk-must-not-travel",
+        "HTTP_COOKIE": "cookie-must-not-travel",
+        "AUTH_HEADER": "bearer-must-not-travel",
+        "KALIV_SIGNING_KEY": "key-must-not-travel",
+    }
+)
+filtered = appcontainer_environment(fake_source)
 check(
-    filtered == {
-        "SystemRoot": r"C:\Windows",
-        "LOCALAPPDATA": r"C:\Users\operator\AppData\Local",
-        "Path": r"C:\Windows\System32",
-    },
-    "AppContainer environment is a positive system-field allowlist",
+    filtered == fake_required,
+    "authoritative launcher keeps only named Windows initialization fields",
+)
+check(
+    all(key.casefold() in WINDOWS_TIER_A_ENV_NAMES for key in filtered),
+    "every emitted field belongs to the immutable positive list",
 )
 for secret_name in (
     "GITHUB_TOKEN",
@@ -199,8 +163,21 @@ for secret_name in (
     "KALIV_SIGNING_KEY",
 ):
     check(secret_name not in filtered, f"{secret_name} cannot enter the sandbox")
+rejects(
+    lambda: appcontainer_environment({"SystemRoot": r"C:\Windows"}),
+    "missing required",
+    "missing initialization fields fail closed instead of inheriting everything",
+)
+duplicate = dict(fake_required)
+duplicate["PATH"] = r"C:\untrusted"
+rejects(
+    lambda: appcontainer_environment(duplicate),
+    "case-insensitive duplicate",
+    "ambiguous Windows environment keys fail closed",
+)
 
 
+# --- Deterministic profile authority -----------------------------------------
 with tempfile.TemporaryDirectory(prefix="kaliv-appcontainer-policy-") as first:
     first_root = os.path.abspath(first)
     name_a = derive_profile_name(first_root)
@@ -227,6 +204,8 @@ rejects(
     "relative roots fail closed",
 )
 
+
+# --- Real kernel proof -------------------------------------------------------
 if os.name != "nt":
     check(True, "native AppContainer proofs are reserved for Windows CI")
 else:
@@ -254,93 +233,108 @@ else:
 
     policy = RestrictedLaunchPolicy(workspace)
     profile = AppContainerProfile(policy)
-    check(not profile.closed, "AppContainer profile and Package SID resolved")
-    check(
-        profile.sid_string.startswith("S-1-15-2-"),
-        "profile exposes an AppContainer Package SID",
-    )
-    receipt = provision_workspace_acl(policy, profile)
-    check(
-        receipt.paths_updated >= 4,
-        "Package SID ACL covers root, executable, input and receipt",
-    )
-    check(
-        receipt.root == policy.workspace_root
-        and receipt.profile_name == policy.profile_name
-        and receipt.appcontainer_sid == profile.sid_string,
-        "ACL receipt is bound to the exact root and profile",
-    )
-    check(
-        receipt.capability_count == 0,
-        "profile declares zero capabilities, including zero network capabilities",
-    )
-
-    source_env = dict(os.environ)
-    source_env.update(
-        {
-            "GITHUB_TOKEN": "ghs-native-must-not-travel",
-            "ACTIONS_RUNTIME_TOKEN": "jwt-native-must-not-travel",
-            "OLLAMA_API_KEY": "sk-native-must-not-travel",
-        }
-    )
-    env = safe_windows_environment(source_env)
-    check(
-        all(name not in env for name in ("GITHUB_TOKEN", "ACTIONS_RUNTIME_TOKEN", "OLLAMA_API_KEY")),
-        "native launch environment excludes injected credentials",
-    )
-    proc = spawn_restricted_in_job(
-        [helper, inside_read, outside_read, inside_write, outside_write, result_path],
-        env=env,
-        limits=JobLimits(
-            process_memory_bytes=128 * 1024 * 1024,
-            active_process_limit=1,
-        ),
-        policy=policy,
-        profile=profile,
-        acl_receipt=receipt,
-    )
-    check(
-        proc.profile_name == policy.profile_name,
-        "child process remains bound to the expected profile",
-    )
-    exit_code = proc.wait(timeout=30)
-    close_attached_job(proc)
-    proc.close()
-
-    result_exists = Path(result_path).is_file()
-    result_text = (
-        Path(result_path).read_text(encoding="utf-8") if result_exists else ""
-    )
     try:
-        payload = json.loads(result_text)
-    except (TypeError, ValueError):
-        payload = {}
-    check(exit_code == 0, f"AppContainer child exits normally (exit={exit_code})")
-    check(result_exists, "AppContainer receipt path still exists")
-    check(
-        payload.get("sentinel") is not True,
-        f"AppContainer child replaced the provisioned receipt ({result_text[:120]!r})",
-    )
-    check(
-        payload.get("appcontainer") is True,
-        "child token is a real AppContainer token",
-    )
-    check(
-        payload.get("lpac") is False,
-        "boundary uses regular AppContainer system compatibility, not LPAC",
-    )
-    check(payload.get("inside_read") is True, "AppContainer child reads inside")
-    check(
-        payload.get("outside_read") is False,
-        "AppContainer child is OS-denied reading outside",
-    )
-    check(payload.get("inside_write") is True, "AppContainer child writes inside")
-    check(
-        payload.get("outside_write") is False,
-        "AppContainer child is OS-denied writing outside",
-    )
+        check(not profile.closed, "AppContainer profile and Package SID resolved")
+        check(
+            profile.sid_string.startswith("S-1-15-2-"),
+            "profile exposes an AppContainer Package SID",
+        )
+        receipt = provision_workspace_acl(policy, profile)
+        check(
+            receipt.paths_updated >= 4,
+            "Package SID ACL covers root, executable, input and receipt",
+        )
+        check(
+            receipt.root == policy.workspace_root
+            and receipt.profile_name == policy.profile_name
+            and receipt.appcontainer_sid == profile.sid_string,
+            "ACL receipt is bound to the exact root and profile",
+        )
+        check(
+            receipt.capability_count == 0,
+            "profile declares zero capabilities, including zero network capabilities",
+        )
 
-    profile.delete()
+        source_env = dict(os.environ)
+        source_env.update(
+            {
+                "GITHUB_TOKEN": "ghs-native-must-not-travel",
+                "ACTIONS_RUNTIME_TOKEN": "jwt-native-must-not-travel",
+                "OLLAMA_API_KEY": "sk-native-must-not-travel",
+            }
+        )
+        native_env = appcontainer_environment(source_env)
+        check(
+            all(
+                name not in native_env
+                for name in (
+                    "GITHUB_TOKEN",
+                    "ACTIONS_RUNTIME_TOKEN",
+                    "OLLAMA_API_KEY",
+                )
+            ),
+            "native launch environment excludes injected credentials",
+        )
+        proc = spawn_tier_a_in_job(
+            [
+                helper,
+                inside_read,
+                outside_read,
+                inside_write,
+                outside_write,
+                result_path,
+            ],
+            source_env=source_env,
+            limits=JobLimits(
+                process_memory_bytes=128 * 1024 * 1024,
+                active_process_limit=1,
+            ),
+            policy=policy,
+            profile=profile,
+            acl_receipt=receipt,
+        )
+        check(
+            proc.profile_name == policy.profile_name,
+            "authoritative launcher keeps child bound to the expected profile",
+        )
+        exit_code = proc.wait(timeout=30)
+        close_attached_job(proc)
+        proc.close()
+
+        result_exists = Path(result_path).is_file()
+        result_text = (
+            Path(result_path).read_text(encoding="utf-8") if result_exists else ""
+        )
+        try:
+            payload = json.loads(result_text)
+        except (TypeError, ValueError):
+            payload = {}
+        check(exit_code == 0, f"AppContainer child exits normally (exit={exit_code})")
+        check(result_exists, "AppContainer receipt path still exists")
+        check(
+            payload.get("sentinel") is not True,
+            f"AppContainer child replaced the provisioned receipt ({result_text[:120]!r})",
+        )
+        check(
+            payload.get("appcontainer") is True,
+            "child token is a real AppContainer token",
+        )
+        check(
+            payload.get("lpac") is False,
+            "boundary uses regular AppContainer system compatibility, not LPAC",
+        )
+        check(payload.get("inside_read") is True, "AppContainer child reads inside")
+        check(
+            payload.get("outside_read") is False,
+            "AppContainer child is OS-denied reading outside",
+        )
+        check(payload.get("inside_write") is True, "AppContainer child writes inside")
+        check(
+            payload.get("outside_write") is False,
+            "AppContainer child is OS-denied writing outside",
+        )
+    finally:
+        profile.delete()
     check(profile.deleted and profile.closed, "test AppContainer profile is deleted")
 
 print(f"\n===== WINDOWS APPCONTAINER: {passed} passed, {failed} failed =====")
