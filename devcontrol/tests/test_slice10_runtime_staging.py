@@ -26,6 +26,7 @@ from kaliv_dev_control.runtime_staging import (
 )
 from kaliv_dev_control.tier_a_execution import (
     LeasedCommandRegistry,
+    TierAExecutionError,
     TierAExecutionLease,
     workspace_root_authority_sha256,
 )
@@ -239,7 +240,7 @@ class TrustedRuntimeStagingTests(unittest.TestCase):
             other = DevelopmentTask.from_mapping(
                 {**task.to_dict(), "task_id": "OTHER_A10"}
             )
-            with self.assertRaisesRegex(Exception, "another task"):
+            with self.assertRaisesRegex(TierAExecutionError, "another task"):
                 stager.verify(receipt, registry, other, COMMAND_ID)
 
     def test_nested_authority_roots_are_rejected(self):
