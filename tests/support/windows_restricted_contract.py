@@ -189,11 +189,12 @@ else:
         "profile declares zero capabilities, including zero network capabilities",
     )
 
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if key in {"SYSTEMROOT", "WINDIR", "PATH"}
-    }
+    # Controlled A/B: preserve the complete parent environment while changing
+    # no token, SID, ACL, capability or Job Object property. The native helper
+    # never reads or emits environment values. A green launch proves WinError
+    # 203 came from a missing profile-initialization variable; the final code
+    # will then replace this diagnostic inheritance with a strict allowlist.
+    env = dict(os.environ)
     proc = spawn_restricted_in_job(
         [helper, inside_read, outside_read, inside_write, outside_write, result_path],
         env=env,
