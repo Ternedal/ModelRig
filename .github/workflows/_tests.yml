@@ -44,12 +44,18 @@ jobs:
       # scripts/ was outside the gate until 27/07-2026, and a directory walk
       # skips *.retained entirely -- 3175 lines of load-bearing logic (the
       # scheduler pilot, the Stage A operators and their tests) that no linter
-      # had ever opened. --extension pulls them in. The four exec-shims carry a
-      # file-level noqa next to the exec that makes their names invisible.
+      # had ever opened. --extension pulls them in. Development Control Plane
+      # source/tests are included explicitly because they are not under worker/.
       - name: Python lint gate (syntax + undefined names)
         run: |
           pip install --quiet ruff
-          ruff check --select E9,F63,F7,F82 --extension retained:python worker/ tests/ scripts/
+          ruff check --select E9,F63,F7,F82 --extension retained:python worker/ tests/ scripts/ devcontrol/src/ devcontrol/tests/
+
+      - name: Development Control Plane portable contracts
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: devcontrol/src
+        run: python3 -m unittest discover -s devcontrol/tests -p 'test_*.py' -v
 
       - name: PowerShell syntax gate
         shell: pwsh
@@ -121,8 +127,8 @@ jobs:
   # limits, an actual AppContainer token or OS-denied workspace escapes. Keep
   # those proofs in the same reusable gate used by PRs and releases. The support
   # suites live outside the portable root tests/*.py inventory and are wired
-  # explicitly here. The AppContainer fixture is compiled by the test with the
-  # hosted MSVC toolchain so no second helper/runtime can drift beside it.
+  # explicitly here. Native fixtures are compiled by their tests with the hosted
+  # MSVC toolchain so no second helper/runtime can drift beside them.
   test-windows-tool-isolation:
     runs-on: windows-latest
     steps:
@@ -135,7 +141,7 @@ jobs:
       - name: Install worker deps
         run: pip install -r worker/requirements.txt
 
-      - name: Native Job Object, AppContainer, catalog lease and ProcessExecutor tests
+      - name: Native Job Object, AppContainer, captured catalog lease and ProcessExecutor tests
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
