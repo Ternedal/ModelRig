@@ -53,6 +53,7 @@ BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/commands.py",
     "devcontrol/src/kaliv_dev_control/contract.py",
     "devcontrol/src/kaliv_dev_control/physical_isolation.py",
+    "devcontrol/src/kaliv_dev_control/runtime_staging.py",
     "devcontrol/src/kaliv_dev_control/tier_a_execution.py",
     "devcontrol/src/kaliv_dev_control/workspace.py",
 )
