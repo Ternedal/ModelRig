@@ -223,17 +223,26 @@ def main() -> int:
         print("===============================================================")
         print("  Fanger en durable claim, crasher den registrerede worker og venter på ægte recovery.")
 
-        due, before, _ = wizard.prepare_aligned_schedule(read_id)
-        wizard.wait_until(due + 2.5)
+        # Laas-foerst-fangst, spejlet fra wizardens catch_claim_and_crash:
+        # prepare aktiverer ikke laengere planen (den ville kunne claime og
+        # eksekvere paa under et sekund FOER laasen var taget og braende
+        # budgettet). Aktivér i stedet planen mens jobs-DB-laasen holdes, saa
+        # enhver claim blokerer paa sit job-insert og fanges som 'reserved';
+        # crash workeren mens claimet staar aabent. Fejler fangsten, deaktiveres
+        # planen FOER laasen slippes, saa den ikke fyrer videre i baggrunden.
+        _due, before, _ = wizard.prepare_aligned_schedule(read_id)
         claim = None
         with wizard.lock_job_store():
-            deadline = time.monotonic() + 4.0
+            wizard.set_enabled(read_id, True)
+            deadline = time.monotonic() + wizard.POLL_SECONDS + 70.0
             while time.monotonic() < deadline:
                 claim = wizard.reserved_after(read_id, before)
                 if claim is not None:
                     kill_recorded_worker(expected_pid)
                     break
                 time.sleep(0.02)
+            if claim is None:
+                wizard.set_enabled(read_id, False)
         if claim is None:
             raise CrashRecoveryError("Crash-claim blev ikke fanget; kør trinnet igen.")
         claim_id = str(claim.get("claim_id") or "")
