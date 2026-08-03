@@ -186,6 +186,22 @@ class GitHubReadReceipt:
             separators=(",", ":"),
         )
 
+    def verify_task(self, task: DevelopmentTask) -> None:
+        expected = {
+            "task_id": task.task_id,
+            "task_sha256": hashlib.sha256(task.canonical_json().encode("utf-8")).hexdigest(),
+            "repository": task.repository,
+            "base_sha": task.base_sha,
+        }
+        actual = {
+            "task_id": self.task_id,
+            "task_sha256": self.task_sha256,
+            "repository": self.repository,
+            "base_sha": self.base_sha,
+        }
+        if actual != expected:
+            raise GitHubReadError("GitHub receipt is not bound to this exact task")
+
 
 class GitHubReadAdapter:
     """Read one repository and exact SHA through fixed GitHub API operations."""
@@ -346,8 +362,12 @@ class GitHubReadAdapter:
             raise GitHubReadError("GitHub content response has an invalid blob SHA")
         if payload.get("encoding") != "base64" or not isinstance(payload.get("content"), str):
             raise GitHubReadError("GitHub content response is not inline base64")
+        encoded_content = payload["content"]
+        if any(char.isspace() and char not in "\r\n" for char in encoded_content):
+            raise GitHubReadError("GitHub file base64 contains unsupported whitespace")
+        compact_content = encoded_content.replace("\r", "").replace("\n", "")
         try:
-            data = base64.b64decode(payload["content"], validate=True)
+            data = base64.b64decode(compact_content, validate=True)
         except (ValueError, binascii.Error) as exc:
             raise GitHubReadError("GitHub file base64 is invalid") from exc
         if len(data) > max_bytes:
