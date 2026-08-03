@@ -26,6 +26,61 @@ from app.windows_restricted import (  # noqa: E402
 
 passed = failed = 0
 
+# Exact names needed by Windows/profile initialization or ordinary native
+# process discovery. This is a positive list, not a credential denylist.
+_SAFE_WINDOWS_ENV = frozenset(
+    name.casefold()
+    for name in (
+        "ALLUSERSPROFILE",
+        "APPDATA",
+        "CommonProgramFiles",
+        "CommonProgramFiles(x86)",
+        "CommonProgramW6432",
+        "COMPUTERNAME",
+        "ComSpec",
+        "DriverData",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "LOCALAPPDATA",
+        "LOGONSERVER",
+        "NUMBER_OF_PROCESSORS",
+        "OS",
+        "Path",
+        "PATHEXT",
+        "PROCESSOR_ARCHITECTURE",
+        "PROCESSOR_IDENTIFIER",
+        "PROCESSOR_LEVEL",
+        "PROCESSOR_REVISION",
+        "ProgramData",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+        "ProgramW6432",
+        "PUBLIC",
+        "SystemDrive",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "USERDOMAIN",
+        "USERDOMAIN_ROAMINGPROFILE",
+        "USERNAME",
+        "USERPROFILE",
+        "windir",
+    )
+)
+
+
+def safe_windows_environment(source):
+    """Copy only named non-secret Windows launch fields."""
+
+    result = {}
+    for key, value in source.items():
+        if isinstance(key, str) and key.casefold() in _SAFE_WINDOWS_ENV:
+            result[key] = value
+    return result
+
+
+passed = failed = 0
+
 
 def check(condition, message):
     global passed, failed
@@ -115,6 +170,37 @@ def build_static_helper(workspace: str) -> str:
     return str(output)
 
 
+fake_source = {
+    "SystemRoot": r"C:\Windows",
+    "LOCALAPPDATA": r"C:\Users\operator\AppData\Local",
+    "Path": r"C:\Windows\System32",
+    "GITHUB_TOKEN": "ghs-must-not-travel",
+    "ACTIONS_RUNTIME_TOKEN": "jwt-must-not-travel",
+    "OLLAMA_API_KEY": "sk-must-not-travel",
+    "HTTP_COOKIE": "cookie-must-not-travel",
+    "AUTH_HEADER": "bearer-must-not-travel",
+    "KALIV_SIGNING_KEY": "key-must-not-travel",
+}
+filtered = safe_windows_environment(fake_source)
+check(
+    filtered == {
+        "SystemRoot": r"C:\Windows",
+        "LOCALAPPDATA": r"C:\Users\operator\AppData\Local",
+        "Path": r"C:\Windows\System32",
+    },
+    "AppContainer environment is a positive system-field allowlist",
+)
+for secret_name in (
+    "GITHUB_TOKEN",
+    "ACTIONS_RUNTIME_TOKEN",
+    "OLLAMA_API_KEY",
+    "HTTP_COOKIE",
+    "AUTH_HEADER",
+    "KALIV_SIGNING_KEY",
+):
+    check(secret_name not in filtered, f"{secret_name} cannot enter the sandbox")
+
+
 with tempfile.TemporaryDirectory(prefix="kaliv-appcontainer-policy-") as first:
     first_root = os.path.abspath(first)
     name_a = derive_profile_name(first_root)
@@ -189,12 +275,19 @@ else:
         "profile declares zero capabilities, including zero network capabilities",
     )
 
-    # Controlled A/B: preserve the complete parent environment while changing
-    # no token, SID, ACL, capability or Job Object property. The native helper
-    # never reads or emits environment values. A green launch proves WinError
-    # 203 came from a missing profile-initialization variable; the final code
-    # will then replace this diagnostic inheritance with a strict allowlist.
-    env = dict(os.environ)
+    source_env = dict(os.environ)
+    source_env.update(
+        {
+            "GITHUB_TOKEN": "ghs-native-must-not-travel",
+            "ACTIONS_RUNTIME_TOKEN": "jwt-native-must-not-travel",
+            "OLLAMA_API_KEY": "sk-native-must-not-travel",
+        }
+    )
+    env = safe_windows_environment(source_env)
+    check(
+        all(name not in env for name in ("GITHUB_TOKEN", "ACTIONS_RUNTIME_TOKEN", "OLLAMA_API_KEY")),
+        "native launch environment excludes injected credentials",
+    )
     proc = spawn_restricted_in_job(
         [helper, inside_read, outside_read, inside_write, outside_write, result_path],
         env=env,
