@@ -1,12 +1,15 @@
 """Contract and real-Windows proofs for the Tier-A AppContainer boundary.
 
 The deterministic authority checks run on every platform. Native profile,
-package-SID ACL, process creation and filesystem proofs run in Windows CI.
+package-SID ACL, process creation, filesystem and loopback denial proofs run in
+Windows CI. The network probe never contacts an external address.
 """
 from __future__ import annotations
 
 import json
 import os
+import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -222,6 +225,14 @@ else:
         raise SystemExit(1) from exc
     check(os.path.isfile(helper), "static Win32 helper compiled")
 
+    system_curl = shutil.which("curl.exe")
+    if not system_curl or not os.path.isfile(system_curl):
+        check(False, "Windows curl.exe is available for the loopback denial probe")
+        raise SystemExit(1)
+    curl = os.path.join(workspace, "curl.exe")
+    shutil.copy2(system_curl, curl)
+    check(os.path.isfile(curl), "Windows curl.exe copied into the workspace")
+
     inside_read = os.path.join(workspace, "inside-read.txt")
     outside_read = os.path.join(outside, "outside-read.txt")
     inside_write = os.path.join(workspace, "inside-write.txt")
@@ -241,8 +252,8 @@ else:
         )
         receipt = provision_workspace_acl(policy, profile)
         check(
-            receipt.paths_updated >= 4,
-            "Package SID ACL covers root, executable, input and receipt",
+            receipt.paths_updated >= 5,
+            "Package SID ACL covers root, executables, input and receipt",
         )
         check(
             receipt.root == policy.workspace_root
@@ -332,6 +343,59 @@ else:
         check(
             payload.get("outside_write") is False,
             "AppContainer child is OS-denied writing outside",
+        )
+
+        # A real listening socket makes connection success observable. The
+        # AppContainer receives no network capability and must therefore fail
+        # before the parent accepts anything. Only loopback is used.
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        listener.settimeout(1.0)
+        port = listener.getsockname()[1]
+        network_output = os.path.join(workspace, "network-output.txt")
+        network_proc = spawn_tier_a_in_job(
+            [
+                curl,
+                "--connect-timeout",
+                "2",
+                "--max-time",
+                "4",
+                "--silent",
+                "--show-error",
+                "--output",
+                network_output,
+                f"http://127.0.0.1:{port}/",
+            ],
+            source_env=source_env,
+            limits=JobLimits(
+                process_memory_bytes=128 * 1024 * 1024,
+                active_process_limit=1,
+            ),
+            policy=policy,
+            profile=profile,
+            acl_receipt=receipt,
+        )
+        network_exit = network_proc.wait(timeout=15)
+        close_attached_job(network_proc)
+        network_proc.close()
+        try:
+            accepted, _ = listener.accept()
+        except socket.timeout:
+            connected = False
+        else:
+            connected = True
+            accepted.close()
+        finally:
+            listener.close()
+        check(
+            network_exit != 0,
+            f"zero-capability AppContainer network attempt fails (exit={network_exit})",
+        )
+        check(
+            not connected,
+            "parent loopback listener observes no AppContainer connection",
         )
     finally:
         profile.delete()
