@@ -98,12 +98,16 @@ else:
     result_path = os.path.join(workspace, "result.json")
     Path(inside_read).write_text("inside", encoding="utf-8")
     Path(outside_read).write_text("outside", encoding="utf-8")
+    # The child result is a controlled receipt channel, not an arbitrary new
+    # file. Provision it explicitly and use a sentinel so a child that never
+    # starts or cannot write cannot masquerade as a valid result.
+    Path(result_path).write_text('{"sentinel":true}', encoding="utf-8")
 
     receipt = provision_workspace_acl(workspace)
     policy = RestrictedLaunchPolicy(workspace, receipt.workspace_sid)
     check(
-        receipt.paths_updated >= 3,
-        "ACL provisioning covered root and existing files",
+        receipt.paths_updated >= 4,
+        "ACL provisioning covered root, executable, input and receipt",
     )
     check(
         receipt.root == policy.workspace_root,
@@ -167,8 +171,20 @@ else:
     exit_code = proc.wait(timeout=30)
     close_attached_job(proc)
     proc.close()
-    payload = json.loads(Path(result_path).read_text(encoding="utf-8"))
-    check(exit_code == 0, "restricted child exits normally")
+    result_exists = Path(result_path).is_file()
+    result_text = (
+        Path(result_path).read_text(encoding="utf-8") if result_exists else ""
+    )
+    try:
+        payload = json.loads(result_text)
+    except (TypeError, ValueError):
+        payload = {}
+    check(exit_code == 0, f"restricted child exits normally (exit={exit_code})")
+    check(result_exists, "restricted child receipt path still exists")
+    check(
+        payload.get("sentinel") is not True,
+        f"restricted child replaced the provisioned receipt ({result_text[:120]!r})",
+    )
     check(
         payload.get("restricted") is True,
         "child sees a real restricted primary token",
