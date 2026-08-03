@@ -25,6 +25,7 @@ TOOLCHAIN_SCHEMA = "kaliv-development-toolchain/v1"
 ATTESTATION_SCHEMA = "kaliv-development-isolation-attestation/v1"
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _TOOL_ID = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
+_TASK_ID = re.compile(r"^[A-Z][A-Z0-9_-]{2,63}$")
 
 
 class CatalogError(ValueError):
@@ -72,11 +73,13 @@ class ProjectCommandSpec:
     network_mode: NetworkMode = NetworkMode.DENY
 
     def __post_init__(self) -> None:
-        if _TOOL_ID.fullmatch(self.command_id) is None:
+        if not isinstance(self.command_id, str) or _TOOL_ID.fullmatch(self.command_id) is None:
             raise CatalogError("invalid catalog command id")
-        if _TOOL_ID.fullmatch(self.tool_id) is None:
+        if not isinstance(self.tool_id, str) or _TOOL_ID.fullmatch(self.tool_id) is None:
             raise CatalogError("invalid catalog tool id")
-        if any(not isinstance(item, str) or not item or "\x00" in item for item in self.args):
+        if not isinstance(self.args, tuple) or any(
+            not isinstance(item, str) or not item or "\x00" in item for item in self.args
+        ):
             raise CatalogError("catalog arguments must be canonical strings")
         if self.cwd != ".":
             path = PurePosixPath(self.cwd)
@@ -86,7 +89,11 @@ class ProjectCommandSpec:
                 or any(part in {"", ".", ".."} for part in path.parts)
             ):
                 raise CatalogError("catalog cwd must be repository-relative")
-        if not 1 <= self.max_timeout_seconds <= 86_400:
+        if (
+            isinstance(self.max_timeout_seconds, bool)
+            or not isinstance(self.max_timeout_seconds, int)
+            or not 1 <= self.max_timeout_seconds <= 86_400
+        ):
             raise CatalogError("catalog timeout is outside bounds")
         clean_env: dict[str, str] = {}
         for key, value in self.env.items():
@@ -156,7 +163,7 @@ class ToolBinding:
     executable_sha256: str
 
     def __post_init__(self) -> None:
-        if _TOOL_ID.fullmatch(self.tool_id) is None:
+        if not isinstance(self.tool_id, str) or _TOOL_ID.fullmatch(self.tool_id) is None:
             raise CatalogError("invalid tool binding id")
         if (
             not isinstance(self.executable, str)
@@ -165,7 +172,10 @@ class ToolBinding:
             or not _is_absolute_executable(self.executable)
         ):
             raise CatalogError("tool executable must be an absolute path")
-        if _HEX64.fullmatch(self.executable_sha256) is None:
+        if (
+            not isinstance(self.executable_sha256, str)
+            or _HEX64.fullmatch(self.executable_sha256) is None
+        ):
             raise CatalogError("tool executable hash must be lowercase SHA-256")
 
     def to_dict(self) -> dict[str, str]:
@@ -223,19 +233,31 @@ class IsolationAttestation:
     def __post_init__(self) -> None:
         if self.schema != ATTESTATION_SCHEMA:
             raise CatalogError("unsupported isolation attestation schema")
-        if not self.task_id or self.repository != "Ternedal/ModelRig":
+        if (
+            not isinstance(self.task_id, str)
+            or _TASK_ID.fullmatch(self.task_id) is None
+            or self.repository != "Ternedal/ModelRig"
+        ):
             raise CatalogError("isolation attestation identity is invalid")
+        if not isinstance(self.boundary, IsolationBoundary) or not isinstance(
+            self.network_mode, NetworkMode
+        ):
+            raise CatalogError("isolation boundary or network mode is invalid")
         for name, value, pattern in (
             ("task_sha256", self.task_sha256, _HEX64),
             ("catalog_sha256", self.catalog_sha256, _HEX64),
             ("toolchain_sha256", self.toolchain_sha256, _HEX64),
         ):
-            if pattern.fullmatch(value) is None:
+            if not isinstance(value, str) or pattern.fullmatch(value) is None:
                 raise CatalogError(f"{name} is invalid")
-        if re.fullmatch(r"[0-9a-f]{40}", self.base_sha) is None:
+        if not isinstance(self.base_sha, str) or re.fullmatch(r"[0-9a-f]{40}", self.base_sha) is None:
             raise CatalogError("attestation base SHA is invalid")
-        if not self.evidence_sha256 or len(self.evidence_sha256) > 32:
-            raise CatalogError("isolation evidence must contain 1..32 hashes")
+        if (
+            not isinstance(self.evidence_sha256, tuple)
+            or not self.evidence_sha256
+            or len(self.evidence_sha256) > 32
+        ):
+            raise CatalogError("isolation evidence must be an immutable tuple of 1..32 hashes")
         if any(_HEX64.fullmatch(item) is None for item in self.evidence_sha256):
             raise CatalogError("isolation evidence hash is invalid")
         if len(set(self.evidence_sha256)) != len(self.evidence_sha256):
