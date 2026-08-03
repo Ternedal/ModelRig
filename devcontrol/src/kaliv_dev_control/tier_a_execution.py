@@ -6,8 +6,9 @@ launch plan only after the exact signed physical report is reloaded, verified,
 bound to the task, catalog and toolchain, and converted into an immutable lease.
 
 The only public execution entry point repeats that verification immediately
-before launch. The lower-level plan executor is private so ordinary runtime code
-cannot turn a merely well-formed plan into authority.
+before launch and requires deterministic trusted-runtime staging. The lower-level
+plan executor is private so ordinary runtime code cannot turn a merely well-formed
+plan into authority.
 """
 from __future__ import annotations
 
@@ -67,6 +68,7 @@ _TIER_A_BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/commands.py",
     "devcontrol/src/kaliv_dev_control/contract.py",
     "devcontrol/src/kaliv_dev_control/physical_isolation.py",
+    "devcontrol/src/kaliv_dev_control/runtime_staging.py",
     "devcontrol/src/kaliv_dev_control/tier_a_execution.py",
     "devcontrol/src/kaliv_dev_control/workspace.py",
 )
@@ -858,6 +860,7 @@ def run_verified_tier_a_command(
     physical_verifier: WindowsPhysicalIsolationVerifier,
     command_id: str,
     *,
+    trusted_runtime_root: Path,
     workspace_root: Path,
     control_plane_root: Path,
     source_env: Mapping[str, str] | None = None,
@@ -865,15 +868,30 @@ def run_verified_tier_a_command(
     process_memory_bytes: int = 512 * 1024 * 1024,
     active_process_limit: int = 8,
 ) -> int:
-    """Reverify signed authority, build one fresh plan and launch it immediately."""
+    """Reverify, stage one trusted runtime, build a fresh plan and launch it."""
 
     registry = LeasedCatalogMaterializer(
         catalog,
         physical_verifier,
         executable_verifier=executable_verifier,
     ).materialize(task, toolchain, attestation)
-    plan = build_tier_a_launch_plan(
+
+    # Import locally so package initialization does not create a circular import:
+    # runtime_staging validates LeasedCommandRegistry from this module. The module
+    # is nevertheless part of the signed Tier-A bundle above, so any change still
+    # invalidates the physical report before a lease can be issued.
+    from .runtime_staging import TrustedRuntimeStager
+
+    stager = TrustedRuntimeStager(trusted_runtime_root, workspace_root)
+    staging_receipt = stager.stage(registry, task, command_id)
+    staged_registry = stager.bind_for_launch(
+        staging_receipt,
         registry,
+        task,
+        command_id,
+    )
+    plan = build_tier_a_launch_plan(
+        staged_registry,
         task,
         command_id,
         workspace_root=workspace_root,
