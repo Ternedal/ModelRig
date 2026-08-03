@@ -1,13 +1,13 @@
 """Lease-bound bridge from signed physical evidence to dormant Tier-A launch.
 
 This module connects the development command catalog to the Windows AppContainer
-substrate without activating any registered ModelRig tool. Materialization is
-not enough by itself: a command receives a launch plan only when the exact
-signed physical report is reloaded, signature-checked, bound to the task,
-catalog and toolchain, and converted into an immutable execution lease.
+substrate without activating any registered ModelRig tool. A command receives a
+launch plan only after the exact signed physical report is reloaded, verified,
+bound to the task, catalog and toolchain, and converted into an immutable lease.
 
-The launch plan also binds the concrete workspace path, staged executable hash,
-reviewed application environment and the authoritative Tier-A code bundle.
+The only public execution entry point repeats that verification immediately
+before launch. The lower-level plan executor is private so ordinary runtime code
+cannot turn a merely well-formed plan into authority.
 """
 from __future__ import annotations
 
@@ -54,11 +54,21 @@ TIER_A_APPLICATION_ENVIRONMENT = MappingProxyType(
     }
 )
 
+# Every Python source file that can create, validate, transform or execute a
+# Tier-A authority is part of the signed code identity. Package __init__ files
+# are included because Python executes them while importing these modules.
 _TIER_A_BUNDLE_FILES = (
+    "worker/app/__init__.py",
     "worker/app/windows_job.py",
     "worker/app/windows_restricted.py",
     "worker/app/windows_tier_a.py",
+    "devcontrol/src/kaliv_dev_control/__init__.py",
+    "devcontrol/src/kaliv_dev_control/catalog.py",
+    "devcontrol/src/kaliv_dev_control/commands.py",
+    "devcontrol/src/kaliv_dev_control/contract.py",
+    "devcontrol/src/kaliv_dev_control/physical_isolation.py",
     "devcontrol/src/kaliv_dev_control/tier_a_execution.py",
+    "devcontrol/src/kaliv_dev_control/workspace.py",
 )
 
 
@@ -117,11 +127,11 @@ def workspace_root_authority_sha256(path: Path) -> str:
 
 
 def tier_a_toolhost_sha256(control_plane_root: Path) -> str:
-    """Hash every source file that participates in the Tier-A launch boundary."""
+    """Hash the complete source chain that can issue or execute Tier-A authority."""
 
     root = _canonical_directory(control_plane_root, name="control-plane root")
     digest = hashlib.sha256()
-    digest.update(b"kaliv-tier-a-toolhost/v1\0")
+    digest.update(b"kaliv-tier-a-toolhost/v2\0")
     for relative in _TIER_A_BUNDLE_FILES:
         path = root / PurePosixPath(relative)
         if path.is_symlink() or not path.is_file():
@@ -695,7 +705,7 @@ def build_tier_a_launch_plan(
     actual_toolhost_hash = tier_a_toolhost_sha256(control_root)
     if actual_toolhost_hash != lease.toolhost_sha256:
         raise TierAExecutionError(
-            "Tier-A toolhost code does not match the signed physical isolation report"
+            "Tier-A authority code does not match the signed physical isolation report"
         )
 
     specification = registry.catalog.resolve(command_id)
@@ -756,7 +766,7 @@ def build_tier_a_launch_plan(
     )
 
 
-def run_tier_a_launch_plan(
+def _run_tier_a_launch_plan(
     plan: TierALaunchPlan,
     *,
     control_plane_root: Path,
@@ -764,7 +774,7 @@ def run_tier_a_launch_plan(
     process_memory_bytes: int = 512 * 1024 * 1024,
     active_process_limit: int = 8,
 ) -> int:
-    """Execute one immutable plan through AppContainer + Job Object and clean up."""
+    """Execute a freshly verified internal plan through AppContainer + Job Object."""
 
     if not isinstance(plan, TierALaunchPlan):
         raise TierAExecutionError("Tier-A runtime requires a validated launch plan")
@@ -774,7 +784,7 @@ def run_tier_a_launch_plan(
     if workspace_root_authority_sha256(root) != plan.workspace_root_sha256:
         raise TierAExecutionError("Tier-A workspace authority changed after planning")
     if tier_a_toolhost_sha256(control_plane_root) != plan.toolhost_sha256:
-        raise TierAExecutionError("Tier-A toolhost changed after planning")
+        raise TierAExecutionError("Tier-A authority code changed after planning")
     executable = Path(plan.argv[0]).resolve()
     if _regular_file_hash(
         executable, name="Tier-A executable"
@@ -838,3 +848,41 @@ def run_tier_a_launch_plan(
                     pass
     finally:
         profile.delete()
+
+
+def run_verified_tier_a_command(
+    task: DevelopmentTask,
+    catalog: ModelRigCommandCatalog,
+    toolchain: Toolchain,
+    attestation: IsolationAttestation,
+    physical_verifier: WindowsPhysicalIsolationVerifier,
+    command_id: str,
+    *,
+    workspace_root: Path,
+    control_plane_root: Path,
+    source_env: Mapping[str, str] | None = None,
+    executable_verifier: ExecutableVerifier | None = None,
+    process_memory_bytes: int = 512 * 1024 * 1024,
+    active_process_limit: int = 8,
+) -> int:
+    """Reverify signed authority, build one fresh plan and launch it immediately."""
+
+    registry = LeasedCatalogMaterializer(
+        catalog,
+        physical_verifier,
+        executable_verifier=executable_verifier,
+    ).materialize(task, toolchain, attestation)
+    plan = build_tier_a_launch_plan(
+        registry,
+        task,
+        command_id,
+        workspace_root=workspace_root,
+        control_plane_root=control_plane_root,
+    )
+    return _run_tier_a_launch_plan(
+        plan,
+        control_plane_root=control_plane_root,
+        source_env=source_env,
+        process_memory_bytes=process_memory_bytes,
+        active_process_limit=active_process_limit,
+    )
