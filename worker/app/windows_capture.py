@@ -23,7 +23,6 @@ from .windows_job import WindowsIsolationError
 from .windows_restricted import _STARTUPINFOW
 
 ERROR_BROKEN_PIPE = 109
-ERROR_INVALID_HANDLE = 6
 HANDLE_FLAG_INHERIT = 0x00000001
 STARTF_USESTDHANDLES = 0x00000100
 GENERIC_READ = 0x80000000
@@ -118,7 +117,7 @@ class _PipeReader:
                 )
                 if not ok:
                     error = ctypes.get_last_error()
-                    if error in {ERROR_BROKEN_PIPE, ERROR_INVALID_HANDLE}:
+                    if error == ERROR_BROKEN_PIPE:
                         break
                     raise self._native_api.win_error(f"ReadFile({self._name})")
                 if read.value == 0:
@@ -179,17 +178,18 @@ class _CaptureKernel32:
             ctypes.POINTER(_STARTUPINFOW),
         ).contents
         startup.dwFlags |= STARTF_USESTDHANDLES
-        startup.hStdInput = ctypes.c_void_p(self._owner._stdin_read)
-        startup.hStdOutput = ctypes.c_void_p(self._owner._stdout_write)
-        startup.hStdError = ctypes.c_void_p(self._owner._stderr_write)
+        startup.hStdInput = self._owner._stdin_read
+        startup.hStdOutput = self._owner._stdout_write
+        startup.hStdError = self._owner._stderr_write
         forwarded = list(arguments)
         forwarded[4] = 1
         try:
             return int(self._delegate.CreateProcessW(*forwarded))
         finally:
-            # These are child-side handles in the parent process. Closing them
-            # immediately is required for deterministic EOF once the job exits.
-            self._owner._close_child_ends()
+            # Do not throw from inside CreateProcessW after it may have created a
+            # child. Record close failure and let the caller terminate the now
+            # fully-owned Job Object before surfacing the error.
+            self._owner._close_child_ends(suppress=True)
 
 
 class _CaptureApi:
@@ -222,6 +222,7 @@ class WindowsOutputCapture:
         self._started = False
         self._finished = False
         self._child_ends_closed = False
+        self._child_close_error: BaseException | None = None
         self._configure_api()
         self._stdout_read, self._stdout_write = self._create_pipe("stdout")
         try:
@@ -337,8 +338,12 @@ class WindowsOutputCapture:
         if handle:
             self.native_api.close_handle(handle)
 
-    def _close_child_ends(self) -> None:
+    def _close_child_ends(self, *, suppress: bool = False) -> None:
         if self._child_ends_closed:
+            if self._child_close_error is not None and not suppress:
+                raise WindowsOutputCaptureError(
+                    "child-side capture handles could not be closed"
+                ) from self._child_close_error
             return
         errors: list[BaseException] = []
         for attribute in ("_stdin_read", "_stdout_write", "_stderr_write"):
@@ -351,9 +356,21 @@ class WindowsOutputCapture:
                     errors.append(exc)
         self._child_ends_closed = True
         if errors:
+            self._child_close_error = errors[0]
+            if not suppress:
+                raise WindowsOutputCaptureError(
+                    "child-side capture handles could not be closed"
+                ) from errors[0]
+
+    def assert_spawn_ready(self) -> None:
+        if not self._started or not self._child_ends_closed:
+            raise WindowsOutputCaptureError(
+                "capture was not bound to exactly one completed CreateProcessW call"
+            )
+        if self._child_close_error is not None:
             raise WindowsOutputCaptureError(
                 "child-side capture handles could not be closed"
-            ) from errors[0]
+            ) from self._child_close_error
 
     def start(self) -> None:
         if self._started or self._finished:
@@ -379,7 +396,7 @@ class WindowsOutputCapture:
         if self._finished:
             return
         try:
-            self._close_child_ends()
+            self._close_child_ends(suppress=True)
         except Exception:
             pass
         if self._started:
