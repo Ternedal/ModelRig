@@ -669,10 +669,16 @@ def job_row(job_id: str) -> dict[str, Any] | None:
 
 
 def catch_claim_and_pause(schedule_id_value: str, due: float, before: set[str]) -> dict[str, Any]:
+    # Reservationen sker foerst ved workerens NAESTE poll-tick efter due, og
+    # poll-perioden (POLL_SECONDS=65) er ude af fase med cadencen (every:60).
+    # Et fast 4-sekunders vindue missede derfor claimet systematisk. Vent i
+    # stedet mindst en hel poll-periode. Laasen blokerer kun workerens
+    # job-insert EFTER reservationen, og den fanges inden for ~20 ms af
+    # poll-loekken her, saa workeren blokeres stadig kun et oejeblik.
     wait_until(due + 2.5)
     claim = None
     with lock_job_store():
-        deadline = time.monotonic() + 4.0
+        deadline = time.monotonic() + POLL_SECONDS + 10.0
         while time.monotonic() < deadline:
             claim = reserved_after(schedule_id_value, before)
             if claim is not None:
@@ -691,10 +697,12 @@ def catch_claim_and_crash(
     due: float,
     before: set[str],
 ) -> dict[str, Any]:
+    # Samme deterministiske vindue som catch_claim_and_pause: daek mindst en
+    # hel poll-periode, da reservationen foerst sker ved naeste poll-tick.
     wait_until(due + 2.5)
     claim = None
     with lock_job_store():
-        deadline = time.monotonic() + 4.0
+        deadline = time.monotonic() + POLL_SECONDS + 10.0
         while time.monotonic() < deadline:
             claim = reserved_after(schedule_id_value, before)
             if claim is not None:
