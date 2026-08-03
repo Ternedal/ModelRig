@@ -24,8 +24,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Same single-source check the release tag gate runs -- here it also guards
-      # every push/PR, so drift surfaces immediately rather than at tag time.
       - name: Version sites match VERSION
         run: python3 scripts/version_tool.py check
 
@@ -55,7 +53,11 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
           PYTHONPATH: devcontrol/src
-        run: python3 -m unittest discover -s devcontrol/tests -p 'test_*.py' -v
+        shell: bash
+        run: |
+          set -o pipefail
+          : > /tmp/modelrig-ci-test.log
+          python3 -m unittest discover -s devcontrol/tests -p 'test_*.py' -v 2>&1 | tee -a /tmp/modelrig-ci-test.log
 
       - name: PowerShell syntax gate
         shell: pwsh
@@ -79,7 +81,6 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          : > /tmp/modelrig-ci-test.log
           status=0
           for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
             [ -e "$f" ] || continue
@@ -104,11 +105,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # The appliance code (updater swap/recovery/journal, supervisor rotation,
-  # heartbeat) leans on file semantics that DIFFER on Windows -- os.Rename won't
-  # overwrite, exes lock while running -- so these Go tests also run on a real
-  # Windows runner, not only Linux. Scoped to the appliance packages to keep the
-  # job fast; the Linux job above remains the full suite.
   test-windows-appliance:
     runs-on: windows-latest
     steps:
