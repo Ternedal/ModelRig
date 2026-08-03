@@ -33,6 +33,19 @@ from .github_read import (
     UrllibReadOnlyTransport,
 )
 from .patch import PatchApplier, PatchReceipt, PatchSummary
+from .physical_isolation import (
+    HmacIsolationReportSigner,
+    PhysicalIsolationError,
+    PhysicalProbeResult,
+    ProbeName,
+    REQUIRED_PROBES,
+    SignedWindowsIsolationReport,
+    WindowsIsolationPhysicalReport,
+    WindowsPhysicalIsolationVerifier,
+    load_signing_secret,
+    load_unsigned_report,
+    write_signed_report,
+)
 from .policy import PathPolicy, ScopeDecision, ScopeViolation
 from .proposal import DraftProposalBuilder, DraftPullRequestProposal
 from .review import (
@@ -65,6 +78,7 @@ __all__ = [
     "GitHubReadAdapter",
     "GitHubReadError",
     "GitHubReadReceipt",
+    "HmacIsolationReportSigner",
     "HttpResponse",
     "IndependentPolicyReviewer",
     "IsolationAttestation",
@@ -77,7 +91,11 @@ __all__ = [
     "PatchReceipt",
     "PatchSummary",
     "PathPolicy",
+    "PhysicalIsolationError",
+    "PhysicalProbeResult",
+    "ProbeName",
     "ProjectCommandSpec",
+    "REQUIRED_PROBES",
     "RejectUnverifiedIsolation",
     "ReviewDecision",
     "ReviewRequest",
@@ -87,13 +105,19 @@ __all__ = [
     "ScopeReceipt",
     "ScopeViolation",
     "SearchMatch",
+    "SignedWindowsIsolationReport",
     "SubprocessRunner",
     "TaskBudget",
     "ToolBinding",
     "Toolchain",
     "UrllibReadOnlyTransport",
+    "WindowsIsolationPhysicalReport",
+    "WindowsPhysicalIsolationVerifier",
     "WorkspaceFiles",
     "WorkspaceManager",
     "build_scope_receipt",
+    "load_signing_secret",
+    "load_unsigned_report",
     "modelrig_command_catalog",
+    "write_signed_report",
 ]
