@@ -4,6 +4,9 @@ Slice 9 connects the signed physical-isolation evidence contract to the dormant
 Windows AppContainer launcher. It does **not** activate autonomous development,
 registered tools, Agent 3, Agent 4, releases, merges or production deployment.
 
+Slice 10A adds deterministic trusted-runtime staging as a separate preparation
+primitive. It deliberately does not change the public execution path yet.
+
 ## Authority chain
 
 A command can reach the Windows launch boundary only through this chain:
@@ -41,6 +44,11 @@ transform or execute Tier-A authority:
 Changing any one of these files invalidates the physical report and prevents a
 new lease or launch plan from being issued.
 
+`runtime_staging.py` is intentionally not in this bundle yet because Slice 10A
+cannot issue or execute a launch plan and is not imported by the package
+initialization path. The integration slice must add it to the bundle and require
+fresh physical evidence in the same change.
+
 ## Environment boundary
 
 The Windows initialization environment is derived from a fixed positive list.
@@ -56,6 +64,32 @@ Windows initialization fields fail closed. Parent credentials such as GitHub
 tokens, model keys, cookies, authorization headers and signing keys are not
 inherited.
 
+## Trusted runtime staging
+
+`TrustedRuntimeStager` can prepare one executable from a separate absolute
+operator-controlled runtime root. It verifies the exact leased task, command,
+catalog, toolchain and signed workspace root before copying anything.
+
+The source executable must be regular, non-empty, link-free, physically inside
+the operator root and match its toolchain SHA-256. It is copied to the
+deterministic path:
+
+```text
+.kaliv/runtime/<tool-id>/<executable-sha256>/<source-basename>
+```
+
+The copy is hashed while written, flushed, fsynced and published with an atomic
+no-overwrite hard link. Existing matching bytes are reusable; existing different
+bytes fail closed and are never replaced.
+
+The canonical `kaliv-development-runtime-staging-receipt/v1` artifact binds the
+task, command, catalog, toolchain, execution lease, signed workspace authority,
+hashed source-path identity, executable bytes and deterministic destination.
+Reload verification rehashes both the operator source and the staged copy.
+
+This receipt is not executable authority. See `RUNTIME_STAGING.md` for the full
+boundary and non-goals.
+
 ## Current limitations
 
 The bridge remains deliberately dormant.
@@ -63,17 +97,20 @@ The bridge remains deliberately dormant.
 - No registered ModelRig tool calls `run_verified_tier_a_command`.
 - The hosted Windows proof uses a synthetic signed report to test the complete
   software wiring. It is not the physical I0b result required for activation.
-- A real command binary must be staged inside the exact approved workspace and
-  must match the toolchain hash. Automatic trusted-runtime staging is not yet
-  implemented.
+- Trusted standalone executable staging exists, but the public fresh-verification
+  runtime path does not consume its receipt yet.
+- Staging a single executable is not a complete Python or Go runtime closure;
+  dependent DLLs, Python libraries and Go toolchain trees remain unprovisioned.
 - Launch plans currently require workspace-root working directory. The existing
   backend Go commands use `backend/` and therefore remain unavailable through
   this bridge.
 - Standard output and standard error capture are not yet part of the native
-  AppContainer process wrapper, so this slice proves exit status and boundary
+  AppContainer process wrapper, so Slice 9 proves exit status and boundary
   enforcement rather than a complete `CommandReceipt` execution path.
 - No GitHub write, branch push, draft-PR creation, merge, release, settings or
   feature-switch authority is granted.
 
-The next safe slice is trusted tool/runtime staging plus bounded output capture,
-followed by a complete physical eleven-probe campaign on the selected rig.
+The next safe slice is to integrate the staging receipt into the single public
+fresh-verification path, add `runtime_staging.py` to the signed authority bundle,
+and add bounded stdout/stderr capture. That must be followed by a complete
+physical eleven-probe campaign on the selected rig.
