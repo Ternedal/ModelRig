@@ -31,6 +31,8 @@ FILE_SHARE_WRITE = 0x00000002
 OPEN_EXISTING = 3
 FILE_ATTRIBUTE_NORMAL = 0x00000080
 INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002
+PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES = 0x00020009
 _READ_CHUNK_BYTES = 64 * 1024
 _MAX_CAPTURE_BYTES = 100_000_000
 
@@ -160,7 +162,7 @@ class _PipeReader:
 
 
 class _CaptureKernel32:
-    """Delegate every Win32 call except the one standard-handle injection."""
+    """Delegate Win32 calls while adding std handles and a strict handle list."""
 
     def __init__(self, owner: "WindowsOutputCapture", delegate: Any) -> None:
         self._owner = owner
@@ -169,9 +171,56 @@ class _CaptureKernel32:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._delegate, name)
 
+    def InitializeProcThreadAttributeList(
+        self,
+        attribute_list: Any,
+        attribute_count: int,
+        flags: int,
+        size: Any,
+    ) -> int:
+        if attribute_count != 1:
+            raise WindowsOutputCaptureError(
+                "capture expected one pre-existing process attribute"
+            )
+        return int(
+            self._delegate.InitializeProcThreadAttributeList(
+                attribute_list,
+                2,
+                flags,
+                size,
+            )
+        )
+
+    def UpdateProcThreadAttribute(self, *arguments: Any) -> int:
+        if len(arguments) != 7:
+            raise WindowsOutputCaptureError(
+                "unexpected UpdateProcThreadAttribute call shape"
+            )
+        attribute = int(arguments[2])
+        if attribute != PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES:
+            raise WindowsOutputCaptureError(
+                "capture may extend only the security-capabilities attribute list"
+            )
+        if self._owner._handle_list_installed:
+            raise WindowsOutputCaptureError("capture handle list was installed twice")
+        if not self._delegate.UpdateProcThreadAttribute(*arguments):
+            return 0
+        forwarded = list(arguments)
+        forwarded[2] = PROC_THREAD_ATTRIBUTE_HANDLE_LIST
+        forwarded[3] = ctypes.cast(self._owner._inherit_handles, ctypes.c_void_p)
+        forwarded[4] = ctypes.sizeof(self._owner._inherit_handles)
+        if not self._delegate.UpdateProcThreadAttribute(*forwarded):
+            return 0
+        self._owner._handle_list_installed = True
+        return 1
+
     def CreateProcessW(self, *arguments: Any) -> int:
         if len(arguments) != 10:
             raise WindowsOutputCaptureError("unexpected CreateProcessW call shape")
+        if not self._owner._handle_list_installed:
+            raise WindowsOutputCaptureError(
+                "CreateProcessW refused capture without a strict handle list"
+            )
         startup_pointer = arguments[8]
         startup = ctypes.cast(
             startup_pointer,
@@ -223,6 +272,7 @@ class WindowsOutputCapture:
         self._finished = False
         self._child_ends_closed = False
         self._child_close_error: BaseException | None = None
+        self._handle_list_installed = False
         self._configure_api()
         self._stdout_read, self._stdout_write = self._create_pipe("stdout")
         try:
@@ -239,6 +289,11 @@ class WindowsOutputCapture:
             self._close_handle(self._stderr_read)
             self._close_handle(self._stderr_write)
             raise
+        self._inherit_handles = (ctypes.c_void_p * 3)(
+            self._stdin_read,
+            self._stdout_write,
+            self._stderr_write,
+        )
         self._stdout_reader = _PipeReader(
             native_api,
             self._stdout_read,
@@ -363,9 +418,13 @@ class WindowsOutputCapture:
                 ) from errors[0]
 
     def assert_spawn_ready(self) -> None:
-        if not self._started or not self._child_ends_closed:
+        if (
+            not self._started
+            or not self._handle_list_installed
+            or not self._child_ends_closed
+        ):
             raise WindowsOutputCaptureError(
-                "capture was not bound to exactly one completed CreateProcessW call"
+                "capture was not bound to one strict completed CreateProcessW call"
             )
         if self._child_close_error is not None:
             raise WindowsOutputCaptureError(
