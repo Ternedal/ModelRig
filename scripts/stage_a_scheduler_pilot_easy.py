@@ -24,7 +24,7 @@ RUNTIME = ROOT / "validation" / "stage-a-runtime"
 PHONE_STATE = RUNTIME / "phone-test-state.json"
 PHONE_INSTRUCTIONS = RUNTIME / "PHONE_TEST.txt"
 PHONE_SCRIPT = ROOT / "scripts" / "stage-a-phone-test.ps1"
-EXPECTED_BRANCH = "agent/stage-a-checkpoint-ux"
+CANDIDATE_BRANCH_PREFIX = "agent/unified-candidate-"
 EXPECTED_VERSION = "1.58.147"
 
 STEPS = (
@@ -136,14 +136,18 @@ def ensure_checkout() -> str:
     if dirty:
         raise EasyPilotError(f"Tracked working tree er ikke ren:\n{dirty}")
 
-    capture(["git", "fetch", "--quiet", "origin", EXPECTED_BRANCH], label="Git fetch")
+    # Bind to the rig candidate that is already checked out and frozen. The
+    # scheduler proof must share the exact candidate SHA with the other five
+    # Stage A proofs, so this NEVER fetches, switches or pulls a branch -- that
+    # would move the checkout off the frozen candidate and bind the evidence to
+    # the wrong SHA (which the candidate campaign would then reject).
     current = capture(["git", "branch", "--show-current"], label="Aktuel branch")
-    if current != EXPECTED_BRANCH:
-        run(["git", "switch", EXPECTED_BRANCH], label=f"Skifter til {EXPECTED_BRANCH}")
-    run(
-        ["git", "pull", "--ff-only", "origin", EXPECTED_BRANCH],
-        label="Henter seneste valideringsflow",
-    )
+    if not current.startswith(CANDIDATE_BRANCH_PREFIX):
+        raise EasyPilotError(
+            "Scheduler-piloten skal køre på den udcheckede rig-kandidat "
+            f"({CANDIDATE_BRANCH_PREFIX}*), ikke '{current or 'detached HEAD'}'. "
+            "Checkout kandidaten først; piloten skifter ikke branch."
+        )
 
     version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
     if version != EXPECTED_VERSION:

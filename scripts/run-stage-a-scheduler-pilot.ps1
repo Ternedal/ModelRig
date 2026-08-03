@@ -7,7 +7,6 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$branch = "agent/stage-a-checkpoint-ux"
 $pythonScript = Join-Path $repoRoot "scripts\stage_a_scheduler_pilot_easy.py"
 
 function Test-IsAdministrator {
@@ -55,27 +54,17 @@ try {
         throw "Tracked working tree er ikke ren:`n$dirty"
     }
 
-    & git fetch --quiet origin $branch
-    if ($LASTEXITCODE -ne 0) { throw "Kunne ikke hente $branch fra origin." }
-
-    $current = (& git branch --show-current).Trim()
-    if ($LASTEXITCODE -ne 0) { throw "Aktuel Git-branch kunne ikke læses." }
-    if ($current -ne $branch) {
-        & git switch $branch
-        if ($LASTEXITCODE -ne 0) { throw "Kunne ikke skifte til $branch." }
-    }
-
-    & git pull --ff-only origin $branch
-    if ($LASTEXITCODE -ne 0) { throw "Kunne ikke fast-forwarde $branch til origin." }
-
-    $expected = (& git rev-parse "origin/$branch").Trim()
+    # Bind to the checked-out, frozen rig candidate. Never fetch/switch/pull a
+    # branch: the scheduler proof must share the candidate's exact SHA with the
+    # other Stage A proofs. The Python orchestrator enforces that HEAD is a
+    # candidate branch; here we only require a clean tree and a valid exact head.
     $actual = (& git rev-parse HEAD).Trim()
-    if ($LASTEXITCODE -ne 0 -or $actual -ne $expected) {
-        throw "Lokal HEAD matcher ikke origin/$branch efter opdateringen."
+    if ($LASTEXITCODE -ne 0 -or $actual -notmatch '^[0-9a-f]{40}$') {
+        throw "Kunne ikke læse en gyldig exact HEAD for den udcheckede kandidat."
     }
 
-    Write-Host "" 
-    Write-Host "Exact scheduler-head: $actual" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Exact candidate-head: $actual" -ForegroundColor Cyan
     & python $pythonScript
     exit $LASTEXITCODE
 }
