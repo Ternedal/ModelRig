@@ -461,71 +461,24 @@ def run_voice(planner: str) -> None:
 
 
 def run_scheduler(planner: str, state: dict[str, Any]) -> None:
+    # Scheduler-beviset produceres af den dedikerede, candidate-bundne pilot
+    # (RUN_STAGE_A_SCHEDULER_PILOT.cmd), ikke inline her. Piloten kraever sin egen
+    # isolerede scheduler-stak (KALIV_SCHEDULER=1 + approval-secret), som denne
+    # one-click-validation-stack bevidst ikke starter -- og dens crash-recovery-
+    # trin genstartede en worker uden scheduler, saa inline-flodet kunne aldrig
+    # fuldfoere. Naar piloten har skrevet validation/scheduler-pilot-latest.json
+    # paa kandidatens eksakte SHA, ser kampagnen scheduler_pilot som bestaaet, og
+    # dette trin springes over ved naeste koersel.
+    del planner, state  # signaturen bevares; delegationen bruger dem ikke
     heading("MANUELT PAUSEPUNKT  Scheduler-pilot")
-    read_id = str(state.get("read_schedule_id") or "")
-    if not read_id:
-        body = {"tool": "rig_status", "args": {}, "cadence": "every:60", "ttl_days": 1, "max_runs": 3}
-        request_json("http://127.0.0.1:8099/schedules/preview", method="POST", body=body)
-        created = request_json("http://127.0.0.1:8099/schedules", method="POST", body=body)
-        read_id = str(created.get("schedule_id") or "")
-        if not read_id:
-            raise WizardError("Read-planen returnerede intet schedule_id.")
-        state["read_schedule_id"] = read_id
-        save_state(state)
-    ok(f"Read schedule-id: {read_id}")
-
-    write_id = str(state.get("write_schedule_id") or "")
-    print("\n  Opret PRÆCIS denne plan i appens schedule-flow og godkend den:")
-    print('    tool=note_append, args={"text":"pilot"}, cadence=every:60, max_runs=2, ttl_days=1')
-    write_id = prompt("  Indsæt write schedule-id", write_id or None)
-    if not write_id:
-        raise WizardError("Write schedule-id mangler.")
-    state["write_schedule_id"] = write_id
-    save_state(state)
-
-    print("\n  Revocation: vent til en read-occurrence er i gang, og tryk Enter.")
-    input("  Wizard'en sender pausekaldet, når du trykker Enter: ")
-    request_json(
-        f"http://127.0.0.1:8099/schedules/{read_id}/enabled",
-        method="POST",
-        body={"enabled": False},
-    )
-    answer = prompt("  Blev jobbet cancelled med den danske pausegrund? Skriv JA")
-    if answer.upper() != "JA":
-        raise WizardError("Revocation/cancel blev ikke bekræftet.")
-
-    print("\n  Crash recovery: start eller genaktivér en scheduled kørsel, og luk worker-vinduet mens jobbet kører.")
-    input("  Tryk Enter efter worker-vinduet er lukket; wizard'en starter exact-head worker igen: ")
-    start_stack(planner, worker_only=True)
-    recovery = prompt("  Indsæt hele linjen der starter med 'scheduler: recovered'")
-    if not recovery.startswith("scheduler: recovered "):
-        raise WizardError("Recovery-linjen har forkert format.")
-
-    manual = VALIDATION / "scheduler-manual-observations.json"
-    manual.write_text(
-        json.dumps(
-            {"revocation_confirmed": True, "recovery_line": recovery, "operator": "Anders"},
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    run(
-        [
-            sys.executable,
-            str(ROOT / "scripts" / "scheduler_pilot_report.py"),
-            "--worker-url",
-            "http://127.0.0.1:8099",
-            "--read-schedule-id",
-            read_id,
-            "--write-schedule-id",
-            write_id,
-            "--manual-observations",
-            str(manual),
-            "--report",
-            str(VALIDATION / "scheduler-pilot-latest.json"),
-        ]
+    note("Scheduler-beviset laves af den dedikerede pilot, ikke inline i one-click.")
+    print("\n  1. Luk denne koerings backend/worker-vinduer, saa port 8080/8099 er frie.")
+    print("  2. Dobbeltklik RUN_STAGE_A_SCHEDULER_PILOT.cmd og godkend den ene write-plan paa Pixel 6a.")
+    print("     Den skriver validation\\scheduler-pilot-latest.json bundet til kandidatens SHA.")
+    print("  3. Dobbeltklik START_STAGE_A_TEST.cmd igen; scheduler er nu groen og springes over.")
+    raise WizardError(
+        "Scheduler-beviset mangler. Koer RUN_STAGE_A_SCHEDULER_PILOT.cmd og "
+        "gen-dobbeltklik START_STAGE_A_TEST.cmd."
     )
 
 
