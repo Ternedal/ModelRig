@@ -135,6 +135,9 @@ jobs:
       - name: Native Job Object and ProcessExecutor tests
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $env:PYTHONPATH = "worker"
           python tests/worker_windows_job.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/worker_toolhost.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
