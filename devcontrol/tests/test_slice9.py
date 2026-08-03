@@ -6,6 +6,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import kaliv_dev_control.tier_a_execution as tier_a_module
 from kaliv_dev_control.catalog import (
     CatalogError,
     IsolationAttestation,
@@ -41,6 +42,20 @@ COMPLETED = "2026-08-03T12:10:00Z"
 NOW = datetime(2026, 8, 3, 12, 15, tzinfo=timezone.utc)
 SECRET = b"x" * 32
 KEY_ID = "operator-key-test"
+
+BUNDLE_FILES = (
+    "worker/app/__init__.py",
+    "worker/app/windows_job.py",
+    "worker/app/windows_restricted.py",
+    "worker/app/windows_tier_a.py",
+    "devcontrol/src/kaliv_dev_control/__init__.py",
+    "devcontrol/src/kaliv_dev_control/catalog.py",
+    "devcontrol/src/kaliv_dev_control/commands.py",
+    "devcontrol/src/kaliv_dev_control/contract.py",
+    "devcontrol/src/kaliv_dev_control/physical_isolation.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_execution.py",
+    "devcontrol/src/kaliv_dev_control/workspace.py",
+)
 
 
 def task(command_id: str = "modelrig.tier-a.probe") -> DevelopmentTask:
@@ -86,12 +101,7 @@ def make_catalog(*, env=None) -> ModelRigCommandCatalog:
 
 
 def create_control_plane(root: Path) -> None:
-    for relative in (
-        "worker/app/windows_job.py",
-        "worker/app/windows_restricted.py",
-        "worker/app/windows_tier_a.py",
-        "devcontrol/src/kaliv_dev_control/tier_a_execution.py",
-    ):
+    for relative in BUNDLE_FILES:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"# {relative}\n", encoding="utf-8")
@@ -110,12 +120,7 @@ def make_probes(*, passed: bool = True) -> tuple[PhysicalProbeResult, ...]:
     )
 
 
-def issue(
-    root: Path,
-    *,
-    failed_probe: bool = False,
-    env=None,
-):
+def issue(root: Path, *, failed_probe: bool = False, env=None):
     workspace = root / "workspace"
     evidence = root / "evidence"
     control = root / "control"
@@ -225,13 +230,15 @@ class TierAExecutionLeaseTests(unittest.TestCase):
                 plan.workspace_root_sha256,
                 workspace_root_authority_sha256(workspace),
             )
-            self.assertEqual(
-                dict(plan.env), dict(TIER_A_APPLICATION_ENVIRONMENT)
-            )
+            self.assertEqual(dict(plan.env), dict(TIER_A_APPLICATION_ENVIRONMENT))
             self.assertEqual(
                 TierALaunchPlan.from_mapping(plan.to_dict()).canonical_json(),
                 plan.canonical_json(),
             )
+
+    def test_public_runtime_requires_fresh_verification_not_a_plan(self):
+        self.assertFalse(hasattr(tier_a_module, "run_tier_a_launch_plan"))
+        self.assertTrue(hasattr(tier_a_module, "run_verified_tier_a_command"))
 
     def test_registry_cannot_be_rebound_to_another_task(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -247,7 +254,7 @@ class TierAExecutionLeaseTests(unittest.TestCase):
             with self.assertRaisesRegex(TierAExecutionError, "another task"):
                 registry.resolve(other, "modelrig.tier-a.probe")
 
-    def test_toolhost_change_after_physical_report_is_rejected(self):
+    def test_any_authority_source_change_after_report_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             development_task, catalog, toolchain, attestation, verifier, workspace, control = issue(
                 Path(directory)
@@ -255,10 +262,10 @@ class TierAExecutionLeaseTests(unittest.TestCase):
             registry = LeasedCatalogMaterializer(
                 catalog, verifier
             ).materialize(development_task, toolchain, attestation)
-            (control / "worker/app/windows_tier_a.py").write_text(
+            (control / "devcontrol/src/kaliv_dev_control/catalog.py").write_text(
                 "# changed after evidence\n", encoding="utf-8"
             )
-            with self.assertRaisesRegex(TierAExecutionError, "toolhost code"):
+            with self.assertRaisesRegex(TierAExecutionError, "authority code"):
                 build_tier_a_launch_plan(
                     registry,
                     development_task,
