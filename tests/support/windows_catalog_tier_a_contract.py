@@ -2,9 +2,9 @@
 
 The probe uses a custom immutable catalog entry bound to a copy of Windows'
 own curl.exe staged inside the approved workspace. It creates a complete signed
-physical report for that exact workspace and current Tier-A code bundle, issues
-an execution lease, builds a launch plan and runs it through AppContainer plus
-Job Object. No external network request is made.
+physical report for that exact workspace and the complete current Tier-A
+authority bundle, then executes only through the public API that re-verifies the
+report immediately before AppContainer launch. No external network is used.
 """
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ from kaliv_dev_control.tier_a_execution import (  # noqa: E402
     LeasedCatalogMaterializer,
     TIER_A_APPLICATION_ENVIRONMENT,
     build_tier_a_launch_plan,
-    run_tier_a_launch_plan,
+    run_verified_tier_a_command,
     tier_a_toolhost_sha256,
     workspace_root_authority_sha256,
 )
@@ -193,6 +193,8 @@ verifier = WindowsPhysicalIsolationVerifier(
     now=lambda: datetime(2026, 8, 3, 14, 15, tzinfo=timezone.utc),
 )
 
+# Structural assertions inspect the issued lease/plan, but execution below does
+# not consume this plan. The public runtime API must verify and rebuild it again.
 leased = LeasedCatalogMaterializer(catalog, verifier).materialize(
     task, toolchain, attestation
 )
@@ -226,14 +228,23 @@ check(
     "parent credentials remain excluded from the Tier-A environment",
 )
 
-exit_code = run_tier_a_launch_plan(
-    plan,
+exit_code = run_verified_tier_a_command(
+    task,
+    catalog,
+    toolchain,
+    attestation,
+    verifier,
+    "modelrig.tier-a.windows-proof",
+    workspace_root=workspace.resolve(),
     control_plane_root=ROOT,
     source_env=dict(os.environ),
     process_memory_bytes=128 * 1024 * 1024,
     active_process_limit=1,
 )
-check(exit_code == 0, f"leased catalog command exits through Tier-A (exit={exit_code})")
+check(
+    exit_code == 0,
+    f"freshly reverified catalog command exits through Tier-A (exit={exit_code})",
+)
 
 print(f"\n===== WINDOWS CATALOG TIER-A: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
