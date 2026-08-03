@@ -29,6 +29,22 @@ release, merge, or production activation.
 - automatic reset to the exact task base SHA if a command changes repository state;
 - a shared-CI bridge that makes all `devcontrol/tests` mandatory in PR and release gates.
 
+### Slice 3 — campaign integrity and structural review
+
+- immutable campaign state with legal transition rules;
+- a SHA-256 hash chain over every state transition and evidence reference;
+- terminal failed and cancelled states that cannot silently resume;
+- review requests bound to the task, staged patch and command receipts;
+- a reviewer actor that must differ from the developer actor;
+- a structural reviewer that refuses missing or failed command evidence;
+- a gate that can only declare `ready_for_draft_pr`;
+- merge authority remains structurally and operationally human.
+
+The reviewer in this slice checks evidence consistency and separation of roles. It
+does **not** claim to understand whether the implementation is semantically good.
+A later semantic reviewer must remain separate from the developer execution and
+must not be allowed to rewrite the task, tests or protected evaluation policy.
+
 ## Command authority
 
 The default command registry is intentionally empty. A task may name command IDs,
@@ -36,10 +52,14 @@ but nothing executes until separately reviewed code injects an exact
 `CommandTemplate`. Models and task payloads cannot supply executables, arguments,
 working directories or environment variables.
 
-This slice proves the command-policy mechanics with fixture repositories. It is
-**not** proof of an operating-system security boundary. Running modified project
-code on the production rig remains blocked until Windows isolation I0b has been
-physically validated.
+In task schema v1, every command ID granted to a task is also required evidence
+for draft-PR readiness. Optional commands are deliberately deferred to a future
+schema version instead of being introduced through an ambiguous in-place change.
+
+This control plane proves Git/worktree and policy isolation with fixture
+repositories. It is **not** proof of an operating-system security boundary.
+Running modified project code on the production rig remains blocked until Windows
+isolation I0b has been physically validated.
 
 ## Explicit non-goals
 
@@ -52,6 +72,7 @@ The current control plane cannot:
 - alter ModelRig runtime or feature switches;
 - access production data or credentials;
 - provide proven process, account or network isolation;
+- perform semantic code review;
 - release or activate any change.
 
 ## Run tests
