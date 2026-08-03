@@ -162,9 +162,14 @@ else:
             result_path,
         ],
         env=env,
+        # A/B diagnostic: keep the restricted token, workspace SID and every
+        # Job Object resource limit, but remove only the UI mask. If the loader
+        # still returns STATUS_DLL_INIT_FAILED, the missing authority is the
+        # window-station/desktop DACL rather than the Job UI policy.
         limits=JobLimits(
             process_memory_bytes=128 * 1024 * 1024,
             active_process_limit=1,
+            ui_restrictions=0,
         ),
         policy=policy,
     )
