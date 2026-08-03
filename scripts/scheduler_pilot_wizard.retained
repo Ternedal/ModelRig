@@ -630,16 +630,16 @@ def wait_until(epoch: float) -> None:
 
 
 def prepare_aligned_schedule(schedule_id_value: str) -> tuple[float, set[str], int]:
+    # Aktiverer IKKE planen her: fanget-i-claim-vinduet kraever at jobs-DB-laasen
+    # er taget FOER planen kan fyre, ellers kan et poll-tick claime og eksekvere
+    # paa under et sekund i hovedet af vinduet (claim -> job -> executed) og
+    # braende budgettet uden at blive fanget. Aktiveringen sker derfor inde i
+    # catch_claim_and_pause/-crash, mens laasen allerede holdes. Den returnerede
+    # "due" er kun bagudkompatibel udfyldning; fangsten bruger den ikke.
     wait_for_first_tick(timeout=20.0)
     before = occurrence_ids(schedule_id_value)
     prior_runs = int(schedule_view(detail(schedule_id_value)).get("runs_used") or 0)
-    enabled_payload = set_enabled(schedule_id_value, True)
-    due = float(schedule_view(enabled_payload).get("due_at") or 0)
-    if due <= time.time():
-        due = float(schedule_view(detail(schedule_id_value)).get("due_at") or 0)
-    if due <= time.time():
-        raise PilotError("Kunne ikke læse en fremtidig due_at efter aktivering.")
-    return due, before, prior_runs
+    return time.time(), before, prior_runs
 
 
 def wait_occurrence(claim_id: str, status: str, *, timeout: float = 20.0) -> dict[str, Any]:
@@ -669,22 +669,26 @@ def job_row(job_id: str) -> dict[str, Any] | None:
 
 
 def catch_claim_and_pause(schedule_id_value: str, due: float, before: set[str]) -> dict[str, Any]:
-    # Reservationen sker foerst ved workerens NAESTE poll-tick efter due, og
-    # poll-perioden (POLL_SECONDS=65) er ude af fase med cadencen (every:60).
-    # Et fast 4-sekunders vindue missede derfor claimet systematisk. Vent i
-    # stedet mindst en hel poll-periode. Laasen blokerer kun workerens
-    # job-insert EFTER reservationen, og den fanges inden for ~20 ms af
-    # poll-loekken her, saa workeren blokeres stadig kun et oejeblik.
-    wait_until(due + 2.5)
+    # Deterministisk fangst: tag jobs-DB-laasen FOERST, aktivér planen mens den
+    # holdes, og poll saa. Enhver claim efter aktiveringen blokerer paa sit
+    # job-insert og kan derfor aldrig naa at eksekvere forbi vinduet; den fanges
+    # som 'reserved' inden for ~20 ms. Vinduet daekker en hel cadence (60 s) plus
+    # en hel poll-periode (65 s), da naeste tick kan ligge vilkaarligt ift. due.
+    # Laasen blokerer kun workerens job-insert EFTER reservationen, saa workeren
+    # staar stille et oejeblik, ikke i hele ventetiden.
+    del due  # fangsten afhaenger ikke laengere af due-tidspunktet
     claim = None
     with lock_job_store():
-        deadline = time.monotonic() + POLL_SECONDS + 10.0
+        set_enabled(schedule_id_value, True)
+        deadline = time.monotonic() + POLL_SECONDS + 70.0
         while time.monotonic() < deadline:
             claim = reserved_after(schedule_id_value, before)
             if claim is not None:
                 set_enabled(schedule_id_value, False)
                 break
             time.sleep(0.02)
+        if claim is None:
+            set_enabled(schedule_id_value, False)
     if claim is None:
         raise PilotError("Revocation-claim blev ikke fanget; kør wizard'en igen.")
     return claim
@@ -697,18 +701,24 @@ def catch_claim_and_crash(
     due: float,
     before: set[str],
 ) -> dict[str, Any]:
-    # Samme deterministiske vindue som catch_claim_and_pause: daek mindst en
-    # hel poll-periode, da reservationen foerst sker ved naeste poll-tick.
-    wait_until(due + 2.5)
+    # Samme deterministiske laas-foerst-fangst som catch_claim_and_pause:
+    # aktivér planen under jobs-DB-laasen, saa ingen claim kan eksekvere forbi
+    # vinduet; fang reservationen og craash workeren mens claimet staar aabent.
+    # Fejler fangsten, deaktiveres planen igen FOER laasen slippes, saa den
+    # ikke fyrer videre i baggrunden og braender budgettet.
+    del due  # fangsten afhaenger ikke laengere af due-tidspunktet
     claim = None
     with lock_job_store():
-        deadline = time.monotonic() + POLL_SECONDS + 10.0
+        set_enabled(schedule_id_value, True)
+        deadline = time.monotonic() + POLL_SECONDS + 70.0
         while time.monotonic() < deadline:
             claim = reserved_after(schedule_id_value, before)
             if claim is not None:
                 stop_worker(process, log, abrupt=True)
                 break
             time.sleep(0.02)
+        if claim is None:
+            set_enabled(schedule_id_value, False)
     if claim is None:
         raise PilotError("Crash-claim blev ikke fanget; kør wizard'en igen.")
     return claim
