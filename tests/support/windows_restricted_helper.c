@@ -21,7 +21,7 @@ static BOOL can_read(const wchar_t *path) {
 }
 
 static BOOL can_write(const wchar_t *path) {
-    static const char payload[] = "restricted-write-ok";
+    static const char payload[] = "appcontainer-write-ok";
     HANDLE handle = CreateFileW(
         path,
         GENERIC_WRITE,
@@ -46,14 +46,22 @@ static BOOL can_write(const wchar_t *path) {
     return ok && closed && written == (DWORD)(sizeof(payload) - 1);
 }
 
-static BOOL token_is_restricted(void) {
+static BOOL query_token_flag(TOKEN_INFORMATION_CLASS information_class) {
     HANDLE token = NULL;
+    DWORD value = 0;
+    DWORD returned = 0;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
         return FALSE;
     }
-    BOOL restricted = IsTokenRestricted(token);
+    BOOL ok = GetTokenInformation(
+        token,
+        information_class,
+        &value,
+        sizeof(value),
+        &returned
+    );
     CloseHandle(token);
-    return restricted;
+    return ok && returned == sizeof(value) && value != 0;
 }
 
 static const char *json_bool(BOOL value) {
@@ -65,19 +73,29 @@ int wmain(int argc, wchar_t **argv) {
         return 2;
     }
 
-    BOOL restricted = token_is_restricted();
+    BOOL appcontainer = query_token_flag(TokenIsAppContainer);
+    BOOL lowbox = query_token_flag(TokenIsLessPrivilegedAppContainer);
+    BOOL restricted = FALSE;
+    HANDLE token = NULL;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+        restricted = IsTokenRestricted(token);
+        CloseHandle(token);
+    }
     BOOL inside_read = can_read(argv[1]);
     BOOL outside_read = can_read(argv[2]);
     BOOL inside_write = can_write(argv[3]);
     BOOL outside_write = can_write(argv[4]);
 
-    char receipt[512];
+    char receipt[640];
     int length = _snprintf_s(
         receipt,
         sizeof(receipt),
         _TRUNCATE,
-        "{\"restricted\":%s,\"inside_read\":%s,\"outside_read\":%s,"
+        "{\"appcontainer\":%s,\"lpac\":%s,\"restricted\":%s,"
+        "\"inside_read\":%s,\"outside_read\":%s,"
         "\"inside_write\":%s,\"outside_write\":%s}",
+        json_bool(appcontainer),
+        json_bool(lowbox),
         json_bool(restricted),
         json_bool(inside_read),
         json_bool(outside_read),
