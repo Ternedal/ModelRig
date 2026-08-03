@@ -116,16 +116,20 @@ jobs:
         working-directory: backend
         run: go test ./cmd/modelrig-updater/ ./cmd/modelrig-supervisor/ ./internal/heartbeat/
 
-  # The Job Object boundary is a Windows kernel property; Linux mocks prove the
-  # call contract but cannot prove suspended assignment, process/memory limits,
-  # or kill-on-close across a real process tree. Keep those proofs in the same
-  # reusable gate used by both PRs and releases. The support suites live outside
-  # the root tests/*.py inventory because they are platform-specific and are
-  # wired here explicitly rather than masquerading as part of the portable glob.
+  # The Job Object and restricted-token boundaries are Windows kernel
+  # properties; Linux mocks cannot prove suspended assignment, process/memory
+  # limits, two-pass restricting-SID access checks or OS-denied workspace
+  # escapes. Keep those proofs in the same reusable gate used by PRs and
+  # releases. The support suites live outside the root tests/*.py inventory
+  # because they are platform-specific and are wired explicitly here.
   test-windows-tool-isolation:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.23"
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -134,7 +138,16 @@ jobs:
       - name: Install worker deps
         run: pip install -r worker/requirements.txt
 
-      - name: Native Job Object and ProcessExecutor tests
+      - name: Build restricted-token native fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $helper = Join-Path $env:RUNNER_TEMP "kaliv-restricted-helper.exe"
+          go build -trimpath -ldflags="-s -w" -o $helper tests/support/windows_restricted_helper.go
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "KALIV_RESTRICTED_HELPER=$helper" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Native Job Object, restricted token and ProcessExecutor tests
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -142,6 +155,8 @@ jobs:
           python tests/support/windows_job_contract.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/support/windows_job_close_contract.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/support/windows_restricted_contract.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/worker_toolhost.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
