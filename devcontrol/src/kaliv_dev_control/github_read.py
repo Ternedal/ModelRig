@@ -80,7 +80,14 @@ class UrllibReadOnlyTransport:
         timeout_seconds: int,
         max_bytes: int,
     ) -> HttpResponse:
-        if not 1 <= timeout_seconds <= 120 or not 1 <= max_bytes <= 16_000_000:
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, int)
+            or isinstance(max_bytes, bool)
+            or not isinstance(max_bytes, int)
+            or not 1 <= timeout_seconds <= 120
+            or not 1 <= max_bytes <= 16_000_000
+        ):
             raise GitHubReadError("HTTP bounds are invalid")
         request = urllib.request.Request(url, headers=dict(headers), method="GET")
         try:
@@ -132,7 +139,12 @@ class GitHubReadReceipt:
             raise GitHubReadError("commit receipt cannot contain a path")
         if self.operation == "read_file":
             normalize_repo_path(self.path, name="receipt.path")
-        if self.status != 200 or self.response_bytes < 0:
+        if (
+            self.status != 200
+            or isinstance(self.response_bytes, bool)
+            or not isinstance(self.response_bytes, int)
+            or not 0 <= self.response_bytes <= 4_000_000
+        ):
             raise GitHubReadError("GitHub receipt response metadata is invalid")
         if _HEX64.fullmatch(self.response_sha256) is None or _HEX64.fullmatch(self.etag_sha256) is None:
             raise GitHubReadError("GitHub receipt response hash is invalid")
@@ -214,7 +226,11 @@ class GitHubReadAdapter:
         token: str | None = None,
         timeout_seconds: int = 30,
     ) -> None:
-        if not 1 <= timeout_seconds <= 120:
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, int)
+            or not 1 <= timeout_seconds <= 120
+        ):
             raise GitHubReadError("GitHub timeout is outside bounds")
         if token is not None and (
             not isinstance(token, str)
@@ -345,7 +361,11 @@ class GitHubReadAdapter:
         if not self._readable(normalized):
             raise GitHubReadError("GitHub path is outside readable task scope")
         upper = min(self.task.budget.max_output_bytes, 1_000_000)
-        if not 1 <= max_bytes <= upper:
+        if (
+            isinstance(max_bytes, bool)
+            or not isinstance(max_bytes, int)
+            or not 1 <= max_bytes <= upper
+        ):
             raise GitHubReadError("GitHub file bound is invalid")
 
         encoded = urllib.parse.quote(normalized, safe="/")
