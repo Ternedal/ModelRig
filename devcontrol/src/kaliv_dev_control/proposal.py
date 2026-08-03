@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 from .campaign import CampaignState, DevelopmentCampaign
 from .contract import DevelopmentTask, MergeAuthority
@@ -14,6 +14,9 @@ from .review import DraftPrGate, ReviewRequest, ReviewVerdict
 
 PROPOSAL_SCHEMA = "kaliv-development-draft-pr-proposal/v1"
 _BRANCH = re.compile(r"^(?![./])(?!.*\.\.)(?!.*//)[A-Za-z0-9._/-]{1,200}$")
+_SHA40 = re.compile(r"^[0-9a-f]{40}$")
+_SHA64 = re.compile(r"^[0-9a-f]{64}$")
+_REPOSITORY = re.compile(r"^[^/\s]+/[^/\s]+$")
 
 
 class ProposalError(ValueError):
@@ -52,6 +55,76 @@ class DraftPullRequestProposal:
     draft: bool = True
     merge_authority: str = "human"
     schema: str = PROPOSAL_SCHEMA
+
+    @classmethod
+    def from_mapping(cls, value: Any) -> "DraftPullRequestProposal":
+        allowed = {
+            "schema",
+            "repository",
+            "base_branch",
+            "base_sha",
+            "head_branch",
+            "title",
+            "body",
+            "task_sha256",
+            "campaign_head_sha256",
+            "review_request_sha256",
+            "review_verdict_sha256",
+            "draft",
+            "merge_authority",
+        }
+        if not isinstance(value, Mapping) or set(value) != allowed:
+            raise ProposalError("proposal fields mismatch")
+        if value["schema"] != PROPOSAL_SCHEMA:
+            raise ProposalError("proposal schema is unsupported")
+        if not isinstance(value["repository"], str) or _REPOSITORY.fullmatch(
+            value["repository"]
+        ) is None:
+            raise ProposalError("proposal repository is invalid")
+        if not isinstance(value["base_sha"], str) or _SHA40.fullmatch(
+            value["base_sha"]
+        ) is None:
+            raise ProposalError("proposal base SHA is invalid")
+        for name in (
+            "task_sha256",
+            "campaign_head_sha256",
+            "review_request_sha256",
+            "review_verdict_sha256",
+        ):
+            if not isinstance(value[name], str) or _SHA64.fullmatch(value[name]) is None:
+                raise ProposalError(f"proposal {name} is invalid")
+        title = value["title"]
+        body = value["body"]
+        if (
+            not isinstance(title, str)
+            or not title
+            or title.strip() != title
+            or "\x00" in title
+            or "\n" in title
+            or len(title.encode("utf-8")) > 240
+        ):
+            raise ProposalError("proposal title is invalid")
+        if (
+            not isinstance(body, str)
+            or not body
+            or "\x00" in body
+            or len(body.encode("utf-8")) > 50_000
+        ):
+            raise ProposalError("proposal body is invalid")
+        if value["draft"] is not True or value["merge_authority"] != "human":
+            raise ProposalError("proposal authority is invalid")
+        return cls(
+            repository=value["repository"],
+            base_branch=_branch(value["base_branch"], name="base branch"),
+            base_sha=value["base_sha"],
+            head_branch=_branch(value["head_branch"], name="head branch"),
+            title=title,
+            body=body,
+            task_sha256=value["task_sha256"],
+            campaign_head_sha256=value["campaign_head_sha256"],
+            review_request_sha256=value["review_request_sha256"],
+            review_verdict_sha256=value["review_verdict_sha256"],
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -112,7 +185,8 @@ class DraftProposalBuilder:
         head = _branch(
             f"kaliv-dev/{suffix}-{task.base_sha[:12]}", name="head branch"
         )
-        title = f"draft(devcontrol): {task.goal}"
+        goal_title = " ".join(task.goal.split())
+        title = f"draft(devcontrol): {goal_title}"
         if len(title.encode("utf-8")) > 240:
             title = f"draft(devcontrol): {task.task_id}"
         criteria = "\n".join(f"- [ ] {item}" for item in task.acceptance_criteria)
@@ -139,6 +213,8 @@ class DraftProposalBuilder:
             "> This is a proposal for a **draft** pull request. It grants no merge, "
             "release or production authority. Semantic human review is still required.\n"
         )
+        if len(body.encode("utf-8")) > 50_000:
+            raise ProposalError("generated proposal body exceeds 50000 UTF-8 bytes")
         return DraftPullRequestProposal(
             repository=task.repository,
             base_branch=base,
