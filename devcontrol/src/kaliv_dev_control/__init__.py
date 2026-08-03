@@ -56,6 +56,18 @@ from .review import (
     ReviewVerdict,
 )
 from .store import CampaignStore
+from .tier_a_execution import (
+    LeasedCatalogMaterializer,
+    LeasedCommandRegistry,
+    TIER_A_APPLICATION_ENVIRONMENT,
+    TierAExecutionError,
+    TierAExecutionLease,
+    TierALaunchPlan,
+    build_tier_a_launch_plan,
+    run_verified_tier_a_command,
+    tier_a_toolhost_sha256,
+    workspace_root_authority_sha256,
+)
 from .workspace import CommandResult, SubprocessRunner, WorkspaceManager
 
 __all__ = [
@@ -83,6 +95,8 @@ __all__ = [
     "IndependentPolicyReviewer",
     "IsolationAttestation",
     "IsolationBoundary",
+    "LeasedCatalogMaterializer",
+    "LeasedCommandRegistry",
     "LocalExecutableHashVerifier",
     "MergeAuthority",
     "ModelRigCommandCatalog",
@@ -107,7 +121,11 @@ __all__ = [
     "SearchMatch",
     "SignedWindowsIsolationReport",
     "SubprocessRunner",
+    "TIER_A_APPLICATION_ENVIRONMENT",
     "TaskBudget",
+    "TierAExecutionError",
+    "TierAExecutionLease",
+    "TierALaunchPlan",
     "ToolBinding",
     "Toolchain",
     "UrllibReadOnlyTransport",
@@ -116,8 +134,12 @@ __all__ = [
     "WorkspaceFiles",
     "WorkspaceManager",
     "build_scope_receipt",
+    "build_tier_a_launch_plan",
     "load_signing_secret",
     "load_unsigned_report",
     "modelrig_command_catalog",
+    "run_verified_tier_a_command",
+    "tier_a_toolhost_sha256",
+    "workspace_root_authority_sha256",
     "write_signed_report",
 ]
