@@ -37,23 +37,25 @@ class SemanticReviewCoreCleanupH10ETests(unittest.TestCase):
             "tempfile.mkstemp",
             "os.replace",
             "os.fsync",
-            "def write_semantic_review_request(",
-            "def write_signed_semantic_review_verdict(",
         )
+        for module in (core, public):
+            source = inspect.getsource(module)
+            for token in forbidden:
+                with self.subTest(module=module.__name__, token=token):
+                    self.assertNotIn(token, source)
+
         core_source = inspect.getsource(core)
-        for token in forbidden:
-            with self.subTest(module="core", token=token):
-                self.assertNotIn(token, core_source)
+        self.assertNotIn("def _write_canonical_file(", core_source)
+        self.assertNotIn("def write_semantic_review_request(", core_source)
+        self.assertNotIn("def write_signed_semantic_review_verdict(", core_source)
 
         public_source = inspect.getsource(public)
-        for token in forbidden[:3]:
-            with self.subTest(module="public", token=token):
-                self.assertNotIn(token, public_source)
         self.assertEqual(public_source.count("def write_semantic_review_request("), 1)
         self.assertEqual(
             public_source.count("def write_signed_semantic_review_verdict("),
             1,
         )
+        self.assertNotIn("vars(_core).pop", public_source)
 
     def test_core_is_model_loader_only_and_facade_owns_publication(self) -> None:
         self.assertFalse(hasattr(core, "_write_canonical_file"))
