@@ -30,6 +30,7 @@ from .catalog import (
     IsolationBoundary,
     NetworkMode,
 )
+from .durable_publication import DurablePublicationError, create_once_file
 
 REPORT_SCHEMA = "kaliv-windows-isolation-physical-report/v1"
 SIGNED_REPORT_SCHEMA = "kaliv-windows-isolation-signed-report/v1"
@@ -581,22 +582,26 @@ def load_signing_secret(path: Path) -> bytes:
 
 
 def write_signed_report(path: Path, signed: SignedWindowsIsolationReport) -> str:
-    """Atomically create one canonical evidence file and return its SHA-256."""
+    """Durably create one canonical evidence file and return its SHA-256."""
 
-    if not path.is_absolute() or path.exists() or _has_symlink_component(path.parent) or not path.parent.is_dir():
+    output = Path(path)
+    if not isinstance(signed, SignedWindowsIsolationReport):
+        raise PhysicalIsolationError("signed report output is invalid")
+    if (
+        not output.is_absolute()
+        or output.exists()
+        or output.is_symlink()
+        or _has_symlink_component(output.parent)
+        or not output.parent.is_dir()
+    ):
         raise PhysicalIsolationError("signed report output path is unsafe or already exists")
     payload = signed.canonical_json().encode("utf-8")
-    descriptor, temporary = tempfile.mkstemp(prefix=".isolation-", suffix=".tmp", dir=path.parent)
+    if len(payload) > 2_000_000:
+        raise PhysicalIsolationError("signed report is too large")
     try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    except Exception:
-        try:
-            os.unlink(temporary)
-        except FileNotFoundError:
-            pass
-        raise
+        create_once_file(output, payload)
+    except (FileExistsError, DurablePublicationError) as exc:
+        raise PhysicalIsolationError(
+            "signed report could not be durably published"
+        ) from exc
     return _sha256(payload)
