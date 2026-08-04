@@ -7,8 +7,7 @@ from typing import Any
 from . import _semantic_review_core as _core
 
 # Preserve the complete existing semantic-review model, signer and verifier API.
-# The core module is byte-identical to the pre-H10D implementation; this facade
-# owns only the publication boundary.
+# The core module owns models and canonical loaders; this facade owns publication.
 for _name, _value in vars(_core).items():
     if not _name.startswith("__"):
         globals()[_name] = _value
@@ -27,12 +26,6 @@ def _tier_a_toolhost_sha256_proxy(*args: Any, **kwargs: Any) -> str:
 
 # Preserve the established public patch point used by semantic-review fixtures.
 _core.tier_a_toolhost_sha256 = _tier_a_toolhost_sha256_proxy
-for _superseded_writer in (
-    "_write_canonical_file",
-    "write_semantic_review_request",
-    "write_signed_semantic_review_verdict",
-):
-    vars(_core).pop(_superseded_writer, None)
 
 
 def _write_canonical_file(path: Path, value: Any, *, name: str) -> str:
