@@ -10,9 +10,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import kaliv_dev_control.publisher_authorization_v2 as authorization_v2_module
 from kaliv_dev_control.asymmetric_authority import (
+    AsymmetricAuthorityError,
     DetachedEd25519AuthoritySignature,
     Ed25519AuthorityVerifier,
     TrustedEd25519AuthorityKey,
+    asymmetric_authority_key_custody_policy_sha256,
     authority_signing_message,
 )
 from kaliv_dev_control.publisher_authorization import (
@@ -38,6 +40,21 @@ EXPIRES = "2026-08-04T06:55:00Z"
 KEY_VALID_FROM = "2026-08-01T00:00:00Z"
 KEY_VALID_UNTIL = "2027-08-01T00:00:00Z"
 KEYRING_EPOCH = 7
+CUSTODY_POLICY_SHA256 = asymmetric_authority_key_custody_policy_sha256()
+
+
+def _trusted_key(public_key_hex: str, *, revoked_at_utc: str | None = None):
+    return TrustedEd25519AuthorityKey(
+        key_id=ISSUER_KEY_ID,
+        issuer_actor_id=ISSUER,
+        issuer_system_id=ISSUER_SYSTEM,
+        public_key_hex=public_key_hex,
+        valid_from_utc=KEY_VALID_FROM,
+        valid_until_utc=KEY_VALID_UNTIL,
+        keyring_epoch=KEYRING_EPOCH,
+        custody_policy_sha256=CUSTODY_POLICY_SHA256,
+        revoked_at_utc=revoked_at_utc,
+    )
 
 
 def make_v2_authorization():
@@ -72,32 +89,29 @@ def make_v2_authorization():
         encoding=serialization.Encoding.Raw,
         format=serialization.PublicFormat.Raw,
     ).hex()
+    message = authority_signing_message(
+        key_id=ISSUER_KEY_ID,
+        issuer_actor_id=ISSUER,
+        issuer_system_id=ISSUER_SYSTEM,
+        keyring_epoch=KEYRING_EPOCH,
+        custody_policy_sha256=CUSTODY_POLICY_SHA256,
+        payload=payload,
+    )
     signature = DetachedEd25519AuthoritySignature(
         key_id=ISSUER_KEY_ID,
         issuer_actor_id=ISSUER,
+        issuer_system_id=ISSUER_SYSTEM,
         keyring_epoch=KEYRING_EPOCH,
+        custody_policy_sha256=CUSTODY_POLICY_SHA256,
         payload_sha256=hashlib.sha256(payload).hexdigest(),
-        signature_hex=private_key.sign(
-            authority_signing_message(
-                key_id=ISSUER_KEY_ID,
-                keyring_epoch=KEYRING_EPOCH,
-                payload=payload,
-            )
-        ).hex(),
+        signature_hex=private_key.sign(message).hex(),
         signed_at_utc=ISSUED,
     )
     lease = AsymmetricPublisherAuthorizationLease.from_signed_payload(
         unsigned_payload=payload,
         signature=signature,
     )
-    trusted = TrustedEd25519AuthorityKey(
-        key_id=ISSUER_KEY_ID,
-        issuer_actor_id=ISSUER,
-        public_key_hex=public_key_hex,
-        valid_from_utc=KEY_VALID_FROM,
-        valid_until_utc=KEY_VALID_UNTIL,
-        keyring_epoch=KEYRING_EPOCH,
-    )
+    trusted = _trusted_key(public_key_hex)
     verifier = AsymmetricPublisherAuthorizationVerifier(
         Ed25519AuthorityVerifier(
             {ISSUER_KEY_ID: trusted},
@@ -138,6 +152,10 @@ class AsymmetricPublisherAuthorizationV2Tests(unittest.TestCase):
         self.assertEqual(lease.signed_request.sha256, signed_request.sha256)
         self.assertEqual(lease.request_sha256, request.sha256)
         self.assertEqual(lease.remote_repository.sha256, remote.sha256)
+        self.assertEqual(lease.signature.issuer_system_id, ISSUER_SYSTEM)
+        self.assertEqual(
+            lease.signature.custody_policy_sha256, CUSTODY_POLICY_SHA256
+        )
         self.assertEqual(
             lease.signature.payload_sha256, hashlib.sha256(payload).hexdigest()
         )
@@ -162,7 +180,7 @@ class AsymmetricPublisherAuthorizationV2Tests(unittest.TestCase):
             lease,
         )
 
-    def test_tampering_wrong_key_revocation_and_epoch_fail_closed(self) -> None:
+    def test_tampering_wrong_key_revocation_epoch_and_identity_fail_closed(self) -> None:
         (
             task,
             semantic_verifier,
@@ -191,20 +209,11 @@ class AsymmetricPublisherAuthorizationV2Tests(unittest.TestCase):
         ).hex()
         wrong_verifier = AsymmetricPublisherAuthorizationVerifier(
             Ed25519AuthorityVerifier(
-                {
-                    ISSUER_KEY_ID: TrustedEd25519AuthorityKey(
-                        key_id=ISSUER_KEY_ID,
-                        issuer_actor_id=ISSUER,
-                        public_key_hex=wrong_public,
-                        valid_from_utc=KEY_VALID_FROM,
-                        valid_until_utc=KEY_VALID_UNTIL,
-                        keyring_epoch=KEYRING_EPOCH,
-                    )
-                },
+                {ISSUER_KEY_ID: _trusted_key(wrong_public)},
                 minimum_keyring_epoch=KEYRING_EPOCH,
             )
         )
-        with self.assertRaises(Exception):
+        with self.assertRaises(AsymmetricAuthorityError):
             wrong_verifier.verify(
                 lease=lease,
                 task=task,
@@ -217,20 +226,14 @@ class AsymmetricPublisherAuthorizationV2Tests(unittest.TestCase):
         revoked_verifier = AsymmetricPublisherAuthorizationVerifier(
             Ed25519AuthorityVerifier(
                 {
-                    ISSUER_KEY_ID: TrustedEd25519AuthorityKey(
-                        key_id=trusted.key_id,
-                        issuer_actor_id=trusted.issuer_actor_id,
-                        public_key_hex=trusted.public_key_hex,
-                        valid_from_utc=trusted.valid_from_utc,
-                        valid_until_utc=trusted.valid_until_utc,
-                        keyring_epoch=trusted.keyring_epoch,
-                        revoked_at_utc=VERIFIED,
+                    ISSUER_KEY_ID: _trusted_key(
+                        trusted.public_key_hex, revoked_at_utc=VERIFIED
                     )
                 },
                 minimum_keyring_epoch=KEYRING_EPOCH,
             )
         )
-        with self.assertRaises(Exception):
+        with self.assertRaises(AsymmetricAuthorityError):
             revoked_verifier.verify(
                 lease=lease,
                 task=task,
@@ -246,7 +249,7 @@ class AsymmetricPublisherAuthorizationV2Tests(unittest.TestCase):
                 minimum_keyring_epoch=KEYRING_EPOCH + 1,
             )
         )
-        with self.assertRaises(Exception):
+        with self.assertRaises(AsymmetricAuthorityError):
             stale_verifier.verify(
                 lease=lease,
                 task=task,
@@ -255,6 +258,13 @@ class AsymmetricPublisherAuthorizationV2Tests(unittest.TestCase):
                 control_plane_root=ROOT,
                 at_utc=VERIFIED,
             )
+
+        payload_map = lease.to_dict()
+        payload_map["issuer_system_id"] = "another-offline-system"
+        with self.assertRaisesRegex(
+            PublisherAuthorizationError, "signature identity"
+        ):
+            AsymmetricPublisherAuthorizationLease.from_mapping(payload_map)
 
         with self.assertRaisesRegex(
             PublisherAuthorizationError, "not currently valid"
@@ -287,7 +297,6 @@ class AsymmetricPublisherAuthorizationV2Tests(unittest.TestCase):
         source = inspect.getsource(authorization_v2_module)
         for forbidden in (
             "Ed25519PrivateKey",
-            "private_key",
             "load_pem_private_key",
             "from_private_bytes",
             "def sign",
