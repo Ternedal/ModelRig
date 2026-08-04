@@ -11,7 +11,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from kaliv_dev_control.contract import ContractError, DevelopmentTask
 from kaliv_dev_control.evidence import build_scope_receipt
 from kaliv_dev_control.policy import PathPolicy, ScopeViolation
-from kaliv_dev_control.workspace import CommandResult, WorkspaceError, WorkspaceManager
+from kaliv_dev_control.trusted_git_runtime import (
+    TrustedGitRunner,
+    TrustedGitRuntimeError,
+)
+from kaliv_dev_control.workspace import WorkspaceError, WorkspaceManager
 
 
 BASE = {
@@ -38,26 +42,36 @@ BASE = {
 }
 
 
-class FakeRunner:
+class FakeTrustedGitRunner(TrustedGitRunner):
     def __init__(self, *, head: str, dirty: bool = False) -> None:
         self.head = head
         self.dirty = dirty
         self.calls: list[tuple[str, ...]] = []
 
-    def run(self, args, *, cwd, timeout_seconds, max_output_bytes, env=None):
+    def run(
+        self,
+        args,
+        *,
+        cwd,
+        stdin=None,
+        maximum=64 * 1024 * 1024,
+        timeout_seconds=120,
+        expected_codes=(0,),
+        extra_env=None,
+    ):
         call = tuple(args)
         self.calls.append(call)
-        if call[:3] == ("git", "worktree", "add"):
+        if call[:3] == ("worktree", "add", "--detach"):
             Path(call[-2]).mkdir(parents=True)
-            return CommandResult(call, 0, "prepared", "")
-        if call == ("git", "rev-parse", "HEAD"):
-            return CommandResult(call, 0, self.head + "\n", "")
-        if call == ("git", "status", "--porcelain=v1"):
-            return CommandResult(call, 0, "M file\n" if self.dirty else "", "")
-        if call[:3] == ("git", "worktree", "remove"):
+            return b"prepared\n"
+        if call == ("rev-parse", "HEAD"):
+            return (self.head + "\n").encode("ascii")
+        if call == ("status", "--porcelain=v1"):
+            return b"M file\n" if self.dirty else b""
+        if call[:2] == ("worktree", "remove"):
             Path(call[-1]).rmdir()
-            return CommandResult(call, 0, "", "")
-        return CommandResult(call, 1, "", "unsupported")
+            return b""
+        raise TrustedGitRuntimeError("unsupported fake Git operation")
 
 
 class FoundationTests(unittest.TestCase):
@@ -131,6 +145,11 @@ class FoundationTests(unittest.TestCase):
         self.assertEqual(first.canonical_json(), second.canonical_json())
         self.assertEqual(len(first.task_sha256), 64)
 
+    def test_workspace_requires_trusted_git_runner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(WorkspaceError, "trusted Git runner"):
+                WorkspaceManager(Path(tmp), git_runner=object())
+
     def test_workspace_verifies_exact_head_and_clean_state(self) -> None:
         task = DevelopmentTask.from_mapping(BASE)
         with tempfile.TemporaryDirectory() as tmp:
@@ -138,11 +157,15 @@ class FoundationTests(unittest.TestCase):
             source = root / "source"
             source.mkdir()
             (source / ".git").mkdir()
+            runner = FakeTrustedGitRunner(head=task.base_sha)
             manager = WorkspaceManager(
-                root / "workspaces", runner=FakeRunner(head=task.base_sha)
+                root / "workspaces",
+                git_runner=runner,
             )
             target = manager.create(task, source_repo=source)
             self.assertEqual(target.name, task.task_id)
+            self.assertEqual(runner.calls[0][:3], ("worktree", "add", "--detach"))
+            self.assertTrue(all(call[0] != "git" for call in runner.calls))
 
     def test_wrong_workspace_head_is_removed_and_rejected(self) -> None:
         task = DevelopmentTask.from_mapping(BASE)
@@ -152,7 +175,8 @@ class FoundationTests(unittest.TestCase):
             source.mkdir()
             (source / ".git").mkdir()
             manager = WorkspaceManager(
-                root / "workspaces", runner=FakeRunner(head="b" * 40)
+                root / "workspaces",
+                git_runner=FakeTrustedGitRunner(head="b" * 40),
             )
             with self.assertRaisesRegex(WorkspaceError, "HEAD"):
                 manager.create(task, source_repo=source)
