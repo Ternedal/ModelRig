@@ -5,14 +5,15 @@ self-development in ModelRig. It is deliberately **not** connected to ordinary
 ModelRig tool registration, Agent 3, Agent 4, GitHub writes, merge, release or
 production activation.
 
-The implementation currently reaches **Slice 10H**. A reviewed single-command task
+The implementation currently reaches **Slice 10I**. A reviewed single-command task
 can enter the Windows Tier-A boundary only after fresh signed physical evidence, a
 command-specific signed exact-file runtime closure, deterministic workspace
 staging, exact cwd validation and bounded native output capture. The staged runtime
 is held immutable until the complete Job Object ends, the resulting execution
-evidence is joined to canonical Git before/after/reset evidence, and one exact
-passing patch/receipt pair can be handed to a separate authenticated semantic
-review boundary.
+evidence is joined to canonical Git before/after/reset evidence, one exact passing
+patch/receipt pair can be handed to a separate authenticated semantic review
+boundary, and an approved candidate can become a deterministic offline draft-PR
+readiness proposal without gaining GitHub write authority.
 
 ## Implemented authority layers
 
@@ -196,10 +197,34 @@ Slice 10H supplies the trustable artifact boundary, not a built-in AI reviewer.
 A separately operated human or model reviewer must actually analyze the canonical
 request and produce the structured verdict.
 
+### Slice 10I — authenticated draft-PR readiness proposal
+
+- `kaliv-development-authenticated-draft-pr-readiness-proposal/v1` embeds the
+  complete task, exact semantic-review request and signed approval verdict;
+- the builder re-verifies the reviewer signature and current v6 execution-authority
+  identity before creating an artifact;
+- request-changes, reject, uncertain criteria, non-satisfied criteria or findings
+  cannot be represented as ready;
+- staged patch, Tier-A receipt, reviewer actor/key, review policy and proposal
+  policy remain independently hash-bound;
+- repository, proposed head branch, title, body, draft flag and merge authority are
+  not caller-selected;
+- the head branch is derived from task ID, exact base SHA and patch SHA;
+- title and body are deterministic and fail reload if altered;
+- only a canonical base branch may be supplied, defaulting to `main`;
+- canonical readiness files are bounded, absolute, link-free and create-once;
+- `DraftPrReadinessGate` re-verifies the exact task, reviewer trust and current
+  execution authority;
+- the module has no branch-push, PR-create/update, reviewer-request, merge, release,
+  settings or deployment adapter.
+
+Slice 10I is offline proposal evidence only. It does not publish the deterministic
+branch name or body anywhere, and a human retains all merge authority.
+
 See `TIER_A_EXECUTION.md`, `RUNTIME_STAGING.md`,
-`RUNTIME_LIFETIME_GUARD.md`, `TIER_A_COMMAND_RECEIPT.md` and
-`SEMANTIC_REVIEW.md` for the complete authority, filesystem, receipt and review
-rules.
+`RUNTIME_LIFETIME_GUARD.md`, `TIER_A_COMMAND_RECEIPT.md`, `SEMANTIC_REVIEW.md`
+and `DRAFT_PR_READINESS.md` for the complete authority, filesystem, receipt,
+review and proposal rules.
 
 ## Reviewed command authority
 
@@ -219,8 +244,9 @@ The default ModelRig catalog contains:
 Slice 10E's standalone version checker uses a separate isolated catalog rather
 than changing this list. Slice 10G further requires a one-command task before its
 Git-aware orchestration surface can run. Slice 10H consumes only completed evidence
-and cannot add or select commands. Optional commands remain deferred rather than
-added ambiguously.
+and cannot add or select commands. Slice 10I consumes only one verified semantic
+approval and cannot publish its proposed branch or pull request. Optional commands
+remain deferred rather than added ambiguously.
 
 ## Physical evidence operator flow
 
@@ -265,14 +291,15 @@ The control plane still cannot:
 - claim lifetime protection against a separate administrator or kernel component;
 - perform semantic analysis without a separately operated reviewer;
 - provision, rotate or revoke reviewer keys;
-- push branches or create/update/merge pull requests from the runtime;
-- alter repository settings, feature switches or production deployment;
-- merge, release or activate its own work.
+- create the proposed branch, commit or push it;
+- create, update or mark a pull request ready for review;
+- request GitHub reviewers or alter repository settings;
+- merge, release, deploy or activate its own work.
 
-No registered ModelRig tool calls the Tier-A bridge, receipt orchestrator or
-semantic-review boundary. Hosted CI uses synthetic evidence to prove software
-wiring and does not replace the selected rig's physical eleven-probe campaign or a
-real independent semantic review.
+No registered ModelRig tool calls the Tier-A bridge, receipt orchestrator,
+semantic-review boundary or draft-readiness builder. Hosted CI uses synthetic
+evidence to prove software wiring and does not replace the selected rig's physical
+eleven-probe campaign or a real independent semantic review.
 
 ## Run tests
 
@@ -282,11 +309,11 @@ python -m unittest discover -s tests -v
 ```
 
 The portable suite is included in ModelRig's shared PR/release gate. It proves the
-10H artifact, signature, actor-separation and tamper-rejection contracts. The
-native Windows gate separately proves Job Object, AppContainer, environment,
-signed physical evidence, exact runtime closure, lifetime immutability, nested
-cwd, strict handle inheritance, bounded output, timeout cleanup and a real
-Git-aware Tier-A receipt.
+10H artifact, signature, actor-separation and tamper-rejection contracts plus the
+10I deterministic, draft-only readiness artifact. The native Windows gate
+separately proves Job Object, AppContainer, environment, signed physical evidence,
+exact runtime closure, lifetime immutability, nested cwd, strict handle
+inheritance, bounded output, timeout cleanup and a real Git-aware Tier-A receipt.
 
 ## Validate a task
 
