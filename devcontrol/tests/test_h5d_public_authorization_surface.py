@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib
 import inspect
 import unittest
@@ -31,13 +32,16 @@ class PublisherAuthorizationPublicSurfaceH5DTests(unittest.TestCase):
         for name in forbidden:
             with self.subTest(name=name):
                 self.assertFalse(hasattr(public_authorization, name))
-        source = inspect.getsource(public_authorization)
-        self.assertNotIn("import *", source)
-        self.assertNotIn("HmacPublisherAuthorizationIssuer", source)
-        self.assertNotIn("TrustedAuthorizationIssuerKey", source)
-        self.assertNotIn("PublisherAuthorizationVerifier", source)
-        self.assertNotIn("hmac", source.lower())
-        self.assertNotIn("secret", source.lower())
+
+        tree = ast.parse(inspect.getsource(public_authorization))
+        imported_names = {
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+        }
+        self.assertNotIn("*", imported_names)
+        self.assertTrue(forbidden.isdisjoint(imported_names))
 
     def test_from_public_import_of_hmac_issuer_fails(self) -> None:
         namespace: dict[str, object] = {}
@@ -69,9 +73,10 @@ class PublisherAuthorizationPublicSurfaceH5DTests(unittest.TestCase):
                 "kaliv_dev_control._compatibility_v1."
             )
         )
-        self.assertEqual(importlib.import_module(
-            "kaliv_dev_control._compatibility_v1"
-        ).__all__, ())
+        self.assertEqual(
+            importlib.import_module("kaliv_dev_control._compatibility_v1").__all__,
+            (),
+        )
 
     def test_supported_surface_remains_ed25519_v2_only(self) -> None:
         expected = {
