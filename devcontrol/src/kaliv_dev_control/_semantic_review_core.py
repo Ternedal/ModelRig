@@ -5,9 +5,7 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import re
-import tempfile
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -993,38 +991,6 @@ def _load_canonical_file(
     return value
 
 
-def _write_canonical_file(path: Path, value: Any, *, prefix: str) -> str:
-    output = Path(path)
-    if (
-        not output.is_absolute()
-        or output.exists()
-        or _has_linkish_component(output.parent)
-        or not output.parent.is_dir()
-    ):
-        raise SemanticReviewError(
-            "semantic review output path is unsafe or already exists"
-        )
-    payload = value.canonical_json().encode("utf-8")
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=prefix,
-        suffix=".tmp",
-        dir=output.parent,
-    )
-    try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_name, output)
-    except Exception:
-        try:
-            os.unlink(temporary_name)
-        except FileNotFoundError:
-            pass
-        raise
-    return _sha256_bytes(payload)
-
-
 def load_semantic_review_request(path: Path) -> SemanticReviewRequest:
     return _load_canonical_file(
         path,
@@ -1032,17 +998,6 @@ def load_semantic_review_request(path: Path) -> SemanticReviewRequest:
         parser=SemanticReviewRequest.from_mapping,
         name="semantic review request",
     )
-
-
-def write_semantic_review_request(
-    path: Path,
-    request: SemanticReviewRequest,
-) -> str:
-    if not isinstance(request, SemanticReviewRequest):
-        raise SemanticReviewError(
-            "semantic review request output is invalid"
-        )
-    return _write_canonical_file(path, request, prefix=".semantic-request-")
 
 
 def load_signed_semantic_review_verdict(
@@ -1053,19 +1008,4 @@ def load_signed_semantic_review_verdict(
         maximum=4 * 1024 * 1024,
         parser=SignedSemanticReviewVerdict.from_mapping,
         name="signed semantic review verdict",
-    )
-
-
-def write_signed_semantic_review_verdict(
-    path: Path,
-    signed_verdict: SignedSemanticReviewVerdict,
-) -> str:
-    if not isinstance(signed_verdict, SignedSemanticReviewVerdict):
-        raise SemanticReviewError(
-            "signed semantic review verdict output is invalid"
-        )
-    return _write_canonical_file(
-        path,
-        signed_verdict,
-        prefix=".semantic-verdict-",
     )
