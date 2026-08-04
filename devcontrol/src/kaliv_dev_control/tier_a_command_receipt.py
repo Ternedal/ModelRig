@@ -6,7 +6,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
@@ -19,6 +18,11 @@ from .tier_a_execution_v3 import (
     run_verified_tier_a_command,
 )
 from .tier_a_result import TierAExecutionResult
+from .trusted_git_runtime import (
+    TrustedGitRunner,
+    TrustedGitRuntimeError,
+    TrustedGitRuntimeEvidence,
+)
 
 GIT_SNAPSHOT_SCHEMA = "kaliv-development-git-workspace-snapshot/v1"
 TIER_A_COMMAND_RECEIPT_SCHEMA = "kaliv-development-tier-a-command-receipt/v1"
@@ -146,6 +150,7 @@ class TierACommandReceipt:
     task_sha256: str
     base_sha: str
     command_id: str
+    git_runtime: TrustedGitRuntimeEvidence
     tier_a_result: TierAExecutionResult
     workspace_before: GitWorkspaceSnapshot
     workspace_after: GitWorkspaceSnapshot
@@ -167,6 +172,8 @@ class TierACommandReceipt:
             raise TierACommandReceiptError("receipt command id is invalid")
         _hex("receipt task hash", self.task_sha256, _HEX64)
         _hex("receipt base SHA", self.base_sha, _HEX40)
+        if not isinstance(self.git_runtime, TrustedGitRuntimeEvidence):
+            raise TierACommandReceiptError("receipt Git runtime evidence is invalid")
         if not isinstance(self.tier_a_result, TierAExecutionResult):
             raise TierACommandReceiptError("receipt Tier-A result is invalid")
         if not isinstance(self.workspace_before, GitWorkspaceSnapshot) or not isinstance(
@@ -228,6 +235,7 @@ class TierACommandReceipt:
         cls,
         *,
         task: DevelopmentTask,
+        git_runtime: TrustedGitRuntimeEvidence,
         result: TierAExecutionResult,
         before: GitWorkspaceSnapshot,
         after: GitWorkspaceSnapshot,
@@ -242,6 +250,7 @@ class TierACommandReceipt:
             task_sha256=task_sha256,
             base_sha=task.base_sha,
             command_id=result.command_id,
+            git_runtime=git_runtime,
             tier_a_result=result,
             workspace_before=before,
             workspace_after=after,
@@ -259,6 +268,7 @@ class TierACommandReceipt:
             "task_sha256",
             "base_sha",
             "command_id",
+            "git_runtime",
             "tier_a_result",
             "workspace_before",
             "workspace_after",
@@ -276,6 +286,7 @@ class TierACommandReceipt:
             task_sha256=value["task_sha256"],
             base_sha=value["base_sha"],
             command_id=value["command_id"],
+            git_runtime=TrustedGitRuntimeEvidence.from_mapping(value["git_runtime"]),
             tier_a_result=TierAExecutionResult.from_mapping(value["tier_a_result"]),
             workspace_before=GitWorkspaceSnapshot.from_mapping(
                 value["workspace_before"]
@@ -296,6 +307,7 @@ class TierACommandReceipt:
             "task_sha256": self.task_sha256,
             "base_sha": self.base_sha,
             "command_id": self.command_id,
+            "git_runtime": self.git_runtime.to_dict(),
             "tier_a_result": self.tier_a_result.to_dict(),
             "workspace_before": self.workspace_before.to_dict(),
             "workspace_after": self.workspace_after.to_dict(),
@@ -316,10 +328,19 @@ class TierACommandReceipt:
 
 
 class _GitWorkspaceEvidence:
-    def __init__(self, workspace: Path, task: DevelopmentTask) -> None:
+    def __init__(
+        self,
+        workspace: Path,
+        task: DevelopmentTask,
+        git_runner: TrustedGitRunner,
+    ) -> None:
         if not isinstance(task, DevelopmentTask):
             raise TierACommandReceiptError(
                 "Git receipt orchestration requires a validated task"
+            )
+        if not isinstance(git_runner, TrustedGitRunner):
+            raise TierACommandReceiptError(
+                "Git receipt orchestration requires a trusted Git runner"
             )
         raw = Path(workspace)
         if not raw.is_absolute():
@@ -334,6 +355,7 @@ class _GitWorkspaceEvidence:
                 "workspace must be an existing link-free Git worktree"
             )
         self.task = task
+        self.git_runner = git_runner
         top = self._git("rev-parse", "--show-toplevel").decode(
             "utf-8", errors="strict"
         ).strip()
@@ -345,39 +367,18 @@ class _GitWorkspaceEvidence:
             )
 
     def _git(self, *args: str, maximum: int = _MAX_GIT_OUTPUT_BYTES) -> bytes:
-        command = [
-            "git",
-            "-c",
-            "core.quotepath=false",
-            "-c",
-            "color.ui=false",
-            *args,
-        ]
         try:
-            completed = subprocess.run(
-                command,
+            return self.git_runner.run(
+                tuple(args),
                 cwd=self.workspace,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=120,
-                check=False,
-                shell=False,
+                maximum=maximum,
+                timeout_seconds=120,
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except TrustedGitRuntimeError as exc:
+            operation = args[0] if args else "unknown"
             raise TierACommandReceiptError(
-                f"Git evidence command failed to complete: {args[0]}"
+                f"trusted Git evidence command failed: {operation}"
             ) from exc
-        output_bytes = len(completed.stdout) + len(completed.stderr)
-        if output_bytes > maximum:
-            raise TierACommandReceiptError(
-                f"Git evidence command exceeded its output bound: {args[0]}"
-            )
-        if completed.returncode != 0:
-            raise TierACommandReceiptError(
-                f"Git evidence command failed: {args[0]}"
-            )
-        return completed.stdout
 
     def snapshot(self) -> GitWorkspaceSnapshot:
         head = self._git("rev-parse", "HEAD", maximum=4096).decode(
@@ -504,6 +505,7 @@ def run_single_verified_tier_a_command_with_receipt(
     attestation: Any,
     physical_verifier: Any,
     *,
+    git_runner: TrustedGitRunner,
     signed_runtime_closure: SignedRuntimeClosureManifest,
     runtime_closure_verifier: Any,
     trusted_runtime_root: Path,
@@ -514,10 +516,15 @@ def run_single_verified_tier_a_command_with_receipt(
     process_memory_bytes: int = 512 * 1024 * 1024,
     active_process_limit: int = 8,
 ) -> TierACommandReceipt:
-    """Run the task's sole command and join it to exact Git before/after/reset evidence."""
+    """Run one command and join it to exact Git and runtime evidence."""
 
+    if not isinstance(git_runner, TrustedGitRunner):
+        raise TierACommandReceiptError(
+            "Tier-A command receipt requires a trusted Git runner"
+        )
     command_id = _single_command_id(task)
-    evidence = _GitWorkspaceEvidence(Path(workspace_root), task)
+    git_runtime_before = git_runner.evidence()
+    evidence = _GitWorkspaceEvidence(Path(workspace_root), task, git_runner)
     before = evidence.snapshot()
     if before.head_sha != task.base_sha:
         raise TierACommandReceiptError(
@@ -576,6 +583,17 @@ def run_single_verified_tier_a_command_with_receipt(
     if before.sha256 != after.sha256:
         reset = evidence.reset_to_base()
 
+    git_runtime_after = git_runner.evidence()
+    if git_runtime_after.sha256 != git_runtime_before.sha256:
+        try:
+            evidence.reset_to_base()
+        except Exception as reset_exc:
+            raise TierACommandReceiptError(
+                "Git runtime changed and exact-base reset failed"
+            ) from reset_exc
+        raise TierACommandReceiptError(
+            "Git runtime identity changed during receipt orchestration"
+        )
     if execution_error is not None:
         raise TierACommandReceiptError(
             "verified Tier-A execution failed before producing a result"
@@ -586,6 +604,7 @@ def run_single_verified_tier_a_command_with_receipt(
         )
     return TierACommandReceipt.create(
         task=task,
+        git_runtime=git_runtime_before,
         result=result,
         before=before,
         after=after,
