@@ -5,10 +5,12 @@ self-development in ModelRig. It is deliberately **not** connected to ordinary
 ModelRig tool registration, Agent 3, Agent 4, GitHub writes, merge, release or
 production activation.
 
-The implementation currently reaches **Slice 10D**. A reviewed catalog command can
+The implementation currently reaches **Slice 10F**. A reviewed catalog command can
 enter the Windows Tier-A boundary only after fresh signed physical evidence, a
 command-specific signed exact-file runtime closure, deterministic workspace
 staging, exact workspace-relative cwd validation and bounded native output capture.
+The staged runtime is held read/execute-only and non-replaceable until the complete
+Job Object process tree has ended.
 
 ## Implemented authority layers
 
@@ -116,22 +118,49 @@ staging, exact workspace-relative cwd validation and bounded native output captu
 - launch-plan schema v3 binds manifest, signature, staging receipt and
   `working_directory_sha256`;
 - workspace-relative nested cwd is revalidated inside the `CreateProcessW`
-  wrapper without granting caller-selected cwd authority;
-- Tier-A authority bundle v4 intentionally invalidates every older physical report;
-- native Windows contract proves a two-file closure, distinct command/cwd
-  signatures, real `backend/` cwd, bounded output and timeout EOF in one path.
+  wrapper without granting caller-selected cwd authority.
 
-See `TIER_A_EXECUTION.md` and `RUNTIME_STAGING.md` for the complete authority
-chains, filesystem rules and deliberate limitations.
+### Slice 10E — reviewed standalone version-check closure
+
+- self-contained Go implementation at `backend/cmd/modelrig-version-check`;
+- isolated one-command catalog using tool ID `modelrig-version-check`;
+- the default catalog remains unchanged, avoiding silent authority replacement;
+- `ModelRigVersionCheckClosureBuilder` emits an unsigned single-file manifest
+  proposal only;
+- exact entrypoint, empty argument vector, root cwd, tool hash, lease, catalog,
+  workspace and runtime-root identities required;
+- extra runtime files/directories and the legacy Python profile fail closed.
+
+See `VERSION_CHECK_CLOSURE.md` for the isolated catalog and operator flow.
+
+### Slice 10F — runtime lifetime immutability
+
+- the exact staged closure is reverified after workspace ACL provisioning;
+- every closure directory and file receives a protected read/execute-only DACL for
+  the operator SID and exact AppContainer package SID;
+- open handles permit read sharing only and deny new write/delete-sharing opens;
+- overwrite, replacement, rename, deletion and file insertion are denied while the
+  Job Object lives;
+- original DACLs are retained by handle and restored only after confirmed Job
+  Object closure;
+- ambiguous process-tree cleanup retains the guard instead of reopening the tree;
+- Tier-A authority bundle v5 intentionally invalidates every v4-or-earlier physical
+  report;
+- native Windows tests prove AppContainer sabotage, concurrent host sabotage,
+  unchanged bytes/tree, DACL restoration, output capture, nested cwd and timeout
+  cleanup through the same path.
+
+See `TIER_A_EXECUTION.md`, `RUNTIME_STAGING.md` and
+`RUNTIME_LIFETIME_GUARD.md` for the complete authority and filesystem rules.
 
 ## Reviewed command authority
 
 The default registry remains empty. Naming a command ID in a task does not make it
-executable. The command must also exist in the immutable catalog, have an exact
+executable. The command must also exist in an immutable catalog, have an exact
 operator tool binding, pass fresh signed physical evidence and complete the signed
 runtime-closure chain.
 
-The current ModelRig catalog contains:
+The default ModelRig catalog contains:
 
 - `modelrig.version.check`;
 - `modelrig.devcontrol.tests`;
@@ -139,8 +168,9 @@ The current ModelRig catalog contains:
 - `modelrig.backend.vet`;
 - `modelrig.backend.tests`.
 
-Task schema v1 treats every granted command as required draft-PR evidence. Optional
-commands are deferred rather than added ambiguously.
+Slice 10E's standalone version checker uses a separate isolated catalog rather
+than changing this list. Task schema v1 treats every granted command as required
+draft-PR evidence. Optional commands remain deferred rather than added ambiguously.
 
 ## Physical evidence operator flow
 
@@ -181,7 +211,7 @@ The control plane still cannot:
 - execute without exact fresh signed physical evidence;
 - manufacture a genuine I0b result without physical probes;
 - automatically discover a transitive PE/DLL, Python or Go runtime closure;
-- guarantee lifetime read-only ACLs for staged runtime files;
+- claim lifetime protection against a separate administrator or kernel component;
 - claim a complete Git-aware `CommandReceipt` from output evidence alone;
 - perform independent semantic AI review;
 - push branches or create/update/merge pull requests from the runtime;
@@ -201,8 +231,9 @@ python -m unittest discover -s tests -v
 
 The portable suite is included in ModelRig's shared PR/release gate. The native
 Windows gate separately proves Job Object, AppContainer, environment, signed
-physical evidence, exact runtime closure, nested cwd, strict handle inheritance,
-bounded output, timeout cleanup and existing ToolHost behavior.
+physical evidence, exact runtime closure, lifetime immutability, nested cwd,
+strict handle inheritance, bounded output, timeout cleanup and existing ToolHost
+behavior.
 
 ## Validate a task
 
