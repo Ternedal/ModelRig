@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .trusted_git_runtime_model import (
-    _MAX_OUTPUT_BYTES,
     TrustedGitRuntimeError,
     TrustedGitRuntimeEvidence,
     _existing_link_free_directory,
@@ -15,6 +14,12 @@ from .trusted_git_runtime_model import (
     _integer,
 )
 from .trusted_git_runtime_staging import TrustedGitRuntime
+
+# The shared runner must cover the largest already-authenticated local Git
+# artifact boundary. Slice 10L permits 128 MiB binary patches, so Git diff
+# reproduction must retain the same hard ceiling rather than silently narrowing
+# an otherwise valid authorization. This remains a strict in-memory bound.
+_MAX_GIT_COMMAND_OUTPUT_BYTES = 128 * 1024 * 1024
 
 
 class TrustedGitRunner:
@@ -157,7 +162,7 @@ class TrustedGitRunner:
         *,
         cwd: Path,
         stdin: bytes | None = None,
-        maximum: int = _MAX_OUTPUT_BYTES,
+        maximum: int = _MAX_GIT_COMMAND_OUTPUT_BYTES,
         timeout_seconds: int = 120,
         expected_codes: tuple[int, ...] = (0,),
         extra_env: Mapping[str, str] | None = None,
@@ -171,7 +176,12 @@ class TrustedGitRunner:
             )
         ):
             raise TrustedGitRuntimeError("Git arguments are invalid")
-        _integer(maximum, name="Git output bound", low=1, high=_MAX_OUTPUT_BYTES)
+        _integer(
+            maximum,
+            name="Git output bound",
+            low=1,
+            high=_MAX_GIT_COMMAND_OUTPUT_BYTES,
+        )
         _integer(timeout_seconds, name="Git timeout", low=1, high=3600)
         root = _existing_link_free_directory(cwd, name="Git cwd")
         self.runtime.verify()
