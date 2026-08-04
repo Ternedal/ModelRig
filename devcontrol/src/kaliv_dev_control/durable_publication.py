@@ -119,12 +119,15 @@ def sync_tree(root: Path) -> None:
                     "publication tree contains a non-regular or aliased file"
                 )
             sync_file(child.resolve())
-    for directory in sorted(directories, key=lambda item: len(item.parts), reverse=True):
+    for directory in sorted(
+        directories, key=lambda item: len(item.parts), reverse=True
+    ):
         sync_directory(directory.resolve())
 
 
 def _windows_move_no_replace(source: Path, destination: Path) -> None:
-    move_file = ctypes.windll.kernel32.MoveFileExW
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    move_file = kernel32.MoveFileExW
     move_file.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
     move_file.restype = ctypes.c_int
     movefile_write_through = 0x00000008
@@ -187,7 +190,11 @@ def rename_directory_no_replace(source: Path, destination: Path) -> None:
     sync_tree(pending)
     if os.name == "nt":
         _windows_move_no_replace(pending, final)
-    elif os.name == "posix" and hasattr(os, "uname") and os.uname().sysname == "Linux":
+    elif (
+        os.name == "posix"
+        and hasattr(os, "uname")
+        and os.uname().sysname == "Linux"
+    ):
         _linux_rename_no_replace(pending, final)
         sync_directory(parent)
     else:
@@ -276,7 +283,9 @@ def remove_tree_durable(path: Path) -> None:
     if not candidate.exists():
         return
     if not candidate.is_dir():
-        raise DurablePublicationError("durable tree removal target is not a directory")
+        raise DurablePublicationError(
+            "durable tree removal target is not a directory"
+        )
     try:
         shutil.rmtree(candidate)
     except OSError as exc:
