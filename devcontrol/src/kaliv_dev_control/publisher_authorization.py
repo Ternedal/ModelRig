@@ -1,19 +1,21 @@
-"""Public publisher authorization boundary.
+"""Public publisher-authorization boundary.
 
-The supported authority surface is Ed25519 verification-only. The original v1
-HMAC objects remain module attributes solely so historical evidence tests can
-load and verify retained artifacts during migration; they are deliberately
-excluded from ``__all__`` and are not a supported issuance API.
+Only the Ed25519/v2 authority path is supported here. Retained v1 HMAC parsers
+and issuers live exclusively under ``kaliv_dev_control._compatibility_v1`` and
+are deliberately absent from this module namespace.
 
-New downstream evidence must use the H5C v2 replay, preflight, postcondition and
-recovery classes exported below. Private signing material is never accepted by
-that path.
+This module contains no private key, shared secret, credential, transport,
+GitHub client, repository writer, merge, release or deployment authority.
 """
 from __future__ import annotations
 
-# Retained exact v1 artifact parsers and compatibility objects. Do not add the
-# HMAC issuer or shared-secret key types to the supported export list below.
-from ._publisher_authorization_legacy import *  # noqa: F403
+from ._publisher_authorization_legacy import (
+    PublisherAuthorizationError,
+    PublisherCredentialPolicy,
+    RemoteRepositoryIdentity,
+    publisher_authorization_policy_sha256,
+    publisher_credential_policy_rules_sha256,
+)
 from .publisher_authorization_v2 import (
     AsymmetricPublisherAuthorizationLease,
     AsymmetricPublisherAuthorizationVerifier,
@@ -41,11 +43,6 @@ from .publisher_authorization_chain_v2 import (
     write_publisher_preflight_receipt_v2,
     write_publisher_replay_ledger_entry_v2,
     write_publisher_replay_recovery_receipt_v2,
-)
-from .publisher_replay_h4 import (
-    PUBLISHER_REPLAY_RECOVERY_SCHEMA,
-    PublisherReplayLedger,
-    PublisherReplayRecoveryReceipt,
 )
 
 __all__ = [
