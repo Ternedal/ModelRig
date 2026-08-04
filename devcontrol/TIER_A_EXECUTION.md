@@ -1,9 +1,10 @@
 # Tier-A execution bridge
 
-The Development Control Plane is dormant and fail closed. Slices 9 through 10D
+The Development Control Plane is dormant and fail closed. Slices 9 through 10F
 connect fresh signed Windows-isolation evidence to one private AppContainer launch
-path. Slice 10D adds a signed exact-file runtime closure and an exact
-workspace-relative working directory without introducing another executor.
+path. The path now binds an exact signed runtime closure, an exact
+workspace-relative working directory, bounded native output and a Windows lifetime
+guard that holds the staged closure immutable until the complete Job Object ends.
 
 Nothing here registers a ModelRig tool, activates Agent 3 or Agent 4, writes to
 GitHub, merges, releases or deploys code.
@@ -45,11 +46,19 @@ A command can cross the Windows process boundary only through this complete chai
     full authority-code identity.
 14. Immediately before launch, the private executor rehashes the authority bundle,
     workspace identity, complete staged closure, entrypoint and working directory.
-15. Windows creates the child suspended in a zero-capability AppContainer, with an
+15. `WindowsRuntimeClosureLifetimeGuard` verifies the tree again, applies a
+    protected read/execute DACL and opens every closure file and directory with
+    sharing that denies write and delete access.
+16. Windows creates the child suspended in a zero-capability AppContainer, with an
     exact three-handle inheritance list, then assigns the Job Object before resume.
-16. stdout and stderr are drained concurrently to EOF, fully hashed and retained
+17. The runtime guard remains owned by the private executor until the Job Object is
+    confirmed closed and the child has been reaped. If Job cleanup cannot be
+    proven, the guard is retained rather than reopening the runtime tree.
+18. stdout and stderr are drained concurrently to EOF, fully hashed and retained
     only within the signed output budget. Execution emits
     `kaliv-development-tier-a-execution-result/v1`.
+19. Only after process-tree completion are the original closure DACLs restored and
+    the deny-write/delete-sharing handles closed.
 
 A serialized launch plan is review evidence, not reusable execution authority.
 Plans lacking a verified closure remain serializable for inspection but the only
@@ -73,9 +82,29 @@ fsynced and atomically published. Existing different bytes fail closed. A comple
 post-stage walk rejects unmanifested entries. Destination files must have exactly
 one hardlink and are rehashed again immediately before process creation.
 
-These checks guarantee the exact signed bytes at staging and prelaunch. They do
-not yet keep the staged tree read-only with a dedicated ACL for the entire child
-lifetime.
+Slice 10E adds a reviewed standalone Go implementation of
+`modelrig.version.check` plus an isolated one-command catalog and an unsigned
+single-file closure builder. The default ModelRig catalog remains unchanged, so
+selecting that standalone profile requires a new catalog hash, toolchain, physical
+report, lease and independently signed closure. See `VERSION_CHECK_CLOSURE.md`.
+
+## Runtime lifetime immutability
+
+Slice 10F protects only the exact staged closure subtree; the ordinary workspace
+retains its existing write policy. After final verification, each closure object
+is opened by handle and its original DACL is retained. A protected DACL grants
+read/execute only to the current operator SID and the exact AppContainer package
+SID. Open file and directory handles permit read sharing only, denying new write
+or delete-sharing opens.
+
+Together these controls block ordinary AppContainer and concurrent host attempts
+to overwrite, replace, rename, delete or extend the runtime tree. Guard acquisition
+fails closed if an incompatible pre-existing handle prevents the required sharing
+lock. Original DACLs are restored only after Job Object closure. See
+`RUNTIME_LIFETIME_GUARD.md` for the full lifecycle and sabotage proof.
+
+The boundary does not claim resistance against a separate administrator or kernel
+component with takeover, backup/restore or direct-volume privileges.
 
 ## Working-directory authority
 
@@ -110,14 +139,16 @@ stderr prefix = floor(max_output_bytes / 2)
 Binary prefixes are canonical base64. On timeout, the complete Job Object is
 terminated, the process is reaped and both streams reach EOF before a non-passing
 result is finalized. `TierAExecutionTimeout` carries that evidence so timeout
-output remains auditable but cannot be mistaken for success.
+output remains auditable but cannot be mistaken for success. Runtime locks remain
+held through the same timeout and cleanup path.
 
 ## Code identity
 
-`tier_a_toolhost_sha256` v4 covers all modules that can issue, transform, stage,
-launch or report Tier-A authority, including the runtime-closure model, verifier,
-stager, launch-plan v3, cwd binding, output capture and public facade. Every report
-issued for an earlier authority bundle is therefore invalid.
+`tier_a_toolhost_sha256` v5 covers all modules that can issue, transform, stage,
+lifetime-lock, launch or report Tier-A authority, including the Windows runtime
+guard, runtime-closure model, verifier, stager, launch-plan v3, cwd binding, output
+capture and public facade. Every report issued for authority bundle v4 or earlier
+is therefore invalid.
 
 ## Current limitations
 
@@ -126,14 +157,16 @@ issued for an earlier authority bundle is therefore invalid.
   selected rig's independent eleven-probe I0b campaign.
 - The closure is exact-file based, not yet an automatically discovered transitive
   PE/DLL, Python or Go runtime closure.
-- Staged bytes are revalidated before launch, but a lifetime read-only ACL and
-  immutable mounted runtime are not yet proven.
+- The lifetime guard proves the ordinary unprivileged operator/AppContainer
+  boundary, not resistance to a separate administrator or kernel component.
 - `TierAExecutionResult` is not a complete development `CommandReceipt`; Git
   before/after identity and reset evidence remain owned by the separate command
   executor.
 - No branch push, pull-request write, merge, release, settings, feature-switch or
   deployment authority is granted.
 
-The next safe unit is a reviewed closure builder for one concrete self-contained
-command, followed by lifetime runtime-file immutability. It must preserve the same
-fresh signed-evidence, exact staging, cwd, output and Job Object boundaries.
+The next safe unit is a single Git-aware orchestration surface that snapshots the
+workspace, invokes only `run_verified_tier_a_command`, verifies the workspace again,
+resets any mutation and emits a complete deterministic `CommandReceipt`. It must
+not introduce another process executor or broaden catalog, GitHub or merge
+authority.
