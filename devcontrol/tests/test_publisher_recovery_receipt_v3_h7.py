@@ -9,6 +9,7 @@ from pathlib import Path
 
 import kaliv_dev_control.publisher_recovery_authorization as recovery_module
 import kaliv_dev_control.publisher_recovery_authorization_strict as strict_module
+import kaliv_dev_control.publisher_recovery_primary as primary_module
 import kaliv_dev_control.publisher_recovery_receipt_v3 as receipt_module
 from kaliv_dev_control.durable_publication import create_once_file
 from kaliv_dev_control.publisher_authorization import (
@@ -16,6 +17,7 @@ from kaliv_dev_control.publisher_authorization import (
     PublisherAuthorizationError,
     PublisherReplayLedgerEntryV2,
     PublisherReplayLedgerV2,
+    PublisherReplayLedgerV3,
     PublisherReplayRecoveryAuthorizationV1,
     PublisherReplayRecoveryAuthorizationVerifierV1,
     PublisherReplayRecoveryReceiptV3,
@@ -218,7 +220,7 @@ class PublisherReplayRecoveryReceiptV3H7Tests(unittest.TestCase):
             with self.assertRaises(PublisherAuthorizationError):
                 write_publisher_replay_recovery_receipt_v3(path, receipt)
 
-    def test_schema_and_verifier_are_single_public_contracts(self):
+    def test_schema_verifier_and_ledger_are_single_public_contracts(self):
         receipt = self._recover_case(
             action="tombstone_uncertain",
             expected_before="reserved",
@@ -239,21 +241,40 @@ class PublisherReplayRecoveryReceiptV3H7Tests(unittest.TestCase):
             "kaliv-development-publisher-replay-recovery-receipt/v3",
         )
         self.assertIs(
-            recovery_module.PublisherReplayRecoveryAuthorizationVerifierV1,
+            primary_module.PublisherReplayRecoveryAuthorizationVerifierV1,
             PublisherReplayRecoveryAuthorizationVerifierV1,
         )
         self.assertIs(
             strict_module.PublisherReplayRecoveryAuthorizationVerifierV1,
             PublisherReplayRecoveryAuthorizationVerifierV1,
         )
+        self.assertIs(PublisherReplayLedgerV2, PublisherReplayLedgerV3)
+        self.assertIs(PublisherReplayLedgerV3, primary_module.PublisherReplayLedgerV3)
+        self.assertTrue(
+            issubclass(
+                PublisherReplayLedgerV3,
+                recovery_module.PublisherReplayLedgerV3,
+            )
+        )
+        self.assertIsNot(
+            PublisherReplayLedgerV3.recover_authenticated,
+            recovery_module.PublisherReplayLedgerV3.recover_authenticated,
+        )
+        self.assertIn(
+            "recover_authenticated",
+            primary_module.PublisherReplayLedgerV3.__dict__,
+        )
         self.assertNotIn(
             "class PublisherReplayRecoveryAuthorizationVerifierV1",
             inspect.getsource(strict_module),
         )
 
-    def test_h7_module_has_no_signer_or_transport_surface(self):
+    def test_receipt_module_is_passive_and_has_no_authority_surface(self):
         source = inspect.getsource(receipt_module)
         for forbidden in (
+            "recover_authenticated =",
+            "_h7_receipt_v3_installed",
+            "setattr(PublisherReplayLedger",
             "Ed25519PrivateKey",
             "from_private_bytes",
             "load_pem_private_key",
