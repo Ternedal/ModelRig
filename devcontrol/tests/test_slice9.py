@@ -43,7 +43,7 @@ NOW = datetime(2026, 8, 3, 12, 15, tzinfo=timezone.utc)
 SECRET = b"x" * 32
 KEY_ID = "operator-key-test"
 
-# This fixture deliberately mirrors the complete signed v4 authority bundle.
+# This fixture deliberately mirrors the complete signed v5 authority bundle.
 # A missing entry must make the test authority root fail closed just like a real
 # operator root, rather than silently weakening physical-evidence identity.
 BUNDLE_FILES = (
@@ -51,6 +51,7 @@ BUNDLE_FILES = (
     "worker/app/windows_job.py",
     "worker/app/windows_restricted.py",
     "worker/app/windows_capture.py",
+    "worker/app/windows_runtime_guard.py",
     "worker/app/windows_tier_a.py",
     "devcontrol/src/kaliv_dev_control/__init__.py",
     "devcontrol/src/kaliv_dev_control/catalog.py",
