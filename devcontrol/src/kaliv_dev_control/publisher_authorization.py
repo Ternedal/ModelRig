@@ -51,12 +51,14 @@ from .publisher_recovery_authorization import (
     PUBLISHER_REPLAY_RECOVERY_STATE_V1_SCHEMA,
     PublisherReplayLedgerV3,
     PublisherReplayRecoveryAuthorizationV1,
-    PublisherReplayRecoveryAuthorizationVerifierV1,
     PublisherReplayRecoveryStateV1,
     build_publisher_replay_recovery_authorization_payload,
     load_publisher_replay_recovery_authorization_v1,
     publisher_replay_recovery_policy_sha256,
     write_publisher_replay_recovery_authorization_v1,
+)
+from .publisher_recovery_authorization_strict import (
+    PublisherReplayRecoveryAuthorizationVerifierV1,
 )
 
 # Compatibility name for existing public consumers. The object now resolves to
