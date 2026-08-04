@@ -38,10 +38,11 @@ for _obsolete_execution_name in (
         delattr(_core, _obsolete_execution_name)
 del _obsolete_execution_name
 
-# Every source file that can issue, transform, stage, launch, lifetime-lock or
-# report Tier-A authority is covered by the physical campaign. The Windows
-# runtime guard adds a protected DACL and deny-write/delete-sharing handles, so
-# the v5 domain intentionally invalidates every earlier physical report.
+# Every source file that can issue, transform, stage, launch, lifetime-lock,
+# join Git evidence or report Tier-A authority is covered by the physical
+# campaign. The command-receipt orchestrator adds fixed Git snapshot/reset
+# operations around the sole verified runtime path, so the v6 domain
+# intentionally invalidates every earlier physical report.
 _TIER_A_BUNDLE_FILES = (
     "worker/app/__init__.py",
     "worker/app/windows_job.py",
@@ -65,6 +66,7 @@ _TIER_A_BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
     "devcontrol/src/kaliv_dev_control/tier_a_result.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_command_receipt.py",
     "devcontrol/src/kaliv_dev_control/tier_a_execution.py",
     "devcontrol/src/kaliv_dev_control/workspace.py",
 )
@@ -145,14 +147,14 @@ def working_directory_authority_sha256(root: Path, relative: str) -> str:
 
 
 def tier_a_toolhost_sha256(control_plane_root: Path) -> str:
-    """Hash the complete v5 source chain that can exercise Tier-A authority."""
+    """Hash the complete v6 source chain that can exercise Tier-A authority."""
 
     root = _core._canonical_directory(
         control_plane_root,
         name="control-plane root",
     )
     digest = hashlib.sha256()
-    digest.update(b"kaliv-tier-a-toolhost/v5\0")
+    digest.update(b"kaliv-tier-a-toolhost/v6\0")
     for relative in _TIER_A_BUNDLE_FILES:
         path = root / PurePosixPath(relative)
         if _has_linkish_component(path) or not path.is_file():
