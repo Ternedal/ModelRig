@@ -5,12 +5,15 @@ import hashlib
 import json
 import os
 import re
-import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from .catalog import CatalogError
 from .contract import DevelopmentTask
+from .streaming_publication import (
+    StreamingPublicationError,
+    publish_stream_once,
+)
 
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -178,17 +181,6 @@ def _closure_secure_directory_chain(root: Path, relative: PurePosixPath) -> Path
     return current
 
 
-def _closure_fsync_directory(path: Path) -> None:
-    if os.name == "nt":
-        return
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-    descriptor = os.open(path, flags)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
 def _closure_staged_mode() -> int:
     # On Windows, os.chmod(..., 0o555) maps to the DOS read-only attribute. It
     # is not a security boundary (the same user can clear it), and it prevents
@@ -215,72 +207,71 @@ def _closure_publish_exact_file(
     expected_size: int,
     maximum: int,
 ) -> None:
-    if _closure_is_linkish(destination):
-        raise RuntimeClosureError("staged runtime destination is a link")
-    if destination.exists():
-        if not destination.is_file() or destination.stat().st_nlink != 1:
-            raise RuntimeClosureError(
-                "staged runtime destination is not a single-link regular file"
-            )
-        digest, size = _closure_file_hash_and_size(destination, maximum=maximum)
-        if digest != expected_sha256 or size != expected_size:
-            raise RuntimeClosureError(
-                "staged runtime destination already has different bytes"
-            )
-        _closure_fix_staged_mode(destination)
-        return
-
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=".kaliv-stage-", suffix=".tmp", dir=destination.parent
-    )
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "wb", closefd=True) as output, source.open(
-            "rb"
-        ) as input_file:
-            digest = hashlib.sha256()
-            size = 0
-            while chunk := input_file.read(1024 * 1024):
-                size += len(chunk)
-                if size > maximum:
-                    raise RuntimeClosureError(
-                        "runtime closure exceeds its staging byte budget"
-                    )
-                digest.update(chunk)
-                output.write(chunk)
-            output.flush()
-            os.fsync(output.fileno())
-        if size != expected_size or digest.hexdigest() != expected_sha256:
-            raise RuntimeClosureError("runtime source changed while staging")
-        try:
-            os.link(temporary, destination)
-        except FileExistsError:
-            existing_hash, existing_size = _closure_file_hash_and_size(
-                destination, maximum=maximum
-            )
-            if (
-                destination.stat().st_nlink != 1
-                or existing_hash != expected_sha256
-                or existing_size != expected_size
-            ):
+    def validate_existing(path: Path, *, concurrent: bool) -> None:
+        if (
+            _closure_is_linkish(path)
+            or not path.is_file()
+            or path.stat().st_nlink != 1
+        ):
+            if concurrent:
                 raise RuntimeClosureError(
                     "concurrent runtime staging produced an unsafe destination"
                 )
-            _closure_fix_staged_mode(destination)
-        else:
-            temporary.unlink()
-            _closure_fsync_directory(destination.parent)
-            try:
-                _closure_fix_staged_mode(destination)
-            except RuntimeClosureError:
-                try:
-                    os.chmod(destination, 0o755)
-                    destination.unlink()
-                except OSError:
-                    pass
-                raise
-    finally:
+            raise RuntimeClosureError(
+                "staged runtime destination is not a single-link regular file"
+            )
+        digest, size = _closure_file_hash_and_size(path, maximum=maximum)
+        if digest != expected_sha256 or size != expected_size:
+            if concurrent:
+                raise RuntimeClosureError(
+                    "concurrent runtime staging produced an unsafe destination"
+                )
+            raise RuntimeClosureError(
+                "staged runtime destination already has different bytes"
+            )
+        _closure_fix_staged_mode(path)
+
+    if _closure_is_linkish(destination):
+        raise RuntimeClosureError("staged runtime destination is a link")
+    if destination.exists():
+        validate_existing(destination, concurrent=False)
+        return
+
+    try:
+        published_here = publish_stream_once(
+            source,
+            destination,
+            expected_sha256=expected_sha256,
+            expected_size=expected_size,
+            maximum=maximum,
+            validate_existing=lambda path: validate_existing(
+                path, concurrent=True
+            ),
+        )
+    except StreamingPublicationError as exc:
+        if exc.code == "source_exceeds_budget":
+            raise RuntimeClosureError(
+                "runtime closure exceeds its staging byte budget"
+            ) from exc
+        if exc.code == "source_changed":
+            raise RuntimeClosureError(
+                "runtime source changed while staging"
+            ) from exc
+        raise RuntimeClosureError(
+            "runtime closure publication was not durable"
+        ) from exc
+    except OSError as exc:
+        raise RuntimeClosureError(
+            "runtime closure publication failed"
+        ) from exc
+
+    if published_here:
         try:
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
+            _closure_fix_staged_mode(destination)
+        except RuntimeClosureError:
+            try:
+                os.chmod(destination, 0o755)
+                destination.unlink()
+            except OSError:
+                pass
+            raise

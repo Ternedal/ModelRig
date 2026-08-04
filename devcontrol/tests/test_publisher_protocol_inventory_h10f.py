@@ -54,6 +54,17 @@ _SHARED_DIRECTORY_PUBLISHERS = Counter(
     }
 )
 
+
+_SHARED_STREAMING_PUBLISHERS = Counter(
+    {
+        (
+            "_runtime_closure_common.py",
+            "_closure_publish_exact_file",
+            "publish_stream_once",
+        ): 1,
+    }
+)
+
 _LOW_LEVEL_PROTOCOLS = Counter(
     {
         (
@@ -76,21 +87,21 @@ _LOW_LEVEL_PROTOCOLS = Counter(
             "_write_canonical",
             "os.replace",
         ): 1,
+        ("durable_publication.py", "create_once_file", "tempfile.mkstemp"): 1,
+        ("durable_publication.py", "create_once_file", "os.link"): 1,
         (
-            "_runtime_closure_common.py",
-            "_closure_publish_exact_file",
+            "streaming_publication.py",
+            "publish_stream_once",
             "tempfile.mkstemp",
         ): 1,
         (
-            "_runtime_closure_common.py",
-            "_closure_publish_exact_file",
+            "streaming_publication.py",
+            "publish_stream_once",
             "os.link",
         ): 1,
-        ("durable_publication.py", "create_once_file", "tempfile.mkstemp"): 1,
-        ("durable_publication.py", "create_once_file", "os.link"): 1,
-        ("patch.py", "apply", "tempfile.NamedTemporaryFile"): 1,
         ("runtime_staging.py", "stage", "tempfile.mkstemp"): 1,
         ("runtime_staging.py", "stage", "os.link"): 1,
+        ("patch.py", "apply", "tempfile.NamedTemporaryFile"): 1,
         ("store.py", "save", "tempfile.NamedTemporaryFile"): 1,
         ("store.py", "save", "temporary.replace"): 1,
     }
@@ -99,6 +110,7 @@ _LOW_LEVEL_PROTOCOLS = Counter(
 _INTERESTING = {
     "create_once_file",
     "rename_directory_no_replace",
+    "publish_stream_once",
     "tempfile.mkstemp",
     "tempfile.NamedTemporaryFile",
     "os.link",
@@ -156,6 +168,7 @@ class PublisherProtocolInventoryH10FTests(unittest.TestCase):
             _inventory(),
             _SHARED_FILE_PUBLISHERS
             + _SHARED_DIRECTORY_PUBLISHERS
+            + _SHARED_STREAMING_PUBLISHERS
             + _LOW_LEVEL_PROTOCOLS,
         )
 
@@ -210,16 +223,58 @@ class PublisherProtocolInventoryH10FTests(unittest.TestCase):
             ),
         )
 
-    def test_streaming_publishers_are_create_once_and_never_replace(self) -> None:
-        for relative, function in (
-            ("_runtime_closure_common.py", "_closure_publish_exact_file"),
-            ("runtime_staging.py", "stage"),
-        ):
-            with self.subTest(relative=relative):
-                calls = _inventory()
-                self.assertEqual(calls[(relative, function, "tempfile.mkstemp")], 1)
-                self.assertEqual(calls[(relative, function, "os.link")], 1)
-                self.assertEqual(calls[(relative, function, "os.replace")], 0)
+    def test_h10g_a_migrates_closure_to_the_shared_streaming_primitive(self) -> None:
+        observed = _inventory()
+        self.assertEqual(
+            Counter(
+                {
+                    key: count
+                    for key, count in observed.items()
+                    if key[2] == "publish_stream_once"
+                }
+            ),
+            _SHARED_STREAMING_PUBLISHERS,
+        )
+        self.assertEqual(
+            observed[
+                (
+                    "streaming_publication.py",
+                    "publish_stream_once",
+                    "tempfile.mkstemp",
+                )
+            ],
+            1,
+        )
+        self.assertEqual(
+            observed[
+                (
+                    "streaming_publication.py",
+                    "publish_stream_once",
+                    "os.link",
+                )
+            ],
+            1,
+        )
+        closure = (_PACKAGE / "_runtime_closure_common.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("publish_stream_once", closure)
+        self.assertNotIn("tempfile.mkstemp", closure)
+        self.assertNotIn("os.link(", closure)
+        self.assertNotIn("os.replace", closure)
+
+    def test_runtime_staging_remains_explicitly_classified_for_h10g_b(self) -> None:
+        observed = _inventory()
+        self.assertEqual(
+            observed[("runtime_staging.py", "stage", "tempfile.mkstemp")],
+            1,
+        )
+        self.assertEqual(
+            observed[("runtime_staging.py", "stage", "os.link")],
+            1,
+        )
+        source = (_PACKAGE / "runtime_staging.py").read_text(encoding="utf-8")
+        self.assertNotIn("os.replace", source)
 
     def test_named_temporaries_are_only_ephemeral_patch_input_or_mutable_state(self) -> None:
         observed = _inventory()

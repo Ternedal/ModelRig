@@ -1,4 +1,4 @@
-# DevControl publisher-protokoller — H10F
+# DevControl publisher-protokoller — H10F/H10G-A
 
 Denne oversigt er autoritativ for fil-publication i `kaliv_dev_control`.
 Formålet er at holde forskellige persistenskontrakter adskilt: immutable beviser
@@ -35,19 +35,28 @@ med `rename_directory_no_replace()`. Reservationen er create-once, den pending
 tree synkroniseres rekursivt, og final-navnet må aldrig erstatte en eksisterende
 transaction. Recovery er eksplicit og schema-bundet.
 
-## 3. Specialiseret streaming/content-addressed create-once
+## 3. Shared bounded streaming create-once publication
 
-To eksisterende publishers streamer potentielt store filer og bruger derfor en
-specialiseret protokol frem for den byte-bufferede `create_once_file()`:
+H10G-A introducerer `streaming_publication.publish_stream_once()` og migrerer
+`_runtime_closure_common._closure_publish_exact_file()` til den fælles primitive.
+`runtime_staging.TrustedRuntimeStager.stage()` beholder foreløbig sin eksisterende,
+eksplicit klassificerede hardlink-protokol og migreres separat i H10G-B.
 
-- `_runtime_closure_common._closure_publish_exact_file()`; og
-- `runtime_staging.TrustedRuntimeStager.stage()`.
+Den fælles primitive kopierer i bounded 1 MiB chunks, beregner SHA-256 og byteantal
+i samme gennemløb, synkroniserer tempfilen og publicerer via hardlink uden
+replacement. En concurrent winner accepteres kun gennem callerens præcise
+valideringscallback. Primitive-funktionen kan synkronisere parent-directory både
+for den lokale vinder og, hvor den eksisterende kontrakt kræver det, efter en
+valideret concurrent winner.
 
-Begge skriver til en sibling-tempfil, synkroniserer indholdet og publicerer via
-hardlink med create-once-semantik. De må bruge `tempfile.mkstemp()` og `os.link()`;
-de må ikke bruge `os.replace()`. En senere fælles streaming-primitive kan samle
-implementeringen, men må bevare bounds, hashing, permissions, no-overwrite og
-platformkontrakterne.
+Runtime closure ejer fortsat single-link-, hash-, size- og platform-mode-
+invarianterne. Der bufferes aldrig en runtime på op til 512 MiB i hukommelsen.
+
+For H10G-A må kun `streaming_publication.py` og den endnu ikke migrerede
+`runtime_staging.py` kalde `tempfile.mkstemp()` og `os.link()` for understøttet
+streaming-publication. Runtime closure må kun kalde `publish_stream_once()` og
+må ikke indeholde `mkstemp`, `os.link` eller replace-publication. H10G-B fjerner
+den sidste direkte low-level caller.
 
 ## 4. Bevidst mutable compare-and-swap state
 
@@ -71,16 +80,19 @@ De historiske writers i
 `mkstemp()` plus `os.replace()`-adfærd alene for retained v1-evidence.
 De er ikke den understøttede offentlige authority-flade. Nye imports, nye
 call-sites eller kopiering af deres protokol uden for compatibility-pakken er
-forbudt af H10F-kontrakten.
+forbudt af inventory-kontrakten.
 
 ## Invariants
 
 - Ingen understøttet immutable JSON/evidence-writer må bruge replace-publication.
 - Nye `mkstemp`, `NamedTemporaryFile`, `os.link`, `os.replace`,
-  `create_once_file` eller `rename_directory_no_replace` call-sites kræver en
-  eksplicit inventory-opdatering og sikkerhedsreview.
+  `create_once_file`, `publish_stream_once` eller
+  `rename_directory_no_replace` call-sites kræver en eksplicit
+  inventory-opdatering og sikkerhedsreview.
 - `os.replace()` er kun tilladt i de to retained v1-moduler.
 - Den eneste understøttede mutable replace-state er campaign-store CAS.
-- H10F tilføjer ingen credential, token, signer, Git-kommando, remote, socket,
+- H10G-A har ét fælles low-level implementation point for runtime closure og én
+  eksplicit klassificeret resterende runtime-staging-implementation.
+- H10G-A tilføjer ingen credential, token, signer, Git-kommando, remote, socket,
   HTTP-klient, GitHub-writer, push, PR-mutation, reviewer-request, merge,
   release, settings-, deployment- eller production-authority.
