@@ -6,8 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import kaliv_dev_control.publisher_recovery_primary as primary_module
 import kaliv_dev_control.publisher_recovery_receipt_finalizer as finalizer_module
-import kaliv_dev_control.publisher_recovery_receipt_v3 as receipt_module
 from kaliv_dev_control.durable_publication import (
     DurablePublicationError,
     create_once_file,
@@ -67,7 +67,7 @@ class PublisherRecoveryReceiptFinalizerH8Tests(unittest.TestCase):
             action=action,
         )
         with patch.object(
-            receipt_module,
+            primary_module,
             "create_once_file",
             side_effect=DurablePublicationError("simulated v3 crash"),
         ):
