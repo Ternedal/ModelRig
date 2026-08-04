@@ -6,6 +6,10 @@ fastapi==0.141.1
 uvicorn==0.52.0
 httpx==0.28.1
 pydantic==2.13.4
+# Official public-key verification primitive used by the dormant Development
+# Control Plane H5 authority boundary. Runtime code receives public keys only;
+# no private-key loader or signer is shipped in the authority package.
+cryptography==49.0.0
 # Python's zoneinfo uses the host database on Unix and this pinned first-party
 # fallback on Windows, so persisted IANA schedule zones mean the same thing.
 # The exact tzdata version is part of the durable DST schedule contract.
