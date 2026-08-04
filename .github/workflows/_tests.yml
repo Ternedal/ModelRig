@@ -146,6 +146,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/support/windows_job_close_contract.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/support/windows_bounded_subprocess_contract.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/support/windows_restricted_contract.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/support/windows_tier_a_environment_contract.py
