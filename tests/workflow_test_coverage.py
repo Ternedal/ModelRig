@@ -8,12 +8,22 @@ would sit there green-looking and never execute. Nothing would ever say so.
 The patterns are read out of the workflow itself, so this cannot drift from
 what CI does: change the loop and this test follows.
 
+The isolated Development Control Plane keeps its tests under ``devcontrol/``
+so it can later move to a separate repository without carrying ModelRig's test
+layout with it. This existing CI contract is therefore also the single explicit
+bridge that executes that suite. No new root test filename is introduced, so
+the generated CURRENT_STATE test inventory remains truthful without a manual
+state-file edit.
+
 Run: python3 tests/workflow_test_coverage.py
 """
 from __future__ import annotations
 
 import fnmatch
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
@@ -57,6 +67,32 @@ fake = ["tests/agent_smoke.py", "tests/worker_unit.py"]
 fake_missed = [f for f in fake if not any(fnmatch.fnmatch(f, g) for g in patterns)]
 check(fake_missed == ["tests/agent_smoke.py"],
       "self-test: a file outside the patterns IS detected (tests/agent_smoke.py)")
+
+# The control plane is intentionally isolated under devcontrol/. Execute its
+# complete suite here rather than adding a second root-level wrapper whose
+# filename would itself change CURRENT_STATE's generated test inventory.
+env = os.environ.copy()
+env["PYTHONDONTWRITEBYTECODE"] = "1"
+devcontrol = subprocess.run(
+    [
+        sys.executable,
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "devcontrol/tests",
+        "-v",
+    ],
+    cwd=root,
+    env=env,
+    check=False,
+)
+check(
+    devcontrol.returncode == 0,
+    "the isolated devcontrol suite is an obligatory CI gate"
+    if devcontrol.returncode == 0
+    else f"devcontrol suite failed with exit {devcontrol.returncode}",
+)
 
 print(f"\n===== TEST COVERAGE: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/kaliv-development-tier-a-execution-result-v1.json",
+  "title": "Kaliv development Tier-A execution result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "task_id",
+    "task_sha256",
+    "base_sha",
+    "command_id",
+    "plan_sha256",
+    "lease_sha256",
+    "signed_report_sha256",
+    "returncode",
+    "duration_ms",
+    "timed_out",
+    "max_output_bytes",
+    "stdout",
+    "stderr",
+    "output_bytes",
+    "captured_output_bytes",
+    "output_truncated",
+    "passed"
+  ],
+  "$defs": {
+    "stream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captured_base64",
+        "captured_bytes",
+        "sha256",
+        "total_bytes",
+        "truncated"
+      ],
+      "properties": {
+        "captured_base64": {"type": "string", "contentEncoding": "base64"},
+        "captured_bytes": {"type": "integer", "minimum": 0, "maximum": 100000000},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "total_bytes": {"type": "integer", "minimum": 0},
+        "truncated": {"type": "boolean"}
+      }
+    }
+  },
+  "properties": {
+    "schema": {"const": "kaliv-development-tier-a-execution-result/v1"},
+    "task_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]{2,63}$"},
+    "task_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "command_id": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,63}$"},
+    "plan_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "lease_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "signed_report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "returncode": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "duration_ms": {"type": "integer", "minimum": 0},
+    "timed_out": {"type": "boolean"},
+    "max_output_bytes": {"type": "integer", "minimum": 1024, "maximum": 100000000},
+    "stdout": {"$ref": "#/$defs/stream"},
+    "stderr": {"$ref": "#/$defs/stream"},
+    "output_bytes": {"type": "integer", "minimum": 0},
+    "captured_output_bytes": {"type": "integer", "minimum": 0, "maximum": 100000000},
+    "output_truncated": {"type": "boolean"},
+    "passed": {"type": "boolean"}
+  }
+}

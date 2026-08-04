@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/kaliv-development-runtime-staging-receipt-v1.json",
+  "title": "Kaliv development runtime staging receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "task_id",
+    "task_sha256",
+    "repository",
+    "base_sha",
+    "command_id",
+    "tool_id",
+    "catalog_sha256",
+    "toolchain_sha256",
+    "lease_sha256",
+    "workspace_root_sha256",
+    "source_path_sha256",
+    "executable_sha256",
+    "staged_relative_path",
+    "size_bytes"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-development-runtime-staging-receipt/v1"},
+    "task_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]{2,63}$"},
+    "task_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "repository": {"const": "Ternedal/ModelRig"},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "command_id": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,63}$"},
+    "tool_id": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,63}$"},
+    "catalog_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "toolchain_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "lease_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "workspace_root_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source_path_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "executable_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "staged_relative_path": {
+      "type": "string",
+      "pattern": "^\\.kaliv/runtime/[a-z][a-z0-9_.-]{1,63}/[0-9a-f]{64}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "size_bytes": {"type": "integer", "minimum": 1, "maximum": 536870912}
+  }
+}

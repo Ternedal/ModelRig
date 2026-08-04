@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/kaliv-development-patch-receipt-v1.json",
+  "title": "Kaliv development patch receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "task_id",
+    "task_sha256",
+    "base_sha",
+    "patch_sha256",
+    "index_diff_sha256",
+    "scope",
+    "applied"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-development-patch-receipt/v1"},
+    "task_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]{2,63}$"},
+    "task_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "patch_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "index_diff_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "applied": {"const": true},
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "task_id",
+        "task_sha256",
+        "base_sha",
+        "passed",
+        "changed_paths",
+        "violations",
+        "details",
+        "added_lines",
+        "deleted_lines"
+      ],
+      "properties": {
+        "schema": {"const": "kaliv-development-scope-receipt/v1"},
+        "task_id": {"type": "string"},
+        "task_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "passed": {"const": true},
+        "changed_paths": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 512}
+        },
+        "violations": {"type": "array", "maxItems": 0},
+        "details": {"type": "array", "items": {"type": "string"}},
+        "added_lines": {"type": "integer", "minimum": 0},
+        "deleted_lines": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

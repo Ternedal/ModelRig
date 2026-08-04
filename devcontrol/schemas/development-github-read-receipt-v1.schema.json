@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/kaliv-development-github-read-receipt-v1.json",
+  "title": "Kaliv development GitHub read receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "task_id",
+    "task_sha256",
+    "repository",
+    "base_sha",
+    "operation",
+    "path",
+    "subject_sha",
+    "status",
+    "response_sha256",
+    "response_bytes",
+    "etag_sha256"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-development-github-read-receipt/v1"},
+    "task_id": {"type": "string", "minLength": 1, "maxLength": 64},
+    "task_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "operation": {"enum": ["verify_base_commit", "read_file"]},
+    "path": {"type": "string", "maxLength": 512},
+    "subject_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "status": {"const": 200},
+    "response_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "response_bytes": {"type": "integer", "minimum": 0, "maximum": 4000000},
+    "etag_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"operation": {"const": "verify_base_commit"}}},
+      "then": {"properties": {"path": {"const": ""}}}
+    },
+    {
+      "if": {"properties": {"operation": {"const": "read_file"}}},
+      "then": {"properties": {"path": {"minLength": 1}}}
+    }
+  ]
+}

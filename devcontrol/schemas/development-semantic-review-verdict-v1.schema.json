@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/development-semantic-review-verdict-v1.schema.json",
+  "title": "Kaliv Development Semantic Review Verdict v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "review_request_sha256",
+    "receipt_sha256",
+    "staged_patch_sha256",
+    "execution_authority_sha256",
+    "review_policy_sha256",
+    "developer_actor_id",
+    "reviewer_actor_id",
+    "reviewer_system_id",
+    "independent",
+    "decision",
+    "criterion_assessments",
+    "findings"
+  ],
+  "properties": {
+    "schema": {
+      "const": "kaliv-development-semantic-review-verdict/v1"
+    },
+    "review_request_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "receipt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "staged_patch_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "execution_authority_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "review_policy_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "developer_actor_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@-]{1,127}$"
+    },
+    "reviewer_actor_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@-]{1,127}$"
+    },
+    "reviewer_system_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"
+    },
+    "independent": {
+      "const": true
+    },
+    "decision": {
+      "enum": ["approve", "request_changes", "reject"]
+    },
+    "criterion_assessments": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/criterion_assessment"
+      }
+    },
+    "findings": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    }
+  },
+  "$defs": {
+    "criterion_assessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["criterion_sha256", "outcome", "rationale"],
+      "properties": {
+        "criterion_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "outcome": {
+          "enum": ["satisfied", "not_satisfied", "uncertain"]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "title", "detail"],
+      "properties": {
+        "severity": {
+          "enum": ["low", "medium", "high", "critical"]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      }
+    }
+  }
+}

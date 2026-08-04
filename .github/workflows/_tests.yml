@@ -24,8 +24,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Same single-source check the release tag gate runs -- here it also guards
-      # every push/PR, so drift surfaces immediately rather than at tag time.
       - name: Version sites match VERSION
         run: python3 scripts/version_tool.py check
 
@@ -44,12 +42,22 @@ jobs:
       # scripts/ was outside the gate until 27/07-2026, and a directory walk
       # skips *.retained entirely -- 3175 lines of load-bearing logic (the
       # scheduler pilot, the Stage A operators and their tests) that no linter
-      # had ever opened. --extension pulls them in. The four exec-shims carry a
-      # file-level noqa next to the exec that makes their names invisible.
+      # had ever opened. --extension pulls them in. Development Control Plane
+      # source/tests are included explicitly because they are not under worker/.
       - name: Python lint gate (syntax + undefined names)
         run: |
           pip install --quiet ruff
-          ruff check --select E9,F63,F7,F82 --extension retained:python worker/ tests/ scripts/
+          ruff check --select E9,F63,F7,F82 --extension retained:python worker/ tests/ scripts/ devcontrol/src/ devcontrol/tests/
+
+      - name: Development Control Plane portable contracts
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: devcontrol/src
+        shell: bash
+        run: |
+          set -o pipefail
+          : > /tmp/modelrig-ci-test.log
+          python3 -m unittest discover -s devcontrol/tests -p 'test_*.py' -v 2>&1 | tee -a /tmp/modelrig-ci-test.log
 
       - name: PowerShell syntax gate
         shell: pwsh
@@ -73,7 +81,6 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          : > /tmp/modelrig-ci-test.log
           status=0
           for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
             [ -e "$f" ] || continue
@@ -98,11 +105,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # The appliance code (updater swap/recovery/journal, supervisor rotation,
-  # heartbeat) leans on file semantics that DIFFER on Windows -- os.Rename won't
-  # overwrite, exes lock while running -- so these Go tests also run on a real
-  # Windows runner, not only Linux. Scoped to the appliance packages to keep the
-  # job fast; the Linux job above remains the full suite.
   test-windows-appliance:
     runs-on: windows-latest
     steps:
@@ -115,3 +117,44 @@ jobs:
       - name: Appliance Go tests on real Windows
         working-directory: backend
         run: go test ./cmd/modelrig-updater/ ./cmd/modelrig-supervisor/ ./internal/heartbeat/
+
+  # Job Objects and AppContainer Package-SID access checks are Windows kernel
+  # properties; Linux mocks cannot prove suspended assignment, memory/process
+  # limits, an actual AppContainer token or OS-denied workspace escapes. Keep
+  # those proofs in the same reusable gate used by PRs and releases. The support
+  # suites live outside the portable root tests/*.py inventory and are wired
+  # explicitly here. Native fixtures are compiled by their tests with the hosted
+  # MSVC toolchain so no second helper/runtime can drift beside them.
+  test-windows-tool-isolation:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install worker deps
+        run: pip install -r worker/requirements.txt
+
+      - name: Native Job Object, AppContainer, captured catalog lease and ProcessExecutor tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:PYTHONPATH = "worker;devcontrol/src"
+          python tests/support/windows_job_contract.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/support/windows_job_close_contract.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/support/windows_bounded_subprocess_contract.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/support/windows_restricted_contract.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/support/windows_tier_a_environment_contract.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/support/windows_catalog_tier_a_contract.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/support/windows_tier_a_receipt_contract.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/worker_toolhost.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

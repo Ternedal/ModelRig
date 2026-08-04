@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.invalid/schemas/development-publisher-dry-run-receipt-v1.schema.json",
+  "title": "Publisher dry-run receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "signed_request",
+    "signed_request_sha256",
+    "request_sha256",
+    "readiness_sha256",
+    "task_sha256",
+    "repository",
+    "base_sha",
+    "head_branch",
+    "staged_patch_sha256",
+    "publisher_actor_id",
+    "publisher_key_id",
+    "operations",
+    "publisher_policy_sha256",
+    "dry_run",
+    "executed",
+    "repository_write_performed",
+    "network_write_performed",
+    "commit_created",
+    "branch_created",
+    "branch_pushed",
+    "pull_request_created",
+    "ready_for_review",
+    "reviewers_requested",
+    "merged",
+    "released",
+    "deployed",
+    "merge_authority"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-development-publisher-dry-run-receipt/v1"},
+    "signed_request": {"type": "object"},
+    "signed_request_sha256": {"$ref": "#/$defs/sha256"},
+    "request_sha256": {"$ref": "#/$defs/sha256"},
+    "readiness_sha256": {"$ref": "#/$defs/sha256"},
+    "task_sha256": {"$ref": "#/$defs/sha256"},
+    "repository": {"type": "string", "pattern": "^[^/\\s]+/[^/\\s]+$", "maxLength": 200},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "head_branch": {"type": "string", "minLength": 1, "maxLength": 200},
+    "staged_patch_sha256": {"$ref": "#/$defs/sha256"},
+    "publisher_actor_id": {"$ref": "#/$defs/actor"},
+    "publisher_key_id": {"$ref": "#/$defs/identifier"},
+    "operations": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {"$ref": "#/$defs/operation"}
+    },
+    "publisher_policy_sha256": {"$ref": "#/$defs/sha256"},
+    "dry_run": {"const": true},
+    "executed": {"const": false},
+    "repository_write_performed": {"const": false},
+    "network_write_performed": {"const": false},
+    "commit_created": {"const": false},
+    "branch_created": {"const": false},
+    "branch_pushed": {"const": false},
+    "pull_request_created": {"const": false},
+    "ready_for_review": {"const": false},
+    "reviewers_requested": {"const": false},
+    "merged": {"const": false},
+    "released": {"const": false},
+    "deployed": {"const": false},
+    "merge_authority": {"const": "human"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "actor": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@-]{1,127}$"},
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"},
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value"],
+      "properties": {
+        "name": {"$ref": "#/$defs/identifier"},
+        "value": {"type": "string", "minLength": 1, "maxLength": 120000}
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "operation",
+        "parameters",
+        "repository_write_required",
+        "network_write_required",
+        "status"
+      ],
+      "properties": {
+        "sequence": {"type": "integer", "minimum": 1, "maximum": 5},
+        "operation": {
+          "enum": [
+            "verify_exact_readiness",
+            "materialize_exact_candidate_commit",
+            "create_proposed_branch",
+            "push_proposed_branch",
+            "create_draft_pull_request"
+          ]
+        },
+        "parameters": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/parameter"}},
+        "repository_write_required": {"type": "boolean"},
+        "network_write_required": {"type": "boolean"},
+        "status": {"const": "planned_not_executed"}
+      }
+    }
+  }
+}
