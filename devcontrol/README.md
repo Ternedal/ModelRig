@@ -2,17 +2,20 @@
 
 This directory contains the dormant, fail-closed foundation for controlled
 self-development in ModelRig. It is deliberately **not** connected to ordinary
-ModelRig tool registration, Agent 3, Agent 4, GitHub writes, merge, release or
+ModelRig tool registration, Agent 3, Agent 4, GitHub publication, merge, release or
 production activation.
 
-The implementation currently reaches **Slice 10K**. One exact task can pass through
+The implementation currently reaches **Slice 10L**. One exact task can pass through
 reviewed command authority, fresh signed physical Windows evidence, native Tier-A
 containment, deterministic runtime closure, Git-aware execution evidence,
-independent semantic approval, an authenticated draft-PR readiness proposal,
-a separately signed publisher intent and finally a time-bounded one-time
-publisher authorization with durable replay protection. The chain still contains
-no GitHub credential, Git transport, network-write adapter or repository mutation
-surface.
+independent semantic approval, authenticated draft-PR readiness, signed publisher
+intent, a time-bounded one-time authorization and finally local-only creation of
+the exact candidate commit and proposed branch inside a new isolated bare Git
+repository.
+
+The chain still contains no GitHub credential, network-write adapter, branch push,
+pull-request write, reviewer request, ready-for-review, merge, release, settings or
+deployment authority.
 
 ## Implemented authority layers
 
@@ -49,8 +52,7 @@ surface.
 
 ### Slices 7–9 — native containment and verified-only execution
 
-- child process created suspended and assigned to a kill-on-close Job Object before
-  resume;
+- child created suspended and assigned to a kill-on-close Job Object before resume;
 - process-memory and active-process limits enforced by Windows;
 - deterministic zero-capability AppContainer with approved-workspace access only;
 - no network capability and a positive-list environment;
@@ -147,6 +149,8 @@ component.
 A valid signature proves artifact and actor-key binding, not semantic competence.
 A separately operated human or model reviewer must actually perform the review.
 
+See `SEMANTIC_REVIEW.md`.
+
 ### Slice 10I — authenticated draft-PR readiness proposal
 
 - embeds the complete task, exact Slice 10H request and signed approval verdict;
@@ -170,16 +174,13 @@ See `DRAFT_PR_READINESS.md`.
 - publisher actor must differ from developer and semantic reviewer;
 - publisher-only domain-separated HMAC signature binds the exact request;
 - the publisher signing key is not a GitHub credential;
-- deterministic dry-run plan contains exactly five operations:
-  1. verify the exact readiness artifact;
-  2. materialize the exact candidate commit;
-  3. create the deterministic proposed branch;
-  4. push the proposed branch; and
-  5. create the exact draft pull request;
+- deterministic dry-run plan describes readiness verification, candidate-commit
+  materialization, local branch creation, future branch push and future exact draft
+  pull-request creation;
 - every operation remains `planned_not_executed`;
-- all repository/network/result flags must remain false; and
+- all repository/network/result flags remain false; and
 - no Git library, GitHub client, remote host, token, HTTP request or subprocess Git
-  command exists in the module.
+  command exists in the Slice 10J module.
 
 A publisher signature proves key possession and exact intent binding. It does not
 prove that a biological human personally initiated the request.
@@ -211,12 +212,52 @@ See `PUBLISHER_DRY_RUN.md`.
 - every observation/write/commit/branch/push/PR/review/merge/release/deployment
   result remains false.
 
-The remote numeric ID is not discovered or network-validated by this module. The
+The remote numeric ID is trusted configuration rather than a network lookup. The
 issuer key, repository identity and replay-ledger directory are external trusted
-operating boundaries. The module does not claim protection against a separate
-administrator, kernel component or an uncoordinated multi-host ledger.
+operating boundaries.
 
 See `PUBLISHER_AUTHORIZATION.md`.
+
+### Slice 10L — local candidate commit and proposed branch
+
+- `kaliv-development-local-candidate-materialization-receipt/v1` embeds the complete
+  verified Slice 10K preflight receipt;
+- authorization is reverified at the explicit materialization timestamp;
+- `TrustedLocalGit` requires one absolute regular link-free Git executable whose
+  complete bytes match an operator-supplied SHA-256;
+- Git is rehashed before and after every fixed command;
+- HOME, XDG/global config, hooks and templates are isolated and empty;
+- terminal prompting, credential-manager interaction, replacement objects,
+  automatic maintenance and signing are disabled;
+- all Git protocols are denied except local `file://` import;
+- the source must be a standalone non-shallow SHA-1 worktree or bare repository
+  containing the exact authorized base commit;
+- linked worktrees, `commondir`, object alternates and linked object storage fail
+  closed;
+- refs, HEAD/status and raw base commit/tree objects are SHA-256-bound before and
+  after materialization, proving the source remained unchanged;
+- one new bare SHA-1 repository is created in a fresh transaction directory;
+- only the exact base is imported, with no tags, remote configuration, tracking
+  refs or submodule recursion;
+- the exact authenticated binary patch is applied to an isolated temporary index;
+- parent-to-tree diff bytes must reproduce the authenticated patch exactly;
+- raw tree and commit objects are independently SHA-256- and Git-SHA-bound;
+- author, committer, message and timestamp are deterministic from the exact
+  publisher request and authorization lease;
+- the only created ref is the exact deterministic proposed local branch;
+- symbolic HEAD points to that branch and no remote may exist;
+- the isolated transaction is published create-once with an exact layout and
+  canonical `receipt.json`; and
+- later verification rechecks the complete authority chain, trusted Git bytes,
+  source state, transaction layout, sole ref, no-remote boundary, raw objects and
+  exact patch reproduction.
+
+Slice 10L creates real Git objects locally but does not publish them. The trusted
+Git executable, source repository and materialization root remain external
+operating boundaries. The module does not claim protection against a separate
+administrator or kernel component.
+
+See `LOCAL_CANDIDATE_MATERIALIZATION.md`.
 
 ## Reviewed command authority
 
@@ -235,8 +276,9 @@ The default ModelRig catalog contains:
 
 Slice 10E uses a separate isolated catalog rather than silently changing this
 list. Slice 10G requires a one-command task. Slices 10H–10K consume completed
-evidence only: they cannot add commands, launch execution, provision credentials,
-materialize commits, publish branches or create pull requests.
+evidence only. Slice 10L may create the exact authorized commit and branch only in
+its isolated local bare repository; it cannot add command authority, launch Tier-A
+execution, provision credentials or publish anything remotely.
 
 ## Physical evidence operator flow
 
@@ -281,22 +323,23 @@ The control plane still cannot:
 - prove that publisher or authorization keys were used by biological humans;
 - provision, store, rotate, revoke or use production reviewer, publisher,
   authorization or GitHub credential material;
-- discover or network-validate the configured remote repository identity;
+- discover, clone or network-validate the configured remote repository;
 - provide distributed replay consensus across uncoordinated hosts;
-- protect trusted key/ledger boundaries against a separate administrator or kernel
-  component;
-- materialize a candidate commit or branch;
-- create a Git remote or perform a network write;
-- push a branch or create/update a pull request;
+- protect trusted key, ledger, Git executable, source-repository or materialization
+  boundaries against a separate administrator or kernel component;
+- configure a Git remote or perform a network write;
+- push the locally materialized branch;
+- create or update a pull request;
 - request reviewers or mark a pull request ready for review;
 - merge, release, change settings or deploy; or
 - activate unattended self-development.
 
 No registered ModelRig tool calls the Tier-A bridge, receipt orchestrator,
-semantic-review boundary, readiness builder, publisher dry-run boundary or
-publisher-authorization boundary. Hosted CI uses synthetic evidence to prove
-software contracts and does not replace the selected rig's physical campaign,
-independent semantic review or production key custody.
+semantic-review boundary, readiness builder, publisher dry-run boundary,
+publisher-authorization boundary or local-candidate materializer. Hosted CI uses
+synthetic and local Git evidence to prove software contracts and does not replace
+the selected rig's physical campaign, independent semantic review or production
+key/tool custody.
 
 ## Run tests
 
@@ -305,12 +348,13 @@ cd devcontrol
 python -m unittest discover -s tests -v
 ```
 
-The portable suite proves the Slice 10H–10K artifact, signature, actor-separation,
-tamper rejection, deterministic proposal/plan, time-window, least-privilege,
-atomic replay and no-write contracts. The native Windows gate separately proves
-Job Object, AppContainer, environment, signed physical evidence, exact runtime
-closure, lifetime immutability, strict handle inheritance, bounded output, timeout
-cleanup and the real Git-aware Tier-A receipt.
+The portable suite proves the Slice 10H–10L artifact, signature, actor-separation,
+tamper rejection, deterministic proposal/plan/commit, time-window,
+least-privilege, atomic replay, exact local Git object and no-remote/no-write
+contracts. The native Windows gate separately proves Job Object, AppContainer,
+environment, signed physical evidence, exact runtime closure, lifetime
+immutability, strict handle inheritance, bounded output, timeout cleanup and the
+real Git-aware Tier-A receipt.
 
 ## Validate a task
 
