@@ -80,13 +80,29 @@ def green_runs():
     }
 
 
+def free_tag_api(tag_sha=None):
+    """Green software checks; vVERSION either unused (404) or owned by tag_sha."""
+    import urllib.error as _ue
+
+    def api(url, _token):
+        if "/git/ref/tags/" in url:
+            if tag_sha is None:
+                raise _ue.HTTPError(url, 404, "not found", {}, None)
+            return {"object": {"type": "commit", "sha": tag_sha}}
+        if "/actions/runs" in url:
+            return green_runs()
+        raise AssertionError(f"uventet API-url i testen: {url}")
+
+    return api
+
+
 repo, main_sha, candidate_sha = fixture()
 now = datetime(2026, 7, 20, 20, 0, tzinfo=timezone.utc)
 receipt = freeze.create_receipt(
     candidate_sha,
     root=repo,
     token="test-token",
-    api=lambda _url, _token: green_runs(),
+    api=free_tag_api(),
     now=now,
 )
 check(receipt["candidate"]["git_sha"] == candidate_sha, "freeze pins exact expected SHA")
@@ -110,12 +126,39 @@ try:
         "a" * 40,
         root=repo,
         token="test-token",
-        api=lambda _url, _token: green_runs(),
+        api=free_tag_api(),
         now=now,
     )
     check(False, "wrong expected SHA must fail")
 except freeze.CandidateFreezeError as exc:
     check("does not equal expected" in str(exc), "wrong expected SHA fails by name")
+
+# F-1901: a candidate whose VERSION is already a shipped tag cannot be promoted.
+# Missing this check cost a full physical Stage A run on 2026-08-04: the campaign
+# passed 7/7 on a version whose tag was published a week earlier.
+try:
+    freeze.create_receipt(
+        candidate_sha,
+        root=repo,
+        token="test-token",
+        api=free_tag_api(tag_sha="f" * 40),
+        now=now,
+    )
+    check(False, "a VERSION already tagged elsewhere must fail the freeze")
+except freeze.CandidateFreezeError as exc:
+    check("already tagged" in str(exc) and "bump VERSION" in str(exc),
+          "a taken VERSION fails closed and names the fix")
+
+# The same tag pointing AT this candidate is the post-promotion state, not a clash.
+receipt_after_tag = freeze.create_receipt(
+    candidate_sha,
+    root=repo,
+    token="test-token",
+    api=free_tag_api(tag_sha=candidate_sha),
+    now=now,
+)
+check(receipt_after_tag["gate"]["passed"] is True,
+      "a tag pointing at this same candidate is not a conflict")
 
 missing = green_runs()["workflow_runs"][:-1]
 try:
