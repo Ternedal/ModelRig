@@ -176,7 +176,7 @@ def _expected_body(
         "> This canonical artifact is evidence for a **draft pull-request proposal only**. "
         "It does not push a branch, create or update a pull request, request reviewers, "
         "merge, release, change settings, deploy or activate runtime authority. A human "
-        "retains all merge authority.\n"
+        "retains all merge authority."
     )
     return _clean_text(body, name="proposal body", maximum=_MAX_BODY_BYTES)
 
