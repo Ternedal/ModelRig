@@ -15,8 +15,10 @@ for _name, _value in vars(_core).items():
 
 from .durable_publication import DurablePublicationError, create_once_file
 
-
-_original_tier_a_toolhost_sha256 = tier_a_toolhost_sha256
+SemanticReviewError = _core.SemanticReviewError
+SemanticReviewRequest = _core.SemanticReviewRequest
+SignedSemanticReviewVerdict = _core.SignedSemanticReviewVerdict
+tier_a_toolhost_sha256 = _core.tier_a_toolhost_sha256
 
 
 def _tier_a_toolhost_sha256_proxy(*args: Any, **kwargs: Any) -> str:
