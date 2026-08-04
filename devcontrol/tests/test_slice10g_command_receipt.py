@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -20,6 +21,11 @@ from kaliv_dev_control.tier_a_command_receipt import (
 )
 from kaliv_dev_control.tier_a_execution import TierAExecutionError, TierAExecutionTimeout
 from kaliv_dev_control.tier_a_result import TierAExecutionResult, TierAOutputStream
+from kaliv_dev_control.trusted_git_runtime import (
+    TrustedGitRunner,
+    TrustedGitRuntimeError,
+    TrustedGitRuntimeEvidence,
+)
 
 COMMAND_ID = "modelrig.receipt.check"
 KEY_ID = "slice-10g-test-key"
@@ -37,6 +43,62 @@ def git(root: Path, *args: str) -> str:
     if completed.returncode != 0:
         raise AssertionError(completed.stderr)
     return completed.stdout.strip()
+
+
+def git_runtime_evidence() -> TrustedGitRuntimeEvidence:
+    return TrustedGitRuntimeEvidence(
+        runtime_manifest_sha256="8" * 64,
+        runtime_file_count=3,
+        runtime_bytes=4096,
+        executable_sha256="9" * 64,
+        version="git version test-fixture",
+        exec_path_relative_path="libexec/git-core",
+        path_relative_directories=("bin", "libexec/git-core"),
+        library_relative_directories=("lib",),
+    )
+
+
+class SystemGitRunner(TrustedGitRunner):
+    """Test double with the production runner type and absolute system Git."""
+
+    def __init__(self) -> None:
+        executable = shutil.which("git")
+        if executable is None:
+            raise unittest.SkipTest("Git executable is unavailable")
+        self.executable = str(Path(executable).resolve())
+        self._evidence = git_runtime_evidence()
+
+    def run(
+        self,
+        args,
+        *,
+        cwd,
+        stdin=None,
+        maximum=64 * 1024 * 1024,
+        timeout_seconds=120,
+        expected_codes=(0,),
+        extra_env=None,
+    ):
+        completed = subprocess.run(
+            [self.executable, *args],
+            cwd=cwd,
+            input=stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_seconds,
+            check=False,
+            shell=False,
+        )
+        if len(completed.stdout) + len(completed.stderr) > maximum:
+            raise TrustedGitRuntimeError("test Git output exceeded its bound")
+        if completed.returncode not in expected_codes:
+            raise TrustedGitRuntimeError(
+                completed.stderr.decode("utf-8", errors="replace")
+            )
+        return completed.stdout
+
+    def evidence(self) -> TrustedGitRuntimeEvidence:
+        return self._evidence
 
 
 def make_repo(root: Path) -> tuple[Path, str]:
@@ -137,13 +199,14 @@ def result(task: DevelopmentTask, *, returncode: int = 0, timed_out: bool = Fals
     )
 
 
-def run_receipt(task, workspace, signed):
+def run_receipt(task, workspace, signed, *, git_runner=None):
     return run_single_verified_tier_a_command_with_receipt(
         task,
         object(),
         object(),
         object(),
         object(),
+        git_runner=git_runner or SystemGitRunner(),
         signed_runtime_closure=signed,
         runtime_closure_verifier=object(),
         trusted_runtime_root=workspace.parent / "trusted",
@@ -182,6 +245,7 @@ class TierACommandReceiptTests(unittest.TestCase):
 
             self.assertEqual(mocked.call_count, 1)
             self.assertTrue(receipt.passed)
+            self.assertEqual(receipt.git_runtime.sha256, git_runtime_evidence().sha256)
             self.assertTrue(receipt.workspace_unchanged)
             self.assertFalse(receipt.workspace_reset_performed)
             self.assertGreater(receipt.workspace_before.staged_patch_bytes, 0)
@@ -315,6 +379,56 @@ class TierACommandReceiptTests(unittest.TestCase):
                 "base\n",
             )
             self.assertEqual(git(workspace, "status", "--short"), "")
+
+    def test_requires_trusted_git_and_detects_runtime_identity_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace, base_sha = make_repo(Path(directory))
+            task = make_task(base_sha)
+            signed = make_closure(task)
+            with self.assertRaisesRegex(TierACommandReceiptError, "trusted Git"):
+                run_single_verified_tier_a_command_with_receipt(
+                    task,
+                    object(),
+                    object(),
+                    object(),
+                    object(),
+                    git_runner=object(),
+                    signed_runtime_closure=signed,
+                    runtime_closure_verifier=object(),
+                    trusted_runtime_root=workspace.parent / "trusted",
+                    workspace_root=workspace,
+                    control_plane_root=workspace.parent / "control",
+                )
+
+            runner = SystemGitRunner()
+            first = runner.evidence()
+            drift = TrustedGitRuntimeEvidence(
+                runtime_manifest_sha256="a" * 64,
+                runtime_file_count=first.runtime_file_count,
+                runtime_bytes=first.runtime_bytes,
+                executable_sha256=first.executable_sha256,
+                version=first.version,
+                exec_path_relative_path=first.exec_path_relative_path,
+                path_relative_directories=first.path_relative_directories,
+                library_relative_directories=first.library_relative_directories,
+            )
+            calls = 0
+
+            def changing_evidence():
+                nonlocal calls
+                calls += 1
+                return first if calls == 1 else drift
+
+            runner.evidence = changing_evidence
+            with patch(
+                "kaliv_dev_control.tier_a_command_receipt.run_verified_tier_a_command",
+                return_value=result(task),
+            ):
+                with self.assertRaisesRegex(
+                    TierACommandReceiptError,
+                    "identity changed",
+                ):
+                    run_receipt(task, workspace, signed, git_runner=runner)
 
 
 if __name__ == "__main__":
