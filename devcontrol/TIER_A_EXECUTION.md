@@ -1,10 +1,9 @@
 # Tier-A execution bridge
 
-The Development Control Plane is dormant and fail closed. Slices 9 through 10F
+The Development Control Plane is dormant and fail closed. Slices 9 through 10G
 connect fresh signed Windows-isolation evidence to one private AppContainer launch
-path. The path now binds an exact signed runtime closure, an exact
-workspace-relative working directory, bounded native output and a Windows lifetime
-guard that holds the staged closure immutable until the complete Job Object ends.
+path, protect the exact runtime closure for the complete Job Object lifetime and
+join the resulting native evidence to deterministic Git before/after/reset state.
 
 Nothing here registers a ModelRig tool, activates Agent 3 or Agent 4, writes to
 GitHub, merges, releases or deploys code.
@@ -39,7 +38,7 @@ A command can cross the Windows process boundary only through this complete chai
 11. Staging emits
     `kaliv-development-runtime-closure-staging-receipt/v1`; the staged tree is
     rejected if a file is missing, extra, linked, hardlinked or changed.
-12. A new one-command leased registry changes only `argv[0]` to the verified staged
+12. A one-command leased registry changes only `argv[0]` to the verified staged
     entrypoint. Fixed arguments, cwd, timeout, environment and lease remain exact.
 13. `kaliv-development-tier-a-launch-plan/v3` binds manifest, signature, staging
     receipt, cwd identity, workspace, executable, timeout, output budget and the
@@ -58,7 +57,10 @@ A command can cross the Windows process boundary only through this complete chai
     only within the signed output budget. Execution emits
     `kaliv-development-tier-a-execution-result/v1`.
 19. Only after process-tree completion are the original closure DACLs restored and
-    the deny-write/delete-sharing handles closed.
+    deny-write/delete-sharing handles closed.
+20. The Git-aware receipt orchestrator removes deterministic runtime staging,
+    captures the workspace after state and resets any mutation to the exact task
+    base before it can emit a complete command receipt.
 
 A serialized launch plan is review evidence, not reusable execution authority.
 Plans lacking a verified closure remain serializable for inspection but the only
@@ -81,6 +83,12 @@ Staging is deterministic and no-overwrite. Files are hashed while copied, flushe
 fsynced and atomically published. Existing different bytes fail closed. A complete
 post-stage walk rejects unmanifested entries. Destination files must have exactly
 one hardlink and are rehashed again immediately before process creation.
+
+On Unix, staged files use mode `0555`. On Windows, the DOS read-only attribute is
+not treated as a security primitive because the same user can clear it and it
+prevents deterministic cleanup after execution. Windows staging therefore remains
+executable and removable; actual lifetime immutability is supplied by the
+protected DACL and deny-write/delete-sharing handles acquired before launch.
 
 Slice 10E adds a reviewed standalone Go implementation of
 `modelrig.version.check` plus an isolated one-command catalog and an unsigned
@@ -105,6 +113,39 @@ lock. Original DACLs are restored only after Job Object closure. See
 
 The boundary does not claim resistance against a separate administrator or kernel
 component with takeover, backup/restore or direct-volume privileges.
+
+## Git-aware command receipt
+
+Slice 10G adds `run_single_verified_tier_a_command_with_receipt`. It is an
+orchestration layer, not a process executor. It has no `command_id` or arbitrary
+argument parameter and accepts only a task with one exact allowed/required command.
+It invokes only `run_verified_tier_a_command`.
+
+Before execution, the workspace must be an exact link-free Git worktree at the
+task base. A staged candidate patch may exist; unstaged and untracked input is
+rejected. Fixed Git commands produce
+`kaliv-development-git-workspace-snapshot/v1`, binding:
+
+- `HEAD` SHA;
+- staged binary/full-index diff SHA-256 and byte count;
+- unstaged binary/full-index diff SHA-256 and byte count;
+- NUL-delimited untracked-path SHA-256 and count.
+
+External diff, text conversion, rename detection, shell execution and unbounded
+Git output are disabled.
+
+After the native process tree and runtime guard are fully closed, deterministic
+runtime staging is removed and the after snapshot is captured. Any difference
+from the before snapshot makes the receipt non-passing and triggers fixed
+`git reset --hard <task.base_sha>` plus `git clean -fd`. A final reset snapshot must
+prove exact-base `HEAD`, zero staged/unstaged patch bytes and zero untracked paths.
+Reset ambiguity fails closed.
+
+`kaliv-development-tier-a-command-receipt/v1` embeds the complete native execution
+result, before/after snapshots, optional reset snapshot and strict consistency
+flags. It passes only when the native result passes, Git state is unchanged and no
+reset was required. A timeout retains complete output and Git evidence but remains
+non-passing. See `TIER_A_COMMAND_RECEIPT.md`.
 
 ## Working-directory authority
 
@@ -144,29 +185,42 @@ held through the same timeout and cleanup path.
 
 ## Code identity
 
-`tier_a_toolhost_sha256` v5 covers all modules that can issue, transform, stage,
-lifetime-lock, launch or report Tier-A authority, including the Windows runtime
-guard, runtime-closure model, verifier, stager, launch-plan v3, cwd binding, output
-capture and public facade. Every report issued for authority bundle v4 or earlier
-is therefore invalid.
+`tier_a_toolhost_sha256` v6 covers all modules that can issue, transform, stage,
+lifetime-lock, launch, join Git evidence or report Tier-A authority, including the
+Windows runtime guard, command-receipt orchestrator, runtime-closure model,
+verifier, stager, launch-plan v3, cwd binding, output capture and public facade.
+Every report issued for authority bundle v5 or earlier is therefore invalid.
+
+## Proofs
+
+Portable tests cover canonical snapshots and receipts, staged-patch preservation,
+mutation/reset behavior, timeout evidence, multi-command rejection, dirty-input
+rejection and reset after execution error.
+
+The native Windows gate creates a real temporary Git repository, compiles the
+static helper, issues synthetic signed eleven-probe evidence and invokes the
+receipt orchestrator through the actual AppContainer, Job Object, output capture
+and lifetime guard. It proves the staged patch is unchanged, deterministic runtime
+staging is removed before the after snapshot and the receipt round-trips
+canonically.
+
+Synthetic CI evidence verifies software wiring only and does not replace an
+independent physical campaign on the selected host.
 
 ## Current limitations
 
-- No registered ModelRig tool calls `run_verified_tier_a_command`.
-- Hosted Windows CI uses synthetic signed evidence; it does not replace the
-  selected rig's independent eleven-probe I0b campaign.
+- No registered ModelRig tool calls the Tier-A runtime or receipt orchestrator.
+- The selected host still needs a fresh independent I0b campaign for authority
+  bundle v6.
 - The closure is exact-file based, not yet an automatically discovered transitive
   PE/DLL, Python or Go runtime closure.
 - The lifetime guard proves the ordinary unprivileged operator/AppContainer
   boundary, not resistance to a separate administrator or kernel component.
-- `TierAExecutionResult` is not a complete development `CommandReceipt`; Git
-  before/after identity and reset evidence remain owned by the separate command
-  executor.
+- Receipt evidence is structural; independent semantic AI review is not yet
+  implemented.
 - No branch push, pull-request write, merge, release, settings, feature-switch or
   deployment authority is granted.
 
-The next safe unit is a single Git-aware orchestration surface that snapshots the
-workspace, invokes only `run_verified_tier_a_command`, verifies the workspace again,
-resets any mutation and emits a complete deterministic `CommandReceipt`. It must
-not introduce another process executor or broaden catalog, GitHub or merge
-authority.
+The next safe unit should add independent semantic review over a completed receipt
+and the already staged patch. It must consume immutable evidence only, must not
+execute commands, mutate the workspace or gain GitHub/merge/release authority.
