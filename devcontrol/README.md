@@ -5,12 +5,14 @@ self-development in ModelRig. It is deliberately **not** connected to ordinary
 ModelRig tool registration, Agent 3, Agent 4, GitHub writes, merge, release or
 production activation.
 
-The implementation currently reaches **Slice 10G**. A reviewed single-command task
+The implementation currently reaches **Slice 10H**. A reviewed single-command task
 can enter the Windows Tier-A boundary only after fresh signed physical evidence, a
 command-specific signed exact-file runtime closure, deterministic workspace
 staging, exact cwd validation and bounded native output capture. The staged runtime
-is held immutable until the complete Job Object ends, and the resulting execution
-evidence is joined to canonical Git before/after/reset evidence.
+is held immutable until the complete Job Object ends, the resulting execution
+evidence is joined to canonical Git before/after/reset evidence, and one exact
+passing patch/receipt pair can be handed to a separate authenticated semantic
+review boundary.
 
 ## Implemented authority layers
 
@@ -21,7 +23,7 @@ evidence is joined to canonical Git before/after/reset evidence.
 - detached exact-SHA workspaces, scoped reads/search and bounded unified patches;
 - fixed command templates and canonical command receipts;
 - campaign state machine with hash-chained evidence and terminal failure states;
-- persisted independent review request/verdict contracts;
+- persisted independent structural review request/verdict contracts;
 - deterministic draft-PR proposals only; merge authority remains human;
 - durable controlled storage, exclusive locks and stale-writer rejection.
 
@@ -169,9 +171,35 @@ See `VERSION_CHECK_CLOSURE.md` for the isolated catalog and operator flow.
 - portable and real-Windows tests prove staged-patch preservation, mutation/reset,
   timeout evidence, canonical reload and the actual AppContainer/Job Object path.
 
+### Slice 10H — authenticated semantic-review evidence
+
+- a canonical offline request embeds the exact staged patch bytes, full passing
+  Slice 10G receipt, task criteria, fixed review-policy hash and current v6
+  execution-authority hash;
+- request construction exposes no workspace, command, argv, catalog or toolchain
+  selection surface;
+- the receipt must prove identical before/after snapshots, no reset and passing
+  Tier-A execution;
+- patch hash and size must match both Git snapshots exactly;
+- structured verdicts assess every acceptance criterion in order and record
+  bounded findings with explicit severity;
+- approval requires every criterion satisfied and zero findings;
+- developer and reviewer actors must differ;
+- reviewer-only HMAC keys are bound to exact reviewer actors;
+- verification rejects task, patch, receipt, policy, execution-authority, actor or
+  signature mismatch;
+- canonical request/verdict files are bounded, link-free and create-once;
+- the module is outside the Tier-A v6 execution bundle and cannot launch commands,
+  reset Git or write to GitHub.
+
+Slice 10H supplies the trustable artifact boundary, not a built-in AI reviewer.
+A separately operated human or model reviewer must actually analyze the canonical
+request and produce the structured verdict.
+
 See `TIER_A_EXECUTION.md`, `RUNTIME_STAGING.md`,
-`RUNTIME_LIFETIME_GUARD.md` and `TIER_A_COMMAND_RECEIPT.md` for the complete
-authority, filesystem and receipt rules.
+`RUNTIME_LIFETIME_GUARD.md`, `TIER_A_COMMAND_RECEIPT.md` and
+`SEMANTIC_REVIEW.md` for the complete authority, filesystem, receipt and review
+rules.
 
 ## Reviewed command authority
 
@@ -190,8 +218,9 @@ The default ModelRig catalog contains:
 
 Slice 10E's standalone version checker uses a separate isolated catalog rather
 than changing this list. Slice 10G further requires a one-command task before its
-Git-aware orchestration surface can run. Optional commands remain deferred rather
-than added ambiguously.
+Git-aware orchestration surface can run. Slice 10H consumes only completed evidence
+and cannot add or select commands. Optional commands remain deferred rather than
+added ambiguously.
 
 ## Physical evidence operator flow
 
@@ -222,7 +251,8 @@ PYTHONPATH=src python -m kaliv_dev_control verify-physical-report \
 
 HMAC is suitable only while the signing key is protected by the separate operator
 account/process boundary required by I0b. A key copied into the agent workspace
-invalidates the independence claim.
+invalidates the independence claim. The same separation rule applies to the
+semantic-review key: it must remain unavailable to the developer/execution side.
 
 ## Explicit remaining boundaries
 
@@ -233,14 +263,16 @@ The control plane still cannot:
 - manufacture a genuine I0b result without physical probes;
 - automatically discover a transitive PE/DLL, Python or Go runtime closure;
 - claim lifetime protection against a separate administrator or kernel component;
-- perform independent semantic AI review of code or command output;
+- perform semantic analysis without a separately operated reviewer;
+- provision, rotate or revoke reviewer keys;
 - push branches or create/update/merge pull requests from the runtime;
 - alter repository settings, feature switches or production deployment;
 - merge, release or activate its own work.
 
-No registered ModelRig tool calls the Tier-A bridge or receipt orchestrator. Hosted
-Windows CI uses synthetic signed evidence to prove software wiring and does not
-replace the selected rig's physical eleven-probe campaign for authority bundle v6.
+No registered ModelRig tool calls the Tier-A bridge, receipt orchestrator or
+semantic-review boundary. Hosted CI uses synthetic evidence to prove software
+wiring and does not replace the selected rig's physical eleven-probe campaign or a
+real independent semantic review.
 
 ## Run tests
 
@@ -249,11 +281,12 @@ cd devcontrol
 python -m unittest discover -s tests -v
 ```
 
-The portable suite is included in ModelRig's shared PR/release gate. The native
-Windows gate separately proves Job Object, AppContainer, environment, signed
-physical evidence, exact runtime closure, lifetime immutability, nested cwd,
-strict handle inheritance, bounded output, timeout cleanup and a real Git-aware
-Tier-A receipt.
+The portable suite is included in ModelRig's shared PR/release gate. It proves the
+10H artifact, signature, actor-separation and tamper-rejection contracts. The
+native Windows gate separately proves Job Object, AppContainer, environment,
+signed physical evidence, exact runtime closure, lifetime immutability, nested
+cwd, strict handle inheritance, bounded output, timeout cleanup and a real
+Git-aware Tier-A receipt.
 
 ## Validate a task
 
