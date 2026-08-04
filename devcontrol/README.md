@@ -5,72 +5,59 @@ self-development in ModelRig. It is deliberately **not** connected to ordinary
 ModelRig tool registration, Agent 3, Agent 4, GitHub writes, merge, release or
 production activation.
 
-The implementation currently reaches **Slice 10I**. A reviewed single-command task
-can enter the Windows Tier-A boundary only after fresh signed physical evidence, a
-command-specific signed exact-file runtime closure, deterministic workspace
-staging, exact cwd validation and bounded native output capture. The staged runtime
-is held immutable until the complete Job Object ends, the resulting execution
-evidence is joined to canonical Git before/after/reset evidence, one exact passing
-patch/receipt pair can be handed to a separate authenticated semantic review
-boundary, and an approved candidate can become a deterministic offline draft-PR
-readiness proposal without gaining GitHub write authority.
+The implementation currently reaches **Slice 10K**. One exact task can pass through
+reviewed command authority, fresh signed physical Windows evidence, native Tier-A
+containment, deterministic runtime closure, Git-aware execution evidence,
+independent semantic approval, an authenticated draft-PR readiness proposal,
+a separately signed publisher intent and finally a time-bounded one-time
+publisher authorization with durable replay protection. The chain still contains
+no GitHub credential, Git transport, network-write adapter or repository mutation
+surface.
 
 ## Implemented authority layers
 
-### Slices 1–4 — task, workspace, campaign and review
+### Slices 1–4 — task, workspace, campaign and structural review
 
-- immutable `kaliv-development-task/v1` with exact base SHA, path policy and
-  resource budgets;
+- immutable `kaliv-development-task/v1` contracts with exact base SHA, path policy
+  and resource budgets;
 - detached exact-SHA workspaces, scoped reads/search and bounded unified patches;
 - fixed command templates and canonical command receipts;
-- campaign state machine with hash-chained evidence and terminal failure states;
-- persisted independent structural review request/verdict contracts;
-- deterministic draft-PR proposals only; merge authority remains human;
-- durable controlled storage, exclusive locks and stale-writer rejection.
+- hash-chained campaign state with terminal failure modes;
+- independent structural review request/verdict contracts;
+- deterministic draft-PR proposal data only;
+- durable controlled storage, exclusive locks and stale-writer rejection; and
+- human-only merge authority.
 
 ### Slice 5 — catalog and read-only GitHub boundary
 
-- immutable command catalog and operator toolchain bindings;
+- immutable command catalog and independently hash-bound toolchain;
 - trusted tool IDs instead of caller-supplied executables;
-- exact task, base, catalog and toolchain identities;
-- network mode fixed to `deny` for project commands;
-- GET-only, fixed-host GitHub adapter with redirects disabled;
+- exact task, base, catalog and toolchain binding;
+- project-command network mode fixed to `deny`;
+- fixed-host GET-only GitHub reads with redirects disabled; and
 - no branch, push, PR, merge, release or settings operation.
 
 ### Slice 6 — signed physical Windows evidence
 
-- strict physical report with eleven mandatory I0b probes;
-- sandbox identity, workspace access/escape, network deny, cleanup, reboot,
-  memory/process limits and compatibility evidence;
+- eleven mandatory I0b probes covering identity, workspace access/escape,
+  networking, cleanup, reboot, memory/process limits and compatibility;
 - failed probes remain representable but cannot authorize execution;
-- separate collector and approver actors;
-- canonical HMAC-SHA256 signed envelope;
-- exact task, catalog, toolchain, authority-code and workspace rebinding;
+- separate collector and approver identities;
+- canonical HMAC-SHA256 signed evidence;
+- exact task, catalog, toolchain, rig, workspace and authority-code binding; and
 - exactly one fresh matching report required.
 
-### Slices 7–8 — native Windows containment
+### Slices 7–9 — native containment and verified-only execution
 
-- child created suspended and assigned to a kill-on-close Job Object before resume;
+- child process created suspended and assigned to a kill-on-close Job Object before
+  resume;
 - process-memory and active-process limits enforced by Windows;
-- deterministic zero-capability AppContainer profile;
-- explicit access only to the approved reparse-free workspace;
-- no network capability;
-- positive-list Windows initialization environment;
-- GitHub tokens, model keys, cookies, authorization headers and signing material
-  are excluded;
-- native CI proves identity, inside access, outside denial, network denial and
-  complete process-tree cleanup.
-
-### Slice 9 — fresh evidence to verified-only execution
-
-- valid signed evidence issues
-  `kaliv-development-execution-lease/v1`;
-- lease binds task, base SHA, catalog, toolchain, report, rig, workspace and full
-  Tier-A authority-code identity;
-- persisted launch plans are audit evidence, not executable authority;
-- the low-level executor is private;
-- the only public runtime path re-verifies signed evidence before every launch;
-- workspace, executable and authority code are rehashed immediately before use.
+- deterministic zero-capability AppContainer with approved-workspace access only;
+- no network capability and a positive-list environment;
+- valid signed physical evidence issues an immutable execution lease;
+- the low-level executor is private; and
+- the only public runtime path re-verifies signed evidence, workspace, executable
+  and authority code immediately before launch.
 
 ### Slices 10A–10B — deterministic runtime staging
 
@@ -82,31 +69,23 @@ readiness proposal without gaining GitHub write authority.
   .kaliv/runtime/<tool-id>/<executable-sha256>/<source-basename>
   ```
 
-- canonical staging receipt binds task, lease, catalog, toolchain, source identity,
+- canonical staging receipt binding task, lease, catalog, toolchain, source,
   destination and bytes;
-- the public runtime requires a fresh receipt and cannot launch a caller-supplied
-  pre-staged executable;
-- only `argv[0]` changes; arguments, cwd, timeout, environment and lease remain
-  exact;
-- no second public execution surface.
+- fresh receipt required for every public launch; and
+- no caller-selected pre-staged executable or second execution surface.
 
 ### Slice 10C — bounded native output evidence
 
-- exact task `max_output_bytes` bound into launch-plan authority;
-- only `NUL` stdin, stdout and stderr handles inherited through an explicit
-  `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`;
+- exact task output bound included in launch authority;
+- only `NUL` stdin, stdout and stderr inherited through an explicit handle list;
 - stdout and stderr drained concurrently to EOF;
-- every byte included in full stream SHA-256 and byte counts;
-- only deterministic bounded prefixes retained as canonical base64;
-- timeout kills the complete Job Object, reaches EOF and raises
-  `TierAExecutionTimeout` carrying non-passing evidence;
-- real-Windows fixture proves output beyond pipe-buffer size and deterministic
-  cleanup.
+- every byte included in complete stream hashes and byte counts;
+- deterministic bounded prefixes retained as canonical base64; and
+- timeout kills the complete Job Object and returns non-passing evidence.
 
 ### Slice 10D — signed runtime closure and exact cwd
 
-- command-specific `kaliv-development-runtime-closure-manifest/v1`;
-- independent HMAC-signed closure envelope;
+- command-specific signed exact-file closure manifest;
 - exact task, command, catalog, toolchain, lease, workspace, source-root,
   entrypoint, cwd and file-set binding;
 - deterministic multi-file staging under:
@@ -115,122 +94,135 @@ readiness proposal without gaining GitHub write authority.
   .kaliv/runtime-closures/<tool-id>/<manifest-sha256>/...
   ```
 
-- traversal, Windows device names, alternate streams, case collisions, parent-file
-  conflicts, links, junctions, hardlinks, missing and extra files rejected;
-- complete staged tree rehashed after staging and immediately before launch;
-- launch-plan schema v3 binds manifest, signature, staging receipt and
-  `working_directory_sha256`;
-- workspace-relative nested cwd is revalidated inside `CreateProcessW` without
-  granting caller-selected cwd authority.
+- traversal, device names, alternate streams, case collisions, links, junctions,
+  hardlinks, missing and extra files rejected;
+- complete staged tree rehashed after staging and immediately before launch; and
+- workspace-relative cwd revalidated inside `CreateProcessW`.
 
 ### Slice 10E — reviewed standalone version-check closure
 
 - self-contained Go implementation at `backend/cmd/modelrig-version-check`;
 - isolated one-command catalog using tool ID `modelrig-version-check`;
-- the default catalog remains unchanged, avoiding silent authority replacement;
-- `ModelRigVersionCheckClosureBuilder` emits an unsigned single-file manifest
-  proposal only;
-- exact entrypoint, empty argument vector, root cwd, tool hash, lease, catalog,
-  workspace and runtime-root identities required;
+- default catalog unchanged;
+- unsigned single-file closure proposal only; and
 - extra runtime files/directories and the legacy Python profile fail closed.
 
-See `VERSION_CHECK_CLOSURE.md` for the isolated catalog and operator flow.
+See `VERSION_CHECK_CLOSURE.md`.
 
 ### Slice 10F — runtime lifetime immutability
 
-- the exact staged closure is reverified after workspace ACL provisioning;
-- every closure directory and file receives a protected read/execute-only DACL for
-  the operator SID and exact AppContainer package SID;
-- open handles permit read sharing only and deny new write/delete-sharing opens;
-- overwrite, replacement, rename, deletion and file insertion are denied while the
-  Job Object lives;
-- original DACLs are retained by handle and restored only after confirmed Job
-  Object closure;
-- ambiguous process-tree cleanup retains the guard instead of reopening the tree;
-- native Windows tests prove AppContainer sabotage, concurrent host sabotage,
-  unchanged bytes/tree, DACL restoration, output capture, nested cwd and timeout
-  cleanup through the same path.
+- staged closure reverified after workspace ACL provisioning;
+- protected read/execute-only DACL for the operator and exact AppContainer SID;
+- open handles deny write/delete-sharing for the complete Job Object lifetime;
+- overwrite, replacement, rename, deletion and insertion denied while active;
+- original DACLs restored only after confirmed process-tree completion; and
+- ambiguous cleanup retains protection rather than reopening a mutation window.
+
+This boundary does not claim resistance against a separate administrator or kernel
+component.
 
 ### Slice 10G — Git-aware Tier-A command receipt
 
-- `run_single_verified_tier_a_command_with_receipt` accepts no caller-selected
-  command ID or arguments;
-- the task must grant exactly one command and require that same command as evidence;
-- `HEAD` must equal the exact task base before execution;
-- an optional staged patch is accepted, while unstaged and untracked input fail
-  before Tier-A is called;
-- canonical Git snapshots bind HEAD, staged and unstaged binary/full-index diff
-  hashes and sizes, plus the NUL-delimited untracked-path identity;
-- the orchestrator calls only `run_verified_tier_a_command`;
-- deterministic runtime staging is removed after Job Object and lifetime-guard
-  completion and before the after snapshot;
-- any Git mutation creates a non-passing receipt, triggers exact-base reset and
-  requires a clean reset snapshot;
-- timeout keeps the complete non-passing Tier-A result and Git evidence;
-- authority bundle v6 includes the receipt orchestrator and invalidates all
-  v5-or-earlier physical reports;
-- portable and real-Windows tests prove staged-patch preservation, mutation/reset,
-  timeout evidence, canonical reload and the actual AppContainer/Job Object path.
+- exactly one task-authorized command and identical required test;
+- exact base `HEAD`, staged patch, unstaged diff and untracked-path identity;
+- only the existing verified Tier-A runtime path is invoked;
+- optional staged input accepted only with zero unstaged or untracked input;
+- before/after/reset snapshots are canonical and hash-bound;
+- workspace mutation creates a non-passing receipt and exact-base reset evidence;
+- timeout preserves complete non-passing Tier-A and Git evidence; and
+- Tier-A authority bundle v6 includes the receipt orchestrator.
 
 ### Slice 10H — authenticated semantic-review evidence
 
-- a canonical offline request embeds the exact staged patch bytes, full passing
-  Slice 10G receipt, task criteria, fixed review-policy hash and current v6
-  execution-authority hash;
-- request construction exposes no workspace, command, argv, catalog or toolchain
-  selection surface;
-- the receipt must prove identical before/after snapshots, no reset and passing
-  Tier-A execution;
-- patch hash and size must match both Git snapshots exactly;
-- structured verdicts assess every acceptance criterion in order and record
-  bounded findings with explicit severity;
+- canonical request embeds the exact staged patch bytes, complete passing Slice 10G
+  receipt, task criteria, fixed policy and current v6 authority hash;
+- every acceptance criterion receives exactly one ordered assessment;
 - approval requires every criterion satisfied and zero findings;
-- developer and reviewer actors must differ;
-- reviewer-only HMAC keys are bound to exact reviewer actors;
-- verification rejects task, patch, receipt, policy, execution-authority, actor or
-  signature mismatch;
-- canonical request/verdict files are bounded, link-free and create-once;
-- the module is outside the Tier-A v6 execution bundle and cannot launch commands,
-  reset Git or write to GitHub.
+- developer and reviewer identities must differ;
+- reviewer-only domain-separated HMAC binds request, patch, receipt, task, policy,
+  authority, actor and key;
+- canonical request/verdict files are bounded, link-free and create-once; and
+- the module cannot execute commands, reset Git or write to GitHub.
 
-Slice 10H supplies the trustable artifact boundary, not a built-in AI reviewer.
-A separately operated human or model reviewer must actually analyze the canonical
-request and produce the structured verdict.
+A valid signature proves artifact and actor-key binding, not semantic competence.
+A separately operated human or model reviewer must actually perform the review.
 
 ### Slice 10I — authenticated draft-PR readiness proposal
 
-- `kaliv-development-authenticated-draft-pr-readiness-proposal/v1` embeds the
-  complete task, exact semantic-review request and signed approval verdict;
-- the builder re-verifies the reviewer signature and current v6 execution-authority
-  identity before creating an artifact;
-- request-changes, reject, uncertain criteria, non-satisfied criteria or findings
-  cannot be represented as ready;
-- staged patch, Tier-A receipt, reviewer actor/key, review policy and proposal
-  policy remain independently hash-bound;
-- repository, proposed head branch, title, body, draft flag and merge authority are
-  not caller-selected;
-- the head branch is derived from task ID, exact base SHA and patch SHA;
-- title and body are deterministic and fail reload if altered;
-- only a canonical base branch may be supplied, defaulting to `main`;
-- canonical readiness files are bounded, absolute, link-free and create-once;
-- `DraftPrReadinessGate` re-verifies the exact task, reviewer trust and current
-  execution authority;
-- the module has no branch-push, PR-create/update, reviewer-request, merge, release,
-  settings or deployment adapter.
+- embeds the complete task, exact Slice 10H request and signed approval verdict;
+- re-verifies reviewer signature, exact task and current Tier-A v6 authority;
+- uncertainty, findings or any non-approval cannot be represented as ready;
+- repository, proposed head branch, title and body are deterministic;
+- staged patch, receipt, reviewer, policies and authority remain independently
+  hash-bound;
+- fixed to `draft: true` and `merge_authority: human`; and
+- no branch-push, PR-create/update, reviewer-request, ready, merge, release or
+  deployment adapter.
 
-Slice 10I is offline proposal evidence only. It does not publish the deterministic
-branch name or body anywhere, and a human retains all merge authority.
+See `DRAFT_PR_READINESS.md`.
 
-See `TIER_A_EXECUTION.md`, `RUNTIME_STAGING.md`,
-`RUNTIME_LIFETIME_GUARD.md`, `TIER_A_COMMAND_RECEIPT.md`, `SEMANTIC_REVIEW.md`
-and `DRAFT_PR_READINESS.md` for the complete authority, filesystem, receipt,
-review and proposal rules.
+### Slice 10J — authenticated publisher intent and dry-run evidence
+
+- `kaliv-development-publisher-request/v1` embeds the complete verified Slice 10I
+  readiness artifact;
+- binds exact task, repository, base, deterministic branches, patch, title/body,
+  publisher actor/system, invocation nonce, policy and ordered operation set;
+- publisher actor must differ from developer and semantic reviewer;
+- publisher-only domain-separated HMAC signature binds the exact request;
+- the publisher signing key is not a GitHub credential;
+- deterministic dry-run plan contains exactly five operations:
+  1. verify the exact readiness artifact;
+  2. materialize the exact candidate commit;
+  3. create the deterministic proposed branch;
+  4. push the proposed branch; and
+  5. create the exact draft pull request;
+- every operation remains `planned_not_executed`;
+- all repository/network/result flags must remain false; and
+- no Git library, GitHub client, remote host, token, HTTP request or subprocess Git
+  command exists in the module.
+
+A publisher signature proves key possession and exact intent binding. It does not
+prove that a biological human personally initiated the request.
+
+See `PUBLISHER_DRY_RUN.md`.
+
+### Slice 10K — one-time publisher authorization and replay ledger
+
+- `kaliv-development-publisher-authorization-lease/v1` embeds and re-verifies the
+  complete signed Slice 10J request;
+- a fourth authorization-issuer actor must differ from developer, semantic
+  reviewer and publisher;
+- issuer-only domain-separated HMAC binds the complete lease;
+- exact GitHub repository name and immutable numeric repository ID are bound as
+  trusted configuration;
+- a fixed least-privilege policy permits only exact proposed-branch contents write
+  and creation of the exact draft pull request;
+- merge, ready-for-review, reviewer requests, releases, settings, workflows,
+  secrets, tags, deployments and other capabilities are explicitly denied;
+- artifacts contain no credential or token material and permit no reusable
+  credential;
+- canonical issue and expiry timestamps limit a lease to 1–900 seconds;
+- every lease is fixed to one use, draft only and human-only merge authority;
+- `PublisherReplayLedger` consumes the exact invocation nonce using atomic
+  `O_CREAT | O_EXCL` create-once storage;
+- sequential and concurrent replay cannot both succeed;
+- preflight evidence requires a currently valid lease and matching consumed nonce;
+- postcondition evidence can represent only `execution_state: not_executed`; and
+- every observation/write/commit/branch/push/PR/review/merge/release/deployment
+  result remains false.
+
+The remote numeric ID is not discovered or network-validated by this module. The
+issuer key, repository identity and replay-ledger directory are external trusted
+operating boundaries. The module does not claim protection against a separate
+administrator, kernel component or an uncoordinated multi-host ledger.
+
+See `PUBLISHER_AUTHORIZATION.md`.
 
 ## Reviewed command authority
 
 The default registry remains empty. Naming a command ID in a task does not make it
 executable. The command must also exist in an immutable catalog, have an exact
-operator tool binding, pass fresh signed physical evidence and complete the signed
+operator binding, pass fresh signed physical evidence and complete the signed
 runtime-closure chain.
 
 The default ModelRig catalog contains:
@@ -238,21 +230,19 @@ The default ModelRig catalog contains:
 - `modelrig.version.check`;
 - `modelrig.devcontrol.tests`;
 - `modelrig.workflow.test-coverage`;
-- `modelrig.backend.vet`;
+- `modelrig.backend.vet`; and
 - `modelrig.backend.tests`.
 
-Slice 10E's standalone version checker uses a separate isolated catalog rather
-than changing this list. Slice 10G further requires a one-command task before its
-Git-aware orchestration surface can run. Slice 10H consumes only completed evidence
-and cannot add or select commands. Slice 10I consumes only one verified semantic
-approval and cannot publish its proposed branch or pull request. Optional commands
-remain deferred rather than added ambiguously.
+Slice 10E uses a separate isolated catalog rather than silently changing this
+list. Slice 10G requires a one-command task. Slices 10H–10K consume completed
+evidence only: they cannot add commands, launch execution, provision credentials,
+materialize commits, publish branches or create pull requests.
 
 ## Physical evidence operator flow
 
 The physical harness writes one canonical unsigned report matching
 `schemas/windows-isolation-physical-report-v1.schema.json`. Signing is a separate
-operator action and its key must stay outside the developer workspace.
+operator action and its key must remain outside the developer workspace.
 
 ```bash
 cd devcontrol
@@ -263,7 +253,6 @@ PYTHONPATH=src python -m kaliv_dev_control sign-physical-report \
   --key-id operator-key-2026
 ```
 
-The signed artifact SHA-256 must be named by the exact task attestation.
 Independent verification uses:
 
 ```bash
@@ -275,10 +264,10 @@ PYTHONPATH=src python -m kaliv_dev_control verify-physical-report \
   --key-id operator-key-2026
 ```
 
-HMAC is suitable only while the signing key is protected by the separate operator
-account/process boundary required by I0b. A key copied into the agent workspace
-invalidates the independence claim. The same separation rule applies to the
-semantic-review key: it must remain unavailable to the developer/execution side.
+HMAC is appropriate only while each key is protected by its required separate
+operator/process boundary. A physical-evidence, semantic-review, publisher or
+authorization key copied into the developer workspace invalidates the claimed
+independence.
 
 ## Explicit remaining boundaries
 
@@ -286,20 +275,28 @@ The control plane still cannot:
 
 - run arbitrary shell commands or model-selected executable arguments;
 - execute without exact fresh signed physical evidence;
-- manufacture a genuine I0b result without physical probes;
+- manufacture a genuine physical I0b result without the eleven probes;
 - automatically discover a transitive PE/DLL, Python or Go runtime closure;
-- claim lifetime protection against a separate administrator or kernel component;
 - perform semantic analysis without a separately operated reviewer;
-- provision, rotate or revoke reviewer keys;
-- create the proposed branch, commit or push it;
-- create, update or mark a pull request ready for review;
-- request GitHub reviewers or alter repository settings;
-- merge, release, deploy or activate its own work.
+- prove that publisher or authorization keys were used by biological humans;
+- provision, store, rotate, revoke or use production reviewer, publisher,
+  authorization or GitHub credential material;
+- discover or network-validate the configured remote repository identity;
+- provide distributed replay consensus across uncoordinated hosts;
+- protect trusted key/ledger boundaries against a separate administrator or kernel
+  component;
+- materialize a candidate commit or branch;
+- create a Git remote or perform a network write;
+- push a branch or create/update a pull request;
+- request reviewers or mark a pull request ready for review;
+- merge, release, change settings or deploy; or
+- activate unattended self-development.
 
 No registered ModelRig tool calls the Tier-A bridge, receipt orchestrator,
-semantic-review boundary or draft-readiness builder. Hosted CI uses synthetic
-evidence to prove software wiring and does not replace the selected rig's physical
-eleven-probe campaign or a real independent semantic review.
+semantic-review boundary, readiness builder, publisher dry-run boundary or
+publisher-authorization boundary. Hosted CI uses synthetic evidence to prove
+software contracts and does not replace the selected rig's physical campaign,
+independent semantic review or production key custody.
 
 ## Run tests
 
@@ -308,12 +305,12 @@ cd devcontrol
 python -m unittest discover -s tests -v
 ```
 
-The portable suite is included in ModelRig's shared PR/release gate. It proves the
-10H artifact, signature, actor-separation and tamper-rejection contracts plus the
-10I deterministic, draft-only readiness artifact. The native Windows gate
-separately proves Job Object, AppContainer, environment, signed physical evidence,
-exact runtime closure, lifetime immutability, nested cwd, strict handle
-inheritance, bounded output, timeout cleanup and a real Git-aware Tier-A receipt.
+The portable suite proves the Slice 10H–10K artifact, signature, actor-separation,
+tamper rejection, deterministic proposal/plan, time-window, least-privilege,
+atomic replay and no-write contracts. The native Windows gate separately proves
+Job Object, AppContainer, environment, signed physical evidence, exact runtime
+closure, lifetime immutability, strict handle inheritance, bounded output, timeout
+cleanup and the real Git-aware Tier-A receipt.
 
 ## Validate a task
 
