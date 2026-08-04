@@ -5,12 +5,12 @@ self-development in ModelRig. It is deliberately **not** connected to ordinary
 ModelRig tool registration, Agent 3, Agent 4, GitHub writes, merge, release or
 production activation.
 
-The implementation currently reaches **Slice 10F**. A reviewed catalog command can
-enter the Windows Tier-A boundary only after fresh signed physical evidence, a
+The implementation currently reaches **Slice 10G**. A reviewed single-command task
+can enter the Windows Tier-A boundary only after fresh signed physical evidence, a
 command-specific signed exact-file runtime closure, deterministic workspace
-staging, exact workspace-relative cwd validation and bounded native output capture.
-The staged runtime is held read/execute-only and non-replaceable until the complete
-Job Object process tree has ended.
+staging, exact cwd validation and bounded native output capture. The staged runtime
+is held immutable until the complete Job Object ends, and the resulting execution
+evidence is joined to canonical Git before/after/reset evidence.
 
 ## Implemented authority layers
 
@@ -81,8 +81,8 @@ Job Object process tree has ended.
 
 - canonical staging receipt binds task, lease, catalog, toolchain, source identity,
   destination and bytes;
-- the public runtime requires a fresh receipt and can no longer launch a caller-
-  supplied pre-staged executable;
+- the public runtime requires a fresh receipt and cannot launch a caller-supplied
+  pre-staged executable;
 - only `argv[0]` changes; arguments, cwd, timeout, environment and lease remain
   exact;
 - no second public execution surface.
@@ -117,8 +117,8 @@ Job Object process tree has ended.
 - complete staged tree rehashed after staging and immediately before launch;
 - launch-plan schema v3 binds manifest, signature, staging receipt and
   `working_directory_sha256`;
-- workspace-relative nested cwd is revalidated inside the `CreateProcessW`
-  wrapper without granting caller-selected cwd authority.
+- workspace-relative nested cwd is revalidated inside `CreateProcessW` without
+  granting caller-selected cwd authority.
 
 ### Slice 10E — reviewed standalone version-check closure
 
@@ -144,14 +144,34 @@ See `VERSION_CHECK_CLOSURE.md` for the isolated catalog and operator flow.
 - original DACLs are retained by handle and restored only after confirmed Job
   Object closure;
 - ambiguous process-tree cleanup retains the guard instead of reopening the tree;
-- Tier-A authority bundle v5 intentionally invalidates every v4-or-earlier physical
-  report;
 - native Windows tests prove AppContainer sabotage, concurrent host sabotage,
   unchanged bytes/tree, DACL restoration, output capture, nested cwd and timeout
   cleanup through the same path.
 
-See `TIER_A_EXECUTION.md`, `RUNTIME_STAGING.md` and
-`RUNTIME_LIFETIME_GUARD.md` for the complete authority and filesystem rules.
+### Slice 10G — Git-aware Tier-A command receipt
+
+- `run_single_verified_tier_a_command_with_receipt` accepts no caller-selected
+  command ID or arguments;
+- the task must grant exactly one command and require that same command as evidence;
+- `HEAD` must equal the exact task base before execution;
+- an optional staged patch is accepted, while unstaged and untracked input fail
+  before Tier-A is called;
+- canonical Git snapshots bind HEAD, staged and unstaged binary/full-index diff
+  hashes and sizes, plus the NUL-delimited untracked-path identity;
+- the orchestrator calls only `run_verified_tier_a_command`;
+- deterministic runtime staging is removed after Job Object and lifetime-guard
+  completion and before the after snapshot;
+- any Git mutation creates a non-passing receipt, triggers exact-base reset and
+  requires a clean reset snapshot;
+- timeout keeps the complete non-passing Tier-A result and Git evidence;
+- authority bundle v6 includes the receipt orchestrator and invalidates all
+  v5-or-earlier physical reports;
+- portable and real-Windows tests prove staged-patch preservation, mutation/reset,
+  timeout evidence, canonical reload and the actual AppContainer/Job Object path.
+
+See `TIER_A_EXECUTION.md`, `RUNTIME_STAGING.md`,
+`RUNTIME_LIFETIME_GUARD.md` and `TIER_A_COMMAND_RECEIPT.md` for the complete
+authority, filesystem and receipt rules.
 
 ## Reviewed command authority
 
@@ -169,8 +189,9 @@ The default ModelRig catalog contains:
 - `modelrig.backend.tests`.
 
 Slice 10E's standalone version checker uses a separate isolated catalog rather
-than changing this list. Task schema v1 treats every granted command as required
-draft-PR evidence. Optional commands remain deferred rather than added ambiguously.
+than changing this list. Slice 10G further requires a one-command task before its
+Git-aware orchestration surface can run. Optional commands remain deferred rather
+than added ambiguously.
 
 ## Physical evidence operator flow
 
@@ -212,15 +233,14 @@ The control plane still cannot:
 - manufacture a genuine I0b result without physical probes;
 - automatically discover a transitive PE/DLL, Python or Go runtime closure;
 - claim lifetime protection against a separate administrator or kernel component;
-- claim a complete Git-aware `CommandReceipt` from output evidence alone;
-- perform independent semantic AI review;
+- perform independent semantic AI review of code or command output;
 - push branches or create/update/merge pull requests from the runtime;
 - alter repository settings, feature switches or production deployment;
 - merge, release or activate its own work.
 
-No registered ModelRig tool calls the Tier-A bridge. Hosted Windows CI uses
-synthetic signed evidence to prove software wiring and does not replace the
-selected rig's physical eleven-probe campaign.
+No registered ModelRig tool calls the Tier-A bridge or receipt orchestrator. Hosted
+Windows CI uses synthetic signed evidence to prove software wiring and does not
+replace the selected rig's physical eleven-probe campaign for authority bundle v6.
 
 ## Run tests
 
@@ -232,8 +252,8 @@ python -m unittest discover -s tests -v
 The portable suite is included in ModelRig's shared PR/release gate. The native
 Windows gate separately proves Job Object, AppContainer, environment, signed
 physical evidence, exact runtime closure, lifetime immutability, nested cwd,
-strict handle inheritance, bounded output, timeout cleanup and existing ToolHost
-behavior.
+strict handle inheritance, bounded output, timeout cleanup and a real Git-aware
+Tier-A receipt.
 
 ## Validate a task
 
