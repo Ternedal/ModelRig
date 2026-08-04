@@ -38,15 +38,16 @@ for _obsolete_execution_name in (
         delattr(_core, _obsolete_execution_name)
 del _obsolete_execution_name
 
-# Every source file that can issue, transform, stage, launch or report Tier-A
-# authority is covered by the physical campaign. Runtime-closure and cwd support
-# add explicit modules to this list, so the v4 domain intentionally invalidates
-# every report issued for the earlier v3 authority bundle.
+# Every source file that can issue, transform, stage, launch, lifetime-lock or
+# report Tier-A authority is covered by the physical campaign. The Windows
+# runtime guard adds a protected DACL and deny-write/delete-sharing handles, so
+# the v5 domain intentionally invalidates every earlier physical report.
 _TIER_A_BUNDLE_FILES = (
     "worker/app/__init__.py",
     "worker/app/windows_job.py",
     "worker/app/windows_restricted.py",
     "worker/app/windows_capture.py",
+    "worker/app/windows_runtime_guard.py",
     "worker/app/windows_tier_a.py",
     "devcontrol/src/kaliv_dev_control/__init__.py",
     "devcontrol/src/kaliv_dev_control/catalog.py",
@@ -144,14 +145,14 @@ def working_directory_authority_sha256(root: Path, relative: str) -> str:
 
 
 def tier_a_toolhost_sha256(control_plane_root: Path) -> str:
-    """Hash the complete v4 source chain that can exercise Tier-A authority."""
+    """Hash the complete v5 source chain that can exercise Tier-A authority."""
 
     root = _core._canonical_directory(
         control_plane_root,
         name="control-plane root",
     )
     digest = hashlib.sha256()
-    digest.update(b"kaliv-tier-a-toolhost/v4\0")
+    digest.update(b"kaliv-tier-a-toolhost/v5\0")
     for relative in _TIER_A_BUNDLE_FILES:
         path = root / PurePosixPath(relative)
         if _has_linkish_component(path) or not path.is_file():
