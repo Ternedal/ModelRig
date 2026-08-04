@@ -9,6 +9,8 @@ import time
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
 import kaliv_dev_control.bounded_subprocess as bounded_module
 import kaliv_dev_control.trusted_git_runtime_runner as git_runner_module
 import kaliv_dev_control.workspace as workspace_module
