@@ -1,13 +1,15 @@
 # Tier-A Git-aware command receipt
 
 Slice 10G joins one verified Tier-A execution result to deterministic Git
-before/after/reset evidence. The control plane remains dormant and fail closed.
-This layer does not add a process launcher, a caller-selected command surface,
-GitHub writes, branch push, merge, release, deployment or runtime activation.
+before/after/reset evidence. Slice 10H can consume one passing receipt in a
+separate authenticated semantic-review artifact. The control plane remains dormant
+and fail closed. Neither layer adds a second process launcher, caller-selected
+command surface, GitHub writes, branch push, merge, release, deployment or runtime
+activation.
 
 ## Public orchestration boundary
 
-The only new orchestration entrypoint is:
+The only Slice 10G orchestration entrypoint is:
 
 ```python
 run_single_verified_tier_a_command_with_receipt(...)
@@ -121,15 +123,47 @@ Timeout results remain fully auditable but non-passing. Extra fields, inconsiste
 flags, mismatched task/command identities or a non-clean reset snapshot fail
 canonical reload.
 
+## Slice 10H semantic-review handoff
+
+A passing receipt may be embedded in
+`kaliv-development-semantic-review-request/v1` together with the exact staged
+binary/full-index patch bytes. The review request requires:
+
+- the receipt and nested Tier-A result both pass;
+- before and after snapshots are identical;
+- no reset evidence exists;
+- patch hash and byte count match both Git snapshots;
+- task, base and command identities match;
+- current v6 execution-authority identity is recorded;
+- exact acceptance criteria and fixed semantic-review-policy identity are bound.
+
+The review constructor accepts no workspace root, caller-selected command, argv,
+catalog or toolchain. The independent reviewer receives a canonical offline
+artifact rather than access to the executable workspace.
+
+A structured verdict must assess every acceptance criterion in order and is then
+authenticated by a reviewer-only key. Verification fails on changed task, patch,
+receipt, policy, authority, reviewer actor or signature. Only a verified `approve`
+verdict with all criteria satisfied and no findings can pass the Slice 10H approval
+gate.
+
+The semantic-review module is intentionally outside the Tier-A v6 source bundle.
+It consumes and re-verifies execution evidence but cannot issue leases, stage
+runtimes, launch commands, reset Git or create a new Tier-A receipt. See
+`SEMANTIC_REVIEW.md` for the complete boundary.
+
 ## Authority identity
 
 `tier_a_toolhost_sha256` v6 includes the command-receipt orchestrator and therefore
 invalidates all v5-or-earlier physical reports. The selected rig needs a new full
 I0b campaign for authority bundle v6 before production execution can be approved.
 
+Slice 10H does not change this execution-authority bundle. It binds the exact v6
+hash into its request and rejects authority drift when the verdict is verified.
+
 ## Proofs
 
-Portable tests prove:
+Portable Slice 10G tests prove:
 
 - exact staged patch preservation;
 - deterministic runtime-staging cleanup;
@@ -147,16 +181,23 @@ AppContainer, Job Object, lifetime guard and bounded-output path. It proves that
 the staged patch survives byte-for-byte, runtime staging is absent before the
 after snapshot and the complete receipt round-trips canonically.
 
+Slice 10H adversarial tests prove exact patch/receipt/task/policy/authority binding,
+reviewer-key actor separation, signature verification, criterion completeness,
+non-approval on uncertainty or findings and canonical create-once offline file
+exchange.
+
 Synthetic CI evidence proves software wiring only. It does not replace an
-independent physical campaign on the selected ModelRig host.
+independent physical campaign on the selected ModelRig host or prove that a real
+semantic reviewer has assessed a production patch.
 
 ## Deliberate limits
 
-Slice 10G does not provide:
+Slices 10G and 10H do not provide:
 
 - automatic transitive PE/DLL, Python or Go runtime discovery;
 - resistance against a separate administrator or kernel component;
-- semantic review of command output or code changes;
+- a built-in AI/model-provider semantic reviewer;
+- reviewer-key provisioning, revocation or hardware-backed custody;
 - command selection outside the exact one-command task;
 - arbitrary Git commands or repository history rewriting beyond exact-base reset;
 - branch push, pull-request write, merge, release, settings or deployment
