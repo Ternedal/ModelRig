@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,12 @@ from kaliv_dev_control.tier_a_execution import (  # noqa: E402
     trusted_runtime_root_sha256,
     workspace_root_authority_sha256,
 )
+from kaliv_dev_control.trusted_git_runtime import (  # noqa: E402
+    TrustedGitRunner,
+    TrustedGitRuntime,
+    capture_trusted_git_runtime_manifest,
+    stage_trusted_git_runtime,
+)
 
 COMMAND_ID = "modelrig.tier-a.receipt-probe"
 TOOL_ID = "receipt-helper"
@@ -64,21 +71,60 @@ def check(condition: bool, message: str) -> None:
         print(f"  FAIL: {message}")
 
 
-def run_git(workspace: Path, *args: str) -> str:
-    completed = subprocess.run(
-        ["git", *args],
-        cwd=workspace,
+def build_trusted_git_runner(parent: Path) -> TrustedGitRunner:
+    discovered = shutil.which("git")
+    if discovered is None:
+        raise RuntimeError("Git for Windows is unavailable")
+    installed = Path(discovered).resolve()
+    exec_path_result = subprocess.run(
+        [str(installed), "--exec-path"],
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         check=False,
         timeout=120,
     )
-    if completed.returncode != 0:
+    if exec_path_result.returncode != 0:
         raise RuntimeError(
-            f"git {args[0]} failed: {(completed.stdout + completed.stderr)[-800:]}"
+            "Git exec-path discovery failed: " + exec_path_result.stderr[-800:]
         )
-    return completed.stdout.strip()
+    exec_path = Path(exec_path_result.stdout.strip()).resolve()
+    mingw_root = exec_path.parent.parent
+    runtime_executable = mingw_root / "bin" / "git.exe"
+    if not runtime_executable.is_file() or not exec_path.is_dir():
+        raise RuntimeError("Git for Windows runtime layout is unsupported")
+
+    source = parent / "git-runtime-source"
+    shutil.copytree(mingw_root / "bin", source / "bin")
+    shutil.copytree(exec_path, source / "libexec" / "git-core")
+    manifest = capture_trusted_git_runtime_manifest(
+        source.resolve(),
+        executable_relative_path="bin/git.exe",
+        exec_path_relative_path="libexec/git-core",
+        path_relative_directories=("bin", "libexec/git-core"),
+    )
+    staging = parent / "git-runtime-staging"
+    operation = parent / "git-runtime-operation"
+    staging.mkdir()
+    operation.mkdir()
+    transaction = stage_trusted_git_runtime(
+        manifest,
+        source_root=source.resolve(),
+        staging_root=staging.resolve(),
+    )
+    return TrustedGitRunner(
+        TrustedGitRuntime(transaction.resolve()),
+        operation_root=operation.resolve(),
+    )
+
+
+def run_git(runner: TrustedGitRunner, workspace: Path, *args: str) -> str:
+    return runner.run(
+        tuple(args),
+        cwd=workspace,
+        maximum=32 * 1024 * 1024,
+        timeout_seconds=120,
+    ).decode("utf-8", errors="strict").strip()
 
 
 def build_static_helper(destination: Path) -> Path:
@@ -146,6 +192,7 @@ def build_static_helper(destination: Path) -> Path:
 
 
 parent = Path(tempfile.mkdtemp(prefix="kaliv-tier-a-receipt-"))
+git_runner = build_trusted_git_runner(parent)
 trusted_runtime_root = parent / "trusted-runtime"
 workspace = parent / "workspace"
 evidence_root = parent / "evidence"
@@ -157,14 +204,20 @@ source_executable = build_static_helper(trusted_runtime_root / "receipt-helper.e
 executable_bytes = source_executable.read_bytes()
 executable_sha256 = hashlib.sha256(executable_bytes).hexdigest()
 
-run_git(workspace, "init")
-run_git(workspace, "config", "user.name", "Slice 10G Windows")
-run_git(workspace, "config", "user.email", "slice10g-windows@example.invalid")
+run_git(git_runner, workspace, "init")
+run_git(git_runner, workspace, "config", "user.name", "Slice 10G Windows")
+run_git(
+    git_runner,
+    workspace,
+    "config",
+    "user.email",
+    "slice10g-windows@example.invalid",
+)
 baseline = workspace / "baseline.txt"
 baseline.write_text("base\n", encoding="utf-8")
-run_git(workspace, "add", "baseline.txt")
-run_git(workspace, "commit", "-m", "base")
-base_sha = run_git(workspace, "rev-parse", "HEAD")
+run_git(git_runner, workspace, "add", "baseline.txt")
+run_git(git_runner, workspace, "commit", "-m", "base")
+base_sha = run_git(git_runner, workspace, "rev-parse", "HEAD")
 check(len(base_sha) == 40, "temporary workspace has one exact Git base SHA")
 
 catalog_env = {"CI": "1", "PYTHONDONTWRITEBYTECODE": "1"}
@@ -312,8 +365,8 @@ closure_verifier = RuntimeClosureVerifier(
 )
 
 baseline.write_text("staged\n", encoding="utf-8")
-run_git(workspace, "add", "baseline.txt")
-staged_status_before = run_git(workspace, "status", "--short")
+run_git(git_runner, workspace, "add", "baseline.txt")
+staged_status_before = run_git(git_runner, workspace, "status", "--short")
 check(
     staged_status_before == "M  baseline.txt",
     "one exact staged patch exists before receipt execution",
@@ -325,6 +378,7 @@ receipt = run_single_verified_tier_a_command_with_receipt(
     toolchain,
     attestation,
     physical_verifier,
+    git_runner=git_runner,
     signed_runtime_closure=signed_closure,
     runtime_closure_verifier=closure_verifier,
     trusted_runtime_root=trusted_runtime_root.resolve(),
@@ -335,6 +389,11 @@ receipt = run_single_verified_tier_a_command_with_receipt(
     active_process_limit=1,
 )
 check(receipt.passed, "real Windows Tier-A execution produces a passing receipt")
+check(
+    receipt.git_runtime.runtime_manifest_sha256
+    == git_runner.evidence().runtime_manifest_sha256,
+    "receipt binds the complete staged Git runtime identity",
+)
 check(
     receipt.tier_a_result.returncode == 0
     and receipt.tier_a_result.output_truncated,
@@ -350,7 +409,7 @@ check(
     "an unchanged workspace is not reset",
 )
 check(
-    run_git(workspace, "status", "--short") == staged_status_before,
+    run_git(git_runner, workspace, "status", "--short") == staged_status_before,
     "the staged patch remains present after receipt execution",
 )
 check(
