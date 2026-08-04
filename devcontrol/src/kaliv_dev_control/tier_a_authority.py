@@ -79,6 +79,10 @@ _TIER_A_BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/tier_a_result.py",
     "devcontrol/src/kaliv_dev_control/tier_a_command_receipt.py",
     "devcontrol/src/kaliv_dev_control/tier_a_execution.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_model.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_runner.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_staging.py",
     "devcontrol/src/kaliv_dev_control/workspace.py",
 )
 
