@@ -8,9 +8,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 import re
-import tempfile
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -21,6 +19,7 @@ from .draft_pr_readiness import (
     AuthenticatedDraftPrReadinessProposal,
     DraftPrReadinessError,
 )
+from .durable_publication import DurablePublicationError, create_once_file
 from .semantic_review import SemanticReviewVerifier
 
 PUBLISHER_REQUEST_SCHEMA = "kaliv-development-publisher-request/v1"
@@ -954,7 +953,7 @@ def _load_canonical(path: Path, parser: Callable[[Any], _T], *, name: str) -> _T
     return value
 
 
-def _write_canonical(path: Path, value: Any, *, name: str, prefix: str) -> str:
+def _write_canonical(path: Path, value: Any, *, name: str) -> str:
     canonical_json = getattr(value, "canonical_json", None)
     if canonical_json is None:
         raise PublisherDryRunError(f"{name} output is invalid")
@@ -962,6 +961,7 @@ def _write_canonical(path: Path, value: Any, *, name: str, prefix: str) -> str:
     if (
         not output.is_absolute()
         or output.exists()
+        or output.is_symlink()
         or _has_linkish_component(output.parent)
         or not output.parent.is_dir()
     ):
@@ -969,19 +969,10 @@ def _write_canonical(path: Path, value: Any, *, name: str, prefix: str) -> str:
     payload = canonical_json().encode("utf-8")
     if len(payload) > _MAX_ARTIFACT_BYTES:
         raise PublisherDryRunError(f"{name} exceeds its byte bound")
-    descriptor, temporary_name = tempfile.mkstemp(prefix=prefix, suffix=".tmp", dir=output.parent)
     try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_name, output)
-    except Exception:
-        try:
-            os.unlink(temporary_name)
-        except FileNotFoundError:
-            pass
-        raise
+        create_once_file(output, payload)
+    except (FileExistsError, DurablePublicationError) as exc:
+        raise PublisherDryRunError(f"{name} could not be durably published") from exc
     return _sha256_bytes(payload)
 
 
@@ -992,7 +983,7 @@ def load_publisher_request(path: Path) -> PublisherRequest:
 def write_publisher_request(path: Path, request: PublisherRequest) -> str:
     if not isinstance(request, PublisherRequest):
         raise PublisherDryRunError("publisher request output is invalid")
-    return _write_canonical(path, request, name="publisher request", prefix=".publisher-request-")
+    return _write_canonical(path, request, name="publisher request")
 
 
 def load_signed_publisher_request(path: Path) -> SignedPublisherRequest:
@@ -1002,7 +993,7 @@ def load_signed_publisher_request(path: Path) -> SignedPublisherRequest:
 def write_signed_publisher_request(path: Path, signed_request: SignedPublisherRequest) -> str:
     if not isinstance(signed_request, SignedPublisherRequest):
         raise PublisherDryRunError("signed publisher request output is invalid")
-    return _write_canonical(path, signed_request, name="signed publisher request", prefix=".signed-publisher-request-")
+    return _write_canonical(path, signed_request, name="signed publisher request")
 
 
 def load_publisher_dry_run_receipt(path: Path) -> PublisherDryRunReceipt:
@@ -1012,4 +1003,4 @@ def load_publisher_dry_run_receipt(path: Path) -> PublisherDryRunReceipt:
 def write_publisher_dry_run_receipt(path: Path, receipt: PublisherDryRunReceipt) -> str:
     if not isinstance(receipt, PublisherDryRunReceipt):
         raise PublisherDryRunError("publisher dry-run receipt output is invalid")
-    return _write_canonical(path, receipt, name="publisher dry-run receipt", prefix=".publisher-dry-run-")
+    return _write_canonical(path, receipt, name="publisher dry-run receipt")
