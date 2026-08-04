@@ -7,7 +7,7 @@ name = "kaliv-dev-control"
 version = "0.1.0"
 description = "Fail-closed control-plane primitives for controlled self-development"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["cryptography==49.0.0"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
