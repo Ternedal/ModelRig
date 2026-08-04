@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/kaliv-development-trusted-git-runtime-staging-receipt-v1.json",
+  "title": "Kaliv development trusted Git runtime staging receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "manifest",
+    "transaction_id",
+    "source_root_path_sha256",
+    "runtime_relative_path",
+    "complete"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-development-trusted-git-runtime-staging-receipt/v1"},
+    "manifest": {
+      "$ref": "development-trusted-git-runtime-manifest-v1.schema.json"
+    },
+    "transaction_id": {
+      "type": "string",
+      "pattern": "^git-runtime-[0-9a-f]{32}$"
+    },
+    "source_root_path_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "runtime_relative_path": {"const": "runtime"},
+    "complete": {"const": true}
+  }
+}
