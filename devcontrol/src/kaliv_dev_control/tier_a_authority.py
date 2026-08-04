@@ -42,7 +42,9 @@ del _obsolete_execution_name
 # join Git evidence or report Tier-A authority is covered by the physical
 # campaign. The command-receipt orchestrator adds fixed Git snapshot/reset
 # operations around the sole verified runtime path, so the v6 domain
-# intentionally invalidates every earlier physical report.
+# intentionally invalidates every earlier physical report. Portable CI also
+# computes the recursive local import closure from the public Tier-A entrypoint
+# and fails if a reachable Python source is missing from this exact bundle.
 _TIER_A_BUNDLE_FILES = (
     "worker/app/__init__.py",
     "worker/app/windows_job.py",
@@ -51,16 +53,25 @@ _TIER_A_BUNDLE_FILES = (
     "worker/app/windows_runtime_guard.py",
     "worker/app/windows_tier_a.py",
     "devcontrol/src/kaliv_dev_control/__init__.py",
+    "devcontrol/src/kaliv_dev_control/campaign.py",
     "devcontrol/src/kaliv_dev_control/catalog.py",
     "devcontrol/src/kaliv_dev_control/commands.py",
     "devcontrol/src/kaliv_dev_control/contract.py",
+    "devcontrol/src/kaliv_dev_control/evidence.py",
+    "devcontrol/src/kaliv_dev_control/files.py",
+    "devcontrol/src/kaliv_dev_control/github_read.py",
+    "devcontrol/src/kaliv_dev_control/patch.py",
     "devcontrol/src/kaliv_dev_control/physical_isolation.py",
+    "devcontrol/src/kaliv_dev_control/policy.py",
+    "devcontrol/src/kaliv_dev_control/proposal.py",
+    "devcontrol/src/kaliv_dev_control/review.py",
     "devcontrol/src/kaliv_dev_control/runtime_staging.py",
     "devcontrol/src/kaliv_dev_control/_runtime_closure_common.py",
     "devcontrol/src/kaliv_dev_control/runtime_closure_model.py",
     "devcontrol/src/kaliv_dev_control/runtime_closure_verify.py",
     "devcontrol/src/kaliv_dev_control/runtime_closure_staging.py",
     "devcontrol/src/kaliv_dev_control/runtime_closure.py",
+    "devcontrol/src/kaliv_dev_control/store.py",
     "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
     "devcontrol/src/kaliv_dev_control/tier_a_plan.py",
     "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py",
