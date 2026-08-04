@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Mapping
 
+from .bounded_subprocess import BoundedSubprocessError, run_bounded_subprocess
 from .trusted_git_runtime_model import (
+    _MAX_OUTPUT_BYTES,
     TrustedGitRuntimeError,
     TrustedGitRuntimeEvidence,
     _existing_link_free_directory,
@@ -15,15 +16,9 @@ from .trusted_git_runtime_model import (
 )
 from .trusted_git_runtime_staging import TrustedGitRuntime
 
-# The shared runner must cover the largest already-authenticated local Git
-# artifact boundary. Slice 10L permits 128 MiB binary patches, so Git diff
-# reproduction must retain the same hard ceiling rather than silently narrowing
-# an otherwise valid authorization. This remains a strict in-memory bound.
-_MAX_GIT_COMMAND_OUTPUT_BYTES = 128 * 1024 * 1024
-
 
 class TrustedGitRunner:
-    """No-shell runner using only one staged and reverified Git runtime."""
+    """Run Git through one complete staged runtime and bounded process tree."""
 
     def __init__(self, runtime: TrustedGitRuntime, *, operation_root: Path) -> None:
         if not isinstance(runtime, TrustedGitRuntime):
@@ -84,15 +79,22 @@ class TrustedGitRunner:
                 or _has_linkish_component(directory)
                 or any(directory.iterdir())
             ):
-                raise TrustedGitRuntimeError("Git isolation directory changed")
+                raise TrustedGitRuntimeError(
+                    "Git isolation directory changed"
+                )
         if (
             not self._global_config.is_file()
             or _has_linkish_component(self._global_config)
             or self._global_config.read_bytes() != b""
         ):
-            raise TrustedGitRuntimeError("Git global configuration changed")
+            raise TrustedGitRuntimeError(
+                "Git global configuration changed"
+            )
 
-    def environment(self, extra: Mapping[str, str] | None = None) -> dict[str, str]:
+    def environment(
+        self,
+        extra: Mapping[str, str] | None = None,
+    ) -> dict[str, str]:
         environment: dict[str, str] = {}
         for name in ("SYSTEMROOT", "WINDIR", "PATHEXT"):
             value = os.environ.get(name)
@@ -162,7 +164,7 @@ class TrustedGitRunner:
         *,
         cwd: Path,
         stdin: bytes | None = None,
-        maximum: int = _MAX_GIT_COMMAND_OUTPUT_BYTES,
+        maximum: int = _MAX_OUTPUT_BYTES,
         timeout_seconds: int = 120,
         expected_codes: tuple[int, ...] = (0,),
         extra_env: Mapping[str, str] | None = None,
@@ -171,7 +173,9 @@ class TrustedGitRunner:
             not isinstance(args, tuple)
             or not args
             or any(
-                not isinstance(item, str) or not item or "\x00" in item
+                not isinstance(item, str)
+                or not item
+                or "\x00" in item
                 for item in args
             )
         ):
@@ -180,9 +184,23 @@ class TrustedGitRunner:
             maximum,
             name="Git output bound",
             low=1,
-            high=_MAX_GIT_COMMAND_OUTPUT_BYTES,
+            high=_MAX_OUTPUT_BYTES,
         )
-        _integer(timeout_seconds, name="Git timeout", low=1, high=3600)
+        _integer(
+            timeout_seconds,
+            name="Git timeout",
+            low=1,
+            high=3600,
+        )
+        if (
+            not isinstance(expected_codes, tuple)
+            or not expected_codes
+            or any(
+                isinstance(code, bool) or not isinstance(code, int)
+                for code in expected_codes
+            )
+        ):
+            raise TrustedGitRuntimeError("Git expected exit codes are invalid")
         root = _existing_link_free_directory(cwd, name="Git cwd")
         self.runtime.verify()
         self._verify_isolation()
@@ -209,29 +227,37 @@ class TrustedGitRunner:
             *args,
         ]
         try:
-            kwargs: dict[str, Any] = {
-                "cwd": root,
-                "stdout": subprocess.PIPE,
-                "stderr": subprocess.PIPE,
-                "timeout": timeout_seconds,
-                "check": False,
-                "shell": False,
-                "env": self.environment(extra_env),
-            }
-            if stdin is None:
-                kwargs["stdin"] = subprocess.DEVNULL
-            else:
-                kwargs["input"] = stdin
-            completed = subprocess.run(command, **kwargs)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise TrustedGitRuntimeError("Git command failed to complete") from exc
-        if len(completed.stdout) + len(completed.stderr) > maximum:
-            raise TrustedGitRuntimeError("Git command exceeded its output bound")
-        if completed.returncode not in expected_codes:
+            try:
+                result = run_bounded_subprocess(
+                    command,
+                    cwd=root,
+                    env=self.environment(extra_env),
+                    stdin_bytes=stdin,
+                    timeout_seconds=timeout_seconds,
+                    max_output_bytes=maximum,
+                    stdout_prefix_bytes=maximum,
+                    stderr_prefix_bytes=maximum,
+                )
+            except BoundedSubprocessError as exc:
+                raise TrustedGitRuntimeError(
+                    "Git command process boundary failed"
+                ) from exc
+        finally:
+            self.runtime.verify()
+            self._verify_isolation()
+        if result.output_limit_exceeded:
+            raise TrustedGitRuntimeError(
+                "Git command exceeded its output bound"
+            )
+        if result.timed_out:
+            raise TrustedGitRuntimeError("Git command timed out")
+        if result.returncode not in expected_codes:
             raise TrustedGitRuntimeError("Git command failed")
-        self.runtime.verify()
-        self._verify_isolation()
-        return completed.stdout
+        if result.stdout.truncated or result.stderr.truncated:
+            raise TrustedGitRuntimeError(
+                "Git command output evidence is incomplete"
+            )
+        return result.stdout.prefix
 
     def evidence(self) -> TrustedGitRuntimeEvidence:
         version = self.run(
