@@ -14,7 +14,6 @@ provides merge, release or deployment authority.
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 
 from ._publisher_authorization_legacy import (
     PublisherAuthorizationError,
@@ -92,6 +91,7 @@ def _verify_exact_post_state(
             "recovery receipt v3 finalization requires a pre-transition authorization"
         )
 
+    final_path, _, _, _ = ledger._paths(lease.invocation_nonce)
     if core_receipt.action == "finalize_prepared":
         expected_final = signed_state.pending_sha256
         if (
@@ -104,6 +104,7 @@ def _verify_exact_post_state(
             raise PublisherAuthorizationError(
                 "recovery receipt v3 finalization prepared transition is inconsistent"
             )
+        ledger._entry(final_path).verify_against(lease)
     elif core_receipt.action == "acknowledge_committed":
         expected_final = signed_state.final_sha256
         if (
@@ -116,6 +117,7 @@ def _verify_exact_post_state(
             raise PublisherAuthorizationError(
                 "recovery receipt v3 finalization committed transition is inconsistent"
             )
+        ledger._entry(final_path).verify_against(lease)
     elif core_receipt.action == "tombstone_uncertain":
         if (
             signed_state.state not in {"reserved", "partial"}
@@ -166,8 +168,7 @@ def finalize_missing_publisher_replay_recovery_receipt_v3(
         name="recovery receipt v3 finalization time",
     )
     nonce = lease.invocation_nonce
-    final_path, pending_path, reservation_path, core_path = ledger._paths(nonce)
-    del final_path, pending_path, reservation_path
+    _, _, _, core_path = ledger._paths(nonce)
     authorization_path = (
         ledger._root / f"{nonce}.v2.recovery-authorization.json"
     )
@@ -206,7 +207,7 @@ def finalize_missing_publisher_replay_recovery_receipt_v3(
         )
 
     # Verify the original authorization at the time it authorized the already
-    # completed transition.  Finalization itself may occur after its expiry.
+    # completed transition. Finalization itself may occur after its expiry.
     authorization_verifier.verify(
         authorization=authorization,
         lease=lease,
