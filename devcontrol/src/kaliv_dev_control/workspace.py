@@ -1,20 +1,21 @@
 """Ephemeral detached-worktree management.
 
-The runner never invokes a shell. The first slice only prepares and verifies a
-workspace; it does not edit files or run project commands.
+Workspace Git operations use only an explicitly supplied ``TrustedGitRunner``.
+The generic subprocess runner remains available for separately reviewed project
+commands, but it is no longer a Git-selection boundary.
 """
 
 from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Protocol, Sequence
 
 from .contract import ContractError, DevelopmentTask
+from .trusted_git_runtime import TrustedGitRunner, TrustedGitRuntimeError
 
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 
@@ -44,7 +45,7 @@ class Runner(Protocol):
 
 
 class SubprocessRunner:
-    """Bounded no-shell subprocess runner."""
+    """Bounded no-shell subprocess runner for non-Git project commands."""
 
     def run(
         self,
@@ -89,11 +90,18 @@ class SubprocessRunner:
 
 
 class WorkspaceManager:
-    """Create exact-SHA detached worktrees under one controlled root."""
+    """Create exact-SHA detached worktrees through one trusted Git runtime."""
 
-    def __init__(self, root: Path, runner: Runner | None = None) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        git_runner: TrustedGitRunner,
+    ) -> None:
+        if not isinstance(git_runner, TrustedGitRunner):
+            raise WorkspaceError("workspace manager requires a trusted Git runner")
         self.root = root.resolve()
-        self.runner = runner or SubprocessRunner()
+        self.git_runner = git_runner
 
     def workspace_path(self, task: DevelopmentTask) -> Path:
         if "/" in task.task_id or "\\" in task.task_id:
@@ -103,10 +111,28 @@ class WorkspaceManager:
             raise WorkspaceError("workspace path escaped the configured root")
         return target
 
+    def _git(
+        self,
+        cwd: Path,
+        *args: str,
+        timeout_seconds: int,
+        max_output_bytes: int,
+    ) -> bytes:
+        try:
+            return self.git_runner.run(
+                tuple(args),
+                cwd=cwd,
+                timeout_seconds=timeout_seconds,
+                maximum=max_output_bytes,
+            )
+        except TrustedGitRuntimeError as exc:
+            operation = args[0] if args else "unknown"
+            raise WorkspaceError(
+                f"trusted Git operation failed: {operation}"
+            ) from exc
+
     def create(self, task: DevelopmentTask, *, source_repo: Path) -> Path:
         source = source_repo.resolve()
-        if shutil.which("git") is None:
-            raise WorkspaceError("git is required")
         if not source.is_dir() or not (source / ".git").exists():
             raise WorkspaceError("source_repo must be a local git checkout")
         if _SHA40.fullmatch(task.base_sha) is None:
@@ -118,14 +144,16 @@ class WorkspaceManager:
         if target.exists():
             raise WorkspaceError("workspace already exists")
 
-        result = self.runner.run(
-            ["git", "worktree", "add", "--detach", str(target), task.base_sha],
-            cwd=source,
+        self._git(
+            source,
+            "worktree",
+            "add",
+            "--detach",
+            str(target),
+            task.base_sha,
             timeout_seconds=min(task.budget.max_runtime_seconds, 300),
             max_output_bytes=task.budget.max_output_bytes,
         )
-        if result.returncode != 0:
-            raise WorkspaceError("git could not create the detached worktree")
         try:
             self._verify(task, target)
         except Exception:
@@ -134,21 +162,23 @@ class WorkspaceManager:
         return target
 
     def _verify(self, task: DevelopmentTask, target: Path) -> None:
-        head = self.runner.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=target,
+        head = self._git(
+            target,
+            "rev-parse",
+            "HEAD",
             timeout_seconds=30,
             max_output_bytes=64_000,
-        )
-        if head.returncode != 0 or head.stdout.strip() != task.base_sha:
+        ).decode("ascii", errors="strict").strip()
+        if head != task.base_sha:
             raise WorkspaceError("workspace HEAD does not match task base SHA")
-        status = self.runner.run(
-            ["git", "status", "--porcelain=v1"],
-            cwd=target,
+        status = self._git(
+            target,
+            "status",
+            "--porcelain=v1",
             timeout_seconds=30,
             max_output_bytes=64_000,
         )
-        if status.returncode != 0 or status.stdout.strip():
+        if status.strip():
             raise WorkspaceError("new workspace is not clean")
 
     def destroy(
@@ -162,15 +192,13 @@ class WorkspaceManager:
         target = self.workspace_path(task)
         if not target.exists():
             return
-        args = ["git", "worktree", "remove"]
+        args = ["worktree", "remove"]
         if allow_dirty:
             args.append("--force")
         args.append(str(target))
-        result = self.runner.run(
-            args,
-            cwd=source,
+        self._git(
+            source,
+            *args,
             timeout_seconds=120,
             max_output_bytes=1_000_000,
         )
-        if result.returncode != 0:
-            raise WorkspaceError("git could not remove the worktree")
