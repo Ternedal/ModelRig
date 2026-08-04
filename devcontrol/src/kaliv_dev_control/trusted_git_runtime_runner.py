@@ -16,6 +16,8 @@ from .trusted_git_runtime_model import (
 )
 from .trusted_git_runtime_staging import TrustedGitRuntime
 
+_MAX_STREAM_OUTPUT_BYTES = 256 * 1024 * 1024
+
 
 class TrustedGitRunner:
     """Run Git through one complete staged runtime and bounded process tree."""
@@ -184,7 +186,7 @@ class TrustedGitRunner:
             maximum,
             name="Git output bound",
             low=1,
-            high=_MAX_OUTPUT_BYTES,
+            high=_MAX_STREAM_OUTPUT_BYTES,
         )
         _integer(
             timeout_seconds,
