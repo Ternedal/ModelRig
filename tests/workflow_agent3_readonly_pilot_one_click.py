@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Run the retained Agent 3 pilot contract against candidate 1.58.147."""
+"""Run the retained Agent 3 pilot contract against candidate 1.58.148."""
 from pathlib import Path
 
 _source_path = Path(__file__).with_name("workflow_agent3_readonly_pilot_one_click.retained")
 _source = _source_path.read_text(encoding="utf-8")
 for _old, _new in (
-    ("agent/unified-candidate-1.58.143", "agent/unified-candidate-1.58.147"),
-    ("1.58.143", "1.58.147"),
+    ("agent/unified-candidate-1.58.143", "agent/unified-candidate-1.58.148"),
+    ("1.58.143", "1.58.148"),
     ("1.58.142", "1.58.144"),
     ("#150", "#161"),
 ):
@@ -89,8 +89,8 @@ if _old_passing_report not in _source:
 _source = _source.replace(_old_passing_report, _new_passing_report)
 
 _old_module_setup = """module = load_module()
-check(module.BRANCH == "agent/unified-candidate-1.58.147", "operator is pinned to the combined physical branch")
-check(module.VERSION == "1.58.147", "operator is pinned to version 1.58.147")
+check(module.BRANCH == "agent/unified-candidate-1.58.148", "operator is pinned to the combined physical branch")
+check(module.VERSION == "1.58.148", "operator is pinned to version 1.58.148")
 sha = "a" * 40
 good = passing_report(module, sha)
 check(module.report_passes(good, sha), "exact-SHA 20/20 report passes")
@@ -106,8 +106,8 @@ for label, mutate in (
 """
 
 _new_module_setup = """module = load_module()
-check(module.BRANCH == "agent/unified-candidate-1.58.147", "operator is pinned to the combined physical branch")
-check(module.VERSION == "1.58.147", "operator is pinned to version 1.58.147")
+check(module.BRANCH == "agent/unified-candidate-1.58.148", "operator is pinned to the combined physical branch")
+check(module.VERSION == "1.58.148", "operator is pinned to version 1.58.148")
 sha = "a" * 40
 identity = {
     "version": module.VERSION,
