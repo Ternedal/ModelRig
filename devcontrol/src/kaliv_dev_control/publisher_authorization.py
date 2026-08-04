@@ -65,6 +65,14 @@ from .publisher_recovery_receipt_v3 import (
     write_publisher_replay_recovery_receipt_v3,
 )
 
+# Retain the former read-only accessor without duplicating it in canonical v3
+# evidence. The value is exactly the embedded authorization SHA-256.
+setattr(
+    PublisherReplayRecoveryReceiptV3,
+    "recovery_authorization_sha256",
+    property(lambda receipt: receipt.authorization_sha256),
+)
+
 # Compatibility name for existing public consumers. The object remains the H6
 # ledger class, now upgraded in place with the consolidated H7 verifier and
 # receipt-v3 return path. Raw recover() remains disabled.
