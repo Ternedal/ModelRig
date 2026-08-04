@@ -1,7 +1,7 @@
-"""Compatibility import for the single consolidated H7 recovery verifier."""
+"""Compatibility import for the single physically primary H9 verifier."""
 from __future__ import annotations
 
-from .publisher_recovery_receipt_v3 import (
+from .publisher_recovery_primary import (
     PublisherReplayRecoveryAuthorizationVerifierV1,
 )
 
