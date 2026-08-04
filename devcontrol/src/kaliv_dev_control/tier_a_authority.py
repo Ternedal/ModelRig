@@ -53,6 +53,7 @@ _TIER_A_BUNDLE_FILES = (
     "worker/app/windows_runtime_guard.py",
     "worker/app/windows_tier_a.py",
     "devcontrol/src/kaliv_dev_control/__init__.py",
+    "devcontrol/src/kaliv_dev_control/bounded_subprocess.py",
     "devcontrol/src/kaliv_dev_control/campaign.py",
     "devcontrol/src/kaliv_dev_control/catalog.py",
     "devcontrol/src/kaliv_dev_control/commands.py",
