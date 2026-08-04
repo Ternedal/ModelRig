@@ -3,14 +3,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
 from .contract import DevelopmentTask, MergeAuthority
+from .durable_publication import DurablePublicationError, create_once_file
 from .semantic_review import (
     CriterionOutcome,
     SemanticReviewDecision,
@@ -614,6 +613,7 @@ def write_authenticated_draft_pr_readiness_proposal(
     if (
         not output.is_absolute()
         or output.exists()
+        or output.is_symlink()
         or _has_linkish_component(output.parent)
         or not output.parent.is_dir()
     ):
@@ -625,21 +625,10 @@ def write_authenticated_draft_pr_readiness_proposal(
         raise DraftPrReadinessError(
             "draft-PR readiness proposal exceeds its byte bound"
         )
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=".draft-pr-readiness-",
-        suffix=".tmp",
-        dir=output.parent,
-    )
     try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_name, output)
-    except Exception:
-        try:
-            os.unlink(temporary_name)
-        except FileNotFoundError:
-            pass
-        raise
+        create_once_file(output, payload)
+    except (FileExistsError, DurablePublicationError) as exc:
+        raise DraftPrReadinessError(
+            "draft-PR readiness proposal could not be durably published"
+        ) from exc
     return _sha256_bytes(payload)
