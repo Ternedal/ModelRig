@@ -1,11 +1,13 @@
 """Public publisher-authorization boundary.
 
-Only the Ed25519/v2 authority path is supported here. Retained v1 HMAC parsers
-and issuers live exclusively under ``kaliv_dev_control._compatibility_v1`` and
-are deliberately absent from this module namespace.
+Only verification-only Ed25519 authority is supported. Retained v1 HMAC
+parsers and issuers live exclusively under
+``kaliv_dev_control._compatibility_v1`` and are absent from this namespace.
 
-This module contains no private key, shared secret, credential, transport,
-GitHub client, repository writer, merge, release or deployment authority.
+H6 also makes authenticated, dual-signature recovery the only public replay
+recovery path. This module contains no private key, shared secret, credential,
+transport, GitHub client, repository writer, merge, release or deployment
+authority.
 """
 from __future__ import annotations
 
@@ -33,7 +35,6 @@ from .publisher_authorization_chain_v2 import (
     PublisherPreflightGateV2,
     PublisherPreflightReceiptV2,
     PublisherReplayLedgerEntryV2,
-    PublisherReplayLedgerV2,
     PublisherReplayRecoveryReceiptV2,
     load_publisher_postcondition_receipt_v2,
     load_publisher_preflight_receipt_v2,
@@ -44,6 +45,23 @@ from .publisher_authorization_chain_v2 import (
     write_publisher_replay_ledger_entry_v2,
     write_publisher_replay_recovery_receipt_v2,
 )
+from .publisher_recovery_authorization import (
+    PUBLISHER_REPLAY_RECOVERY_AUTHORIZATION_V1_SCHEMA,
+    PUBLISHER_REPLAY_RECOVERY_POLICY,
+    PUBLISHER_REPLAY_RECOVERY_STATE_V1_SCHEMA,
+    PublisherReplayLedgerV3,
+    PublisherReplayRecoveryAuthorizationV1,
+    PublisherReplayRecoveryAuthorizationVerifierV1,
+    PublisherReplayRecoveryStateV1,
+    build_publisher_replay_recovery_authorization_payload,
+    load_publisher_replay_recovery_authorization_v1,
+    publisher_replay_recovery_policy_sha256,
+    write_publisher_replay_recovery_authorization_v1,
+)
+
+# Compatibility name for existing public consumers. The object now resolves to
+# the H6 subclass whose raw recover() entrypoint is disabled.
+PublisherReplayLedgerV2 = PublisherReplayLedgerV3
 
 __all__ = [
     "PublisherAuthorizationError",
@@ -75,4 +93,15 @@ __all__ = [
     "write_publisher_preflight_receipt_v2",
     "write_publisher_replay_ledger_entry_v2",
     "write_publisher_replay_recovery_receipt_v2",
+    "PUBLISHER_REPLAY_RECOVERY_AUTHORIZATION_V1_SCHEMA",
+    "PUBLISHER_REPLAY_RECOVERY_POLICY",
+    "PUBLISHER_REPLAY_RECOVERY_STATE_V1_SCHEMA",
+    "PublisherReplayLedgerV3",
+    "PublisherReplayRecoveryAuthorizationV1",
+    "PublisherReplayRecoveryAuthorizationVerifierV1",
+    "PublisherReplayRecoveryStateV1",
+    "build_publisher_replay_recovery_authorization_payload",
+    "load_publisher_replay_recovery_authorization_v1",
+    "publisher_replay_recovery_policy_sha256",
+    "write_publisher_replay_recovery_authorization_v1",
 ]
