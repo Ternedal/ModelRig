@@ -6,6 +6,8 @@ parsers and issuers live exclusively under
 
 H7 keeps authenticated, dual-signature recovery as the only public replay
 recovery path and embeds the complete authorization in recovery receipt v3.
+H8 may only finalize a missing receipt v3 after re-verifying the exact durable
+authorization, v2 receipt and post-state; it never repeats recovery.
 This module contains no private key, shared secret, credential, transport,
 GitHub client, repository writer, merge, release or deployment authority.
 """
@@ -64,6 +66,9 @@ from .publisher_recovery_receipt_v3 import (
     load_publisher_replay_recovery_receipt_v3,
     write_publisher_replay_recovery_receipt_v3,
 )
+from .publisher_recovery_receipt_finalizer import (
+    finalize_missing_publisher_replay_recovery_receipt_v3,
+)
 
 # Retain the former read-only accessor without duplicating it in canonical v3
 # evidence. The value is exactly the embedded authorization SHA-256.
@@ -118,6 +123,7 @@ __all__ = [
     "PublisherReplayRecoveryReceiptV3",
     "PublisherReplayRecoveryStateV1",
     "build_publisher_replay_recovery_authorization_payload",
+    "finalize_missing_publisher_replay_recovery_receipt_v3",
     "load_publisher_replay_recovery_authorization_v1",
     "load_publisher_replay_recovery_receipt_v3",
     "publisher_replay_recovery_policy_sha256",
