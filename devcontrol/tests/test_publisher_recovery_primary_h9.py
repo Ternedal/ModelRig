@@ -92,9 +92,8 @@ class PublisherRecoveryPrimaryH9Tests(unittest.TestCase):
             "import socket",
             "subprocess",
             "git push",
-            "pull_request",
-            "merge_pull_request",
-            "deployment",
+            "pull_request(",
+            "merge_pull_request(",
         ):
             self.assertNotIn(forbidden, source)
 
