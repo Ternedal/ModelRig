@@ -34,7 +34,7 @@ from kaliv_dev_control.tier_a_command_receipt import (
     GitWorkspaceSnapshot,
     TierACommandReceipt,
 )
-from test_slice10g_command_receipt import make_task, result
+from test_slice10g_command_receipt import git_runtime_evidence, make_task, result
 
 ROOT = Path(__file__).resolve().parents[2]
 PATCH_BYTES = (
@@ -66,6 +66,7 @@ def make_receipt(task, patch_bytes: bytes = PATCH_BYTES) -> TierACommandReceipt:
     )
     return TierACommandReceipt.create(
         task=task,
+        git_runtime=git_runtime_evidence(),
         result=result(task),
         before=snapshot,
         after=snapshot,
