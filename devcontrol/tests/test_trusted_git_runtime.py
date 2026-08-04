@@ -222,7 +222,7 @@ class TrustedGitRuntimeTests(unittest.TestCase):
             source = make_source(root)
             alias = source / "lib" / "alias.so"
             alias.symlink_to(source / "lib" / "runtime.so")
-            with self.assertRaisesRegex(TrustedGitRuntimeError, "linked"):
+            with self.assertRaisesRegex(TrustedGitRuntimeError, "link-free"):
                 capture(source)
 
         with tempfile.TemporaryDirectory() as directory:
