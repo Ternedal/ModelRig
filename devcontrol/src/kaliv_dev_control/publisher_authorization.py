@@ -4,10 +4,10 @@ Only verification-only Ed25519 authority is supported. Retained v1 HMAC
 parsers and issuers live exclusively under
 ``kaliv_dev_control._compatibility_v1`` and are absent from this namespace.
 
-H6 also makes authenticated, dual-signature recovery the only public replay
-recovery path. This module contains no private key, shared secret, credential,
-transport, GitHub client, repository writer, merge, release or deployment
-authority.
+H7 keeps authenticated, dual-signature recovery as the only public replay
+recovery path and embeds the complete authorization in recovery receipt v3.
+This module contains no private key, shared secret, credential, transport,
+GitHub client, repository writer, merge, release or deployment authority.
 """
 from __future__ import annotations
 
@@ -57,12 +57,17 @@ from .publisher_recovery_authorization import (
     publisher_replay_recovery_policy_sha256,
     write_publisher_replay_recovery_authorization_v1,
 )
-from .publisher_recovery_authorization_strict import (
+from .publisher_recovery_receipt_v3 import (
+    PUBLISHER_REPLAY_RECOVERY_RECEIPT_V3_SCHEMA,
     PublisherReplayRecoveryAuthorizationVerifierV1,
+    PublisherReplayRecoveryReceiptV3,
+    load_publisher_replay_recovery_receipt_v3,
+    write_publisher_replay_recovery_receipt_v3,
 )
 
-# Compatibility name for existing public consumers. The object now resolves to
-# the H6 subclass whose raw recover() entrypoint is disabled.
+# Compatibility name for existing public consumers. The object remains the H6
+# ledger class, now upgraded in place with the consolidated H7 verifier and
+# receipt-v3 return path. Raw recover() remains disabled.
 PublisherReplayLedgerV2 = PublisherReplayLedgerV3
 
 __all__ = [
@@ -98,12 +103,16 @@ __all__ = [
     "PUBLISHER_REPLAY_RECOVERY_AUTHORIZATION_V1_SCHEMA",
     "PUBLISHER_REPLAY_RECOVERY_POLICY",
     "PUBLISHER_REPLAY_RECOVERY_STATE_V1_SCHEMA",
+    "PUBLISHER_REPLAY_RECOVERY_RECEIPT_V3_SCHEMA",
     "PublisherReplayLedgerV3",
     "PublisherReplayRecoveryAuthorizationV1",
     "PublisherReplayRecoveryAuthorizationVerifierV1",
+    "PublisherReplayRecoveryReceiptV3",
     "PublisherReplayRecoveryStateV1",
     "build_publisher_replay_recovery_authorization_payload",
     "load_publisher_replay_recovery_authorization_v1",
+    "load_publisher_replay_recovery_receipt_v3",
     "publisher_replay_recovery_policy_sha256",
     "write_publisher_replay_recovery_authorization_v1",
+    "write_publisher_replay_recovery_receipt_v3",
 ]
