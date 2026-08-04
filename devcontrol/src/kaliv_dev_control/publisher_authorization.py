@@ -4,10 +4,9 @@ Only verification-only Ed25519 authority is supported. Retained v1 HMAC
 parsers and issuers live exclusively under
 ``kaliv_dev_control._compatibility_v1`` and are absent from this namespace.
 
-H7 keeps authenticated, dual-signature recovery as the only public replay
-recovery path and embeds the complete authorization in recovery receipt v3.
-H8 may only finalize a missing receipt v3 after re-verifying the exact durable
-authorization, v2 receipt and post-state; it never repeats recovery.
+H9 exposes one physically primary authenticated replay/recovery ledger. It
+preserves H6 dual-signature authorization, H7 canonical receipt v3 and H8's
+receipt-only finalizer without import-time class mutation.
 This module contains no private key, shared secret, credential, transport,
 GitHub client, repository writer, merge, release or deployment authority.
 """
@@ -51,7 +50,6 @@ from .publisher_recovery_authorization import (
     PUBLISHER_REPLAY_RECOVERY_AUTHORIZATION_V1_SCHEMA,
     PUBLISHER_REPLAY_RECOVERY_POLICY,
     PUBLISHER_REPLAY_RECOVERY_STATE_V1_SCHEMA,
-    PublisherReplayLedgerV3,
     PublisherReplayRecoveryAuthorizationV1,
     PublisherReplayRecoveryStateV1,
     build_publisher_replay_recovery_authorization_payload,
@@ -59,9 +57,12 @@ from .publisher_recovery_authorization import (
     publisher_replay_recovery_policy_sha256,
     write_publisher_replay_recovery_authorization_v1,
 )
+from .publisher_recovery_primary import (
+    PublisherReplayLedgerV3,
+    PublisherReplayRecoveryAuthorizationVerifierV1,
+)
 from .publisher_recovery_receipt_v3 import (
     PUBLISHER_REPLAY_RECOVERY_RECEIPT_V3_SCHEMA,
-    PublisherReplayRecoveryAuthorizationVerifierV1,
     PublisherReplayRecoveryReceiptV3,
     load_publisher_replay_recovery_receipt_v3,
     write_publisher_replay_recovery_receipt_v3,
@@ -78,9 +79,8 @@ setattr(
     property(lambda receipt: receipt.authorization_sha256),
 )
 
-# Compatibility name for existing public consumers. The object remains the H6
-# ledger class, now upgraded in place with the consolidated H7 verifier and
-# receipt-v3 return path. Raw recover() remains disabled.
+# Compatibility name for existing public consumers. Both public names resolve
+# to the physically implemented H9 ledger. Raw recover() remains disabled.
 PublisherReplayLedgerV2 = PublisherReplayLedgerV3
 
 __all__ = [
