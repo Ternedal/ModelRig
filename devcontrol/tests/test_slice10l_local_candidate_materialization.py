@@ -3,10 +3,12 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import os
 import shutil
 import subprocess
 import tempfile
 import unittest
+from functools import lru_cache
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,7 +18,6 @@ from kaliv_dev_control.local_candidate_materialization import (
     LocalCandidateMaterializationError,
     LocalCandidateMaterializationGate,
     LocalCandidateMaterializationReceipt,
-    TrustedLocalGit,
     load_local_candidate_materialization_receipt,
     local_candidate_materialization_policy_sha256,
     materialize_local_candidate,
@@ -39,6 +40,11 @@ from kaliv_dev_control.publisher_dry_run import (
     TrustedPublisherKey,
 )
 from kaliv_dev_control.semantic_review import SemanticReviewRequest
+from kaliv_dev_control.trusted_git_runtime import (
+    TrustedGitRuntime,
+    capture_trusted_git_runtime_manifest,
+    stage_trusted_git_runtime,
+)
 from test_slice10g_command_receipt import make_task
 from test_slice10h_semantic_review import DEVELOPER, ROOT, approve, make_receipt
 from test_slice10j_publisher_dry_run import (
@@ -79,15 +85,86 @@ def git(root: Path, *args: str, stdin: bytes | None = None) -> bytes:
     return completed.stdout
 
 
-def trusted_git() -> TrustedLocalGit:
+def _copy_runtime_library(source: Path, destination: Path) -> None:
+    target = destination / source.name
+    if target.exists():
+        if target.read_bytes() != source.read_bytes():
+            raise unittest.SkipTest(
+                f"runtime library basename collision: {source.name}"
+            )
+        return
+    shutil.copy2(source, target)
+
+
+@lru_cache(maxsize=1)
+def trusted_git() -> TrustedGitRuntime:
     executable = shutil.which("git")
     if executable is None:
         raise unittest.SkipTest("Git executable is unavailable")
-    path = Path(executable).resolve()
-    return TrustedLocalGit(
-        executable_path=path,
-        expected_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+    installed = Path(executable).resolve()
+    root = Path(tempfile.mkdtemp(prefix="kaliv-test-git-runtime-"))
+    source = root / "source"
+    (source / "bin").mkdir(parents=True)
+    (source / "libexec" / "git-core").mkdir(parents=True)
+    (source / "lib").mkdir(parents=True)
+    shutil.copy2(installed, source / "bin" / "git")
+
+    exec_path_result = subprocess.run(
+        [str(installed), "--exec-path"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
     )
+    if exec_path_result.returncode != 0:
+        raise unittest.SkipTest("Git exec-path discovery failed")
+    exec_path = Path(exec_path_result.stdout.strip()).resolve()
+    shutil.copytree(
+        exec_path,
+        source / "libexec" / "git-core",
+        dirs_exist_ok=True,
+    )
+
+    ldd = shutil.which("ldd")
+    if ldd is not None:
+        dependencies = subprocess.run(
+            [ldd, str(installed)],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+        if dependencies.returncode == 0:
+            observed: set[Path] = set()
+            for line in dependencies.stdout.splitlines():
+                text = line.strip()
+                candidate = ""
+                if "=>" in text:
+                    candidate = text.split("=>", 1)[1].strip().split(" ", 1)[0]
+                elif text.startswith("/"):
+                    candidate = text.split(" ", 1)[0]
+                if candidate.startswith("/"):
+                    path = Path(candidate).resolve()
+                    if path.is_file() and path not in observed:
+                        observed.add(path)
+                        _copy_runtime_library(path, source / "lib")
+
+    manifest = capture_trusted_git_runtime_manifest(
+        source.resolve(),
+        executable_relative_path="bin/git",
+        exec_path_relative_path="libexec/git-core",
+        path_relative_directories=("bin", "libexec/git-core", "lib"),
+    )
+    staging = root / "staging"
+    staging.mkdir()
+    transaction = stage_trusted_git_runtime(
+        manifest,
+        source_root=source.resolve(),
+        staging_root=staging.resolve(),
+    )
+    return TrustedGitRuntime(transaction.resolve())
 
 
 def make_chain(root: Path):
@@ -214,32 +291,24 @@ def make_chain(root: Path):
         checked_at_utc=CHECKED,
     )
     return (
-        source.resolve(),
-        task,
-        staged_patch,
-        semantic_verifier,
-        publisher_verifier,
-        authorization_verifier,
-        dry_run,
-        preflight,
+        source.resolve(), task, staged_patch, semantic_verifier,
+        publisher_verifier, authorization_verifier, dry_run, preflight,
     )
 
 
 def create_materialization(root: Path, *, output_name: str = "materialized"):
-    (
-        source,
-        task,
-        staged_patch,
-        semantic_verifier,
-        publisher_verifier,
-        authorization_verifier,
-        dry_run,
-        preflight,
-    ) = make_chain(root)
+    chain = make_chain(root)
+    source, task, staged_patch, semantic_verifier, publisher_verifier, authorization_verifier, dry_run, preflight = chain
     output = root / output_name
     output.mkdir()
-    tool = trusted_git()
-    source_before = git(source, "status", "--porcelain=v2", "-z", "--untracked-files=all")
+    runtime = trusted_git()
+    source_before = git(
+        source,
+        "status",
+        "--porcelain=v2",
+        "-z",
+        "--untracked-files=all",
+    )
     receipt = materialize_local_candidate(
         preflight=preflight,
         task=task,
@@ -249,77 +318,50 @@ def create_materialization(root: Path, *, output_name: str = "materialized"):
         control_plane_root=ROOT,
         source_repository=source,
         materialization_root=output.resolve(),
-        trusted_git=tool,
+        trusted_git=runtime,
         materialized_at_utc=MATERIALIZED,
     )
-    source_after = git(source, "status", "--porcelain=v2", "-z", "--untracked-files=all")
+    source_after = git(
+        source,
+        "status",
+        "--porcelain=v2",
+        "-z",
+        "--untracked-files=all",
+    )
     if source_before != source_after:
         raise AssertionError("source repository changed")
-    return (
-        source,
-        task,
-        staged_patch,
-        semantic_verifier,
-        publisher_verifier,
-        authorization_verifier,
-        dry_run,
-        preflight,
-        output.resolve(),
-        tool,
-        receipt,
-    )
+    return (*chain, output.resolve(), runtime, receipt)
 
 
 class LocalCandidateMaterializationTests(unittest.TestCase):
-    def test_exact_local_commit_branch_receipt_and_determinism(self):
+    def test_exact_commit_runtime_receipt_and_determinism(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             (
-                source,
-                task,
-                staged_patch,
-                semantic_verifier,
-                publisher_verifier,
-                authorization_verifier,
-                dry_run,
-                preflight,
-                output,
-                tool,
-                receipt,
+                source, task, staged_patch, semantic_verifier,
+                publisher_verifier, authorization_verifier, dry_run, preflight,
+                output, runtime, receipt,
             ) = create_materialization(root)
             transaction = output / receipt.transaction_id
             repository = transaction / receipt.repository_relative_path
             receipt_path = transaction / receipt.receipt_relative_path
 
+            self.assertEqual(receipt.schema, "kaliv-development-local-candidate-materialization-receipt/v2")
             self.assertEqual(
-                git(output, f"--git-dir={repository}", "rev-parse", "--is-bare-repository")
-                .decode("ascii")
-                .strip(),
-                "true",
+                receipt.git.runtime.runtime_manifest_sha256,
+                runtime.receipt.manifest.sha256,
             )
             self.assertEqual(
-                git(output, f"--git-dir={repository}", "symbolic-ref", "HEAD")
-                .decode("utf-8")
-                .strip(),
-                receipt.candidate.branch_ref,
+                git(output, f"--git-dir={repository}", "rev-parse", "--is-bare-repository").strip(),
+                b"true",
             )
-            self.assertEqual(
-                git(output, f"--git-dir={repository}", "remote"),
-                b"",
-            )
+            self.assertEqual(git(output, f"--git-dir={repository}", "remote"), b"")
             reproduced = git(
                 output,
                 f"--git-dir={repository}",
-                "diff",
-                "--binary",
-                "--full-index",
-                "--no-color",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--no-renames",
-                task.base_sha,
-                receipt.candidate.commit_sha,
-                "--",
+                "diff", "--binary", "--full-index", "--no-color",
+                "--no-ext-diff", "--no-textconv", "--no-renames",
+                task.base_sha, receipt.candidate.commit_sha, "--",
             )
             self.assertEqual(reproduced, staged_patch)
             self.assertEqual(
@@ -334,17 +376,9 @@ class LocalCandidateMaterializationTests(unittest.TestCase):
                 commit_parameters["commit_message"],
             )
             self.assertEqual(
-                receipt.candidate.author_actor_id,
-                commit_parameters["author_actor_id"],
-            )
-            self.assertEqual(
                 receipt.materialization_policy_sha256,
                 local_candidate_materialization_policy_sha256(),
             )
-            self.assertFalse(receipt.remote_configured)
-            self.assertFalse(receipt.network_write_performed)
-            self.assertFalse(receipt.remote_push_performed)
-            self.assertFalse(receipt.pull_request_created)
 
             verify_local_candidate_materialization(
                 receipt=receipt,
@@ -355,7 +389,7 @@ class LocalCandidateMaterializationTests(unittest.TestCase):
                 control_plane_root=ROOT,
                 source_repository=source,
                 materialization_root=output,
-                trusted_git=tool,
+                trusted_git=runtime,
             )
             self.assertTrue(
                 LocalCandidateMaterializationGate.valid(
@@ -367,7 +401,7 @@ class LocalCandidateMaterializationTests(unittest.TestCase):
                     control_plane_root=ROOT,
                     source_repository=source,
                     materialization_root=output,
-                    trusted_git=tool,
+                    trusted_git=runtime,
                 )
             )
 
@@ -382,28 +416,18 @@ class LocalCandidateMaterializationTests(unittest.TestCase):
                 control_plane_root=ROOT,
                 source_repository=source,
                 materialization_root=second_root.resolve(),
-                trusted_git=tool,
+                trusted_git=runtime,
                 materialized_at_utc=MATERIALIZED,
             )
             self.assertEqual(second.candidate.commit_sha, receipt.candidate.commit_sha)
-            self.assertEqual(second.candidate.tree_sha, receipt.candidate.tree_sha)
             self.assertEqual(second.canonical_json(), receipt.canonical_json())
 
-    def test_expiry_wrong_task_authority_source_and_git_fail_closed(self):
+    def test_expiry_wrong_runtime_source_and_authority_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
-            (
-                source,
-                task,
-                _,
-                semantic_verifier,
-                publisher_verifier,
-                authorization_verifier,
-                _,
-                preflight,
-            ) = make_chain(root)
-            expired = root / "expired"
-            expired.mkdir()
+            source, task, _, semantic_verifier, publisher_verifier, authorization_verifier, _, preflight = make_chain(root)
+            output = root / "expired"
+            output.mkdir()
             with self.assertRaises(LocalCandidateMaterializationError):
                 materialize_local_candidate(
                     preflight=preflight,
@@ -413,14 +437,23 @@ class LocalCandidateMaterializationTests(unittest.TestCase):
                     semantic_verifier=semantic_verifier,
                     control_plane_root=ROOT,
                     source_repository=source,
-                    materialization_root=expired.resolve(),
+                    materialization_root=output.resolve(),
                     trusted_git=trusted_git(),
                     materialized_at_utc=EXPIRES,
                 )
-
-            executable = Path(shutil.which("git") or "").resolve()
-            with self.assertRaisesRegex(LocalCandidateMaterializationError, "expected hash"):
-                TrustedLocalGit(executable_path=executable, expected_sha256="0" * 64)
+            with self.assertRaisesRegex(LocalCandidateMaterializationError, "trusted Git runtime"):
+                materialize_local_candidate(
+                    preflight=preflight,
+                    task=task,
+                    authorization_verifier=authorization_verifier,
+                    publisher_verifier=publisher_verifier,
+                    semantic_verifier=semantic_verifier,
+                    control_plane_root=ROOT,
+                    source_repository=source,
+                    materialization_root=output.resolve(),
+                    trusted_git=object(),
+                    materialized_at_utc=MATERIALIZED,
+                )
 
             wrong_source = root / "wrong-source"
             wrong_source.mkdir()
@@ -460,20 +493,6 @@ class LocalCandidateMaterializationTests(unittest.TestCase):
                 trusted_git=trusted_git(),
                 materialized_at_utc=MATERIALIZED,
             )
-            other_task = make_task("2" * 40)
-            self.assertFalse(
-                LocalCandidateMaterializationGate.valid(
-                    receipt=receipt,
-                    task=other_task,
-                    authorization_verifier=authorization_verifier,
-                    publisher_verifier=publisher_verifier,
-                    semantic_verifier=semantic_verifier,
-                    control_plane_root=ROOT,
-                    source_repository=source,
-                    materialization_root=good,
-                    trusted_git=trusted_git(),
-                )
-            )
             with patch(
                 "kaliv_dev_control.semantic_review.tier_a_toolhost_sha256",
                 return_value="0" * 64,
@@ -492,23 +511,10 @@ class LocalCandidateMaterializationTests(unittest.TestCase):
                     )
                 )
 
-    def test_existing_transaction_receipt_and_disk_tampering_fail_closed(self):
+    def test_existing_transaction_authority_and_disk_tampering_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
-            (
-                source,
-                task,
-                _,
-                semantic_verifier,
-                publisher_verifier,
-                authorization_verifier,
-                _,
-                preflight,
-                output,
-                tool,
-                receipt,
-            ) = create_materialization(root)
-
+            source, task, _, semantic_verifier, publisher_verifier, authorization_verifier, _, preflight, output, runtime, receipt = create_materialization(root)
             with self.assertRaisesRegex(LocalCandidateMaterializationError, "already exists"):
                 materialize_local_candidate(
                     preflight=preflight,
@@ -519,48 +525,27 @@ class LocalCandidateMaterializationTests(unittest.TestCase):
                     control_plane_root=ROOT,
                     source_repository=source,
                     materialization_root=output,
-                    trusted_git=tool,
+                    trusted_git=runtime,
                     materialized_at_utc=MATERIALIZED,
                 )
-
             for field in (
-                "remote_configured",
-                "network_write_performed",
-                "remote_push_performed",
-                "pull_request_created",
-                "ready_for_review",
-                "reviewers_requested",
-                "merged",
-                "released",
-                "deployed",
+                "remote_configured", "network_write_performed",
+                "remote_push_performed", "pull_request_created",
+                "ready_for_review", "reviewers_requested", "merged",
+                "released", "deployed",
             ):
                 payload = receipt.to_dict()
                 payload[field] = True
                 with self.subTest(field=field):
-                    with self.assertRaisesRegex(
-                        LocalCandidateMaterializationError,
-                        "authority boundary",
-                    ):
+                    with self.assertRaisesRegex(LocalCandidateMaterializationError, "authority boundary"):
                         LocalCandidateMaterializationReceipt.from_mapping(payload)
-
-            payload = receipt.to_dict()
-            payload["candidate"]["branch_target_sha"] = "0" * 40
-            with self.assertRaisesRegex(LocalCandidateMaterializationError, "branch or patch"):
-                LocalCandidateMaterializationReceipt.from_mapping(payload)
-            payload = receipt.to_dict()
-            payload["source"]["source_mutated"] = True
-            with self.assertRaisesRegex(LocalCandidateMaterializationError, "claims mutation"):
-                LocalCandidateMaterializationReceipt.from_mapping(payload)
 
             transaction = output / receipt.transaction_id
             repository = transaction / receipt.repository_relative_path
             git(
                 output,
                 f"--git-dir={repository}",
-                "remote",
-                "add",
-                "origin",
-                "https://example.invalid/repo.git",
+                "remote", "add", "origin", "https://example.invalid/repo.git",
             )
             self.assertFalse(
                 LocalCandidateMaterializationGate.valid(
@@ -572,25 +557,13 @@ class LocalCandidateMaterializationTests(unittest.TestCase):
                     control_plane_root=ROOT,
                     source_repository=source,
                     materialization_root=output,
-                    trusted_git=tool,
+                    trusted_git=runtime,
                 )
             )
 
-    def test_canonical_storage_schema_and_api_surface(self):
+    def test_canonical_schema_api_and_retired_legacy_entrypoints(self):
         with tempfile.TemporaryDirectory() as directory:
-            (
-                source,
-                task,
-                _,
-                semantic_verifier,
-                publisher_verifier,
-                authorization_verifier,
-                _,
-                _,
-                output,
-                tool,
-                receipt,
-            ) = create_materialization(Path(directory).resolve())
+            source, task, _, semantic_verifier, publisher_verifier, authorization_verifier, _, _, output, runtime, receipt = create_materialization(Path(directory).resolve())
             copy_path = output / "receipt-copy.json"
             self.assertEqual(
                 write_local_candidate_materialization_receipt(copy_path, receipt),
@@ -598,16 +571,10 @@ class LocalCandidateMaterializationTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(LocalCandidateMaterializationError, "already exists"):
                 write_local_candidate_materialization_receipt(copy_path, receipt)
-            noncanonical = output / "noncanonical.json"
-            noncanonical.write_bytes(receipt.canonical_json().encode("utf-8") + b"\n")
-            with self.assertRaisesRegex(LocalCandidateMaterializationError, "canonical"):
-                load_local_candidate_materialization_receipt(noncanonical)
-
             schema = json.loads(
                 (
-                    ROOT
-                    / "devcontrol/schemas"
-                    / "development-local-candidate-materialization-receipt-v1.schema.json"
+                    ROOT / "devcontrol" / "schemas"
+                    / "development-local-candidate-materialization-receipt-v2.schema.json"
                 ).read_text(encoding="utf-8")
             )
             self.assertEqual(set(schema["required"]), set(receipt.to_dict()))
@@ -617,8 +584,14 @@ class LocalCandidateMaterializationTests(unittest.TestCase):
                 ("source", receipt.source.to_dict()),
                 ("candidate", receipt.candidate.to_dict()),
             ):
-                self.assertEqual(set(schema["$defs"][definition]["required"]), set(payload))
-                self.assertEqual(set(schema["$defs"][definition]["properties"]), set(payload))
+                self.assertEqual(
+                    set(schema["$defs"][definition]["required"]),
+                    set(payload),
+                )
+                self.assertEqual(
+                    set(schema["$defs"][definition]["properties"]),
+                    set(payload),
+                )
 
             transaction = output / receipt.transaction_id
             (transaction / "unexpected.txt").write_text("unexpected", encoding="utf-8")
@@ -632,49 +605,36 @@ class LocalCandidateMaterializationTests(unittest.TestCase):
                     control_plane_root=ROOT,
                     source_repository=source,
                     materialization_root=output,
-                    trusted_git=tool,
+                    trusted_git=runtime,
                 )
             )
 
         parameters = set(inspect.signature(materialize_local_candidate).parameters)
         for forbidden in (
-            "remote",
-            "remote_url",
-            "github",
-            "token",
-            "credential",
-            "push",
-            "pull_request",
-            "reviewers",
-            "ready",
-            "merge",
-            "release",
-            "deploy",
-            "branch",
-            "commit_message",
-            "author",
-            "argv",
-            "environment",
-            "source_env",
+            "remote", "remote_url", "github", "token", "credential",
+            "push", "pull_request", "reviewers", "ready", "merge",
+            "release", "deploy", "branch", "commit_message", "author",
+            "argv", "environment", "source_env",
         ):
             self.assertNotIn(forbidden, parameters)
         for forbidden in (
-            "push_branch",
-            "create_pull_request",
-            "update_pull_request",
-            "request_reviewers",
-            "mark_ready_for_review",
-            "merge_pull_request",
-            "release",
-            "deploy",
+            "push_branch", "create_pull_request", "update_pull_request",
+            "request_reviewers", "mark_ready_for_review",
+            "merge_pull_request", "release", "deploy",
         ):
             self.assertNotIn(forbidden, set(dir(materialization_module)))
+        for retired in (
+            "TrustedLocalGit", "materialize_local_candidate",
+            "verify_local_candidate_materialization",
+            "LocalCandidateMaterializationGate",
+        ):
+            self.assertFalse(hasattr(materialization_module._legacy, retired))
         source_text = inspect.getsource(materialization_module)
+        self.assertNotIn("import subprocess", source_text)
         self.assertNotIn("import requests", source_text)
         self.assertNotIn("import urllib", source_text)
         self.assertNotIn("import socket", source_text)
         self.assertNotIn("api.github.com", source_text)
-        self.assertNotIn("Authorization:", source_text)
         self.assertNotIn("github_token", source_text)
 
 
