@@ -37,6 +37,11 @@ from .tier_a_plan import (
 )
 from .tier_a_result import TierAExecutionResult, TierAOutputStream
 
+# If native cleanup cannot prove the Job Object was closed, releasing the
+# runtime locks would reopen a mutation window while a child may still exist.
+# Retain those guards until process shutdown instead of weakening the boundary.
+_QUARANTINED_RUNTIME_GUARDS: list[Any] = []
+
 
 class TierAExecutionTimeout(TierAExecutionError):
     """The Job Object timed out after producing canonical bounded evidence."""
@@ -101,6 +106,7 @@ def _run_tier_a_launch_plan(
             RestrictedLaunchPolicy,
             provision_workspace_acl,
         )
+        from app.windows_runtime_guard import WindowsRuntimeClosureLifetimeGuard
         from app.windows_tier_a import spawn_tier_a_in_job
     except ImportError as exc:
         raise TierAExecutionError(
@@ -116,10 +122,23 @@ def _run_tier_a_launch_plan(
         working_directory=working_directory,
     )
     process = None
+    lifetime_guard = None
     capture_finished = False
+    job_closed = False
     started = time.monotonic()
     try:
         acl_receipt = provision_workspace_acl(policy, profile)
+        lifetime_guard = WindowsRuntimeClosureLifetimeGuard.acquire(
+            policy,
+            profile,
+            staged_root_relative_path=(
+                runtime_closure_receipt.staged_root_relative_path
+            ),
+            files=tuple(
+                (entry.relative_path, entry.sha256, entry.size_bytes)
+                for entry in runtime_closure_receipt.files
+            ),
+        )
         process = spawn_tier_a_in_job(
             plan.argv,
             source_env=os.environ if source_env is None else source_env,
@@ -139,7 +158,11 @@ def _run_tier_a_launch_plan(
             returncode = process.wait(timeout=plan.max_timeout_seconds)
         except subprocess.TimeoutExpired:
             timed_out = True
-            terminate_attached_job(process)
+            if not terminate_attached_job(process):
+                raise TierAExecutionError(
+                    "timed-out Tier-A process lost its Job Object authority"
+                )
+            job_closed = True
             try:
                 returncode = process.wait(timeout=5)
             except Exception as exc:
@@ -147,7 +170,11 @@ def _run_tier_a_launch_plan(
                     "timed-out Tier-A process could not be reaped"
                 ) from exc
         else:
-            close_attached_job(process)
+            if not close_attached_job(process):
+                raise TierAExecutionError(
+                    "completed Tier-A process lost its Job Object authority"
+                )
+            job_closed = True
 
         process.close()
         process = None
@@ -174,26 +201,55 @@ def _run_tier_a_launch_plan(
     except TierAExecutionTimeout:
         raise
     except Exception as exc:
+        cleanup_error: Exception | None = None
         if process is not None:
-            try:
-                terminate_attached_job(process)
-            except Exception:
-                pass
+            if not job_closed:
+                try:
+                    if not terminate_attached_job(process):
+                        raise TierAExecutionError(
+                            "Tier-A cleanup found no attached Job Object"
+                        )
+                    job_closed = True
+                except Exception as cleanup_exc:
+                    cleanup_error = cleanup_exc
             try:
                 process.wait(timeout=5)
-            except Exception:
-                pass
+            except Exception as cleanup_exc:
+                if cleanup_error is None:
+                    cleanup_error = cleanup_exc
             try:
                 process.close()
-            except Exception:
-                pass
+            except Exception as cleanup_exc:
+                if cleanup_error is None:
+                    cleanup_error = cleanup_exc
         if not capture_finished:
             capture.abort()
+        if lifetime_guard is not None and process is not None and not job_closed:
+            _QUARANTINED_RUNTIME_GUARDS.append(lifetime_guard)
+            lifetime_guard = None
+        if cleanup_error is not None:
+            raise TierAExecutionError(
+                "Tier-A process tree cleanup failed; runtime locks retained"
+            ) from cleanup_error
         if isinstance(exc, TierAExecutionError):
             raise
         raise TierAExecutionError("Tier-A command execution failed safely") from exc
     finally:
-        profile.delete()
+        guard_error: Exception | None = None
+        if lifetime_guard is not None:
+            try:
+                lifetime_guard.close()
+            except Exception as exc:
+                guard_error = exc
+        try:
+            profile.delete()
+        except Exception as exc:
+            if guard_error is None:
+                guard_error = exc
+        if guard_error is not None:
+            raise TierAExecutionError(
+                "Tier-A lifetime guard cleanup failed"
+            ) from guard_error
 
 
 def run_verified_tier_a_command(
