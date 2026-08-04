@@ -189,6 +189,24 @@ def _closure_fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
+def _closure_staged_mode() -> int:
+    # On Windows, os.chmod(..., 0o555) maps to the DOS read-only attribute. It
+    # is not a security boundary (the same user can clear it), and it prevents
+    # deterministic post-execution cleanup. Windows lifetime immutability is
+    # instead enforced by the protected DACL and deny-write/delete-sharing
+    # handles acquired before the child is created. Unix staging remains 0555.
+    return 0o755 if os.name == "nt" else 0o555
+
+
+def _closure_fix_staged_mode(path: Path) -> None:
+    try:
+        os.chmod(path, _closure_staged_mode())
+    except OSError as exc:
+        raise RuntimeClosureError(
+            "staged runtime permissions could not be fixed"
+        ) from exc
+
+
 def _closure_publish_exact_file(
     source: Path,
     destination: Path,
@@ -209,6 +227,7 @@ def _closure_publish_exact_file(
             raise RuntimeClosureError(
                 "staged runtime destination already has different bytes"
             )
+        _closure_fix_staged_mode(destination)
         return
 
     descriptor, temporary_name = tempfile.mkstemp(
@@ -247,20 +266,19 @@ def _closure_publish_exact_file(
                 raise RuntimeClosureError(
                     "concurrent runtime staging produced an unsafe destination"
                 )
+            _closure_fix_staged_mode(destination)
         else:
             temporary.unlink()
             _closure_fsync_directory(destination.parent)
             try:
-                os.chmod(destination, 0o555)
-            except OSError as exc:
+                _closure_fix_staged_mode(destination)
+            except RuntimeClosureError:
                 try:
                     os.chmod(destination, 0o755)
                     destination.unlink()
                 except OSError:
                     pass
-                raise RuntimeClosureError(
-                    "staged runtime permissions could not be fixed"
-                ) from exc
+                raise
     finally:
         try:
             temporary.unlink()
