@@ -1,19 +1,18 @@
 """Ephemeral detached-worktree management.
 
 Workspace Git operations use only an explicitly supplied ``TrustedGitRunner``.
-The generic subprocess runner remains available for separately reviewed project
-commands, but it is no longer a Git-selection boundary.
+The generic subprocess runner uses the same streaming process-tree boundary for
+separately reviewed non-Git project commands.
 """
-
 from __future__ import annotations
 
 import os
 import re
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Protocol, Sequence
 
+from .bounded_subprocess import BoundedSubprocessError, run_bounded_subprocess
 from .contract import ContractError, DevelopmentTask
 from .trusted_git_runtime import TrustedGitRunner, TrustedGitRuntimeError
 
@@ -45,7 +44,7 @@ class Runner(Protocol):
 
 
 class SubprocessRunner:
-    """Bounded no-shell subprocess runner for non-Git project commands."""
+    """Streaming no-shell runner for separately reviewed project commands."""
 
     def run(
         self,
@@ -65,27 +64,30 @@ class SubprocessRunner:
             merged_env.update(env)
         merged_env["PYTHONDONTWRITEBYTECODE"] = "1"
         try:
-            completed = subprocess.run(
-                list(args),
-                cwd=cwd,
+            result = run_bounded_subprocess(
+                tuple(args),
+                cwd=Path(cwd).resolve(),
                 env=merged_env,
-                shell=False,
-                text=False,
-                capture_output=True,
-                timeout=timeout_seconds,
-                check=False,
+                timeout_seconds=timeout_seconds,
+                max_output_bytes=max_output_bytes,
+                stdout_prefix_bytes=max_output_bytes,
+                stderr_prefix_bytes=max_output_bytes,
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise WorkspaceError(f"command failed to complete: {args[0]}") from exc
-        stdout_raw = completed.stdout or b""
-        stderr_raw = completed.stderr or b""
-        if len(stdout_raw) + len(stderr_raw) > max_output_bytes:
+        except BoundedSubprocessError as exc:
+            raise WorkspaceError(
+                f"command failed to complete: {args[0]}"
+            ) from exc
+        if result.output_limit_exceeded:
             raise WorkspaceError("command output exceeded the task budget")
+        if result.timed_out:
+            raise WorkspaceError(f"command timed out: {args[0]}")
+        if result.stdout.truncated or result.stderr.truncated:
+            raise WorkspaceError("command output evidence is incomplete")
         return CommandResult(
             args=tuple(args),
-            returncode=completed.returncode,
-            stdout=stdout_raw.decode("utf-8", errors="replace"),
-            stderr=stderr_raw.decode("utf-8", errors="replace"),
+            returncode=result.returncode,
+            stdout=result.stdout.prefix.decode("utf-8", errors="replace"),
+            stderr=result.stderr.prefix.decode("utf-8", errors="replace"),
         )
 
 
