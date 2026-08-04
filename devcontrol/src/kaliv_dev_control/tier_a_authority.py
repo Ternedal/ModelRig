@@ -68,6 +68,7 @@ _TIER_A_BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/proposal.py",
     "devcontrol/src/kaliv_dev_control/review.py",
     "devcontrol/src/kaliv_dev_control/runtime_staging.py",
+    "devcontrol/src/kaliv_dev_control/streaming_publication.py",
     "devcontrol/src/kaliv_dev_control/_runtime_closure_common.py",
     "devcontrol/src/kaliv_dev_control/runtime_closure_model.py",
     "devcontrol/src/kaliv_dev_control/runtime_closure_verify.py",
