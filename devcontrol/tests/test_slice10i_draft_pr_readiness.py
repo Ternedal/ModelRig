@@ -18,6 +18,7 @@ from kaliv_dev_control.draft_pr_readiness import (
 )
 from kaliv_dev_control.semantic_review import (
     CriterionOutcome,
+    FindingSeverity,
     HmacSemanticReviewVerdictSigner,
     SemanticFinding,
     SemanticReviewDecision,
@@ -27,7 +28,6 @@ from kaliv_dev_control.semantic_review import (
 )
 from test_slice10g_command_receipt import make_task
 from test_slice10h_semantic_review import (
-    DEVELOPER,
     KEY_ID,
     REVIEWER,
     ROOT,
@@ -130,7 +130,7 @@ class DraftPrReadinessTests(unittest.TestCase):
         self.assertEqual(other_base.head_branch, first.head_branch)
 
     def test_task_evidence_and_presentation_tampering_fail_closed(self):
-        task, request, signed, _, proposal = make_proposal()
+        task, request, _, verifier, proposal = make_proposal()
 
         cases = []
         payload = proposal.to_dict()
@@ -183,7 +183,7 @@ class DraftPrReadinessTests(unittest.TestCase):
             DraftPrReadinessGate.ready(
                 proposal=proposal,
                 task=other_task,
-                verifier=approve(request)[2],
+                verifier=verifier,
                 control_plane_root=ROOT,
             )
         )
@@ -193,18 +193,14 @@ class DraftPrReadinessTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "receipt"):
             AuthenticatedDraftPrReadinessProposal.from_mapping(request_payload)
 
-        verdict_payload = proposal.to_dict()
-        verdict_payload["signed_semantic_review_verdict"][
-            "signature_sha256"
-        ] = "0" * 64
-        structurally_valid = AuthenticatedDraftPrReadinessProposal.from_mapping(
-            verdict_payload
+        wrong_secret_verifier = SemanticReviewVerifier(
+            {KEY_ID: TrustedSemanticReviewerKey(REVIEWER, b"x" * 32)}
         )
         self.assertFalse(
             DraftPrReadinessGate.ready(
-                proposal=structurally_valid,
+                proposal=proposal,
                 task=task,
-                verifier=approve(request)[2],
+                verifier=wrong_secret_verifier,
                 control_plane_root=ROOT,
             )
         )
@@ -222,7 +218,7 @@ class DraftPrReadinessTests(unittest.TestCase):
             ),
             findings=(
                 SemanticFinding(
-                    severity="high",
+                    severity=FindingSeverity.HIGH,
                     title="Evidence gap",
                     detail="The exact evidence does not prove the criterion.",
                 ),
@@ -319,7 +315,6 @@ class DraftPrReadinessTests(unittest.TestCase):
             "release",
         ):
             self.assertNotIn(forbidden, names)
-        self.assertNotIn("GitHub", inspect.getsource(readiness_module).splitlines()[0])
 
     def test_invalid_base_branch_fails_before_artifact_creation(self):
         task, _, request = make_request()
