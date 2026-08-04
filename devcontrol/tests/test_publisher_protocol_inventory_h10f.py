@@ -62,6 +62,7 @@ _SHARED_STREAMING_PUBLISHERS = Counter(
             "_closure_publish_exact_file",
             "publish_stream_once",
         ): 1,
+        ("runtime_staging.py", "stage", "publish_stream_once"): 1,
     }
 )
 
@@ -99,8 +100,6 @@ _LOW_LEVEL_PROTOCOLS = Counter(
             "publish_stream_once",
             "os.link",
         ): 1,
-        ("runtime_staging.py", "stage", "tempfile.mkstemp"): 1,
-        ("runtime_staging.py", "stage", "os.link"): 1,
         ("patch.py", "apply", "tempfile.NamedTemporaryFile"): 1,
         ("store.py", "save", "tempfile.NamedTemporaryFile"): 1,
         ("store.py", "save", "temporary.replace"): 1,
@@ -223,7 +222,7 @@ class PublisherProtocolInventoryH10FTests(unittest.TestCase):
             ),
         )
 
-    def test_h10g_a_migrates_closure_to_the_shared_streaming_primitive(self) -> None:
+    def test_h10g_migrates_both_runtime_publishers_to_the_shared_streaming_primitive(self) -> None:
         observed = _inventory()
         self.assertEqual(
             Counter(
@@ -255,26 +254,13 @@ class PublisherProtocolInventoryH10FTests(unittest.TestCase):
             ],
             1,
         )
-        closure = (_PACKAGE / "_runtime_closure_common.py").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("publish_stream_once", closure)
-        self.assertNotIn("tempfile.mkstemp", closure)
-        self.assertNotIn("os.link(", closure)
-        self.assertNotIn("os.replace", closure)
-
-    def test_runtime_staging_remains_explicitly_classified_for_h10g_b(self) -> None:
-        observed = _inventory()
-        self.assertEqual(
-            observed[("runtime_staging.py", "stage", "tempfile.mkstemp")],
-            1,
-        )
-        self.assertEqual(
-            observed[("runtime_staging.py", "stage", "os.link")],
-            1,
-        )
-        source = (_PACKAGE / "runtime_staging.py").read_text(encoding="utf-8")
-        self.assertNotIn("os.replace", source)
+        for relative in ("_runtime_closure_common.py", "runtime_staging.py"):
+            with self.subTest(relative=relative):
+                source = (_PACKAGE / relative).read_text(encoding="utf-8")
+                self.assertIn("publish_stream_once", source)
+                self.assertNotIn("tempfile.mkstemp", source)
+                self.assertNotIn("os.link(", source)
+                self.assertNotIn("os.replace", source)
 
     def test_named_temporaries_are_only_ephemeral_patch_input_or_mutable_state(self) -> None:
         observed = _inventory()

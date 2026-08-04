@@ -15,7 +15,6 @@ import hashlib
 import json
 import os
 import re
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
@@ -23,6 +22,10 @@ from typing import Any, Mapping
 from .catalog import CatalogError
 from .commands import CommandRegistry, CommandTemplate
 from .contract import DevelopmentTask
+from .streaming_publication import (
+    StreamingPublicationError,
+    publish_stream_once,
+)
 from .tier_a_execution import (
     LeasedCommandRegistry,
     workspace_root_authority_sha256,
@@ -150,19 +153,6 @@ def _secure_directory_chain(root: Path, relative: PurePosixPath) -> Path:
                 "runtime staging directory changed to a link or non-directory"
             )
     return current
-
-
-def _fsync_directory(path: Path) -> None:
-    if os.name == "nt":
-        return
-    flags = os.O_RDONLY
-    if hasattr(os, "O_DIRECTORY"):
-        flags |= os.O_DIRECTORY
-    descriptor = os.open(path, flags)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
 
 
 def _fix_published_permissions(destination: Path, *, published_here: bool) -> None:
@@ -461,55 +451,55 @@ class TrustedRuntimeStager:
                     "staged runtime destination already exists with different bytes"
                 )
         else:
-            descriptor, temporary_name = tempfile.mkstemp(
-                prefix=".kaliv-stage-", suffix=".tmp", dir=parent
-            )
-            temporary = Path(temporary_name)
+            def validate_concurrent(path: Path) -> None:
+                if _is_linkish(path) or not path.is_file():
+                    raise RuntimeStagingError(
+                        "concurrent runtime staging produced an unsafe destination"
+                    )
+                existing_hash, existing_size = _file_hash_and_size(
+                    path, maximum=self.max_executable_bytes
+                )
+                if (
+                    existing_hash != executable_sha256
+                    or existing_size != size_bytes
+                ):
+                    raise RuntimeStagingError(
+                        "concurrent runtime staging produced different bytes"
+                    )
+
             try:
-                digest = hashlib.sha256()
-                copied = 0
-                with source.open("rb") as source_handle, os.fdopen(
-                    descriptor, "wb", closefd=True
-                ) as destination_handle:
-                    while chunk := source_handle.read(1024 * 1024):
-                        copied += len(chunk)
-                        if copied > self.max_executable_bytes:
-                            raise RuntimeStagingError(
-                                "trusted runtime exceeds the staging budget"
-                            )
-                        destination_handle.write(chunk)
-                        digest.update(chunk)
-                    destination_handle.flush()
-                    os.fsync(destination_handle.fileno())
-                descriptor = -1
-                if copied != size_bytes or digest.hexdigest() != executable_sha256:
+                published_here = publish_stream_once(
+                    source,
+                    destination,
+                    expected_sha256=executable_sha256,
+                    expected_size=size_bytes,
+                    maximum=self.max_executable_bytes,
+                    validate_existing=validate_concurrent,
+                    prepare_temporary=(
+                        lambda path: _fix_published_permissions(
+                            path, published_here=False
+                        )
+                        if os.name != "nt"
+                        else None
+                    ),
+                    sync_parent_on_race=True,
+                )
+            except StreamingPublicationError as exc:
+                if exc.code == "source_exceeds_budget":
+                    raise RuntimeStagingError(
+                        "trusted runtime exceeds the staging budget"
+                    ) from exc
+                if exc.code == "source_changed":
                     raise RuntimeStagingError(
                         "trusted runtime changed while it was being staged"
-                    )
-                if os.name != "nt":
-                    _fix_published_permissions(temporary, published_here=False)
-                try:
-                    os.link(temporary, destination)
-                    published_here = True
-                except FileExistsError:
-                    existing_hash, existing_size = _file_hash_and_size(
-                        destination, maximum=self.max_executable_bytes
-                    )
-                    if (
-                        existing_hash != executable_sha256
-                        or existing_size != size_bytes
-                    ):
-                        raise RuntimeStagingError(
-                            "concurrent runtime staging produced different bytes"
-                        )
-                _fsync_directory(parent)
-            finally:
-                if descriptor >= 0:
-                    os.close(descriptor)
-                try:
-                    temporary.unlink()
-                except FileNotFoundError:
-                    pass
+                    ) from exc
+                raise RuntimeStagingError(
+                    "trusted runtime publication was not durable"
+                ) from exc
+            except OSError as exc:
+                raise RuntimeStagingError(
+                    "trusted runtime publication failed"
+                ) from exc
 
         # Windows' read-only attribute applies to every hard-link name. Setting it
         # on the temporary name before unlink would make temp cleanup fail with

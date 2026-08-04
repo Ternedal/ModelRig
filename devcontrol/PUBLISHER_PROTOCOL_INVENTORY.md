@@ -1,4 +1,4 @@
-# DevControl publisher-protokoller — H10F/H10G-A
+# DevControl publisher-protokoller — H10F/H10G
 
 Denne oversigt er autoritativ for fil-publication i `kaliv_dev_control`.
 Formålet er at holde forskellige persistenskontrakter adskilt: immutable beviser
@@ -37,10 +37,9 @@ transaction. Recovery er eksplicit og schema-bundet.
 
 ## 3. Shared bounded streaming create-once publication
 
-H10G-A introducerer `streaming_publication.publish_stream_once()` og migrerer
-`_runtime_closure_common._closure_publish_exact_file()` til den fælles primitive.
-`runtime_staging.TrustedRuntimeStager.stage()` beholder foreløbig sin eksisterende,
-eksplicit klassificerede hardlink-protokol og migreres separat i H10G-B.
+H10G introducerer `streaming_publication.publish_stream_once()` og migrerer både
+`_runtime_closure_common._closure_publish_exact_file()` og
+`runtime_staging.TrustedRuntimeStager.stage()` til den fælles primitive.
 
 Den fælles primitive kopierer i bounded 1 MiB chunks, beregner SHA-256 og byteantal
 i samme gennemløb, synkroniserer tempfilen og publicerer via hardlink uden
@@ -52,11 +51,10 @@ valideret concurrent winner.
 Runtime closure ejer fortsat single-link-, hash-, size- og platform-mode-
 invarianterne. Der bufferes aldrig en runtime på op til 512 MiB i hukommelsen.
 
-For H10G-A må kun `streaming_publication.py` og den endnu ikke migrerede
-`runtime_staging.py` kalde `tempfile.mkstemp()` og `os.link()` for understøttet
-streaming-publication. Runtime closure må kun kalde `publish_stream_once()` og
-må ikke indeholde `mkstemp`, `os.link` eller replace-publication. H10G-B fjerner
-den sidste direkte low-level caller.
+Kun `streaming_publication.py` må kalde `tempfile.mkstemp()` og `os.link()` for
+understøttet streaming-publication. Begge authority-callers må kun kalde
+`publish_stream_once()` og må ikke indeholde `mkstemp`, `os.link` eller
+replace-publication.
 
 ## 4. Bevidst mutable compare-and-swap state
 
@@ -91,8 +89,7 @@ forbudt af inventory-kontrakten.
   inventory-opdatering og sikkerhedsreview.
 - `os.replace()` er kun tilladt i de to retained v1-moduler.
 - Den eneste understøttede mutable replace-state er campaign-store CAS.
-- H10G-A har ét fælles low-level implementation point for runtime closure og én
-  eksplicit klassificeret resterende runtime-staging-implementation.
-- H10G-A tilføjer ingen credential, token, signer, Git-kommando, remote, socket,
+- H10G har ét fælles low-level implementation point for begge runtime-publishers.
+- H10G tilføjer ingen credential, token, signer, Git-kommando, remote, socket,
   HTTP-klient, GitHub-writer, push, PR-mutation, reviewer-request, merge,
   release, settings-, deployment- eller production-authority.
