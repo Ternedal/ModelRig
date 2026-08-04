@@ -16,6 +16,23 @@ for _name, _value in vars(_core).items():
 from .durable_publication import DurablePublicationError, create_once_file
 
 
+_original_tier_a_toolhost_sha256 = tier_a_toolhost_sha256
+
+
+def _tier_a_toolhost_sha256_proxy(*args: Any, **kwargs: Any) -> str:
+    return globals()["tier_a_toolhost_sha256"](*args, **kwargs)
+
+
+# Preserve the established public patch point used by semantic-review fixtures.
+_core.tier_a_toolhost_sha256 = _tier_a_toolhost_sha256_proxy
+for _superseded_writer in (
+    "_write_canonical_file",
+    "write_semantic_review_request",
+    "write_signed_semantic_review_verdict",
+):
+    vars(_core).pop(_superseded_writer, None)
+
+
 def _write_canonical_file(path: Path, value: Any, *, name: str) -> str:
     output = Path(path)
     if (
