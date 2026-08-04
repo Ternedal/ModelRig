@@ -206,7 +206,13 @@ def _authorization(ledger, lease, *, operator_actor=OPERATOR):
 
 class PublisherReplayRecoveryAuthorizationH6Tests(unittest.TestCase):
     def test_public_ledger_disables_raw_recovery(self):
-        self.assertIs(
+        self.assertTrue(
+            issubclass(
+                public_authorization.PublisherReplayLedgerV2,
+                PublisherReplayLedgerV3,
+            )
+        )
+        self.assertIsNot(
             public_authorization.PublisherReplayLedgerV2,
             PublisherReplayLedgerV3,
         )
