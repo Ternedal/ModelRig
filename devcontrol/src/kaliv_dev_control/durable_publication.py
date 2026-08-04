@@ -79,8 +79,9 @@ def sync_file(path: Path) -> None:
         or not candidate.is_file()
     ):
         raise DurablePublicationError("file sync target is missing or unsafe")
+    flags = os.O_RDWR if os.name == "nt" else os.O_RDONLY
     try:
-        descriptor = os.open(candidate, os.O_RDONLY)
+        descriptor = os.open(candidate, flags)
     except OSError as exc:
         raise DurablePublicationError("file could not be opened for sync") from exc
     try:
