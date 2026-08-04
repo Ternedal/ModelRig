@@ -1,4 +1,4 @@
-"""Complete local Git runtime capture, staging, verification and execution."""
+"""Complete local Git runtime capture, durable staging and execution."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -19,9 +19,12 @@ from .trusted_git_runtime_model import (
     _sha256_bytes,
 )
 from .trusted_git_runtime_runner import TrustedGitRunner
-from .trusted_git_runtime_staging import (
+from .trusted_git_runtime_h4 import (
+    TRUSTED_GIT_RUNTIME_RECOVERY_SCHEMA,
     TrustedGitRuntime,
+    TrustedGitRuntimeRecoveryReceipt,
     load_trusted_git_runtime_receipt,
+    recover_trusted_git_runtime_transaction,
     stage_trusted_git_runtime,
 )
 
@@ -93,15 +96,18 @@ def capture_trusted_git_runtime_manifest(
 __all__ = [
     "TRUSTED_GIT_RUNTIME_EVIDENCE_SCHEMA",
     "TRUSTED_GIT_RUNTIME_MANIFEST_SCHEMA",
+    "TRUSTED_GIT_RUNTIME_RECOVERY_SCHEMA",
     "TRUSTED_GIT_RUNTIME_STAGING_RECEIPT_SCHEMA",
     "TrustedGitRuntime",
     "TrustedGitRuntimeError",
     "TrustedGitRuntimeEvidence",
     "TrustedGitRuntimeFile",
     "TrustedGitRuntimeManifest",
+    "TrustedGitRuntimeRecoveryReceipt",
     "TrustedGitRuntimeStagingReceipt",
     "TrustedGitRunner",
     "capture_trusted_git_runtime_manifest",
     "load_trusted_git_runtime_receipt",
+    "recover_trusted_git_runtime_transaction",
     "stage_trusted_git_runtime",
 ]
