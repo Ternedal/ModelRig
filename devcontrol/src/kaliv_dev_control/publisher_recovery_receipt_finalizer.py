@@ -1,12 +1,13 @@
 """Authenticated finalization of a missing publisher recovery receipt v3 (H8).
 
 This module addresses only the narrow crash window where the authenticated H6
-recovery transition and its durable v2 evidence completed, but H7 receipt-v3
-publication did not.  The finalizer loads all authority and transition evidence
+recovery transition and its durable v2 evidence completed, but receipt-v3
+publication did not. The finalizer loads all authority and transition evidence
 from fixed ledger paths, verifies the original dual Ed25519 authorization at
 the recorded recovery time, verifies the exact current durable post-state, and
 publishes only the missing deterministic receipt v3.
 
+H9 binds this finalizer to the physically primary recovery ledger and verifier.
 It never calls a recovery transition, changes nonce state, accepts a private
 key or credential, configures a remote, performs network I/O, writes GitHub, or
 provides merge, release or deployment authority.
@@ -25,13 +26,15 @@ from .publisher_authorization_chain_v2 import (
 )
 from .publisher_authorization_v2 import AsymmetricPublisherAuthorizationLease
 from .publisher_recovery_authorization import (
-    PublisherReplayLedgerV3,
     PublisherReplayRecoveryAuthorizationV1,
     PublisherReplayRecoveryStateV1,
     load_publisher_replay_recovery_authorization_v1,
 )
-from .publisher_recovery_receipt_v3 import (
+from .publisher_recovery_primary import (
+    PublisherReplayLedgerV3,
     PublisherReplayRecoveryAuthorizationVerifierV1,
+)
+from .publisher_recovery_receipt_v3 import (
     PublisherReplayRecoveryReceiptV3,
     load_publisher_replay_recovery_receipt_v3,
     write_publisher_replay_recovery_receipt_v3,
@@ -143,8 +146,8 @@ def finalize_missing_publisher_replay_recovery_receipt_v3(
     """Publish only a missing v3 receipt for an already completed recovery.
 
     The function deliberately accepts neither authorization nor core receipt
-    objects from the caller.  Both are loaded canonically from the exact ledger
-    paths.  The original transition is never called or repeated.
+    objects from the caller. Both are loaded canonically from the exact ledger
+    paths. The original transition is never called or repeated.
     """
 
     if not isinstance(ledger, PublisherReplayLedgerV3):
