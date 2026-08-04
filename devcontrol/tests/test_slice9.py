@@ -26,6 +26,7 @@ from kaliv_dev_control.physical_isolation import (
     WindowsPhysicalIsolationVerifier,
     write_signed_report,
 )
+from kaliv_dev_control.tier_a_authority import _TIER_A_BUNDLE_FILES
 from kaliv_dev_control.tier_a_execution import (
     LeasedCatalogMaterializer,
     TIER_A_APPLICATION_ENVIRONMENT,
@@ -43,36 +44,10 @@ NOW = datetime(2026, 8, 3, 12, 15, tzinfo=timezone.utc)
 SECRET = b"x" * 32
 KEY_ID = "operator-key-test"
 
-# This fixture deliberately mirrors the complete signed v6 authority bundle.
-# A missing entry must make the test authority root fail closed just like a real
-# operator root, rather than silently weakening physical-evidence identity.
-BUNDLE_FILES = (
-    "worker/app/__init__.py",
-    "worker/app/windows_job.py",
-    "worker/app/windows_restricted.py",
-    "worker/app/windows_capture.py",
-    "worker/app/windows_runtime_guard.py",
-    "worker/app/windows_tier_a.py",
-    "devcontrol/src/kaliv_dev_control/__init__.py",
-    "devcontrol/src/kaliv_dev_control/catalog.py",
-    "devcontrol/src/kaliv_dev_control/commands.py",
-    "devcontrol/src/kaliv_dev_control/contract.py",
-    "devcontrol/src/kaliv_dev_control/physical_isolation.py",
-    "devcontrol/src/kaliv_dev_control/runtime_staging.py",
-    "devcontrol/src/kaliv_dev_control/_runtime_closure_common.py",
-    "devcontrol/src/kaliv_dev_control/runtime_closure_model.py",
-    "devcontrol/src/kaliv_dev_control/runtime_closure_verify.py",
-    "devcontrol/src/kaliv_dev_control/runtime_closure_staging.py",
-    "devcontrol/src/kaliv_dev_control/runtime_closure.py",
-    "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
-    "devcontrol/src/kaliv_dev_control/tier_a_plan.py",
-    "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py",
-    "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
-    "devcontrol/src/kaliv_dev_control/tier_a_result.py",
-    "devcontrol/src/kaliv_dev_control/tier_a_command_receipt.py",
-    "devcontrol/src/kaliv_dev_control/tier_a_execution.py",
-    "devcontrol/src/kaliv_dev_control/workspace.py",
-)
+# Synthetic control roots must use the production authority bundle directly.
+# A parallel fixture list can silently drift and weaken the physical-evidence
+# tests whenever an authority-reachable source file is added.
+BUNDLE_FILES = _TIER_A_BUNDLE_FILES
 
 
 def task(command_id: str = "modelrig.tier-a.probe") -> DevelopmentTask:
