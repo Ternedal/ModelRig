@@ -1,9 +1,9 @@
-"""Authenticated publisher replay recovery receipt v3 (H7).
+"""Canonical authenticated publisher replay recovery receipt v3.
 
-H7 consolidates the supported recovery verifier and makes the complete dual
-Ed25519 authorization part of the durable recovery receipt.  The retained H6
-mutation core remains fail closed and continues to write its v2 transition
-receipt; H7 wraps that exact receipt in canonical v3 evidence.
+H9 keeps this module deliberately passive: it defines, loads and durably writes
+the H7 receipt-v3 artifact, but it does not replace verifier references, mutate
+ledger classes or install methods at import time.  The physically primary
+recovery ledger lives in :mod:`publisher_recovery_primary`.
 
 No private key, shared secret, credential, Git transport, network client,
 repository writer, pull-request writer, merge, release or deployment capability
@@ -16,11 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import publisher_recovery_authorization as _recovery_module
 from ._publisher_authorization_legacy import (
     PublisherAuthorizationError,
     _MAX_ARTIFACT_BYTES,
-    _actor,
     _canonical,
     _has_linkish_component,
     _hex,
@@ -31,57 +29,13 @@ from ._publisher_authorization_legacy import (
 )
 from .durable_publication import DurablePublicationError, create_once_file
 from .publisher_authorization_chain_v2 import PublisherReplayRecoveryReceiptV2
-from .publisher_authorization_v2 import AsymmetricPublisherAuthorizationLease
 from .publisher_recovery_authorization import (
-    PublisherReplayLedgerV3,
     PublisherReplayRecoveryAuthorizationV1,
-    PublisherReplayRecoveryAuthorizationVerifierV1 as _H6RecoveryVerifier,
-    PublisherReplayRecoveryStateV1,
 )
 
 PUBLISHER_REPLAY_RECOVERY_RECEIPT_V3_SCHEMA = (
     "kaliv-development-publisher-replay-recovery-receipt/v3"
 )
-
-
-class PublisherReplayRecoveryAuthorizationVerifierV1(_H6RecoveryVerifier):
-    """The single supported verifier, including exact signature-time binding."""
-
-    def verify(
-        self,
-        *,
-        authorization: PublisherReplayRecoveryAuthorizationV1,
-        lease: AsymmetricPublisherAuthorizationLease,
-        current_state: PublisherReplayRecoveryStateV1,
-        at_utc: str,
-    ) -> PublisherReplayRecoveryAuthorizationV1:
-        verified = super().verify(
-            authorization=authorization,
-            lease=lease,
-            current_state=current_state,
-            at_utc=at_utc,
-        )
-        requested = _utc(
-            authorization.requested_at_utc,
-            name="recovery request time",
-        )
-        expires = _utc(
-            authorization.expires_at_utc,
-            name="recovery authorization expiry",
-        )
-        for signature, role in (
-            (authorization.operator_signature, "operator"),
-            (authorization.reviewer_signature, "reviewer"),
-        ):
-            signed = _utc(
-                signature.signed_at_utc,
-                name=f"recovery {role} signature time",
-            )
-            if signed < requested or signed >= expires:
-                raise PublisherAuthorizationError(
-                    f"recovery {role} signature is outside the approval window"
-                )
-        return verified
 
 
 @dataclass(frozen=True, slots=True)
@@ -354,79 +308,8 @@ def write_publisher_replay_recovery_receipt_v3(
     return receipt.sha256
 
 
-_H6_RECOVER_AUTHENTICATED = PublisherReplayLedgerV3.recover_authenticated
-
-
-def _recover_authenticated_h7(
-    self: PublisherReplayLedgerV3,
-    *,
-    lease: AsymmetricPublisherAuthorizationLease,
-    authorization: PublisherReplayRecoveryAuthorizationV1,
-    authorization_verifier: PublisherReplayRecoveryAuthorizationVerifierV1,
-    recovered_at_utc: str,
-) -> PublisherReplayRecoveryReceiptV3:
-    if not isinstance(
-        authorization_verifier,
-        PublisherReplayRecoveryAuthorizationVerifierV1,
-    ):
-        raise PublisherAuthorizationError(
-            "recovery requires the consolidated H7 Ed25519 verifier"
-        )
-    core_receipt = _H6_RECOVER_AUTHENTICATED(
-        self,
-        lease=lease,
-        authorization=authorization,
-        authorization_verifier=authorization_verifier,
-        recovered_at_utc=recovered_at_utc,
-    )
-    receipt = PublisherReplayRecoveryReceiptV3.from_core(
-        authorization=authorization,
-        core_receipt=core_receipt,
-    )
-    path = self._root / f"{lease.invocation_nonce}.v3.recovery.json"
-    payload = receipt.canonical_json().encode("utf-8")
-    if len(payload) > _MAX_ARTIFACT_BYTES:
-        raise PublisherAuthorizationError(
-            "publisher replay recovery receipt v3 exceeds its byte bound"
-        )
-    if path.exists():
-        if (
-            path.is_symlink()
-            or not path.is_file()
-            or path.read_bytes() != payload
-        ):
-            raise PublisherAuthorizationError(
-                "publisher replay recovery receipt v3 conflicts with durable evidence"
-            )
-    else:
-        try:
-            create_once_file(path, payload)
-        except (FileExistsError, DurablePublicationError) as exc:
-            raise PublisherAuthorizationError(
-                "publisher replay recovery receipt v3 was not durably published"
-            ) from exc
-    loaded = load_publisher_replay_recovery_receipt_v3(path)
-    if loaded.canonical_json() != receipt.canonical_json():
-        raise PublisherAuthorizationError(
-            "publisher replay recovery receipt v3 postcondition failed"
-        )
-    return receipt
-
-
-# Replace both formerly divergent public/internal verifier references with one
-# H7 class, then install receipt-v3 wrapping on the existing H6 ledger class.
-# The ledger class identity intentionally remains stable for existing consumers.
-_recovery_module.PublisherReplayRecoveryAuthorizationVerifierV1 = (
-    PublisherReplayRecoveryAuthorizationVerifierV1
-)
-if not getattr(PublisherReplayLedgerV3, "_h7_receipt_v3_installed", False):
-    PublisherReplayLedgerV3.recover_authenticated = _recover_authenticated_h7
-    PublisherReplayLedgerV3._h7_receipt_v3_installed = True
-
-
 __all__ = [
     "PUBLISHER_REPLAY_RECOVERY_RECEIPT_V3_SCHEMA",
-    "PublisherReplayRecoveryAuthorizationVerifierV1",
     "PublisherReplayRecoveryReceiptV3",
     "load_publisher_replay_recovery_receipt_v3",
     "write_publisher_replay_recovery_receipt_v3",
