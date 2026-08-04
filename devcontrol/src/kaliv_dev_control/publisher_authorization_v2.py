@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -17,6 +16,7 @@ from .asymmetric_authority import (
     ASYMMETRIC_AUTHORITY_ALGORITHM,
     DetachedEd25519AuthoritySignature,
     Ed25519AuthorityVerifier,
+    asymmetric_authority_key_custody_policy_sha256,
 )
 from .contract import DevelopmentTask, MergeAuthority
 from .publisher_dry_run import (
@@ -96,7 +96,7 @@ def build_asymmetric_publisher_authorization_payload(
     issuer_system_id: str,
     issuer_key_id: str,
 ) -> bytes:
-    """Build the exact canonical bytes an offline signer must sign."""
+    """Build the exact canonical bytes an external signer must sign."""
 
     if not isinstance(task, DevelopmentTask):
         raise PublisherAuthorizationError("authorization payload requires a task")
@@ -129,12 +129,10 @@ def build_asymmetric_publisher_authorization_payload(
     expires = _utc(expires_at_utc, name="lease expiry time")
     duration = int((expires - issued).total_seconds())
     if not 1 <= duration <= _MAX_LEASE_SECONDS:
-        raise PublisherAuthorizationError(
-            "authorization lease lifetime is invalid"
-        )
+        raise PublisherAuthorizationError("authorization lease lifetime is invalid")
     issuer = _actor(issuer_actor_id, name="authorization issuer actor")
-    _identifier(issuer_system_id, name="authorization issuer system")
-    _identifier(issuer_key_id, name="authorization issuer key ID")
+    system = _identifier(issuer_system_id, name="authorization issuer system")
+    key_id = _identifier(issuer_key_id, name="authorization issuer key ID")
     developer = request.readiness.semantic_review_request.developer_actor_id
     reviewer = request.readiness.reviewer_actor_id
     publisher = request.publisher_actor_id
@@ -146,17 +144,18 @@ def build_asymmetric_publisher_authorization_payload(
         signed_request=signed_request,
         remote_repository=remote_repository,
     )
-    unsigned = _lease_unsigned_payload(
-        signed_request=signed_request,
-        remote_repository=remote_repository,
-        credential_policy=policy,
-        issued_at_utc=issued_at_utc,
-        expires_at_utc=expires_at_utc,
-        issuer_actor_id=issuer,
-        issuer_system_id=issuer_system_id,
-        issuer_key_id=issuer_key_id,
-    )
-    return _canonical(unsigned).encode("utf-8")
+    return _canonical(
+        _lease_unsigned_payload(
+            signed_request=signed_request,
+            remote_repository=remote_repository,
+            credential_policy=policy,
+            issued_at_utc=issued_at_utc,
+            expires_at_utc=expires_at_utc,
+            issuer_actor_id=issuer,
+            issuer_system_id=system,
+            issuer_key_id=key_id,
+        )
+    ).encode("utf-8")
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,15 +201,14 @@ class AsymmetricPublisherAuthorizationLease:
             raise PublisherAuthorizationError(
                 "authorization lease credential policy is invalid"
             )
-        if not isinstance(
-            self.signature, DetachedEd25519AuthoritySignature
-        ):
-            raise PublisherAuthorizationError(
-                "authorization lease signature is invalid"
-            )
-        _actor(self.issuer_actor_id, name="authorization issuer actor")
-        _identifier(self.issuer_system_id, name="authorization issuer system")
-        _identifier(self.issuer_key_id, name="authorization issuer key ID")
+        if not isinstance(self.signature, DetachedEd25519AuthoritySignature):
+            raise PublisherAuthorizationError("authorization lease signature is invalid")
+
+        issuer = _actor(self.issuer_actor_id, name="authorization issuer actor")
+        system = _identifier(
+            self.issuer_system_id, name="authorization issuer system"
+        )
+        key_id = _identifier(self.issuer_key_id, name="authorization issuer key ID")
         if self.algorithm != ASYMMETRIC_AUTHORITY_ALGORITHM:
             raise PublisherAuthorizationError(
                 "authorization signature algorithm is unsupported"
@@ -219,10 +217,13 @@ class AsymmetricPublisherAuthorizationLease:
         expires = _utc(self.expires_at_utc, name="lease expiry time")
         duration = int((expires - issued).total_seconds())
         if not 1 <= duration <= _MAX_LEASE_SECONDS:
-            raise PublisherAuthorizationError(
-                "authorization lease lifetime is invalid"
-            )
+            raise PublisherAuthorizationError("authorization lease lifetime is invalid")
+
         request = self.signed_request.request
+        expected_policy = PublisherCredentialPolicy.for_request(
+            signed_request=self.signed_request,
+            remote_repository=self.remote_repository,
+        )
         if (
             self.signed_request_sha256 != self.signed_request.sha256
             or self.request_sha256 != request.sha256
@@ -232,11 +233,7 @@ class AsymmetricPublisherAuthorizationLease:
             or self.remote_repository_sha256 != self.remote_repository.sha256
             or self.remote_repository.repository != request.repository
             or self.credential_policy_sha256 != self.credential_policy.sha256
-            or self.credential_policy
-            != PublisherCredentialPolicy.for_request(
-                signed_request=self.signed_request,
-                remote_repository=self.remote_repository,
-            )
+            or self.credential_policy != expected_policy
         ):
             raise PublisherAuthorizationError(
                 "authorization lease identities are inconsistent"
@@ -245,21 +242,21 @@ class AsymmetricPublisherAuthorizationLease:
             self.authorization_policy_sha256
             != publisher_authorization_policy_sha256()
         ):
-            raise PublisherAuthorizationError(
-                "authorization policy is unsupported"
-            )
-        developer = (
-            request.readiness.semantic_review_request.developer_actor_id
-        )
+            raise PublisherAuthorizationError("authorization policy is unsupported")
+
+        developer = request.readiness.semantic_review_request.developer_actor_id
         reviewer = request.readiness.reviewer_actor_id
         publisher = request.publisher_actor_id
-        if self.issuer_actor_id in {developer, reviewer, publisher}:
+        if issuer in {developer, reviewer, publisher}:
             raise PublisherAuthorizationError(
                 "authorization issuer must be separate from developer, reviewer and publisher"
             )
+        custody = asymmetric_authority_key_custody_policy_sha256()
         if (
-            self.signature.key_id != self.issuer_key_id
-            or self.signature.issuer_actor_id != self.issuer_actor_id
+            self.signature.key_id != key_id
+            or self.signature.issuer_actor_id != issuer
+            or self.signature.issuer_system_id != system
+            or self.signature.custody_policy_sha256 != custody
             or self.signature.signed_at_utc != self.issued_at_utc
         ):
             raise PublisherAuthorizationError(
@@ -332,9 +329,7 @@ class AsymmetricPublisherAuthorizationLease:
                 data["credential_policy"]
             ),
             credential_policy_sha256=data["credential_policy_sha256"],
-            authorization_policy_sha256=data[
-                "authorization_policy_sha256"
-            ],
+            authorization_policy_sha256=data["authorization_policy_sha256"],
             issued_at_utc=data["issued_at_utc"],
             expires_at_utc=data["expires_at_utc"],
             issuer_actor_id=data["issuer_actor_id"],
@@ -394,10 +389,7 @@ class AsymmetricPublisherAuthorizationLease:
         return _canonical(self.unsigned_dict())
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            **self.unsigned_dict(),
-            "signature": self.signature.to_dict(),
-        }
+        return {**self.unsigned_dict(), "signature": self.signature.to_dict()}
 
     def canonical_json(self) -> str:
         return _canonical(self.to_dict())
@@ -410,10 +402,7 @@ class AsymmetricPublisherAuthorizationLease:
 class AsymmetricPublisherAuthorizationVerifier:
     """Verify v2 leases with public keys only."""
 
-    def __init__(
-        self,
-        authority_verifier: Ed25519AuthorityVerifier,
-    ) -> None:
+    def __init__(self, authority_verifier: Ed25519AuthorityVerifier) -> None:
         if not isinstance(authority_verifier, Ed25519AuthorityVerifier):
             raise PublisherAuthorizationError(
                 "authorization verifier requires an Ed25519 authority verifier"
