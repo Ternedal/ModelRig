@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.invalid/schemas/development-publisher-request-v1.schema.json",
+  "title": "Authenticated publisher intent request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "readiness",
+    "readiness_sha256",
+    "task_sha256",
+    "repository",
+    "base_sha",
+    "base_branch",
+    "head_branch",
+    "staged_patch_sha256",
+    "staged_patch_bytes",
+    "title_sha256",
+    "body_sha256",
+    "publisher_actor_id",
+    "publisher_system_id",
+    "invocation_nonce",
+    "requested_operations",
+    "publisher_policy_sha256",
+    "human_invoked",
+    "dry_run_only",
+    "draft_only",
+    "merge_authority"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-development-publisher-request/v1"},
+    "readiness": {"type": "object"},
+    "readiness_sha256": {"$ref": "#/$defs/sha256"},
+    "task_sha256": {"$ref": "#/$defs/sha256"},
+    "repository": {"type": "string", "pattern": "^[^/\\s]+/[^/\\s]+$", "maxLength": 200},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "base_branch": {"type": "string", "minLength": 1, "maxLength": 200},
+    "head_branch": {"type": "string", "minLength": 1, "maxLength": 200},
+    "staged_patch_sha256": {"$ref": "#/$defs/sha256"},
+    "staged_patch_bytes": {"type": "integer", "minimum": 1, "maximum": 33554432},
+    "title_sha256": {"$ref": "#/$defs/sha256"},
+    "body_sha256": {"$ref": "#/$defs/sha256"},
+    "publisher_actor_id": {"$ref": "#/$defs/actor"},
+    "publisher_system_id": {"$ref": "#/$defs/identifier"},
+    "invocation_nonce": {"$ref": "#/$defs/sha256"},
+    "requested_operations": {
+      "type": "array",
+      "prefixItems": [
+        {"const": "verify_exact_readiness"},
+        {"const": "materialize_exact_candidate_commit"},
+        {"const": "create_proposed_branch"},
+        {"const": "push_proposed_branch"},
+        {"const": "create_draft_pull_request"}
+      ],
+      "items": false,
+      "minItems": 5,
+      "maxItems": 5
+    },
+    "publisher_policy_sha256": {"$ref": "#/$defs/sha256"},
+    "human_invoked": {"const": true},
+    "dry_run_only": {"const": true},
+    "draft_only": {"const": true},
+    "merge_authority": {"const": "human"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "actor": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@-]{1,127}$"},
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"}
+  }
+}
