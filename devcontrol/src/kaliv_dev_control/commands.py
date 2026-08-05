@@ -33,8 +33,9 @@ _RESERVED_ENV = {"HOME", "XDG_CONFIG_HOME", "TMPDIR", "PWD"}
 
 # The bootstrap runs inside an unprivileged user/mount namespace. It marks the
 # complete host mount tree recursively read-only, remounts only the disposable
-# sandbox root writable, drops all namespace capabilities with no_new_privs, and
-# then execs the reviewed template argv. The boundary is inherited by descendants.
+# sandbox root writable, reopens cwd through that writable mount, drops all
+# namespace capabilities with no_new_privs, and then execs the reviewed argv.
+# The boundary is inherited by descendants.
 _MOUNT_SANDBOX_BOOTSTRAP = r"""
 import ctypes
 import os
@@ -69,11 +70,14 @@ def syscall(number, *args):
     return int(result)
 
 try:
-    if len(sys.argv) < 4:
-        raise RuntimeError("missing sandbox root, setpriv path or command")
+    if len(sys.argv) < 5:
+        raise RuntimeError("missing sandbox root, command cwd, setpriv path or command")
     sandbox_root = os.path.realpath(sys.argv[1])
-    setpriv = sys.argv[2]
-    command = sys.argv[3:]
+    command_cwd = os.path.realpath(sys.argv[2])
+    setpriv = sys.argv[3]
+    command = sys.argv[4:]
+    if os.path.commonpath((sandbox_root, command_cwd)) != sandbox_root:
+        raise RuntimeError("command cwd escaped sandbox root")
 
     attr = MountAttr(MOUNT_ATTR_RDONLY, 0, 0, 0)
     syscall(
@@ -101,6 +105,10 @@ try:
         ctypes.c_void_p(),
     ) != 0:
         fail("sandbox writable remount")
+
+    # subprocess entered the namespace with cwd on the parent read-only mount.
+    # Resolve it again through the new writable bind mount before dropping caps.
+    os.chdir(command_cwd)
     if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
         fail("no_new_privs")
 
@@ -119,7 +127,6 @@ except BaseException as exc:
     print(f"kaliv filesystem sandbox failed: {exc}", file=sys.stderr)
     raise SystemExit(126)
 """
-
 
 
 class CommandPolicyError(ValueError):
@@ -549,7 +556,11 @@ class CommandExecutor:
         return target
 
     @staticmethod
-    def _confined_argv(sandbox_root: Path, argv: tuple[str, ...]) -> tuple[str, ...]:
+    def _confined_argv(
+        sandbox_root: Path,
+        cwd: Path,
+        argv: tuple[str, ...],
+    ) -> tuple[str, ...]:
         if not sys.platform.startswith("linux"):
             raise CommandExecutionError(
                 "filesystem-confined command execution is Linux-only in DC-L01"
@@ -572,6 +583,7 @@ class CommandExecutor:
             "-c",
             _MOUNT_SANDBOX_BOOTSTRAP,
             str(sandbox_root),
+            str(cwd),
             setpriv,
             *argv,
         )
@@ -606,7 +618,7 @@ class CommandExecutor:
                 raise CommandExecutionError("command sandbox was not created")
             cwd = self._cwd(sandbox.repository, template.cwd)
             command_env = sandbox.environment(template.env, cwd)
-            confined_argv = self._confined_argv(sandbox.root, template.argv)
+            confined_argv = self._confined_argv(sandbox.root, cwd, template.argv)
             started = time.monotonic()
             try:
                 result = self.runner.run(
