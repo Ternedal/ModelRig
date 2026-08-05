@@ -61,15 +61,19 @@ class CommandTemplate:
                 "argv must contain canonical non-empty strings"
             )
         object.__setattr__(self, "argv", immutable_argv)
+        if not isinstance(self.cwd, str) or not self.cwd or "\x00" in self.cwd:
+            raise CommandPolicyError("command cwd must be repository-relative")
         if self.cwd != ".":
+            raw_parts = self.cwd.split("/")
             path = PurePosixPath(self.cwd)
             if (
                 self.cwd.startswith("/")
                 or "\\" in self.cwd
-                or any(part in {"", ".", ".."} for part in path.parts)
+                or any(part in {"", ".", ".."} for part in raw_parts)
+                or path.as_posix() != self.cwd
             ):
                 raise CommandPolicyError(
-                    "command cwd must be repository-relative"
+                    "command cwd must be canonical and repository-relative"
                 )
         if not 1 <= self.max_timeout_seconds <= 86_400:
             raise CommandPolicyError("command timeout is outside bounds")
