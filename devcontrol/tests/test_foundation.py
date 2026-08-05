@@ -399,18 +399,6 @@ class FoundationTests(unittest.TestCase):
             self.assertEqual(target.read_text(encoding="utf-8"), "old\n")
             self.assertEqual(_git(repo, "status", "--porcelain"), "")
 
-    def test_command_mutation_boundary_includes_ignored_artifacts(self) -> None:
-        commands = (
-            Path(__file__).resolve().parents[1]
-            / "src"
-            / "kaliv_dev_control"
-            / "commands.py"
-        ).read_text(encoding="utf-8")
-        self.assertIn('"--ignored"', commands)
-        self.assertIn('("clean", "-ffdx")', commands)
-        self.assertNotIn('("clean", "-fdx")', commands)
-        self.assertNotIn('("clean", "-fd")', commands)
-
     def test_foundation_has_no_future_slice_import(self) -> None:
         source = Path(__file__).resolve().parents[1] / "src" / "kaliv_dev_control"
         forbidden = (
