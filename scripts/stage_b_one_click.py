@@ -16,6 +16,7 @@ It cannot merge, push, tag, publish a release or activate production.
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -40,6 +41,26 @@ OBSERVATIONS = VALIDATION / "appliance-lifecycle-observations.json"
 EXAMPLE = ROOT / "eval" / "appliance_lifecycle_observations.example.json"
 STATE_PATH = VALIDATION / "stage-b-easy-state.json"
 JOURNAL = ROOT / "update-transaction.json"
+
+
+def use_root(new_root: Path) -> None:
+    """Point the wizard at a different checkout than the one it is stored in.
+
+    Stage B's release freeze requires HEAD to be exactly the published tag's
+    commit -- but this wizard is merged AFTER that commit, so it does not exist
+    inside the release checkout, and copying it in would dirty the tree the same
+    freeze checks. Running it from a newer worktree while writing evidence into
+    the release checkout resolves both: validation/ is gitignored, so the
+    evidence never dirties the tree it must describe.
+    """
+    global ROOT, VALIDATION, EVIDENCE, OBSERVATIONS, EXAMPLE, STATE_PATH, JOURNAL
+    ROOT = new_root.resolve()
+    VALIDATION = ROOT / "validation"
+    EVIDENCE = VALIDATION / "appliance-lifecycle-evidence"
+    OBSERVATIONS = VALIDATION / "appliance-lifecycle-observations.json"
+    EXAMPLE = ROOT / "eval" / "appliance_lifecycle_observations.example.json"
+    STATE_PATH = VALIDATION / "stage-b-easy-state.json"
+    JOURNAL = ROOT / "update-transaction.json"
 
 LIFECYCLE_SCHEMA = "kaliv-appliance-lifecycle-observations/v1"
 BACKEND_HEALTH = "http://127.0.0.1:8080/healthz"
@@ -521,9 +542,26 @@ def build_observations(candidate: dict[str, Any]) -> dict[str, Any]:
     return observations
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=None,
+        help=(
+            "checkout, som evidensen hører til (default: wizardens eget repo). "
+            "Brug den udcheckede release, når wizard'en køres fra en nyere worktree."
+        ),
+    )
+    args = parser.parse_args(argv)
+    if args.root is not None:
+        if not (args.root / "VERSION").is_file():
+            raise StageBError(f"--root peger ikke på en ModelRig-checkout: {args.root}")
+        use_root(args.root)
+
     os.chdir(ROOT)
     heading("Kaliv Stage B — updater-evidens, letteste vej")
+    note(f"Evidens skrives til {ROOT}")
     print("  Wizard'en måler alt, den kan måle, og stopper kun for genstarten og")
     print("  godkendelsen af den ugyldige opdatering.")
     print("  Den kan ikke merge, pushe, tagge, release eller aktivere produktion.")
