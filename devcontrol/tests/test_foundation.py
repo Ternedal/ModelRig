@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -8,7 +9,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from kaliv_dev_control.commands import CommandPolicyError, default_registry
+from kaliv_dev_control.commands import (
+    CommandExecutor,
+    CommandPolicyError,
+    CommandRegistry,
+    CommandTemplate,
+    default_registry,
+)
 from kaliv_dev_control.contract import ContractError, DevelopmentTask
 from kaliv_dev_control.evidence import build_scope_receipt
 from kaliv_dev_control.policy import PathPolicy, ScopeViolation
@@ -37,6 +44,16 @@ BASE = {
     },
     "merge_authority": "human",
 }
+
+
+def _git(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        ("git", *args),
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
 
 
 class FakeWorkspaceGitRunner:
@@ -178,6 +195,45 @@ class FoundationTests(unittest.TestCase):
                 manager.create(task, source_repo=source)
             self.assertFalse((root / "workspaces" / task.task_id).exists())
 
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "DC-L01 command containment is Linux-only",
+    )
+    def test_ignored_artifact_is_detected_and_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            _git(repo, "init")
+            _git(repo, "config", "user.email", "test@example.com")
+            _git(repo, "config", "user.name", "Test")
+            (repo / ".gitignore").write_text("ignored.tmp\n", encoding="utf-8")
+            (repo / "devcontrol").mkdir()
+            (repo / "devcontrol" / "tracked.txt").write_text("ok\n", encoding="utf-8")
+            _git(repo, "add", ".")
+            _git(repo, "commit", "-m", "base")
+            base_sha = _git(repo, "rev-parse", "HEAD")
+            command_id = "python.ignored-mutator"
+            task_data = dict(BASE)
+            task_data["base_sha"] = base_sha
+            task_data["allowed_command_ids"] = [command_id]
+            task = DevelopmentTask.from_mapping(task_data)
+            template = CommandTemplate(
+                command_id=command_id,
+                argv=(
+                    sys.executable,
+                    "-c",
+                    "from pathlib import Path; Path('ignored.tmp').write_text('x')",
+                ),
+            )
+            receipt = CommandExecutor(
+                registry=CommandRegistry((template,))
+            ).execute(task, repo, command_id)
+            self.assertFalse(receipt.passed)
+            self.assertFalse(receipt.workspace_unchanged)
+            self.assertTrue(receipt.workspace_reset)
+            self.assertFalse((repo / "ignored.tmp").exists())
+            self.assertEqual(_git(repo, "status", "--porcelain"), "")
+
     def test_command_mutation_boundary_includes_ignored_artifacts(self) -> None:
         commands = (
             Path(__file__).resolve().parents[1]
@@ -199,7 +255,6 @@ class FoundationTests(unittest.TestCase):
             "runtime_staging",
             "tier_a_",
             "publisher_",
-            "app.windows_job",
         )
         for path in source.glob("*.py"):
             text = path.read_text(encoding="utf-8")
