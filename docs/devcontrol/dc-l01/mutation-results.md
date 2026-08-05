@@ -17,15 +17,19 @@ was required to turn red.
 | Default registry grants no command | Register `python.unittest` in the default registry | **RED** — empty-registry assertion detects it |
 | Escaped POSIX sessions remain inside the boundary | Replace descendant scan with leader-only `killpg` | **RED** — `start_new_session=True` descendant survives the timeout regression |
 | Termination evidence requires positive quiescence acknowledgement | Force `_terminate_tree()` to return `False`/simulate supervisor exit `125` | **RED** — bounded execution raises and returns no receipt |
-| Command ignored artifacts count as mutations | Remove `--ignored` or replace `git clean -fdx` with `git clean -fd` | **RED** — command regression observes wrong receipt flags or a surviving ignored artifact |
-| Patch ignored artifacts invalidate evidence | Remove the ignored scan or replace patch reset `git clean -fdx` with `git clean -fd` | **RED** — patch regression returns positive evidence or leaves the hidden artifact behind |
+| Command ignored artifacts count as mutations | Remove `--ignored` or replace `git clean -ffdx` with `git clean -fd` | **RED** — command regression observes wrong receipt flags or a surviving ignored artifact |
+| Patch ignored artifacts invalidate evidence | Remove the ignored scan or replace patch reset `git clean -ffdx` with `git clean -fd` | **RED** — patch regression returns positive evidence or leaves the hidden artifact behind |
+| Nested Git repositories are physically removed | Replace `git clean -ffdx` with `git clean -fdx` | **RED** — command and patch regressions leave the nested repository and dirty status behind |
+| Reset success requires clean-state proof | Remove the post-reset staged/unstaged/untracked/ignored verification | **RED** — a surviving artifact can be reported as successfully reset |
+| Snapshot failures reset before propagation | Move the post-command `_snapshot()` outside the reset-on-error block | **RED** — an oversized tracked diff raises while leaving the workspace modified |
 
 The unmodified candidate passed the focused harness for workspace, command and
 patch exact-SHA rejection; immutable command argv; staged, unstaged, untracked
 and ignored workspace rejection; ambiguous raw task-path rejection; no
 future/product import; empty default registry; escaped-session termination;
-negative acknowledgement handling; and executable ignored-artifact detection and
-reset on both command and patch paths.
+negative acknowledgement handling; executable ignored-artifact and nested-Git
+cleanup on command and patch paths; verified clean-state reset; and reset before
+propagation of oversized post-command snapshot failures.
 
 The source tests additionally exercise protected-path precedence, boolean budget
 rejection, patch mode/rename/binary rejection, mutation reset, timeout and
