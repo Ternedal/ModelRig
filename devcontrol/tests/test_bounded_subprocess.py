@@ -23,6 +23,7 @@ from kaliv_dev_control.bounded_subprocess import (
 from kaliv_dev_control.commands import (
     CommandExecutionError,
     CommandExecutor,
+    CommandPolicyError,
     CommandRegistry,
     CommandTemplate,
 )
@@ -368,6 +369,33 @@ class WorkspaceResetRegressionTests(unittest.TestCase):
             self.assertFalse(hook.exists())
             self.assertEqual(_git(repo, "remote"), "")
             self.assertEqual(_git(repo, "status", "--porcelain"), "")
+
+    def test_command_template_rejects_git_context_environment(self) -> None:
+        for key in ("GIT_DIR", "GIT_CONFIG_GLOBAL", "HOME", "XDG_CONFIG_HOME"):
+            with self.subTest(key=key):
+                with self.assertRaisesRegex(CommandPolicyError, "Git isolation"):
+                    CommandTemplate(
+                        command_id="python.bad-env",
+                        argv=(sys.executable, "-c", "pass"),
+                        env={key: "/tmp/escape"},
+                    )
+
+    def test_runner_drops_inherited_git_context(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo, _, base_sha = self._repo(directory)
+            with mock.patch.dict(
+                os.environ,
+                {"GIT_DIR": "/definitely/not/a/repository"},
+                clear=False,
+            ):
+                result = SubprocessRunner().run(
+                    ("git", "rev-parse", "HEAD"),
+                    cwd=repo,
+                    timeout_seconds=10,
+                    max_output_bytes=64_000,
+                )
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout.strip(), base_sha)
 
     def test_patch_reset_removes_nested_git_repository(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
