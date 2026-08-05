@@ -233,6 +233,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_rag.py`
 - `tests/worker_rag_benchmark.py`
 - `tests/worker_rag_cloud.py`
+- `tests/worker_rag_corpus_contract.py`
 - `tests/worker_rag_pdf_lifecycle.py`
 - `tests/worker_read_scope.py`
 - `tests/worker_read_scope_windows_aliases.py`

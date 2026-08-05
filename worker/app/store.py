@@ -12,6 +12,7 @@ import os
 import sqlite3
 import threading
 import time
+from collections.abc import Sequence
 
 from . import paths as _paths
 # Anchored under the data root so a worker started from a different folder
@@ -46,7 +47,116 @@ class DocStore:
             )
             """
         )
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS corpus_meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
         self._conn.commit()
+        self._backfill_measured_dimension()
+
+    # ---- corpus contract -------------------------------------------------
+    # The index is only meaningful together with the embedding model that
+    # built it. Without that recorded, swapping MODELRIG_EMBED_MODEL makes
+    # cosine() return 0.0 for every chunk (mismatched lengths), min_score
+    # filters them all out, and the query returns nothing -- byte-identical
+    # to a legitimate "no relevant sources". The model then answers from its
+    # own parametric knowledge while the corpus is silently disconnected.
+
+    def meta(self, key: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM corpus_meta WHERE key = ?", (key,)
+            ).fetchone()
+        return None if row is None else str(row[0])
+
+    def set_meta(self, values: dict[str, str]) -> None:
+        with self._lock:
+            self._conn.executemany(
+                "INSERT INTO corpus_meta (key, value) VALUES (?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [(k, str(v)) for k, v in values.items()],
+            )
+            self._conn.commit()
+
+    def _backfill_measured_dimension(self) -> None:
+        """Record what an existing index can PROVE about itself, nothing more.
+
+        A corpus built before the contract existed has no recorded model. The
+        dimension, however, is measurable from the stored vectors, so it is a
+        fact rather than an assumption -- record it. The model name stays
+        ``unknown`` on purpose: guessing it (for instance from the currently
+        configured model) would write an assumption into the database as if it
+        were established, which is exactly the failure this table exists to
+        prevent. Consequence, accepted deliberately: for pre-contract indexes a
+        model swap that keeps the same dimension is not detectable."""
+        with self._lock:
+            has_meta = self._conn.execute(
+                "SELECT 1 FROM corpus_meta LIMIT 1"
+            ).fetchone()
+            if has_meta is not None:
+                return
+            row = self._conn.execute(
+                "SELECT embedding FROM documents LIMIT 1"
+            ).fetchone()
+            if row is None:
+                return  # empty corpus: nothing to prove, nothing to record
+            try:
+                measured = len(json.loads(row[0]))
+            except (ValueError, TypeError):
+                return
+            if measured <= 0:
+                return
+            self._conn.executemany(
+                "INSERT OR IGNORE INTO corpus_meta (key, value) VALUES (?,?)",
+                [("embedding_model", "unknown"),
+                 ("embedding_dimensions", str(measured))],
+            )
+            self._conn.commit()
+
+    def apply_ingest(
+        self,
+        clear_sources: "Sequence[str]",
+        rows: "Sequence[tuple[str, list[float], str | None, int]]",
+    ) -> int:
+        """Replace sources and insert their chunks in ONE transaction.
+
+        The old order deleted a source, then embedded and committed chunk by
+        chunk. A failed embed at chunk 14 of 50 left the previous version gone
+        and a partial one committed -- a valid but semantically corrupt corpus
+        that nothing detected afterwards. Every embedding is now computed
+        before this call, so the only work inside the transaction is local
+        SQLite writes.
+
+        BEGIN IMMEDIATE takes the write lock at transaction start rather than
+        at first write, matching the Agent 3 campaign adapter (ADR-A4-008
+        slice 4). Any failure rolls the whole thing back: there is no
+        intermediate state in which the old source is gone and the new one is
+        incomplete."""
+        replaced = 0
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                for source in clear_sources:
+                    cur = self._conn.execute(
+                        "DELETE FROM documents WHERE source = ?", (source,)
+                    )
+                    replaced += int(cur.rowcount or 0)
+                now = time.time()
+                self._conn.executemany(
+                    "INSERT INTO documents (text, source, chunk_index, embedding, created_at) "
+                    "VALUES (?,?,?,?,?)",
+                    [(text, source, idx, json.dumps(emb), now)
+                     for text, emb, source, idx in rows],
+                )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+        return replaced
 
     def add(self, text: str, embedding: list[float], source: str | None = None,
             chunk_index: int = 0) -> int:
