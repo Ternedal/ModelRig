@@ -38,11 +38,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git hash-object .github/h10m-payload-1a.b64)" = "a80482c0752de6b5231495e3fd971718c005f017"
+          test "$(git hash-object .github/h10m-payload-1b.b64)" = "413b099a2166e774a6cf63a9c4a8243155181950"
+          test "$(git hash-object .github/h10m-payload-1c.b64)" = "c12118b13fde2e29b940736fe49871997f1137bd"
+          test "$(git hash-object .github/h10m-payload-2.b64)" = "50d8e7c200d9a7fafcacde737d12eb1f751e8612"
+          test "$(git hash-object .github/h10m-payload-3.b64)" = "4f7022bcdbe8f05f3a980c85507ec35df76777f2"
+          test "$(git hash-object .github/h10m-payload-4a.b64)" = "3d2da0ae9c3e7264f918ef9965fe980afc812e50"
+          test "$(git hash-object .github/h10m-payload-4b.b64)" = "b1fb19b9782db95b945d5e0657c1796758d4a43e"
           cat \
-            .github/h10m-payload-1.b64 \
+            .github/h10m-payload-1a.b64 \
+            .github/h10m-payload-1b.b64 \
+            .github/h10m-payload-1c.b64 \
             .github/h10m-payload-2.b64 \
             .github/h10m-payload-3.b64 \
-            .github/h10m-payload-4.b64 > /tmp/h10m.b64
+            .github/h10m-payload-4a.b64 \
+            .github/h10m-payload-4b.b64 > /tmp/h10m.b64
           base64 --decode /tmp/h10m.b64 > /tmp/h10m.tar.gz
           echo "cc15cabff5c06bb7d0d859fca447e33633b3717946c9615dc753a28eddd74660  /tmp/h10m.tar.gz" | sha256sum --check
           tar -tzf /tmp/h10m.tar.gz | sort > /tmp/h10m-paths.txt
