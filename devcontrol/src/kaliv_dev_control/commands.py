@@ -55,7 +55,6 @@ LANDLOCK_ACCESS_FS_MAKE_BLOCK = 1 << 11
 LANDLOCK_ACCESS_FS_MAKE_SYM = 1 << 12
 LANDLOCK_ACCESS_FS_REFER = 1 << 13
 LANDLOCK_ACCESS_FS_TRUNCATE = 1 << 14
-LANDLOCK_ACCESS_FS_IOCTL_DEV = 1 << 15
 
 class RulesetAttr(ctypes.Structure):
     _fields_ = [("handled_access_fs", ctypes.c_uint64)]
@@ -109,8 +108,6 @@ try:
         handled |= LANDLOCK_ACCESS_FS_REFER
     if abi >= 3:
         handled |= LANDLOCK_ACCESS_FS_TRUNCATE
-    if abi >= 5:
-        handled |= LANDLOCK_ACCESS_FS_IOCTL_DEV
 
     ruleset_attr = RulesetAttr(handled)
     ruleset_fd = syscall(
