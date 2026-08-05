@@ -23,12 +23,16 @@ python3 tests/workflow_test_coverage.py
 
 - PR base equals current `main` before final review.
 - Changed paths equal `exact-path-allowlist.json` exactly.
-- All eight exact-copy files equal the source blob in `source-provenance.json`.
-- All twelve projections match their documented dependency-minimal deltas.
+- All seven exact-copy files equal the source blob in `source-provenance.json`.
+- All thirteen projections match their documented dependency-minimal deltas.
 - The package imports with no missing/future/product module and starts no work.
 - Command templates freeze argv into immutable tuples before registry use.
 - Command and patch execution verify workspace `HEAD == task.base_sha`; a
   mismatch returns no passing receipt.
+- Staged, unstaged, untracked and ignored workspace state is rejected before a
+  registered command starts.
+- Empty, dot and parent raw task-path segments are rejected before
+  `PurePosixPath` can normalize them.
 - Linux containment kills descendants that escape into new sessions.
 - Termination proof requires the supervisor's positive quiescence acknowledgement;
   unacknowledged or fallback termination fails without returning a result.
