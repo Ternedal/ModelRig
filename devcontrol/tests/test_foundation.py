@@ -21,7 +21,11 @@ from kaliv_dev_control.contract import ContractError, DevelopmentTask
 from kaliv_dev_control.evidence import build_scope_receipt
 from kaliv_dev_control.patch import PatchApplier, PatchError
 from kaliv_dev_control.policy import PathPolicy, ScopeViolation
-from kaliv_dev_control.workspace import WorkspaceError, WorkspaceManager
+from kaliv_dev_control.workspace import (
+    SubprocessRunner,
+    WorkspaceError,
+    WorkspaceManager,
+)
 
 
 BASE = {
@@ -86,6 +90,30 @@ class FakeWorkspaceGitRunner:
             Path(call[-1]).rmdir()
             return b""
         raise RuntimeError("unsupported fake Git operation")
+
+
+class RecordingRunner:
+    def __init__(self) -> None:
+        self.delegate = SubprocessRunner()
+        self.calls: list[tuple[str, ...]] = []
+
+    def run(
+        self,
+        args,
+        *,
+        cwd,
+        timeout_seconds,
+        max_output_bytes,
+        env=None,
+    ):
+        self.calls.append(tuple(args))
+        return self.delegate.run(
+            args,
+            cwd=cwd,
+            timeout_seconds=timeout_seconds,
+            max_output_bytes=max_output_bytes,
+            env=env,
+        )
 
 
 class FoundationTests(unittest.TestCase):
@@ -184,6 +212,22 @@ class FoundationTests(unittest.TestCase):
         source_argv.append("mutated")
         self.assertIsInstance(template.argv, tuple)
         self.assertEqual(template.argv, (sys.executable, "-c", "pass"))
+
+    def test_command_template_rejects_noncanonical_cwd(self) -> None:
+        for cwd in (
+            "./devcontrol",
+            "devcontrol//tests",
+            "devcontrol/.",
+            "devcontrol/",
+            "devcontrol/../worker",
+        ):
+            with self.subTest(cwd=cwd):
+                with self.assertRaisesRegex(CommandPolicyError, "canonical"):
+                    CommandTemplate(
+                        command_id="python.fixed",
+                        argv=(sys.executable, "-c", "pass"),
+                        cwd=cwd,
+                    )
 
     def test_workspace_requires_injected_git_runner(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -365,6 +409,45 @@ class FoundationTests(unittest.TestCase):
             with self.assertRaisesRegex(PatchError, "HEAD"):
                 PatchApplier().apply(_task_at(base_sha), repo, patch)
             self.assertEqual(target.read_text(encoding="utf-8"), "other\n")
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "DC-L01 patch containment is Linux-only",
+    )
+    def test_patch_rejects_pre_staged_workspace_before_apply(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            _git(repo, "init")
+            _git(repo, "config", "user.email", "test@example.com")
+            _git(repo, "config", "user.name", "Test")
+            (repo / "devcontrol").mkdir()
+            target = repo / "devcontrol" / "target.txt"
+            target.write_text("old\n", encoding="utf-8")
+            _git(repo, "add", ".")
+            _git(repo, "commit", "-m", "base")
+            base_sha = _git(repo, "rev-parse", "HEAD")
+            target.write_text("pre\n", encoding="utf-8")
+            _git(repo, "add", "devcontrol/target.txt")
+            patch = """diff --git a/devcontrol/target.txt b/devcontrol/target.txt
+--- a/devcontrol/target.txt
++++ b/devcontrol/target.txt
+@@ -1 +1 @@
+-pre
++new
+"""
+            runner = RecordingRunner()
+            with self.assertRaisesRegex(PatchError, "staged"):
+                PatchApplier(runner=runner).apply(
+                    _task_at(base_sha),
+                    repo,
+                    patch,
+                )
+            self.assertFalse(
+                any(call[:2] == ("git", "apply") for call in runner.calls)
+            )
+            self.assertEqual(target.read_text(encoding="utf-8"), "old\n")
+            self.assertEqual(_git(repo, "status", "--porcelain"), "")
 
     @unittest.skipUnless(
         sys.platform.startswith("linux"),
