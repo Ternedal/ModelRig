@@ -17,6 +17,7 @@ from .bounded_subprocess import BoundedSubprocessError, run_bounded_subprocess
 from .contract import ContractError, DevelopmentTask
 
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
+_SAFE_EXPLICIT_ENV_KEYS = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ")
 
 
 class WorkspaceError(RuntimeError):
@@ -59,11 +60,18 @@ class SubprocessRunner:
             raise WorkspaceError("command arguments must be non-empty strings")
         if timeout_seconds <= 0 or max_output_bytes <= 0:
             raise WorkspaceError("command bounds must be positive")
-        merged_env = os.environ.copy()
-        for key in tuple(merged_env):
-            if key.startswith("GIT_"):
-                merged_env.pop(key, None)
-        if env:
+        if env is None:
+            merged_env = os.environ.copy()
+            for key in tuple(merged_env):
+                if key.startswith("GIT_"):
+                    merged_env.pop(key, None)
+        else:
+            merged_env = {
+                key: os.environ[key]
+                for key in _SAFE_EXPLICIT_ENV_KEYS
+                if key in os.environ
+            }
+            merged_env.setdefault("PATH", os.defpath)
             merged_env.update(env)
         merged_env["PYTHONDONTWRITEBYTECODE"] = "1"
         try:
