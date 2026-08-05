@@ -19,8 +19,8 @@
     "branch": "agent/devcontrol-landing-decomposition-preflight",
     "branch_base": {
       "branch": "main",
-      "head": "1306afa36f18dd6bf34058f4d06e0a89c8a08734",
-      "meaning": "main head from which the DC-L00 preflight branch was created"
+      "head": "c6249e924320d9ac5e338e704f5f5b027727eec1",
+      "meaning": "current main head synchronized into the DC-L00 preflight branch before final exact-head review"
     }
   },
   "policy": {
