@@ -48,15 +48,13 @@ Every slice inherits these invariants:
 Each implementation slice starts from then-current `main`, after all declared prerequisites have landed. No review depends on a sibling PR or unpublished branch. If `main` advances, the exact-head matrix reruns before review.
 
 ```text
-DC-L00
-  ├─ DC-L01 → DC-L02 → DC-L03 → DC-L04 ─┐
-  └──────────────────── DC-L05 ───────────┤
-                                           v
+DC-L00 → DC-L01 → DC-L02 → DC-L03 → DC-L04 → DC-L05
+                                               ↓
 DC-L06 → DC-L07 → DC-L08 → DC-L09 → DC-L10
       → DC-L11 → DC-L12 → DC-L13 → DC-L14 → DC-L15
 ```
 
-`DC-L05` is independently reviewable because it is a native worker substrate and may not import DevControl. `DC-L06` is the first point where evidence contracts and the native substrate meet.
+`DC-L05` remains independently reviewable as a product-side native worker substrate and may not import DevControl. It is nevertheless ordered after `DC-L04` because `.github/workflows/_tests.yml`, `devcontrol/README.md` and `tests/workflow_test_coverage.py` are progressive surfaces whose declared edits must land in one deterministic order. `DC-L06` is the first point where evidence contracts and the native substrate meet.
 
 ### 3.2 Projection, not history replay
 
@@ -92,15 +90,15 @@ The three Tier-A files above are progressive because the compatibility facade an
 
 ### 3.4 Exact source-path disposition
 
-All 219 source paths are committed as canonical, human-reviewable assignments in `DEVCONTROL_SOURCE_PATH_DISPOSITION.json`. Every path resolves to exactly one of:
+All 219 source paths are committed as canonical, human-reviewable entries in `DEVCONTROL_SOURCE_PATH_DISPOSITION.json`. Each entry resolves to exactly one of:
 
 - `land` with one slice ID;
 - `progressive` with an ordered slice-ID list; or
 - `reject` with an explicit reason.
 
-The assignments are sorted deterministically. The file records:
+The entries are sorted by path. The file records:
 
-- a SHA-256 of the canonical reconstructed `[path, kind, target]` entries;
+- a SHA-256 of the canonical compact JSON entries;
 - a SHA-256 of the sorted LF-terminated path list;
 - exact counts by kind and landing slice; and
 - the locked source head and source synchronization base.
@@ -215,6 +213,8 @@ Lands the canonical eleven-probe I0b model, operator CLI, separate collector/app
 
 ### DC-L05 — native Windows containment substrate
 
+Starts only after DC-L04 has landed so the shared progressive workflow, README and workflow-coverage surfaces retain their declared edit order.
+
 Lands worker-side suspended launch, Job Object, AppContainer, ACL, output capture and runtime guard plus native fixtures. It may harden the existing `ProcessExecutor`, but may not register DevControl, add a route or import `kaliv_dev_control`.
 
 ### DC-L06 — Tier-A identities and materialization
@@ -235,7 +235,7 @@ Lands:
 
 - `streaming_publication.py`, with permission-metadata durability fixed;
 - `runtime_staging.py`;
-- runtime-closure common/model/verify/staging/public modules;
+- runtime-closure common/model/verify/staging/public modules and their schemas, excluding trusted Git staging contracts;
 - closure-bound `tier_a_plan.py`;
 - `tier_a_result.py`; and
 - the standalone Go version-check closure.
@@ -250,7 +250,7 @@ The completed execution path preserves timeout, process-tree termination, AppCon
 
 ### DC-L09 — trusted Git runtime, command receipt and final public execution facade
 
-Lands trusted Git staging, exact Git snapshots, mutation/reset evidence, the one-command receipt orchestrator and the final `tier_a_execution.py` compatibility surface.
+Lands trusted Git staging and its staging-receipt schema, exact Git snapshots, mutation/reset evidence, the one-command receipt orchestrator and the final `tier_a_execution.py` compatibility surface.
 
 No remote or credential mechanism is allowed. A passing receipt requires exact-base cleanliness or exact authenticated staged input; observed mutation is non-passing and followed by verifiable reset evidence.
 
