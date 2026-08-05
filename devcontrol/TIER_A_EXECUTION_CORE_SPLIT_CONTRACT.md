@@ -1,8 +1,8 @@
 # Tier-A execution core split contract
 
-Schema: `kaliv-tier-a-execution-core-split-contract/v6`
+Schema: `kaliv-tier-a-execution-core-split-contract/v7`
 
-This is the authoritative review and migration contract for `devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py`. H10O moves physical-evidence capture, the leased registry and catalog materialization into `_tier_a_materialization.py`, while the legacy core imports and re-exports the exact same class objects.
+This is the authoritative review and migration contract for `devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py`. H10P moves the retained v2 source-bundle tuple and toolhost hash into `_tier_a_legacy_toolhost.py`, while the legacy core imports and re-exports the exact same tuple and function objects.
 
 The machine-readable contract is `devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.json`.
 
@@ -64,14 +64,21 @@ Completed slices: `H10O`.
 | `LeasedCommandRegistry` | class | command_registry | `devcontrol/src/kaliv_dev_control/_tier_a_materialization.py` |
 | `LeasedCatalogMaterializer` | class | evidence_materialization | `devcontrol/src/kaliv_dev_control/_tier_a_materialization.py` |
 
+### `devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py`
+
+Completed slices: `H10P`.
+
+| Symbol | Kind | Responsibility | Destination |
+|---|---|---|---|
+| `_TIER_A_BUNDLE_FILES` | constant | legacy_toolhost_identity | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py` |
+| `tier_a_toolhost_sha256` | function | legacy_toolhost_identity | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py` |
+
 ## Remaining symbols owned by the legacy core
 
 | Symbol | Kind | Responsibility | Proposed destination |
 |---|---|---|---|
 | `PLAN_SCHEMA` | constant | legacy_plan_model | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py` |
 | `_COMMAND_ID` | constant | legacy_plan_model | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py` |
-| `_TIER_A_BUNDLE_FILES` | constant | legacy_toolhost_identity | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py` |
-| `tier_a_toolhost_sha256` | function | legacy_toolhost_identity | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py` |
 | `TierALaunchPlan` | class | legacy_plan_model | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py` |
 | `build_tier_a_launch_plan` | function | legacy_launch_planning | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py` |
 | `_run_tier_a_launch_plan` | function | legacy_execution | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py` |
@@ -102,5 +109,6 @@ Completed slices: `H10O`.
 - **H10M**: `devcontrol/src/kaliv_dev_control/_tier_a_lease.py` gained `LEASE_SCHEMA`, `_HEX40`, `_HEX64`, `_TASK_ID`, `_canonical`, `_sha256`, `_task_sha`, `TierAExecutionLease`.
 - **H10N**: `devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py` gained `_has_symlink_component`, `_canonical_directory`, `workspace_root_authority_sha256`, `_regular_file_hash`.
 - **H10O**: `devcontrol/src/kaliv_dev_control/_tier_a_materialization.py` gained `_LeaseCapturingVerifier`, `LeasedCommandRegistry`, `LeasedCatalogMaterializer`.
+- **H10P**: `devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py` gained `_TIER_A_BUNDLE_FILES`, `tier_a_toolhost_sha256`.
 
-H10O changes the exact Tier-A source bundle bytes and therefore the toolhost digest. Every earlier physical I0b report remains stale; no replacement physical evidence is created by this contract.
+H10P changes the exact Tier-A source bundle bytes and therefore the toolhost digest. Every earlier physical I0b report remains stale; no replacement physical evidence is created by this contract.

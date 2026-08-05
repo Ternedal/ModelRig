@@ -12,7 +12,6 @@ plan into authority.
 """
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import subprocess
@@ -37,6 +36,10 @@ from ._tier_a_path_authority import (
     _regular_file_hash,
     workspace_root_authority_sha256,
 )
+from ._tier_a_legacy_toolhost import (
+    _TIER_A_BUNDLE_FILES,
+    tier_a_toolhost_sha256,
+)
 from ._tier_a_materialization import (
     _LeaseCapturingVerifier,
     LeasedCommandRegistry,
@@ -59,45 +62,6 @@ from .physical_isolation import WindowsPhysicalIsolationVerifier
 
 PLAN_SCHEMA = "kaliv-development-tier-a-launch-plan/v1"
 _COMMAND_ID = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
-
-# Every Python source file that can create, validate, transform or execute a
-# Tier-A authority is part of the signed code identity. Package __init__ files
-# are included because Python executes them while importing these modules.
-_TIER_A_BUNDLE_FILES = (
-    "worker/app/__init__.py",
-    "worker/app/windows_job.py",
-    "worker/app/windows_restricted.py",
-    "worker/app/windows_tier_a.py",
-    "devcontrol/src/kaliv_dev_control/__init__.py",
-    "devcontrol/src/kaliv_dev_control/catalog.py",
-    "devcontrol/src/kaliv_dev_control/commands.py",
-    "devcontrol/src/kaliv_dev_control/contract.py",
-    "devcontrol/src/kaliv_dev_control/physical_isolation.py",
-    "devcontrol/src/kaliv_dev_control/runtime_staging.py",
-    "devcontrol/src/kaliv_dev_control/tier_a_execution.py",
-    "devcontrol/src/kaliv_dev_control/workspace.py",
-)
-
-
-def tier_a_toolhost_sha256(control_plane_root: Path) -> str:
-    """Hash the complete source chain that can issue or execute Tier-A authority."""
-
-    root = _canonical_directory(control_plane_root, name="control-plane root")
-    digest = hashlib.sha256()
-    digest.update(b"kaliv-tier-a-toolhost/v2\0")
-    for relative in _TIER_A_BUNDLE_FILES:
-        path = root / PurePosixPath(relative)
-        if path.is_symlink() or not path.is_file():
-            raise TierAExecutionError(
-                f"Tier-A toolhost bundle file is missing or unsafe: {relative}"
-            )
-        payload = path.read_bytes()
-        digest.update(relative.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(len(payload).to_bytes(8, "big"))
-        digest.update(payload)
-    return digest.hexdigest()
-
 
 @dataclass(frozen=True, slots=True)
 class TierALaunchPlan:

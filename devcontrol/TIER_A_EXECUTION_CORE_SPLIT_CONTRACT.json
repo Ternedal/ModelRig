@@ -1,7 +1,7 @@
 {
-  "schema": "kaliv-tier-a-execution-core-split-contract/v6",
+  "schema": "kaliv-tier-a-execution-core-split-contract/v7",
   "source": "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
-  "source_git_blob_sha1": "67ddfa322904e1305be3ba38db2f37acd29cc5dd",
+  "source_git_blob_sha1": "7929f503cb99c98ac8f542c81032cb098320cd28",
   "constraints": {
     "h10j_moves_production_code": false,
     "preserve_object_identity_during_future_split": true,
@@ -19,7 +19,9 @@
     "h10n_extracted_path_authority": true,
     "h10n_changes_authority_digest": true,
     "h10o_extracted_materialization_services": true,
-    "h10o_changes_authority_digest": true
+    "h10o_changes_authority_digest": true,
+    "h10p_extracted_legacy_toolhost_identity": true,
+    "h10p_changes_authority_digest": true
   },
   "proposed_modules": {
     "devcontrol/src/kaliv_dev_control/_tier_a_lease.py": "Lease schema, shared validation, canonical lease identity and TierAExecutionLease.",
@@ -42,18 +44,6 @@
       "kind": "constant",
       "responsibility": "legacy_plan_model",
       "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"
-    },
-    {
-      "name": "_TIER_A_BUNDLE_FILES",
-      "kind": "constant",
-      "responsibility": "legacy_toolhost_identity",
-      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py"
-    },
-    {
-      "name": "tier_a_toolhost_sha256",
-      "kind": "function",
-      "responsibility": "legacy_toolhost_identity",
-      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py"
     },
     {
       "name": "TierALaunchPlan",
@@ -418,6 +408,39 @@
         "DevelopmentTask": "contract",
         "WindowsPhysicalIsolationVerifier": "physical_isolation"
       }
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
+      "git_blob_sha1": "a5a064b31333f001268a4bc10d7b29c10386e654",
+      "completed_slices": [
+        "H10P"
+      ],
+      "symbols": [
+        {
+          "name": "_TIER_A_BUNDLE_FILES",
+          "kind": "constant",
+          "responsibility": "legacy_toolhost_identity",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py"
+        },
+        {
+          "name": "tier_a_toolhost_sha256",
+          "kind": "function",
+          "responsibility": "legacy_toolhost_identity",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py"
+        }
+      ],
+      "core_import_module": "_tier_a_legacy_toolhost",
+      "legacy_core_reexports": [
+        "_TIER_A_BUNDLE_FILES",
+        "tier_a_toolhost_sha256"
+      ],
+      "direct_consumers": [
+        "_tier_a_execution_core"
+      ],
+      "resolved_dependencies": {
+        "TierAExecutionError": "_tier_a_lease",
+        "_canonical_directory": "_tier_a_path_authority"
+      }
     }
   ],
   "migration_history": [
@@ -467,6 +490,14 @@
         "_LeaseCapturingVerifier",
         "LeasedCommandRegistry",
         "LeasedCatalogMaterializer"
+      ]
+    },
+    {
+      "slice": "H10P",
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
+      "symbols": [
+        "_TIER_A_BUNDLE_FILES",
+        "tier_a_toolhost_sha256"
       ]
     }
   ]
