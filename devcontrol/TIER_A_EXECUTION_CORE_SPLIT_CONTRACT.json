@@ -1,7 +1,7 @@
 {
-  "schema": "kaliv-tier-a-execution-core-split-contract/v8",
+  "schema": "kaliv-tier-a-execution-core-split-contract/v9",
   "source": "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
-  "source_git_blob_sha1": "7b445d5b99d140bdf73301973ec59b13803d7353",
+  "source_git_blob_sha1": "744768b781a7c9742c8deec3a8f34add024ba306",
   "constraints": {
     "h10j_moves_production_code": false,
     "preserve_object_identity_during_future_split": true,
@@ -23,7 +23,10 @@
     "h10p_extracted_legacy_toolhost_identity": true,
     "h10p_changes_authority_digest": true,
     "h10q_extracted_legacy_plan_model": true,
-    "h10q_changes_authority_digest": true
+    "h10q_changes_authority_digest": true,
+    "h10r_extracted_legacy_runner": true,
+    "h10r_completes_core_split": true,
+    "h10r_changes_authority_digest": true
   },
   "proposed_modules": {
     "devcontrol/src/kaliv_dev_control/_tier_a_lease.py": "Lease schema, shared validation, canonical lease identity and TierAExecutionLease.",
@@ -34,20 +37,7 @@
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py": "Retained v1 launch-plan model and plan construction.",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py": "Retained non-capturing Windows executor that modern authority removes at import time."
   },
-  "symbols": [
-    {
-      "name": "_run_tier_a_launch_plan",
-      "kind": "function",
-      "responsibility": "legacy_execution",
-      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py"
-    },
-    {
-      "name": "run_verified_tier_a_command",
-      "kind": "function",
-      "responsibility": "legacy_execution",
-      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py"
-    }
-  ],
+  "symbols": [],
   "external_core_consumers": [
     {
       "path": "devcontrol/src/kaliv_dev_control/runtime_closure_builder.py",
@@ -481,6 +471,55 @@
         "NetworkMode": "catalog",
         "DevelopmentTask": "contract"
       }
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py",
+      "git_blob_sha1": "7ee004f070065beb05380b2355c6add02dd69311",
+      "completed_slices": [
+        "H10R"
+      ],
+      "symbols": [
+        {
+          "name": "_run_tier_a_launch_plan",
+          "kind": "function",
+          "responsibility": "legacy_execution",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py"
+        },
+        {
+          "name": "run_verified_tier_a_command",
+          "kind": "function",
+          "responsibility": "legacy_execution",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py"
+        }
+      ],
+      "core_import_module": "_tier_a_legacy_runner",
+      "legacy_core_reexports": [
+        "_run_tier_a_launch_plan",
+        "run_verified_tier_a_command"
+      ],
+      "modern_core_removals": [
+        "_run_tier_a_launch_plan",
+        "run_verified_tier_a_command"
+      ],
+      "direct_consumers": [
+        "_tier_a_execution_core"
+      ],
+      "resolved_dependencies": {
+        "TierAExecutionError": "_tier_a_lease",
+        "TierALaunchPlan": "_tier_a_legacy_plan",
+        "build_tier_a_launch_plan": "_tier_a_legacy_plan",
+        "tier_a_toolhost_sha256": "_tier_a_legacy_toolhost",
+        "LeasedCatalogMaterializer": "_tier_a_materialization",
+        "_canonical_directory": "_tier_a_path_authority",
+        "_regular_file_hash": "_tier_a_path_authority",
+        "workspace_root_authority_sha256": "_tier_a_path_authority",
+        "ExecutableVerifier": "catalog",
+        "IsolationAttestation": "catalog",
+        "ModelRigCommandCatalog": "catalog",
+        "Toolchain": "catalog",
+        "DevelopmentTask": "contract",
+        "WindowsPhysicalIsolationVerifier": "physical_isolation"
+      }
     }
   ],
   "migration_history": [
@@ -548,6 +587,14 @@
         "_COMMAND_ID",
         "TierALaunchPlan",
         "build_tier_a_launch_plan"
+      ]
+    },
+    {
+      "slice": "H10R",
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py",
+      "symbols": [
+        "_run_tier_a_launch_plan",
+        "run_verified_tier_a_command"
       ]
     }
   ]

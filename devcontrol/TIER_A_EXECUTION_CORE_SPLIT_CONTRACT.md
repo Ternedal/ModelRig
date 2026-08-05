@@ -1,8 +1,8 @@
 # Tier-A execution core split contract
 
-Schema: `kaliv-tier-a-execution-core-split-contract/v8`
+Schema: `kaliv-tier-a-execution-core-split-contract/v9`
 
-This is the authoritative review and migration contract for `devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py`. H10Q moves the retained v1 launch-plan model and deterministic plan construction into `_tier_a_legacy_plan.py`, while the legacy core imports and re-exports the exact same constants, class and function objects.
+This is the authoritative review and migration contract for `devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py`. H10R moves the final retained legacy executor pair into `_tier_a_legacy_runner.py`, leaving the legacy core as an import-only compatibility facade. Modern authority continues removing both executor names.
 
 The machine-readable contract is `devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.json`.
 
@@ -84,12 +84,20 @@ Completed slices: `H10Q`.
 | `TierALaunchPlan` | class | legacy_plan_model | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py` |
 | `build_tier_a_launch_plan` | function | legacy_launch_planning | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py` |
 
+### `devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py`
+
+Completed slices: `H10R`.
+
+| Symbol | Kind | Responsibility | Destination |
+|---|---|---|---|
+| `_run_tier_a_launch_plan` | function | legacy_execution | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py` |
+| `run_verified_tier_a_command` | function | legacy_execution | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py` |
+
 ## Remaining symbols owned by the legacy core
 
 | Symbol | Kind | Responsibility | Proposed destination |
 |---|---|---|---|
-| `_run_tier_a_launch_plan` | function | legacy_execution | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py` |
-| `run_verified_tier_a_command` | function | legacy_execution | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py` |
+| _none_ | — | H10R completed the physical split | `_tier_a_execution_core.py` is import-only |
 
 ## Exact external core consumers
 
@@ -118,5 +126,6 @@ Completed slices: `H10Q`.
 - **H10O**: `devcontrol/src/kaliv_dev_control/_tier_a_materialization.py` gained `_LeaseCapturingVerifier`, `LeasedCommandRegistry`, `LeasedCatalogMaterializer`.
 - **H10P**: `devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py` gained `_TIER_A_BUNDLE_FILES`, `tier_a_toolhost_sha256`.
 - **H10Q**: `devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py` gained `PLAN_SCHEMA`, `_COMMAND_ID`, `TierALaunchPlan`, `build_tier_a_launch_plan`.
+- **H10R**: `devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py` gained `_run_tier_a_launch_plan`, `run_verified_tier_a_command`.
 
-H10Q changes the exact Tier-A source bundle bytes and therefore the toolhost digest. Every earlier physical I0b report remains stale; no replacement physical evidence is created by this contract.
+H10R changes the exact Tier-A source bundle bytes and therefore the toolhost digest. Every earlier physical I0b report remains stale; no replacement physical evidence is created by this contract.

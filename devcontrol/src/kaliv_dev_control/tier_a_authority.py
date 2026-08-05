@@ -84,6 +84,7 @@ _TIER_A_BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py",
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
     "devcontrol/src/kaliv_dev_control/tier_a_result.py",
     "devcontrol/src/kaliv_dev_control/tier_a_command_receipt.py",
