@@ -1,8 +1,9 @@
 """Allowlisted development commands and deterministic execution receipts.
 
 Command arguments come from the registry, never from a model or task payload.
-The executor snapshots the workspace before and after the command. Any mutation,
-including ignored artifacts, resets the ephemeral workspace to the exact base SHA.
+The executor verifies the exact task base SHA and snapshots the workspace before
+and after the command. Any mutation, including ignored artifacts or a HEAD
+change, resets the ephemeral workspace to the exact base SHA.
 """
 
 from __future__ import annotations
@@ -42,13 +43,17 @@ class CommandTemplate:
     def __post_init__(self) -> None:
         if _COMMAND_ID.fullmatch(self.command_id) is None:
             raise CommandPolicyError("invalid command id")
-        if not self.argv or any(
+        if isinstance(self.argv, (str, bytes)) or not isinstance(self.argv, Sequence):
+            raise CommandPolicyError("argv must be a sequence of strings")
+        immutable_argv = tuple(self.argv)
+        if not immutable_argv or any(
             not isinstance(item, str) or not item or "\x00" in item
-            for item in self.argv
+            for item in immutable_argv
         ):
             raise CommandPolicyError(
                 "argv must contain canonical non-empty strings"
             )
+        object.__setattr__(self, "argv", immutable_argv)
         if self.cwd != ".":
             path = PurePosixPath(self.cwd)
             if (
@@ -189,6 +194,13 @@ class CommandExecutor:
             raise CommandExecutionError(f"git snapshot failed: {args[0]}")
         return result.stdout
 
+    def _verify_head(self, task: DevelopmentTask, workspace: Path) -> None:
+        head = self._run_git(workspace, "rev-parse", "HEAD").strip()
+        if head != task.base_sha:
+            raise CommandExecutionError(
+                "workspace HEAD does not match task base SHA"
+            )
+
     def _snapshot(self, workspace: Path) -> tuple[str, bool]:
         cached = self._run_git(
             workspace,
@@ -238,6 +250,7 @@ class CommandExecutor:
                 raise CommandExecutionError(
                     "workspace mutation could not be reset"
                 )
+        self._verify_head(task, workspace)
 
     @staticmethod
     def _cwd(workspace: Path, relative: str) -> Path:
@@ -267,6 +280,7 @@ class CommandExecutor:
         template = self.registry.resolve(task, command_id)
         root = workspace.resolve()
         cwd = self._cwd(root, template.cwd)
+        self._verify_head(task, root)
         before_sha, before_clean = self._snapshot(root)
         if not before_clean:
             raise CommandExecutionError(
@@ -290,6 +304,11 @@ class CommandExecutor:
                 "command execution did not complete safely"
             ) from exc
         duration_ms = max(0, int((time.monotonic() - started) * 1_000))
+        try:
+            self._verify_head(task, root)
+        except CommandExecutionError:
+            self._reset(task, root)
+            raise
         after_sha, after_clean = self._snapshot(root)
         unchanged = before_sha == after_sha and after_clean
         reset = False
