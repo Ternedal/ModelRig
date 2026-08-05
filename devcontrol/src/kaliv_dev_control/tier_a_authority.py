@@ -78,6 +78,7 @@ _TIER_A_BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
     "devcontrol/src/kaliv_dev_control/tier_a_plan.py",
     "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py",
+    "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
     "devcontrol/src/kaliv_dev_control/tier_a_result.py",
     "devcontrol/src/kaliv_dev_control/tier_a_command_receipt.py",

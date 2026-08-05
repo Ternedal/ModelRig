@@ -1,17 +1,18 @@
 {
-  "schema": "kaliv-tier-a-execution-core-split-contract/v1",
+  "schema": "kaliv-tier-a-execution-core-split-contract/v2",
   "source": "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
-  "source_git_blob_sha1": "681a2218c086c527c05e6def2396f56aced29902",
+  "source_git_blob_sha1": "4f4efeef36ac44fd2337972c29b99c0f9cb0a373",
   "constraints": {
     "h10j_moves_production_code": false,
     "preserve_object_identity_during_future_split": true,
     "preserve_public_import_paths_during_future_split": true,
     "future_split_changes_authority_digest": true,
-    "fresh_physical_evidence_required_after_future_split": true
+    "fresh_physical_evidence_required_after_future_split": true,
+    "h10k_moves_environment_policy": true,
+    "earlier_physical_evidence_is_stale": true
   },
   "proposed_modules": {
     "devcontrol/src/kaliv_dev_control/_tier_a_lease.py": "Lease schema, shared validation, canonical lease identity and TierAExecutionLease.",
-    "devcontrol/src/kaliv_dev_control/_tier_a_environment.py": "Reviewed Tier-A application environment policy and validation.",
     "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py": "Canonical directory, workspace authority and regular-file identity checks.",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py": "Retained v2 bundle identity used only by the legacy core.",
     "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py": "Physical-evidence capture, leased registry and catalog materialization.",
@@ -19,39 +20,170 @@
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py": "Retained non-capturing Windows executor that modern authority removes at import time."
   },
   "symbols": [
-    {"name": "LEASE_SCHEMA", "kind": "constant", "responsibility": "lease_model", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"},
-    {"name": "PLAN_SCHEMA", "kind": "constant", "responsibility": "legacy_plan_model", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"},
-    {"name": "_HEX40", "kind": "constant", "responsibility": "schema_validation", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"},
-    {"name": "_HEX64", "kind": "constant", "responsibility": "schema_validation", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"},
-    {"name": "_TASK_ID", "kind": "constant", "responsibility": "schema_validation", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"},
-    {"name": "_COMMAND_ID", "kind": "constant", "responsibility": "legacy_plan_model", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"},
-    {"name": "TIER_A_APPLICATION_ENVIRONMENT", "kind": "constant", "responsibility": "environment_policy", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_environment.py"},
-    {"name": "_TIER_A_BUNDLE_FILES", "kind": "constant", "responsibility": "legacy_toolhost_identity", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py"},
-    {"name": "TierAExecutionError", "kind": "class", "responsibility": "lease_model", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"},
-    {"name": "_canonical", "kind": "function", "responsibility": "canonical_identity", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"},
-    {"name": "_sha256", "kind": "function", "responsibility": "canonical_identity", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"},
-    {"name": "_task_sha", "kind": "function", "responsibility": "canonical_identity", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"},
-    {"name": "_has_symlink_component", "kind": "function", "responsibility": "path_authority", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py"},
-    {"name": "_canonical_directory", "kind": "function", "responsibility": "path_authority", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py"},
-    {"name": "workspace_root_authority_sha256", "kind": "function", "responsibility": "path_authority", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py"},
-    {"name": "tier_a_toolhost_sha256", "kind": "function", "responsibility": "legacy_toolhost_identity", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py"},
-    {"name": "_validated_application_env", "kind": "function", "responsibility": "environment_policy", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_environment.py"},
-    {"name": "TierAExecutionLease", "kind": "class", "responsibility": "lease_model", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"},
-    {"name": "_LeaseCapturingVerifier", "kind": "class", "responsibility": "evidence_materialization", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py"},
-    {"name": "LeasedCommandRegistry", "kind": "class", "responsibility": "command_registry", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py"},
-    {"name": "LeasedCatalogMaterializer", "kind": "class", "responsibility": "evidence_materialization", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py"},
-    {"name": "TierALaunchPlan", "kind": "class", "responsibility": "legacy_plan_model", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"},
-    {"name": "_regular_file_hash", "kind": "function", "responsibility": "path_authority", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py"},
-    {"name": "build_tier_a_launch_plan", "kind": "function", "responsibility": "legacy_launch_planning", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"},
-    {"name": "_run_tier_a_launch_plan", "kind": "function", "responsibility": "legacy_execution", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py"},
-    {"name": "run_verified_tier_a_command", "kind": "function", "responsibility": "legacy_execution", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py"}
+    {
+      "name": "LEASE_SCHEMA",
+      "kind": "constant",
+      "responsibility": "lease_model",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"
+    },
+    {
+      "name": "PLAN_SCHEMA",
+      "kind": "constant",
+      "responsibility": "legacy_plan_model",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"
+    },
+    {
+      "name": "_HEX40",
+      "kind": "constant",
+      "responsibility": "schema_validation",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"
+    },
+    {
+      "name": "_HEX64",
+      "kind": "constant",
+      "responsibility": "schema_validation",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"
+    },
+    {
+      "name": "_TASK_ID",
+      "kind": "constant",
+      "responsibility": "schema_validation",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"
+    },
+    {
+      "name": "_COMMAND_ID",
+      "kind": "constant",
+      "responsibility": "legacy_plan_model",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"
+    },
+    {
+      "name": "_TIER_A_BUNDLE_FILES",
+      "kind": "constant",
+      "responsibility": "legacy_toolhost_identity",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py"
+    },
+    {
+      "name": "TierAExecutionError",
+      "kind": "class",
+      "responsibility": "lease_model",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"
+    },
+    {
+      "name": "_canonical",
+      "kind": "function",
+      "responsibility": "canonical_identity",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"
+    },
+    {
+      "name": "_sha256",
+      "kind": "function",
+      "responsibility": "canonical_identity",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"
+    },
+    {
+      "name": "_task_sha",
+      "kind": "function",
+      "responsibility": "canonical_identity",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"
+    },
+    {
+      "name": "_has_symlink_component",
+      "kind": "function",
+      "responsibility": "path_authority",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py"
+    },
+    {
+      "name": "_canonical_directory",
+      "kind": "function",
+      "responsibility": "path_authority",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py"
+    },
+    {
+      "name": "workspace_root_authority_sha256",
+      "kind": "function",
+      "responsibility": "path_authority",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py"
+    },
+    {
+      "name": "tier_a_toolhost_sha256",
+      "kind": "function",
+      "responsibility": "legacy_toolhost_identity",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py"
+    },
+    {
+      "name": "TierAExecutionLease",
+      "kind": "class",
+      "responsibility": "lease_model",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"
+    },
+    {
+      "name": "_LeaseCapturingVerifier",
+      "kind": "class",
+      "responsibility": "evidence_materialization",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py"
+    },
+    {
+      "name": "LeasedCommandRegistry",
+      "kind": "class",
+      "responsibility": "command_registry",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py"
+    },
+    {
+      "name": "LeasedCatalogMaterializer",
+      "kind": "class",
+      "responsibility": "evidence_materialization",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py"
+    },
+    {
+      "name": "TierALaunchPlan",
+      "kind": "class",
+      "responsibility": "legacy_plan_model",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"
+    },
+    {
+      "name": "_regular_file_hash",
+      "kind": "function",
+      "responsibility": "path_authority",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py"
+    },
+    {
+      "name": "build_tier_a_launch_plan",
+      "kind": "function",
+      "responsibility": "legacy_launch_planning",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"
+    },
+    {
+      "name": "_run_tier_a_launch_plan",
+      "kind": "function",
+      "responsibility": "legacy_execution",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py"
+    },
+    {
+      "name": "run_verified_tier_a_command",
+      "kind": "function",
+      "responsibility": "legacy_execution",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py"
+    }
   ],
   "external_core_consumers": [
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
+      "import_style": "direct",
+      "module_alias": null,
+      "imported_names": [
+        "TierAExecutionError"
+      ],
+      "attribute_references": [],
+      "dynamic_removals": []
+    },
     {
       "path": "devcontrol/src/kaliv_dev_control/runtime_closure_builder.py",
       "import_style": "direct",
       "module_alias": null,
-      "imported_names": ["LeasedCommandRegistry", "workspace_root_authority_sha256"],
+      "imported_names": [
+        "LeasedCommandRegistry",
+        "workspace_root_authority_sha256"
+      ],
       "attribute_references": [],
       "dynamic_removals": []
     },
@@ -60,7 +192,9 @@
       "import_style": "module_alias",
       "module_alias": "_core",
       "imported_names": [],
-      "attribute_references": ["LeasedCommandRegistry"],
+      "attribute_references": [
+        "LeasedCommandRegistry"
+      ],
       "dynamic_removals": []
     },
     {
@@ -68,7 +202,9 @@
       "import_style": "module_alias",
       "module_alias": "_core",
       "imported_names": [],
-      "attribute_references": ["LeasedCommandRegistry"],
+      "attribute_references": [
+        "LeasedCommandRegistry"
+      ],
       "dynamic_removals": []
     },
     {
@@ -86,14 +222,20 @@
         "_canonical_directory",
         "workspace_root_authority_sha256"
       ],
-      "dynamic_removals": ["_run_tier_a_launch_plan", "run_verified_tier_a_command"]
+      "dynamic_removals": [
+        "_run_tier_a_launch_plan",
+        "run_verified_tier_a_command"
+      ]
     },
     {
       "path": "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py",
       "import_style": "module_alias",
       "module_alias": "_core",
       "imported_names": [],
-      "attribute_references": ["_canonical_directory", "_regular_file_hash"],
+      "attribute_references": [
+        "_canonical_directory",
+        "_regular_file_hash"
+      ],
       "dynamic_removals": []
     },
     {
@@ -101,16 +243,99 @@
       "import_style": "module_alias",
       "module_alias": "_core",
       "imported_names": [],
-      "attribute_references": ["_canonical_directory", "_regular_file_hash", "_validated_application_env"],
+      "attribute_references": [
+        "_canonical_directory",
+        "_regular_file_hash",
+        "_validated_application_env"
+      ],
       "dynamic_removals": []
     }
   ],
   "public_identity_chains": [
-    {"symbol": "LeasedCatalogMaterializer", "chain": ["_tier_a_execution_core.LeasedCatalogMaterializer", "tier_a_authority.LeasedCatalogMaterializer", "tier_a_execution.LeasedCatalogMaterializer", "kaliv_dev_control.LeasedCatalogMaterializer"]},
-    {"symbol": "LeasedCommandRegistry", "chain": ["_tier_a_execution_core.LeasedCommandRegistry", "tier_a_authority.LeasedCommandRegistry", "tier_a_execution.LeasedCommandRegistry", "kaliv_dev_control.LeasedCommandRegistry"]},
-    {"symbol": "TIER_A_APPLICATION_ENVIRONMENT", "chain": ["_tier_a_execution_core.TIER_A_APPLICATION_ENVIRONMENT", "tier_a_authority.TIER_A_APPLICATION_ENVIRONMENT", "tier_a_execution.TIER_A_APPLICATION_ENVIRONMENT", "kaliv_dev_control.TIER_A_APPLICATION_ENVIRONMENT"]},
-    {"symbol": "TierAExecutionError", "chain": ["_tier_a_execution_core.TierAExecutionError", "tier_a_authority.TierAExecutionError", "tier_a_execution.TierAExecutionError", "kaliv_dev_control.TierAExecutionError"]},
-    {"symbol": "TierAExecutionLease", "chain": ["_tier_a_execution_core.TierAExecutionLease", "tier_a_authority.TierAExecutionLease", "tier_a_execution.TierAExecutionLease", "kaliv_dev_control.TierAExecutionLease"]},
-    {"symbol": "workspace_root_authority_sha256", "chain": ["_tier_a_execution_core.workspace_root_authority_sha256", "tier_a_authority.workspace_root_authority_sha256", "tier_a_execution.workspace_root_authority_sha256", "kaliv_dev_control.workspace_root_authority_sha256"]}
+    {
+      "symbol": "LeasedCatalogMaterializer",
+      "chain": [
+        "_tier_a_execution_core.LeasedCatalogMaterializer",
+        "tier_a_authority.LeasedCatalogMaterializer",
+        "tier_a_execution.LeasedCatalogMaterializer",
+        "kaliv_dev_control.LeasedCatalogMaterializer"
+      ]
+    },
+    {
+      "symbol": "LeasedCommandRegistry",
+      "chain": [
+        "_tier_a_execution_core.LeasedCommandRegistry",
+        "tier_a_authority.LeasedCommandRegistry",
+        "tier_a_execution.LeasedCommandRegistry",
+        "kaliv_dev_control.LeasedCommandRegistry"
+      ]
+    },
+    {
+      "symbol": "TIER_A_APPLICATION_ENVIRONMENT",
+      "chain": [
+        "_tier_a_environment.TIER_A_APPLICATION_ENVIRONMENT",
+        "_tier_a_execution_core.TIER_A_APPLICATION_ENVIRONMENT",
+        "tier_a_authority.TIER_A_APPLICATION_ENVIRONMENT",
+        "tier_a_execution.TIER_A_APPLICATION_ENVIRONMENT",
+        "kaliv_dev_control.TIER_A_APPLICATION_ENVIRONMENT"
+      ]
+    },
+    {
+      "symbol": "TierAExecutionError",
+      "chain": [
+        "_tier_a_execution_core.TierAExecutionError",
+        "tier_a_authority.TierAExecutionError",
+        "tier_a_execution.TierAExecutionError",
+        "kaliv_dev_control.TierAExecutionError"
+      ]
+    },
+    {
+      "symbol": "TierAExecutionLease",
+      "chain": [
+        "_tier_a_execution_core.TierAExecutionLease",
+        "tier_a_authority.TierAExecutionLease",
+        "tier_a_execution.TierAExecutionLease",
+        "kaliv_dev_control.TierAExecutionLease"
+      ]
+    },
+    {
+      "symbol": "workspace_root_authority_sha256",
+      "chain": [
+        "_tier_a_execution_core.workspace_root_authority_sha256",
+        "tier_a_authority.workspace_root_authority_sha256",
+        "tier_a_execution.workspace_root_authority_sha256",
+        "kaliv_dev_control.workspace_root_authority_sha256"
+      ]
+    }
+  ],
+  "completed_extractions": [
+    {
+      "slice": "H10K",
+      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
+      "destination_git_blob_sha1": "51bfa325bd8284525604eb7faac3dce10b41a63a",
+      "symbols": [
+        {
+          "name": "TIER_A_APPLICATION_ENVIRONMENT",
+          "kind": "constant",
+          "responsibility": "environment_policy"
+        },
+        {
+          "name": "_validated_application_env",
+          "kind": "function",
+          "responsibility": "environment_policy"
+        }
+      ],
+      "legacy_core_reexports_exact_objects": true,
+      "lazy_error_dependency": "TierAExecutionError"
+    }
+  ],
+  "private_identity_chains": [
+    {
+      "symbol": "_validated_application_env",
+      "chain": [
+        "_tier_a_environment._validated_application_env",
+        "_tier_a_execution_core._validated_application_env"
+      ]
+    }
   ]
 }

@@ -1,78 +1,62 @@
 # Tier-A execution core split contract
 
-Schema: `kaliv-tier-a-execution-core-split-contract/v1`
+Schema: `kaliv-tier-a-execution-core-split-contract/v2`
 
-This is a review and migration contract for `devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py`. H10J does **not** move production code. It freezes the current ownership surface, every external source consumer, the public object-identity chains and a one-to-one proposed destination for every owned top-level symbol.
+This contract now records both the remaining legacy-core ownership and completed identity-preserving extractions. H10K moves only the reviewed Tier-A environment policy; no executor, Git, network or publication authority is added.
 
-The authoritative machine-readable contract is `devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.json`.
+## Completed extraction
 
-## Proposed private modules
+`TIER_A_APPLICATION_ENVIRONMENT` and `_validated_application_env` now originate in `devcontrol/src/kaliv_dev_control/_tier_a_environment.py`. The legacy core imports and re-exports the exact same objects. `TierAExecutionError` remains in the core and is resolved lazily when validation is called, keeping the new module directly importable during this intermediate split.
 
-- `devcontrol/src/kaliv_dev_control/_tier_a_lease.py` — lease schema, shared validation, canonical lease identity and `TierAExecutionLease`.
-- `devcontrol/src/kaliv_dev_control/_tier_a_environment.py` — reviewed application-environment policy and validation.
-- `devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py` — canonical directory, workspace authority and regular-file identity checks.
-- `devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py` — retained v2 bundle identity used only by the legacy core.
-- `devcontrol/src/kaliv_dev_control/_tier_a_materialization.py` — physical-evidence capture, leased registry and catalog materialization.
-- `devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py` — retained v1 launch-plan model and construction.
-- `devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py` — retained non-capturing Windows executor removed by modern authority at import time.
+Adding the new authority-bearing module to the exact Tier-A bundle and changing the legacy core intentionally changes the toolhost digest. Every earlier physical I0b report is therefore stale; no replacement evidence is manufactured.
 
-## Exact symbol mapping
+## Remaining exact symbol mapping
 
 | Symbol | Kind | Responsibility | Proposed destination |
 |---|---|---|---|
-| `LEASE_SCHEMA` | constant | lease model | `_tier_a_lease.py` |
-| `PLAN_SCHEMA` | constant | legacy plan model | `_tier_a_legacy_plan.py` |
-| `_HEX40` | constant | schema validation | `_tier_a_lease.py` |
-| `_HEX64` | constant | schema validation | `_tier_a_lease.py` |
-| `_TASK_ID` | constant | schema validation | `_tier_a_lease.py` |
-| `_COMMAND_ID` | constant | legacy plan model | `_tier_a_legacy_plan.py` |
-| `TIER_A_APPLICATION_ENVIRONMENT` | constant | environment policy | `_tier_a_environment.py` |
-| `_TIER_A_BUNDLE_FILES` | constant | legacy toolhost identity | `_tier_a_legacy_toolhost.py` |
-| `TierAExecutionError` | class | lease model | `_tier_a_lease.py` |
-| `_canonical` | function | canonical identity | `_tier_a_lease.py` |
-| `_sha256` | function | canonical identity | `_tier_a_lease.py` |
-| `_task_sha` | function | canonical identity | `_tier_a_lease.py` |
-| `_has_symlink_component` | function | path authority | `_tier_a_path_authority.py` |
-| `_canonical_directory` | function | path authority | `_tier_a_path_authority.py` |
-| `workspace_root_authority_sha256` | function | path authority | `_tier_a_path_authority.py` |
-| `tier_a_toolhost_sha256` | function | legacy toolhost identity | `_tier_a_legacy_toolhost.py` |
-| `_validated_application_env` | function | environment policy | `_tier_a_environment.py` |
-| `TierAExecutionLease` | class | lease model | `_tier_a_lease.py` |
-| `_LeaseCapturingVerifier` | class | evidence materialization | `_tier_a_materialization.py` |
-| `LeasedCommandRegistry` | class | command registry | `_tier_a_materialization.py` |
-| `LeasedCatalogMaterializer` | class | evidence materialization | `_tier_a_materialization.py` |
-| `TierALaunchPlan` | class | legacy plan model | `_tier_a_legacy_plan.py` |
-| `_regular_file_hash` | function | path authority | `_tier_a_path_authority.py` |
-| `build_tier_a_launch_plan` | function | legacy launch planning | `_tier_a_legacy_plan.py` |
-| `_run_tier_a_launch_plan` | function | legacy execution | `_tier_a_legacy_runner.py` |
-| `run_verified_tier_a_command` | function | legacy execution | `_tier_a_legacy_runner.py` |
+| `LEASE_SCHEMA` | constant | lease_model | `_tier_a_lease.py` |
+| `PLAN_SCHEMA` | constant | legacy_plan_model | `_tier_a_legacy_plan.py` |
+| `_HEX40` | constant | schema_validation | `_tier_a_lease.py` |
+| `_HEX64` | constant | schema_validation | `_tier_a_lease.py` |
+| `_TASK_ID` | constant | schema_validation | `_tier_a_lease.py` |
+| `_COMMAND_ID` | constant | legacy_plan_model | `_tier_a_legacy_plan.py` |
+| `_TIER_A_BUNDLE_FILES` | constant | legacy_toolhost_identity | `_tier_a_legacy_toolhost.py` |
+| `TierAExecutionError` | class | lease_model | `_tier_a_lease.py` |
+| `_canonical` | function | canonical_identity | `_tier_a_lease.py` |
+| `_sha256` | function | canonical_identity | `_tier_a_lease.py` |
+| `_task_sha` | function | canonical_identity | `_tier_a_lease.py` |
+| `_has_symlink_component` | function | path_authority | `_tier_a_path_authority.py` |
+| `_canonical_directory` | function | path_authority | `_tier_a_path_authority.py` |
+| `workspace_root_authority_sha256` | function | path_authority | `_tier_a_path_authority.py` |
+| `tier_a_toolhost_sha256` | function | legacy_toolhost_identity | `_tier_a_legacy_toolhost.py` |
+| `TierAExecutionLease` | class | lease_model | `_tier_a_lease.py` |
+| `_LeaseCapturingVerifier` | class | evidence_materialization | `_tier_a_materialization.py` |
+| `LeasedCommandRegistry` | class | command_registry | `_tier_a_materialization.py` |
+| `LeasedCatalogMaterializer` | class | evidence_materialization | `_tier_a_materialization.py` |
+| `TierALaunchPlan` | class | legacy_plan_model | `_tier_a_legacy_plan.py` |
+| `_regular_file_hash` | function | path_authority | `_tier_a_path_authority.py` |
+| `build_tier_a_launch_plan` | function | legacy_launch_planning | `_tier_a_legacy_plan.py` |
+| `_run_tier_a_launch_plan` | function | legacy_execution | `_tier_a_legacy_runner.py` |
+| `run_verified_tier_a_command` | function | legacy_execution | `_tier_a_legacy_runner.py` |
 
-The contract test parses the source AST and requires this table's authoritative JSON mapping to match the source order, symbol names and kinds exactly. A missing, duplicated or newly added top-level symbol fails CI.
+## Exact core consumers
 
-## Current external consumers
+- `devcontrol/src/kaliv_dev_control/_tier_a_environment.py` — direct: TierAExecutionError.
+- `devcontrol/src/kaliv_dev_control/runtime_closure_builder.py` — direct: LeasedCommandRegistry, workspace_root_authority_sha256.
+- `devcontrol/src/kaliv_dev_control/runtime_closure_staging.py` — module_alias: LeasedCommandRegistry.
+- `devcontrol/src/kaliv_dev_control/runtime_closure_verify.py` — module_alias: LeasedCommandRegistry.
+- `devcontrol/src/kaliv_dev_control/tier_a_authority.py` — module_alias: LEASE_SCHEMA, LeasedCatalogMaterializer, LeasedCommandRegistry, TIER_A_APPLICATION_ENVIRONMENT, TierAExecutionError, TierAExecutionLease, _canonical_directory, workspace_root_authority_sha256.
+- `devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py` — module_alias: _canonical_directory, _regular_file_hash.
+- `devcontrol/src/kaliv_dev_control/tier_a_plan.py` — module_alias: _canonical_directory, _regular_file_hash, _validated_application_env.
 
-The source graph contains exactly six modules that import `_tier_a_execution_core`. CI discovers this set from the AST and verifies each import style and every referenced core identity:
+## Identity constraints
 
-- `devcontrol/src/kaliv_dev_control/runtime_closure_builder.py` directly imports `LeasedCommandRegistry` and `workspace_root_authority_sha256`.
-- `devcontrol/src/kaliv_dev_control/runtime_closure_staging.py` imports the core as `_core` and references `LeasedCommandRegistry`.
-- `devcontrol/src/kaliv_dev_control/runtime_closure_verify.py` imports the core as `_core` and references `LeasedCommandRegistry`.
-- `devcontrol/src/kaliv_dev_control/tier_a_authority.py` imports the core as `_core` and references `LEASE_SCHEMA`, `LeasedCatalogMaterializer`, `LeasedCommandRegistry`, `TIER_A_APPLICATION_ENVIRONMENT`, `TierAExecutionError`, `TierAExecutionLease`, `_canonical_directory` and `workspace_root_authority_sha256`.
-- `devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py` imports the core as `_core` and references `_canonical_directory` and `_regular_file_hash`.
-- `devcontrol/src/kaliv_dev_control/tier_a_plan.py` imports the core as `_core` and references `_canonical_directory`, `_regular_file_hash` and `_validated_application_env`.
+- `LeasedCatalogMaterializer`: `_tier_a_execution_core.LeasedCatalogMaterializer` → `tier_a_authority.LeasedCatalogMaterializer` → `tier_a_execution.LeasedCatalogMaterializer` → `kaliv_dev_control.LeasedCatalogMaterializer`.
+- `LeasedCommandRegistry`: `_tier_a_execution_core.LeasedCommandRegistry` → `tier_a_authority.LeasedCommandRegistry` → `tier_a_execution.LeasedCommandRegistry` → `kaliv_dev_control.LeasedCommandRegistry`.
+- `TIER_A_APPLICATION_ENVIRONMENT`: `_tier_a_environment.TIER_A_APPLICATION_ENVIRONMENT` → `_tier_a_execution_core.TIER_A_APPLICATION_ENVIRONMENT` → `tier_a_authority.TIER_A_APPLICATION_ENVIRONMENT` → `tier_a_execution.TIER_A_APPLICATION_ENVIRONMENT` → `kaliv_dev_control.TIER_A_APPLICATION_ENVIRONMENT`.
+- `TierAExecutionError`: `_tier_a_execution_core.TierAExecutionError` → `tier_a_authority.TierAExecutionError` → `tier_a_execution.TierAExecutionError` → `kaliv_dev_control.TierAExecutionError`.
+- `TierAExecutionLease`: `_tier_a_execution_core.TierAExecutionLease` → `tier_a_authority.TierAExecutionLease` → `tier_a_execution.TierAExecutionLease` → `kaliv_dev_control.TierAExecutionLease`.
+- `workspace_root_authority_sha256`: `_tier_a_execution_core.workspace_root_authority_sha256` → `tier_a_authority.workspace_root_authority_sha256` → `tier_a_execution.workspace_root_authority_sha256` → `kaliv_dev_control.workspace_root_authority_sha256`.
+- `_validated_application_env`: `_tier_a_environment._validated_application_env` → `_tier_a_execution_core._validated_application_env`.
 
-`tier_a_authority.py` deliberately removes `_run_tier_a_launch_plan` and `run_verified_tier_a_command` from the imported legacy core. This prevents the obsolete non-capturing executor from remaining reachable after modern authority initialization. The contract recognizes the loop-driven `delattr()` calls and fails if those removals disappear or move silently.
-
-## Public object identities that a future split must preserve
-
-- `LeasedCatalogMaterializer`: `_tier_a_execution_core` → `tier_a_authority` → `tier_a_execution` → `kaliv_dev_control`.
-- `LeasedCommandRegistry`: `_tier_a_execution_core` → `tier_a_authority` → `tier_a_execution` → `kaliv_dev_control`.
-- `TIER_A_APPLICATION_ENVIRONMENT`: `_tier_a_execution_core` → `tier_a_authority` → `tier_a_execution` → `kaliv_dev_control`.
-- `TierAExecutionError`: `_tier_a_execution_core` → `tier_a_authority` → `tier_a_execution` → `kaliv_dev_control`.
-- `TierAExecutionLease`: `_tier_a_execution_core` → `tier_a_authority` → `tier_a_execution` → `kaliv_dev_control`.
-- `workspace_root_authority_sha256`: `_tier_a_execution_core` → `tier_a_authority` → `tier_a_execution` → `kaliv_dev_control`.
-
-CI imports all four surfaces and proves each chain is the same Python object by identity, not merely an equivalent replacement.
-
-## Future split constraints
-
-A later production split must preserve all six consumer imports, the public import paths and object identities above, retain the modern authority's removal of the two obsolete executor functions, and update the exact Tier-A bundle. Because moving authority-bearing source changes the toolhost digest, all previous physical evidence will become stale and a fresh physical campaign will be required after the code is frozen.
+A later split must keep every listed object identical by Python `is`, preserve the two intentional legacy-executor removals, update the exact bundle and regenerate the H10I inventory.

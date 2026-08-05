@@ -19,9 +19,12 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from types import MappingProxyType
 from typing import Any, Mapping
 
+from ._tier_a_environment import (
+    TIER_A_APPLICATION_ENVIRONMENT,
+    _validated_application_env,
+)
 from .catalog import (
     CatalogError,
     CatalogMaterializer,
@@ -45,15 +48,6 @@ _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _TASK_ID = re.compile(r"^[A-Z][A-Z0-9_-]{2,63}$")
 _COMMAND_ID = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
-
-TIER_A_APPLICATION_ENVIRONMENT = MappingProxyType(
-    {
-        "CI": "1",
-        "MODELRIG_DEVCONTROL": "1",
-        "GOTOOLCHAIN": "local",
-        "PYTHONDONTWRITEBYTECODE": "1",
-    }
-)
 
 # Every Python source file that can create, validate, transform or execute a
 # Tier-A authority is part of the signed code identity. Package __init__ files
@@ -146,45 +140,6 @@ def tier_a_toolhost_sha256(control_plane_root: Path) -> str:
         digest.update(len(payload).to_bytes(8, "big"))
         digest.update(payload)
     return digest.hexdigest()
-
-
-def _validated_application_env(value: Mapping[str, str]) -> Mapping[str, str]:
-    if not isinstance(value, Mapping):
-        raise TierAExecutionError("Tier-A application environment must be a mapping")
-    clean: dict[str, str] = {}
-    seen: set[str] = set()
-    allowed = {
-        key.casefold(): (key, expected)
-        for key, expected in TIER_A_APPLICATION_ENVIRONMENT.items()
-    }
-    for key, item in value.items():
-        if (
-            not isinstance(key, str)
-            or not key
-            or "=" in key
-            or "\0" in key
-            or not isinstance(item, str)
-            or "\0" in item
-        ):
-            raise TierAExecutionError("Tier-A application environment is invalid")
-        folded = key.casefold()
-        if folded in seen:
-            raise TierAExecutionError(
-                f"Tier-A application environment contains a duplicate key: {key}"
-            )
-        seen.add(folded)
-        try:
-            canonical_key, expected = allowed[folded]
-        except KeyError as exc:
-            raise TierAExecutionError(
-                f"Tier-A application environment key is not reviewed: {key}"
-            ) from exc
-        if item != expected:
-            raise TierAExecutionError(
-                f"Tier-A application environment value is not reviewed: {canonical_key}"
-            )
-        clean[canonical_key] = item
-    return MappingProxyType(dict(sorted(clean.items())))
 
 
 @dataclass(frozen=True, slots=True)
