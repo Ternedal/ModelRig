@@ -1,18 +1,22 @@
 {
-  "schema": "kaliv-tier-a-execution-core-split-contract/v2",
+  "schema": "kaliv-tier-a-execution-core-split-contract/v3",
   "source": "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
-  "source_git_blob_sha1": "4f4efeef36ac44fd2337972c29b99c0f9cb0a373",
+  "source_git_blob_sha1": "1b4779a456fb98ce42f9938a577ec1588957d419",
   "constraints": {
     "h10j_moves_production_code": false,
     "preserve_object_identity_during_future_split": true,
     "preserve_public_import_paths_during_future_split": true,
     "future_split_changes_authority_digest": true,
     "fresh_physical_evidence_required_after_future_split": true,
-    "h10k_moves_environment_policy": true,
-    "earlier_physical_evidence_is_stale": true
+    "h10k_completed_first_production_extraction": true,
+    "h10k_changes_authority_digest": true,
+    "h10l_extracted_error_identity": true,
+    "h10l_eliminates_lazy_reverse_dependency": true,
+    "h10l_changes_authority_digest": true
   },
   "proposed_modules": {
     "devcontrol/src/kaliv_dev_control/_tier_a_lease.py": "Lease schema, shared validation, canonical lease identity and TierAExecutionLease.",
+    "devcontrol/src/kaliv_dev_control/_tier_a_environment.py": "Reviewed Tier-A application environment policy and validation.",
     "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py": "Canonical directory, workspace authority and regular-file identity checks.",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py": "Retained v2 bundle identity used only by the legacy core.",
     "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py": "Physical-evidence capture, leased registry and catalog materialization.",
@@ -61,12 +65,6 @@
       "kind": "constant",
       "responsibility": "legacy_toolhost_identity",
       "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py"
-    },
-    {
-      "name": "TierAExecutionError",
-      "kind": "class",
-      "responsibility": "lease_model",
-      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"
     },
     {
       "name": "_canonical",
@@ -167,16 +165,6 @@
   ],
   "external_core_consumers": [
     {
-      "path": "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
-      "import_style": "direct",
-      "module_alias": null,
-      "imported_names": [
-        "TierAExecutionError"
-      ],
-      "attribute_references": [],
-      "dynamic_removals": []
-    },
-    {
       "path": "devcontrol/src/kaliv_dev_control/runtime_closure_builder.py",
       "import_style": "direct",
       "module_alias": null,
@@ -273,7 +261,6 @@
     {
       "symbol": "TIER_A_APPLICATION_ENVIRONMENT",
       "chain": [
-        "_tier_a_environment.TIER_A_APPLICATION_ENVIRONMENT",
         "_tier_a_execution_core.TIER_A_APPLICATION_ENVIRONMENT",
         "tier_a_authority.TIER_A_APPLICATION_ENVIRONMENT",
         "tier_a_execution.TIER_A_APPLICATION_ENVIRONMENT",
@@ -311,30 +298,50 @@
   "completed_extractions": [
     {
       "slice": "H10K",
-      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
-      "destination_git_blob_sha1": "51bfa325bd8284525604eb7faac3dce10b41a63a",
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
+      "git_blob_sha1": "68cee74aa519e41cb9b8e3a5e74e3dbb90a6d78d",
       "symbols": [
         {
           "name": "TIER_A_APPLICATION_ENVIRONMENT",
           "kind": "constant",
-          "responsibility": "environment_policy"
+          "responsibility": "environment_policy",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_environment.py"
         },
         {
           "name": "_validated_application_env",
           "kind": "function",
-          "responsibility": "environment_policy"
+          "responsibility": "environment_policy",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_environment.py"
         }
       ],
-      "legacy_core_reexports_exact_objects": true,
-      "lazy_error_dependency": "TierAExecutionError"
-    }
-  ],
-  "private_identity_chains": [
+      "core_import_module": "_tier_a_environment",
+      "legacy_core_reexports": [
+        "TIER_A_APPLICATION_ENVIRONMENT",
+        "_validated_application_env"
+      ],
+      "resolved_dependencies": {
+        "TierAExecutionError": "_tier_a_lease"
+      }
+    },
     {
-      "symbol": "_validated_application_env",
-      "chain": [
-        "_tier_a_environment._validated_application_env",
-        "_tier_a_execution_core._validated_application_env"
+      "slice": "H10L",
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py",
+      "git_blob_sha1": "1f4a6eac5b9f0874bbb12897f690f8ae2ee9efe1",
+      "symbols": [
+        {
+          "name": "TierAExecutionError",
+          "kind": "class",
+          "responsibility": "lease_model",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"
+        }
+      ],
+      "core_import_module": "_tier_a_lease",
+      "legacy_core_reexports": [
+        "TierAExecutionError"
+      ],
+      "direct_consumers": [
+        "_tier_a_environment",
+        "_tier_a_execution_core"
       ]
     }
   ]

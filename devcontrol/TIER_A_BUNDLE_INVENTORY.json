@@ -1,15 +1,15 @@
 {
   "bundle_source": "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
-  "file_count": 43,
-  "generated_json_sha256": "35c9c7ac0dae7c1e5c3620571d6dff384651727e2eee1ac8a3b023d13ccf374e",
-  "generated_markdown_sha256": "14132e2c88222f2eef0e20e86267fdd65bb40b8ea6bc03432393ee0f75e52acb",
+  "file_count": 44,
+  "generated_json_sha256": "93a01dc661014195289cc725a34064ea0deef3dcb0f6a6c41458cd25ec7801c8",
+  "generated_markdown_sha256": "7e8502270edcae6f9b0a3cb74021481706df04b7b34019c8a845d8990b63da52",
   "generator": "scripts/tier_a_bundle_inventory.py",
   "inventory_schema": "kaliv-tier-a-bundle-inventory/v1",
   "lock_schema": "kaliv-tier-a-bundle-inventory-lock/v1",
   "totals": {
-    "bytes": 521505,
-    "local_import_edges": 132,
-    "physical_lines": 14286,
+    "bytes": 521601,
+    "local_import_edges": 134,
+    "physical_lines": 14292,
     "top_level_classes": 147,
     "top_level_functions": 155
   }

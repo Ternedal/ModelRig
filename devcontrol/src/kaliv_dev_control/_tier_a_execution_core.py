@@ -21,12 +21,12 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
+from ._tier_a_lease import TierAExecutionError
 from ._tier_a_environment import (
     TIER_A_APPLICATION_ENVIRONMENT,
     _validated_application_env,
 )
 from .catalog import (
-    CatalogError,
     CatalogMaterializer,
     ExecutableVerifier,
     IsolationAttestation,
@@ -66,10 +66,6 @@ _TIER_A_BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/tier_a_execution.py",
     "devcontrol/src/kaliv_dev_control/workspace.py",
 )
-
-
-class TierAExecutionError(CatalogError):
-    """A signed authority could not be converted into a safe Tier-A launch."""
 
 
 def _canonical(value: Mapping[str, Any]) -> str:

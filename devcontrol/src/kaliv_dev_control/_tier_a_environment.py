@@ -1,14 +1,16 @@
 """Reviewed Tier-A application environment policy and validation.
 
-This module owns the exact immutable environment allowlist and validator.  The
+This module owns the exact immutable environment allowlist and validator. The
 legacy execution core re-exports both objects unchanged while the larger core is
-split in small reviewable steps.  The domain error remains in the legacy core
-for H10K, so it is imported lazily only when validation is invoked.
+split in small reviewable steps. The shared domain error now originates in the
+lease module, so validation has no reverse dependency on the legacy core.
 """
 from __future__ import annotations
 
 from types import MappingProxyType
 from typing import Mapping
+
+from ._tier_a_lease import TierAExecutionError
 
 TIER_A_APPLICATION_ENVIRONMENT = MappingProxyType(
     {
@@ -21,11 +23,6 @@ TIER_A_APPLICATION_ENVIRONMENT = MappingProxyType(
 
 
 def _validated_application_env(value: Mapping[str, str]) -> Mapping[str, str]:
-    # TierAExecutionError is scheduled for a later identity-preserving extraction.
-    # Importing it at call time keeps this module directly importable while H10K
-    # moves only the two environment-policy objects promised by the split contract.
-    from ._tier_a_execution_core import TierAExecutionError
-
     if not isinstance(value, Mapping):
         raise TierAExecutionError("Tier-A application environment must be a mapping")
     clean: dict[str, str] = {}
