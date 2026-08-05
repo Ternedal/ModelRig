@@ -8,11 +8,18 @@ A qualifying verdict must:
 - name or be mechanically bound to the exact pull-request head;
 - inspect the complete 28-path diff against ADR-DC-001 and DC-L00;
 - confirm the seven exact-copy blobs and thirteen documented projections;
-- confirm command templates freeze argv into immutable tuples;
+- confirm command templates freeze argv and reject `GIT_*`, `HOME` and
+  `XDG_CONFIG_HOME` isolation overrides;
+- confirm inherited `GIT_*` context is removed from generic command execution;
 - confirm command and patch execution bind evidence to the exact task base SHA
   and return no passing receipt from a mismatched workspace HEAD;
 - confirm staged, unstaged, untracked and ignored workspace state is rejected
   before a registered command starts;
+- confirm registered commands run behind a bounded disposable Git metadata
+  overlay and receipts bind both worktree and metadata fingerprints;
+- confirm config, hook, ref and object writes cannot alter real repository
+  metadata, invalidate command evidence and are discarded before the real
+  `.git` entry is restored atomically;
 - confirm ambiguous raw task paths are rejected before filesystem path
   normalization can alter their authority;
 - confirm the Linux subreaper terminates descendants that create new sessions;
