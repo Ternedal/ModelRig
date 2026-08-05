@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from kaliv_dev_control.commands import (
+    CommandExecutionError,
     CommandExecutor,
     CommandPolicyError,
     CommandRegistry,
@@ -18,6 +19,7 @@ from kaliv_dev_control.commands import (
 )
 from kaliv_dev_control.contract import ContractError, DevelopmentTask
 from kaliv_dev_control.evidence import build_scope_receipt
+from kaliv_dev_control.patch import PatchApplier, PatchError
 from kaliv_dev_control.policy import PathPolicy, ScopeViolation
 from kaliv_dev_control.workspace import WorkspaceError, WorkspaceManager
 
@@ -54,6 +56,13 @@ def _git(cwd: Path, *args: str) -> str:
         capture_output=True,
         check=True,
     ).stdout.strip()
+
+
+def _task_at(base_sha: str, *command_ids: str) -> DevelopmentTask:
+    data = dict(BASE)
+    data["base_sha"] = base_sha
+    data["allowed_command_ids"] = list(command_ids) or ["python.unittest"]
+    return DevelopmentTask.from_mapping(data)
 
 
 class FakeWorkspaceGitRunner:
@@ -155,6 +164,17 @@ class FoundationTests(unittest.TestCase):
         with self.assertRaisesRegex(CommandPolicyError, "not registered"):
             default_registry().resolve(task, "python.unittest")
 
+    def test_command_template_freezes_mutable_argv(self) -> None:
+        source_argv = [sys.executable, "-c", "pass"]
+        template = CommandTemplate(
+            command_id="python.fixed",
+            argv=source_argv,  # type: ignore[arg-type]
+        )
+        source_argv[1] = "-V"
+        source_argv.append("mutated")
+        self.assertIsInstance(template.argv, tuple)
+        self.assertEqual(template.argv, (sys.executable, "-c", "pass"))
+
     def test_workspace_requires_injected_git_runner(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaisesRegex(WorkspaceError, "workspace Git runner"):
@@ -199,6 +219,37 @@ class FoundationTests(unittest.TestCase):
         sys.platform.startswith("linux"),
         "DC-L01 command containment is Linux-only",
     )
+    def test_command_executor_rejects_wrong_workspace_head(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            _git(repo, "init")
+            _git(repo, "config", "user.email", "test@example.com")
+            _git(repo, "config", "user.name", "Test")
+            (repo / "devcontrol").mkdir()
+            target = repo / "devcontrol" / "tracked.txt"
+            target.write_text("base\n", encoding="utf-8")
+            _git(repo, "add", ".")
+            _git(repo, "commit", "-m", "base")
+            base_sha = _git(repo, "rev-parse", "HEAD")
+            target.write_text("other\n", encoding="utf-8")
+            _git(repo, "add", ".")
+            _git(repo, "commit", "-m", "other")
+            command_id = "python.noop"
+            template = CommandTemplate(
+                command_id=command_id,
+                argv=(sys.executable, "-c", "pass"),
+            )
+            with self.assertRaisesRegex(CommandExecutionError, "HEAD"):
+                CommandExecutor(
+                    registry=CommandRegistry((template,))
+                ).execute(_task_at(base_sha, command_id), repo, command_id)
+            self.assertEqual(_git(repo, "rev-parse", "HEAD"), _git(repo, "rev-parse", "HEAD"))
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "DC-L01 command containment is Linux-only",
+    )
     def test_ignored_artifact_is_detected_and_removed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
@@ -213,10 +264,7 @@ class FoundationTests(unittest.TestCase):
             _git(repo, "commit", "-m", "base")
             base_sha = _git(repo, "rev-parse", "HEAD")
             command_id = "python.ignored-mutator"
-            task_data = dict(BASE)
-            task_data["base_sha"] = base_sha
-            task_data["allowed_command_ids"] = [command_id]
-            task = DevelopmentTask.from_mapping(task_data)
+            task = _task_at(base_sha, command_id)
             template = CommandTemplate(
                 command_id=command_id,
                 argv=(
@@ -232,6 +280,70 @@ class FoundationTests(unittest.TestCase):
             self.assertFalse(receipt.workspace_unchanged)
             self.assertTrue(receipt.workspace_reset)
             self.assertFalse((repo / "ignored.tmp").exists())
+            self.assertEqual(_git(repo, "status", "--porcelain"), "")
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "DC-L01 patch containment is Linux-only",
+    )
+    def test_patch_rejects_wrong_workspace_head(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            _git(repo, "init")
+            _git(repo, "config", "user.email", "test@example.com")
+            _git(repo, "config", "user.name", "Test")
+            (repo / "devcontrol").mkdir()
+            target = repo / "devcontrol" / "target.txt"
+            target.write_text("old\n", encoding="utf-8")
+            _git(repo, "add", ".")
+            _git(repo, "commit", "-m", "base")
+            base_sha = _git(repo, "rev-parse", "HEAD")
+            target.write_text("other\n", encoding="utf-8")
+            _git(repo, "add", ".")
+            _git(repo, "commit", "-m", "other")
+            patch = """diff --git a/devcontrol/target.txt b/devcontrol/target.txt
+--- a/devcontrol/target.txt
++++ b/devcontrol/target.txt
+@@ -1 +1 @@
+-other
++new
+"""
+            with self.assertRaisesRegex(PatchError, "HEAD"):
+                PatchApplier().apply(_task_at(base_sha), repo, patch)
+            self.assertEqual(target.read_text(encoding="utf-8"), "other\n")
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "DC-L01 patch containment is Linux-only",
+    )
+    def test_patch_rejects_and_removes_ignored_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            _git(repo, "init")
+            _git(repo, "config", "user.email", "test@example.com")
+            _git(repo, "config", "user.name", "Test")
+            (repo / ".gitignore").write_text("ignored.tmp\n", encoding="utf-8")
+            (repo / "devcontrol").mkdir()
+            target = repo / "devcontrol" / "target.txt"
+            target.write_text("old\n", encoding="utf-8")
+            _git(repo, "add", ".")
+            _git(repo, "commit", "-m", "base")
+            base_sha = _git(repo, "rev-parse", "HEAD")
+            ignored = repo / "ignored.tmp"
+            ignored.write_text("hidden\n", encoding="utf-8")
+            patch = """diff --git a/devcontrol/target.txt b/devcontrol/target.txt
+--- a/devcontrol/target.txt
++++ b/devcontrol/target.txt
+@@ -1 +1 @@
+-old
++new
+"""
+            with self.assertRaisesRegex(PatchError, "ignored"):
+                PatchApplier().apply(_task_at(base_sha), repo, patch)
+            self.assertFalse(ignored.exists())
+            self.assertEqual(target.read_text(encoding="utf-8"), "old\n")
             self.assertEqual(_git(repo, "status", "--porcelain"), "")
 
     def test_command_mutation_boundary_includes_ignored_artifacts(self) -> None:
