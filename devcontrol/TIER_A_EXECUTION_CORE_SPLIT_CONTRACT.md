@@ -2,7 +2,7 @@
 
 Schema: `kaliv-tier-a-execution-core-split-contract/v1`
 
-This is a review and migration contract for `devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py`. H10J does **not** move production code. It freezes the current ownership surface, the only external source consumer, the public object-identity chains and a one-to-one proposed destination for every owned top-level symbol.
+This is a review and migration contract for `devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py`. H10J does **not** move production code. It freezes the current ownership surface, every external source consumer, the public object-identity chains and a one-to-one proposed destination for every owned top-level symbol.
 
 The authoritative machine-readable contract is `devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.json`.
 
@@ -49,13 +49,18 @@ The authoritative machine-readable contract is `devcontrol/TIER_A_EXECUTION_CORE
 
 The contract test parses the source AST and requires this table's authoritative JSON mapping to match the source order, symbol names and kinds exactly. A missing, duplicated or newly added top-level symbol fails CI.
 
-## Current external consumer
+## Current external consumers
 
-The only source module importing `_tier_a_execution_core` is `devcontrol/src/kaliv_dev_control/tier_a_authority.py` under the alias `_core`.
+The source graph contains exactly six modules that import `_tier_a_execution_core`. CI discovers this set from the AST and verifies each import style and every referenced core identity:
 
-It directly references `LEASE_SCHEMA`, `LeasedCatalogMaterializer`, `LeasedCommandRegistry`, `TIER_A_APPLICATION_ENVIRONMENT`, `TierAExecutionError`, `TierAExecutionLease`, `_canonical_directory` and `workspace_root_authority_sha256`.
+- `devcontrol/src/kaliv_dev_control/runtime_closure_builder.py` directly imports `LeasedCommandRegistry` and `workspace_root_authority_sha256`.
+- `devcontrol/src/kaliv_dev_control/runtime_closure_staging.py` imports the core as `_core` and references `LeasedCommandRegistry`.
+- `devcontrol/src/kaliv_dev_control/runtime_closure_verify.py` imports the core as `_core` and references `LeasedCommandRegistry`.
+- `devcontrol/src/kaliv_dev_control/tier_a_authority.py` imports the core as `_core` and references `LEASE_SCHEMA`, `LeasedCatalogMaterializer`, `LeasedCommandRegistry`, `TIER_A_APPLICATION_ENVIRONMENT`, `TierAExecutionError`, `TierAExecutionLease`, `_canonical_directory` and `workspace_root_authority_sha256`.
+- `devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py` imports the core as `_core` and references `_canonical_directory` and `_regular_file_hash`.
+- `devcontrol/src/kaliv_dev_control/tier_a_plan.py` imports the core as `_core` and references `_canonical_directory`, `_regular_file_hash` and `_validated_application_env`.
 
-It deliberately removes `_run_tier_a_launch_plan` and `run_verified_tier_a_command` from the imported legacy core. This prevents the obsolete non-capturing executor from remaining reachable after modern authority initialization.
+`tier_a_authority.py` deliberately removes `_run_tier_a_launch_plan` and `run_verified_tier_a_command` from the imported legacy core. This prevents the obsolete non-capturing executor from remaining reachable after modern authority initialization. The contract recognizes the loop-driven `delattr()` calls and fails if those removals disappear or move silently.
 
 ## Public object identities that a future split must preserve
 
@@ -70,4 +75,4 @@ CI imports all four surfaces and proves each chain is the same Python object by 
 
 ## Future split constraints
 
-A later production split must preserve the public import paths and object identities above, retain the modern authority's removal of the two obsolete executor functions, and update the exact Tier-A bundle. Because moving authority-bearing source changes the toolhost digest, all previous physical evidence will become stale and a fresh physical campaign will be required after the code is frozen.
+A later production split must preserve all six consumer imports, the public import paths and object identities above, retain the modern authority's removal of the two obsolete executor functions, and update the exact Tier-A bundle. Because moving authority-bearing source changes the toolhost digest, all previous physical evidence will become stale and a fresh physical campaign will be required after the code is frozen.
