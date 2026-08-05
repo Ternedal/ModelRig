@@ -238,7 +238,7 @@ class CommandExecutor:
     def _reset(self, task: DevelopmentTask, workspace: Path) -> None:
         for args in (
             ("reset", "--hard", task.base_sha),
-            ("clean", "-fdx"),
+            ("clean", "-ffdx"),
         ):
             result = self.runner.run(
                 ["git", *args],
@@ -251,6 +251,16 @@ class CommandExecutor:
                     "workspace mutation could not be reset"
                 )
         self._verify_head(task, workspace)
+        try:
+            _, clean = self._snapshot(workspace)
+        except (WorkspaceError, CommandExecutionError) as exc:
+            raise CommandExecutionError(
+                "workspace reset could not be verified"
+            ) from exc
+        if not clean:
+            raise CommandExecutionError(
+                "workspace reset did not produce a clean state"
+            )
 
     @staticmethod
     def _cwd(workspace: Path, relative: str) -> Path:
@@ -306,10 +316,12 @@ class CommandExecutor:
         duration_ms = max(0, int((time.monotonic() - started) * 1_000))
         try:
             self._verify_head(task, root)
-        except CommandExecutionError:
+            after_sha, after_clean = self._snapshot(root)
+        except (WorkspaceError, CommandExecutionError) as exc:
             self._reset(task, root)
-            raise
-        after_sha, after_clean = self._snapshot(root)
+            raise CommandExecutionError(
+                "post-command workspace verification failed"
+            ) from exc
         unchanged = before_sha == after_sha and after_clean
         reset = False
         if not unchanged:
