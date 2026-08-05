@@ -37,22 +37,23 @@ from ._tier_a_path_authority import (
     _regular_file_hash,
     workspace_root_authority_sha256,
 )
+from ._tier_a_materialization import (
+    _LeaseCapturingVerifier,
+    LeasedCommandRegistry,
+    LeasedCatalogMaterializer,
+)
 from ._tier_a_environment import (
     TIER_A_APPLICATION_ENVIRONMENT,
     _validated_application_env,
 )
 from .catalog import (
-    CatalogMaterializer,
-    ExecutableVerifier,
     IsolationAttestation,
     IsolationBoundary,
     ModelRigCommandCatalog,
     NetworkMode,
     Toolchain,
 )
-from .commands import CommandRegistry, CommandTemplate
 from .contract import DevelopmentTask
-from .physical_isolation import WindowsPhysicalIsolationVerifier
 
 PLAN_SCHEMA = "kaliv-development-tier-a-launch-plan/v1"
 _COMMAND_ID = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
@@ -94,112 +95,6 @@ def tier_a_toolhost_sha256(control_plane_root: Path) -> str:
         digest.update(len(payload).to_bytes(8, "big"))
         digest.update(payload)
     return digest.hexdigest()
-
-
-class _LeaseCapturingVerifier:
-    def __init__(self, verifier: WindowsPhysicalIsolationVerifier) -> None:
-        if not isinstance(verifier, WindowsPhysicalIsolationVerifier):
-            raise TierAExecutionError(
-                "leased materialization requires WindowsPhysicalIsolationVerifier"
-            )
-        self.verifier = verifier
-        self._lease: TierAExecutionLease | None = None
-
-    def verify(self, attestation: IsolationAttestation) -> None:
-        self._lease = None
-        self.verifier.verify(attestation)
-        candidates = self.verifier._load_candidates(set(attestation.evidence_sha256))
-        if len(candidates) != 1:
-            raise TierAExecutionError(
-                "physical evidence changed while issuing the execution lease"
-            )
-        signed = candidates[0]
-        if signed.sha256 not in attestation.evidence_sha256:
-            raise TierAExecutionError(
-                "execution lease report is not named by the attestation"
-            )
-        self._lease = TierAExecutionLease.from_signed_report(attestation, signed)
-
-    @property
-    def lease(self) -> TierAExecutionLease:
-        if self._lease is None:
-            raise TierAExecutionError("no verified execution lease was issued")
-        return self._lease
-
-
-class LeasedCommandRegistry:
-    """A command registry that retains the exact signed execution authority."""
-
-    def __init__(
-        self,
-        registry: CommandRegistry,
-        lease: TierAExecutionLease,
-        *,
-        task: DevelopmentTask,
-        catalog: ModelRigCommandCatalog,
-        toolchain: Toolchain,
-        attestation: IsolationAttestation,
-    ) -> None:
-        if not isinstance(registry, CommandRegistry):
-            raise TierAExecutionError("leased registry requires a command registry")
-        lease.verify_attestation(attestation)
-        if (
-            lease.task_sha256 != _task_sha(task)
-            or lease.catalog_sha256 != catalog.sha256
-            or lease.toolchain_sha256 != toolchain.sha256
-        ):
-            raise TierAExecutionError(
-                "leased registry authority does not match task, catalog and toolchain"
-            )
-        self._registry = registry
-        self.lease = lease
-        self.catalog = catalog
-        self.toolchain = toolchain
-        self.attestation = attestation
-        self._task_sha256 = _task_sha(task)
-
-    def resolve(self, task: DevelopmentTask, command_id: str) -> CommandTemplate:
-        if _task_sha(task) != self._task_sha256:
-            raise TierAExecutionError(
-                "leased command registry cannot be rebound to another task"
-            )
-        self.lease.verify_attestation(self.attestation)
-        return self._registry.resolve(task, command_id)
-
-
-class LeasedCatalogMaterializer:
-    """Materialize fixed commands and retain the signed physical evidence result."""
-
-    def __init__(
-        self,
-        catalog: ModelRigCommandCatalog,
-        physical_verifier: WindowsPhysicalIsolationVerifier,
-        *,
-        executable_verifier: ExecutableVerifier | None = None,
-    ) -> None:
-        self.catalog = catalog
-        self._capturing = _LeaseCapturingVerifier(physical_verifier)
-        self._materializer = CatalogMaterializer(
-            catalog,
-            isolation_verifier=self._capturing,
-            executable_verifier=executable_verifier,
-        )
-
-    def materialize(
-        self,
-        task: DevelopmentTask,
-        toolchain: Toolchain,
-        attestation: IsolationAttestation,
-    ) -> LeasedCommandRegistry:
-        registry = self._materializer.materialize(task, toolchain, attestation)
-        return LeasedCommandRegistry(
-            registry,
-            self._capturing.lease,
-            task=task,
-            catalog=self.catalog,
-            toolchain=toolchain,
-            attestation=attestation,
-        )
 
 
 @dataclass(frozen=True, slots=True)

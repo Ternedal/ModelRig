@@ -8,6 +8,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 LEASE_PATH = ROOT / "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"
 CORE_PATH = ROOT / "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py"
+MATERIALIZATION_PATH = (
+    ROOT / "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py"
+)
 MOVED = [
     "LEASE_SCHEMA",
     "_HEX40",
@@ -83,8 +86,15 @@ class TierALeaseModelExtractionTests(unittest.TestCase):
             self.assertIs(getattr(self.package, symbol), identity)
 
     def test_extraction_left_no_stray_dataclass_decorator(self) -> None:
-        tree = ast.parse(CORE_PATH.read_text(encoding="utf-8"), filename=str(CORE_PATH))
-        classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
+        tree = ast.parse(
+            MATERIALIZATION_PATH.read_text(encoding="utf-8"),
+            filename=str(MATERIALIZATION_PATH),
+        )
+        classes = {
+            node.name: node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef)
+        }
         self.assertEqual(classes["_LeaseCapturingVerifier"].decorator_list, [])
         self.assertEqual(classes["LeasedCommandRegistry"].decorator_list, [])
         self.assertEqual(classes["LeasedCatalogMaterializer"].decorator_list, [])

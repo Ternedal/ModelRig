@@ -144,7 +144,7 @@ class TierAExecutionCoreSplitContractTests(unittest.TestCase):
     def test_source_remaining_symbols_and_destinations_are_exact(self):
         self.assertEqual(
             self.contract["schema"],
-            "kaliv-tier-a-execution-core-split-contract/v5",
+            "kaliv-tier-a-execution-core-split-contract/v6",
         )
         self.assertEqual(
             _git_blob_sha1(self.source_bytes),
@@ -190,6 +190,10 @@ class TierAExecutionCoreSplitContractTests(unittest.TestCase):
         self.assertTrue(constraints["h10m_changes_authority_digest"])
         self.assertTrue(constraints["h10n_extracted_path_authority"])
         self.assertTrue(constraints["h10n_changes_authority_digest"])
+        self.assertTrue(
+            constraints["h10o_extracted_materialization_services"]
+        )
+        self.assertTrue(constraints["h10o_changes_authority_digest"])
         self.assertTrue(constraints["earlier_physical_evidence_is_stale"])
         self.assertTrue(
             constraints["preserve_object_identity_during_future_split"]
@@ -206,6 +210,7 @@ class TierAExecutionCoreSplitContractTests(unittest.TestCase):
                 "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
                 "devcontrol/src/kaliv_dev_control/_tier_a_lease.py",
                 "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py",
+                "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py",
             ],
         )
         core = importlib.import_module("kaliv_dev_control._tier_a_execution_core")
@@ -229,7 +234,7 @@ class TierAExecutionCoreSplitContractTests(unittest.TestCase):
             for symbol in extraction["legacy_core_reexports"]:
                 self.assertIs(getattr(core, symbol), getattr(extracted_module, symbol))
 
-        environment, lease, path_authority = extractions
+        environment, lease, path_authority, materialization = extractions
         self.assertEqual(environment["completed_slices"], ["H10K"])
         self.assertEqual(
             environment["resolved_dependencies"],
@@ -253,8 +258,32 @@ class TierAExecutionCoreSplitContractTests(unittest.TestCase):
             },
         )
         self.assertEqual(
+            materialization["completed_slices"], ["H10O"]
+        )
+        self.assertEqual(
+            materialization["direct_consumers"],
+            ["_tier_a_execution_core"],
+        )
+        self.assertEqual(
+            materialization["resolved_dependencies"],
+            {
+                "TierAExecutionError": "_tier_a_lease",
+                "TierAExecutionLease": "_tier_a_lease",
+                "_task_sha": "_tier_a_lease",
+                "CatalogMaterializer": "catalog",
+                "ExecutableVerifier": "catalog",
+                "IsolationAttestation": "catalog",
+                "ModelRigCommandCatalog": "catalog",
+                "Toolchain": "catalog",
+                "CommandRegistry": "commands",
+                "CommandTemplate": "commands",
+                "DevelopmentTask": "contract",
+                "WindowsPhysicalIsolationVerifier": "physical_isolation",
+            },
+        )
+        self.assertEqual(
             [item["slice"] for item in self.contract["migration_history"]],
-            ["H10K", "H10L", "H10M", "H10N"],
+            ["H10K", "H10L", "H10M", "H10N", "H10O"],
         )
 
     def test_external_core_consumers_are_complete(self):

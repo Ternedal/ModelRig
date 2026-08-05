@@ -1,7 +1,7 @@
 {
-  "schema": "kaliv-tier-a-execution-core-split-contract/v5",
+  "schema": "kaliv-tier-a-execution-core-split-contract/v6",
   "source": "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
-  "source_git_blob_sha1": "cafbbd449b49bbfa6bdd969cb701d1c384c636bb",
+  "source_git_blob_sha1": "824a95d7ed95426b84e63492a576891ff011a820",
   "constraints": {
     "h10j_moves_production_code": false,
     "preserve_object_identity_during_future_split": true,
@@ -17,7 +17,9 @@
     "h10m_changes_authority_digest": true,
     "earlier_physical_evidence_is_stale": true,
     "h10n_extracted_path_authority": true,
-    "h10n_changes_authority_digest": true
+    "h10n_changes_authority_digest": true,
+    "h10o_extracted_materialization_services": true,
+    "h10o_changes_authority_digest": true
   },
   "proposed_modules": {
     "devcontrol/src/kaliv_dev_control/_tier_a_lease.py": "Lease schema, shared validation, canonical lease identity and TierAExecutionLease.",
@@ -52,24 +54,6 @@
       "kind": "function",
       "responsibility": "legacy_toolhost_identity",
       "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py"
-    },
-    {
-      "name": "_LeaseCapturingVerifier",
-      "kind": "class",
-      "responsibility": "evidence_materialization",
-      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py"
-    },
-    {
-      "name": "LeasedCommandRegistry",
-      "kind": "class",
-      "responsibility": "command_registry",
-      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py"
-    },
-    {
-      "name": "LeasedCatalogMaterializer",
-      "kind": "class",
-      "responsibility": "evidence_materialization",
-      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py"
     },
     {
       "name": "TierALaunchPlan",
@@ -384,6 +368,56 @@
         "TierAExecutionError": "_tier_a_lease",
         "_sha256": "_tier_a_lease"
       }
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py",
+      "git_blob_sha1": "52b7e4939b2c45dd044eb4b781449ad9be9aede8",
+      "completed_slices": [
+        "H10O"
+      ],
+      "symbols": [
+        {
+          "name": "_LeaseCapturingVerifier",
+          "kind": "class",
+          "responsibility": "evidence_materialization",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py"
+        },
+        {
+          "name": "LeasedCommandRegistry",
+          "kind": "class",
+          "responsibility": "command_registry",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py"
+        },
+        {
+          "name": "LeasedCatalogMaterializer",
+          "kind": "class",
+          "responsibility": "evidence_materialization",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py"
+        }
+      ],
+      "core_import_module": "_tier_a_materialization",
+      "legacy_core_reexports": [
+        "_LeaseCapturingVerifier",
+        "LeasedCommandRegistry",
+        "LeasedCatalogMaterializer"
+      ],
+      "direct_consumers": [
+        "_tier_a_execution_core"
+      ],
+      "resolved_dependencies": {
+        "TierAExecutionError": "_tier_a_lease",
+        "TierAExecutionLease": "_tier_a_lease",
+        "_task_sha": "_tier_a_lease",
+        "CatalogMaterializer": "catalog",
+        "ExecutableVerifier": "catalog",
+        "IsolationAttestation": "catalog",
+        "ModelRigCommandCatalog": "catalog",
+        "Toolchain": "catalog",
+        "CommandRegistry": "commands",
+        "CommandTemplate": "commands",
+        "DevelopmentTask": "contract",
+        "WindowsPhysicalIsolationVerifier": "physical_isolation"
+      }
     }
   ],
   "migration_history": [
@@ -424,6 +458,15 @@
         "_canonical_directory",
         "workspace_root_authority_sha256",
         "_regular_file_hash"
+      ]
+    },
+    {
+      "slice": "H10O",
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py",
+      "symbols": [
+        "_LeaseCapturingVerifier",
+        "LeasedCommandRegistry",
+        "LeasedCatalogMaterializer"
       ]
     }
   ]
