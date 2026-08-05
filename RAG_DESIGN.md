@@ -1,6 +1,6 @@
 # RAG_DESIGN.md — hærdning af dokumentviden (RAG)
 
-**Status:** LIVE · replace-by-source leveret (1.58.40) · T-043 benchmark-harness leveret · måling/kalibrering kræver rig · **Ejer:** Anders
+**Status:** LIVE · replace-by-source leveret (1.58.40) · atomisk ingest + corpus-kontrakt leveret (1.58.148) · T-043 benchmark-harness leveret · måling/kalibrering kræver rig · **Ejer:** Anders
 
 > Autoritativt design for RAG-ingest/-retrieval, grundet i **kodelæsning**
 > (rag.py, store.py, main.py's seks ingest-endpoints, rag_pdf/docx/pptx) — ikke
@@ -34,6 +34,8 @@ Det **reelle** hul var et andet — se R1.
 | R3 | DOCX-tabeller kan splittes midt i en række af chunkeren | Tabelfakta spredt over chunks → dårlig retrieval på tabeldata | 🔶 Planlagt: tabel-atomiske chunks (én chunk pr. tabel op til chunk_size) — kræver læsning af rag_docx' serialisering først |
 | R4 | top_k=4 / min_score=0.3 er ukalibrerede gæt | For stramt → "ved ikke" på reelt svarbare spørgsmål; for løst → støj | 🟡 Benchmark-harness leveret; endelige værdier kræver rig-run + rigtige dokumenter |
 | R5 | Ingen OCR | Scannede dokumenter kan ikke indekseres | ⛔ Erklæret ikke-mål for nu (ærlig 422 er adfærden); OCR = stor dependency, egen beslutning |
+| R7 | **Ingest var ikke atomisk.** `delete_source` kørte først, hvorefter hvert chunk blev embeddet og committet enkeltvis | En fejlet embedding ved chunk 14 af 50 efterlod den gamle kilde permanent væk og en delvis ny committet — korpusset gyldigt, men semantisk korrupt, og intet opdagede det | ✅ **1.58.148: atomisk ingest** (se §4) |
+| R8 | **Korpusset havde ingen kontrakt.** Hverken embedding-model, dimension eller chunker-version blev gemt | `cosine` returnerer 0.0 ved mismatchede længder og `query` filtrerer alt under `min_score` væk → et modelskift gav NUL matches, byte-identisk med et legitimt "ingen relevante kilder", hvorefter modellen svarede fra egen viden med korpusset tavst koblet fra | ✅ **1.58.148: corpus-kontrakt, fail-closed** (se §4b) |
 | R6 | Ingen side-/afsnitscitater | Svar kan ikke pege på side N | 🔶 Planlagt: `page`-metadata fra rag_pdf videre til `documents` + `[kilde s.N]` i syntese |
 
 ## 4. Replace-by-source (Implementeret 1.58.40, testet)
@@ -47,6 +49,69 @@ ingest-endpoints rapporterer nu `replaced` i svaret.
 **Testet** (tests/worker_rag.py, 11 nye checks, kører i CI): total stabil ved
 gen-ingest · gamle chunks væk, ny tekst vinder retrieval · andre kilder urørte ·
 multi-dokument samme source i ét kald bevares · blank tekst → 422.
+
+**Atomicitet (1.58.148).** Den oprindelige implementering slettede kilden
+FØRST og embeddede derefter chunk for chunk med et commit pr. chunk. Et
+netværkskald pr. chunk betyder, at en fejl midtvejs — Ollama nede, timeout,
+skiftet model — efterlod den gamle version permanent væk og en delvis ny
+committet. Kaldet fejlede, mens korpusset stod gyldigt men semantisk korrupt.
+
+Rækkefølgen er vendt om:
+
+```
+1. chunk dokumentet
+2. embed ALLE chunks          <- eneste netværkstrin; fejler det, er intet rørt
+3. BEGIN IMMEDIATE
+4. slet kilden
+5. indsæt alle nye chunks
+6. COMMIT
+```
+
+`BEGIN IMMEDIATE` tager skrivelåsen ved transaktionsstart frem for ved første
+skrivning — samme mønster som Agent 3-kampagneadapteren fra ADR-A4-008 slice 4.
+Enhver fejl inde i transaktionen ruller det hele tilbage. Der findes ingen
+mellemtilstand, hvor den gamle kilde er væk og den nye er ufuldstændig.
+
+## 4b. Corpus-kontrakten (Implementeret 1.58.148)
+
+Et RAG-index er kun meningsfuldt sammen med den embedding-model, der byggede
+det. Uden den registreret var et modelskift — som kun kræver en ændret
+`MODELRIG_EMBED_MODEL` — **usynligt**: `cosine` returnerer 0.0 for vektorer med
+forskellig længde, `query` filtrerer alt under `min_score` væk, og resultatet
+er nul matches. Det er byte-identisk med et legitimt "ingen relevante kilder",
+hvorefter modellen svarer fra sin egen parametriske viden, mens korpusset er
+tavst koblet fra. Det er den værst tænkelige fejlklasse for et RAG-system,
+fordi stilheden ligner et svar.
+
+**Tabellen `corpus_meta`** (key/value) binder korpusset til sin oprindelse:
+`embedding_model`, `embedding_dimensions`, `chunker_version`. Den skrives ved
+første ingest.
+
+**Guarden** sidder i `query()` **før** scoring og rejser `CorpusModelMismatch`
+med begge modeller og rettelsen i teksten. Den fanger to tilfælde:
+
+- forskellig dimension — det åbenlyse;
+- **samme dimension, anden model** — det farlige. Samme vektorlængde betyder
+  ikke samme vektorrum, og uden modelnavnet ville det slippe igennem.
+
+**Eksisterende indekser (besluttet af Anders, mulighed C).** Et korpus bygget
+før kontrakten får registreret det, det kan *bevise* om sig selv: dimensionen
+måles fra en gemt vektor og er derfor et faktum. Modelnavnet sættes til
+`unknown` frem for at gætte på den aktuelt konfigurerede model — at gætte ville
+skrive en antagelse ind i databasen, som om den var fastslået, hvilket er
+præcis det, tabellen findes for at forhindre. **Accepteret konsekvens:** for
+præ-kontrakt-indekser er et modelskift ved samme dimension ikke detekterbart.
+Ankommer der senere nye chunks fra en kendt model ved samme dimension,
+registreres navnet sandfærdigt.
+
+**Testet** (tests/worker_rag_corpus_contract.py, 14 checks): kontrakten skrives
+ved første ingest · embedding-fejl efterlader den gamle kilde intakt · fejl inde
+i transaktionen ruller delete tilbage · dimensions-mismatch fejler lukket ·
+modelskift ved samme dimension fejler lukket · fejlteksten navngiver begge sider
+· præ-kontrakt-korpus backfiller den målte dimension og gætter aldrig modellen ·
+tomt korpus pålægger ingen kontrakt · transaktionen åbnes med `BEGIN IMMEDIATE`
+før nogen DELETE eller INSERT. Alle syv sikkerhedsegenskaber er mutationstestet:
+brudt enkeltvis i kilden, hvorefter suiten blev rød.
 
 ## 5. T-043 load- og kvalitetsbenchmark
 

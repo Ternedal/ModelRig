@@ -75,7 +75,7 @@ are the same versioned values validated by worker, backend and clients.
 |---|---|
 | `CLIENT_STATE_DESIGN.md` | DELVIST · trin 1-2 leveret (1.58.44/45) · trin 3-5 kræver device-test · **Ejer:** Anders |
 | `ISOLATION_DESIGN.md` | LIVE · I0a+I0c leveret (dormant) · I0b afventer rig · **Ejer:** Anders (gates) — se CURRENT_STATE.md for switches |
-| `RAG_DESIGN.md` | LIVE · replace-by-source leveret (1.58.40) · T-043 benchmark-harness leveret · måling/kalibrering kræver rig · **Ejer:** Anders |
+| `RAG_DESIGN.md` | LIVE · replace-by-source leveret (1.58.40) · atomisk ingest + corpus-kontrakt leveret (1.58.148) · T-043 benchmark-harness leveret · måling/kalibrering kræver rig · **Ejer:** Anders |
 | `UPDATER_DESIGN.md` | LIVE · §4a self-update UDESTÅR (manuel udskiftning indtil da) · **Ejer:** Anders (rig) |
 | `VALIDATION-1.58.49.md` | AFVENTER KØRSEL · resultatfelter tomme · gælder 1.58.49+ · **Ejer:** Anders (rig + telefon) |
 

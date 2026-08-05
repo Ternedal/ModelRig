@@ -28,7 +28,7 @@ flowchart TB
     Go["Backend (Go) :8080<br/>pairing · tokens · reverse proxy ONLY<br/>flushes streams chunk-by-chunk"]
 
     subgraph Worker["Worker (Python) :8099 — mounted from app.entrypoint"]
-        Pipe["RAG&nbsp;&nbsp;pdf · docx · pptx · html · foto (vision)<br/>Voice&nbsp;&nbsp;ASR → LLM(stream) → sentence-TTS<br/>buffered: /voice/converse/upload<br/>streamed: /voice/converse/stream (NDJSON)"]
+        Pipe["RAG&nbsp;&nbsp;pdf · docx · pptx · html · foto (vision)<br/>ingest is atomic: embed all → BEGIN IMMEDIATE → replace<br/>corpus bound to the model that built it; mismatch fails closed<br/>Voice&nbsp;&nbsp;ASR → LLM(stream) → sentence-TTS<br/>buffered: /voice/converse/upload<br/>streamed: /voice/converse/stream (NDJSON)"]
         Tools["Kaliv Tools<br/>registry (in code)<br/>confirmation gate<br/>audit log (append-only)<br/>Executor seam<br/>web_research: risk=read + network=public<br/>gated KALIV_WEB_RESEARCH_ENABLED"]
         Sched["Scheduler<br/>at-most-once by construction<br/>claim + budget slot in one transaction<br/>write approvals leave a receipt"]
         A3["Agent 3<br/>mount_agent3() owns the whole surface<br/>DORMANT unless KALIV_AGENT3_ENABLED=1<br/>server-authoritative plan · one confirmation per side effect"]
@@ -39,7 +39,7 @@ flowchart TB
 
     Human(["human"])
     Ollama["Ollama :11434<br/>local — ALWAYS for embeddings"]
-    DB[("SQLite<br/>RAG · audit · schedules")]
+    DB[("SQLite<br/>RAG (documents + corpus_meta) · audit · schedules")]
     Cloud["Ollama Cloud<br/>(optional)<br/>text model ≠ voice model<br/>(cloudModel / voiceCloudModel)"]
 
     Sup -- "supervises" --> Go
@@ -107,6 +107,15 @@ subscribers, and application-driven polling is forbidden. Those boundaries are
 not prose alone: CI gates scan the package on every run
 (`AGENT_4_ARCHITECTURE_DECISIONS.md` is the authoritative source).
 
+**DevControl** — a separate, dormant authority chain for controlled
+self-development, governed by `docs/devcontrol/ADR-DC-001_DEVCONTROL_AUTHORITY_BOUNDARY.md`.
+It is deliberately **not** part of the product runtime: nothing under `worker/`,
+`backend/`, `desktop/` or `android/` imports it, merge and publication authority
+stay human and cannot be delegated, and any actual publication capability
+requires its own ADR. The implementation is not on `main`; the decision that
+governs it is, on purpose — so the code is reviewed against the boundary rather
+than the boundary described from the code.
+
 **Tools** — the model proposes; the gate decides. Reads run. Writes stop at a
 confirmation card and execute the arguments that were shown: the worker parks
 them, so no client can alter them after approval. *Risk* decides whether a
@@ -129,6 +138,13 @@ Ollama Cloud (https://ollama.com, model `:cloud`) with `OLLAMA_API_KEY`.
 - **worker/** — Python FastAPI. RAG: **chunk** (overlapping) → embed via Ollama →
   SQLite → cosine retrieval → optional synthesis, plus **streaming RAG chat**
   (retrieve + stream the answer). Source management: list, stats, delete, filter.
+  Ingest is **atomic**: every embedding is computed before anything is deleted,
+  and the replace plus all inserts run in one `BEGIN IMMEDIATE` transaction, so a
+  failed embed can no longer leave a source half-replaced. The corpus is **bound
+  to the model that built it** (`corpus_meta`), and a query under a different
+  model or dimension **fails closed with a named error** instead of returning
+  nothing — silence that looks like "no relevant sources" is the one answer a
+  disconnected index must never give.
 - **desktop/** — Compose Desktop (JVM). **Streaming** chat with local-first +
   Ollama Cloud fallback, model picker, branded UI.
 - **android/** — Compose Android V1. Talk to your **rig** (backend → local models
