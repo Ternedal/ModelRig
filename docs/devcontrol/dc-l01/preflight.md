@@ -36,27 +36,28 @@ positive quiescence acknowledgement; an unacknowledged or fallback path fails
 without returning a result. Windows fails closed until the native Job Object
 boundary lands in DC-L05; DC-L01 does not import that future product module.
 
-Registered commands never see the real `.git` entry. Before execution it is
-atomically replaced with a bounded disposable metadata overlay backed by a
-read-only object alternate. The command receives isolated HOME/XDG/Git config,
-hooks are disabled, inherited `GIT_*` variables are removed and templates cannot
-override the isolation context. Overlay metadata is fingerprinted with worktree
-state, discarded after execution and the real metadata is restored atomically.
+Registered commands never execute in the source checkout. The executor first
+verifies the source is at the exact task HEAD with no staged, unstaged, untracked
+or ignored state, creates a temporary Git bundle and clones a bounded independent
+repository at that exact SHA. Before command execution it removes the origin and
+bundle, uses no object alternates, isolates HOME/XDG/TMP/Git configuration and
+rejects any source-path or Git-context disclosure. The sandbox worktree and its
+complete bounded `.git` metadata are fingerprinted. Every sandbox is destroyed,
+and the source repository is re-verified unchanged before evidence can return.
 
 ## Source projection decisions
 
-Seven source paths are copied byte-identically from the locked source head.
-Thirteen source-derived paths are deliberately projected:
+Six source paths are copied byte-identically from the locked source head.
+Fourteen source-derived paths are deliberately projected:
 
 - `bounded_subprocess.py`: replaces process-group-only cleanup and the DC-L05
   Windows import with Linux subreaper containment, positive quiescence
   acknowledgement and Windows fail-closed behavior;
-- `commands.py`: freezes mutable argv inputs, verifies exact task HEAD, rejects
-  staged/unstaged/untracked/ignored state, executes behind a bounded disposable
-  Git metadata overlay, combines worktree and metadata fingerprints, rejects Git
-  environment overrides, atomically restores real metadata, removes nested Git
-  repositories with `git clean -ffdx`, verifies physical clean state and resets
-  before propagating post-command verification failures;
+- `commands.py`: freezes mutable argv inputs, verifies exact task HEAD and clean
+  source state, executes in a bounded independent bundle-cloned repository,
+  removes origin/bundle before execution, uses no alternates, isolates command
+  environment and Git config, fingerprints worktree plus complete sandbox Git
+  metadata, destroys the sandbox and re-verifies the source before evidence;
 - `contract.py`: rejects empty, dot and parent raw path segments before
   `PurePosixPath` can normalize ambiguous task authority;
 - `patch.py`: verifies exact task HEAD, includes ignored artifacts in post-apply
@@ -67,17 +68,22 @@ Thirteen source-derived paths are deliberately projected:
   context from generic subprocess execution;
 - `test_bounded_subprocess.py`: removes the deferred DC-L09 runner import, proves
   escaped-session containment and negative acknowledgement behavior, and
-  executes nested-Git cleanup, oversized snapshot reset, Git config/hook
-  isolation, forbidden template environment and inherited `GIT_DIR` regressions;
+  exercises nested-Git handling, oversized snapshot failure, forbidden template
+  environment and inherited `GIT_DIR` regressions;
 - `test_foundation.py`: tests the workspace seam, future/product imports,
   immutable command argv, exact command/patch HEAD binding, pre-staged command
   rejection, ambiguous raw path rejection and executable ignored-artifact
-  detection/reset for both command and patch paths;
+  disposal for command plus ignored-artifact reset for patch;
+- `test_slice2.py`: adds executable independent-sandbox regressions proving that
+  no source path, metadata backup, bundle, remote or alternate is visible and
+  that sandbox-only config/hook mutations invalidate evidence while source
+  metadata and status remain unchanged;
 - `__init__.py`: exports only DC-L01 symbols;
 - `__main__.py`: exposes only task validation and path checking;
 - `pyproject.toml`: has no runtime dependency; cryptography remains deferred;
 - `README.md`: describes only landed authority;
-- `_tests.yml`: adds only the DC-L01 lint and unittest gate; and
+- `_tests.yml`: adds the DC-L01 lint/unittest gate and captures verbose failure
+  output in the existing failed-test artifact; and
 - `workflow_test_coverage.py`: proves the three DC-L01 tests are reached by CI.
 
 ## Required gates
@@ -91,25 +97,27 @@ Thirteen source-derived paths are deliberately projected:
 6. Missing or wrong workspace Git seams fail closed.
 7. Command and patch receipts are bound to the exact task base SHA; a mismatched
    workspace HEAD returns no passing receipt.
-8. Staged, unstaged, untracked or ignored workspace state is rejected before a
+8. Staged, unstaged, untracked or ignored source state is rejected before a
    command starts.
-9. Ambiguous raw task paths are rejected before filesystem path normalization.
-10. Path escape, protected path, budget overflow, malformed patch, timeout and
+9. Commands execute only inside an independent exact-HEAD sandbox with no source
+   path, bundle, remote, metadata backup or object alternate visible.
+10. Sandbox worktree and complete bounded Git metadata jointly determine command
+    receipt state; metadata-only mutations invalidate positive evidence.
+11. Every sandbox is physically destroyed and the source is re-verified exact and
+    clean before command evidence returns.
+12. Ambiguous raw task paths are rejected before filesystem path normalization.
+13. Path escape, protected path, budget overflow, malformed patch, timeout and
     output overflow all fail closed.
-11. Linux containment terminates descendants that escape into new sessions and
+14. Linux containment terminates descendants that escape into new sessions and
     emits termination proof only after positive supervisor acknowledgement;
     unsupported platforms and unacknowledged/fallback termination fail closed.
-12. Ignored artifacts and nested Git repositories cannot coexist with positive
-    command or patch evidence and are physically removed by double-force reset.
-13. Git config, hooks, refs or object writes occur only in a disposable overlay,
-    invalidate command evidence and cannot alter real repository metadata.
-14. Inherited and template-provided Git context cannot redirect execution around
-    the overlay.
-15. A post-command snapshot/output-limit failure resets the workspace before the
-    verification error propagates.
-16. Every reset verifies exact HEAD and zero staged, unstaged, untracked and
+15. Ignored artifacts and nested Git repositories cannot coexist with positive
+    command evidence because they mutate and are destroyed with the sandbox.
+16. Ignored artifacts and nested Git repositories cannot coexist with positive
+    patch evidence and are physically removed by double-force patch reset.
+17. Patch reset verifies exact HEAD and zero staged, unstaged, untracked and
     ignored residual state before it can be claimed successful.
-17. Repository CI, CodeQL, diagnostics and independent exact-head review pass.
+18. Repository CI, CodeQL, diagnostics and independent exact-head review pass.
 
 ## Definition of done
 
