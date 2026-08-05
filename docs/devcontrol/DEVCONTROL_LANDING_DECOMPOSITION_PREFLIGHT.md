@@ -4,7 +4,7 @@
 **Source PR:** `#338` (`agent/devcontrol-foundation-v1`)  
 **Source head:** `07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f`  
 **Source synchronization base:** `main @ 9ce48d321fb3d04a67b4038058a83c2fa627d4d5`  
-**DC-L00 branch base:** `main @ 1306afa36f18dd6bf34058f4d06e0a89c8a08734`  
+**DC-L00 branch base:** `main @ c6249e924320d9ac5e338e704f5f5b027727eec1`  
 **Machine-readable plan:** `docs/devcontrol/DEVCONTROL_LANDING_SLICES.json`  
 **Canonical path disposition:** `docs/devcontrol/DEVCONTROL_SOURCE_PATH_DISPOSITION.json`
 
@@ -15,7 +15,7 @@ PR #338 is a validated integration and reference branch, not a reviewable landin
 The two base anchors above have different meanings:
 
 - **Source synchronization base** is the `main` parent contained in the locked source integration head. It defines the exact 219-path source diff being decomposed.
-- **DC-L00 branch base** is the `main` head from which this preflight PR was created. It defines the exact base for review and landing of the preflight itself.
+- **DC-L00 branch base** is the current `main` head synchronized into this preflight branch. It defines the exact base for final review and landing of the preflight itself.
 
 This preflight locks:
 
