@@ -26,11 +26,17 @@ python3 tests/workflow_test_coverage.py
 - All seven exact-copy files equal the source blob in `source-provenance.json`.
 - All thirteen projections match their documented dependency-minimal deltas.
 - The package imports with no missing/future/product module and starts no work.
-- Command templates freeze argv into immutable tuples before registry use.
+- Command templates freeze argv and reject `GIT_*`, `HOME` and
+  `XDG_CONFIG_HOME` isolation overrides.
+- Generic command execution strips inherited `GIT_*` context.
 - Command and patch execution verify workspace `HEAD == task.base_sha`; a
   mismatch returns no passing receipt.
 - Staged, unstaged, untracked and ignored workspace state is rejected before a
   registered command starts.
+- Each registered command executes behind a bounded disposable Git metadata
+  overlay; worktree and metadata fingerprints jointly determine receipt state.
+- Config, hook, ref and object mutations remain in the overlay, invalidate the
+  receipt, and the real `.git` entry is restored atomically and byte-identically.
 - Empty, dot and parent raw task-path segments are rejected before
   `PurePosixPath` can normalize them.
 - Linux containment kills descendants that escape into new sessions.
