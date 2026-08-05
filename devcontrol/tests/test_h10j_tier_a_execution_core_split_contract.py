@@ -30,27 +30,58 @@ def _owned_symbols(tree: ast.Module) -> list[tuple[str, str]]:
     return result
 
 
-def _imports_core(path: Path) -> bool:
+def _loop_string_values(tree: ast.Module) -> dict[str, set[str]]:
+    values: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.For) or not isinstance(node.target, ast.Name):
+            continue
+        if not isinstance(node.iter, (ast.Tuple, ast.List, ast.Set)):
+            continue
+        items = {
+            item.value
+            for item in node.iter.elts
+            if isinstance(item, ast.Constant) and isinstance(item.value, str)
+        }
+        if len(items) == len(node.iter.elts):
+            values[node.target.id] = items
+    return values
+
+
+def _core_consumer_details(path: Path) -> dict[str, object] | None:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    imported_names: set[str] = set()
+    module_aliases: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             if node.module == "_tier_a_execution_core":
-                return True
-            if node.module is None and any(
-                alias.name == "_tier_a_execution_core" for alias in node.names
-            ):
-                return True
+                imported_names.update(alias.name for alias in node.names)
+            elif node.module is None:
+                module_aliases.update(
+                    alias.asname or alias.name
+                    for alias in node.names
+                    if alias.name == "_tier_a_execution_core"
+                )
         elif isinstance(node, ast.Import):
-            if any(
-                alias.name.endswith("._tier_a_execution_core")
+            module_aliases.update(
+                alias.asname or alias.name
                 for alias in node.names
-            ):
-                return True
-    return False
-
-
-def _core_consumer_details(path: Path, alias_name: str) -> tuple[list[str], list[str]]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+                if alias.name.endswith("._tier_a_execution_core")
+            )
+    if not imported_names and not module_aliases:
+        return None
+    if imported_names and module_aliases:
+        raise AssertionError(f"mixed core import styles are not supported: {path}")
+    if imported_names:
+        return {
+            "import_style": "direct",
+            "module_alias": None,
+            "imported_names": sorted(imported_names),
+            "attribute_references": [],
+            "dynamic_removals": [],
+        }
+    if len(module_aliases) != 1:
+        raise AssertionError(f"core module alias is ambiguous: {path}")
+    alias_name = next(iter(module_aliases))
     attributes = sorted(
         {
             node.attr
@@ -60,21 +91,30 @@ def _core_consumer_details(path: Path, alias_name: str) -> tuple[list[str], list
             and node.value.id == alias_name
         }
     )
-    removals = sorted(
-        {
-            node.args[1].value
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "delattr"
-            and len(node.args) == 2
-            and isinstance(node.args[0], ast.Name)
-            and node.args[0].id == alias_name
-            and isinstance(node.args[1], ast.Constant)
-            and isinstance(node.args[1].value, str)
-        }
-    )
-    return attributes, removals
+    loop_values = _loop_string_values(tree)
+    removals: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            not isinstance(node, ast.Call)
+            or not isinstance(node.func, ast.Name)
+            or node.func.id != "delattr"
+            or len(node.args) != 2
+            or not isinstance(node.args[0], ast.Name)
+            or node.args[0].id != alias_name
+        ):
+            continue
+        value = node.args[1]
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            removals.add(value.value)
+        elif isinstance(value, ast.Name):
+            removals.update(loop_values.get(value.id, set()))
+    return {
+        "import_style": "module_alias",
+        "module_alias": alias_name,
+        "imported_names": [],
+        "attribute_references": attributes,
+        "dynamic_removals": sorted(removals),
+    }
 
 
 class TierAExecutionCoreSplitContractTests(unittest.TestCase):
@@ -130,21 +170,34 @@ class TierAExecutionCoreSplitContractTests(unittest.TestCase):
             constraints["fresh_physical_evidence_required_after_future_split"]
         )
 
-    def test_external_core_consumer_is_complete(self):
+    def test_external_core_consumers_are_complete(self):
         target = self.source_path.resolve()
-        consumers = sorted(
-            path.relative_to(ROOT).as_posix()
-            for path in PACKAGE_ROOT.rglob("*.py")
-            if path.resolve() != target and _imports_core(path)
+        actual: dict[str, dict[str, object]] = {}
+        for path in PACKAGE_ROOT.rglob("*.py"):
+            if path.resolve() == target:
+                continue
+            details = _core_consumer_details(path)
+            if details is not None:
+                actual[path.relative_to(ROOT).as_posix()] = details
+        declared = self.contract["external_core_consumers"]
+        self.assertEqual(
+            [item["path"] for item in declared],
+            sorted(item["path"] for item in declared),
         )
-        expected_consumer = self.contract["external_core_consumer"]
-        self.assertEqual(consumers, [expected_consumer["path"]])
-        attributes, removals = _core_consumer_details(
-            ROOT / expected_consumer["path"],
-            expected_consumer["module_alias"],
-        )
-        self.assertEqual(attributes, expected_consumer["attribute_references"])
-        self.assertEqual(removals, expected_consumer["dynamic_removals"])
+        expected = {
+            item["path"]: {
+                key: item[key]
+                for key in (
+                    "import_style",
+                    "module_alias",
+                    "imported_names",
+                    "attribute_references",
+                    "dynamic_removals",
+                )
+            }
+            for item in declared
+        }
+        self.assertEqual(actual, expected)
 
     def test_public_identity_chains_are_preserved_today(self):
         package = importlib.import_module("kaliv_dev_control")
@@ -176,9 +229,16 @@ class TierAExecutionCoreSplitContractTests(unittest.TestCase):
             self.assertIn(symbol, facade.__all__)
             self.assertIn(symbol, package.__all__)
 
-        for symbol in self.contract["external_core_consumer"][
-            "dynamic_removals"
-        ]:
+        removals = {
+            symbol
+            for consumer in self.contract["external_core_consumers"]
+            for symbol in consumer["dynamic_removals"]
+        }
+        self.assertEqual(
+            removals,
+            {"_run_tier_a_launch_plan", "run_verified_tier_a_command"},
+        )
+        for symbol in removals:
             self.assertFalse(hasattr(core, symbol))
 
     def test_markdown_review_table_has_no_loss_or_duplication(self):
@@ -189,6 +249,8 @@ class TierAExecutionCoreSplitContractTests(unittest.TestCase):
         self.assertEqual(len(table_symbols), len(set(table_symbols)))
         for destination in self.contract["proposed_modules"]:
             self.assertIn(f"`{destination}`", markdown)
+        for consumer in self.contract["external_core_consumers"]:
+            self.assertIn(f"`{consumer['path']}`", markdown)
         for chain in self.contract["public_identity_chains"]:
             self.assertIn(f"`{chain['symbol']}`", markdown)
 
