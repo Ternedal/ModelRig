@@ -1,0 +1,108 @@
+name: h10m-one-shot-apply
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'agent/devcontrol-foundation-v1'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/devcontrol-foundation-v1
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+
+      - name: Verify H10L starting identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py)" = "1b4779a456fb98ce42f9938a577ec1588957d419"
+          test "$(git hash-object devcontrol/src/kaliv_dev_control/_tier_a_lease.py)" = "1f4a6eac5b9f0874bbb12897f690f8ae2ee9efe1"
+          test "$(git hash-object devcontrol/src/kaliv_dev_control/_tier_a_environment.py)" = "68cee74aa519e41cb9b8e3a5e74e3dbb90a6d78d"
+
+      - name: Materialize verified H10M payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            .github/h10m-payload-1.b64 \
+            .github/h10m-payload-2.b64 \
+            .github/h10m-payload-3.b64 \
+            .github/h10m-payload-4.b64 > /tmp/h10m.b64
+          base64 --decode /tmp/h10m.b64 > /tmp/h10m.tar.gz
+          echo "cc15cabff5c06bb7d0d859fca447e33633b3717946c9615dc753a28eddd74660  /tmp/h10m.tar.gz" | sha256sum --check
+          tar -tzf /tmp/h10m.tar.gz | sort > /tmp/h10m-paths.txt
+          cat > /tmp/h10m-expected-paths.txt <<'EOF'
+          devcontrol/TIER_A_BUNDLE_INVENTORY.json
+          devcontrol/TIER_A_BUNDLE_INVENTORY.md
+          devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.json
+          devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.md
+          devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py
+          devcontrol/src/kaliv_dev_control/_tier_a_lease.py
+          devcontrol/tests/test_h10j_tier_a_execution_core_split_contract.py
+          devcontrol/tests/test_h10l_tier_a_error_extraction.py
+          devcontrol/tests/test_h10m_tier_a_lease_model_extraction.py
+          EOF
+          sed -i 's/^          //' /tmp/h10m-expected-paths.txt
+          diff -u /tmp/h10m-expected-paths.txt /tmp/h10m-paths.txt
+          tar -xzf /tmp/h10m.tar.gz
+
+      - name: Verify exact H10M Git identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object devcontrol/src/kaliv_dev_control/_tier_a_lease.py)" = "244cf114ed5df5923555b3d797140073319da2f7"
+          test "$(git hash-object devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py)" = "45ba3a6ebbdc2295bf1ee8d35c4c3b849c053b99"
+          test "$(git hash-object devcontrol/TIER_A_BUNDLE_INVENTORY.json)" = "7a5dececdf78874c5172bd51ef26e9e0071ff3d3"
+          test "$(git hash-object devcontrol/TIER_A_BUNDLE_INVENTORY.md)" = "2ce463c9352e5fe7e01c75963ac54658fcab1476"
+          test "$(git hash-object devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.json)" = "b7b0942ee5d75a209445925e13221d32c71ce213"
+          test "$(git hash-object devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.md)" = "56fc1a2123c07edc5a33dfbea727f24cce7cc7f1"
+          test "$(git hash-object devcontrol/tests/test_h10j_tier_a_execution_core_split_contract.py)" = "d386cc58f7da1421b769d0272861dd60a6dbcb0e"
+          test "$(git hash-object devcontrol/tests/test_h10l_tier_a_error_extraction.py)" = "259e648288122451dc250d1514f612de44f44c96"
+          test "$(git hash-object devcontrol/tests/test_h10m_tier_a_lease_model_extraction.py)" = "f9b8df34ee7b84e727e7aed1a4de3b86f6bccda9"
+
+      - name: Install worker dependencies
+        run: python -m pip install -r worker/requirements.txt
+
+      - name: Validate H10M and complete DevControl suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$PWD/devcontrol/src:$PWD/worker"
+          python scripts/tier_a_bundle_inventory.py --check
+          python -m compileall -q devcontrol/src devcontrol/tests
+          python -m unittest discover -s devcontrol/tests -v
+
+      - name: Commit exact H10M extraction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ModelRig H10M apply"
+          git config user.email "actions@users.noreply.github.com"
+          git add \
+            devcontrol/src/kaliv_dev_control/_tier_a_lease.py \
+            devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py \
+            devcontrol/TIER_A_BUNDLE_INVENTORY.json \
+            devcontrol/TIER_A_BUNDLE_INVENTORY.md \
+            devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.json \
+            devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.md \
+            devcontrol/tests/test_h10j_tier_a_execution_core_split_contract.py \
+            devcontrol/tests/test_h10l_tier_a_error_extraction.py \
+            devcontrol/tests/test_h10m_tier_a_lease_model_extraction.py
+          git diff --cached --check
+          git commit -m "refactor(devcontrol): extract Tier-A lease model (H10M)"
+          git push origin HEAD:agent/devcontrol-foundation-v1
