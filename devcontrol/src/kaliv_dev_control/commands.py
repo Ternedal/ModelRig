@@ -2,8 +2,8 @@
 
 Command arguments come from the registry, never from a model or task payload.
 The executor verifies the exact task base SHA and snapshots the workspace before
-and after the command. Any mutation, including ignored artifacts or a HEAD
-change, resets the ephemeral workspace to the exact base SHA.
+and after the command. Any mutation, including staged, ignored artifacts or a
+HEAD change, resets the ephemeral workspace to the exact base SHA.
 """
 
 from __future__ import annotations
@@ -233,7 +233,7 @@ class CommandExecutor:
             "-z",
         )
         fingerprint = self._sha256(cached.encode("utf-8", errors="replace"))
-        return fingerprint, not bool(unstaged or untracked or ignored)
+        return fingerprint, not bool(cached or unstaged or untracked or ignored)
 
     def _reset(self, task: DevelopmentTask, workspace: Path) -> None:
         for args in (
@@ -284,7 +284,7 @@ class CommandExecutor:
         before_sha, before_clean = self._snapshot(root)
         if not before_clean:
             raise CommandExecutionError(
-                "workspace has unstaged, untracked or ignored changes before command"
+                "workspace has staged, unstaged, untracked or ignored changes before command"
             )
         started = time.monotonic()
         try:
