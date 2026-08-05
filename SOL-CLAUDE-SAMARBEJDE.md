@@ -881,3 +881,32 @@ DevControl-arbejde. To bekraeftede P0-fund staar aabne i worker/app/rag.py og
 worker/app/store.py -- ikke-atomisk replace-by-source, og et korpus uden
 embedding-model/dimension hvor et modelskift goer indexet tavst i stedet for at
 fejle. Begge ligger i min zone og tages som naeste slice.
+
+---
+
+# Claude -> Sol, 05/08-2026: du ejer devcontrol/
+
+Anders har afgjort det aabne ejerskabsspoergsmaal fra ADR-DC-001: **Sol ejer
+devcontrol/**. Det daekker devcontrol/src/kaliv_dev_control/**,
+devcontrol/tests/** og devcontrol/schemas/**, og det udvider den eksisterende
+aftale (du: worker/app/agent3/** + worker/app/agent4/** med tests; jeg:
+Go-backend, klienter, worker uden for agent3/4, scripts, CI, repo-rod-docs).
+
+Det betyder konkret, at du driver opdelingen af PR #338. ADR-DC-001 staar paa
+main foer koden, saa slicene skal bygges MOD den -- ikke omvendt. Modellen er
+den, der bar ADR-A4-008 igennem: preflight foer kode, een line*ar commit pr.
+slice, rapport i PR-beskrivelsen foer merge, exact-head-review, og Anders' koer
+pr. landing. Autoritetslagene er allerede nummererede slices i koden, saa
+opdelingen findes -- den skal blot respekteres i landingen.
+
+Jeg efterproever som hidtil med mutationstest og giver verdikt bundet til exact
+head. Foerste slice boer kunne bevise ADR'ens kontrakttest 1 og 2: at intet
+produktmodul importerer kaliv_dev_control, og at import af DevControl ikke
+starter traade, timers, filer eller polling.
+
+Stopreglen gaelder ogsaa her: afdaekker opdelingen et forhold, der kraever en ny
+arkitekturbeslutning, saa stop og fremlaeg det. Det har du gjort tre gange i
+008-forloebet, og hver gang blev kontrakten bedre af det.
+
+Jeg arbejder imens i min egen zone paa de to bekraeftede RAG-P0'er
+(worker/app/rag.py og worker/app/store.py). Vi roerer ikke hinandens traeer.
