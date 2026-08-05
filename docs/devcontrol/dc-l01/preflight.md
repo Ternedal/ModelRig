@@ -36,6 +36,13 @@ positive quiescence acknowledgement; an unacknowledged or fallback path fails
 without returning a result. Windows fails closed until the native Job Object
 boundary lands in DC-L05; DC-L01 does not import that future product module.
 
+Registered commands never see the real `.git` entry. Before execution it is
+atomically replaced with a bounded disposable metadata overlay backed by a
+read-only object alternate. The command receives isolated HOME/XDG/Git config,
+hooks are disabled, inherited `GIT_*` variables are removed and templates cannot
+override the isolation context. Overlay metadata is fingerprinted with worktree
+state, discarded after execution and the real metadata is restored atomically.
+
 ## Source projection decisions
 
 Seven source paths are copied byte-identically from the locked source head.
@@ -44,21 +51,24 @@ Thirteen source-derived paths are deliberately projected:
 - `bounded_subprocess.py`: replaces process-group-only cleanup and the DC-L05
   Windows import with Linux subreaper containment, positive quiescence
   acknowledgement and Windows fail-closed behavior;
-- `commands.py`: freezes mutable argv inputs, verifies exact task HEAD before and
-  after execution, treats staged/unstaged/untracked/ignored state as dirty,
-  removes nested Git repositories with `git clean -ffdx`, verifies the reset is
-  physically clean, and resets before propagating post-command snapshot errors;
+- `commands.py`: freezes mutable argv inputs, verifies exact task HEAD, rejects
+  staged/unstaged/untracked/ignored state, executes behind a bounded disposable
+  Git metadata overlay, combines worktree and metadata fingerprints, rejects Git
+  environment overrides, atomically restores real metadata, removes nested Git
+  repositories with `git clean -ffdx`, verifies physical clean state and resets
+  before propagating post-command verification failures;
 - `contract.py`: rejects empty, dot and parent raw path segments before
   `PurePosixPath` can normalize ambiguous task authority;
 - `patch.py`: verifies exact task HEAD, includes ignored artifacts in post-apply
   cleanliness evidence, removes nested Git repositories with `git clean -ffdx`
   and verifies staged/unstaged/untracked/ignored state is empty after reset;
-- `workspace.py`: removes the DC-L09 `trusted_git_runtime` import and replaces it
-  with an implementation-free injected protocol;
+- `workspace.py`: removes the DC-L09 `trusted_git_runtime` import, replaces it
+  with an implementation-free injected protocol and strips inherited `GIT_*`
+  context from generic subprocess execution;
 - `test_bounded_subprocess.py`: removes the deferred DC-L09 runner import, proves
-  termination of a descendant that calls `start_new_session=True`, proves an
-  unacknowledged termination path returns no successful result, and executes
-  nested-Git command/patch reset plus oversized post-snapshot regressions;
+  escaped-session containment and negative acknowledgement behavior, and
+  executes nested-Git cleanup, oversized snapshot reset, Git config/hook
+  isolation, forbidden template environment and inherited `GIT_DIR` regressions;
 - `test_foundation.py`: tests the workspace seam, future/product imports,
   immutable command argv, exact command/patch HEAD binding, pre-staged command
   rejection, ambiguous raw path rejection and executable ignored-artifact
@@ -91,11 +101,15 @@ Thirteen source-derived paths are deliberately projected:
     unsupported platforms and unacknowledged/fallback termination fail closed.
 12. Ignored artifacts and nested Git repositories cannot coexist with positive
     command or patch evidence and are physically removed by double-force reset.
-13. A post-command snapshot/output-limit failure resets the workspace before the
+13. Git config, hooks, refs or object writes occur only in a disposable overlay,
+    invalidate command evidence and cannot alter real repository metadata.
+14. Inherited and template-provided Git context cannot redirect execution around
+    the overlay.
+15. A post-command snapshot/output-limit failure resets the workspace before the
     verification error propagates.
-14. Every reset verifies exact HEAD and zero staged, unstaged, untracked and
+16. Every reset verifies exact HEAD and zero staged, unstaged, untracked and
     ignored residual state before it can be claimed successful.
-15. Repository CI, CodeQL, diagnostics and independent exact-head review pass.
+17. Repository CI, CodeQL, diagnostics and independent exact-head review pass.
 
 ## Definition of done
 
