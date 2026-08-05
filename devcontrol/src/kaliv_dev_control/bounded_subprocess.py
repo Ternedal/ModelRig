@@ -285,23 +285,30 @@ def _spawn(
         raise BoundedSubprocessError("subprocess supervisor could not start") from exc
 
 
-def _terminate_tree(process: subprocess.Popen[bytes]) -> None:
+def _terminate_tree(process: subprocess.Popen[bytes]) -> bool:
+    """Request termination and accept only the supervisor's quiescent acknowledgement."""
     try:
         os.kill(process.pid, signal.SIGTERM)
     except ProcessLookupError:
-        return
+        return process.poll() == 128 + signal.SIGTERM
     except OSError as exc:
         raise BoundedSubprocessError("Linux supervisor termination failed") from exc
     deadline = time.monotonic() + 6
     while process.poll() is None and time.monotonic() < deadline:
         time.sleep(0.01)
-    if process.poll() is None:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        except OSError as exc:
-            raise BoundedSubprocessError("Linux supervisor fallback failed") from exc
+    if process.poll() is not None:
+        return process.returncode == 128 + signal.SIGTERM
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except OSError as exc:
+        raise BoundedSubprocessError("Linux supervisor fallback failed") from exc
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        pass
+    return False
 
 
 def _drain(
@@ -422,14 +429,20 @@ def run_bounded_subprocess(
                     break
                 condition.wait(timeout=min(remaining, 0.05))
         if limit_exceeded or timed_out or failure is not None:
-            _terminate_tree(process)
-            terminated = True
+            terminated = _terminate_tree(process)
+            if not terminated:
+                raise BoundedSubprocessError(
+                    "supervisor did not acknowledge process-tree quiescence"
+                )
         try:
             process.wait(timeout=10)
         except subprocess.TimeoutExpired as exc:
             if not terminated:
-                _terminate_tree(process)
-                terminated = True
+                terminated = _terminate_tree(process)
+                if not terminated:
+                    raise BoundedSubprocessError(
+                        "supervisor did not acknowledge process-tree quiescence"
+                    )
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
@@ -448,8 +461,11 @@ def run_bounded_subprocess(
         if int(state["total"]) > max_output_bytes:
             limit_exceeded = True
             if not terminated:
-                _terminate_tree(process)
-                terminated = True
+                terminated = _terminate_tree(process)
+                if not terminated:
+                    raise BoundedSubprocessError(
+                        "supervisor did not acknowledge process-tree quiescence"
+                    )
         return BoundedSubprocessResult(
             args=args,
             returncode=int(process.returncode),
