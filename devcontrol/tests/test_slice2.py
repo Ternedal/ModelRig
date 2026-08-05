@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -92,6 +93,22 @@ class Slice2Tests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def _task_for(self, command_id: str) -> DevelopmentTask:
+        return DevelopmentTask(
+            task_id=self.task.task_id,
+            repository=self.task.repository,
+            base_sha=self.task.base_sha,
+            goal=self.task.goal,
+            acceptance_criteria=self.task.acceptance_criteria,
+            risk=self.task.risk,
+            allowed_paths=self.task.allowed_paths,
+            protected_paths=self.task.protected_paths,
+            allowed_command_ids=(command_id,),
+            required_tests=self.task.required_tests,
+            budget=self.task.budget,
+            merge_authority=self.task.merge_authority,
+        )
 
     def test_read_and_literal_search_are_bounded_by_scope(self) -> None:
         files = WorkspaceFiles(self.task, self.repo)
@@ -252,6 +269,53 @@ class Slice2Tests(unittest.TestCase):
         self.assertTrue(receipt.workspace_unchanged)
         self.assertFalse(receipt.workspace_reset)
 
+    def test_command_sandbox_hides_source_and_rejects_metadata_mutation(self) -> None:
+        config = self.repo / ".git" / "config"
+        hook = self.repo / ".git" / "hooks" / "pre-commit"
+        config_before = config.read_bytes()
+        command_id = "python.sandbox-metadata"
+        script = (
+            "import os, subprocess; from pathlib import Path; "
+            "root=Path(os.environ['HOME']).parent; "
+            "assert 'GITHUB_WORKSPACE' not in os.environ; "
+            "assert not (root/'original-dot-git').exists(); "
+            "assert not (root/'source.bundle').exists(); "
+            "assert not Path('.git/objects/info/alternates').exists(); "
+            "assert subprocess.run(['git','remote'], check=True, "
+            "text=True, capture_output=True).stdout.strip()==''; "
+            "assert 'source.bundle' not in Path('.git/config').read_text(); "
+            "subprocess.run(['git','remote','add','injected',"
+            "'https://example.invalid/repo.git'], check=True); "
+            "h=Path('.git/hooks/pre-commit'); "
+            "h.write_text('#!/bin/sh\\nexit 1\\n'); h.chmod(0o755)"
+        )
+        template = CommandTemplate(
+            command_id=command_id,
+            argv=(sys.executable, "-c", script),
+        )
+        receipt = CommandExecutor(
+            registry=CommandRegistry((template,))
+        ).execute(self._task_for(command_id), self.repo, command_id)
+        self.assertEqual(receipt.returncode, 0)
+        self.assertFalse(receipt.passed)
+        self.assertFalse(receipt.workspace_unchanged)
+        self.assertTrue(receipt.workspace_reset)
+        self.assertEqual(config.read_bytes(), config_before)
+        self.assertFalse(hook.exists())
+        self.assertEqual(run(self.repo, "git", "remote"), "")
+        self.assertEqual(run(self.repo, "git", "status", "--porcelain"), "")
+
+    def test_command_rejects_literal_source_workspace_argument(self) -> None:
+        command_id = "python.source-path"
+        template = CommandTemplate(
+            command_id=command_id,
+            argv=(sys.executable, "-c", "pass", str(self.repo)),
+        )
+        with self.assertRaisesRegex(CommandPolicyError, "source workspace"):
+            CommandExecutor(
+                registry=CommandRegistry((template,))
+            ).execute(self._task_for(command_id), self.repo, command_id)
+
     def test_unregistered_or_undeclared_command_fails_closed(self) -> None:
         with self.assertRaises(CommandPolicyError):
             CommandExecutor().execute(
@@ -270,23 +334,10 @@ class Slice2Tests(unittest.TestCase):
                 "Path('devcontrol/target.txt').write_text('bad\\n')",
             ),
         )
-        registry = CommandRegistry((template,))
-        task = DevelopmentTask(
-            task_id=self.task.task_id,
-            repository=self.task.repository,
-            base_sha=self.task.base_sha,
-            goal=self.task.goal,
-            acceptance_criteria=self.task.acceptance_criteria,
-            risk=self.task.risk,
-            allowed_paths=self.task.allowed_paths,
-            protected_paths=self.task.protected_paths,
-            allowed_command_ids=("python.mutator",),
-            required_tests=self.task.required_tests,
-            budget=self.task.budget,
-            merge_authority=self.task.merge_authority,
-        )
-        receipt = CommandExecutor(registry=registry).execute(
-            task,
+        receipt = CommandExecutor(
+            registry=CommandRegistry((template,))
+        ).execute(
+            self._task_for("python.mutator"),
             self.repo,
             "python.mutator",
         )
