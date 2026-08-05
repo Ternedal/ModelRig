@@ -233,6 +233,8 @@ class _GitMetadataOverlay:
                 raise CommandExecutionError("Git metadata entry is unsupported")
 
     def _prepare(self, target: Path) -> None:
+        if self._backup is None:
+            raise CommandExecutionError("Git metadata backup path is unavailable")
         git_dir = self._resolve_git_path(
             self.workspace,
             self.executor._run_git(
@@ -261,10 +263,15 @@ class _GitMetadataOverlay:
         ).strip()
         if object_format not in {"sha1", "sha256"}:
             raise CommandExecutionError("Git object format is unsupported")
-        object_directory = common_dir / "objects"
-        if not object_directory.is_dir() or object_directory.is_symlink():
+        source_objects = common_dir / "objects"
+        if not source_objects.is_dir() or source_objects.is_symlink():
             raise CommandExecutionError("Git object directory is unsafe")
-        if "\n" in str(object_directory) or "\r" in str(object_directory):
+        alternate_objects = (
+            self._backup / "objects"
+            if common_dir == self.dot_git.resolve()
+            else source_objects
+        )
+        if "\n" in str(alternate_objects) or "\r" in str(alternate_objects):
             raise CommandExecutionError("Git object directory path is unsafe")
 
         target.mkdir(parents=True)
@@ -301,7 +308,7 @@ class _GitMetadataOverlay:
         (target / "config").write_bytes(config_bytes)
         alternates = target / "objects" / "info" / "alternates"
         alternates.parent.mkdir(parents=True, exist_ok=True)
-        alternate_bytes = (str(object_directory) + "\n").encode("utf-8")
+        alternate_bytes = (str(alternate_objects) + "\n").encode("utf-8")
         self._account(len(alternate_bytes))
         alternates.write_bytes(alternate_bytes)
         (target / "hooks").mkdir()
@@ -313,7 +320,10 @@ class _GitMetadataOverlay:
         digest = hashlib.sha256()
         files = 0
         total = 0
-        for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
+        for path in sorted(
+            root.rglob("*"),
+            key=lambda item: item.relative_to(root).as_posix(),
+        ):
             relative = path.relative_to(root).as_posix().encode("utf-8")
             if path.is_symlink():
                 raise CommandExecutionError("command created a Git metadata symlink")
@@ -322,13 +332,14 @@ class _GitMetadataOverlay:
                 continue
             if not path.is_file():
                 raise CommandExecutionError("command created unsupported Git metadata")
-            size = path.stat().st_size
+            file_stat = path.stat()
+            size = file_stat.st_size
             files += 1
             total += size
             if files > _METADATA_MAX_FILES or total > _METADATA_MAX_BYTES:
                 raise CommandExecutionError("command exceeded Git metadata bounds")
             digest.update(b"F\0" + relative + b"\0")
-            digest.update(str(stat.S_IMODE(path.stat().st_mode)).encode("ascii") + b"\0")
+            digest.update(str(stat.S_IMODE(file_stat.st_mode)).encode("ascii") + b"\0")
             with path.open("rb") as handle:
                 while chunk := handle.read(131_072):
                     digest.update(chunk)
@@ -383,7 +394,6 @@ class _GitMetadataOverlay:
     def deactivate(self) -> str:
         if not self._active or self._root is None or self._backup is None:
             raise CommandExecutionError("Git metadata overlay is not active")
-        after: str
         try:
             after = self._fingerprint(self.dot_git)
         except CommandExecutionError as exc:
