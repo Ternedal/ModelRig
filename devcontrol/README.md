@@ -11,7 +11,10 @@ DC-L00 decomposition contract.
 - bounded UTF-8 reads and literal search inside approved paths;
 - fail-closed non-binary unified-diff parsing, application and staged receipts;
 - fixed command templates selected only from an immutable registry;
-- streaming bounded subprocess evidence with timeout/output process-tree stop;
+- Linux streaming subprocess containment through a subreaper supervisor that
+  terminates descendants even when they create a new session;
+- clean-state evidence that includes ignored artifacts and resets with
+  `git clean -fdx`; and
 - exact-SHA detached-worktree verification through an **injected local Git
   protocol**.
 
@@ -22,6 +25,9 @@ runner, no GitHub adapter, no HTTP client, no credential loader, no physical
 evidence, no process-launch authority for Tier A, no publication and no
 activation path. `default_registry()` is empty. `WorkspaceManager` cannot do
 anything until a later reviewed slice injects a compatible runner.
+
+Windows command containment deliberately fails closed in DC-L01. The native Job
+Object boundary belongs to DC-L05 and is not imported early.
 
 Product code must not import `kaliv_dev_control`.
 
