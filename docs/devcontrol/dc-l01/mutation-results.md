@@ -12,6 +12,11 @@ was required to turn red.
 | Patch receipts bind the exact task base SHA | Remove the patch `rev-parse HEAD` check | **RED** — a patch can be applied while the receipt names another base commit |
 | Fixed command authority is immutable | Retain the caller-owned argv list instead of copying to a tuple | **RED** — post-registration list mutation changes the executable arguments |
 | Pre-staged command workspaces are rejected | Remove `cached` from the clean-state boolean | **RED** — the marker command starts despite a staged index mutation |
+| Git metadata is isolated from commands | Execute against the real `.git` entry instead of the disposable overlay | **RED** — injected remote and hook persist despite a clean worktree |
+| Git metadata participates in receipt evidence | Omit the overlay fingerprint from the combined receipt fingerprint | **RED** — config/hook mutations can return positive evidence |
+| Real metadata restoration is transactional | Remove rollback between the two `.git` renames | **RED** — activation failure can leave the real metadata displaced |
+| Host Git context cannot redirect commands | Preserve inherited `GIT_DIR` in `SubprocessRunner` | **RED** — a host value redirects Git away from the task repository |
+| Templates cannot override Git isolation | Permit `GIT_*`, `HOME` or `XDG_CONFIG_HOME` in template env | **RED** — a registered command can bypass overlay/config isolation |
 | Raw task paths remain unambiguous | Validate only `PurePosixPath.parts` after normalization | **RED** — dot, duplicate-separator or trailing-separator authority is silently accepted |
 | DC-L01 cannot import DC-L09/DC-L05 product code | Add `trusted_git_runtime` or `app.windows_job` import | **RED** — future/product-import assertion detects it |
 | Default registry grants no command | Register `python.unittest` in the default registry | **RED** — empty-registry assertion detects it |
@@ -25,11 +30,14 @@ was required to turn red.
 
 The unmodified candidate passed the focused harness for workspace, command and
 patch exact-SHA rejection; immutable command argv; staged, unstaged, untracked
-and ignored workspace rejection; ambiguous raw task-path rejection; no
-future/product import; empty default registry; escaped-session termination;
-negative acknowledgement handling; executable ignored-artifact and nested-Git
-cleanup on command and patch paths; verified clean-state reset; and reset before
-propagation of oversized post-command snapshot failures.
+and ignored workspace rejection; Git metadata overlay isolation and combined
+receipt fingerprinting; byte-identical real config restoration; injected remote
+and hook removal; forbidden template Git context; inherited `GIT_DIR`
+sanitization; ambiguous raw task-path rejection; no future/product import; empty
+default registry; escaped-session termination; negative acknowledgement handling;
+executable ignored-artifact and nested-Git cleanup on command and patch paths;
+verified clean-state reset; and reset before propagation of oversized
+post-command snapshot failures.
 
 The source tests additionally exercise protected-path precedence, boolean budget
 rejection, patch mode/rename/binary rejection, mutation reset, timeout and
