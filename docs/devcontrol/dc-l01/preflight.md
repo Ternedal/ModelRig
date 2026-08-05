@@ -31,8 +31,10 @@ local worktree add/remove, exact `rev-parse HEAD`, and clean-status verification
 
 Bounded command execution is concrete only on Linux. A subreaper supervisor
 tracks and kills descendants even when they create a new session/process group.
-Windows fails closed until the native Job Object boundary lands in DC-L05; DC-L01
-does not import that future product module.
+The caller records termination proof only after the supervisor exits with its
+positive quiescence acknowledgement; an unacknowledged or fallback path fails
+without returning a result. Windows fails closed until the native Job Object
+boundary lands in DC-L05; DC-L01 does not import that future product module.
 
 ## Source projection decisions
 
@@ -40,15 +42,17 @@ Nine source paths are copied byte-identically from the locked source head.
 Eleven source-derived paths are deliberately projected:
 
 - `bounded_subprocess.py`: replaces process-group-only cleanup and the DC-L05
-  Windows import with Linux subreaper containment and Windows fail-closed behavior;
+  Windows import with Linux subreaper containment, positive quiescence
+  acknowledgement and Windows fail-closed behavior;
 - `commands.py`: includes ignored artifacts in clean-state evidence and uses
   `git clean -fdx` when resetting a mutated workspace;
 - `workspace.py`: removes the DC-L09 `trusted_git_runtime` import and replaces it
   with an implementation-free injected protocol;
-- `test_bounded_subprocess.py`: removes the deferred DC-L09 runner import and
-  proves termination of a descendant that calls `start_new_session=True`;
-- `test_foundation.py`: tests the workspace seam, future/product imports and the
-  ignored-artifact mutation gate;
+- `test_bounded_subprocess.py`: removes the deferred DC-L09 runner import, proves
+  termination of a descendant that calls `start_new_session=True`, and proves an
+  unacknowledged termination path returns no successful result;
+- `test_foundation.py`: tests the workspace seam, future/product imports and an
+  executable ignored-artifact detection/reset boundary;
 - `__init__.py`: exports only DC-L01 symbols;
 - `__main__.py`: exposes only task validation and path checking;
 - `pyproject.toml`: has no runtime dependency; cryptography remains deferred;
@@ -66,9 +70,12 @@ Eleven source-derived paths are deliberately projected:
 6. Missing or wrong workspace Git seams fail closed.
 7. Wrong SHA, dirty or ignored workspace, path escape, protected path, budget
    overflow, malformed patch, timeout and output overflow all fail closed.
-8. Linux containment terminates descendants that escape into new sessions;
-   unsupported platforms fail closed.
-9. Repository CI, CodeQL, diagnostics and independent exact-head review pass.
+8. Linux containment terminates descendants that escape into new sessions and
+   emits termination proof only after positive supervisor acknowledgement;
+   unsupported platforms and unacknowledged/fallback termination fail closed.
+9. Ignored artifacts produce failed/reset receipt flags and are physically
+   removed from the ephemeral workspace.
+10. Repository CI, CodeQL, diagnostics and independent exact-head review pass.
 
 ## Definition of done
 
