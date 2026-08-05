@@ -1,9 +1,9 @@
 name: h10k-source-materialization
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/devcontrol-foundation-v1
+      - main
 
 permissions:
   contents: read
@@ -12,7 +12,7 @@ jobs:
   materialize:
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout exact branch head
+      - name: Checkout exact PR head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Package H10K source tree
         run: tar -czf /tmp/h10k-source.tgz devcontrol worker/app
