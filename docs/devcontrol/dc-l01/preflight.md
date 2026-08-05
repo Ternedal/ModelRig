@@ -38,21 +38,26 @@ boundary lands in DC-L05; DC-L01 does not import that future product module.
 
 ## Source projection decisions
 
-Nine source paths are copied byte-identically from the locked source head.
-Eleven source-derived paths are deliberately projected:
+Eight source paths are copied byte-identically from the locked source head.
+Twelve source-derived paths are deliberately projected:
 
 - `bounded_subprocess.py`: replaces process-group-only cleanup and the DC-L05
   Windows import with Linux subreaper containment, positive quiescence
   acknowledgement and Windows fail-closed behavior;
-- `commands.py`: includes ignored artifacts in clean-state evidence and uses
+- `commands.py`: freezes mutable argv inputs, verifies exact task HEAD before and
+  after execution, includes ignored artifacts in clean-state evidence and uses
   `git clean -fdx` when resetting a mutated workspace;
+- `patch.py`: verifies exact task HEAD, includes ignored artifacts in post-apply
+  cleanliness evidence and resets staged/untracked/ignored state with
+  `git clean -fdx` before returning no receipt;
 - `workspace.py`: removes the DC-L09 `trusted_git_runtime` import and replaces it
   with an implementation-free injected protocol;
 - `test_bounded_subprocess.py`: removes the deferred DC-L09 runner import, proves
   termination of a descendant that calls `start_new_session=True`, and proves an
   unacknowledged termination path returns no successful result;
-- `test_foundation.py`: tests the workspace seam, future/product imports and an
-  executable ignored-artifact detection/reset boundary;
+- `test_foundation.py`: tests the workspace seam, future/product imports,
+  immutable command argv, exact command/patch HEAD binding and executable
+  ignored-artifact detection/reset for both command and patch paths;
 - `__init__.py`: exports only DC-L01 symbols;
 - `__main__.py`: exposes only task validation and path checking;
 - `pyproject.toml`: has no runtime dependency; cryptography remains deferred;
@@ -66,16 +71,19 @@ Eleven source-derived paths are deliberately projected:
 2. All exact copies match their recorded source blobs.
 3. Projected files contain only the deltas recorded in `source-provenance.json`.
 4. The package imports without a future-slice or product module.
-5. The default command registry is empty.
+5. The default command registry is empty and registered argv cannot be mutated
+   after template construction.
 6. Missing or wrong workspace Git seams fail closed.
-7. Wrong SHA, dirty or ignored workspace, path escape, protected path, budget
-   overflow, malformed patch, timeout and output overflow all fail closed.
-8. Linux containment terminates descendants that escape into new sessions and
+7. Command and patch receipts are bound to the exact task base SHA; a mismatched
+   workspace HEAD returns no passing receipt.
+8. Dirty or ignored workspace, path escape, protected path, budget overflow,
+   malformed patch, timeout and output overflow all fail closed.
+9. Linux containment terminates descendants that escape into new sessions and
    emits termination proof only after positive supervisor acknowledgement;
    unsupported platforms and unacknowledged/fallback termination fail closed.
-9. Ignored artifacts produce failed/reset receipt flags and are physically
-   removed from the ephemeral workspace.
-10. Repository CI, CodeQL, diagnostics and independent exact-head review pass.
+10. Ignored artifacts cannot coexist with positive command or patch evidence and
+    are physically removed from the ephemeral workspace during reset.
+11. Repository CI, CodeQL, diagnostics and independent exact-head review pass.
 
 ## Definition of done
 
