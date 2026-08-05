@@ -184,10 +184,44 @@ class PatchApplier:
     def _reset(self, task: DevelopmentTask, workspace: Path) -> None:
         for args in (
             ["reset", "--hard", task.base_sha],
-            ["clean", "-fdx"],
+            ["clean", "-ffdx"],
         ):
             self._run(workspace, args, task, 2_000_000)
         self._verify_head(task, workspace)
+        residuals = (
+            self._run(
+                workspace,
+                ["diff", "--cached", "--name-only", "-z", "--"],
+                task,
+                2_000_000,
+            ),
+            self._run(
+                workspace,
+                ["diff", "--name-only", "-z", "--"],
+                task,
+                2_000_000,
+            ),
+            self._run(
+                workspace,
+                ["ls-files", "--others", "--exclude-standard", "-z"],
+                task,
+                2_000_000,
+            ),
+            self._run(
+                workspace,
+                [
+                    "ls-files",
+                    "--others",
+                    "--ignored",
+                    "--exclude-standard",
+                    "-z",
+                ],
+                task,
+                2_000_000,
+            ),
+        )
+        if any(residuals):
+            raise PatchError("workspace reset did not produce a clean state")
 
     @staticmethod
     def _verify_paths_are_regular(
