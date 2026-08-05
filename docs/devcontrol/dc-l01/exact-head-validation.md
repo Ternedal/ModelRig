@@ -25,43 +25,40 @@ python3 tests/workflow_test_coverage.py
 - Changed paths equal `exact-path-allowlist.json` exactly.
 - All six exact-copy files equal the source blob in `source-provenance.json`.
 - All fourteen projections match their documented dependency-minimal deltas.
-- The package imports with no missing/future/product module and starts no work.
-- Command templates freeze argv and reject `GIT_*`, `HOME` and
-  `XDG_CONFIG_HOME` isolation overrides.
-- Generic command execution strips inherited `GIT_*` context.
+- The package imports with no missing or future module and starts no work.
+- Command templates freeze argv, reject reserved environment overrides and reject
+  raw cwd values containing empty, dot, parent, duplicate or trailing segments
+  before `PurePosixPath` normalization.
+- Generic command execution strips inherited Git context.
 - Command and patch execution verify workspace `HEAD == task.base_sha`; a
   mismatch returns no passing receipt.
-- Staged, unstaged, untracked and ignored source-workspace state is rejected
-  before a registered command starts.
+- Staged, unstaged, untracked and ignored source state is rejected before a
+  registered command starts.
+- Staged, unstaged, untracked and ignored patch-workspace state is rejected and
+  verified-reset before any `git apply` invocation.
 - Each registered command executes in a bounded independent exact-HEAD Git
   repository created through a temporary bundle.
 - The bundle and origin are removed before command execution; the sandbox uses no
   object alternates and exposes no source path through arguments, environment,
-  Git config or reflogs.
+  Git configuration or logs.
 - Worktree state and the complete bounded sandbox `.git` metadata fingerprint
   jointly determine command receipt state.
 - Config, hook, ref, object, ignored-file and nested-repository mutations remain
-  inside the disposable sandbox, invalidate positive evidence and are physically
-  removed when the sandbox is destroyed.
+  inside the disposable sandbox, invalidate positive evidence and are removed
+  when the sandbox is destroyed.
 - Sandbox cleanup is mandatory and the source repository is re-verified at the
   exact task HEAD with zero staged, unstaged, untracked or ignored state before a
   receipt can be returned.
-- Empty, dot and parent raw task-path segments are rejected before
-  `PurePosixPath` can normalize them.
-- Linux containment kills descendants that escape into new sessions.
-- Termination proof requires the supervisor's positive quiescence acknowledgement;
-  unacknowledged or fallback termination fails without returning a result.
-- Windows containment fails closed until DC-L05 lands its native boundary.
+- Empty, dot and parent raw task-path segments are rejected before path
+  normalization can alter authority.
+- Linux containment kills descendants that escape into new sessions and requires
+  positive quiescence acknowledgement; unsupported paths fail closed.
 - Ignored files and nested Git repositories count as patch-workspace mutations,
   cannot coexist with a positive patch receipt and are physically removed by
-  `git clean -ffdx` during patch reset.
+  double-force cleanup during patch reset.
 - Patch reset verifies exact HEAD and zero staged, unstaged, untracked and ignored
   residual state before success is claimed.
-- A post-command snapshot/output-limit failure cannot expose or dirty the source
-  repository because command execution is confined to the disposable sandbox.
-- No product module imports `kaliv_dev_control`.
-- No HTTP write, remote Git verb, credential loader, GitHub mutation, merge,
-  release, deployment or activation adapter exists in the slice.
+- No merge, release, deployment or activation adapter exists in the slice.
 - Any commit after review invalidates the verdict and requires complete rerun.
 
 The PR body must name the exact head and check run numbers. A green ancestor is
