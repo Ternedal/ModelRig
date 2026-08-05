@@ -42,14 +42,11 @@ jobs:
         run: cd backend && go test ./...
 
       # scripts/ was outside the gate until 27/07-2026, and a directory walk
-      # skips *.retained entirely -- 3175 lines of load-bearing logic (the
-      # scheduler pilot, the Stage A operators and their tests) that no linter
-      # had ever opened. --extension pulls them in. The four exec-shims carry a
-      # file-level noqa next to the exec that makes their names invisible.
+      # skips *.retained entirely -- load-bearing logic that no linter had opened.
       - name: Python lint gate (syntax + undefined names)
         run: |
           pip install --quiet ruff
-          ruff check --select E9,F63,F7,F82 --extension retained:python worker/ tests/ scripts/
+          ruff check --select E9,F63,F7,F82 --extension retained:python worker/ tests/ scripts/ devcontrol/src/ devcontrol/tests/
 
       - name: PowerShell syntax gate
         shell: pwsh
@@ -62,11 +59,7 @@ jobs:
 
       # Every integration + worker test, globbed so a new tests/*.py is included
       # with no edit here. MODELRIG_BIN is used by the backend/e2e tests; the
-      # worker tests ignore it. This is exactly the set the release job used to
-      # list inline (backend_smoke/v1, e2e, worker_*), now in one place.
-      #
-      # Keep the complete output as one artifact on failure. A red aggregate
-      # step without the exact failing script/output is not an actionable gate.
+      # worker tests ignore it.
       - name: Test suite (auto-includes new tests/*.py)
         env:
           MODELRIG_BIN: /tmp/modelrig-server
@@ -89,6 +82,11 @@ jobs:
           done
           exit "$status"
 
+      - name: DevControl DC-L01 foundation tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: PYTHONPATH=devcontrol/src python3 -m unittest discover -s devcontrol/tests -p 'test_*.py' -v
+
       - name: Upload full failed Python test log
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -98,11 +96,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # The appliance code (updater swap/recovery/journal, supervisor rotation,
-  # heartbeat) leans on file semantics that DIFFER on Windows -- os.Rename won't
-  # overwrite, exes lock while running -- so these Go tests also run on a real
-  # Windows runner, not only Linux. Scoped to the appliance packages to keep the
-  # job fast; the Linux job above remains the full suite.
+  # The appliance code leans on file semantics that differ on Windows, so these
+  # packages also run on a real Windows runner.
   test-windows-appliance:
     runs-on: windows-latest
     steps:

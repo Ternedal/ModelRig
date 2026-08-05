@@ -1,0 +1,27 @@
+{
+  "schema": "modelrig-devcontrol-symbol-ownership/v1",
+  "slice": "DC-L01",
+  "modules": {
+    "kaliv_dev_control.contract": ["ContractError","Risk","MergeAuthority","TaskBudget","DevelopmentTask","normalize_repo_path"],
+    "kaliv_dev_control.policy": ["ScopeViolation","ScopeDecision","PathPolicy"],
+    "kaliv_dev_control.evidence": ["ScopeReceipt","build_scope_receipt"],
+    "kaliv_dev_control.files": ["FileAccessError","SearchMatch","WorkspaceFiles"],
+    "kaliv_dev_control.patch": ["PatchError","PatchSummary","PatchReceipt","PatchApplier"],
+    "kaliv_dev_control.bounded_subprocess": ["BoundedSubprocessError","BoundedStreamEvidence","BoundedSubprocessResult","run_bounded_subprocess"],
+    "kaliv_dev_control.commands": ["CommandPolicyError","CommandExecutionError","CommandTemplate","CommandReceipt","CommandRegistry","default_registry","CommandExecutor"],
+    "kaliv_dev_control.workspace": ["WorkspaceError","CommandResult","Runner","SubprocessRunner","WorkspaceGitRunner","WorkspaceManager"]
+  },
+  "package_exports": [
+    "BoundedStreamEvidence","BoundedSubprocessError","BoundedSubprocessResult",
+    "CommandExecutionError","CommandExecutor","CommandPolicyError","CommandReceipt","CommandRegistry","CommandResult","CommandTemplate",
+    "ContractError","DevelopmentTask","FileAccessError","MergeAuthority",
+    "PatchApplier","PatchError","PatchReceipt","PatchSummary","PathPolicy",
+    "Risk","Runner","ScopeDecision","ScopeReceipt","ScopeViolation","SearchMatch","SubprocessRunner","TaskBudget",
+    "WorkspaceError","WorkspaceFiles","WorkspaceGitRunner","WorkspaceManager",
+    "build_scope_receipt","default_registry","normalize_repo_path","run_bounded_subprocess"
+  ],
+  "forbidden_public_surfaces": [
+    "campaign","catalog","github_read","physical_isolation","review","runtime_staging","tier_a_execution","publisher","activation"
+  ],
+  "rule": "No owned public symbol may be silently omitted, duplicated in another slice, or re-exported before its module lands."
+}
