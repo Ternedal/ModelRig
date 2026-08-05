@@ -103,8 +103,18 @@ class FoundationTests(unittest.TestCase):
             DevelopmentTask.from_mapping(dict(BASE, merge_authority="agent"))
 
     def test_noncanonical_path_is_rejected(self) -> None:
-        with self.assertRaisesRegex(ContractError, "non-canonical"):
-            DevelopmentTask.from_mapping(dict(BASE, allowed_paths=["../main/**"]))
+        for value in (
+            "../main/**",
+            "./worker/**",
+            "devcontrol//x",
+            "devcontrol/./x",
+            "devcontrol/",
+        ):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ContractError, "non-canonical"):
+                    DevelopmentTask.from_mapping(
+                        dict(BASE, allowed_paths=[value])
+                    )
 
     def test_boolean_budget_is_rejected(self) -> None:
         value = dict(BASE)
@@ -244,7 +254,50 @@ class FoundationTests(unittest.TestCase):
                 CommandExecutor(
                     registry=CommandRegistry((template,))
                 ).execute(_task_at(base_sha, command_id), repo, command_id)
-            self.assertEqual(_git(repo, "rev-parse", "HEAD"), _git(repo, "rev-parse", "HEAD"))
+            self.assertEqual(
+                _git(repo, "rev-parse", "HEAD"),
+                _git(repo, "rev-parse", "HEAD"),
+            )
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "DC-L01 command containment is Linux-only",
+    )
+    def test_command_executor_rejects_pre_staged_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            _git(repo, "init")
+            _git(repo, "config", "user.email", "test@example.com")
+            _git(repo, "config", "user.name", "Test")
+            (repo / "devcontrol").mkdir()
+            target = repo / "devcontrol" / "tracked.txt"
+            target.write_text("base\n", encoding="utf-8")
+            _git(repo, "add", ".")
+            _git(repo, "commit", "-m", "base")
+            base_sha = _git(repo, "rev-parse", "HEAD")
+            target.write_text("staged\n", encoding="utf-8")
+            _git(repo, "add", "devcontrol/tracked.txt")
+            marker = repo / "command-ran.txt"
+            command_id = "python.marker"
+            template = CommandTemplate(
+                command_id=command_id,
+                argv=(
+                    sys.executable,
+                    "-c",
+                    "from pathlib import Path; "
+                    "Path('command-ran.txt').write_text('ran')",
+                ),
+            )
+            with self.assertRaisesRegex(CommandExecutionError, "staged"):
+                CommandExecutor(
+                    registry=CommandRegistry((template,))
+                ).execute(_task_at(base_sha, command_id), repo, command_id)
+            self.assertFalse(marker.exists())
+            self.assertIn(
+                "devcontrol/tracked.txt",
+                _git(repo, "diff", "--cached", "--name-only"),
+            )
 
     @unittest.skipUnless(
         sys.platform.startswith("linux"),
