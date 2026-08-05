@@ -384,6 +384,7 @@ class _CommandSandbox:
         self.disabled_hooks = self.root / "disabled-hooks"
         for directory in (self.home, self.xdg, self.tmp, self.disabled_hooks):
             directory.mkdir()
+        (self.root / "empty-git-config").touch()
 
         try:
             self.executor._run_git(
@@ -456,8 +457,8 @@ class _CommandSandbox:
                 "TMPDIR": str(self.tmp),
                 "PWD": str(cwd),
                 "GIT_CONFIG_NOSYSTEM": "1",
-                "GIT_CONFIG_SYSTEM": os.devnull,
-                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_CONFIG_SYSTEM": str(self.root / "empty-git-config"),
+                "GIT_CONFIG_GLOBAL": str(self.root / "empty-git-config"),
                 "GIT_OPTIONAL_LOCKS": "0",
                 "GIT_TERMINAL_PROMPT": "0",
                 "GIT_CONFIG_COUNT": "1",
