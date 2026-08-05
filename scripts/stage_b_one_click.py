@@ -450,6 +450,20 @@ def trial_good_update(observations: dict[str, Any], state: dict[str, Any]) -> No
         }
     )
     save_observations(observations)
+    text = log.read_text(encoding="utf-8", errors="replace").lower()
+    for marker in ("rolling back", "rollback failed", "manual_recovery", "fatal:"):
+        if marker in text:
+            raise StageBError(
+                f"Den gode opdatering indeholder den forbudte markør {marker!r}. "
+                "Ryd op med 'modelrig-updater-windows-x64.exe -recover' (som "
+                "administrator) og kør trinnet igen."
+            )
+    if after_versions["backend_version"] != candidate["version"]:
+        raise StageBError(
+            f"Opdateringen tog ikke effekt: backend rapporterer stadig "
+            f"{after_versions['backend_version'] or '(nede)'}, "
+            f"ikke {candidate['version']}. Beviset ville være usandt."
+        )
     state["good_update_done"] = True
     save_state(state)
     ok(f"Opdatering gennemført: {source_version} -> {after_versions['backend_version']}")
@@ -529,6 +543,21 @@ def preflight() -> dict[str, Any]:
     heading("Preflight — er riggen klar til Stage B?")
     if os.name != "nt":
         raise StageBError("Stage B må kun køres på Windows-riggen.")
+    # The updater must stop the KalivSupervisor scheduled task before it swaps
+    # exes; without elevation the supervisor restarts the server, the exe stays
+    # locked, and BOTH the swap and its rollback fail with "Adgang nægtet",
+    # leaving a manual_recovery journal that blocks Stage B outright.
+    elevated = powershell(
+        "$p=New-Object Security.Principal.WindowsPrincipal("
+        "[Security.Principal.WindowsIdentity]::GetCurrent()); "
+        "Write-Output $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)",
+        timeout=30.0,
+    ).strip().lower()
+    if not elevated.startswith("true"):
+        raise StageBError(
+            "Stage B skal køres som ADMINISTRATOR. Updateren kan ellers ikke stoppe "
+            "KalivSupervisor, og både swap og rollback fejler på låste exe-filer."
+        )
     if JOURNAL.exists():
         raise StageBError(
             "update-transaction.json findes stadig; en tidligere updater-transaktion er "
