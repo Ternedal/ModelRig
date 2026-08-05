@@ -27,8 +27,11 @@ python3 tests/workflow_test_coverage.py
 - All eleven projections match their documented dependency-minimal deltas.
 - The package imports with no missing/future/product module and starts no work.
 - Linux containment kills descendants that escape into new sessions.
+- Termination proof requires the supervisor's positive quiescence acknowledgement;
+  unacknowledged or fallback termination fails without returning a result.
 - Windows containment fails closed until DC-L05 lands its native boundary.
-- Ignored files count as workspace mutations and `git clean -fdx` removes them.
+- Ignored files count as workspace mutations, produce failed/reset receipt flags
+  and are physically removed by `git clean -fdx`.
 - No product module imports `kaliv_dev_control`.
 - No HTTP write, remote Git verb, credential loader, GitHub mutation, merge,
   release, deployment or activation adapter exists in the slice.
