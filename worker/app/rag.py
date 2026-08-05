@@ -7,6 +7,13 @@ from . import ollama_client as oc
 from .store import DocStore
 
 
+CHUNKER_VERSION = "v1"
+
+
+class CorpusModelMismatch(RuntimeError):
+    """The active embedding model cannot read this corpus."""
+
+
 def cosine(a: list[float], b: list[float]) -> float:
     """Cosine similarity; returns 0.0 for empty or mismatched vectors."""
     if not a or not b or len(a) != len(b):
@@ -75,20 +82,82 @@ async def ingest(store: DocStore, documents: list[dict],
     unnamed snippets keep append semantics on purpose (there is no identity to
     replace).
 
-    Returns (chunks_added, chunks_replaced)."""
-    added = 0
-    replaced = 0
-    cleared: set[str] = set()
+    Returns (chunks_added, chunks_replaced).
+
+    ATOMICITY: every embedding is computed BEFORE anything is deleted or
+    inserted. The old order deleted the source first and then embedded and
+    committed chunk by chunk, so a failed embed at chunk 14 of 50 -- Ollama
+    down, a timeout, a swapped model -- left the previous version permanently
+    gone and a partial one committed. The call failed while the corpus stayed
+    valid but semantically corrupt, and nothing detected it afterwards. Now the
+    only failure point before the write is embedding, where nothing has been
+    touched yet; the delete and all inserts then happen in one transaction that
+    rolls back as a unit."""
+    cleared: list[str] = []
+    seen: set[str] = set()
+    rows: list[tuple[str, list[float], str | None, int]] = []
     for d in documents:
         source = d.get("source")
-        if source and source not in cleared:
-            replaced += store.delete_source(source)
-            cleared.add(source)
+        if source and source not in seen:
+            seen.add(source)
+            cleared.append(source)
         for idx, piece in enumerate(chunk_text(d.get("text") or "", chunk_size, overlap)):
             emb = await oc.embed(piece)
-            store.add(piece, emb, source, idx)
-            added += 1
-    return added, replaced
+            rows.append((piece, emb, source, idx))
+    if not rows and not cleared:
+        return 0, 0
+    replaced = store.apply_ingest(cleared, rows)
+    _record_corpus_contract(store, rows)
+    return len(rows), replaced
+
+
+def _record_corpus_contract(store: DocStore, rows) -> None:
+    """Bind the corpus to the model that built it, once it holds anything."""
+    if not rows:
+        return
+    dims = len(rows[0][1])
+    if dims <= 0:
+        return
+    existing_dims = store.meta("embedding_dimensions")
+    if existing_dims is None:
+        store.set_meta({
+            "embedding_model": oc.EMBED_MODEL,
+            "embedding_dimensions": str(dims),
+            "chunker_version": CHUNKER_VERSION,
+        })
+        return
+    # A corpus backfilled from pre-contract data knows its dimension but not
+    # its model. Once new chunks arrive from a known model at that same
+    # dimension, the name can be recorded truthfully.
+    if store.meta("embedding_model") == "unknown" and existing_dims == str(dims):
+        store.set_meta({"embedding_model": oc.EMBED_MODEL})
+
+
+def assert_corpus_matches_active_model(store: DocStore, query_dims: int) -> None:
+    """Fail closed when the active model cannot read this corpus.
+
+    cosine() returns 0.0 for mismatched vector lengths and query() drops
+    everything below min_score, so a model swap yields zero matches -- which is
+    indistinguishable from a legitimate "no relevant sources". The model then
+    answers from its own knowledge while the corpus is silently disconnected.
+    That silence is the failure this guard exists to convert into a named
+    error."""
+    recorded_dims = store.meta("embedding_dimensions")
+    if recorded_dims is None:
+        return  # empty or pre-contract corpus with nothing measurable
+    if str(query_dims) != recorded_dims:
+        raise CorpusModelMismatch(
+            f"RAG index was built with {store.meta('embedding_model')}/"
+            f"{recorded_dims}d, but the active model "
+            f"({oc.EMBED_MODEL}) produces {query_dims}d. Reindex required."
+        )
+    recorded_model = store.meta("embedding_model")
+    if recorded_model and recorded_model != "unknown" and recorded_model != oc.EMBED_MODEL:
+        raise CorpusModelMismatch(
+            f"RAG index was built with {recorded_model}, but the active model "
+            f"is {oc.EMBED_MODEL}. Same dimension does not mean the same vector "
+            f"space. Reindex required."
+        )
 
 
 async def query(
@@ -109,6 +178,7 @@ async def query(
     matches (including zero) rather than padding with irrelevant ones.
     """
     q_emb = await oc.embed(q)
+    assert_corpus_matches_active_model(store, len(q_emb))
     scored = [
         {"id": doc_id, "text": text, "source": src,
          "chunk_index": chunk_index, "score": cosine(q_emb, emb)}
