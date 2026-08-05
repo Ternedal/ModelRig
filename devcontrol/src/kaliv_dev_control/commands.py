@@ -28,6 +28,7 @@ _COMMAND_ID = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
 RECEIPT_SCHEMA = "kaliv-development-command-receipt/v1"
 _METADATA_MAX_FILES = 100_000
 _METADATA_MAX_BYTES = 64_000_000
+_RESERVED_ENV = {"HOME", "XDG_CONFIG_HOME"}
 
 
 class CommandPolicyError(ValueError):
@@ -81,6 +82,10 @@ class CommandTemplate:
                 or "\x00" in key + value
             ):
                 raise CommandPolicyError("command environment is invalid")
+            if key.startswith("GIT_") or key in _RESERVED_ENV:
+                raise CommandPolicyError(
+                    "command environment cannot override Git isolation"
+                )
             immutable_env[key] = value
         object.__setattr__(self, "env", MappingProxyType(immutable_env))
 
@@ -356,10 +361,12 @@ class _GitMetadataOverlay:
         self._root = Path(self._temporary.name)
         self._backup = self._root / "original-dot-git"
         self._staged_overlay = self._root / "staged-overlay"
+        real_moved = False
         try:
             self._prepare(self._staged_overlay)
             before = self._fingerprint(self._staged_overlay)
             os.replace(self.dot_git, self._backup)
+            real_moved = True
             os.replace(self._staged_overlay, self.dot_git)
             self._active = True
             home = self._root / "home"
@@ -385,10 +392,21 @@ class _GitMetadataOverlay:
             )
             return before, environment
         except Exception:
-            if self._active:
-                self.deactivate()
-            elif self._temporary is not None:
-                self._temporary.cleanup()
+            try:
+                if self._active:
+                    self.deactivate()
+                elif real_moved and self._backup.exists():
+                    if self.dot_git.exists() or self.dot_git.is_symlink():
+                        self._remove(self.dot_git)
+                    os.replace(self._backup, self.dot_git)
+                    if self._temporary is not None:
+                        self._temporary.cleanup()
+                elif self._temporary is not None:
+                    self._temporary.cleanup()
+            except Exception as restore_exc:
+                raise CommandExecutionError(
+                    "Git metadata activation rollback failed"
+                ) from restore_exc
             raise
 
     def deactivate(self) -> str:
