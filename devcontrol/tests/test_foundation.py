@@ -45,14 +45,7 @@ class FakeWorkspaceGitRunner:
         self.dirty = dirty
         self.calls: list[tuple[str, ...]] = []
 
-    def run(
-        self,
-        args,
-        *,
-        cwd,
-        timeout_seconds,
-        maximum,
-    ) -> bytes:
+    def run(self, args, *, cwd, timeout_seconds, maximum) -> bytes:
         del cwd, timeout_seconds, maximum
         call = tuple(args)
         self.calls.append(call)
@@ -164,7 +157,10 @@ class FoundationTests(unittest.TestCase):
             self.assertEqual(runner.calls[0][:3], ("worktree", "add", "--detach"))
             self.assertTrue(all(call[0] != "git" for call in runner.calls))
             self.assertFalse(
-                any(call[0] in {"fetch", "pull", "push", "remote", "clone"} for call in runner.calls)
+                any(
+                    call[0] in {"fetch", "pull", "push", "remote", "clone"}
+                    for call in runner.calls
+                )
             )
 
     def test_wrong_workspace_head_is_removed_and_rejected(self) -> None:
@@ -182,6 +178,17 @@ class FoundationTests(unittest.TestCase):
                 manager.create(task, source_repo=source)
             self.assertFalse((root / "workspaces" / task.task_id).exists())
 
+    def test_command_mutation_boundary_includes_ignored_artifacts(self) -> None:
+        commands = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "kaliv_dev_control"
+            / "commands.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"--ignored"', commands)
+        self.assertIn('("clean", "-fdx")', commands)
+        self.assertNotIn('("clean", "-fd")', commands)
+
     def test_foundation_has_no_future_slice_import(self) -> None:
         source = Path(__file__).resolve().parents[1] / "src" / "kaliv_dev_control"
         forbidden = (
@@ -192,12 +199,14 @@ class FoundationTests(unittest.TestCase):
             "runtime_staging",
             "tier_a_",
             "publisher_",
+            "app.windows_job",
         )
         for path in source.glob("*.py"):
             text = path.read_text(encoding="utf-8")
             for name in forbidden:
                 self.assertNotIn(f"from .{name}", text, f"future import in {path.name}")
                 self.assertNotIn(f"import .{name}", text, f"future import in {path.name}")
+            self.assertNotIn("from app.windows_job", text, f"product import in {path.name}")
 
 
 if __name__ == "__main__":
