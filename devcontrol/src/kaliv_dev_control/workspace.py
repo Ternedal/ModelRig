@@ -60,6 +60,9 @@ class SubprocessRunner:
         if timeout_seconds <= 0 or max_output_bytes <= 0:
             raise WorkspaceError("command bounds must be positive")
         merged_env = os.environ.copy()
+        for key in tuple(merged_env):
+            if key.startswith("GIT_"):
+                merged_env.pop(key, None)
         if env:
             merged_env.update(env)
         merged_env["PYTHONDONTWRITEBYTECODE"] = "1"
