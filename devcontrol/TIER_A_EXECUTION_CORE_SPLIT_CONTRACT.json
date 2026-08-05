@@ -46,24 +46,65 @@
     {"name": "_run_tier_a_launch_plan", "kind": "function", "responsibility": "legacy_execution", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py"},
     {"name": "run_verified_tier_a_command", "kind": "function", "responsibility": "legacy_execution", "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py"}
   ],
-  "external_core_consumer": {
-    "path": "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
-    "module_alias": "_core",
-    "attribute_references": [
-      "LEASE_SCHEMA",
-      "LeasedCatalogMaterializer",
-      "LeasedCommandRegistry",
-      "TIER_A_APPLICATION_ENVIRONMENT",
-      "TierAExecutionError",
-      "TierAExecutionLease",
-      "_canonical_directory",
-      "workspace_root_authority_sha256"
-    ],
-    "dynamic_removals": [
-      "_run_tier_a_launch_plan",
-      "run_verified_tier_a_command"
-    ]
-  },
+  "external_core_consumers": [
+    {
+      "path": "devcontrol/src/kaliv_dev_control/runtime_closure_builder.py",
+      "import_style": "direct",
+      "module_alias": null,
+      "imported_names": ["LeasedCommandRegistry", "workspace_root_authority_sha256"],
+      "attribute_references": [],
+      "dynamic_removals": []
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/runtime_closure_staging.py",
+      "import_style": "module_alias",
+      "module_alias": "_core",
+      "imported_names": [],
+      "attribute_references": ["LeasedCommandRegistry"],
+      "dynamic_removals": []
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/runtime_closure_verify.py",
+      "import_style": "module_alias",
+      "module_alias": "_core",
+      "imported_names": [],
+      "attribute_references": ["LeasedCommandRegistry"],
+      "dynamic_removals": []
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
+      "import_style": "module_alias",
+      "module_alias": "_core",
+      "imported_names": [],
+      "attribute_references": [
+        "LEASE_SCHEMA",
+        "LeasedCatalogMaterializer",
+        "LeasedCommandRegistry",
+        "TIER_A_APPLICATION_ENVIRONMENT",
+        "TierAExecutionError",
+        "TierAExecutionLease",
+        "_canonical_directory",
+        "workspace_root_authority_sha256"
+      ],
+      "dynamic_removals": ["_run_tier_a_launch_plan", "run_verified_tier_a_command"]
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py",
+      "import_style": "module_alias",
+      "module_alias": "_core",
+      "imported_names": [],
+      "attribute_references": ["_canonical_directory", "_regular_file_hash"],
+      "dynamic_removals": []
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/tier_a_plan.py",
+      "import_style": "module_alias",
+      "module_alias": "_core",
+      "imported_names": [],
+      "attribute_references": ["_canonical_directory", "_regular_file_hash", "_validated_application_env"],
+      "dynamic_removals": []
+    }
+  ],
   "public_identity_chains": [
     {"symbol": "LeasedCatalogMaterializer", "chain": ["_tier_a_execution_core.LeasedCatalogMaterializer", "tier_a_authority.LeasedCatalogMaterializer", "tier_a_execution.LeasedCatalogMaterializer", "kaliv_dev_control.LeasedCatalogMaterializer"]},
     {"symbol": "LeasedCommandRegistry", "chain": ["_tier_a_execution_core.LeasedCommandRegistry", "tier_a_authority.LeasedCommandRegistry", "tier_a_execution.LeasedCommandRegistry", "kaliv_dev_control.LeasedCommandRegistry"]},
