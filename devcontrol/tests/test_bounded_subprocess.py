@@ -34,6 +34,10 @@ def _wait_gone(*pids: int) -> None:
     raise AssertionError(f"process tree remained alive: {pids}")
 
 
+@unittest.skipUnless(
+    sys.platform.startswith("linux"),
+    "DC-L01 containment is Linux-only",
+)
 class BoundedSubprocessTests(unittest.TestCase):
     def test_success_streams_hashes_counts_and_stdin(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -67,7 +71,6 @@ class BoundedSubprocessTests(unittest.TestCase):
         self.assertEqual(result.stderr.prefix, b"err")
         self.assertEqual(result.total_output_bytes, len(payload) + 3)
 
-    @unittest.skipIf(os.name == "nt", "portable tree proof uses POSIX process groups")
     def test_output_limit_terminates_parent_and_descendant(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -87,7 +90,7 @@ subprocess.Popen([
     {child_script!r},
     str(root / "child.pid"),
 ])
-for _ in range(200):
+for _ in range(400):
     if (root / "child.pid").exists():
         break
     time.sleep(0.005)
@@ -115,7 +118,6 @@ while True:
         self.assertEqual(len(result.stdout.prefix), 4096)
         self.assertTrue(result.stdout.truncated)
 
-    @unittest.skipIf(os.name == "nt", "portable tree proof uses POSIX process groups")
     def test_timeout_terminates_parent_and_descendant(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -135,7 +137,7 @@ subprocess.Popen([
     {child_script!r},
     str(root / "child.pid"),
 ])
-for _ in range(200):
+for _ in range(400):
     if (root / "child.pid").exists():
         break
     time.sleep(0.005)
@@ -145,7 +147,7 @@ time.sleep(60)
                 (sys.executable, "-c", parent_script, str(root)),
                 cwd=root,
                 env=os.environ.copy(),
-                timeout_seconds=1,
+                timeout_seconds=2,
                 max_output_bytes=4096,
             )
             parent_pid = int((root / "parent.pid").read_text())
@@ -155,13 +157,46 @@ time.sleep(60)
         self.assertFalse(result.output_limit_exceeded)
         self.assertTrue(result.process_tree_terminated)
 
+    def test_timeout_terminates_descendant_in_new_session(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            child = root / "child.py"
+            child.write_text(
+                "import os,sys,time\n"
+                "from pathlib import Path\n"
+                "Path(sys.argv[1]).write_text(str(os.getpid()))\n"
+                "time.sleep(60)\n",
+                encoding="utf-8",
+            )
+            parent = root / "parent.py"
+            parent.write_text(
+                "import subprocess,sys,time\n"
+                "from pathlib import Path\n"
+                "root=Path(sys.argv[1])\n"
+                "subprocess.Popen([sys.executable, str(root/'child.py'), "
+                "str(root/'escaped.pid')], start_new_session=True)\n"
+                "for _ in range(400):\n"
+                "    if (root/'escaped.pid').exists(): break\n"
+                "    time.sleep(0.005)\n"
+                "time.sleep(60)\n",
+                encoding="utf-8",
+            )
+            result = run_bounded_subprocess(
+                (sys.executable, str(parent), str(root)),
+                cwd=root,
+                env=os.environ.copy(),
+                timeout_seconds=2,
+                max_output_bytes=4096,
+            )
+            escaped_pid = int((root / "escaped.pid").read_text())
+            _wait_gone(escaped_pid)
+        self.assertTrue(result.timed_out)
+        self.assertTrue(result.process_tree_terminated)
+
     def test_workspace_runner_fails_closed_on_live_output_limit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             runner = SubprocessRunner()
-            with self.assertRaisesRegex(
-                WorkspaceError,
-                "output exceeded",
-            ):
+            with self.assertRaisesRegex(WorkspaceError, "output exceeded"):
                 runner.run(
                     (
                         sys.executable,
@@ -175,14 +210,19 @@ time.sleep(60)
                     max_output_bytes=10_000,
                 )
 
-    def test_authority_runners_do_not_use_post_process_capture(self) -> None:
+
+class BoundedSubprocessSourceTests(unittest.TestCase):
+    def test_authority_runners_use_linux_subreaper_without_future_import(self) -> None:
         for module in (bounded_module, workspace_module):
             source = inspect.getsource(module)
             self.assertNotIn("subprocess.run(", source)
             self.assertNotIn("capture_output=True", source)
-        self.assertIn("start_new_session=True", inspect.getsource(bounded_module))
-        self.assertIn("spawn_in_job", inspect.getsource(bounded_module))
-        self.assertIn("terminate_attached_job", inspect.getsource(bounded_module))
+        source = inspect.getsource(bounded_module)
+        self.assertNotIn("app.windows_job", source)
+        self.assertIn("_PR_SET_CHILD_SUBREAPER", source)
+        self.assertIn("_linux_descendants", source)
+        self.assertIn("start_new_session=True", source)
+        self.assertIn("Windows containment is deferred to DC-L05", source)
 
 
 if __name__ == "__main__":
