@@ -95,10 +95,14 @@ def normalize_repo_path(value: str, *, name: str) -> str:
         raise ContractError(f"{name} must use POSIX separators")
     if raw.startswith("/") or re.match(r"^[A-Za-z]:", raw):
         raise ContractError(f"{name} must be repository-relative")
-    path = PurePosixPath(raw)
-    if any(part in {"", ".", ".."} for part in path.parts):
+    raw_parts = raw.split("/")
+    if any(part in {"", ".", ".."} for part in raw_parts):
         raise ContractError(f"{name} contains a non-canonical path segment")
-    return path.as_posix()
+    path = PurePosixPath(raw)
+    canonical = path.as_posix()
+    if canonical != raw:
+        raise ContractError(f"{name} is not canonical")
+    return canonical
 
 
 @dataclass(frozen=True, slots=True)
