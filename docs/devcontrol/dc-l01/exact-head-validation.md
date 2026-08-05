@@ -23,15 +23,19 @@ python3 tests/workflow_test_coverage.py
 
 - PR base equals current `main` before final review.
 - Changed paths equal `exact-path-allowlist.json` exactly.
-- All nine exact-copy files equal the source blob in `source-provenance.json`.
-- All eleven projections match their documented dependency-minimal deltas.
+- All eight exact-copy files equal the source blob in `source-provenance.json`.
+- All twelve projections match their documented dependency-minimal deltas.
 - The package imports with no missing/future/product module and starts no work.
+- Command templates freeze argv into immutable tuples before registry use.
+- Command and patch execution verify workspace `HEAD == task.base_sha`; a
+  mismatch returns no passing receipt.
 - Linux containment kills descendants that escape into new sessions.
 - Termination proof requires the supervisor's positive quiescence acknowledgement;
   unacknowledged or fallback termination fails without returning a result.
 - Windows containment fails closed until DC-L05 lands its native boundary.
-- Ignored files count as workspace mutations, produce failed/reset receipt flags
-  and are physically removed by `git clean -fdx`.
+- Ignored files count as workspace mutations for both command and patch evidence,
+  cannot coexist with a positive receipt, and are physically removed by
+  `git clean -fdx` during reset.
 - No product module imports `kaliv_dev_control`.
 - No HTTP write, remote Git verb, credential loader, GitHub mutation, merge,
   release, deployment or activation adapter exists in the slice.
