@@ -1,8 +1,8 @@
 """Allowlisted development commands and deterministic execution receipts.
 
 Command arguments come from the registry, never from a model or task payload.
-The executor snapshots the staged patch before and after the command. Any
-repository mutation resets the ephemeral workspace to the task's exact base SHA.
+The executor snapshots the workspace before and after the command. Any mutation,
+including ignored artifacts, resets the ephemeral workspace to the exact base SHA.
 """
 
 from __future__ import annotations
@@ -61,7 +61,6 @@ class CommandTemplate:
                 )
         if not 1 <= self.max_timeout_seconds <= 86_400:
             raise CommandPolicyError("command timeout is outside bounds")
-
         immutable_env: dict[str, str] = {}
         for key, value in self.env.items():
             if (
@@ -213,13 +212,21 @@ class CommandExecutor:
             "--exclude-standard",
             "-z",
         )
+        ignored = self._run_git(
+            workspace,
+            "ls-files",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "-z",
+        )
         fingerprint = self._sha256(cached.encode("utf-8", errors="replace"))
-        return fingerprint, not bool(unstaged or untracked)
+        return fingerprint, not bool(unstaged or untracked or ignored)
 
     def _reset(self, task: DevelopmentTask, workspace: Path) -> None:
         for args in (
             ("reset", "--hard", task.base_sha),
-            ("clean", "-fd"),
+            ("clean", "-fdx"),
         ):
             result = self.runner.run(
                 ["git", *args],
@@ -235,7 +242,11 @@ class CommandExecutor:
     @staticmethod
     def _cwd(workspace: Path, relative: str) -> Path:
         root = workspace.resolve()
-        target = root if relative == "." else (root / PurePosixPath(relative)).resolve()
+        target = (
+            root
+            if relative == "."
+            else (root / PurePosixPath(relative)).resolve()
+        )
         if not target.is_relative_to(root) or not target.is_dir():
             raise CommandExecutionError(
                 "command cwd escaped or does not exist"
@@ -256,13 +267,11 @@ class CommandExecutor:
         template = self.registry.resolve(task, command_id)
         root = workspace.resolve()
         cwd = self._cwd(root, template.cwd)
-
         before_sha, before_clean = self._snapshot(root)
         if not before_clean:
             raise CommandExecutionError(
-                "workspace has unstaged or untracked changes before command"
+                "workspace has unstaged, untracked or ignored changes before command"
             )
-
         started = time.monotonic()
         try:
             result = self.runner.run(
@@ -281,14 +290,12 @@ class CommandExecutor:
                 "command execution did not complete safely"
             ) from exc
         duration_ms = max(0, int((time.monotonic() - started) * 1_000))
-
         after_sha, after_clean = self._snapshot(root)
         unchanged = before_sha == after_sha and after_clean
         reset = False
         if not unchanged:
             self._reset(task, root)
             reset = True
-
         task_sha = self._sha256(task.canonical_json().encode("utf-8"))
         stdout = result.stdout.encode("utf-8")
         stderr = result.stderr.encode("utf-8")
@@ -297,7 +304,6 @@ class CommandExecutor:
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode("utf-8")
-
         return CommandReceipt(
             task_id=task.task_id,
             task_sha256=task_sha,
