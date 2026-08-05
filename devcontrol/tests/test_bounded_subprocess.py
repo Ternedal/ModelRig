@@ -339,6 +339,36 @@ class WorkspaceResetRegressionTests(unittest.TestCase):
             self.assertFalse((repo / "nested").exists())
             self.assertEqual(_git(repo, "status", "--porcelain"), "")
 
+    def test_command_git_metadata_mutation_is_isolated_and_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo, _, base_sha = self._repo(directory)
+            config = repo / ".git" / "config"
+            hook = repo / ".git" / "hooks" / "pre-commit"
+            config_before = config.read_bytes()
+            command_id = "python.git-metadata-mutator"
+            script = (
+                "import subprocess; from pathlib import Path; "
+                "subprocess.run(['git','remote','add','injected',"
+                "'https://example.invalid/repo.git'], check=True); "
+                "hook=Path('.git/hooks/pre-commit'); "
+                "hook.write_text('#!/bin/sh\\nexit 1\\n'); "
+                "hook.chmod(0o755)"
+            )
+            template = CommandTemplate(
+                command_id=command_id,
+                argv=(sys.executable, "-c", script),
+            )
+            receipt = CommandExecutor(
+                registry=CommandRegistry((template,))
+            ).execute(_task_at(base_sha, command_id), repo, command_id)
+            self.assertFalse(receipt.passed)
+            self.assertFalse(receipt.workspace_unchanged)
+            self.assertTrue(receipt.workspace_reset)
+            self.assertEqual(config.read_bytes(), config_before)
+            self.assertFalse(hook.exists())
+            self.assertEqual(_git(repo, "remote"), "")
+            self.assertEqual(_git(repo, "status", "--porcelain"), "")
+
     def test_patch_reset_removes_nested_git_repository(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repo, target, base_sha = self._repo(directory)
