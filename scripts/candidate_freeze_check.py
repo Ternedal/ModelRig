@@ -152,6 +152,38 @@ def _stray_bytecode(root: Path) -> list[str]:
     return sorted(found)
 
 
+def _version_tag_owner(
+    version: str, token: str, api: Callable[[str, str], Any]
+) -> str | None:
+    """Return the commit a published vVERSION tag points at, or None if free.
+
+    A candidate whose VERSION already belongs to a shipped release cannot be
+    promoted: the tag name is taken, reusing it would leave the published
+    SHA256SUMS describing different bytes, and the updater proof needs a HIGHER
+    version to update TO -- X -> X is not an update at all. Reading this costs
+    one API call at freeze time; missing it costs a whole physical Stage A run.
+    """
+    try:
+        payload = api(
+            f"https://api.github.com/repos/{REPO}/git/ref/tags/v{version}", token
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise CandidateFreezeError("release tag status could not be read") from exc
+    except (urllib.error.URLError, OSError) as exc:
+        raise CandidateFreezeError("release tag status could not be read") from exc
+    if not isinstance(payload, Mapping):
+        raise CandidateFreezeError("release tag response is malformed")
+    obj = payload.get("object")
+    if not isinstance(obj, Mapping):
+        raise CandidateFreezeError("release tag response is malformed")
+    sha = obj.get("sha")
+    if not isinstance(sha, str) or _SHA40.fullmatch(sha) is None:
+        raise CandidateFreezeError("release tag response is malformed")
+    return sha
+
+
 def _workflow_checks(runs: Sequence[Mapping[str, Any]]) -> dict[str, str]:
     verdicts: dict[str, str] = {}
     errors: list[str] = []
@@ -265,6 +297,13 @@ def create_receipt(
     if not isinstance(runs, list):
         raise CandidateFreezeError("GitHub workflow response is malformed")
     checks = _workflow_checks(runs)
+    tag_owner = _version_tag_owner(candidate["version"], github_token, api)
+    if tag_owner is not None and tag_owner != expected_sha:
+        raise CandidateFreezeError(
+            f"v{candidate['version']} is already tagged at {tag_owner}: this "
+            "candidate's VERSION belongs to a shipped release and cannot be "
+            "promoted -- bump VERSION before collecting physical evidence"
+        )
     tree_paths, tree_sha256 = _tracked_tree(root)
     generated = now or datetime.now(timezone.utc)
     receipt = {
