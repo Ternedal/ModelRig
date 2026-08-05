@@ -144,7 +144,7 @@ class TierAExecutionCoreSplitContractTests(unittest.TestCase):
     def test_source_remaining_symbols_and_destinations_are_exact(self):
         self.assertEqual(
             self.contract["schema"],
-            "kaliv-tier-a-execution-core-split-contract/v3",
+            "kaliv-tier-a-execution-core-split-contract/v4",
         )
         self.assertEqual(
             _git_blob_sha1(self.source_bytes),
@@ -186,6 +186,9 @@ class TierAExecutionCoreSplitContractTests(unittest.TestCase):
         self.assertTrue(constraints["h10k_changes_authority_digest"])
         self.assertTrue(constraints["h10l_extracted_error_identity"])
         self.assertTrue(constraints["h10l_eliminates_lazy_reverse_dependency"])
+        self.assertTrue(constraints["h10m_extracted_cohesive_lease_model"])
+        self.assertTrue(constraints["h10m_changes_authority_digest"])
+        self.assertTrue(constraints["earlier_physical_evidence_is_stale"])
         self.assertTrue(
             constraints["preserve_object_identity_during_future_split"]
         )
@@ -196,8 +199,11 @@ class TierAExecutionCoreSplitContractTests(unittest.TestCase):
     def test_completed_extractions_are_exact_and_reexported_by_identity(self):
         extractions = self.contract["completed_extractions"]
         self.assertEqual(
-            [item["slice"] for item in extractions],
-            ["H10K", "H10L"],
+            [item["path"] for item in extractions],
+            [
+                "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
+                "devcontrol/src/kaliv_dev_control/_tier_a_lease.py",
+            ],
         )
         core = importlib.import_module("kaliv_dev_control._tier_a_execution_core")
         for extraction in extractions:
@@ -220,14 +226,20 @@ class TierAExecutionCoreSplitContractTests(unittest.TestCase):
             for symbol in extraction["legacy_core_reexports"]:
                 self.assertIs(getattr(core, symbol), getattr(extracted_module, symbol))
 
-        h10k, h10l = extractions
+        environment, lease = extractions
+        self.assertEqual(environment["completed_slices"], ["H10K"])
         self.assertEqual(
-            h10k["resolved_dependencies"],
+            environment["resolved_dependencies"],
             {"TierAExecutionError": "_tier_a_lease"},
         )
+        self.assertEqual(lease["completed_slices"], ["H10L", "H10M"])
         self.assertEqual(
-            h10l["direct_consumers"],
+            lease["direct_consumers"],
             ["_tier_a_environment", "_tier_a_execution_core"],
+        )
+        self.assertEqual(
+            [item["slice"] for item in self.contract["migration_history"]],
+            ["H10K", "H10L", "H10M"],
         )
 
     def test_external_core_consumers_are_complete(self):

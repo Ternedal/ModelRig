@@ -59,9 +59,9 @@ class TierAErrorExtractionTests(unittest.TestCase):
                 for node in tree.body
             )
         )
-        self.assertEqual(
+        self.assertIn(
+            "TierAExecutionError",
             _direct_imports(CORE_PATH, "_tier_a_lease"),
-            ["TierAExecutionError"],
         )
 
     def test_environment_has_no_reverse_dependency_on_legacy_core(self) -> None:
@@ -114,7 +114,7 @@ class TierAErrorExtractionTests(unittest.TestCase):
                 break
         self.assertEqual(literal, bundle)
 
-    def test_lease_module_has_only_domain_error_authority(self) -> None:
+    def test_lease_module_has_no_runtime_or_publication_authority(self) -> None:
         source = LEASE_PATH.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(LEASE_PATH))
         owned = [
@@ -122,7 +122,16 @@ class TierAErrorExtractionTests(unittest.TestCase):
             for node in tree.body
             if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
         ]
-        self.assertEqual(owned, ["TierAExecutionError"])
+        self.assertEqual(
+            owned,
+            [
+                "TierAExecutionError",
+                "_canonical",
+                "_sha256",
+                "_task_sha",
+                "TierAExecutionLease",
+            ],
+        )
         forbidden = {
             "subprocess",
             "socket",
