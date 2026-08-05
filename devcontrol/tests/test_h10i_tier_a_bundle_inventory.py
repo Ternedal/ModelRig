@@ -17,39 +17,41 @@ SPEC.loader.exec_module(GENERATOR)
 
 
 class TierAAuthorityBundleInventoryTests(unittest.TestCase):
-    def test_inventory_snapshots_are_exact_and_reproducible(self):
+    def test_inventory_report_and_lock_are_exact_and_reproducible(self):
         first = GENERATOR.build_inventory(ROOT)
         second = GENERATOR.build_inventory(ROOT)
         self.assertEqual(first, second)
 
-        actual_json = GENERATOR.render_json(first)
-        actual_markdown = GENERATOR.render_markdown(first)
-        snapshot_path = ROOT / GENERATOR.SNAPSHOT_PATH
+        expected_lock = GENERATOR.render_json(GENERATOR.build_lock(first))
+        expected_markdown = GENERATOR.render_markdown(first)
+        lock_path = ROOT / GENERATOR.LOCK_PATH
         markdown_path = ROOT / GENERATOR.MARKDOWN_PATH
-        expected_json = snapshot_path.read_text(encoding="utf-8")
-        expected_markdown = markdown_path.read_text(encoding="utf-8")
-        if expected_json != actual_json or expected_markdown != actual_markdown:
-            print("BEGIN H10I GENERATED JSON")
-            print(actual_json, end="")
-            print("END H10I GENERATED JSON")
+        actual_lock = lock_path.read_text(encoding="utf-8")
+        actual_markdown = markdown_path.read_text(encoding="utf-8")
+        if actual_lock != expected_lock or actual_markdown != expected_markdown:
+            print("BEGIN H10I GENERATED LOCK")
+            print(expected_lock, end="")
+            print("END H10I GENERATED LOCK")
             print("BEGIN H10I GENERATED MARKDOWN")
-            print(actual_markdown, end="")
+            print(expected_markdown, end="")
             print("END H10I GENERATED MARKDOWN")
-            self.fail("Tier-A authority-bundle inventory snapshot is stale")
+            self.fail("Tier-A authority-bundle inventory is stale")
 
-        parsed = json.loads(expected_json)
-        self.assertEqual(parsed["schema"], GENERATOR.SCHEMA)
-        self.assertEqual(parsed["file_count"], len(parsed["files"]))
+        lock = json.loads(actual_lock)
+        self.assertEqual(lock["lock_schema"], GENERATOR.LOCK_SCHEMA)
+        self.assertEqual(lock["inventory_schema"], GENERATOR.SCHEMA)
+        self.assertEqual(lock["file_count"], len(first["files"]))
+        self.assertEqual(lock["totals"], first["totals"])
         self.assertEqual(
-            [item["path"] for item in parsed["files"]],
+            [item["path"] for item in first["files"]],
             list(GENERATOR._bundle_paths(ROOT)),
         )
         for responsibility in GENERATOR.RESPONSIBILITIES:
             self.assertEqual(
-                parsed["responsibility_summary"][responsibility],
+                first["responsibility_summary"][responsibility],
                 [
                     item["path"]
-                    for item in parsed["files"]
+                    for item in first["files"]
                     if responsibility in item["responsibilities"]
                 ],
             )
