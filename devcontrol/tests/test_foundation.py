@@ -407,7 +407,8 @@ class FoundationTests(unittest.TestCase):
             / "commands.py"
         ).read_text(encoding="utf-8")
         self.assertIn('"--ignored"', commands)
-        self.assertIn('("clean", "-fdx")', commands)
+        self.assertIn('("clean", "-ffdx")', commands)
+        self.assertNotIn('("clean", "-fdx")', commands)
         self.assertNotIn('("clean", "-fd")', commands)
 
     def test_foundation_has_no_future_slice_import(self) -> None:
