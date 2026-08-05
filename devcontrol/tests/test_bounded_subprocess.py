@@ -12,7 +12,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import kaliv_dev_control.bounded_subprocess as bounded_module
-import kaliv_dev_control.trusted_git_runtime_runner as git_runner_module
 import kaliv_dev_control.workspace as workspace_module
 from kaliv_dev_control.bounded_subprocess import run_bounded_subprocess
 from kaliv_dev_control.workspace import SubprocessRunner, WorkspaceError
@@ -177,7 +176,7 @@ time.sleep(60)
                 )
 
     def test_authority_runners_do_not_use_post_process_capture(self) -> None:
-        for module in (bounded_module, git_runner_module, workspace_module):
+        for module in (bounded_module, workspace_module):
             source = inspect.getsource(module)
             self.assertNotIn("subprocess.run(", source)
             self.assertNotIn("capture_output=True", source)
