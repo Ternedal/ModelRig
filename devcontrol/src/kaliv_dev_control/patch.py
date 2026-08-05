@@ -176,12 +176,18 @@ class PatchApplier:
             raise PatchError(f"git {args[0]} failed")
         return result.stdout
 
+    def _verify_head(self, task: DevelopmentTask, workspace: Path) -> None:
+        head = self._run(workspace, ["rev-parse", "HEAD"], task, 64_000).strip()
+        if head != task.base_sha:
+            raise PatchError("workspace HEAD does not match task base SHA")
+
     def _reset(self, task: DevelopmentTask, workspace: Path) -> None:
         for args in (
             ["reset", "--hard", task.base_sha],
-            ["clean", "-fd"],
+            ["clean", "-fdx"],
         ):
             self._run(workspace, args, task, 2_000_000)
+        self._verify_head(task, workspace)
 
     @staticmethod
     def _verify_paths_are_regular(
@@ -243,8 +249,21 @@ class PatchApplier:
             ["ls-files", "--others", "--exclude-standard", "-z"],
             task,
         )
-        if unstaged or untracked:
-            raise PatchError("patch left unstaged or untracked changes")
+        ignored = self._run(
+            workspace,
+            [
+                "ls-files",
+                "--others",
+                "--ignored",
+                "--exclude-standard",
+                "-z",
+            ],
+            task,
+        )
+        if unstaged or untracked or ignored:
+            raise PatchError(
+                "patch left unstaged, untracked or ignored changes"
+            )
 
         decision = PathPolicy(task).evaluate(
             paths,
@@ -276,6 +295,7 @@ class PatchApplier:
         patch_text: str,
     ) -> PatchReceipt:
         root = workspace.resolve()
+        self._verify_head(task, root)
         summary = self.parse(task, patch_text)
         self._verify_paths_are_regular(root, summary.changed_paths)
 
