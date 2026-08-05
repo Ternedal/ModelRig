@@ -181,14 +181,12 @@ class PatchApplier:
         if head != task.base_sha:
             raise PatchError("workspace HEAD does not match task base SHA")
 
-    def _reset(self, task: DevelopmentTask, workspace: Path) -> None:
-        for args in (
-            ["reset", "--hard", task.base_sha],
-            ["clean", "-ffdx"],
-        ):
-            self._run(workspace, args, task, 2_000_000)
-        self._verify_head(task, workspace)
-        residuals = (
+    def _workspace_state(
+        self,
+        task: DevelopmentTask,
+        workspace: Path,
+    ) -> tuple[str, str, str, str]:
+        return (
             self._run(
                 workspace,
                 ["diff", "--cached", "--name-only", "-z", "--"],
@@ -220,8 +218,28 @@ class PatchApplier:
                 2_000_000,
             ),
         )
-        if any(residuals):
+
+    def _reset(self, task: DevelopmentTask, workspace: Path) -> None:
+        for args in (
+            ["reset", "--hard", task.base_sha],
+            ["clean", "-ffdx"],
+        ):
+            self._run(workspace, args, task, 2_000_000)
+        self._verify_head(task, workspace)
+        if any(self._workspace_state(task, workspace)):
             raise PatchError("workspace reset did not produce a clean state")
+
+    def _reject_dirty_workspace(
+        self,
+        task: DevelopmentTask,
+        workspace: Path,
+    ) -> None:
+        if not any(self._workspace_state(task, workspace)):
+            return
+        self._reset(task, workspace)
+        raise PatchError(
+            "workspace has staged, unstaged, untracked or ignored changes"
+        )
 
     @staticmethod
     def _verify_paths_are_regular(
@@ -330,6 +348,7 @@ class PatchApplier:
     ) -> PatchReceipt:
         root = workspace.resolve()
         self._verify_head(task, root)
+        self._reject_dirty_workspace(task, root)
         summary = self.parse(task, patch_text)
         self._verify_paths_are_regular(root, summary.changed_paths)
 
