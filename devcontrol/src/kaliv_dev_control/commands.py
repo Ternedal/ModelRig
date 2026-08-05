@@ -132,6 +132,22 @@ try:
     finally:
         os.close(root_fd)
 
+    null_access = LANDLOCK_ACCESS_FS_WRITE_FILE
+    if abi >= 3:
+        null_access |= LANDLOCK_ACCESS_FS_TRUNCATE
+    null_fd = os.open("/dev/null", os.O_PATH | os.O_CLOEXEC)
+    try:
+        null_attr = PathBeneathAttr(null_access, null_fd)
+        syscall(
+            SYS_LANDLOCK_ADD_RULE,
+            ctypes.c_int(ruleset_fd),
+            ctypes.c_int(LANDLOCK_RULE_PATH_BENEATH),
+            ctypes.byref(null_attr),
+            ctypes.c_uint(0),
+        )
+    finally:
+        os.close(null_fd)
+
     if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
         fail("no_new_privs")
     syscall(
