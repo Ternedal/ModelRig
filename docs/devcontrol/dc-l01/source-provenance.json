@@ -22,11 +22,11 @@
     {"path":"devcontrol/src/kaliv_dev_control/patch.py","source_blob":"b5262565900c0a65948d827539df5ea3453a3fbf","mode":"exact_copy"},
     {"path":"devcontrol/src/kaliv_dev_control/policy.py","source_blob":"926a89fc34d5125280d5bc1a0a094faae41ee470","mode":"exact_copy"},
     {"path":"devcontrol/src/kaliv_dev_control/workspace.py","source_blob":"81f28925362255e0acf812fa23246d5cfed808a3","mode":"projected","delta":"replace DC-L09 TrustedGitRunner import with an implementation-free WorkspaceGitRunner protocol; retain exact-SHA local worktree behavior"},
-    {"path":"devcontrol/tests/test_bounded_subprocess.py","source_blob":"147278478a899e3ecc5452db08c34b5570763214","mode":"exact_copy"},
+    {"path":"devcontrol/tests/test_bounded_subprocess.py","source_blob":"147278478a899e3ecc5452db08c34b5570763214","mode":"projected","delta":"remove the deferred DC-L09 trusted_git_runtime_runner import and inspect only authority runners owned by DC-L01"},
     {"path":"devcontrol/tests/test_foundation.py","source_blob":"20ea7b97b2b5eebb48e04ec97e3d5d49e1f601c0","mode":"projected","delta":"replace future TrustedGitRunner test dependency with the DC-L01 protocol and add empty-registry/future-import assertions"},
     {"path":"devcontrol/tests/test_slice2.py","source_blob":"d3e1b195b2f03e3cde7efa6388b1158c19d0be75","mode":"exact_copy"},
     {"path":"tests/workflow_test_coverage.py","source_blob":"78fa51aa32ef1973315a5a2ac97c6b8a252a111d","mode":"projected","delta":"prove the explicit DC-L01 unittest discovery reaches all three foundation tests"}
   ],
-  "exact_copy_count": 12,
-  "projected_count": 8
+  "exact_copy_count": 11,
+  "projected_count": 9
 }
