@@ -23,7 +23,7 @@ python3 tests/workflow_test_coverage.py
 
 - PR base equals current `main` before final review.
 - Changed paths equal `exact-path-allowlist.json` exactly.
-- All twelve exact-copy files equal the source blob in `source-provenance.json`.
+- All eleven exact-copy files equal the source blob in `source-provenance.json`.
 - The package imports with no missing/future module and starts no work.
 - No product module imports `kaliv_dev_control`.
 - No HTTP write, remote Git verb, credential loader, GitHub mutation, merge,
