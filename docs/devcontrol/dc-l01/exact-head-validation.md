@@ -37,9 +37,13 @@ python3 tests/workflow_test_coverage.py
 - Termination proof requires the supervisor's positive quiescence acknowledgement;
   unacknowledged or fallback termination fails without returning a result.
 - Windows containment fails closed until DC-L05 lands its native boundary.
-- Ignored files count as workspace mutations for both command and patch evidence,
-  cannot coexist with a positive receipt, and are physically removed by
-  `git clean -fdx` during reset.
+- Ignored files and nested Git repositories count as workspace mutations for
+  command and patch evidence, cannot coexist with a positive receipt, and are
+  physically removed by `git clean -ffdx` during reset.
+- Command and patch reset verify exact HEAD and zero staged, unstaged, untracked
+  and ignored residual state before success is claimed.
+- A post-command snapshot/output-limit failure resets the workspace before the
+  verification error propagates.
 - No product module imports `kaliv_dev_control`.
 - No HTTP write, remote Git verb, credential loader, GitHub mutation, merge,
   release, deployment or activation adapter exists in the slice.
