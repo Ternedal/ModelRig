@@ -272,10 +272,15 @@ class Slice2Tests(unittest.TestCase):
     def test_command_sandbox_hides_source_and_rejects_metadata_mutation(self) -> None:
         config = self.repo / ".git" / "config"
         hook = self.repo / ".git" / "hooks" / "pre-commit"
+        outside_marker = self.root / "outside-marker.txt"
         config_before = config.read_bytes()
         command_id = "python.sandbox-metadata"
+        child_script = (
+            "import os; from pathlib import Path; "
+            "Path(os.environ['OUTSIDE_MARKER']).write_text('escaped')"
+        )
         script = (
-            "import os, subprocess; from pathlib import Path; "
+            "import os, subprocess, sys; from pathlib import Path; "
             "root=Path(os.environ['HOME']).parent; "
             "assert 'GITHUB_WORKSPACE' not in os.environ; "
             "assert not (root/'original-dot-git').exists(); "
@@ -284,6 +289,10 @@ class Slice2Tests(unittest.TestCase):
             "assert subprocess.run(['git','remote'], check=True, "
             "text=True, capture_output=True).stdout.strip()==''; "
             "assert 'source.bundle' not in Path('.git/config').read_text(); "
+            f"child=subprocess.run([sys.executable,'-c',{child_script!r}],"
+            "text=True,capture_output=True); "
+            "assert child.returncode!=0; "
+            "assert not Path(os.environ['OUTSIDE_MARKER']).exists(); "
             "subprocess.run(['git','remote','add','injected',"
             "'https://example.invalid/repo.git'], check=True); "
             "h=Path('.git/hooks/pre-commit'); "
@@ -292,6 +301,7 @@ class Slice2Tests(unittest.TestCase):
         template = CommandTemplate(
             command_id=command_id,
             argv=(sys.executable, "-c", script),
+            env={"OUTSIDE_MARKER": str(outside_marker)},
         )
         receipt = CommandExecutor(
             registry=CommandRegistry((template,))
@@ -300,6 +310,7 @@ class Slice2Tests(unittest.TestCase):
         self.assertFalse(receipt.passed)
         self.assertFalse(receipt.workspace_unchanged)
         self.assertTrue(receipt.workspace_reset)
+        self.assertFalse(outside_marker.exists())
         self.assertEqual(config.read_bytes(), config_before)
         self.assertFalse(hook.exists())
         self.assertEqual(run(self.repo, "git", "remote"), "")
