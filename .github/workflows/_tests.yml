@@ -85,7 +85,10 @@ jobs:
       - name: DevControl DC-L01 foundation tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-        run: PYTHONPATH=devcontrol/src python3 -m unittest discover -s devcontrol/tests -p 'test_*.py' -v
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=devcontrol/src python3 -m unittest discover -s devcontrol/tests -p 'test_*.py' -v 2>&1 | tee -a /tmp/modelrig-ci-test.log
 
       - name: Upload full failed Python test log
         if: failure()
