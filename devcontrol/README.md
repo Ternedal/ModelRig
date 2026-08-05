@@ -13,8 +13,9 @@ DC-L00 decomposition contract.
 - fixed command templates selected only from an immutable registry;
 - Linux streaming subprocess containment through a subreaper supervisor that
   terminates descendants even when they create a new session;
-- clean-state evidence that includes ignored artifacts and resets with
-  `git clean -fdx`; and
+- clean-state evidence that includes staged, ignored and nested-Git artifacts,
+  resets with `git clean -ffdx`, and verifies physical cleanliness afterward;
+- post-command verification failures reset before they propagate; and
 - exact-SHA detached-worktree verification through an **injected local Git
   protocol**.
 
