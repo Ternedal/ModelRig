@@ -1,16 +1,20 @@
 """Allowlisted development commands and deterministic execution receipts.
 
 Command arguments come from the registry, never from a model or task payload.
-The executor verifies the exact task base SHA and snapshots the workspace before
-and after the command. Any mutation, including staged, ignored artifacts or a
-HEAD change, resets the ephemeral workspace to the exact base SHA.
+The executor verifies the exact task base SHA, isolates repository metadata and
+snapshots the workspace before and after the command. Any mutation resets the
+ephemeral workspace to the exact base SHA.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import shutil
+import stat
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -22,6 +26,8 @@ from .workspace import Runner, SubprocessRunner, WorkspaceError
 
 _COMMAND_ID = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
 RECEIPT_SCHEMA = "kaliv-development-command-receipt/v1"
+_METADATA_MAX_FILES = 100_000
+_METADATA_MAX_BYTES = 64_000_000
 
 
 class CommandPolicyError(ValueError):
@@ -163,6 +169,249 @@ def default_registry() -> CommandRegistry:
     return CommandRegistry(())
 
 
+class _GitMetadataOverlay:
+    """Hide real Git metadata behind a bounded disposable command overlay."""
+
+    def __init__(self, executor: "CommandExecutor", workspace: Path) -> None:
+        self.executor = executor
+        self.workspace = workspace
+        self.dot_git = workspace / ".git"
+        self._temporary: tempfile.TemporaryDirectory[str] | None = None
+        self._root: Path | None = None
+        self._backup: Path | None = None
+        self._staged_overlay: Path | None = None
+        self._active = False
+        self._copied_files = 0
+        self._copied_bytes = 0
+
+    @staticmethod
+    def _remove(path: Path) -> None:
+        if path.is_symlink() or path.is_file():
+            path.unlink(missing_ok=True)
+        elif path.is_dir():
+            shutil.rmtree(path)
+
+    @staticmethod
+    def _resolve_git_path(workspace: Path, value: str) -> Path:
+        path = Path(value)
+        if not path.is_absolute():
+            path = workspace / path
+        return path.resolve()
+
+    def _account(self, size: int) -> None:
+        self._copied_files += 1
+        self._copied_bytes += size
+        if (
+            self._copied_files > _METADATA_MAX_FILES
+            or self._copied_bytes > _METADATA_MAX_BYTES
+        ):
+            raise CommandExecutionError("Git metadata exceeds overlay bounds")
+
+    def _copy_file(self, source: Path, target: Path) -> None:
+        if source.is_symlink() or not source.is_file():
+            raise CommandExecutionError("Git metadata contains an unsafe entry")
+        size = source.stat().st_size
+        self._account(size)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+    def _copy_tree(self, source: Path, target: Path) -> None:
+        if not source.exists():
+            return
+        if source.is_symlink() or not source.is_dir():
+            raise CommandExecutionError("Git metadata tree is unsafe")
+        target.mkdir(parents=True, exist_ok=True)
+        for item in sorted(source.iterdir(), key=lambda path: path.name):
+            destination = target / item.name
+            if item.is_symlink():
+                raise CommandExecutionError("Git metadata contains a symlink")
+            if item.is_dir():
+                self._copy_tree(item, destination)
+            elif item.is_file():
+                self._copy_file(item, destination)
+            else:
+                raise CommandExecutionError("Git metadata entry is unsupported")
+
+    def _prepare(self, target: Path) -> None:
+        git_dir = self._resolve_git_path(
+            self.workspace,
+            self.executor._run_git(
+                self.workspace,
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-dir",
+                max_output_bytes=64_000,
+            ).strip(),
+        )
+        common_dir = self._resolve_git_path(
+            self.workspace,
+            self.executor._run_git(
+                self.workspace,
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+                max_output_bytes=64_000,
+            ).strip(),
+        )
+        object_format = self.executor._run_git(
+            self.workspace,
+            "rev-parse",
+            "--show-object-format",
+            max_output_bytes=64_000,
+        ).strip()
+        if object_format not in {"sha1", "sha256"}:
+            raise CommandExecutionError("Git object format is unsupported")
+        object_directory = common_dir / "objects"
+        if not object_directory.is_dir() or object_directory.is_symlink():
+            raise CommandExecutionError("Git object directory is unsafe")
+        if "\n" in str(object_directory) or "\r" in str(object_directory):
+            raise CommandExecutionError("Git object directory path is unsafe")
+
+        target.mkdir(parents=True)
+        for name in ("HEAD", "index", "ORIG_HEAD"):
+            source = git_dir / name
+            if source.exists():
+                self._copy_file(source, target / name)
+        if not (target / "HEAD").is_file():
+            raise CommandExecutionError("Git metadata overlay has no HEAD")
+        for source in sorted(git_dir.glob("sharedindex.*")):
+            self._copy_file(source, target / source.name)
+
+        self._copy_tree(common_dir / "refs", target / "refs")
+        for name in ("packed-refs", "shallow"):
+            source = common_dir / name
+            if source.exists():
+                self._copy_file(source, target / name)
+        for name in ("exclude", "attributes"):
+            source = common_dir / "info" / name
+            if source.exists():
+                self._copy_file(source, target / "info" / name)
+
+        config = [
+            "[core]",
+            f"\trepositoryformatversion = {1 if object_format == 'sha256' else 0}",
+            "\tfilemode = true",
+            "\tbare = false",
+            "\tlogallrefupdates = false",
+        ]
+        if object_format == "sha256":
+            config.extend(("[extensions]", "\tobjectFormat = sha256"))
+        config_bytes = ("\n".join(config) + "\n").encode("utf-8")
+        self._account(len(config_bytes))
+        (target / "config").write_bytes(config_bytes)
+        alternates = target / "objects" / "info" / "alternates"
+        alternates.parent.mkdir(parents=True, exist_ok=True)
+        alternate_bytes = (str(object_directory) + "\n").encode("utf-8")
+        self._account(len(alternate_bytes))
+        alternates.write_bytes(alternate_bytes)
+        (target / "hooks").mkdir()
+
+    @staticmethod
+    def _fingerprint(root: Path) -> str:
+        if root.is_symlink() or not root.is_dir():
+            raise CommandExecutionError("Git metadata overlay is missing or unsafe")
+        digest = hashlib.sha256()
+        files = 0
+        total = 0
+        for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
+            relative = path.relative_to(root).as_posix().encode("utf-8")
+            if path.is_symlink():
+                raise CommandExecutionError("command created a Git metadata symlink")
+            if path.is_dir():
+                digest.update(b"D\0" + relative + b"\0")
+                continue
+            if not path.is_file():
+                raise CommandExecutionError("command created unsupported Git metadata")
+            size = path.stat().st_size
+            files += 1
+            total += size
+            if files > _METADATA_MAX_FILES or total > _METADATA_MAX_BYTES:
+                raise CommandExecutionError("command exceeded Git metadata bounds")
+            digest.update(b"F\0" + relative + b"\0")
+            digest.update(str(stat.S_IMODE(path.stat().st_mode)).encode("ascii") + b"\0")
+            with path.open("rb") as handle:
+                while chunk := handle.read(131_072):
+                    digest.update(chunk)
+            digest.update(b"\0")
+        return digest.hexdigest()
+
+    def activate(self, template_env: Mapping[str, str]) -> tuple[str, dict[str, str]]:
+        if self.dot_git.is_symlink() or not self.dot_git.exists():
+            raise CommandExecutionError("workspace Git metadata entry is unsafe")
+        self._temporary = tempfile.TemporaryDirectory(
+            prefix=".kaliv-git-overlay-",
+            dir=self.workspace.parent,
+        )
+        self._root = Path(self._temporary.name)
+        self._backup = self._root / "original-dot-git"
+        self._staged_overlay = self._root / "staged-overlay"
+        try:
+            self._prepare(self._staged_overlay)
+            before = self._fingerprint(self._staged_overlay)
+            os.replace(self.dot_git, self._backup)
+            os.replace(self._staged_overlay, self.dot_git)
+            self._active = True
+            home = self._root / "home"
+            xdg = self._root / "xdg"
+            disabled_hooks = self._root / "disabled-hooks"
+            home.mkdir()
+            xdg.mkdir()
+            disabled_hooks.mkdir()
+            environment = dict(template_env)
+            environment.update(
+                {
+                    "HOME": str(home),
+                    "XDG_CONFIG_HOME": str(xdg),
+                    "GIT_CONFIG_NOSYSTEM": "1",
+                    "GIT_CONFIG_SYSTEM": os.devnull,
+                    "GIT_CONFIG_GLOBAL": os.devnull,
+                    "GIT_OPTIONAL_LOCKS": "0",
+                    "GIT_TERMINAL_PROMPT": "0",
+                    "GIT_CONFIG_COUNT": "1",
+                    "GIT_CONFIG_KEY_0": "core.hooksPath",
+                    "GIT_CONFIG_VALUE_0": str(disabled_hooks),
+                }
+            )
+            return before, environment
+        except Exception:
+            if self._active:
+                self.deactivate()
+            elif self._temporary is not None:
+                self._temporary.cleanup()
+            raise
+
+    def deactivate(self) -> str:
+        if not self._active or self._root is None or self._backup is None:
+            raise CommandExecutionError("Git metadata overlay is not active")
+        after: str
+        try:
+            after = self._fingerprint(self.dot_git)
+        except CommandExecutionError as exc:
+            after = hashlib.sha256(
+                ("invalid:" + str(exc)).encode("utf-8")
+            ).hexdigest()
+        restore_error: Exception | None = None
+        quarantine = self._root / "discarded-overlay"
+        try:
+            if self.dot_git.exists() or self.dot_git.is_symlink():
+                os.replace(self.dot_git, quarantine)
+            os.replace(self._backup, self.dot_git)
+            self._active = False
+        except Exception as exc:
+            restore_error = exc
+        try:
+            self._remove(quarantine)
+            if self._temporary is not None:
+                self._temporary.cleanup()
+        finally:
+            self._temporary = None
+        if restore_error is not None:
+            raise CommandExecutionError(
+                "real Git metadata could not be restored"
+            ) from restore_error
+        return after
+
+
 class CommandExecutor:
     """Execute a fixed command and prove it did not alter the workspace."""
 
@@ -177,6 +426,12 @@ class CommandExecutor:
     @staticmethod
     def _sha256(data: bytes) -> str:
         return hashlib.sha256(data).hexdigest()
+
+    @staticmethod
+    def _combined_fingerprint(worktree: str, metadata: str) -> str:
+        return hashlib.sha256(
+            (worktree + "\x00" + metadata).encode("ascii")
+        ).hexdigest()
 
     def _run_git(
         self,
@@ -291,42 +546,53 @@ class CommandExecutor:
         root = workspace.resolve()
         cwd = self._cwd(root, template.cwd)
         self._verify_head(task, root)
-        before_sha, before_clean = self._snapshot(root)
+        before_worktree, before_clean = self._snapshot(root)
         if not before_clean:
             raise CommandExecutionError(
                 "workspace has staged, unstaged, untracked or ignored changes before command"
             )
+
+        overlay = _GitMetadataOverlay(self, root)
+        before_metadata, command_env = overlay.activate(template.env)
         started = time.monotonic()
         try:
-            result = self.runner.run(
-                template.argv,
-                cwd=cwd,
-                timeout_seconds=min(
-                    task.budget.max_runtime_seconds,
-                    template.max_timeout_seconds,
-                ),
-                max_output_bytes=task.budget.max_output_bytes,
-                env=template.env,
-            )
+            try:
+                result = self.runner.run(
+                    template.argv,
+                    cwd=cwd,
+                    timeout_seconds=min(
+                        task.budget.max_runtime_seconds,
+                        template.max_timeout_seconds,
+                    ),
+                    max_output_bytes=task.budget.max_output_bytes,
+                    env=command_env,
+                )
+            finally:
+                after_metadata = overlay.deactivate()
         except WorkspaceError as exc:
             self._reset(task, root)
             raise CommandExecutionError(
                 "command execution did not complete safely"
             ) from exc
         duration_ms = max(0, int((time.monotonic() - started) * 1_000))
+
         try:
             self._verify_head(task, root)
-            after_sha, after_clean = self._snapshot(root)
+            after_worktree, after_clean = self._snapshot(root)
         except (WorkspaceError, CommandExecutionError) as exc:
             self._reset(task, root)
             raise CommandExecutionError(
                 "post-command workspace verification failed"
             ) from exc
+
+        before_sha = self._combined_fingerprint(before_worktree, before_metadata)
+        after_sha = self._combined_fingerprint(after_worktree, after_metadata)
         unchanged = before_sha == after_sha and after_clean
         reset = False
         if not unchanged:
             self._reset(task, root)
             reset = True
+
         task_sha = self._sha256(task.canonical_json().encode("utf-8"))
         stdout = result.stdout.encode("utf-8")
         stderr = result.stderr.encode("utf-8")
