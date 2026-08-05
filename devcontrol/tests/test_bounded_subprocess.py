@@ -2,18 +2,23 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import io
 import os
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import kaliv_dev_control.bounded_subprocess as bounded_module
 import kaliv_dev_control.workspace as workspace_module
-from kaliv_dev_control.bounded_subprocess import run_bounded_subprocess
+from kaliv_dev_control.bounded_subprocess import (
+    BoundedSubprocessError,
+    run_bounded_subprocess,
+)
 from kaliv_dev_control.workspace import SubprocessRunner, WorkspaceError
 
 
@@ -193,6 +198,43 @@ time.sleep(60)
         self.assertTrue(result.timed_out)
         self.assertTrue(result.process_tree_terminated)
 
+    def test_unacknowledged_termination_fails_without_result(self) -> None:
+        class FakeProcess:
+            pid = 999_999
+            stdin = None
+            stdout = io.BytesIO()
+            stderr = io.BytesIO()
+            returncode = 125
+
+            def poll(self):
+                return None
+
+            def wait(self, timeout=None):
+                del timeout
+                return self.returncode
+
+        fake = FakeProcess()
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                mock.patch.object(bounded_module, "_spawn", return_value=fake),
+                mock.patch.object(
+                    bounded_module,
+                    "_terminate_tree",
+                    return_value=False,
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    BoundedSubprocessError,
+                    "did not acknowledge",
+                ):
+                    run_bounded_subprocess(
+                        (sys.executable, "-c", "pass"),
+                        cwd=Path(directory).resolve(),
+                        env=os.environ.copy(),
+                        timeout_seconds=1,
+                        max_output_bytes=4096,
+                    )
+
     def test_workspace_runner_fails_closed_on_live_output_limit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             runner = SubprocessRunner()
@@ -222,6 +264,7 @@ class BoundedSubprocessSourceTests(unittest.TestCase):
         self.assertIn("_PR_SET_CHILD_SUBREAPER", source)
         self.assertIn("_linux_descendants", source)
         self.assertIn("start_new_session=True", source)
+        self.assertIn("did not acknowledge process-tree quiescence", source)
         self.assertIn("Windows containment is deferred to DC-L05", source)
 
 
