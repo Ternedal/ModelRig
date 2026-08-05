@@ -20,9 +20,13 @@ A qualifying verdict must:
   acknowledges tree quiescence, and an unacknowledged/fallback path returns no
   successful result;
 - confirm Windows containment fails closed pending DC-L05;
-- confirm ignored files count as mutations for both command and patch evidence,
-  cannot coexist with a positive receipt and are physically removed by
-  `git clean -fdx` during reset;
+- confirm ignored files and nested Git repositories count as mutations for both
+  command and patch evidence, cannot coexist with a positive receipt, and are
+  physically removed by `git clean -ffdx` during reset;
+- confirm command and patch resets verify exact HEAD plus zero staged, unstaged,
+  untracked and ignored residual state before success is claimed;
+- confirm a post-command snapshot/output-limit failure resets the workspace
+  before the verification error propagates;
 - confirm no future-slice import, concrete Git runner, non-empty default command
   registry, network write, GitHub mutation, publication or activation authority;
 - confirm all required GitHub checks are green on that exact head; and
