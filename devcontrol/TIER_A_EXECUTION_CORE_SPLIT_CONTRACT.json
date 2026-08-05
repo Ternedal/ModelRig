@@ -1,7 +1,7 @@
 {
   "schema": "kaliv-tier-a-execution-core-split-contract/v6",
   "source": "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
-  "source_git_blob_sha1": "824a95d7ed95426b84e63492a576891ff011a820",
+  "source_git_blob_sha1": "67ddfa322904e1305be3ba38db2f37acd29cc5dd",
   "constraints": {
     "h10j_moves_production_code": false,
     "preserve_object_identity_during_future_split": true,

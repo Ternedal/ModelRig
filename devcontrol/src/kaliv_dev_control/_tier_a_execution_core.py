@@ -47,6 +47,7 @@ from ._tier_a_environment import (
     _validated_application_env,
 )
 from .catalog import (
+    ExecutableVerifier,
     IsolationAttestation,
     IsolationBoundary,
     ModelRigCommandCatalog,
@@ -54,6 +55,7 @@ from .catalog import (
     Toolchain,
 )
 from .contract import DevelopmentTask
+from .physical_isolation import WindowsPhysicalIsolationVerifier
 
 PLAN_SCHEMA = "kaliv-development-tier-a-launch-plan/v1"
 _COMMAND_ID = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
