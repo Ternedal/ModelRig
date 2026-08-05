@@ -35,8 +35,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "74e75cd5636f3b2994088e78c09a343cacf50c2a"
-          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/main-sync-one-shot.yml"
+          test "$(git rev-list --count 74e75cd5636f3b2994088e78c09a343cacf50c2a..HEAD)" = "2"
+          test "$(git diff --name-only 74e75cd5636f3b2994088e78c09a343cacf50c2a HEAD)" = ".github/workflows/main-sync-one-shot.yml"
           git fetch --no-tags origin main
           test "$(git rev-parse origin/main)" = "11dcd7b072dd2272f84ef3801f5a9501b8aad601"
           echo "STAGING_HEAD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
@@ -102,7 +102,7 @@ jobs:
           python tests/workflow_current_state.py
           python tests/workflow_activation_readiness.py
           python tests/workflow_test_coverage.py
-          go test ./backend/...
+          (cd backend && go test ./...)
 
       - name: Push exact merge commit
         shell: bash
