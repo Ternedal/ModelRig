@@ -41,6 +41,7 @@ OBSERVATIONS = VALIDATION / "appliance-lifecycle-observations.json"
 EXAMPLE = ROOT / "eval" / "appliance_lifecycle_observations.example.json"
 STATE_PATH = VALIDATION / "stage-b-easy-state.json"
 JOURNAL = ROOT / "update-transaction.json"
+APPLIANCE: Path | None = None
 
 
 def use_root(new_root: Path) -> None:
@@ -359,15 +360,38 @@ def trial_supervisor(
     ok(f"Supervisor genstartede {which} på {restart_ms:.0f} ms (pid {before} -> {after})")
 
 
+def appliance_root() -> Path:
+    """Where the installed appliance lives -- NOT the repo checkout.
+
+    The repo holds the evidence; the appliance holds the exes the updater swaps.
+    They are different directories, so ask the running supervisor where it lives
+    rather than guessing: whatever process currently supervises the rig is the
+    installation this campaign must prove. Explicit --appliance wins.
+    """
+    if APPLIANCE is not None:
+        return APPLIANCE
+    script = (
+        "$p=Get-Process 'modelrig-supervisor-windows-x64' -ErrorAction SilentlyContinue | "
+        "Select-Object -First 1; if($null -eq $p){exit 1}; Write-Output $p.Path"
+    )
+    try:
+        path = Path(powershell(script, timeout=30.0).splitlines()[-1].strip())
+        if path.is_file():
+            return path.parent
+    except (StageBError, IndexError, OSError):
+        pass
+    return ROOT
+
+
 def run_updater(log_path: Path, extra: list[str]) -> None:
-    """Run the updater elevated-in-place, tee'ing the complete stdout+stderr."""
-    updater = ROOT.parent / "ModelRig" / "modelrig-updater-windows-x64.exe"
-    if not updater.is_file():
-        updater = ROOT / "modelrig-updater-windows-x64.exe"
+    """Run the updater in place, tee'ing the complete stdout+stderr."""
+    root = appliance_root()
+    updater = root / "modelrig-updater-windows-x64.exe"
     if not updater.is_file():
         raise StageBError(
-            "modelrig-updater-windows-x64.exe blev ikke fundet. Hent den fra den "
-            "publicerede release og verificér dens SHA-256 mod SHA256SUMS.txt først."
+            f"modelrig-updater-windows-x64.exe blev ikke fundet i {root}. Hent den fra "
+            "den publicerede release, verificér dens SHA-256 mod SHA256SUMS.txt, og "
+            "angiv evt. installationen med --appliance."
         )
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("wb") as handle:
@@ -553,7 +577,19 @@ def main(argv: list[str] | None = None) -> int:
             "Brug den udcheckede release, når wizard'en køres fra en nyere worktree."
         ),
     )
+    parser.add_argument(
+        "--appliance",
+        type=Path,
+        default=None,
+        help=(
+            "installationen med de exe'er updateren swapper (default: udledes fra "
+            "den koerende supervisor)."
+        ),
+    )
     args = parser.parse_args(argv)
+    if args.appliance is not None:
+        global APPLIANCE
+        APPLIANCE = args.appliance.resolve()
     if args.root is not None:
         if not (args.root / "VERSION").is_file():
             raise StageBError(f"--root peger ikke på en ModelRig-checkout: {args.root}")
