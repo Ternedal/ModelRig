@@ -1,21 +1,28 @@
 # DevControl landing decomposition — preflight
 
-**Status:** preflight only · dependency model corrected after exact-head author review  
+**Status:** preflight contract · independent exact-head review required before merge  
 **Source PR:** `#338` (`agent/devcontrol-foundation-v1`)  
 **Source head:** `07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f`  
-**Planning base:** `main @ 9ce48d321fb3d04a67b4038058a83c2fa627d4d5`  
-**Machine-readable plan:** `docs/devcontrol/DEVCONTROL_LANDING_SLICES.json`
+**Source synchronization base:** `main @ 9ce48d321fb3d04a67b4038058a83c2fa627d4d5`  
+**DC-L00 branch base:** `main @ 1306afa36f18dd6bf34058f4d06e0a89c8a08734`  
+**Machine-readable plan:** `docs/devcontrol/DEVCONTROL_LANDING_SLICES.json`  
+**Canonical path disposition:** `docs/devcontrol/DEVCONTROL_SOURCE_PATH_DISPOSITION.json`
 
 ## 1. Purpose
 
 PR #338 is a validated integration and reference branch, not a reviewable landing unit. At the locked source head it contains 420 commits, 219 changed files, 49,225 additions and 32 deletions. ADR-DC-001 explicitly forbids landing that body of work as one monolithic pull request.
 
+The two base anchors above have different meanings:
+
+- **Source synchronization base** is the `main` parent contained in the locked source integration head. It defines the exact 219-path source diff being decomposed.
+- **DC-L00 branch base** is the `main` head from which this preflight PR was created. It defines the exact base for review and landing of the preflight itself.
+
 This preflight locks:
 
 - landing order and dependency direction;
 - common fail-closed gates;
-- which authority boundary each slice owns;
-- where the unresolved P1 findings must be closed;
+- the authority boundary owned by each slice;
+- where unresolved P1 findings must be closed;
 - how source provenance is retained without replaying 420 commits; and
 - when physical I0b evidence may become valid again.
 
@@ -85,14 +92,20 @@ The three Tier-A files above are progressive because the compatibility facade an
 
 ### 3.4 Exact source-path disposition
 
-The 219 source paths must resolve to exactly one of:
+All 219 source paths are committed as canonical, human-reviewable assignments in `DEVCONTROL_SOURCE_PATH_DISPOSITION.json`. Every path resolves to exactly one of:
 
-- `land:<slice-id>`;
-- `progressive:<slice-id-list>`;
-- `reject:<reason>`; or
-- `supersede:<replacement>`.
+- `land` with one slice ID;
+- `progressive` with an ordered slice-ID list; or
+- `reject` with an explicit reason.
 
-Before `DC-L01` begins, PR #352 must contain a literal `source-path-disposition.json` covering all 219 paths with no duplicates or omissions. Rule families in this document are planning aids, not merge-time allowlists.
+The assignments are sorted deterministically. The file records:
+
+- a SHA-256 of the canonical reconstructed `[path, kind, target]` entries;
+- a SHA-256 of the sorted LF-terminated path list;
+- exact counts by kind and landing slice; and
+- the locked source head and source synchronization base.
+
+The hashes are secondary integrity locks. They do not replace review of the visible assignments.
 
 ### 3.5 Authority digest and evidence semantics
 
@@ -122,7 +135,7 @@ The implementation PR is not ready until all eight agree.
 
 ### 5.1 Scope and provenance
 
-- Exact base and source heads are recorded.
+- Exact branch base, source synchronization base and source head are recorded with distinct names.
 - Changed paths equal a literal allowlist.
 - Every source path has exactly one disposition.
 - Owned symbols equal the symbol manifest with no loss, duplication or accidental re-export.
@@ -160,17 +173,25 @@ Every load-bearing gate needs a controlled red/green mutation. Examples:
 - add a Git remote; or
 - expose a retained signer or executor publicly.
 
-### 5.5 Exact-head validation
+### 5.5 Exact-head validation and independent review
 
 The reviewed commit runs all applicable portable DevControl tests, repository lint and workflow coverage, complete repository test discovery, native Windows isolation contracts, touched platform gates, CodeQL and independent diagnostics. A green ancestor or byte-different checkpoint is not evidence.
 
+The independent review requirement is a **stable merge gate**, not mutable status stored in the reviewed commit:
+
+- the verdict must name the exact pull-request head SHA;
+- the reviewer identity must differ from the author identity;
+- any head change makes the prior verdict stale;
+- author self-review, including through an integration authenticated as the author, does not satisfy the gate; and
+- no DC-L01 branch starts until DC-L00 is independently approved and landed.
+
 ## 6. Slice sequence
 
-Candidate path families below are replaced by literal path lists in each slice preflight.
+Candidate path families below are planning summaries. Literal path ownership is authoritative in the path-disposition file and in each slice preflight.
 
 ### DC-L00 — landing decomposition preflight
 
-Lands this plan and machine-readable companion only. Before it can be marked ready, it must also add the literal 219-path disposition inventory required by §3.4 and receive an independent review anchored to the exact head.
+Lands this plan, the machine-readable slice graph and the visible 219-path disposition inventory. It requires an independent review anchored to its exact head before merge. The review requirement remains a policy gate and is not represented as a transient “missing” status inside the commit.
 
 ### DC-L01 — task, scope, workspace and bounded command foundation
 
@@ -190,7 +211,7 @@ Lands trusted command IDs, immutable catalog/toolchain binding and fixed-host GE
 
 ### DC-L04 — signed physical Windows evidence contract
 
-Lands the canonical eleven-probe I0b model, operator CLI, separate collector/approver identities, signing and strict verification. This is software contract landing only, not a genuine rig campaign.
+Lands the canonical eleven-probe I0b model, operator CLI, separate collector/approver identities, signing and strict verification. This is software-contract landing only, not a genuine rig campaign.
 
 ### DC-L05 — native Windows containment substrate
 
@@ -200,7 +221,7 @@ Lands worker-side suspended launch, Job Object, AppContainer, ACL, output captur
 
 Lands lease, environment, path, materialization, retained v2 toolhost and retained v1 launch-plan identities.
 
-It also lands **projected initial versions** of:
+It also lands projected initial versions of:
 
 - `_tier_a_execution_core.py` as an import-only facade over already-landed identities;
 - `_tier_a_legacy_toolhost.py` with an exact stage-local bundle tuple; and
