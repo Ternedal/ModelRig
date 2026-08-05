@@ -7,7 +7,10 @@ A qualifying verdict must:
 - be submitted by an identity different from the PR author;
 - name or be mechanically bound to the exact pull-request head;
 - inspect the complete 28-path diff against ADR-DC-001 and DC-L00;
-- confirm the twelve exact-copy blobs and eight documented projections;
+- confirm the nine exact-copy blobs and eleven documented projections;
+- confirm the Linux subreaper terminates descendants that create new sessions;
+- confirm Windows containment fails closed pending DC-L05;
+- confirm ignored files count as mutations and are removed during reset;
 - confirm no future-slice import, concrete Git runner, non-empty default command
   registry, network write, GitHub mutation, publication or activation authority;
 - confirm all required GitHub checks are green on that exact head; and
