@@ -46,7 +46,7 @@ AT_FDCWD = -100
 AT_RECURSIVE = 0x8000
 MOUNT_ATTR_RDONLY = 0x1
 MS_BIND = 4096
-MS_REMOUNT = 32
+MS_REC = 16384
 PR_SET_NO_NEW_PRIVS = 38
 
 class MountAttr(ctypes.Structure):
@@ -79,32 +79,34 @@ try:
     if os.path.commonpath((sandbox_root, command_cwd)) != sandbox_root:
         raise RuntimeError("command cwd escaped sandbox root")
 
-    attr = MountAttr(MOUNT_ATTR_RDONLY, 0, 0, 0)
-    syscall(
-        SYS_MOUNT_SETATTR,
-        ctypes.c_int(AT_FDCWD),
-        ctypes.c_char_p(b"/"),
-        ctypes.c_uint(AT_RECURSIVE),
-        ctypes.byref(attr),
-        ctypes.c_size_t(ctypes.sizeof(attr)),
-    )
     root_bytes = sandbox_root.encode("utf-8")
     if libc.mount(
         ctypes.c_char_p(root_bytes),
         ctypes.c_char_p(root_bytes),
         ctypes.c_void_p(),
-        ctypes.c_ulong(MS_BIND),
+        ctypes.c_ulong(MS_BIND | MS_REC),
         ctypes.c_void_p(),
     ) != 0:
-        fail("sandbox bind mount")
-    if libc.mount(
-        ctypes.c_void_p(),
+        fail("sandbox recursive bind mount")
+
+    readonly = MountAttr(MOUNT_ATTR_RDONLY, 0, 0, 0)
+    syscall(
+        SYS_MOUNT_SETATTR,
+        ctypes.c_int(AT_FDCWD),
+        ctypes.c_char_p(b"/"),
+        ctypes.c_uint(AT_RECURSIVE),
+        ctypes.byref(readonly),
+        ctypes.c_size_t(ctypes.sizeof(readonly)),
+    )
+    writable = MountAttr(0, MOUNT_ATTR_RDONLY, 0, 0)
+    syscall(
+        SYS_MOUNT_SETATTR,
+        ctypes.c_int(AT_FDCWD),
         ctypes.c_char_p(root_bytes),
-        ctypes.c_void_p(),
-        ctypes.c_ulong(MS_REMOUNT | MS_BIND),
-        ctypes.c_void_p(),
-    ) != 0:
-        fail("sandbox writable remount")
+        ctypes.c_uint(AT_RECURSIVE),
+        ctypes.byref(writable),
+        ctypes.c_size_t(ctypes.sizeof(writable)),
+    )
 
     # subprocess entered the namespace with cwd on the parent read-only mount.
     # Resolve it again through the new writable bind mount before dropping caps.
