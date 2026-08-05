@@ -1,1 +1,16 @@
-{}
+{
+  "bundle_source": "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
+  "file_count": 42,
+  "generated_json_sha256": "af05e8a742559f5388bd71755599879e8161facd63967f344a938c42b578df6e",
+  "generated_markdown_sha256": "d95d5bf586e18d414a97cf1ac586e5418088afe0f90c15c1c646c3a48bf946a7",
+  "generator": "scripts/tier_a_bundle_inventory.py",
+  "inventory_schema": "kaliv-tier-a-bundle-inventory/v1",
+  "lock_schema": "kaliv-tier-a-bundle-inventory-lock/v1",
+  "totals": {
+    "bytes": 520588,
+    "local_import_edges": 130,
+    "physical_lines": 14266,
+    "top_level_classes": 147,
+    "top_level_functions": 155
+  }
+}
