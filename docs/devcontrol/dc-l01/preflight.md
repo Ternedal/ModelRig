@@ -31,12 +31,14 @@ local worktree add/remove, exact `rev-parse HEAD`, and clean-status verification
 
 ## Source projection decisions
 
-Twelve source paths are copied byte-identically from the locked source head.
-Eight source-derived paths are deliberately projected:
+Eleven source paths are copied byte-identically from the locked source head.
+Nine source-derived paths are deliberately projected:
 
 - `workspace.py`: removes the DC-L09 `trusted_git_runtime` import and replaces it
   with an implementation-free injected protocol;
-- `test_foundation.py`: tests that seam and forbids future-slice imports;
+- `test_bounded_subprocess.py`: removes the deferred DC-L09 runner import and
+  inspects only authority runners owned by DC-L01;
+- `test_foundation.py`: tests the workspace seam and forbids future-slice imports;
 - `__init__.py`: exports only DC-L01 symbols;
 - `__main__.py`: exposes only task validation and path checking;
 - `pyproject.toml`: has no runtime dependency; cryptography remains deferred;
