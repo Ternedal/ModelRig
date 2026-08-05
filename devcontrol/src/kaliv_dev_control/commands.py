@@ -1,9 +1,9 @@
 """Allowlisted development commands and deterministic execution receipts.
 
 Command arguments come from the registry, never from a model or task payload.
-The executor verifies the exact task base SHA and runs each command in a fully
-disposable local Git sandbox. The source workspace and its Git metadata are never
-exposed through sandbox configuration, alternates or explicit command environment.
+Each command runs at the exact task SHA in a disposable local Git sandbox. A
+Linux user/mount namespace confines all filesystem writes from the command and
+its descendants to that sandbox before a positive receipt can be issued.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import stat
+import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -29,6 +30,96 @@ RECEIPT_SCHEMA = "kaliv-development-command-receipt/v1"
 _SANDBOX_MAX_FILES = 250_000
 _SANDBOX_MAX_BYTES = 1_000_000_000
 _RESERVED_ENV = {"HOME", "XDG_CONFIG_HOME", "TMPDIR", "PWD"}
+
+# The bootstrap runs inside an unprivileged user/mount namespace. It marks the
+# complete host mount tree recursively read-only, remounts only the disposable
+# sandbox root writable, drops all namespace capabilities with no_new_privs, and
+# then execs the reviewed template argv. The boundary is inherited by descendants.
+_MOUNT_SANDBOX_BOOTSTRAP = r"""
+import ctypes
+import os
+import sys
+
+SYS_MOUNT_SETATTR = 442
+AT_FDCWD = -100
+AT_RECURSIVE = 0x8000
+MOUNT_ATTR_RDONLY = 0x1
+MS_BIND = 4096
+MS_REMOUNT = 32
+PR_SET_NO_NEW_PRIVS = 38
+
+class MountAttr(ctypes.Structure):
+    _fields_ = [
+        ("attr_set", ctypes.c_uint64),
+        ("attr_clr", ctypes.c_uint64),
+        ("propagation", ctypes.c_uint64),
+        ("userns_fd", ctypes.c_uint64),
+    ]
+
+libc = ctypes.CDLL(None, use_errno=True)
+
+def fail(name):
+    error = ctypes.get_errno()
+    raise OSError(error, f"{name}: {os.strerror(error)}")
+
+def syscall(number, *args):
+    result = libc.syscall(ctypes.c_long(number), *args)
+    if result < 0:
+        fail("syscall")
+    return int(result)
+
+try:
+    if len(sys.argv) < 4:
+        raise RuntimeError("missing sandbox root, setpriv path or command")
+    sandbox_root = os.path.realpath(sys.argv[1])
+    setpriv = sys.argv[2]
+    command = sys.argv[3:]
+
+    attr = MountAttr(MOUNT_ATTR_RDONLY, 0, 0, 0)
+    syscall(
+        SYS_MOUNT_SETATTR,
+        ctypes.c_int(AT_FDCWD),
+        ctypes.c_char_p(b"/"),
+        ctypes.c_uint(AT_RECURSIVE),
+        ctypes.byref(attr),
+        ctypes.c_size_t(ctypes.sizeof(attr)),
+    )
+    root_bytes = sandbox_root.encode("utf-8")
+    if libc.mount(
+        ctypes.c_char_p(root_bytes),
+        ctypes.c_char_p(root_bytes),
+        ctypes.c_void_p(),
+        ctypes.c_ulong(MS_BIND),
+        ctypes.c_void_p(),
+    ) != 0:
+        fail("sandbox bind mount")
+    if libc.mount(
+        ctypes.c_void_p(),
+        ctypes.c_char_p(root_bytes),
+        ctypes.c_void_p(),
+        ctypes.c_ulong(MS_REMOUNT | MS_BIND),
+        ctypes.c_void_p(),
+    ) != 0:
+        fail("sandbox writable remount")
+    if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
+        fail("no_new_privs")
+
+    argv = [
+        setpriv,
+        "--no-new-privs",
+        "--securebits=+noroot,+noroot_locked",
+        "--bounding-set=-all",
+        "--inh-caps=-all",
+        "--ambient-caps=-all",
+        "--",
+        *command,
+    ]
+    os.execve(setpriv, argv, os.environ)
+except BaseException as exc:
+    print(f"kaliv filesystem sandbox failed: {exc}", file=sys.stderr)
+    raise SystemExit(126)
+"""
+
 
 
 class CommandPolicyError(ValueError):
@@ -57,10 +148,9 @@ class CommandTemplate:
             not isinstance(item, str) or not item or "\x00" in item
             for item in immutable_argv
         ):
-            raise CommandPolicyError(
-                "argv must contain canonical non-empty strings"
-            )
+            raise CommandPolicyError("argv must contain canonical non-empty strings")
         object.__setattr__(self, "argv", immutable_argv)
+
         if not isinstance(self.cwd, str) or not self.cwd or "\x00" in self.cwd:
             raise CommandPolicyError("command cwd must be repository-relative")
         if self.cwd != ".":
@@ -77,6 +167,7 @@ class CommandTemplate:
                 )
         if not 1 <= self.max_timeout_seconds <= 86_400:
             raise CommandPolicyError("command timeout is outside bounds")
+
         immutable_env: dict[str, str] = {}
         for key, value in self.env.items():
             if (
@@ -137,10 +228,7 @@ class CommandReceipt:
 
     def canonical_json(self) -> str:
         return json.dumps(
-            self.to_dict(),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
+            self.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
         )
 
 
@@ -151,21 +239,13 @@ class CommandRegistry:
         values: dict[str, CommandTemplate] = {}
         for template in templates:
             if template.command_id in values:
-                raise CommandPolicyError(
-                    f"duplicate command id: {template.command_id}"
-                )
+                raise CommandPolicyError(f"duplicate command id: {template.command_id}")
             values[template.command_id] = template
         self._templates = MappingProxyType(values)
 
-    def resolve(
-        self,
-        task: DevelopmentTask,
-        command_id: str,
-    ) -> CommandTemplate:
+    def resolve(self, task: DevelopmentTask, command_id: str) -> CommandTemplate:
         if command_id not in task.allowed_command_ids:
-            raise CommandPolicyError(
-                "command is not allowed by the task contract"
-            )
+            raise CommandPolicyError("command is not allowed by the task contract")
         try:
             return self._templates[command_id]
         except KeyError as exc:
@@ -181,12 +261,7 @@ def default_registry() -> CommandRegistry:
 class _CommandSandbox:
     """Build and destroy an independent exact-HEAD Git repository."""
 
-    def __init__(
-        self,
-        executor: "CommandExecutor",
-        task: DevelopmentTask,
-        source: Path,
-    ) -> None:
+    def __init__(self, executor: "CommandExecutor", task: DevelopmentTask, source: Path) -> None:
         self.executor = executor
         self.task = task
         self.source = source
@@ -209,18 +284,14 @@ class _CommandSandbox:
         if self.root is None or not self.root.exists():
             return
         for path in sorted(
-            self.root.rglob("*"),
-            key=lambda item: len(item.parts),
-            reverse=True,
+            self.root.rglob("*"), key=lambda item: len(item.parts), reverse=True
         ):
             self._chmod_for_removal(path)
         self._chmod_for_removal(self.root)
         try:
             shutil.rmtree(self.root)
         except OSError as exc:
-            raise CommandExecutionError(
-                "command sandbox could not be destroyed"
-            ) from exc
+            raise CommandExecutionError("command sandbox could not be destroyed") from exc
         finally:
             self.root = None
             self.repository = None
@@ -232,33 +303,22 @@ class _CommandSandbox:
         digest = hashlib.sha256()
         files = 0
         total = 0
-        for path in sorted(
-            root.rglob("*"),
-            key=lambda item: item.relative_to(root).as_posix(),
-        ):
+        for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
             relative = path.relative_to(root).as_posix().encode("utf-8")
             if path.is_symlink():
-                raise CommandExecutionError(
-                    "command created a Git metadata symlink"
-                )
+                raise CommandExecutionError("command created a Git metadata symlink")
             if path.is_dir():
                 digest.update(b"D\0" + relative + b"\0")
                 continue
             if not path.is_file():
-                raise CommandExecutionError(
-                    "command created unsupported Git metadata"
-                )
+                raise CommandExecutionError("command created unsupported Git metadata")
             file_stat = path.stat()
             files += 1
             total += file_stat.st_size
             if files > _SANDBOX_MAX_FILES or total > _SANDBOX_MAX_BYTES:
-                raise CommandExecutionError(
-                    "command exceeded Git metadata bounds"
-                )
+                raise CommandExecutionError("command exceeded Git metadata bounds")
             digest.update(b"F\0" + relative + b"\0")
-            digest.update(
-                str(stat.S_IMODE(file_stat.st_mode)).encode("ascii") + b"\0"
-            )
+            digest.update(str(stat.S_IMODE(file_stat.st_mode)).encode("ascii") + b"\0")
             with path.open("rb") as handle:
                 while chunk := handle.read(131_072):
                     digest.update(chunk)
@@ -284,14 +344,10 @@ class _CommandSandbox:
                 )
         alternates = self.repository / ".git" / "objects" / "info" / "alternates"
         if alternates.exists():
-            raise CommandExecutionError(
-                "command sandbox must not use object alternates"
-            )
+            raise CommandExecutionError("command sandbox must not use object alternates")
 
     def create(self) -> tuple[str, str]:
-        self.root = Path(
-            tempfile.mkdtemp(prefix=".kaliv-command-sandbox-")
-        ).resolve()
+        self.root = Path(tempfile.mkdtemp(prefix=".kaliv-command-sandbox-")).resolve()
         if self.root.is_symlink():
             raise CommandExecutionError("command sandbox root is unsafe")
         self.repository = self.root / "repository"
@@ -306,70 +362,40 @@ class _CommandSandbox:
         try:
             self.executor._run_git(
                 self.source,
-                "bundle",
-                "create",
-                str(bundle),
-                "HEAD",
+                "bundle", "create", str(bundle), "HEAD",
                 timeout_seconds=300,
                 max_output_bytes=4_000_000,
             )
-            if (
-                bundle.is_symlink()
-                or not bundle.is_file()
-                or bundle.stat().st_size > _SANDBOX_MAX_BYTES
-            ):
-                raise CommandExecutionError(
-                    "command sandbox bundle is unsafe or too large"
-                )
+            if bundle.is_symlink() or not bundle.is_file() or bundle.stat().st_size > _SANDBOX_MAX_BYTES:
+                raise CommandExecutionError("command sandbox bundle is unsafe or too large")
             self.executor._run_git(
                 self.root,
-                "clone",
-                "--no-checkout",
-                "--no-tags",
-                "--quiet",
-                str(bundle),
-                str(self.repository),
+                "clone", "--no-checkout", "--no-tags", "--quiet", str(bundle), str(self.repository),
                 timeout_seconds=300,
                 max_output_bytes=4_000_000,
             )
             self.executor._run_git(
                 self.repository,
-                "checkout",
-                "--quiet",
-                "--detach",
-                self.task.base_sha,
+                "checkout", "--quiet", "--detach", self.task.base_sha,
                 timeout_seconds=300,
                 max_output_bytes=4_000_000,
             )
             self.executor._run_git(
+                self.repository, "remote", "remove", "origin", max_output_bytes=1_000_000
+            )
+            self.executor._run_git(
                 self.repository,
-                "remote",
-                "remove",
-                "origin",
+                "config", "--local", "core.hooksPath", str(self.disabled_hooks),
                 max_output_bytes=1_000_000,
             )
             self.executor._run_git(
                 self.repository,
-                "config",
-                "--local",
-                "core.hooksPath",
-                str(self.disabled_hooks),
+                "config", "--local", "core.logAllRefUpdates", "false",
                 max_output_bytes=1_000_000,
             )
             self.executor._run_git(
                 self.repository,
-                "config",
-                "--local",
-                "core.logAllRefUpdates",
-                "false",
-                max_output_bytes=1_000_000,
-            )
-            self.executor._run_git(
-                self.repository,
-                "config",
-                "--local",
-                "gc.auto",
-                "0",
+                "config", "--local", "gc.auto", "0",
                 max_output_bytes=1_000_000,
             )
             logs = self.repository / ".git" / "logs"
@@ -381,12 +407,8 @@ class _CommandSandbox:
             self.executor._verify_head(self.task, self.repository)
             worktree, clean = self.executor._snapshot(self.repository)
             if not clean:
-                raise CommandExecutionError(
-                    "new command sandbox is not clean"
-                )
-            metadata = self._bounded_fingerprint(
-                self.repository / ".git"
-            )
+                raise CommandExecutionError("new command sandbox is not clean")
+            metadata = self._bounded_fingerprint(self.repository / ".git")
             self._assert_no_source_disclosure()
             self.executor._verify_source_clean(self.task, self.source)
             return worktree, metadata
@@ -394,20 +416,10 @@ class _CommandSandbox:
             self.cleanup()
             raise
 
-    def environment(
-        self,
-        template_env: Mapping[str, str],
-        cwd: Path,
-    ) -> dict[str, str]:
+    def environment(self, template_env: Mapping[str, str], cwd: Path) -> dict[str, str]:
         if any(
             value is None
-            for value in (
-                self.root,
-                self.home,
-                self.xdg,
-                self.tmp,
-                self.disabled_hooks,
-            )
+            for value in (self.root, self.home, self.xdg, self.tmp, self.disabled_hooks)
         ):
             raise CommandExecutionError("command sandbox is not prepared")
         environment = dict(template_env)
@@ -457,9 +469,7 @@ class CommandExecutor:
 
     @staticmethod
     def _combined_fingerprint(worktree: str, metadata: str) -> str:
-        return hashlib.sha256(
-            (worktree + "\x00" + metadata).encode("ascii")
-        ).hexdigest()
+        return hashlib.sha256((worktree + "\x00" + metadata).encode("ascii")).hexdigest()
 
     def _run_git(
         self,
@@ -488,40 +498,21 @@ class CommandExecutor:
     def _verify_head(self, task: DevelopmentTask, workspace: Path) -> None:
         head = self._run_git(workspace, "rev-parse", "HEAD").strip()
         if head != task.base_sha:
-            raise CommandExecutionError(
-                "workspace HEAD does not match task base SHA"
-            )
+            raise CommandExecutionError("workspace HEAD does not match task base SHA")
 
     def _snapshot(self, workspace: Path) -> tuple[str, bool]:
         cached = self._run_git(
-            workspace,
-            "diff",
-            "--cached",
-            "--binary",
-            "--no-ext-diff",
-            "--",
+            workspace, "diff", "--cached", "--binary", "--no-ext-diff", "--"
         )
         unstaged = self._run_git(
-            workspace,
-            "diff",
-            "--binary",
-            "--no-ext-diff",
-            "--",
+            workspace, "diff", "--binary", "--no-ext-diff", "--"
         )
         untracked = self._run_git(
-            workspace,
-            "ls-files",
-            "--others",
-            "--exclude-standard",
-            "-z",
+            workspace, "ls-files", "--others", "--exclude-standard", "-z"
         )
         ignored = self._run_git(
             workspace,
-            "ls-files",
-            "--others",
-            "--ignored",
-            "--exclude-standard",
-            "-z",
+            "ls-files", "--others", "--ignored", "--exclude-standard", "-z",
         )
         fingerprint = self._sha256(cached.encode("utf-8", errors="replace"))
         return fingerprint, not bool(cached or unstaged or untracked or ignored)
@@ -538,10 +529,7 @@ class CommandExecutor:
             raise CommandExecutionError(
                 "source workspace has staged, unstaged, untracked or ignored changes"
             )
-        if (
-            expected_fingerprint is not None
-            and fingerprint != expected_fingerprint
-        ):
+        if expected_fingerprint is not None and fingerprint != expected_fingerprint:
             raise CommandExecutionError(
                 "source workspace fingerprint changed during command execution"
             )
@@ -550,21 +538,43 @@ class CommandExecutor:
     @staticmethod
     def _cwd(workspace: Path, relative: str) -> Path:
         root = workspace.resolve()
-        target = (
-            root
-            if relative == "."
-            else (root / PurePosixPath(relative)).resolve()
-        )
+        target = root if relative == "." else (root / PurePosixPath(relative)).resolve()
         if not target.is_relative_to(root) or not target.is_dir():
-            raise CommandExecutionError(
-                "command cwd escaped or does not exist"
-            )
+            raise CommandExecutionError("command cwd escaped or does not exist")
         cursor = target
         while cursor != root:
             if cursor.is_symlink():
                 raise CommandExecutionError("command cwd contains a symlink")
             cursor = cursor.parent
         return target
+
+    @staticmethod
+    def _confined_argv(sandbox_root: Path, argv: tuple[str, ...]) -> tuple[str, ...]:
+        if not sys.platform.startswith("linux"):
+            raise CommandExecutionError(
+                "filesystem-confined command execution is Linux-only in DC-L01"
+            )
+        unshare = shutil.which("unshare")
+        setpriv = shutil.which("setpriv")
+        if unshare is None or setpriv is None:
+            raise CommandExecutionError(
+                "filesystem sandbox helpers are unavailable"
+            )
+        return (
+            unshare,
+            "--user",
+            "--map-root-user",
+            "--mount",
+            "--fork",
+            "--kill-child=SIGKILL",
+            sys.executable,
+            "-I",
+            "-c",
+            _MOUNT_SANDBOX_BOOTSTRAP,
+            str(sandbox_root),
+            setpriv,
+            *argv,
+        )
 
     def execute(
         self,
@@ -592,14 +602,15 @@ class CommandExecutor:
         after_clean = False
         try:
             before_worktree, before_metadata = sandbox.create()
-            if sandbox.repository is None:
+            if sandbox.repository is None or sandbox.root is None:
                 raise CommandExecutionError("command sandbox was not created")
             cwd = self._cwd(sandbox.repository, template.cwd)
             command_env = sandbox.environment(template.env, cwd)
+            confined_argv = self._confined_argv(sandbox.root, template.argv)
             started = time.monotonic()
             try:
                 result = self.runner.run(
-                    template.argv,
+                    confined_argv,
                     cwd=cwd,
                     timeout_seconds=min(
                         task.budget.max_runtime_seconds,
@@ -612,15 +623,10 @@ class CommandExecutor:
                 raise CommandExecutionError(
                     "command execution did not complete safely"
                 ) from exc
-            duration_ms = max(
-                0,
-                int((time.monotonic() - started) * 1_000),
-            )
+            duration_ms = max(0, int((time.monotonic() - started) * 1_000))
             try:
                 self._verify_head(task, sandbox.repository)
-                after_worktree, after_clean = self._snapshot(
-                    sandbox.repository
-                )
+                after_worktree, after_clean = self._snapshot(sandbox.repository)
                 after_metadata = sandbox.metadata_fingerprint()
             except (WorkspaceError, CommandExecutionError) as exc:
                 raise CommandExecutionError(
@@ -635,9 +641,7 @@ class CommandExecutor:
                 cleanup_error = exc
             try:
                 self._verify_source_clean(
-                    task,
-                    source,
-                    expected_fingerprint=source_before,
+                    task, source, expected_fingerprint=source_before
                 )
             except Exception as exc:
                 source_error = exc
@@ -646,20 +650,12 @@ class CommandExecutor:
                     "source workspace integrity could not be verified"
                 ) from source_error
             if cleanup_error is not None:
-                raise CommandExecutionError(
-                    "command sandbox cleanup failed"
-                ) from cleanup_error
+                raise CommandExecutionError("command sandbox cleanup failed") from cleanup_error
 
         if result is None:
             raise CommandExecutionError("command returned no result")
-        before_sha = self._combined_fingerprint(
-            before_worktree,
-            before_metadata,
-        )
-        after_sha = self._combined_fingerprint(
-            after_worktree,
-            after_metadata,
-        )
+        before_sha = self._combined_fingerprint(before_worktree, before_metadata)
+        after_sha = self._combined_fingerprint(after_worktree, after_metadata)
         unchanged = before_sha == after_sha and after_clean
         reset = not unchanged
 
@@ -667,9 +663,7 @@ class CommandExecutor:
         stdout = result.stdout.encode("utf-8")
         stderr = result.stderr.encode("utf-8")
         argv = json.dumps(
-            list(template.argv),
-            ensure_ascii=False,
-            separators=(",", ":"),
+            list(template.argv), ensure_ascii=False, separators=(",", ":")
         ).encode("utf-8")
         return CommandReceipt(
             task_id=task.task_id,
