@@ -1,21 +1,24 @@
 name: h10l-one-shot-apply
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/devcontrol-foundation-v1
+      - main
+    types:
+      - synchronize
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: github.actor != 'github-actions[bot]'
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout exact branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: agent/devcontrol-foundation-v1
           fetch-depth: 0
 
       - name: Set up Python
