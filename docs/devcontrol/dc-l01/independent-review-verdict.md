@@ -7,10 +7,14 @@ A qualifying verdict must:
 - be submitted by an identity different from the PR author;
 - name or be mechanically bound to the exact pull-request head;
 - inspect the complete 28-path diff against ADR-DC-001 and DC-L00;
-- confirm the eight exact-copy blobs and twelve documented projections;
+- confirm the seven exact-copy blobs and thirteen documented projections;
 - confirm command templates freeze argv into immutable tuples;
 - confirm command and patch execution bind evidence to the exact task base SHA
   and return no passing receipt from a mismatched workspace HEAD;
+- confirm staged, unstaged, untracked and ignored workspace state is rejected
+  before a registered command starts;
+- confirm ambiguous raw task paths are rejected before filesystem path
+  normalization can alter their authority;
 - confirm the Linux subreaper terminates descendants that create new sessions;
 - confirm termination proof is emitted only after the supervisor positively
   acknowledges tree quiescence, and an unacknowledged/fallback path returns no
