@@ -2,7 +2,7 @@
 
 Command arguments come from the registry, never from a model or task payload.
 Each command runs at the exact task SHA in a disposable local Git sandbox. A
-Linux user/mount namespace confines all filesystem writes from the command and
+Linux Landlock domain confines all filesystem writes from the command and
 its descendants to that sandbox before a positive receipt can be issued.
 """
 
@@ -31,49 +31,39 @@ _SANDBOX_MAX_FILES = 250_000
 _SANDBOX_MAX_BYTES = 1_000_000_000
 _RESERVED_ENV = {"HOME", "XDG_CONFIG_HOME", "TMPDIR", "PWD"}
 
-# The bootstrap runs inside an unprivileged user/mount namespace. It marks the
-# complete host mount tree recursively read-only, remounts only the disposable
-# sandbox root writable, reopens cwd through that writable mount, drops all
-# namespace capabilities with kernel APIs, and then execs the reviewed argv.
-# The boundary is inherited by descendants.
-_MOUNT_SANDBOX_BOOTSTRAP = r"""
+_LANDLOCK_SANDBOX_BOOTSTRAP = r"""
 import ctypes
 import os
 import sys
 
-SYS_MOUNT_SETATTR = 442
-AT_FDCWD = -100
-AT_RECURSIVE = 0x8000
-MOUNT_ATTR_RDONLY = 0x1
-MS_BIND = 4096
-MS_REC = 16384
-PR_SET_SECUREBITS = 28
-PR_CAPBSET_DROP = 24
+SYS_LANDLOCK_CREATE_RULESET = 444
+SYS_LANDLOCK_ADD_RULE = 445
+SYS_LANDLOCK_RESTRICT_SELF = 446
+LANDLOCK_CREATE_RULESET_VERSION = 1
+LANDLOCK_RULE_PATH_BENEATH = 1
 PR_SET_NO_NEW_PRIVS = 38
-PR_CAP_AMBIENT = 47
-PR_CAP_AMBIENT_CLEAR_ALL = 4
-SECBIT_NOROOT = 1 << 0
-SECBIT_NOROOT_LOCKED = 1 << 1
-SECBIT_NO_SETUID_FIXUP = 1 << 2
-SECBIT_NO_SETUID_FIXUP_LOCKED = 1 << 3
-_LINUX_CAPABILITY_VERSION_3 = 0x20080522
 
-class MountAttr(ctypes.Structure):
+LANDLOCK_ACCESS_FS_WRITE_FILE = 1 << 1
+LANDLOCK_ACCESS_FS_REMOVE_DIR = 1 << 4
+LANDLOCK_ACCESS_FS_REMOVE_FILE = 1 << 5
+LANDLOCK_ACCESS_FS_MAKE_CHAR = 1 << 6
+LANDLOCK_ACCESS_FS_MAKE_DIR = 1 << 7
+LANDLOCK_ACCESS_FS_MAKE_REG = 1 << 8
+LANDLOCK_ACCESS_FS_MAKE_SOCK = 1 << 9
+LANDLOCK_ACCESS_FS_MAKE_FIFO = 1 << 10
+LANDLOCK_ACCESS_FS_MAKE_BLOCK = 1 << 11
+LANDLOCK_ACCESS_FS_MAKE_SYM = 1 << 12
+LANDLOCK_ACCESS_FS_REFER = 1 << 13
+LANDLOCK_ACCESS_FS_TRUNCATE = 1 << 14
+LANDLOCK_ACCESS_FS_IOCTL_DEV = 1 << 15
+
+class RulesetAttr(ctypes.Structure):
+    _fields_ = [("handled_access_fs", ctypes.c_uint64)]
+
+class PathBeneathAttr(ctypes.Structure):
     _fields_ = [
-        ("attr_set", ctypes.c_uint64),
-        ("attr_clr", ctypes.c_uint64),
-        ("propagation", ctypes.c_uint64),
-        ("userns_fd", ctypes.c_uint64),
-    ]
-
-class CapHeader(ctypes.Structure):
-    _fields_ = [("version", ctypes.c_uint32), ("pid", ctypes.c_int)]
-
-class CapData(ctypes.Structure):
-    _fields_ = [
-        ("effective", ctypes.c_uint32),
-        ("permitted", ctypes.c_uint32),
-        ("inheritable", ctypes.c_uint32),
+        ("allowed_access", ctypes.c_uint64),
+        ("parent_fd", ctypes.c_int),
     ]
 
 libc = ctypes.CDLL(None, use_errno=True)
@@ -97,62 +87,63 @@ try:
     if os.path.commonpath((sandbox_root, command_cwd)) != sandbox_root:
         raise RuntimeError("command cwd escaped sandbox root")
 
-    root_bytes = sandbox_root.encode("utf-8")
-    if libc.mount(
-        ctypes.c_char_p(root_bytes),
-        ctypes.c_char_p(root_bytes),
+    abi = syscall(
+        SYS_LANDLOCK_CREATE_RULESET,
         ctypes.c_void_p(),
-        ctypes.c_ulong(MS_BIND | MS_REC),
-        ctypes.c_void_p(),
-    ) != 0:
-        fail("sandbox recursive bind mount")
-
-    readonly = MountAttr(MOUNT_ATTR_RDONLY, 0, 0, 0)
-    syscall(
-        SYS_MOUNT_SETATTR,
-        ctypes.c_int(AT_FDCWD),
-        ctypes.c_char_p(b"/"),
-        ctypes.c_uint(AT_RECURSIVE),
-        ctypes.byref(readonly),
-        ctypes.c_size_t(ctypes.sizeof(readonly)),
+        ctypes.c_size_t(0),
+        ctypes.c_uint(LANDLOCK_CREATE_RULESET_VERSION),
     )
-    writable = MountAttr(0, MOUNT_ATTR_RDONLY, 0, 0)
-    syscall(
-        SYS_MOUNT_SETATTR,
-        ctypes.c_int(AT_FDCWD),
-        ctypes.c_char_p(root_bytes),
-        ctypes.c_uint(AT_RECURSIVE),
-        ctypes.byref(writable),
-        ctypes.c_size_t(ctypes.sizeof(writable)),
+    handled = (
+        LANDLOCK_ACCESS_FS_WRITE_FILE
+        | LANDLOCK_ACCESS_FS_REMOVE_DIR
+        | LANDLOCK_ACCESS_FS_REMOVE_FILE
+        | LANDLOCK_ACCESS_FS_MAKE_CHAR
+        | LANDLOCK_ACCESS_FS_MAKE_DIR
+        | LANDLOCK_ACCESS_FS_MAKE_REG
+        | LANDLOCK_ACCESS_FS_MAKE_SOCK
+        | LANDLOCK_ACCESS_FS_MAKE_FIFO
+        | LANDLOCK_ACCESS_FS_MAKE_BLOCK
+        | LANDLOCK_ACCESS_FS_MAKE_SYM
     )
+    if abi >= 2:
+        handled |= LANDLOCK_ACCESS_FS_REFER
+    if abi >= 3:
+        handled |= LANDLOCK_ACCESS_FS_TRUNCATE
+    if abi >= 5:
+        handled |= LANDLOCK_ACCESS_FS_IOCTL_DEV
 
-    # subprocess entered the namespace with cwd on the parent read-only mount.
-    # Resolve it again through the new writable bind mount before dropping caps.
-    os.chdir(command_cwd)
-
-    securebits = (
-        SECBIT_NOROOT
-        | SECBIT_NOROOT_LOCKED
-        | SECBIT_NO_SETUID_FIXUP
-        | SECBIT_NO_SETUID_FIXUP_LOCKED
+    ruleset_attr = RulesetAttr(handled)
+    ruleset_fd = syscall(
+        SYS_LANDLOCK_CREATE_RULESET,
+        ctypes.byref(ruleset_attr),
+        ctypes.c_size_t(ctypes.sizeof(ruleset_attr)),
+        ctypes.c_uint(0),
     )
-    if libc.prctl(PR_SET_SECUREBITS, securebits, 0, 0, 0) != 0:
-        fail("securebits")
-    cap_last = int(open("/proc/sys/kernel/cap_last_cap", encoding="ascii").read())
-    for capability in range(cap_last + 1):
-        if libc.prctl(PR_CAPBSET_DROP, capability, 0, 0, 0) != 0:
-            fail("capability bounding set")
-    if libc.prctl(
-        PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0
-    ) != 0:
-        fail("ambient capabilities")
-    header = CapHeader(_LINUX_CAPABILITY_VERSION_3, 0)
-    data = (CapData * 2)()
-    if libc.capset(ctypes.byref(header), ctypes.byref(data)) != 0:
-        fail("capset")
+    root_fd = os.open(
+        sandbox_root,
+        os.O_PATH | os.O_CLOEXEC | os.O_DIRECTORY,
+    )
+    try:
+        path_attr = PathBeneathAttr(handled, root_fd)
+        syscall(
+            SYS_LANDLOCK_ADD_RULE,
+            ctypes.c_int(ruleset_fd),
+            ctypes.c_int(LANDLOCK_RULE_PATH_BENEATH),
+            ctypes.byref(path_attr),
+            ctypes.c_uint(0),
+        )
+    finally:
+        os.close(root_fd)
+
     if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
         fail("no_new_privs")
-
+    syscall(
+        SYS_LANDLOCK_RESTRICT_SELF,
+        ctypes.c_int(ruleset_fd),
+        ctypes.c_uint(0),
+    )
+    os.close(ruleset_fd)
+    os.chdir(command_cwd)
     os.execvpe(command[0], command, os.environ)
 except BaseException as exc:
     print(f"kaliv filesystem sandbox failed: {exc}", file=sys.stderr)
@@ -596,22 +587,11 @@ class CommandExecutor:
             raise CommandExecutionError(
                 "filesystem-confined command execution is Linux-only in DC-L01"
             )
-        unshare = shutil.which("unshare")
-        if unshare is None:
-            raise CommandExecutionError(
-                "filesystem sandbox helper is unavailable"
-            )
         return (
-            unshare,
-            "--user",
-            "--map-root-user",
-            "--mount",
-            "--fork",
-            "--kill-child=SIGKILL",
             sys.executable,
             "-I",
             "-c",
-            _MOUNT_SANDBOX_BOOTSTRAP,
+            _LANDLOCK_SANDBOX_BOOTSTRAP,
             str(sandbox_root),
             str(cwd),
             *argv,
