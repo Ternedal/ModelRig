@@ -1,7 +1,7 @@
 {
-  "schema": "kaliv-tier-a-execution-core-split-contract/v4",
+  "schema": "kaliv-tier-a-execution-core-split-contract/v5",
   "source": "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
-  "source_git_blob_sha1": "45ba3a6ebbdc2295bf1ee8d35c4c3b849c053b99",
+  "source_git_blob_sha1": "cafbbd449b49bbfa6bdd969cb701d1c384c636bb",
   "constraints": {
     "h10j_moves_production_code": false,
     "preserve_object_identity_during_future_split": true,
@@ -15,7 +15,9 @@
     "h10l_changes_authority_digest": true,
     "h10m_extracted_cohesive_lease_model": true,
     "h10m_changes_authority_digest": true,
-    "earlier_physical_evidence_is_stale": true
+    "earlier_physical_evidence_is_stale": true,
+    "h10n_extracted_path_authority": true,
+    "h10n_changes_authority_digest": true
   },
   "proposed_modules": {
     "devcontrol/src/kaliv_dev_control/_tier_a_lease.py": "Lease schema, shared validation, canonical lease identity and TierAExecutionLease.",
@@ -46,24 +48,6 @@
       "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py"
     },
     {
-      "name": "_has_symlink_component",
-      "kind": "function",
-      "responsibility": "path_authority",
-      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py"
-    },
-    {
-      "name": "_canonical_directory",
-      "kind": "function",
-      "responsibility": "path_authority",
-      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py"
-    },
-    {
-      "name": "workspace_root_authority_sha256",
-      "kind": "function",
-      "responsibility": "path_authority",
-      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py"
-    },
-    {
       "name": "tier_a_toolhost_sha256",
       "kind": "function",
       "responsibility": "legacy_toolhost_identity",
@@ -92,12 +76,6 @@
       "kind": "class",
       "responsibility": "legacy_plan_model",
       "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"
-    },
-    {
-      "name": "_regular_file_hash",
-      "kind": "function",
-      "responsibility": "path_authority",
-      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py"
     },
     {
       "name": "build_tier_a_launch_plan",
@@ -359,6 +337,53 @@
         "_tier_a_environment",
         "_tier_a_execution_core"
       ]
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py",
+      "git_blob_sha1": "58663373a9a404538899895697c018c04afd96ba",
+      "completed_slices": [
+        "H10N"
+      ],
+      "symbols": [
+        {
+          "name": "_has_symlink_component",
+          "kind": "function",
+          "responsibility": "path_authority",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py"
+        },
+        {
+          "name": "_canonical_directory",
+          "kind": "function",
+          "responsibility": "path_authority",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py"
+        },
+        {
+          "name": "workspace_root_authority_sha256",
+          "kind": "function",
+          "responsibility": "path_authority",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py"
+        },
+        {
+          "name": "_regular_file_hash",
+          "kind": "function",
+          "responsibility": "path_authority",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py"
+        }
+      ],
+      "core_import_module": "_tier_a_path_authority",
+      "legacy_core_reexports": [
+        "_canonical_directory",
+        "_has_symlink_component",
+        "_regular_file_hash",
+        "workspace_root_authority_sha256"
+      ],
+      "direct_consumers": [
+        "_tier_a_execution_core"
+      ],
+      "resolved_dependencies": {
+        "TierAExecutionError": "_tier_a_lease",
+        "_sha256": "_tier_a_lease"
+      }
     }
   ],
   "migration_history": [
@@ -389,6 +414,16 @@
         "_sha256",
         "_task_sha",
         "TierAExecutionLease"
+      ]
+    },
+    {
+      "slice": "H10N",
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py",
+      "symbols": [
+        "_has_symlink_component",
+        "_canonical_directory",
+        "workspace_root_authority_sha256",
+        "_regular_file_hash"
       ]
     }
   ]

@@ -1,8 +1,8 @@
 # Tier-A execution core split contract
 
-Schema: `kaliv-tier-a-execution-core-split-contract/v4`
+Schema: `kaliv-tier-a-execution-core-split-contract/v5`
 
-This is the authoritative review and migration contract for `devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py`. H10M extends the existing lease module with the cohesive immutable lease schema, validation patterns, canonical hash helpers and `TierAExecutionLease`, while the legacy core re-exports every exact object.
+This is the authoritative review and migration contract for `devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py`. H10N moves the cohesive canonical-directory, workspace-authority and regular-file identity functions into `_tier_a_path_authority.py`, while the legacy core imports and re-exports the exact same function objects.
 
 The machine-readable contract is `devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.json`.
 
@@ -43,6 +43,17 @@ Completed slices: `H10L`, `H10M`.
 | `_task_sha` | function | canonical_identity | `devcontrol/src/kaliv_dev_control/_tier_a_lease.py` |
 | `TierAExecutionLease` | class | lease_model | `devcontrol/src/kaliv_dev_control/_tier_a_lease.py` |
 
+### `devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py`
+
+Completed slices: `H10N`.
+
+| Symbol | Kind | Responsibility | Destination |
+|---|---|---|---|
+| `_has_symlink_component` | function | path_authority | `devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py` |
+| `_canonical_directory` | function | path_authority | `devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py` |
+| `workspace_root_authority_sha256` | function | path_authority | `devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py` |
+| `_regular_file_hash` | function | path_authority | `devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py` |
+
 ## Remaining symbols owned by the legacy core
 
 | Symbol | Kind | Responsibility | Proposed destination |
@@ -50,15 +61,11 @@ Completed slices: `H10L`, `H10M`.
 | `PLAN_SCHEMA` | constant | legacy_plan_model | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py` |
 | `_COMMAND_ID` | constant | legacy_plan_model | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py` |
 | `_TIER_A_BUNDLE_FILES` | constant | legacy_toolhost_identity | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py` |
-| `_has_symlink_component` | function | path_authority | `devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py` |
-| `_canonical_directory` | function | path_authority | `devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py` |
-| `workspace_root_authority_sha256` | function | path_authority | `devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py` |
 | `tier_a_toolhost_sha256` | function | legacy_toolhost_identity | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py` |
 | `_LeaseCapturingVerifier` | class | evidence_materialization | `devcontrol/src/kaliv_dev_control/_tier_a_materialization.py` |
 | `LeasedCommandRegistry` | class | command_registry | `devcontrol/src/kaliv_dev_control/_tier_a_materialization.py` |
 | `LeasedCatalogMaterializer` | class | evidence_materialization | `devcontrol/src/kaliv_dev_control/_tier_a_materialization.py` |
 | `TierALaunchPlan` | class | legacy_plan_model | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py` |
-| `_regular_file_hash` | function | path_authority | `devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py` |
 | `build_tier_a_launch_plan` | function | legacy_launch_planning | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py` |
 | `_run_tier_a_launch_plan` | function | legacy_execution | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py` |
 | `run_verified_tier_a_command` | function | legacy_execution | `devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py` |
@@ -86,5 +93,6 @@ Completed slices: `H10L`, `H10M`.
 - **H10K**: `devcontrol/src/kaliv_dev_control/_tier_a_environment.py` gained `TIER_A_APPLICATION_ENVIRONMENT`, `_validated_application_env`.
 - **H10L**: `devcontrol/src/kaliv_dev_control/_tier_a_lease.py` gained `TierAExecutionError`.
 - **H10M**: `devcontrol/src/kaliv_dev_control/_tier_a_lease.py` gained `LEASE_SCHEMA`, `_HEX40`, `_HEX64`, `_TASK_ID`, `_canonical`, `_sha256`, `_task_sha`, `TierAExecutionLease`.
+- **H10N**: `devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py` gained `_has_symlink_component`, `_canonical_directory`, `workspace_root_authority_sha256`, `_regular_file_hash`.
 
-H10M changes the exact Tier-A source bundle bytes and therefore the toolhost digest. Every earlier physical I0b report remains stale; no replacement physical evidence is created by this contract.
+H10N changes the exact Tier-A source bundle bytes and therefore the toolhost digest. Every earlier physical I0b report remains stale; no replacement physical evidence is created by this contract.

@@ -8,7 +8,7 @@ This report is generated from the exact `_TIER_A_BUNDLE_FILES` tuple in `devcont
 
 | Files | Bytes | Physical lines | Top-level classes | Top-level functions | Local import edges |
 |---:|---:|---:|---:|---:|---:|
-| 44 | 522050 | 14313 | 147 | 155 | 136 |
+| 45 | 522477 | 14328 | 147 | 155 | 138 |
 
 ## Per-file measurements
 
@@ -45,12 +45,13 @@ Local import fan-out counts distinct direct imports that resolve to another file
 | `devcontrol/src/kaliv_dev_control/runtime_closure_staging.py` | 15700 | 388 | 2 | 0 | 7 | canonicalization, path_validation, publication |
 | `devcontrol/src/kaliv_dev_control/runtime_closure.py` | 798 | 25 | 0 | 0 | 4 | — |
 | `devcontrol/src/kaliv_dev_control/store.py` | 6707 | 164 | 2 | 0 | 1 | canonicalization, path_validation, publication |
-| `devcontrol/src/kaliv_dev_control/tier_a_authority.py` | 7667 | 190 | 0 | 8 | 3 | canonicalization, hashing, path_validation |
+| `devcontrol/src/kaliv_dev_control/tier_a_authority.py` | 7733 | 191 | 0 | 8 | 3 | canonicalization, hashing, path_validation |
 | `devcontrol/src/kaliv_dev_control/tier_a_plan.py` | 20389 | 510 | 1 | 3 | 6 | canonicalization, hashing, path_validation |
 | `devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py` | 11683 | 317 | 1 | 2 | 14 | canonicalization, path_validation |
 | `devcontrol/src/kaliv_dev_control/_tier_a_lease.py` | 9954 | 260 | 2 | 3 | 3 | canonicalization, hashing |
 | `devcontrol/src/kaliv_dev_control/_tier_a_environment.py` | 2162 | 61 | 0 | 1 | 1 | canonicalization |
-| `devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py` | 23835 | 630 | 4 | 8 | 10 | canonicalization, hashing, path_validation |
+| `devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py` | 1694 | 53 | 0 | 4 | 1 | canonicalization, hashing, path_validation |
+| `devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py` | 22502 | 591 | 4 | 4 | 11 | canonicalization, hashing, path_validation |
 | `devcontrol/src/kaliv_dev_control/tier_a_result.py` | 11791 | 310 | 3 | 3 | 0 | canonicalization, hashing |
 | `devcontrol/src/kaliv_dev_control/tier_a_command_receipt.py` | 22349 | 612 | 4 | 7 | 6 | canonicalization, hashing, path_validation |
 | `devcontrol/src/kaliv_dev_control/tier_a_execution.py` | 2041 | 68 | 0 | 0 | 5 | — |
@@ -65,9 +66,9 @@ Local import fan-out counts distinct direct imports that resolve to another file
 
 | Responsibility | Files with signal |
 |---|---:|
-| Canonicalization | 30 |
-| Hashing | 25 |
-| Path Validation | 29 |
+| Canonicalization | 31 |
+| Hashing | 26 |
+| Path Validation | 30 |
 | Publication | 11 |
 
 ## Signal rules
