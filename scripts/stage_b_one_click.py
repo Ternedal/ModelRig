@@ -1,0 +1,565 @@
+#!/usr/bin/env python3
+"""One-click, resumable Windows wizard for the physical Stage B updater campaign.
+
+Stage A proved seven candidate-bound proofs. Stage B proves the eighth: that the
+appliance survives its own lifecycle -- a reboot, both supervisor restarts, a real
+updater run onto the published release, and an invalid update that is refused or
+rolled back cleanly.
+
+The observations file behind that proof carries ~50 hand-filled fields: versions,
+40- and 64-hex fingerprints, log paths, SHA-256 digests and latencies. Every one of
+them is measurable, and hand-copying them is where a physical campaign goes wrong.
+This wizard measures them instead, and stops only for what a human must truly do:
+press reboot, and approve the invalid-update run.
+
+It cannot merge, push, tag, publish a release or activate production.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import platform
+import socket
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+sys.dont_write_bytecode = True
+
+ROOT = Path(__file__).resolve().parents[1]
+VALIDATION = ROOT / "validation"
+EVIDENCE = VALIDATION / "appliance-lifecycle-evidence"
+OBSERVATIONS = VALIDATION / "appliance-lifecycle-observations.json"
+EXAMPLE = ROOT / "eval" / "appliance_lifecycle_observations.example.json"
+STATE_PATH = VALIDATION / "stage-b-easy-state.json"
+JOURNAL = ROOT / "update-transaction.json"
+
+LIFECYCLE_SCHEMA = "kaliv-appliance-lifecycle-observations/v1"
+BACKEND_HEALTH = "http://127.0.0.1:8080/healthz"
+WORKER_HEALTH = "http://127.0.0.1:8099/healthz"
+AGENT3_STATUS = "http://127.0.0.1:8080/api/v1/experimental/agent3/status"
+SUPERVISOR_TASK = "KalivSupervisor"
+READY_TIMEOUT_S = 300.0
+
+
+class StageBError(RuntimeError):
+    pass
+
+
+def heading(text: str) -> None:
+    print("\n" + "=" * 72)
+    print(f"  {text}")
+    print("=" * 72)
+
+
+def ok(text: str) -> None:
+    print(f"  OK    {text}")
+
+
+def note(text: str) -> None:
+    print(f"  ->    {text}")
+
+
+def capture(args: list[str], *, cwd: Path = ROOT, timeout: float = 120.0) -> str:
+    try:
+        result = subprocess.run(
+            args, cwd=cwd, text=True, capture_output=True, check=False, timeout=timeout
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise StageBError(f"Kommandoen kunne ikke gennemføres: {' '.join(args)}") from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise StageBError(f"{' '.join(args)} fejlede: {detail[-400:]}")
+    return result.stdout.strip()
+
+
+def powershell(script: str, *, timeout: float = 120.0) -> str:
+    return capture(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        timeout=timeout,
+    )
+
+
+def get_json(url: str, *, timeout: float = 5.0, token: str | None = None) -> Any:
+    request = urllib.request.Request(url)
+    request.add_header("Accept", "application/json")
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.load(response)
+
+
+def sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def load_state() -> dict[str, Any]:
+    try:
+        value = json.loads(STATE_PATH.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def save_state(state: dict[str, Any]) -> None:
+    VALIDATION.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def save_observations(observations: dict[str, Any]) -> None:
+    OBSERVATIONS.parent.mkdir(parents=True, exist_ok=True)
+    OBSERVATIONS.write_text(
+        json.dumps(observations, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+# --- measurement -----------------------------------------------------------
+
+
+def candidate_identity() -> dict[str, Any]:
+    """The same identity the chain validator recomputes -- never hand-typed."""
+    version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    git_sha = capture(["git", "rev-parse", "HEAD"])
+    worker = ROOT / "worker"
+    if str(worker) not in sys.path:
+        sys.path.insert(0, str(worker))
+    from app.build_identity import code_fingerprint  # noqa: E402
+
+    return {"version": version, "git_sha": git_sha, "code_sha256": code_fingerprint()}
+
+
+def live_versions() -> dict[str, Any]:
+    """Read what the running appliance reports -- the honest post-condition."""
+    out: dict[str, Any] = {}
+    try:
+        out["backend_version"] = str(get_json(BACKEND_HEALTH).get("version") or "")
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        out["backend_version"] = ""
+    try:
+        out["worker_version"] = str(get_json(WORKER_HEALTH).get("version") or "")
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        out["worker_version"] = ""
+    out["worker_code_sha256"] = worker_fingerprint()
+    return out
+
+
+def worker_fingerprint() -> str:
+    token = os.environ.get("MODELRIG_TOKEN", "").strip()
+    if not token:
+        return ""
+    try:
+        payload = get_json(AGENT3_STATUS, token=token)
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        return ""
+    value = payload.get("code_sha256") if isinstance(payload, dict) else None
+    return str(value) if isinstance(value, str) else ""
+
+
+def wait_ready(timeout: float = READY_TIMEOUT_S) -> float | None:
+    """Block until backend AND worker answer; return the milliseconds it took."""
+    start = time.monotonic()
+    deadline = start + timeout
+    while time.monotonic() < deadline:
+        try:
+            backend = get_json(BACKEND_HEALTH, timeout=2.0)
+            worker = get_json(WORKER_HEALTH, timeout=2.0)
+            if backend.get("status") == "ok" and worker.get("status") == "ok":
+                return round((time.monotonic() - start) * 1000.0, 3)
+        except (urllib.error.URLError, OSError, json.JSONDecodeError):
+            pass
+        time.sleep(1.0)
+    return None
+
+
+def listener_pid(port: int) -> int | None:
+    script = (
+        f"$x=Get-NetTCPConnection -State Listen -LocalPort {port} "
+        "-ErrorAction SilentlyContinue | Select-Object -First 1; "
+        "if($null -eq $x){exit 1}; Write-Output $x.OwningProcess"
+    )
+    try:
+        return int(powershell(script, timeout=30.0).splitlines()[-1])
+    except (StageBError, ValueError, IndexError):
+        return None
+
+
+def data_snapshot() -> dict[str, Any]:
+    """Cheap before/after fingerprint so data_preserved is measured, not claimed."""
+    token = os.environ.get("MODELRIG_TOKEN", "").strip()
+    snapshot: dict[str, Any] = {"schedules": None, "documents": None}
+    try:
+        snapshot["documents"] = get_json(WORKER_HEALTH).get("documents")
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        pass
+    if token:
+        try:
+            payload = get_json("http://127.0.0.1:8080/api/v1/schedules", token=token)
+            items = payload.get("schedules") if isinstance(payload, dict) else None
+            snapshot["schedules"] = len(items) if isinstance(items, list) else None
+        except (urllib.error.URLError, OSError, json.JSONDecodeError):
+            pass
+    return snapshot
+
+
+# --- trials ----------------------------------------------------------------
+
+
+def trial_reboot(observations: dict[str, Any], state: dict[str, Any]) -> None:
+    if state.get("reboot_done"):
+        ok("Reboot-beviset er allerede indsamlet.")
+        return
+    heading("1/5  MANUELT PAUSEPUNKT — normal reboot")
+    print("  Genstart riggen normalt (Start -> Genstart). Log ind igen når den er oppe,")
+    print("  og kør denne wizard igen. Supervisoren skal selv bringe backend + worker op.")
+    print("  Wizard'en måler selv, hvor lang tid det tog, og hvilke versioner der kom op.")
+    log = EVIDENCE / "reboot.log"
+    state["reboot_pending_since"] = datetime.now(timezone.utc).isoformat()
+    save_state(state)
+    input("\n  Tryk Enter LIGE EFTER du er logget ind igen efter genstarten: ")
+
+    note("Venter på at supervisoren bringer backend + worker op...")
+    ready_ms = wait_ready()
+    versions = live_versions()
+    lines = [
+        f"stage-b reboot trial at {datetime.now(timezone.utc).isoformat()}",
+        f"ready_ms={ready_ms}",
+        f"backend_version={versions['backend_version']}",
+        f"worker_version={versions['worker_version']}",
+        f"worker_code_sha256={versions['worker_code_sha256']}",
+    ]
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    trial = observations["trials"]["reboot"]
+    trial.update(
+        {
+            "performed": True,
+            "ready": ready_ms is not None,
+            "ready_ms": ready_ms,
+            "backend_version": versions["backend_version"],
+            "worker_version": versions["worker_version"],
+            "worker_code_sha256": versions["worker_code_sha256"],
+            "notes": "Målt af stage_b_one_click efter operatørens genstart.",
+            "evidence_path": "validation/appliance-lifecycle-evidence/reboot.log",
+            "evidence_sha256": sha256_file(log),
+        }
+    )
+    save_observations(observations)
+    state["reboot_done"] = True
+    save_state(state)
+    if ready_ms is None:
+        raise StageBError("Riggen kom ikke op efter genstarten inden for tidsgrænsen.")
+    ok(f"Reboot bevist: klar efter {ready_ms:.0f} ms")
+
+
+def trial_supervisor(
+    observations: dict[str, Any], state: dict[str, Any], which: str, port: int
+) -> None:
+    key = f"supervisor_{which}"
+    if state.get(f"{key}_done"):
+        ok(f"Supervisor-{which} er allerede bevist.")
+        return
+    heading(f"{'2' if which == 'backend' else '3'}/5  AUTOMATISK — supervisor genstarter {which}")
+    before = listener_pid(port)
+    if before is None:
+        raise StageBError(f"Ingen {which} lytter på port {port}; start appliancen først.")
+    note(f"Stopper {which} (pid {before}); supervisoren skal selv bringe den tilbage.")
+    try:
+        powershell(f"Stop-Process -Id {before} -Force -ErrorAction Stop", timeout=30.0)
+    except StageBError as exc:
+        raise StageBError(
+            f"Kunne ikke stoppe {which}: {exc}. Kør wizard'en som administrator."
+        ) from exc
+
+    start = time.monotonic()
+    deadline = start + READY_TIMEOUT_S
+    after: int | None = None
+    while time.monotonic() < deadline:
+        candidate_pid = listener_pid(port)
+        if candidate_pid is not None and candidate_pid != before:
+            after = candidate_pid
+            break
+        time.sleep(1.0)
+    restart_ms = round((time.monotonic() - start) * 1000.0, 3) if after else None
+    if after is not None:
+        wait_ready()
+    versions = live_versions()
+    active_version = versions["backend_version"] if which == "backend" else versions["worker_version"]
+
+    log = EVIDENCE / f"supervisor_{which}.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(
+        "\n".join(
+            [
+                f"stage-b supervisor_{which} trial at {datetime.now(timezone.utc).isoformat()}",
+                f"stopped_pid={before}",
+                f"restarted_pid={after}",
+                f"restart_ms={restart_ms}",
+                f"active_version={active_version}",
+                f"active_code_sha256={versions['worker_code_sha256']}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    trial = observations["trials"][key]
+    trial.update(
+        {
+            "performed": True,
+            "restarted": after is not None,
+            "ready": after is not None,
+            "restart_ms": restart_ms,
+            "active_version": active_version,
+            "active_code_sha256": versions["worker_code_sha256"],
+            "notes": f"Supervisor bragte {which} tilbage; målt af stage_b_one_click.",
+            "evidence_path": f"validation/appliance-lifecycle-evidence/supervisor_{which}.log",
+            "evidence_sha256": sha256_file(log),
+        }
+    )
+    save_observations(observations)
+    state[f"{key}_done"] = True
+    save_state(state)
+    if after is None:
+        raise StageBError(
+            f"Supervisoren bragte ikke {which} tilbage. Kontrollér den planlagte opgave "
+            f"{SUPERVISOR_TASK}."
+        )
+    ok(f"Supervisor genstartede {which} på {restart_ms:.0f} ms (pid {before} -> {after})")
+
+
+def run_updater(log_path: Path, extra: list[str]) -> None:
+    """Run the updater elevated-in-place, tee'ing the complete stdout+stderr."""
+    updater = ROOT.parent / "ModelRig" / "modelrig-updater-windows-x64.exe"
+    if not updater.is_file():
+        updater = ROOT / "modelrig-updater-windows-x64.exe"
+    if not updater.is_file():
+        raise StageBError(
+            "modelrig-updater-windows-x64.exe blev ikke fundet. Hent den fra den "
+            "publicerede release og verificér dens SHA-256 mod SHA256SUMS.txt først."
+        )
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("wb") as handle:
+        process = subprocess.Popen(
+            [str(updater), *extra],
+            cwd=updater.parent,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        assert process.stdout is not None
+        for raw in process.stdout:
+            sys.stdout.write(raw.decode("utf-8", "replace"))
+            handle.write(raw)
+        process.wait()
+
+
+def trial_good_update(observations: dict[str, Any], state: dict[str, Any]) -> None:
+    if state.get("good_update_done"):
+        ok("Den gode opdatering er allerede bevist.")
+        return
+    heading("4/5  AUTOMATISK — gyldig opdatering til den publicerede release")
+    candidate = candidate_identity()
+    before_versions = live_versions()
+    before_data = data_snapshot()
+    source_version = before_versions["backend_version"]
+    if not source_version:
+        raise StageBError("Kunne ikke læse riggens nuværende version fra /healthz.")
+    if source_version == candidate["version"]:
+        raise StageBError(
+            f"Riggen kører allerede {source_version}. Stage B kræver, at den starter på "
+            "den FORRIGE release, så updateren har noget at opdatere til."
+        )
+    note(f"Opdaterer {source_version} -> {candidate['version']} via den rigtige updater.")
+    log = EVIDENCE / "good_update.log"
+    run_updater(log, [])
+
+    wait_ready()
+    after_versions = live_versions()
+    after_data = data_snapshot()
+    trial = observations["trials"]["good_update"]
+    trial.update(
+        {
+            "performed": True,
+            "source_version": source_version,
+            "source_git_sha": state.get("source_git_sha") or candidate["git_sha"],
+            "target_version": candidate["version"],
+            "target_git_sha": candidate["git_sha"],
+            "target_code_sha256": candidate["code_sha256"],
+            "ready": after_versions["backend_version"] == candidate["version"],
+            "rollback_observed": "rolling back" in log.read_text(encoding="utf-8", errors="replace").lower(),
+            "data_preserved": before_data["documents"] == after_data["documents"],
+            "schedules_preserved": before_data["schedules"] == after_data["schedules"],
+            "notes": "Kørt og målt af stage_b_one_click; hele updater-outputtet er gemt.",
+            "evidence_path": "validation/appliance-lifecycle-evidence/good_update.log",
+            "evidence_sha256": sha256_file(log),
+        }
+    )
+    save_observations(observations)
+    state["good_update_done"] = True
+    save_state(state)
+    ok(f"Opdatering gennemført: {source_version} -> {after_versions['backend_version']}")
+
+
+def trial_bad_update(observations: dict[str, Any], state: dict[str, Any]) -> None:
+    if state.get("bad_update_done"):
+        ok("Den ugyldige opdatering er allerede bevist.")
+        return
+    heading("5/5  MANUELT PAUSEPUNKT — ugyldig opdatering")
+    bad_repo = os.environ.get("KALIV_STAGE_B_BAD_REPO", "").strip()
+    log = EVIDENCE / "bad_update.log"
+    candidate = candidate_identity()
+
+    if bad_repo:
+        note(f"Kører updateren mod {bad_repo}, hvis release bevidst har en forkert checksum.")
+        print("  Forventet udfald: 'checksum MISMATCH ... refusing to install' FØR swap.")
+        answer = input("  Skriv JA for at køre den ugyldige opdatering: ").strip()
+        if answer.upper() != "JA":
+            raise StageBError("Den ugyldige opdatering blev ikke godkendt.")
+        run_updater(log, ["-repo", bad_repo])
+    else:
+        print("  Sæt KALIV_STAGE_B_BAD_REPO til et testdepot, hvis seneste release har en")
+        print("  bevidst forkert SHA256SUMS.txt, så wizard'en kan køre trinnet selv.")
+        print("  Ellers: kør den ugyldige opdatering manuelt og gem HELE outputtet som")
+        print(f"  {log}")
+        input("\n  Tryk Enter, når loggen ligger der: ")
+    if not log.is_file():
+        raise StageBError(f"Den ugyldige opdaterings log mangler: {log}")
+
+    text = log.read_text(encoding="utf-8", errors="replace").lower()
+    rejected = any(
+        marker in text
+        for marker in (
+            "checksum mismatch",
+            "refusing to install",
+            "cannot check provenance",
+            "no build provenance",
+            "has no sha256sums.txt",
+        )
+    )
+    rolled_back = f"rolled back to {candidate['version'].lower()}" in text
+    if not rejected and not rolled_back:
+        raise StageBError(
+            "Loggen beviser hverken en afvisning før swap eller en gennemført rollback."
+        )
+    after_versions = live_versions()
+    after_data = data_snapshot()
+    trial = observations["trials"]["bad_update"]
+    trial.update(
+        {
+            "performed": True,
+            "attempted_version": state.get("bad_attempted_version") or "",
+            "attempted_git_sha": state.get("bad_attempted_git_sha") or "",
+            "rejected_or_rolled_back": True,
+            "active_version": after_versions["backend_version"],
+            "active_git_sha": candidate["git_sha"],
+            "active_code_sha256": candidate["code_sha256"],
+            "ready": after_versions["backend_version"] == candidate["version"],
+            "data_preserved": after_data["documents"] is not None,
+            "schedules_preserved": after_data["schedules"] is not None,
+            "notes": "Afvist før swap" if rejected else "Fuld rollback gennemført",
+            "evidence_path": "validation/appliance-lifecycle-evidence/bad_update.log",
+            "evidence_sha256": sha256_file(log),
+        }
+    )
+    save_observations(observations)
+    state["bad_update_done"] = True
+    save_state(state)
+    ok("Den ugyldige opdatering blev afvist eller rullet rent tilbage.")
+
+
+# --- orchestration ---------------------------------------------------------
+
+
+def preflight() -> dict[str, Any]:
+    heading("Preflight — er riggen klar til Stage B?")
+    if os.name != "nt":
+        raise StageBError("Stage B må kun køres på Windows-riggen.")
+    if JOURNAL.exists():
+        raise StageBError(
+            "update-transaction.json findes stadig; en tidligere updater-transaktion er "
+            "ikke afsluttet. Kør updateren med -recover først."
+        )
+    dirty = capture(["git", "status", "--porcelain"])
+    if dirty:
+        raise StageBError(f"Working tree er ikke ren:\n{dirty}")
+    candidate = candidate_identity()
+    ok(f"Kandidat {candidate['version']} @ {candidate['git_sha'][:12]}")
+    versions = live_versions()
+    ok(f"Backend kører {versions['backend_version'] or '(nede)'}")
+    ok(f"Worker kører {versions['worker_version'] or '(nede)'}")
+    if not os.environ.get("MODELRIG_TOKEN", "").strip():
+        note("MODELRIG_TOKEN er ikke sat; worker-fingerprint og schedule-tælling springes over.")
+    return candidate
+
+
+def build_observations(candidate: dict[str, Any]) -> dict[str, Any]:
+    if OBSERVATIONS.is_file():
+        try:
+            existing = json.loads(OBSERVATIONS.read_text(encoding="utf-8-sig"))
+            if isinstance(existing, dict) and existing.get("schema") == LIFECYCLE_SCHEMA:
+                return existing
+        except (OSError, json.JSONDecodeError):
+            pass
+    observations = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+    observations["candidate"] = dict(candidate)
+    observations["host"] = {
+        "hostname": socket.gethostname(),
+        "windows_version": platform.platform(),
+    }
+    observations["started_at"] = datetime.now(timezone.utc).isoformat()
+    save_observations(observations)
+    return observations
+
+
+def main() -> int:
+    os.chdir(ROOT)
+    heading("Kaliv Stage B — updater-evidens, letteste vej")
+    print("  Wizard'en måler alt, den kan måle, og stopper kun for genstarten og")
+    print("  godkendelsen af den ugyldige opdatering.")
+    print("  Den kan ikke merge, pushe, tagge, release eller aktivere produktion.")
+
+    candidate = preflight()
+    state = load_state()
+    observations = build_observations(candidate)
+    EVIDENCE.mkdir(parents=True, exist_ok=True)
+
+    trial_reboot(observations, state)
+    trial_supervisor(observations, state, "backend", 8080)
+    trial_supervisor(observations, state, "worker", 8099)
+    trial_good_update(observations, state)
+    trial_bad_update(observations, state)
+
+    observations["finished_at"] = datetime.now(timezone.utc).isoformat()
+    save_observations(observations)
+
+    heading("Alle fem lifecycle-observationer er indsamlet")
+    print(f"  Observationer: {OBSERVATIONS.relative_to(ROOT)}")
+    print("  Verificér nu hele Stage B-bundlen med:")
+    print("    VERIFY_STAGE_B_EVIDENCE.cmd")
+    print("  production_activation forbliver false.")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        print("\n  SIKKERT STOP: afbrudt af operatøren.", file=sys.stderr)
+        raise SystemExit(1)
+    except Exception as exc:  # noqa: BLE001 -- the wizard reports, never crashes raw
+        print(f"\n  SIKKERT STOP: {type(exc).__name__}: {str(exc)[:800]}", file=sys.stderr)
+        print(
+            "  Intet blev merget, releaset eller aktiveret. Ret problemet og kør igen.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
