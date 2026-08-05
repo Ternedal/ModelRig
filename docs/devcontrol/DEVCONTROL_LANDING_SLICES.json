@@ -1,6 +1,6 @@
 {
-  "schema": "modelrig-devcontrol-landing-decomposition/v1",
-  "status": "preflight_only",
+  "schema": "modelrig-devcontrol-landing-decomposition/v2",
+  "status": "preflight_only_dependency_corrected",
   "source": {
     "repository": "Ternedal/ModelRig",
     "pull_request": 338,
@@ -17,6 +17,7 @@
     "stacked_pull_requests_forbidden": true,
     "fresh_current_main_branch_required": true,
     "future_slice_dependency_forbidden": true,
+    "literal_source_path_disposition_required_before_dc_l01": true,
     "human_terminal_authority": true,
     "remote_publication_requires_new_adr": true,
     "physical_evidence_stale_until_final_freeze": true,
@@ -28,14 +29,21 @@
     "devcontrol/pyproject.toml",
     "devcontrol/src/kaliv_dev_control/__init__.py",
     "devcontrol/src/kaliv_dev_control/__main__.py",
+    "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
     "tests/workflow_test_coverage.py",
     "worker/requirements.txt"
   ],
+  "deferred_until_dependency_complete": {
+    "devcontrol/src/kaliv_dev_control/tier_a_execution.py": "DC-L09"
+  },
   "required_slice_artifacts": [
     "preflight.md",
     "exact-path-allowlist.json",
     "symbol-ownership.json",
     "source-provenance.json",
+    "source-path-disposition.json",
     "exact-head-validation.md",
     "mutation-results.md",
     "independent-review-verdict.md"
@@ -43,6 +51,7 @@
   "common_gates": [
     "exact_base_head",
     "exact_path_allowlist",
+    "all_source_paths_have_exactly_one_disposition",
     "exact_symbol_ownership",
     "source_blob_provenance",
     "no_future_slice_imports",
@@ -62,13 +71,20 @@
       "kind": "documentation",
       "scope": [
         "docs/devcontrol/DEVCONTROL_LANDING_DECOMPOSITION_PREFLIGHT.md",
-        "docs/devcontrol/DEVCONTROL_LANDING_SLICES.json"
+        "docs/devcontrol/DEVCONTROL_LANDING_SLICES.json",
+        "docs/devcontrol/DEVCONTROL_SOURCE_PATH_DISPOSITION.json"
+      ],
+      "ready_blockers": [
+        "literal_219_path_disposition_missing",
+        "independent_exact_head_review_missing"
       ]
     },
     {
       "id": "DC-L01",
       "title": "Task, scope, workspace and bounded command foundation",
-      "depends_on": ["DC-L00"],
+      "depends_on": [
+        "DC-L00"
+      ],
       "kind": "software",
       "scope_families": [
         "contract.py",
@@ -85,15 +101,20 @@
     {
       "id": "DC-L02",
       "title": "Durable campaign, store and structural review",
-      "depends_on": ["DC-L01"],
+      "depends_on": [
+        "DC-L01"
+      ],
       "kind": "software",
       "scope_families": [
         "durable_publication.py",
-        "streaming_publication.py",
         "campaign.py",
         "store.py",
         "review.py",
-        "proposal.py"
+        "proposal.py",
+        "campaign/store/review/proposal schemas and tests"
+      ],
+      "hard_exclusions": [
+        "streaming_publication.py"
       ],
       "required_finding_closures": [
         "campaign_store_stale_lock_recovery",
@@ -103,14 +124,24 @@
     {
       "id": "DC-L03",
       "title": "Immutable catalog and GET-only GitHub boundary",
-      "depends_on": ["DC-L01", "DC-L02"],
+      "depends_on": [
+        "DC-L01",
+        "DC-L02"
+      ],
       "kind": "software",
-      "scope_families": ["catalog.py", "github_read.py", "slice5 schemas and tests"]
+      "scope_families": [
+        "catalog.py",
+        "github_read.py",
+        "slice5 schemas and tests"
+      ]
     },
     {
       "id": "DC-L04",
       "title": "Signed physical Windows evidence contract",
-      "depends_on": ["DC-L02", "DC-L03"],
+      "depends_on": [
+        "DC-L02",
+        "DC-L03"
+      ],
       "kind": "software",
       "scope_families": [
         "physical_isolation.py",
@@ -122,7 +153,9 @@
     {
       "id": "DC-L05",
       "title": "Native Windows containment substrate",
-      "depends_on": ["DC-L00"],
+      "depends_on": [
+        "DC-L00"
+      ],
       "kind": "software",
       "scope_families": [
         "worker/app/windows_*.py",
@@ -137,7 +170,11 @@
     {
       "id": "DC-L06",
       "title": "Tier-A authority identities and materialization",
-      "depends_on": ["DC-L03", "DC-L04", "DC-L05"],
+      "depends_on": [
+        "DC-L03",
+        "DC-L04",
+        "DC-L05"
+      ],
       "kind": "software",
       "scope_families": [
         "_tier_a_lease.py",
@@ -145,56 +182,82 @@
         "_tier_a_path_authority.py",
         "_tier_a_materialization.py",
         "_tier_a_legacy_toolhost.py",
-        "_tier_a_legacy_plan.py"
+        "_tier_a_legacy_plan.py",
+        "projected _tier_a_execution_core.py",
+        "projected tier_a_authority.py"
       ],
-      "hard_exclusions": ["supported process-launch entrypoint"]
-    },
-    {
-      "id": "DC-L07",
-      "title": "Verified-only Tier-A execution and result evidence",
-      "depends_on": ["DC-L06"],
-      "kind": "software",
-      "scope_families": [
-        "_tier_a_legacy_runner.py",
-        "_tier_a_execution_core.py",
-        "tier_a_authority.py",
-        "tier_a_plan.py",
-        "tier_a_execution_v3.py",
-        "tier_a_execution.py",
-        "tier_a_result.py"
+      "hard_exclusions": [
+        "supported process-launch entrypoint"
       ]
     },
     {
-      "id": "DC-L08",
-      "title": "Deterministic runtime staging, closure and lifetime guard",
-      "depends_on": ["DC-L07"],
+      "id": "DC-L07",
+      "title": "Deterministic runtime staging, closure, plan and result evidence",
+      "depends_on": [
+        "DC-L06"
+      ],
       "kind": "software",
       "scope_families": [
+        "streaming_publication.py",
         "runtime_staging.py",
         "_runtime_closure_common.py",
         "runtime_closure_*.py",
+        "tier_a_plan.py",
+        "tier_a_result.py",
         "backend/cmd/modelrig-version-check/**",
+        "stage-local Tier-A progressive surfaces",
         "slice10A-F schemas and tests"
       ],
       "required_finding_closures": [
         "streaming_permission_metadata_durability"
+      ],
+      "hard_exclusions": [
+        "legacy or modern executor"
+      ]
+    },
+    {
+      "id": "DC-L08",
+      "title": "Verified-only Tier-A execution",
+      "depends_on": [
+        "DC-L07"
+      ],
+      "kind": "software",
+      "scope_families": [
+        "_tier_a_legacy_runner.py",
+        "tier_a_execution_v3.py",
+        "execution-stage _tier_a_execution_core.py",
+        "execution-stage _tier_a_legacy_toolhost.py",
+        "execution-stage tier_a_authority.py",
+        "native execution tests"
+      ],
+      "hard_exclusions": [
+        "tier_a_command_receipt.py",
+        "final tier_a_execution.py"
       ]
     },
     {
       "id": "DC-L09",
-      "title": "Trusted Git runtime and Git-aware execution receipt",
-      "depends_on": ["DC-L08"],
+      "title": "Trusted Git runtime, command receipt and final public execution facade",
+      "depends_on": [
+        "DC-L08"
+      ],
       "kind": "software",
       "scope_families": [
         "trusted_git_runtime*.py",
         "tier_a_command_receipt.py",
+        "tier_a_execution.py",
         "trusted Git and Slice 10G schemas/tests"
+      ],
+      "hard_exclusions": [
+        "remote Git or credential mechanism"
       ]
     },
     {
       "id": "DC-L10",
       "title": "Asymmetric authority and independent semantic review",
-      "depends_on": ["DC-L09"],
+      "depends_on": [
+        "DC-L09"
+      ],
       "kind": "software",
       "scope_families": [
         "asymmetric_authority.py",
@@ -206,19 +269,25 @@
     {
       "id": "DC-L11",
       "title": "Draft readiness and publisher dry-run intent",
-      "depends_on": ["DC-L10"],
+      "depends_on": [
+        "DC-L10"
+      ],
       "kind": "software",
       "scope_families": [
         "draft_pr_readiness.py",
         "publisher_dry_run.py",
         "readiness/request/dry-run schemas/tests"
       ],
-      "hard_exclusions": ["Git, HTTP, credential or remote mutation adapter"]
+      "hard_exclusions": [
+        "Git, HTTP, credential or remote mutation adapter"
+      ]
     },
     {
       "id": "DC-L12",
       "title": "One-time authorization, replay and authenticated recovery",
-      "depends_on": ["DC-L11"],
+      "depends_on": [
+        "DC-L11"
+      ],
       "kind": "software",
       "scope_families": [
         "publisher_authorization*.py",
@@ -233,14 +302,18 @@
     {
       "id": "DC-L13",
       "title": "Local-only candidate materialization",
-      "depends_on": ["DC-L12"],
+      "depends_on": [
+        "DC-L12"
+      ],
       "kind": "software",
       "scope_families": [
         "local_candidate_materialization.py",
         "local_candidate_materialization_h5c.py",
         "local candidate schemas/tests"
       ],
-      "hard_exclusions": ["remote, push, network fetch, credential helper, signing"]
+      "hard_exclusions": [
+        "remote, push, network fetch, credential helper, signing"
+      ]
     },
     {
       "id": "DC-L14",
@@ -262,7 +335,7 @@
       ],
       "kind": "software",
       "scope_families": [
-        "final package surfaces",
+        "final progressive package surfaces",
         "authority bundle inventory",
         "core split contract v9",
         "protocol inventory",
@@ -277,7 +350,9 @@
     {
       "id": "DC-L15",
       "title": "Fresh physical I0b campaign and pilot decision packet",
-      "depends_on": ["DC-L14"],
+      "depends_on": [
+        "DC-L14"
+      ],
       "kind": "physical_validation",
       "hard_exclusions": [
         "automatic activation",
