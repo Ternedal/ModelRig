@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""Generate the exact, reviewable Tier-A authority-bundle inventory."""
+"""Generate and verify the reviewable Tier-A authority-bundle inventory."""
 from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable
+from typing import Any
 
 SCHEMA = "kaliv-tier-a-bundle-inventory/v1"
+LOCK_SCHEMA = "kaliv-tier-a-bundle-inventory-lock/v1"
 BUNDLE_SOURCE = "devcontrol/src/kaliv_dev_control/tier_a_authority.py"
-SNAPSHOT_PATH = "devcontrol/TIER_A_BUNDLE_INVENTORY.json"
+LOCK_PATH = "devcontrol/TIER_A_BUNDLE_INVENTORY.json"
 MARKDOWN_PATH = "devcontrol/TIER_A_BUNDLE_INVENTORY.md"
 RESPONSIBILITIES = (
     "canonicalization",
@@ -18,12 +20,6 @@ RESPONSIBILITIES = (
     "path_validation",
     "publication",
 )
-
-
-def _physical_line_count(text: str) -> int:
-    if not text:
-        return 0
-    return text.count("\n") + (0 if text.endswith("\n") else 1)
 
 
 def _bundle_paths(root: Path) -> tuple[str, ...]:
@@ -48,124 +44,112 @@ def _bundle_paths(root: Path) -> tuple[str, ...]:
     raise ValueError("_TIER_A_BUNDLE_FILES was not found")
 
 
-def _module_name(relative: str) -> tuple[str, bool]:
-    path = PurePosixPath(relative)
-    if path.parts[:3] == ("devcontrol", "src", "kaliv_dev_control"):
-        tail = path.parts[3:]
-        package = "kaliv_dev_control"
-    elif path.parts[:2] == ("worker", "app"):
-        tail = path.parts[2:]
-        package = "app"
+def _module_info(relative: str) -> tuple[str, bool]:
+    parts = PurePosixPath(relative).parts
+    if parts[:3] == ("devcontrol", "src", "kaliv_dev_control"):
+        package, tail = "kaliv_dev_control", parts[3:]
+    elif parts[:2] == ("worker", "app"):
+        package, tail = "app", parts[2:]
     else:
         raise ValueError(f"unsupported Tier-A bundle source root: {relative}")
-    if not tail:
-        raise ValueError(f"bundle path does not name a Python source: {relative}")
-    filename = tail[-1]
-    if not filename.endswith(".py"):
+    if not tail or not tail[-1].endswith(".py"):
         raise ValueError(f"bundle path is not Python source: {relative}")
-    is_package = filename == "__init__.py"
-    module_parts = list(tail[:-1])
+    is_package = tail[-1] == "__init__.py"
+    module_tail = list(tail[:-1])
     if not is_package:
-        module_parts.append(filename[:-3])
-    return ".".join((package, *module_parts)), is_package
-
-
-def _relative_base(current_module: str, is_package: bool, level: int) -> str:
-    base = current_module if is_package else current_module.rpartition(".")[0]
-    parts = base.split(".") if base else []
-    ascend = max(level - 1, 0)
-    if ascend > len(parts):
-        return ""
-    return ".".join(parts[: len(parts) - ascend])
+        module_tail.append(tail[-1][:-3])
+    return ".".join((package, *module_tail)), is_package
 
 
 def _local_imports(
     tree: ast.Module,
-    *,
     current_module: str,
     is_package: bool,
     bundle_modules: set[str],
-) -> tuple[str, ...]:
+) -> list[str]:
     targets: set[str] = set()
+    current_package = (
+        current_module if is_package else current_module.rpartition(".")[0]
+    )
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name in bundle_modules:
-                    targets.add(alias.name)
-        elif isinstance(node, ast.ImportFrom):
-            if node.level:
-                base = _relative_base(current_module, is_package, node.level)
-                module = ".".join(
-                    part for part in (base, node.module or "") if part
-                )
-            else:
-                module = node.module or ""
-            if module in bundle_modules:
-                targets.add(module)
-            for alias in node.names:
-                if alias.name == "*":
-                    continue
-                candidate = ".".join(
-                    part for part in (module, alias.name) if part
-                )
-                if candidate in bundle_modules:
-                    targets.add(candidate)
+            targets.update(
+                alias.name
+                for alias in node.names
+                if alias.name in bundle_modules
+            )
+            continue
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if node.level:
+            package_parts = (
+                current_package.split(".") if current_package else []
+            )
+            ascend = node.level - 1
+            base = ".".join(
+                package_parts[: len(package_parts) - ascend]
+            )
+            module = ".".join(
+                part for part in (base, node.module or "") if part
+            )
+        else:
+            module = node.module or ""
+        if module in bundle_modules:
+            targets.add(module)
+        for alias in node.names:
+            candidate = ".".join(
+                part for part in (module, alias.name) if part
+            )
+            if alias.name != "*" and candidate in bundle_modules:
+                targets.add(candidate)
     targets.discard(current_module)
-    return tuple(sorted(targets))
+    return sorted(targets)
 
 
 def _call_name(node: ast.Call) -> str:
-    function = node.func
-    if isinstance(function, ast.Name):
-        return function.id
-    if isinstance(function, ast.Attribute):
-        parts = [function.attr]
-        value = function.value
-        while isinstance(value, ast.Attribute):
-            parts.append(value.attr)
-            value = value.value
-        if isinstance(value, ast.Name):
-            parts.append(value.id)
-        return ".".join(reversed(parts))
-    return ""
+    current = node.func
+    parts: list[str] = []
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if isinstance(current, ast.Name):
+        parts.append(current.id)
+    return ".".join(reversed(parts))
 
 
-def _identifier_names(tree: ast.Module) -> set[str]:
-    names: set[str] = set()
+def _responsibilities(tree: ast.Module) -> list[str]:
+    identifiers: set[str] = set()
+    calls: set[str] = set()
+    definitions: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Name):
-            names.add(node.id)
+            identifiers.add(node.id.lower())
         elif isinstance(node, ast.Attribute):
-            names.add(node.attr)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.add(node.name)
+            identifiers.add(node.attr.lower())
         elif isinstance(node, ast.alias):
-            names.add(node.name)
-    return names
+            identifiers.add(node.name.lower())
+        elif isinstance(
+            node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        ):
+            definitions.add(node.name.lower())
+            identifiers.add(node.name.lower())
+        elif isinstance(node, ast.Call):
+            calls.add(_call_name(node).lower())
+    leaves = {call.rsplit(".", 1)[-1] for call in calls if call}
+    result: list[str] = []
 
-
-def _responsibility_signals(tree: ast.Module) -> tuple[str, ...]:
-    identifiers = {name.lower() for name in _identifier_names(tree)}
-    calls = {
-        _call_name(node).lower()
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-    }
-    call_leaves = {name.rsplit(".", 1)[-1] for name in calls if name}
-    responsibilities: list[str] = []
-
-    has_canonical_name = any("canonical" in name for name in identifiers)
-    has_canonical_json_dump = any(
+    canonical_dump = any(
         isinstance(node, ast.Call)
         and _call_name(node).lower().endswith("json.dumps")
         and {keyword.arg for keyword in node.keywords if keyword.arg}
         & {"sort_keys", "separators"}
         for node in ast.walk(tree)
     )
-    if has_canonical_name or has_canonical_json_dump:
-        responsibilities.append("canonicalization")
-
-    if "hashlib" in identifiers or call_leaves & {
+    if canonical_dump or any(
+        "canonical" in name for name in identifiers
+    ):
+        result.append("canonicalization")
+    if "hashlib" in identifiers or leaves & {
         "sha1",
         "sha224",
         "sha256",
@@ -174,8 +158,7 @@ def _responsibility_signals(tree: ast.Module) -> tuple[str, ...]:
         "blake2b",
         "blake2s",
     }:
-        responsibilities.append("hashing")
-
+        result.append("hashing")
     path_tokens = (
         "linkish",
         "symlink",
@@ -185,8 +168,9 @@ def _responsibility_signals(tree: ast.Module) -> tuple[str, ...]:
         "pureposixpath",
     )
     if any(
-        any(token in name for token in path_tokens) for name in identifiers
-    ) or call_leaves & {
+        any(token in name for token in path_tokens)
+        for name in identifiers
+    ) or leaves & {
         "is_symlink",
         "is_junction",
         "resolve",
@@ -194,77 +178,64 @@ def _responsibility_signals(tree: ast.Module) -> tuple[str, ...]:
         "lstat",
         "samefile",
     }:
-        responsibilities.append("path_validation")
-
-    publication_calls = {
-        "create_once_file",
-        "publish_stream_once",
-        "rename_directory_no_replace",
-        "mkstemp",
-        "namedtemporaryfile",
-        "replace",
-        "link",
-        "fsync",
-    }
-    publication_definitions = any(
-        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-        and (
-            "publish" in node.name.lower()
-            or "stager" in node.name.lower()
-            or node.name.lower().startswith("write_")
-        )
-        for node in ast.walk(tree)
-    )
+        result.append("path_validation")
     if (
         any("publication" in name for name in identifiers)
-        or bool(call_leaves & publication_calls)
-        or publication_definitions
+        or leaves
+        & {
+            "create_once_file",
+            "publish_stream_once",
+            "rename_directory_no_replace",
+            "mkstemp",
+            "namedtemporaryfile",
+            "replace",
+            "link",
+            "fsync",
+        }
+        or any(
+            "publish" in name
+            or "stager" in name
+            or name.startswith("write_")
+            for name in definitions
+        )
     ):
-        responsibilities.append("publication")
-
-    return tuple(responsibilities)
+        result.append("publication")
+    return result
 
 
 def build_inventory(root: Path) -> dict[str, Any]:
     root = root.resolve()
-    bundle_paths = _bundle_paths(root)
-    module_map = {relative: _module_name(relative) for relative in bundle_paths}
-    bundle_modules = {module for module, _ in module_map.values()}
+    paths = _bundle_paths(root)
+    modules = {relative: _module_info(relative) for relative in paths}
+    module_names = {module for module, _ in modules.values()}
     files: list[dict[str, Any]] = []
-
-    for relative in bundle_paths:
-        path = root / PurePosixPath(relative)
-        payload = path.read_bytes()
+    for relative in paths:
+        payload = (root / PurePosixPath(relative)).read_bytes()
         text = payload.decode("utf-8")
         tree = ast.parse(text, filename=relative)
-        current_module, is_package = module_map[relative]
-        local_imports = _local_imports(
-            tree,
-            current_module=current_module,
-            is_package=is_package,
-            bundle_modules=bundle_modules,
-        )
-        top_level_classes = sum(
-            isinstance(node, ast.ClassDef) for node in tree.body
-        )
-        top_level_functions = sum(
-            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            for node in tree.body
-        )
+        module, is_package = modules[relative]
+        imports = _local_imports(tree, module, is_package, module_names)
         files.append(
             {
                 "path": relative,
                 "bytes": len(payload),
-                "physical_lines": _physical_line_count(text),
-                "top_level_classes": top_level_classes,
-                "top_level_functions": top_level_functions,
-                "local_import_fan_out": len(local_imports),
-                "local_imports": list(local_imports),
-                "responsibilities": list(_responsibility_signals(tree)),
+                "physical_lines": text.count("\n")
+                + (1 if text and not text.endswith("\n") else 0),
+                "top_level_classes": sum(
+                    isinstance(node, ast.ClassDef) for node in tree.body
+                ),
+                "top_level_functions": sum(
+                    isinstance(
+                        node, (ast.FunctionDef, ast.AsyncFunctionDef)
+                    )
+                    for node in tree.body
+                ),
+                "local_import_fan_out": len(imports),
+                "local_imports": imports,
+                "responsibilities": _responsibilities(tree),
             }
         )
-
-    responsibility_summary = {
+    summary = {
         responsibility: [
             item["path"]
             for item in files
@@ -278,7 +249,9 @@ def build_inventory(root: Path) -> dict[str, Any]:
         "file_count": len(files),
         "totals": {
             "bytes": sum(item["bytes"] for item in files),
-            "physical_lines": sum(item["physical_lines"] for item in files),
+            "physical_lines": sum(
+                item["physical_lines"] for item in files
+            ),
             "top_level_classes": sum(
                 item["top_level_classes"] for item in files
             ),
@@ -289,25 +262,15 @@ def build_inventory(root: Path) -> dict[str, Any]:
                 item["local_import_fan_out"] for item in files
             ),
         },
-        "responsibility_summary": responsibility_summary,
+        "responsibility_summary": summary,
         "files": files,
     }
 
 
-def render_json(inventory: dict[str, Any]) -> str:
+def render_json(value: dict[str, Any]) -> str:
     return json.dumps(
-        inventory,
-        ensure_ascii=False,
-        sort_keys=True,
-        indent=2,
+        value, ensure_ascii=False, sort_keys=True, indent=2
     ) + "\n"
-
-
-def _markdown_list(paths: Iterable[str]) -> str:
-    values = list(paths)
-    if not values:
-        return "- None\n"
-    return "".join(f"- `{path}`\n" for path in values)
 
 
 def render_markdown(inventory: dict[str, Any]) -> str:
@@ -317,7 +280,7 @@ def render_markdown(inventory: dict[str, Any]) -> str:
         "",
         f"Schema: `{inventory['schema']}`",
         "",
-        "This file is generated from the exact `_TIER_A_BUNDLE_FILES` tuple in "
+        "This report is generated from the exact `_TIER_A_BUNDLE_FILES` tuple in "
         f"`{inventory['bundle_source']}`. It records measurements only; it does "
         "not enforce size, line-count, complexity or fan-out thresholds.",
         "",
@@ -325,15 +288,17 @@ def render_markdown(inventory: dict[str, Any]) -> str:
         "",
         "| Files | Bytes | Physical lines | Top-level classes | Top-level functions | Local import edges |",
         "|---:|---:|---:|---:|---:|---:|",
-        (
-            f"| {inventory['file_count']} | {totals['bytes']} | "
-            f"{totals['physical_lines']} | {totals['top_level_classes']} | "
-            f"{totals['top_level_functions']} | {totals['local_import_edges']} |"
-        ),
+        f"| {inventory['file_count']} | {totals['bytes']} | "
+        f"{totals['physical_lines']} | {totals['top_level_classes']} | "
+        f"{totals['top_level_functions']} | "
+        f"{totals['local_import_edges']} |",
         "",
         "## Per-file measurements",
         "",
-        "Local import fan-out counts distinct direct imports that resolve to another file in the exact bundle.",
+        "Local import fan-out counts distinct direct imports that resolve to "
+        "another file in the exact bundle. Responsibility signals are "
+        "deterministic syntactic indicators for split planning, not claims "
+        "that every listed implementation is equivalent.",
         "",
         "| Path | Bytes | Lines | Classes | Functions | Fan-out | Responsibility signals |",
         "|---|---:|---:|---:|---:|---:|---|",
@@ -341,40 +306,28 @@ def render_markdown(inventory: dict[str, Any]) -> str:
     for item in inventory["files"]:
         responsibilities = ", ".join(item["responsibilities"]) or "—"
         lines.append(
-            f"| `{item['path']}` | {item['bytes']} | {item['physical_lines']} | "
-            f"{item['top_level_classes']} | {item['top_level_functions']} | "
+            f"| `{item['path']}` | {item['bytes']} | "
+            f"{item['physical_lines']} | {item['top_level_classes']} | "
+            f"{item['top_level_functions']} | "
             f"{item['local_import_fan_out']} | {responsibilities} |"
         )
-
     lines.extend(
         [
             "",
             "## Duplicated responsibility signals",
             "",
-            "These are deterministic syntactic signals for review and split planning, not claims that every listed implementation is equivalent.",
-            "",
+            "| Responsibility | Files with signal |",
+            "|---|---:|",
         ]
     )
-    titles = {
-        "canonicalization": "Canonicalization",
-        "hashing": "Hashing",
-        "path_validation": "Path validation",
-        "publication": "Publication",
-    }
     for responsibility in RESPONSIBILITIES:
-        lines.extend(
-            [
-                f"### {titles[responsibility]}",
-                "",
-                _markdown_list(
-                    inventory["responsibility_summary"][responsibility]
-                ).rstrip("\n"),
-                "",
-            ]
+        lines.append(
+            f"| {responsibility.replace('_', ' ').title()} | "
+            f"{len(inventory['responsibility_summary'][responsibility])} |"
         )
-
     lines.extend(
         [
+            "",
             "## Signal rules",
             "",
             "- **Canonicalization:** canonical-named definitions/references or `json.dumps` calls that explicitly request sorted keys or compact separators.",
@@ -382,38 +335,69 @@ def render_markdown(inventory: dict[str, Any]) -> str:
             "- **Path validation:** link/junction/symlink, relative-path, canonical-directory or physical resolution checks.",
             "- **Publication:** shared publication primitives, temporary-file/link/replace/fsync calls, or publish/stager/write definitions.",
             "",
-            f"The canonical machine-readable snapshot is `{SNAPSHOT_PATH}`.",
+            "Run `python scripts/tier_a_bundle_inventory.py --format json` for "
+            "the full machine-readable inventory, including direct local-import "
+            "targets and category-to-file mappings. Run "
+            "`python scripts/tier_a_bundle_inventory.py --check` to verify this "
+            "report and its cryptographic lock.",
             "",
         ]
     )
     return "\n".join(lines)
 
 
+def build_lock(inventory: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "lock_schema": LOCK_SCHEMA,
+        "inventory_schema": inventory["schema"],
+        "generator": "scripts/tier_a_bundle_inventory.py",
+        "bundle_source": inventory["bundle_source"],
+        "file_count": inventory["file_count"],
+        "totals": inventory["totals"],
+        "generated_json_sha256": hashlib.sha256(
+            render_json(inventory).encode("utf-8")
+        ).hexdigest(),
+        "generated_markdown_sha256": hashlib.sha256(
+            render_markdown(inventory).encode("utf-8")
+        ).hexdigest(),
+    }
+
+
+def check(root: Path, inventory: dict[str, Any]) -> None:
+    expected_lock = render_json(build_lock(inventory))
+    if (root / LOCK_PATH).read_text(encoding="utf-8") != expected_lock:
+        raise SystemExit(
+            f"Tier-A bundle inventory lock is stale: {root / LOCK_PATH}"
+        )
+    expected_report = render_markdown(inventory)
+    if (root / MARKDOWN_PATH).read_text(
+        encoding="utf-8"
+    ) != expected_report:
+        raise SystemExit(
+            f"Tier-A bundle inventory report is stale: "
+            f"{root / MARKDOWN_PATH}"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--format", choices=("json", "markdown"), default="markdown"
+        "--format",
+        choices=("json", "markdown", "lock"),
+        default="markdown",
     )
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="compare generated output with the committed snapshot",
-    )
+    parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     inventory = build_inventory(root)
-    output = (
-        render_json(inventory)
-        if args.format == "json"
-        else render_markdown(inventory)
-    )
-    target = root / (
-        SNAPSHOT_PATH if args.format == "json" else MARKDOWN_PATH
-    )
     if args.check:
-        if target.read_text(encoding="utf-8") != output:
-            raise SystemExit(f"Tier-A bundle inventory is stale: {target}")
+        check(root, inventory)
         return 0
+    output = {
+        "json": render_json(inventory),
+        "markdown": render_markdown(inventory),
+        "lock": render_json(build_lock(inventory)),
+    }[args.format]
     print(output, end="")
     return 0
 
