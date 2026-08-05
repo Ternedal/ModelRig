@@ -675,3 +675,23 @@ func TestJournalNeedsProcessStop(t *testing.T) {
 		}
 	}
 }
+
+// The updater's whole swap depends on actually stopping the running set: the
+// shipped binaries are modelrig-server-windows-x64.exe and siblings, and
+// Get-Process matches -Name exactly. Without wildcards the command matched
+// nothing, -ErrorAction SilentlyContinue swallowed it, and the discarded error
+// hid it -- so the old server kept the port and its exe locked, the swapped-in
+// build could not bind, and the update rolled back into a failing rollback.
+func TestStopRunningSetMatchesShippedProcessNames(t *testing.T) {
+	for _, prefix := range []string{
+		"modelrig-server", "modelrig-worker", "modelrig-supervisor",
+	} {
+		if !strings.Contains(stopRunningSet, prefix+"*") {
+			t.Fatalf("stopRunningSet must wildcard %q so it matches %s-windows-x64: %s",
+				prefix, prefix, stopRunningSet)
+		}
+	}
+	if !strings.Contains(stopRunningSet, "Stop-Process -Force") {
+		t.Fatalf("stopRunningSet must force-stop the matched processes: %s", stopRunningSet)
+	}
+}
