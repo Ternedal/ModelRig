@@ -75,6 +75,13 @@ DevControl er ikke Agent 4 og må ikke nummereres ind i A4-serien. Beslutninger 
 - **PR #338 landes ikke i ét stykke.** 412 commits og 215 filer kan ikke reviewes meningsfuldt. Branchen opdeles i afgrænsede slices mod denne ADR, efter samme model som bar ADR-A4-008 igennem: preflight før kode, rapport før merge, exact-head-review med mutationstest, og Anders' kør pr. landing. Autoritetslagene er allerede nummererede slices i koden, så opdelingen findes — den skal blot respekteres i landingen.
 - **Platformbindingen accepteres som kendt begrænsning.** Indeslutningen er Windows-specifik (Job Objects, AppContainer). Det er bevidst og noteres her frem for at blive opdaget senere. Genbesøges kun ved et målt behov for en anden platform, og da gennem en ny ADR.
 
-## Åbent spørgsmål
+## Ejerskab — afgjort
 
-**Hvem ejer `devcontrol/`?** Ejerskabsaftalen i `SOL-CLAUDE-SAMARBEJDE.md` dækker det ikke: Sol ejer `worker/app/agent3/**` og `worker/app/agent4/**` med tests, Claude ejer Go-backend, klienter, worker uden for agent3/4, scripts, CI og repo-rod-docs. `devcontrol/` falder uden for begge. Indtil Anders tildeler ejerskabet, har **ingen** claim, og ingen agent bør arbejde i træet — to agenter i samme mappe uden grænse er præcis den situation, aftalen blev skrevet for at undgå. Afgørelsen hører hjemme i samarbejdsfilen, ikke i denne ADR.
+**Sol ejer `devcontrol/`.** Besluttet af Anders 05/08-2026, umiddelbart efter at
+denne ADR blev landet. Sol driver dermed opdelingen af PR #338 i slices mod
+ADR'en og ejer træet, herunder `devcontrol/src/kaliv_dev_control/**`,
+`devcontrol/tests/**` og `devcontrol/schemas/**`.
+
+Claude efterprøver som hidtil: exact-head-review med mutationstest, verdikt før
+landing, ingen merge uden Anders' kør. Selve ejerskabsteksten står i
+`SOL-CLAUDE-SAMARBEJDE.md`; denne ADR gengiver den kun for kontekst.
