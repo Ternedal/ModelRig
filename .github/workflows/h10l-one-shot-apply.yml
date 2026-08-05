@@ -65,16 +65,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git hash-object devcontrol/src/kaliv_dev_control/_tier_a_lease.py)" = "2fec20714d2ff48815477252016b5dad153b23ba"
-          test "$(git hash-object devcontrol/src/kaliv_dev_control/_tier_a_environment.py)" = "68cee63ef921c369aeb39222adec7475a605ba8a"
-          test "$(git hash-object devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py)" = "ce8f239559ae0186e92e38c859dd9200050ab962"
-          test "$(git hash-object devcontrol/src/kaliv_dev_control/tier_a_authority.py)" = "40b0728d94a9fb46808c2f672b86f47c24914272"
-          test "$(git hash-object devcontrol/TIER_A_BUNDLE_INVENTORY.json)" = "7c7559734135d8aa0b2abce36284a99dc61ce557"
-          test "$(git hash-object devcontrol/TIER_A_BUNDLE_INVENTORY.md)" = "7caafac7a95dd2488b5071920a1133aee44a6dc0"
-          test "$(git hash-object devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.json)" = "6e5732ae73cd888a59a6f70b22f95cbf89c3a78d"
-          test "$(git hash-object devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.md)" = "c9e6e23f0ec10915bbcfddb37c62f3e670ebc315"
-          test "$(git hash-object devcontrol/tests/test_h10j_tier_a_execution_core_split_contract.py)" = "9c919df770b3cca4ce25277fdb4e8f89e4f50582"
-          test "$(git hash-object devcontrol/tests/test_h10l_tier_a_error_extraction.py)" = "3797fb07414f5d4c5d05b7eedcbfb5427a650207"
+          test "$(git hash-object devcontrol/src/kaliv_dev_control/_tier_a_lease.py)" = "1f4a6eac5b9f0874bbb12897f690f8ae2ee9efe1"
+          test "$(git hash-object devcontrol/src/kaliv_dev_control/_tier_a_environment.py)" = "68cee74aa519e41cb9b8e3a5e74e3dbb90a6d78d"
+          test "$(git hash-object devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py)" = "1b4779a456fb98ce42f9938a577ec1588957d419"
+          test "$(git hash-object devcontrol/src/kaliv_dev_control/tier_a_authority.py)" = "f93f5ea43b2dd4476bdbe739228edded65e109b1"
+          test "$(git hash-object devcontrol/TIER_A_BUNDLE_INVENTORY.json)" = "42260b5ebe4be752ca5b8d6dbfa368a7c9a7a9d1"
+          test "$(git hash-object devcontrol/TIER_A_BUNDLE_INVENTORY.md)" = "0b62809775955fe5109e2d614a32f3788e8573d3"
+          test "$(git hash-object devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.json)" = "c297215b0b27a69565b1c0277a1c426f138fcb3a"
+          test "$(git hash-object devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.md)" = "3ccfdb4515ab36658c7208500b2db82618277204"
+          test "$(git hash-object devcontrol/tests/test_h10j_tier_a_execution_core_split_contract.py)" = "0d87cf3c49f94001b21f888335d720bbb13cfc0c"
+          test "$(git hash-object devcontrol/tests/test_h10l_tier_a_error_extraction.py)" = "959a91e51672f4a1b825edc386fffcc86fbd7a39"
 
       - name: Install worker dependencies
         run: python -m pip install -r worker/requirements.txt
