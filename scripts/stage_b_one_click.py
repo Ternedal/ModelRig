@@ -16,6 +16,7 @@ It cannot merge, push, tag, publish a release or activate production.
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -40,6 +41,27 @@ OBSERVATIONS = VALIDATION / "appliance-lifecycle-observations.json"
 EXAMPLE = ROOT / "eval" / "appliance_lifecycle_observations.example.json"
 STATE_PATH = VALIDATION / "stage-b-easy-state.json"
 JOURNAL = ROOT / "update-transaction.json"
+APPLIANCE: Path | None = None
+
+
+def use_root(new_root: Path) -> None:
+    """Point the wizard at a different checkout than the one it is stored in.
+
+    Stage B's release freeze requires HEAD to be exactly the published tag's
+    commit -- but this wizard is merged AFTER that commit, so it does not exist
+    inside the release checkout, and copying it in would dirty the tree the same
+    freeze checks. Running it from a newer worktree while writing evidence into
+    the release checkout resolves both: validation/ is gitignored, so the
+    evidence never dirties the tree it must describe.
+    """
+    global ROOT, VALIDATION, EVIDENCE, OBSERVATIONS, EXAMPLE, STATE_PATH, JOURNAL
+    ROOT = new_root.resolve()
+    VALIDATION = ROOT / "validation"
+    EVIDENCE = VALIDATION / "appliance-lifecycle-evidence"
+    OBSERVATIONS = VALIDATION / "appliance-lifecycle-observations.json"
+    EXAMPLE = ROOT / "eval" / "appliance_lifecycle_observations.example.json"
+    STATE_PATH = VALIDATION / "stage-b-easy-state.json"
+    JOURNAL = ROOT / "update-transaction.json"
 
 LIFECYCLE_SCHEMA = "kaliv-appliance-lifecycle-observations/v1"
 BACKEND_HEALTH = "http://127.0.0.1:8080/healthz"
@@ -338,15 +360,38 @@ def trial_supervisor(
     ok(f"Supervisor genstartede {which} på {restart_ms:.0f} ms (pid {before} -> {after})")
 
 
+def appliance_root() -> Path:
+    """Where the installed appliance lives -- NOT the repo checkout.
+
+    The repo holds the evidence; the appliance holds the exes the updater swaps.
+    They are different directories, so ask the running supervisor where it lives
+    rather than guessing: whatever process currently supervises the rig is the
+    installation this campaign must prove. Explicit --appliance wins.
+    """
+    if APPLIANCE is not None:
+        return APPLIANCE
+    script = (
+        "$p=Get-Process 'modelrig-supervisor-windows-x64' -ErrorAction SilentlyContinue | "
+        "Select-Object -First 1; if($null -eq $p){exit 1}; Write-Output $p.Path"
+    )
+    try:
+        path = Path(powershell(script, timeout=30.0).splitlines()[-1].strip())
+        if path.is_file():
+            return path.parent
+    except (StageBError, IndexError, OSError):
+        pass
+    return ROOT
+
+
 def run_updater(log_path: Path, extra: list[str]) -> None:
-    """Run the updater elevated-in-place, tee'ing the complete stdout+stderr."""
-    updater = ROOT.parent / "ModelRig" / "modelrig-updater-windows-x64.exe"
-    if not updater.is_file():
-        updater = ROOT / "modelrig-updater-windows-x64.exe"
+    """Run the updater in place, tee'ing the complete stdout+stderr."""
+    root = appliance_root()
+    updater = root / "modelrig-updater-windows-x64.exe"
     if not updater.is_file():
         raise StageBError(
-            "modelrig-updater-windows-x64.exe blev ikke fundet. Hent den fra den "
-            "publicerede release og verificér dens SHA-256 mod SHA256SUMS.txt først."
+            f"modelrig-updater-windows-x64.exe blev ikke fundet i {root}. Hent den fra "
+            "den publicerede release, verificér dens SHA-256 mod SHA256SUMS.txt, og "
+            "angiv evt. installationen med --appliance."
         )
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("wb") as handle:
@@ -405,6 +450,20 @@ def trial_good_update(observations: dict[str, Any], state: dict[str, Any]) -> No
         }
     )
     save_observations(observations)
+    text = log.read_text(encoding="utf-8", errors="replace").lower()
+    for marker in ("rolling back", "rollback failed", "manual_recovery", "fatal:"):
+        if marker in text:
+            raise StageBError(
+                f"Den gode opdatering indeholder den forbudte markør {marker!r}. "
+                "Ryd op med 'modelrig-updater-windows-x64.exe -recover' (som "
+                "administrator) og kør trinnet igen."
+            )
+    if after_versions["backend_version"] != candidate["version"]:
+        raise StageBError(
+            f"Opdateringen tog ikke effekt: backend rapporterer stadig "
+            f"{after_versions['backend_version'] or '(nede)'}, "
+            f"ikke {candidate['version']}. Beviset ville være usandt."
+        )
     state["good_update_done"] = True
     save_state(state)
     ok(f"Opdatering gennemført: {source_version} -> {after_versions['backend_version']}")
@@ -484,6 +543,21 @@ def preflight() -> dict[str, Any]:
     heading("Preflight — er riggen klar til Stage B?")
     if os.name != "nt":
         raise StageBError("Stage B må kun køres på Windows-riggen.")
+    # The updater must stop the KalivSupervisor scheduled task before it swaps
+    # exes; without elevation the supervisor restarts the server, the exe stays
+    # locked, and BOTH the swap and its rollback fail with "Adgang nægtet",
+    # leaving a manual_recovery journal that blocks Stage B outright.
+    elevated = powershell(
+        "$p=New-Object Security.Principal.WindowsPrincipal("
+        "[Security.Principal.WindowsIdentity]::GetCurrent()); "
+        "Write-Output $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)",
+        timeout=30.0,
+    ).strip().lower()
+    if not elevated.startswith("true"):
+        raise StageBError(
+            "Stage B skal køres som ADMINISTRATOR. Updateren kan ellers ikke stoppe "
+            "KalivSupervisor, og både swap og rollback fejler på låste exe-filer."
+        )
     if JOURNAL.exists():
         raise StageBError(
             "update-transaction.json findes stadig; en tidligere updater-transaktion er "
@@ -521,9 +595,38 @@ def build_observations(candidate: dict[str, Any]) -> dict[str, Any]:
     return observations
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=None,
+        help=(
+            "checkout, som evidensen hører til (default: wizardens eget repo). "
+            "Brug den udcheckede release, når wizard'en køres fra en nyere worktree."
+        ),
+    )
+    parser.add_argument(
+        "--appliance",
+        type=Path,
+        default=None,
+        help=(
+            "installationen med de exe'er updateren swapper (default: udledes fra "
+            "den koerende supervisor)."
+        ),
+    )
+    args = parser.parse_args(argv)
+    if args.appliance is not None:
+        global APPLIANCE
+        APPLIANCE = args.appliance.resolve()
+    if args.root is not None:
+        if not (args.root / "VERSION").is_file():
+            raise StageBError(f"--root peger ikke på en ModelRig-checkout: {args.root}")
+        use_root(args.root)
+
     os.chdir(ROOT)
     heading("Kaliv Stage B — updater-evidens, letteste vej")
+    note(f"Evidens skrives til {ROOT}")
     print("  Wizard'en måler alt, den kan måle, og stopper kun for genstarten og")
     print("  godkendelsen af den ugyldige opdatering.")
     print("  Den kan ikke merge, pushe, tagge, release eller aktivere produktion.")
