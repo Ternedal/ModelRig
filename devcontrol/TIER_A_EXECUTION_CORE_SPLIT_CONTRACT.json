@@ -1,7 +1,7 @@
 {
-  "schema": "kaliv-tier-a-execution-core-split-contract/v7",
+  "schema": "kaliv-tier-a-execution-core-split-contract/v8",
   "source": "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
-  "source_git_blob_sha1": "7929f503cb99c98ac8f542c81032cb098320cd28",
+  "source_git_blob_sha1": "7b445d5b99d140bdf73301973ec59b13803d7353",
   "constraints": {
     "h10j_moves_production_code": false,
     "preserve_object_identity_during_future_split": true,
@@ -21,7 +21,9 @@
     "h10o_extracted_materialization_services": true,
     "h10o_changes_authority_digest": true,
     "h10p_extracted_legacy_toolhost_identity": true,
-    "h10p_changes_authority_digest": true
+    "h10p_changes_authority_digest": true,
+    "h10q_extracted_legacy_plan_model": true,
+    "h10q_changes_authority_digest": true
   },
   "proposed_modules": {
     "devcontrol/src/kaliv_dev_control/_tier_a_lease.py": "Lease schema, shared validation, canonical lease identity and TierAExecutionLease.",
@@ -33,30 +35,6 @@
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py": "Retained non-capturing Windows executor that modern authority removes at import time."
   },
   "symbols": [
-    {
-      "name": "PLAN_SCHEMA",
-      "kind": "constant",
-      "responsibility": "legacy_plan_model",
-      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"
-    },
-    {
-      "name": "_COMMAND_ID",
-      "kind": "constant",
-      "responsibility": "legacy_plan_model",
-      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"
-    },
-    {
-      "name": "TierALaunchPlan",
-      "kind": "class",
-      "responsibility": "legacy_plan_model",
-      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"
-    },
-    {
-      "name": "build_tier_a_launch_plan",
-      "kind": "function",
-      "responsibility": "legacy_launch_planning",
-      "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"
-    },
     {
       "name": "_run_tier_a_launch_plan",
       "kind": "function",
@@ -441,6 +419,68 @@
         "TierAExecutionError": "_tier_a_lease",
         "_canonical_directory": "_tier_a_path_authority"
       }
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py",
+      "git_blob_sha1": "1d9cee5d7029ceb34a7dffe1d1ecb3e90cf3048a",
+      "completed_slices": [
+        "H10Q"
+      ],
+      "symbols": [
+        {
+          "name": "PLAN_SCHEMA",
+          "kind": "constant",
+          "responsibility": "legacy_plan_model",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"
+        },
+        {
+          "name": "_COMMAND_ID",
+          "kind": "constant",
+          "responsibility": "legacy_plan_model",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"
+        },
+        {
+          "name": "TierALaunchPlan",
+          "kind": "class",
+          "responsibility": "legacy_plan_model",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"
+        },
+        {
+          "name": "build_tier_a_launch_plan",
+          "kind": "function",
+          "responsibility": "legacy_launch_planning",
+          "destination": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py"
+        }
+      ],
+      "core_import_module": "_tier_a_legacy_plan",
+      "legacy_core_reexports": [
+        "PLAN_SCHEMA",
+        "_COMMAND_ID",
+        "TierALaunchPlan",
+        "build_tier_a_launch_plan"
+      ],
+      "direct_consumers": [
+        "_tier_a_execution_core"
+      ],
+      "resolved_dependencies": {
+        "_validated_application_env": "_tier_a_environment",
+        "TierAExecutionError": "_tier_a_lease",
+        "_HEX40": "_tier_a_lease",
+        "_HEX64": "_tier_a_lease",
+        "_TASK_ID": "_tier_a_lease",
+        "_canonical": "_tier_a_lease",
+        "_sha256": "_tier_a_lease",
+        "_task_sha": "_tier_a_lease",
+        "tier_a_toolhost_sha256": "_tier_a_legacy_toolhost",
+        "LeasedCommandRegistry": "_tier_a_materialization",
+        "_canonical_directory": "_tier_a_path_authority",
+        "_has_symlink_component": "_tier_a_path_authority",
+        "_regular_file_hash": "_tier_a_path_authority",
+        "workspace_root_authority_sha256": "_tier_a_path_authority",
+        "IsolationBoundary": "catalog",
+        "NetworkMode": "catalog",
+        "DevelopmentTask": "contract"
+      }
     }
   ],
   "migration_history": [
@@ -498,6 +538,16 @@
       "symbols": [
         "_TIER_A_BUNDLE_FILES",
         "tier_a_toolhost_sha256"
+      ]
+    },
+    {
+      "slice": "H10Q",
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py",
+      "symbols": [
+        "PLAN_SCHEMA",
+        "_COMMAND_ID",
+        "TierALaunchPlan",
+        "build_tier_a_launch_plan"
       ]
     }
   ]

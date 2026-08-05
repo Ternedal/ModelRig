@@ -144,7 +144,7 @@ class TierAExecutionCoreSplitContractTests(unittest.TestCase):
     def test_source_remaining_symbols_and_destinations_are_exact(self):
         self.assertEqual(
             self.contract["schema"],
-            "kaliv-tier-a-execution-core-split-contract/v7",
+            "kaliv-tier-a-execution-core-split-contract/v8",
         )
         self.assertEqual(
             _git_blob_sha1(self.source_bytes),
@@ -198,6 +198,10 @@ class TierAExecutionCoreSplitContractTests(unittest.TestCase):
             constraints["h10p_extracted_legacy_toolhost_identity"]
         )
         self.assertTrue(constraints["h10p_changes_authority_digest"])
+        self.assertTrue(
+            constraints["h10q_extracted_legacy_plan_model"]
+        )
+        self.assertTrue(constraints["h10q_changes_authority_digest"])
         self.assertTrue(constraints["earlier_physical_evidence_is_stale"])
         self.assertTrue(
             constraints["preserve_object_identity_during_future_split"]
@@ -216,6 +220,7 @@ class TierAExecutionCoreSplitContractTests(unittest.TestCase):
                 "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py",
                 "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py",
                 "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
+                "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py",
             ],
         )
         core = importlib.import_module("kaliv_dev_control._tier_a_execution_core")
@@ -245,6 +250,7 @@ class TierAExecutionCoreSplitContractTests(unittest.TestCase):
             path_authority,
             materialization,
             legacy_toolhost,
+            legacy_plan,
         ) = extractions
         self.assertEqual(environment["completed_slices"], ["H10K"])
         self.assertEqual(
@@ -306,9 +312,36 @@ class TierAExecutionCoreSplitContractTests(unittest.TestCase):
                 "_canonical_directory": "_tier_a_path_authority",
             },
         )
+        self.assertEqual(legacy_plan["completed_slices"], ["H10Q"])
+        self.assertEqual(
+            legacy_plan["direct_consumers"],
+            ["_tier_a_execution_core"],
+        )
+        self.assertEqual(
+            legacy_plan["resolved_dependencies"],
+            {
+                "_validated_application_env": "_tier_a_environment",
+                "TierAExecutionError": "_tier_a_lease",
+                "_HEX40": "_tier_a_lease",
+                "_HEX64": "_tier_a_lease",
+                "_TASK_ID": "_tier_a_lease",
+                "_canonical": "_tier_a_lease",
+                "_sha256": "_tier_a_lease",
+                "_task_sha": "_tier_a_lease",
+                "tier_a_toolhost_sha256": "_tier_a_legacy_toolhost",
+                "LeasedCommandRegistry": "_tier_a_materialization",
+                "_canonical_directory": "_tier_a_path_authority",
+                "_has_symlink_component": "_tier_a_path_authority",
+                "_regular_file_hash": "_tier_a_path_authority",
+                "workspace_root_authority_sha256": "_tier_a_path_authority",
+                "IsolationBoundary": "catalog",
+                "NetworkMode": "catalog",
+                "DevelopmentTask": "contract",
+            },
+        )
         self.assertEqual(
             [item["slice"] for item in self.contract["migration_history"]],
-            ["H10K", "H10L", "H10M", "H10N", "H10O", "H10P"],
+            ["H10K", "H10L", "H10M", "H10N", "H10O", "H10P", "H10Q"],
         )
 
     def test_external_core_consumers_are_complete(self):
