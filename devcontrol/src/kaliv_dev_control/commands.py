@@ -34,7 +34,7 @@ _RESERVED_ENV = {"HOME", "XDG_CONFIG_HOME", "TMPDIR", "PWD"}
 # The bootstrap runs inside an unprivileged user/mount namespace. It marks the
 # complete host mount tree recursively read-only, remounts only the disposable
 # sandbox root writable, reopens cwd through that writable mount, drops all
-# namespace capabilities with no_new_privs, and then execs the reviewed argv.
+# namespace capabilities with kernel APIs, and then execs the reviewed argv.
 # The boundary is inherited by descendants.
 _MOUNT_SANDBOX_BOOTSTRAP = r"""
 import ctypes
@@ -47,7 +47,16 @@ AT_RECURSIVE = 0x8000
 MOUNT_ATTR_RDONLY = 0x1
 MS_BIND = 4096
 MS_REC = 16384
+PR_SET_SECUREBITS = 28
+PR_CAPBSET_DROP = 24
 PR_SET_NO_NEW_PRIVS = 38
+PR_CAP_AMBIENT = 47
+PR_CAP_AMBIENT_CLEAR_ALL = 4
+SECBIT_NOROOT = 1 << 0
+SECBIT_NOROOT_LOCKED = 1 << 1
+SECBIT_NO_SETUID_FIXUP = 1 << 2
+SECBIT_NO_SETUID_FIXUP_LOCKED = 1 << 3
+_LINUX_CAPABILITY_VERSION_3 = 0x20080522
 
 class MountAttr(ctypes.Structure):
     _fields_ = [
@@ -55,6 +64,16 @@ class MountAttr(ctypes.Structure):
         ("attr_clr", ctypes.c_uint64),
         ("propagation", ctypes.c_uint64),
         ("userns_fd", ctypes.c_uint64),
+    ]
+
+class CapHeader(ctypes.Structure):
+    _fields_ = [("version", ctypes.c_uint32), ("pid", ctypes.c_int)]
+
+class CapData(ctypes.Structure):
+    _fields_ = [
+        ("effective", ctypes.c_uint32),
+        ("permitted", ctypes.c_uint32),
+        ("inheritable", ctypes.c_uint32),
     ]
 
 libc = ctypes.CDLL(None, use_errno=True)
@@ -70,12 +89,11 @@ def syscall(number, *args):
     return int(result)
 
 try:
-    if len(sys.argv) < 5:
-        raise RuntimeError("missing sandbox root, command cwd, setpriv path or command")
+    if len(sys.argv) < 4:
+        raise RuntimeError("missing sandbox root, command cwd or command")
     sandbox_root = os.path.realpath(sys.argv[1])
     command_cwd = os.path.realpath(sys.argv[2])
-    setpriv = sys.argv[3]
-    command = sys.argv[4:]
+    command = sys.argv[3:]
     if os.path.commonpath((sandbox_root, command_cwd)) != sandbox_root:
         raise RuntimeError("command cwd escaped sandbox root")
 
@@ -111,20 +129,31 @@ try:
     # subprocess entered the namespace with cwd on the parent read-only mount.
     # Resolve it again through the new writable bind mount before dropping caps.
     os.chdir(command_cwd)
+
+    securebits = (
+        SECBIT_NOROOT
+        | SECBIT_NOROOT_LOCKED
+        | SECBIT_NO_SETUID_FIXUP
+        | SECBIT_NO_SETUID_FIXUP_LOCKED
+    )
+    if libc.prctl(PR_SET_SECUREBITS, securebits, 0, 0, 0) != 0:
+        fail("securebits")
+    cap_last = int(open("/proc/sys/kernel/cap_last_cap", encoding="ascii").read())
+    for capability in range(cap_last + 1):
+        if libc.prctl(PR_CAPBSET_DROP, capability, 0, 0, 0) != 0:
+            fail("capability bounding set")
+    if libc.prctl(
+        PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0
+    ) != 0:
+        fail("ambient capabilities")
+    header = CapHeader(_LINUX_CAPABILITY_VERSION_3, 0)
+    data = (CapData * 2)()
+    if libc.capset(ctypes.byref(header), ctypes.byref(data)) != 0:
+        fail("capset")
     if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
         fail("no_new_privs")
 
-    argv = [
-        setpriv,
-        "--no-new-privs",
-        "--securebits=+noroot,+noroot_locked",
-        "--bounding-set=-all",
-        "--inh-caps=-all",
-        "--ambient-caps=-all",
-        "--",
-        *command,
-    ]
-    os.execve(setpriv, argv, os.environ)
+    os.execvpe(command[0], command, os.environ)
 except BaseException as exc:
     print(f"kaliv filesystem sandbox failed: {exc}", file=sys.stderr)
     raise SystemExit(126)
@@ -568,10 +597,9 @@ class CommandExecutor:
                 "filesystem-confined command execution is Linux-only in DC-L01"
             )
         unshare = shutil.which("unshare")
-        setpriv = shutil.which("setpriv")
-        if unshare is None or setpriv is None:
+        if unshare is None:
             raise CommandExecutionError(
-                "filesystem sandbox helpers are unavailable"
+                "filesystem sandbox helper is unavailable"
             )
         return (
             unshare,
@@ -586,7 +614,6 @@ class CommandExecutor:
             _MOUNT_SANDBOX_BOOTSTRAP,
             str(sandbox_root),
             str(cwd),
-            setpriv,
             *argv,
         )
 
