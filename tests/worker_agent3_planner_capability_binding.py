@@ -160,6 +160,25 @@ assert started_payload["capability_receipt"] == receipt
 assert started_payload["run"]["state"] == "completed"
 assert executed == ["rig_status"]
 
+# The receipt exists to prove WHICH plan ran, so a finished run must still hash
+# to the plan that was approved. It did not: agent_run_plan_sha256 covered
+# step.id and step.state, and both change by executing -- _clone_steps mints a
+# fresh uuid4 per step, and PENDING becomes SUCCEEDED. Preview and start agreed
+# only because both hash the still-pending template, so nothing here caught it.
+# On the rig the durable receipt disagreed with the approved plan for every
+# completed run, and the read-only pilot failed 20/20 with "durable capability
+# receipt is not bound to the reviewed plan". Hash the EXECUTED run, not the
+# template, or this passes while the binding is broken.
+executed_run = AgentRun.from_json(json.dumps(started_payload["run"]))
+assert executed_run.state.value == "completed"
+assert [step.state.value for step in executed_run.steps] != [
+    step.state.value for step in template.steps
+], "the executed run must differ from the template, or this proves nothing"
+assert [step.id for step in executed_run.steps] != [
+    step.id for step in template.steps
+], "start clones steps with fresh ids, so this is the case that used to break"
+assert agent_run_plan_sha256(executed_run) == receipt["plan_sha256"]
+
 # Any graph change invalidates the reviewed token, even when unrelated to this route.
 stale_graph = preview()
 runtime["voice"] = True
@@ -216,4 +235,4 @@ legacy = TestClient(legacy_app).post(
 assert legacy.status_code == 200, legacy.text
 assert "capability_receipt" not in legacy.json()
 
-print("35 passed, 0 failed")
+print("39 passed, 0 failed")
