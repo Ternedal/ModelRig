@@ -210,9 +210,10 @@ class CatalogTests(unittest.TestCase):
             pinned = verifier.verify(
                 ToolBinding("python", str(source.resolve()), digest)
             )
-            source.chmod(0o700)
-            source.write_bytes(b"not the verified executable")
-            source.chmod(0o500)
+            replacement = source.with_name("replacement")
+            replacement.write_bytes(b"not the verified executable")
+            replacement.chmod(0o500)
+            os.replace(replacement, source)
             result = subprocess.run(
                 [pinned, "-c", "print('pinned-object')"],
                 text=True,
@@ -336,7 +337,12 @@ class GitHubReadTests(unittest.TestCase):
             GitHubReadReceipt.from_mapping(receipt.to_dict()).canonical_json(),
             receipt.canonical_json(),
         )
-        for change in ({"task_id": 1}, {"repository": 1}, {"status": 201}):
+        for change in (
+            {"task_id": 1},
+            {"repository": 1},
+            {"status": 201},
+            {"status": 200.0},
+        ):
             with self.subTest(change=change), self.assertRaises(GitHubReadError):
                 GitHubReadReceipt.from_mapping({**receipt.to_dict(), **change})
         other = DevelopmentTask.from_mapping({**task().to_dict(), "task_id": "OTHER"})
