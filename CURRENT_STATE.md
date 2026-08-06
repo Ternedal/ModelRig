@@ -353,6 +353,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_stage_a_scheduler_finalize.py`
 - `tests/workflow_stage_a_scheduler_publish.py`
 - `tests/workflow_stage_a_voice_test.py`
+- `tests/workflow_stage_b_one_click.py`
 - `tests/workflow_stage_b_physical_gate.py`
 - `tests/workflow_staged_promotion_runbook.py`
 - `tests/workflow_stale_check.py`

@@ -44,6 +44,20 @@ type target struct {
 
 // isNewer reports whether latest is a strictly higher semver than current.
 // Both may carry a leading "v". Missing components count as 0 (1.58 == 1.58.0).
+
+// stopRunningSet force-stops the appliance's processes so their exes unlock.
+//
+// The names MUST be wildcards. The shipped binaries are
+// modelrig-server-windows-x64.exe (and siblings), while Get-Process matches a
+// -Name argument exactly -- so the unwildcarded form matched nothing, failed
+// silently under -ErrorAction SilentlyContinue, and its error was discarded.
+// The updater therefore never stopped anything: the old server kept port 8080
+// and its own exe locked, the swapped-in build could not bind, health checks
+// still reported the OLD version, and the update "rolled back" -- into a
+// rollback that failed on the very same lock. Found on the rig, 2026-08-05.
+const stopRunningSet = "Get-Process modelrig-server*,modelrig-worker*," +
+	"modelrig-supervisor* -ErrorAction SilentlyContinue | Stop-Process -Force"
+
 func isNewer(current, latest string) (bool, error) {
 	c, err := parseSemver(current)
 	if err != nil {
@@ -438,7 +452,7 @@ func main() {
 		// and require manual recovery. No automatic restart on unknown state.
 		log.Printf("journal evidence is ambiguous -- stopping the running set conservatively before failing closed")
 		_ = ps(fmt.Sprintf("Stop-ScheduledTask -TaskName '%s' -ErrorAction SilentlyContinue", *task))
-		_ = ps("Get-Process modelrig-server,modelrig-worker,modelrig-supervisor -ErrorAction SilentlyContinue | Stop-Process -Force")
+		_ = ps(stopRunningSet)
 		die("transaction journal evidence exists but cannot be read: %v -- failing closed; runtime stopped, evidence kept. Inspect %s (and its .tmp) and restore by hand", perr, journalPath)
 	}
 	if pending != nil {
@@ -448,7 +462,7 @@ func main() {
 			// a successful recovery -- never on a set we could not repair.
 			log.Printf("pending update transaction found (state %s) -- stopping the running set before recovery", pending.State)
 			_ = ps(fmt.Sprintf("Stop-ScheduledTask -TaskName '%s' -ErrorAction SilentlyContinue", *task))
-			_ = ps("Get-Process modelrig-server,modelrig-worker,modelrig-supervisor -ErrorAction SilentlyContinue | Stop-Process -Force")
+			_ = ps(stopRunningSet)
 			time.Sleep(2 * time.Second)
 			if err := recoverFromJournal(journalPath, targets); err != nil {
 				die("%v", err) // set may be broken: the task is NOT restarted
@@ -593,7 +607,7 @@ func main() {
 	}
 	log.Printf("stopping supervisor + processes so the exes unlock")
 	_ = ps(fmt.Sprintf("Stop-ScheduledTask -TaskName '%s' -ErrorAction SilentlyContinue", *task))
-	_ = ps("Get-Process modelrig-server,modelrig-worker,modelrig-supervisor -ErrorAction SilentlyContinue | Stop-Process -Force")
+	_ = ps(stopRunningSet)
 	time.Sleep(2 * time.Second)
 
 	if err := backupAndSwap(targets, staged, backupDir, journal); err != nil {
@@ -648,7 +662,7 @@ func main() {
 	log.Printf("update did not come up healthy + alive on %s -- ROLLING BACK to %s", newVersion, cur)
 	_ = journal.setState("rolling_back")
 	_ = ps(fmt.Sprintf("Stop-ScheduledTask -TaskName '%s' -ErrorAction SilentlyContinue", *task))
-	_ = ps("Get-Process modelrig-server,modelrig-worker,modelrig-supervisor -ErrorAction SilentlyContinue | Stop-Process -Force")
+	_ = ps(stopRunningSet)
 	time.Sleep(2 * time.Second)
 	if err := restore(targets, backupDir); err != nil {
 		// Broken set: keep the journal so the next run finishes the rollback,
