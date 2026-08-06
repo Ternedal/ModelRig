@@ -64,6 +64,18 @@ class WorkspaceFiles:
             raise FileAccessError("path escaped workspace")
         return normalized, resolved
 
+    @staticmethod
+    def _read_bounded(path: Path, maximum: int) -> bytes:
+        """Read no more than ``maximum + 1`` bytes and reject overflow."""
+        try:
+            with path.open("rb") as handle:
+                data = handle.read(maximum + 1)
+        except OSError as exc:
+            raise FileAccessError("file could not be read") from exc
+        if len(data) > maximum:
+            raise FileAccessError("file exceeds read bound")
+        return data
+
     def read_text(
         self,
         relative: str,
@@ -77,9 +89,7 @@ class WorkspaceFiles:
         _, path = self._resolve(relative)
         if not path.is_file():
             raise FileAccessError("path is not a regular file")
-        data = path.read_bytes()
-        if len(data) > max_bytes:
-            raise FileAccessError("file exceeds read bound")
+        data = self._read_bounded(path, max_bytes)
         if b"\x00" in data:
             raise FileAccessError("binary file is not readable as text")
         try:
@@ -127,14 +137,16 @@ class WorkspaceFiles:
                 if not self._allowed(relative):
                     continue
 
-                size = path.stat().st_size
-                if size > max_file_bytes:
+                try:
+                    if path.stat().st_size > max_file_bytes:
+                        continue
+                    data = self._read_bounded(path, max_file_bytes)
+                except FileAccessError:
                     continue
-                scanned += size
+                scanned += len(data)
                 if scanned > max_scan_bytes:
                     raise FileAccessError("search exceeded scan budget")
 
-                data = path.read_bytes()
                 if b"\x00" in data:
                     continue
                 try:
