@@ -139,6 +139,16 @@ def run_rig_validation(planner: str) -> None:
             BASE_URL,
             "-PlannerModel",
             planner,
+            # ACTIVATION_READINESS.md is TRACKED, and the generator stamps it
+            # with a generation timestamp and absolute paths from whichever
+            # machine ran it. Regenerating it here dirties the working tree --
+            # and the very next step, the 20-task pilot, refuses to collect
+            # evidence unless the tree is clean. So every run that actually
+            # performed rig validation killed itself one step later with
+            # "working tree must be clean while collecting pilot evidence".
+            # The readiness page is a local status view, not pilot evidence;
+            # regenerate it outside an evidence run.
+            "-SkipReadinessRegeneration",
         ]
     )
     # The PowerShell runner is the authoritative fail-closed gate: it verifies
