@@ -15,6 +15,9 @@ was required to turn red.
 | Pre-staged command workspaces are rejected | Remove `cached` from the clean-state boolean | **RED** — the marker command starts despite a staged index mutation |
 | Pre-staged patch workspaces are rejected before apply | Remove the pre-apply workspace-state gate | **RED** — `git apply --index` runs on a staged change and can issue evidence against the wrong base state |
 | Commands do not execute in the source checkout | Run the registered argv with `cwd=source` instead of the sandbox repository | **RED** — executable regressions observe source metadata/worktree exposure |
+| Persistent host filesystem writes are denied | Remove the Landlock ruleset or grant write rights above the sandbox root | **RED** — a descendant absolute-path write creates a host artifact while sandbox evidence can remain positive |
+| Landlock denial is inherited by descendants | Apply the restriction only after spawning the reviewed command | **RED** — the child process writes outside the sandbox successfully |
+| Landlock remains usable by Git without broad host authority | Remove the narrow `/dev/null` sink rule or replace it with a directory-wide exception | **RED** — Git commands fail closed, or the exception grants unnecessary persistent host write authority |
 | Real Git metadata is unreachable | Store a source `.git` backup below sandbox HOME or expose it through an object alternate | **RED** — command code can discover the backup/alternate |
 | Bundle source is removed before execution | Keep `source.bundle` or its origin remote in the sandbox | **RED** — the sandbox regression detects the bundle, remote or bundle path |
 | Sandbox Git metadata participates in receipt evidence | Omit the bounded `.git` fingerprint | **RED** — remote/hook mutations can return positive evidence |
@@ -35,11 +38,14 @@ was required to turn red.
 
 The unmodified candidate passed the focused harness for exact-SHA binding,
 immutable argv, canonical raw command cwd, clean command and patch preconditions,
-independent sandbox execution, metadata isolation, mandatory cleanup, source
-re-verification, ambiguous task-path rejection, empty registry, process-tree
-containment, ignored-artifact handling, nested-repository patch cleanup and
-verified reset. The pre-staged patch regression additionally records every Git
-call and proves no `git apply` invocation occurs before the fail-closed reset.
+independent sandbox execution, inherited Landlock filesystem-write confinement,
+metadata isolation, mandatory cleanup, source re-verification, ambiguous task-path
+rejection, empty registry, process-tree containment, ignored-artifact handling,
+nested-repository patch cleanup and verified reset. The descendant regression
+proves an absolute write outside the sandbox leaves no host artifact while an
+in-sandbox mutation remains observable as non-passing/reset evidence. The
+pre-staged patch regression additionally records every Git call and proves no
+`git apply` invocation occurs before the fail-closed reset.
 
 The exact-head execution remains authoritative; this document does not substitute
 for the repository checks and external review bound to the reviewed commit.
