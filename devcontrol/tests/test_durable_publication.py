@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from kaliv_dev_control import durable_publication as publication_module
 from kaliv_dev_control.durable_publication import (
     DurablePublicationError,
     create_once_file,
@@ -110,6 +111,44 @@ class DurablePublicationTests(unittest.TestCase):
             self.assertEqual(target.read_bytes(), b"new")
             self.assertFalse(source.exists())
             directory_sync.assert_called_once_with(root)
+
+    def test_windows_directory_sync_opens_and_flushes_a_directory_handle(self) -> None:
+        calls: dict[str, object] = {}
+
+        class Function:
+            def __init__(self, name: str, result: object) -> None:
+                self.name = name
+                self.result = result
+                self.argtypes = None
+                self.restype = None
+
+            def __call__(self, *args):
+                calls[self.name] = args
+                return self.result
+
+        class Kernel32:
+            CreateFileW = Function("create", 123)
+            FlushFileBuffers = Function("flush", 1)
+            CloseHandle = Function("close", 1)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            with patch.object(
+                publication_module.ctypes,
+                "WinDLL",
+                return_value=Kernel32(),
+                create=True,
+            ):
+                publication_module._windows_sync_directory(root)
+
+        create_args = calls["create"]
+        self.assertEqual(create_args[0], str(root))
+        self.assertEqual(create_args[1], 0xC0000000)
+        self.assertEqual(create_args[2], 0x00000007)
+        self.assertEqual(create_args[4], 3)
+        self.assertEqual(create_args[5], 0x82000000)
+        self.assertEqual(calls["flush"], (123,))
+        self.assertEqual(calls["close"], (123,))
 
 
 if __name__ == "__main__":
