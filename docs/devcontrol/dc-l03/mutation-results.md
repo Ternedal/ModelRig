@@ -43,7 +43,7 @@ Load-bearing mutations and expected failures:
     toolchain owns a deep copy of every binding.
 13. Replace `materializer.executable_verifier` from inside the isolation verifier
     callback.
-    Expected: `test_materialization_freezes_executable_verifier_before_callback`
+    Expected: `test_materialization_uses_original_executable_verifier_snapshot`
     fails unless the originally reviewed verifier is used and retained.
 14. Reuse or retarget a registry materialized for task A with task B that grants
     the same command ID but has a different task hash or base SHA.
@@ -67,3 +67,8 @@ Load-bearing mutations and expected failures:
     Expected: `test_receipt_reload_types_and_task_binding_are_strict` fails.
 20. Materialize the reviewed catalog without an injected isolation verifier.
     Expected: the default fail-closed materialization regression fails.
+21. Let `HTTPS_PROXY`, `SSL_CERT_FILE`, `SSL_CERT_DIR` or environment-resolved
+    CA paths choose the network or TLS trust authority used for GitHub reads.
+    Expected: `test_transport_ignores_environment_network_and_tls_authority`
+    fails unless proxy inheritance is empty and an explicit TLS client context
+    loads only compiled OpenSSL paths or explicit Windows certificate stores.

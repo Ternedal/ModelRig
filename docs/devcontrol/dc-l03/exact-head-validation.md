@@ -3,7 +3,7 @@
 Status: **authority candidate validated; repository workflow gates pending**
 
 Authority implementation and regression candidate:
-`ddcbf355a173d59dca3e8c695ae3cd2f393d2bc6`.
+`852c4604376d48290700c7a1a7f05729623106ee`.
 
 The candidate keeps the complete 16-path allowlist and includes:
 
@@ -26,18 +26,30 @@ The candidate keeps the complete 16-path allowlist and includes:
   token, timeout and transport authority cannot be retargeted after construction;
 - fixed-host HTTPS GET-only GitHub reads with redirects and environment proxies
   disabled;
+- an explicit TLS client context with certificate verification and hostname
+  checking whose trust roots come only from compiled OpenSSL paths or explicit
+  Windows certificate stores, never `SSL_CERT_FILE` or `SSL_CERT_DIR`;
+- fail-closed TLS setup when no approved system trust roots can be loaded;
 - exact-SHA validation before transport, protected-path denial before network,
   bounded response/base64 handling and decoded Git-blob verification;
 - concrete integer receipt status validation, including rejection of `200.0`.
 
-Focused DC-L03 validation produced **24/24 passing tests** in an isolated harness
-with the landed DC-L03 implementations and dependencies. The suite covers deep
-mutation of catalog specs and tool bindings, verifier replacement during an
-external callback, task mutation, registry retargeting and cross-task reuse,
-catalog replacement, toolchain mutation, pathname replacement, descriptor
-retirement, symlinks, hash mismatch, moving refs, complete GitHub adapter
-retargeting, protected paths, proxy/redirect escape, blob mismatch, token
-non-persistence and strict persisted types.
+Focused DC-L03 validation produced **24/24 passing tests** using the exact landed
+runtime and test blob IDs `9e3760fb87b68b6cb59ec4885ab43673a31427a6`
+and `f1bae155af0e4e28fae1bc6c09979c9ec6a3212f`. The suite covers deep mutation
+of catalog specs and tool bindings, verifier replacement during an external
+callback, task mutation, registry retargeting and cross-task reuse, catalog
+replacement, toolchain mutation, pathname replacement, descriptor retirement,
+symlinks, hash mismatch, moving refs, complete GitHub adapter retargeting,
+protected paths, proxy/redirect escape, environment-selected TLS roots, blob
+mismatch, token non-persistence and strict persisted types.
+
+The independent review of exact head
+`5ca477c95b6e6a5ac396b6ff9d55db2de49b3511` found one actionable P2 issue:
+process-environment TLS trust overrides could affect the default HTTPS handler.
+The explicit system-trust context and regression in candidate
+`852c4604376d48290700c7a1a7f05729623106ee` close that finding. A fresh
+independent review is required for the resulting exact head.
 
 Verified repository facts:
 
