@@ -1,0 +1,69 @@
+{
+  "all_paths": [
+    "devcontrol/README.md",
+    "devcontrol/pyproject.toml",
+    "devcontrol/schemas/development-campaign-v1.schema.json",
+    "devcontrol/schemas/development-draft-pr-proposal-v1.schema.json",
+    "devcontrol/schemas/development-review-request-v1.schema.json",
+    "devcontrol/schemas/development-review-verdict-v1.schema.json",
+    "devcontrol/src/kaliv_dev_control/__init__.py",
+    "devcontrol/src/kaliv_dev_control/campaign.py",
+    "devcontrol/src/kaliv_dev_control/durable_publication.py",
+    "devcontrol/src/kaliv_dev_control/proposal.py",
+    "devcontrol/src/kaliv_dev_control/review.py",
+    "devcontrol/src/kaliv_dev_control/store.py",
+    "devcontrol/tests/test_campaign_review.py",
+    "devcontrol/tests/test_durable_publication.py",
+    "devcontrol/tests/test_proposal_reload.py",
+    "devcontrol/tests/test_review_reload.py",
+    "devcontrol/tests/test_store_proposal.py",
+    "docs/devcontrol/dc-l02/exact-head-validation.md",
+    "docs/devcontrol/dc-l02/exact-path-allowlist.json",
+    "docs/devcontrol/dc-l02/independent-review-verdict.md",
+    "docs/devcontrol/dc-l02/mutation-results.md",
+    "docs/devcontrol/dc-l02/preflight.md",
+    "docs/devcontrol/dc-l02/source-path-disposition.json",
+    "docs/devcontrol/dc-l02/source-provenance.json",
+    "docs/devcontrol/dc-l02/symbol-ownership.json",
+    "tests/workflow_test_coverage.py"
+  ],
+  "assigned_source_paths": [
+    "devcontrol/schemas/development-campaign-v1.schema.json",
+    "devcontrol/schemas/development-draft-pr-proposal-v1.schema.json",
+    "devcontrol/schemas/development-review-request-v1.schema.json",
+    "devcontrol/schemas/development-review-verdict-v1.schema.json",
+    "devcontrol/src/kaliv_dev_control/campaign.py",
+    "devcontrol/src/kaliv_dev_control/durable_publication.py",
+    "devcontrol/src/kaliv_dev_control/proposal.py",
+    "devcontrol/src/kaliv_dev_control/review.py",
+    "devcontrol/src/kaliv_dev_control/store.py",
+    "devcontrol/tests/test_campaign_review.py",
+    "devcontrol/tests/test_durable_publication.py",
+    "devcontrol/tests/test_proposal_reload.py",
+    "devcontrol/tests/test_review_reload.py",
+    "devcontrol/tests/test_store_proposal.py"
+  ],
+  "base_sha": "a4260a4633125246fb67f7316dcc7e5e1dae6700",
+  "hard_exclusions": [
+    "devcontrol/src/kaliv_dev_control/streaming_publication.py"
+  ],
+  "path_count": 26,
+  "progressive_surfaces": [
+    "devcontrol/README.md",
+    "devcontrol/pyproject.toml",
+    "devcontrol/src/kaliv_dev_control/__init__.py",
+    "tests/workflow_test_coverage.py"
+  ],
+  "schema": "modelrig-devcontrol-exact-path-allowlist/v1",
+  "slice": "DC-L02",
+  "slice_control_artifacts": [
+    "docs/devcontrol/dc-l02/preflight.md",
+    "docs/devcontrol/dc-l02/exact-path-allowlist.json",
+    "docs/devcontrol/dc-l02/symbol-ownership.json",
+    "docs/devcontrol/dc-l02/source-provenance.json",
+    "docs/devcontrol/dc-l02/source-path-disposition.json",
+    "docs/devcontrol/dc-l02/exact-head-validation.md",
+    "docs/devcontrol/dc-l02/mutation-results.md",
+    "docs/devcontrol/dc-l02/independent-review-verdict.md"
+  ]
+}

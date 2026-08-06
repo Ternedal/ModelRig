@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from kaliv_dev_control.campaign import CampaignState, DevelopmentCampaign
 from kaliv_dev_control.proposal import DraftProposalBuilder, ProposalError
@@ -49,7 +51,7 @@ class StoreProposalTests(unittest.TestCase):
             with self.assertRaises(CampaignStoreError):
                 store.load("SDC-004")
 
-    def test_store_rejects_existing_lock(self) -> None:
+    def test_store_rejects_existing_malformed_lock(self) -> None:
         value = task()
         campaign = DevelopmentCampaign.create("SDC-004", value)
         with tempfile.TemporaryDirectory() as temporary:
@@ -58,6 +60,83 @@ class StoreProposalTests(unittest.TestCase):
             (root / ".SDC-004.lock").write_text("held\n", encoding="utf-8")
             with self.assertRaises(CampaignStoreError):
                 CampaignStore(root).create(campaign)
+
+    def test_store_recovers_a_provably_dead_owner_lock(self) -> None:
+        value = task()
+        campaign = DevelopmentCampaign.create("SDC-004", value)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "campaigns"
+            root.mkdir()
+            lock = root / ".SDC-004.lock"
+            lock.write_text(
+                json.dumps(
+                    {
+                        "schema": "kaliv-development-campaign-lock/v1",
+                        "pid": 999999,
+                        "identity": "dead-owner",
+                        "nonce": "a" * 64,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with patch(
+                "kaliv_dev_control.store._identity",
+                side_effect=("current-owner", ""),
+            ):
+                path = CampaignStore(root).create(campaign)
+            self.assertTrue(path.is_file())
+            self.assertFalse(lock.exists())
+
+    def test_store_never_reclaims_a_live_owner_lock(self) -> None:
+        value = task()
+        campaign = DevelopmentCampaign.create("SDC-004", value)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "campaigns"
+            root.mkdir()
+            lock = root / ".SDC-004.lock"
+            lock.write_text(
+                json.dumps(
+                    {
+                        "schema": "kaliv-development-campaign-lock/v1",
+                        "pid": 123,
+                        "identity": "live-owner",
+                        "nonce": "b" * 64,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with patch(
+                "kaliv_dev_control.store._identity",
+                side_effect=("current-owner", "live-owner"),
+            ):
+                with self.assertRaisesRegex(CampaignStoreError, "live operation"):
+                    CampaignStore(root).create(campaign)
+            self.assertTrue(lock.is_file())
+
+    def test_nested_store_creation_syncs_each_new_parent(self) -> None:
+        value = task()
+        campaign = DevelopmentCampaign.create("SDC-004", value)
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            root = base / "first" / "second"
+            from kaliv_dev_control import store as store_module
+
+            real_sync = store_module.sync_directory
+            with patch(
+                "kaliv_dev_control.store.sync_directory",
+                wraps=real_sync,
+            ) as directory_sync:
+                CampaignStore(root).create(campaign)
+            synced = {call.args[0] for call in directory_sync.call_args_list}
+            self.assertIn(base, synced)
+            self.assertIn(base / "first", synced)
+            self.assertIn(root, synced)
 
     def _reviewed(self):
         value = task()

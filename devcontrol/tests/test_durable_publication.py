@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -13,6 +14,7 @@ from kaliv_dev_control.durable_publication import (
     DurablePublicationError,
     create_once_file,
     rename_directory_no_replace,
+    replace_file_durable,
     sync_tree,
     unlink_durable,
 )
@@ -38,10 +40,7 @@ class DurablePublicationTests(unittest.TestCase):
             self.assertEqual(len(winners), 1)
             self.assertEqual(len(failures), 1)
             self.assertEqual(target.read_bytes(), winners[0])
-            self.assertEqual(
-                [item.name for item in root.iterdir()],
-                ["entry.json"],
-            )
+            self.assertEqual([item.name for item in root.iterdir()], ["entry.json"])
             with self.assertRaises(FileExistsError):
                 create_once_file(target, b"replacement")
 
@@ -95,6 +94,22 @@ class DurablePublicationTests(unittest.TestCase):
             unlink_durable(target)
             self.assertFalse(target.exists())
             unlink_durable(target)
+
+    @unittest.skipIf(os.name == "nt", "POSIX parent fsync is observable directly")
+    def test_replace_file_syncs_parent_directory_after_atomic_replace(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            source = root / ".record.pending"
+            target = root / "record.json"
+            source.write_bytes(b"new")
+            target.write_bytes(b"old")
+            with patch(
+                "kaliv_dev_control.durable_publication.sync_directory"
+            ) as directory_sync:
+                replace_file_durable(source, target)
+            self.assertEqual(target.read_bytes(), b"new")
+            self.assertFalse(source.exists())
+            directory_sync.assert_called_once_with(root)
 
 
 if __name__ == "__main__":

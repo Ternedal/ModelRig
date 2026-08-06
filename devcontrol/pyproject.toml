@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kaliv-dev-control"
 version = "0.1.0"
-description = "Fail-closed DC-L01 primitives for controlled self-development"
+description = "Fail-closed DC-L01–L02 primitives for controlled self-development"
 requires-python = ">=3.11"
 dependencies = []
 
