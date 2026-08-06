@@ -20,6 +20,10 @@ was required to turn red.
 | Persistent host writes are denied | Remove Landlock or grant rights above sandbox | **RED** — descendant creates a host artifact |
 | Truncate is always mediated | Permit Landlock ABI 1/2 or omit `TRUNCATE` | **RED** — existing host files can be truncated outside the sandbox |
 | Metadata mutation is denied | Remove the inherited seccomp filter | **RED** — chmod/chown/xattr/utime changes host metadata without changing Git state |
+| Alternate xattr/file-attribute entrypoints are denied | Permit syscall 463, 466 or 469 | **RED** — an at-variant or file-attribute syscall bypasses the legacy xattr denylist |
+| io_uring cannot dispatch metadata mutations | Permit syscall 425, 426 or 427 | **RED** — an io_uring context can bypass direct metadata-syscall comparisons |
+| x86_64 x32 syscall aliases are denied | Remove the `X32_SYSCALL_BIT` guard | **RED** — x32-numbered metadata calls bypass native syscall comparisons |
+| File-flag ioctl mutation is denied | Permit the architecture-specific `ioctl` syscall | **RED** — `FS_IOC_SETFLAGS` remains an alternate host-metadata path |
 | Seccomp architecture is verified | Accept unknown/mismatched audit architecture | **RED** — filter can inspect the wrong syscall table |
 | Containment installation fails closed | Ignore Landlock/seccomp setup failure | **RED** — reviewed argv runs without the declared boundary |
 | Landlock denial is inherited | Apply restriction after spawning command | **RED** — child writes outside sandbox |
@@ -48,10 +52,13 @@ cleanup, source re-verification, process-tree containment, ignored-artifact
 handling and nested-repository cleanup.
 
 Executable descendants attempted absolute writes plus chmod, chown, xattr and
-utime changes against host targets. The kernel denied every operation and the
-host content, mode, ownership-relevant state, timestamps and xattrs remained
-unchanged. Separate regressions prove both assume-unchanged and skip-worktree are
-rejected, explicitly cleared and restored to exact base before any patch receipt.
+utime changes against host targets. A separate raw-syscall regression requires
+`EPERM` for io_uring setup/entry/registration, setxattrat, removexattrat,
+file_setattr, the file-flag ioctl path and the x86_64 x32 syscall namespace. The
+kernel denied every tested path before argument validation, and the host content,
+mode, ownership-relevant state, timestamps and xattrs remained unchanged.
+Separate regressions prove both assume-unchanged and skip-worktree are rejected,
+explicitly cleared and restored to exact base before any patch receipt.
 
 The exact-head execution remains authoritative; this document does not substitute
 for repository checks and external review bound to the reviewed commit.
