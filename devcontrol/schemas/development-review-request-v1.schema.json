@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/kaliv-development-review-request-v1.json",
+  "title": "Kaliv development review request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "task_id",
+    "task_sha256",
+    "base_sha",
+    "developer_actor_id",
+    "patch_receipt_sha256",
+    "index_diff_sha256",
+    "required_command_ids",
+    "command_evidence",
+    "acceptance_criteria"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-development-review-request/v1"},
+    "task_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]{2,63}$"},
+    "task_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "developer_actor_id": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.@-]{1,127}$"},
+    "patch_receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "index_diff_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "required_command_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,63}$"}
+    },
+    "command_evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command_id", "receipt_sha256", "passed"],
+        "properties": {
+          "command_id": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,63}$"},
+          "receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "passed": {"type": "boolean"}
+        }
+      }
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 1024}
+    }
+  }
+}

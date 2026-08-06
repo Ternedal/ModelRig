@@ -1,4 +1,4 @@
-"""Contract test: every repository and DC-L01 test is actually reached by CI.
+"""Contract test: every repository and landed DevControl test is reached by CI.
 
 Run: python3 tests/workflow_test_coverage.py
 """
@@ -51,20 +51,31 @@ check(
     "self-test: a repository file outside the patterns is detected",
 )
 
-foundation_command = (
+discovery_command = (
     "PYTHONPATH=devcontrol/src python3 -m unittest discover "
     "-s devcontrol/tests -p 'test_*.py' -v"
 )
 check(
-    foundation_command in workflow,
-    "the workflow runs the exact DC-L01 unittest discovery command",
+    discovery_command in workflow,
+    "the workflow runs the exact DevControl unittest discovery command",
 )
 
 devcontrol_tests = sorted((root / "devcontrol/tests").glob("test_*.py"))
-check(len(devcontrol_tests) == 3, "the three DC-L01 test modules are present")
+expected = {
+    "test_bounded_subprocess.py",
+    "test_campaign_review.py",
+    "test_durable_publication.py",
+    "test_foundation.py",
+    "test_proposal_reload.py",
+    "test_review_reload.py",
+    "test_slice2.py",
+    "test_store_proposal.py",
+}
+observed = {path.name for path in devcontrol_tests}
+check(observed == expected, f"the eight DC-L01–L02 test modules are present: {sorted(observed)}")
 check(
     all(path.is_file() for path in devcontrol_tests),
-    "every DC-L01 test matched by unittest discovery is a regular file",
+    "every DevControl test matched by unittest discovery is a regular file",
 )
 
 print(f"\n===== TEST COVERAGE: {passed} passed, {failed} failed =====")

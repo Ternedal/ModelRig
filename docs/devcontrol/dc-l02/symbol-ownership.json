@@ -1,0 +1,48 @@
+{
+  "future_slice_symbols_forbidden": [
+    "streaming publication",
+    "GitHub write",
+    "remote Git",
+    "credentials",
+    "activation"
+  ],
+  "owners": {
+    "campaign.py": [
+      "CampaignError",
+      "CampaignState",
+      "CampaignEvent",
+      "DevelopmentCampaign"
+    ],
+    "durable_publication.py": [
+      "DurablePublicationError",
+      "sync_directory",
+      "sync_file",
+      "sync_tree",
+      "create_once_file",
+      "replace_file_durable",
+      "rename_directory_no_replace",
+      "unlink_durable",
+      "remove_tree_durable"
+    ],
+    "proposal.py": [
+      "ProposalError",
+      "DraftPullRequestProposal",
+      "DraftProposalBuilder"
+    ],
+    "review.py": [
+      "ReviewError",
+      "ReviewDecision",
+      "CommandEvidence",
+      "ReviewRequest",
+      "ReviewVerdict",
+      "IndependentPolicyReviewer",
+      "DraftPrGate"
+    ],
+    "store.py": [
+      "CampaignStoreError",
+      "CampaignStore"
+    ]
+  },
+  "schema": "modelrig-devcontrol-symbol-ownership/v1",
+  "slice": "DC-L02"
+}

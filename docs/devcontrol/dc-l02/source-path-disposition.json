@@ -1,0 +1,25 @@
+{
+  "exact_copy_count": 9,
+  "projected_count": 5,
+  "unassigned_count": 0,
+  "schema": "modelrig-devcontrol-source-path-disposition/v1",
+  "slice": "DC-L02",
+  "locked_source_head": "07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f",
+  "hard_exclusions": ["devcontrol/src/kaliv_dev_control/streaming_publication.py"],
+  "assignments": [
+    {"path":"devcontrol/schemas/development-campaign-v1.schema.json","disposition":"exact_copy"},
+    {"path":"devcontrol/schemas/development-draft-pr-proposal-v1.schema.json","disposition":"exact_copy"},
+    {"path":"devcontrol/schemas/development-review-request-v1.schema.json","disposition":"exact_copy"},
+    {"path":"devcontrol/schemas/development-review-verdict-v1.schema.json","disposition":"exact_copy"},
+    {"path":"devcontrol/src/kaliv_dev_control/campaign.py","disposition":"project"},
+    {"path":"devcontrol/src/kaliv_dev_control/durable_publication.py","disposition":"project"},
+    {"path":"devcontrol/src/kaliv_dev_control/proposal.py","disposition":"exact_copy"},
+    {"path":"devcontrol/src/kaliv_dev_control/review.py","disposition":"exact_copy"},
+    {"path":"devcontrol/src/kaliv_dev_control/store.py","disposition":"project"},
+    {"path":"devcontrol/tests/test_campaign_review.py","disposition":"exact_copy"},
+    {"path":"devcontrol/tests/test_durable_publication.py","disposition":"project"},
+    {"path":"devcontrol/tests/test_proposal_reload.py","disposition":"exact_copy"},
+    {"path":"devcontrol/tests/test_review_reload.py","disposition":"exact_copy"},
+    {"path":"devcontrol/tests/test_store_proposal.py","disposition":"project"}
+  ]
+}
