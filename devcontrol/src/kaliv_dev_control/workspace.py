@@ -24,12 +24,63 @@ class WorkspaceError(RuntimeError):
     """The requested workspace operation could not be proven safe."""
 
 
+class RawEvidenceText(str):
+    """Decoded display text that retains the exact bytes used for evidence.
+
+    ``CommandExecutor`` historically hashes ``CommandResult.stdout.encode()``.
+    Keeping the original bytes behind the UTF-8 encode operation preserves that
+    interface for injected runners while preventing lossy replacement decoding
+    from changing hashes or byte counts for real subprocess output.
+    """
+
+    __slots__ = ("_raw_bytes",)
+
+    def __new__(
+        cls,
+        value: str,
+        raw_bytes: bytes | None = None,
+    ) -> "RawEvidenceText":
+        if not isinstance(value, str):
+            raise WorkspaceError("command output text is invalid")
+        raw = value.encode("utf-8") if raw_bytes is None else raw_bytes
+        if not isinstance(raw, bytes):
+            raise WorkspaceError("command output bytes are invalid")
+        instance = super().__new__(cls, value)
+        instance._raw_bytes = raw
+        return instance
+
+    @classmethod
+    def from_bytes(cls, raw: bytes) -> "RawEvidenceText":
+        if not isinstance(raw, bytes):
+            raise WorkspaceError("command output bytes are invalid")
+        return cls(raw.decode("utf-8", errors="replace"), raw)
+
+    @property
+    def raw_bytes(self) -> bytes:
+        return self._raw_bytes
+
+    def encode(self, encoding: str = "utf-8", errors: str = "strict") -> bytes:
+        normalized = encoding.replace("_", "-").lower()
+        if normalized in {"utf-8", "utf8"}:
+            return self._raw_bytes
+        return super().encode(encoding, errors)
+
+
 @dataclass(frozen=True, slots=True)
 class CommandResult:
     args: tuple[str, ...]
     returncode: int
     stdout: str
     stderr: str
+
+    def __post_init__(self) -> None:
+        for field in ("stdout", "stderr"):
+            value = getattr(self, field)
+            if isinstance(value, RawEvidenceText):
+                continue
+            if not isinstance(value, str):
+                raise WorkspaceError("command output must be text")
+            object.__setattr__(self, field, RawEvidenceText(value))
 
 
 class Runner(Protocol):
@@ -63,9 +114,13 @@ class SubprocessRunner:
         if env is None:
             merged_env = os.environ.copy()
             for key in tuple(merged_env):
-                if key.startswith("GIT_"):
+                if key.startswith("GIT_") or key.startswith("LD_"):
                     merged_env.pop(key, None)
         else:
+            if any(key.startswith("LD_") for key in env):
+                raise WorkspaceError(
+                    "command environment cannot install dynamic-loader hooks"
+                )
             merged_env = {
                 key: os.environ[key]
                 for key in _SAFE_EXPLICIT_ENV_KEYS
@@ -95,8 +150,8 @@ class SubprocessRunner:
         return CommandResult(
             args=tuple(args),
             returncode=result.returncode,
-            stdout=result.stdout.prefix.decode("utf-8", errors="replace"),
-            stderr=result.stderr.prefix.decode("utf-8", errors="replace"),
+            stdout=RawEvidenceText.from_bytes(result.stdout.prefix),
+            stderr=RawEvidenceText.from_bytes(result.stderr.prefix),
         )
 
 
