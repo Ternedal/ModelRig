@@ -3,7 +3,7 @@
 Status: **authority candidate validated; repository workflow gates pending**
 
 Authority implementation and regression candidate:
-`695e789c208c99f2185642bb40929ad656aed89b`.
+`6843bb4b1dcc61be927ceeedad92ff3a92de774a`.
 
 The candidate keeps the complete 16-path allowlist and includes:
 
@@ -11,6 +11,8 @@ The candidate keeps the complete 16-path allowlist and includes:
   attested catalog hash;
 - one immutable toolchain snapshot used for both the attested toolchain hash and
   every later binding lookup;
+- a task-bound command registry that enforces the exact attested task hash,
+  repository and base SHA on every command resolution;
 - sealed Linux executable-object pinning and process-lifetime descriptor
   retirement, preventing pathname replacement and stale fd retargeting;
 - fail-closed Windows/non-Linux executable verification;
@@ -23,18 +25,18 @@ The candidate keeps the complete 16-path allowlist and includes:
   bounded response/base64 handling and decoded Git-blob verification;
 - concrete integer receipt status validation, including rejection of `200.0`.
 
-Focused DC-L03 validation produced **19/19 passing tests** in an isolated harness
+Focused DC-L03 validation produced **20/20 passing tests** in an isolated harness
 containing the committed DC-L03 implementations and their landed dependencies.
-The suite covers catalog replacement during command resolution, toolchain
-mutation during isolation verification, pathname replacement, descriptor
-retirement, symlinks, hash mismatch, moving refs, public task reassignment,
-protected paths, proxy/redirect escape, blob mismatch, token non-persistence and
-strict persisted types.
+The suite covers registry reuse across tasks, catalog replacement during command
+resolution, toolchain mutation during isolation verification, pathname
+replacement, descriptor retirement, symlinks, hash mismatch, moving refs,
+public task reassignment, protected paths, proxy/redirect escape, blob mismatch,
+token non-persistence and strict persisted types.
 
 The independent review of exact head
-`6d1012ebfc758656f4d9922b2e973a6a23483a26` found one additional actionable
-catalog-race issue. That issue is closed by the catalog snapshot and its focused
-regression in candidate `695e789c208c99f2185642bb40929ad656aed89b`.
+`99c4e9ad763d3a466e6dac54952310317496b841` found one additional actionable
+registry-reuse issue. That issue is closed by the task-bound registry and its
+focused regression in candidate `6843bb4b1dcc61be927ceeedad92ff3a92de774a`.
 A fresh independent review is required for the resulting exact head.
 
 Verified repository facts:
