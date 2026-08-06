@@ -1,0 +1,46 @@
+{
+  "schema": "modelrig-devcontrol-slice-source-path-disposition/v1",
+  "slice": "DC-L01",
+  "source_head": "07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f",
+  "land": [
+    "devcontrol/schemas/development-command-receipt-v1.schema.json",
+    "devcontrol/schemas/development-patch-receipt-v1.schema.json",
+    "devcontrol/schemas/development-task-v1.schema.json",
+    "devcontrol/src/kaliv_dev_control/bounded_subprocess.py",
+    "devcontrol/src/kaliv_dev_control/commands.py",
+    "devcontrol/src/kaliv_dev_control/contract.py",
+    "devcontrol/src/kaliv_dev_control/evidence.py",
+    "devcontrol/src/kaliv_dev_control/files.py",
+    "devcontrol/src/kaliv_dev_control/patch.py",
+    "devcontrol/src/kaliv_dev_control/policy.py",
+    "devcontrol/src/kaliv_dev_control/workspace.py",
+    "devcontrol/tests/test_bounded_subprocess.py",
+    "devcontrol/tests/test_foundation.py",
+    "devcontrol/tests/test_slice2.py"
+  ],
+  "progressive_stage": [
+    ".github/workflows/_tests.yml",
+    "devcontrol/README.md",
+    "devcontrol/pyproject.toml",
+    "devcontrol/src/kaliv_dev_control/__init__.py",
+    "devcontrol/src/kaliv_dev_control/__main__.py",
+    "tests/workflow_test_coverage.py"
+  ],
+  "slice_control_artifacts": [
+    "docs/devcontrol/dc-l01/exact-head-validation.md",
+    "docs/devcontrol/dc-l01/exact-path-allowlist.json",
+    "docs/devcontrol/dc-l01/independent-review-verdict.md",
+    "docs/devcontrol/dc-l01/mutation-results.md",
+    "docs/devcontrol/dc-l01/preflight.md",
+    "docs/devcontrol/dc-l01/source-path-disposition.json",
+    "docs/devcontrol/dc-l01/source-provenance.json",
+    "docs/devcontrol/dc-l01/symbol-ownership.json"
+  ],
+  "deferred": [
+    "all DC-L02 through DC-L15 source paths",
+    "concrete trusted Git runner",
+    "command catalog and non-empty default registry",
+    "network, GitHub write, publication and activation authority"
+  ],
+  "counts": {"land":14,"progressive_stage":6,"slice_control_artifacts":8,"total_changed_paths":28}
+}

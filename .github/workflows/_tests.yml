@@ -42,14 +42,11 @@ jobs:
         run: cd backend && go test ./...
 
       # scripts/ was outside the gate until 27/07-2026, and a directory walk
-      # skips *.retained entirely -- 3175 lines of load-bearing logic (the
-      # scheduler pilot, the Stage A operators and their tests) that no linter
-      # had ever opened. --extension pulls them in. The four exec-shims carry a
-      # file-level noqa next to the exec that makes their names invisible.
+      # skips *.retained entirely -- load-bearing logic that no linter had opened.
       - name: Python lint gate (syntax + undefined names)
         run: |
           pip install --quiet ruff
-          ruff check --select E9,F63,F7,F82 --extension retained:python worker/ tests/ scripts/
+          ruff check --select E9,F63,F7,F82 --extension retained:python worker/ tests/ scripts/ devcontrol/src/ devcontrol/tests/
 
       - name: PowerShell syntax gate
         shell: pwsh
@@ -62,11 +59,7 @@ jobs:
 
       # Every integration + worker test, globbed so a new tests/*.py is included
       # with no edit here. MODELRIG_BIN is used by the backend/e2e tests; the
-      # worker tests ignore it. This is exactly the set the release job used to
-      # list inline (backend_smoke/v1, e2e, worker_*), now in one place.
-      #
-      # Keep the complete output as one artifact on failure. A red aggregate
-      # step without the exact failing script/output is not an actionable gate.
+      # worker tests ignore it.
       - name: Test suite (auto-includes new tests/*.py)
         env:
           MODELRIG_BIN: /tmp/modelrig-server
@@ -89,6 +82,122 @@ jobs:
           done
           exit "$status"
 
+      - name: DevControl DC-L01 foundation tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=devcontrol/src python3 -m unittest discover -s devcontrol/tests -p 'test_*.py' -v 2>&1 | tee -a /tmp/modelrig-ci-test.log
+
+      - name: DevControl final boundary regressions
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=devcontrol/src python3 - <<'PY' 2>&1 | tee -a /tmp/modelrig-ci-test.log
+          from pathlib import Path
+          import hashlib
+          import subprocess
+          import sys
+          import tempfile
+
+          from kaliv_dev_control.commands import CommandExecutor
+          from kaliv_dev_control.files import FileAccessError, WorkspaceFiles
+          from kaliv_dev_control.workspace import SubprocessRunner, WorkspaceError
+
+          runner = SubprocessRunner()
+          for key in ("LD_PRELOAD", "LD_AUDIT", "LD_LIBRARY_PATH"):
+              try:
+                  runner.run(
+                      (sys.executable, "-c", "pass"),
+                      cwd=Path.cwd(),
+                      timeout_seconds=10,
+                      max_output_bytes=64_000,
+                      env={key: "/tmp/untrusted-loader.so"},
+                  )
+              except WorkspaceError as exc:
+                  assert "dynamic-loader hooks" in str(exc)
+              else:
+                  raise AssertionError(f"{key} was not rejected before spawn")
+
+          requested = []
+
+          class BoundedReader:
+              def __enter__(self):
+                  return self
+
+              def __exit__(self, exc_type, exc, traceback):
+                  return False
+
+              def read(self, size):
+                  requested.append(size)
+                  return b"x" * size
+
+          class BoundedPath:
+              def open(self, mode):
+                  assert mode == "rb"
+                  return BoundedReader()
+
+          try:
+              WorkspaceFiles._read_bounded(BoundedPath(), 8)
+          except FileAccessError as exc:
+              assert "exceeds read bound" in str(exc)
+          else:
+              raise AssertionError("bounded read accepted max_bytes + 1 bytes")
+          assert requested == [9]
+
+          raw = runner.run(
+              (
+                  sys.executable,
+                  "-c",
+                  "import os; os.write(1, b'\\xff'); os.write(2, b'\\xfe')",
+              ),
+              cwd=Path.cwd(),
+              timeout_seconds=10,
+              max_output_bytes=64_000,
+              env={},
+          )
+          stdout = raw.stdout.encode("utf-8")
+          stderr = raw.stderr.encode("utf-8")
+          assert stdout == b"\xff"
+          assert stderr == b"\xfe"
+          assert hashlib.sha256(stdout).hexdigest() == hashlib.sha256(b"\xff").hexdigest()
+          assert hashlib.sha256(stderr).hexdigest() == hashlib.sha256(b"\xfe").hexdigest()
+          assert len(stdout) + len(stderr) == 2
+
+          def git(repository, *args):
+              return subprocess.run(
+                  ("git", *args),
+                  cwd=repository,
+                  check=True,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE,
+                  text=True,
+              ).stdout
+
+          for hidden_flag in ("--assume-unchanged", "--skip-worktree"):
+              with tempfile.TemporaryDirectory() as directory:
+                  repository = Path(directory)
+                  git(repository, "init", "--quiet")
+                  git(repository, "config", "user.name", "DC-L01 Test")
+                  git(repository, "config", "user.email", "dc-l01@example.invalid")
+                  tracked = repository / "tracked.txt"
+                  tracked.write_text("base\n", encoding="utf-8")
+                  git(repository, "add", "tracked.txt")
+                  git(repository, "commit", "--quiet", "-m", "base")
+                  git(repository, "update-index", hidden_flag, "--", "tracked.txt")
+                  tracked.write_text("hidden mutation\n", encoding="utf-8")
+                  assert not git(repository, "diff", "--name-only", "--").strip()
+                  _, clean = CommandExecutor()._snapshot(repository)
+                  assert not clean, hidden_flag
+
+          preflight = Path("docs/devcontrol/dc-l01/preflight.md").read_text(encoding="utf-8")
+          assert "ee1d828b9f956284216b78ff8784c6787c3736dc" in preflight
+          assert "6644512e1d442349f263ffc157fe63e18886507f" not in preflight
+          PY
+
       - name: Upload full failed Python test log
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -98,11 +207,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # The appliance code (updater swap/recovery/journal, supervisor rotation,
-  # heartbeat) leans on file semantics that DIFFER on Windows -- os.Rename won't
-  # overwrite, exes lock while running -- so these Go tests also run on a real
-  # Windows runner, not only Linux. Scoped to the appliance packages to keep the
-  # job fast; the Linux job above remains the full suite.
+  # The appliance code leans on file semantics that differ on Windows, so these
+  # packages also run on a real Windows runner.
   test-windows-appliance:
     runs-on: windows-latest
     steps:
