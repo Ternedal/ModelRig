@@ -345,6 +345,44 @@ class RejectUnverifiedIsolation:
         raise CatalogError("OS isolation has not been independently verified")
 
 
+class TaskBoundCommandRegistry(CommandRegistry):
+    def __init__(
+        self,
+        templates: Sequence[CommandTemplate],
+        task: DevelopmentTask,
+        executable_verifier: ExecutableVerifier,
+    ) -> None:
+        super().__init__(templates)
+        object.__setattr__(self, "_bound_task_identity", self._identity(task))
+        object.__setattr__(self, "_catalog_executable_verifier", executable_verifier)
+        object.__setattr__(self, "_sealed", True)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if getattr(self, "_sealed", False):
+            raise CommandPolicyError("task-bound command registry is immutable")
+        object.__setattr__(self, name, value)
+
+    @staticmethod
+    def _identity(task: DevelopmentTask) -> tuple[str, str, str, str]:
+        if not isinstance(task, DevelopmentTask):
+            raise CommandPolicyError("registry resolution requires a development task")
+        try:
+            snapshot = DevelopmentTask.from_mapping(task.to_dict())
+        except (ContractError, AttributeError, TypeError, ValueError) as exc:
+            raise CommandPolicyError("registry resolution task is invalid") from exc
+        return (
+            snapshot.task_id,
+            _task_sha(snapshot),
+            snapshot.repository,
+            snapshot.base_sha,
+        )
+
+    def resolve(self, task: DevelopmentTask, command_id: str) -> CommandTemplate:
+        if self._identity(task) != self._bound_task_identity:
+            raise CommandPolicyError("command registry is not bound to this exact task")
+        return super().resolve(task, command_id)
+
+
 class LocalExecutableHashVerifier:
     def __init__(self) -> None:
         self._pins: dict[str, tuple[ToolBinding, int, str]] = {}
@@ -378,7 +416,13 @@ class LocalExecutableHashVerifier:
         except OSError as exc:
             raise CatalogError(f"tool executable cannot be resolved: {binding.tool_id}") from exc
         try:
-            source = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0))
+            source = os.open(
+                path,
+                os.O_RDONLY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_NONBLOCK", 0),
+            )
         except OSError as exc:
             raise CatalogError(f"tool executable cannot be opened safely: {binding.tool_id}") from exc
         pinned: int | None = None
@@ -431,44 +475,6 @@ class LocalExecutableHashVerifier:
                 os.close(pinned)
 
 
-class TaskBoundCommandRegistry(CommandRegistry):
-    def __init__(
-        self,
-        templates: Sequence[CommandTemplate],
-        task: DevelopmentTask,
-        executable_verifier: ExecutableVerifier,
-    ) -> None:
-        super().__init__(templates)
-        object.__setattr__(self, "_bound_task_identity", self._identity(task))
-        object.__setattr__(self, "_catalog_executable_verifier", executable_verifier)
-        object.__setattr__(self, "_sealed", True)
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        if getattr(self, "_sealed", False):
-            raise CommandPolicyError("task-bound command registry is immutable")
-        object.__setattr__(self, name, value)
-
-    @staticmethod
-    def _identity(task: DevelopmentTask) -> tuple[str, str, str, str]:
-        if not isinstance(task, DevelopmentTask):
-            raise CommandPolicyError("registry resolution requires a development task")
-        try:
-            snapshot = DevelopmentTask.from_mapping(task.to_dict())
-        except (ContractError, AttributeError, TypeError, ValueError) as exc:
-            raise CommandPolicyError("registry resolution task is invalid") from exc
-        return (
-            snapshot.task_id,
-            _task_sha(snapshot),
-            snapshot.repository,
-            snapshot.base_sha,
-        )
-
-    def resolve(self, task: DevelopmentTask, command_id: str) -> CommandTemplate:
-        if self._identity(task) != self._bound_task_identity:
-            raise CommandPolicyError("command registry is not bound to this exact task")
-        return super().resolve(task, command_id)
-
-
 class CatalogMaterializer:
     def __init__(
         self, catalog: ModelRigCommandCatalog, *,
@@ -496,10 +502,10 @@ class CatalogMaterializer:
         if task_snapshot.repository != "Ternedal/ModelRig":
             raise CatalogError("ModelRig catalog cannot authorize another repository")
         catalog = self.catalog.snapshot()
-        specs = tuple(catalog.resolve(item) for item in task_snapshot.allowed_command_ids)
-        snapshot = toolchain.snapshot()
         isolation_verifier = self.isolation_verifier
         executable_verifier = self.executable_verifier
+        specs = tuple(catalog.resolve(item) for item in task_snapshot.allowed_command_ids)
+        snapshot = toolchain.snapshot()
         expected = {
             "task_id": task_snapshot.task_id, "task_sha256": _task_sha(task_snapshot),
             "repository": task_snapshot.repository, "base_sha": task_snapshot.base_sha,
@@ -508,16 +514,40 @@ class CatalogMaterializer:
             "boundary": IsolationBoundary.OS_ISOLATED,
             "network_mode": NetworkMode.DENY,
         }
-        actual = {
-            "task_id": attestation.task_id, "task_sha256": attestation.task_sha256,
-            "repository": attestation.repository, "base_sha": attestation.base_sha,
-            "catalog_sha256": attestation.catalog_sha256,
-            "toolchain_sha256": attestation.toolchain_sha256,
-            "boundary": attestation.boundary, "network_mode": attestation.network_mode,
-        }
-        if actual != expected:
+        try:
+            attestation_snapshot = IsolationAttestation.from_mapping(
+                attestation.to_dict()
+            )
+        except (CatalogError, AttributeError, TypeError, ValueError) as exc:
+            raise CatalogError("materializer isolation attestation is invalid") from exc
+
+        def authority(proof: IsolationAttestation) -> dict[str, Any]:
+            return {
+                "task_id": proof.task_id, "task_sha256": proof.task_sha256,
+                "repository": proof.repository, "base_sha": proof.base_sha,
+                "catalog_sha256": proof.catalog_sha256,
+                "toolchain_sha256": proof.toolchain_sha256,
+                "boundary": proof.boundary, "network_mode": proof.network_mode,
+            }
+
+        if authority(attestation_snapshot) != expected:
             raise CatalogError("isolation attestation is not bound to this exact authority")
-        isolation_verifier.verify(attestation)
+        verifier_attestation = IsolationAttestation.from_mapping(
+            attestation_snapshot.to_dict()
+        )
+        verified_canonical = verifier_attestation.canonical_json()
+        isolation_verifier.verify(verifier_attestation)
+        try:
+            verified_snapshot = IsolationAttestation.from_mapping(
+                verifier_attestation.to_dict()
+            )
+        except (CatalogError, AttributeError, TypeError, ValueError) as exc:
+            raise CatalogError("isolation verifier mutated the attestation") from exc
+        if (
+            verified_snapshot.canonical_json() != verified_canonical
+            or authority(verified_snapshot) != expected
+        ):
+            raise CatalogError("isolation verifier mutated the attestation")
         templates, invocations = [], {}
         for spec in specs:
             if spec.required_boundary is not IsolationBoundary.OS_ISOLATED or spec.network_mode is not NetworkMode.DENY:

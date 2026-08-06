@@ -145,6 +145,11 @@ class MutateTaskIsolation:
         object.__setattr__(self.value, "base_sha", "b" * 40)
 
 
+class MutateAttestationIsolation:
+    def verify(self, proof: IsolationAttestation) -> None:
+        object.__setattr__(proof, "base_sha", "b" * 40)
+
+
 class MutateSpecIsolation:
     def __init__(self, value: ProjectCommandSpec) -> None:
         self.value = value
@@ -304,6 +309,18 @@ class CatalogTests(unittest.TestCase):
         with self.assertRaisesRegex(CommandPolicyError, "exact task"):
             registry.resolve(original, "modelrig.devcontrol.tests")
 
+    def test_materialization_uses_private_stable_attestation_snapshot(self):
+        t = task("modelrig.devcontrol.tests")
+        tc = toolchain()
+        proof = attestation(t, tc)
+        with self.assertRaisesRegex(CatalogError, "mutated"):
+            CatalogMaterializer(
+                modelrig_command_catalog(),
+                isolation_verifier=MutateAttestationIsolation(),
+                executable_verifier=AcceptExecutable(),
+            ).materialize(t, tc, proof)
+        self.assertEqual(proof.base_sha, BASE_SHA)
+
     def test_materialization_uses_attested_catalog_snapshot(self):
         t, tc = task("modelrig.devcontrol.tests"), toolchain()
         source = modelrig_command_catalog()
@@ -410,6 +427,37 @@ class CatalogTests(unittest.TestCase):
                 os.close(unrelated)
             with self.assertRaisesRegex(CatalogError, "closed"):
                 verifier.verify(ToolBinding("python", str(source.resolve()), digest))
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and hasattr(os, "mkfifo"),
+        "Linux FIFO regression",
+    )
+    def test_fifo_executable_candidate_is_rejected_without_blocking(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fifo = Path(directory) / "fifo-tool"
+            os.mkfifo(fifo, 0o500)
+            script = """
+import sys
+from kaliv_dev_control.catalog import CatalogError, LocalExecutableHashVerifier, ToolBinding
+try:
+    LocalExecutableHashVerifier().verify(ToolBinding("python", sys.argv[1], "0" * 64))
+except CatalogError as exc:
+    print(exc)
+    raise SystemExit(0)
+raise SystemExit(2)
+"""
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-c", script, str(fifo.resolve())],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=3,
+                )
+            except subprocess.TimeoutExpired as exc:
+                self.fail(f"FIFO executable verification blocked: {exc}")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("regular executable", result.stdout)
 
     @unittest.skipIf(os.name == "nt", "Windows verifier fails closed")
     def test_link_and_hash_mismatch_are_rejected(self):
