@@ -1135,7 +1135,16 @@ def validate_evidence(
 
 
 def campaign_report(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    root = Path(__file__).resolve().parents[1]
+    # --root lets a newer campaign validate a frozen release checkout, the same
+    # way stage_b_one_click does. The contract a release is judged by is not
+    # always the one shipped inside it: 1.58.149's own lifecycle contract could
+    # only be satisfied with KALIV_AGENT3_ENABLED and KALIV_SCHEDULER_API set,
+    # which no appliance sets, so the released copy could not judge its own
+    # physical evidence. The measurements are unchanged either way -- this only
+    # decides which contract they are held against. The candidate identity still
+    # comes from the checkout under test, never from the validator's own repo.
+    root = getattr(args, "root", None) or Path(__file__).resolve().parents[1]
+    root = Path(root).resolve()
     now = datetime.now(timezone.utc)
     candidate = candidate_identity(root)
     assessor = _load_agent3_assessor(root)
@@ -1228,6 +1237,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--rag-report", type=Path, default=DEFAULT_PATHS["rag"])
     parser.add_argument("--lifecycle-report", type=Path, default=DEFAULT_PATHS["lifecycle"])
     parser.add_argument("--scheduler-pilot-report", type=Path, default=DEFAULT_PATHS["scheduler_pilot"])
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=None,
+        help=(
+            "checkout hvis evidens skal vurderes (default: validatorens eget "
+            "repo). Brug den udcheckede release, naar kampagnen koeres fra en "
+            "nyere worktree."
+        ),
+    )
     parser.add_argument("--max-age-hours", type=float, default=168.0)
     parser.add_argument("--min-model-exact", type=float, default=1.0)
     args = parser.parse_args(argv)
