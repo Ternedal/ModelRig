@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -86,6 +88,26 @@ check("def remote_release_identity" in source
 # Both token-backed readings sit behind experimental flags a normal appliance
 # does not set, so the bundle must bind the running build to things that are
 # always measurable: the installed worker exe and the schedule store on disk.
+# --root exists to run a newer wizard against a frozen release checkout. It was
+# defeated by `def capture(..., cwd: Path = ROOT)`: the default bound ROOT at def
+# time, so use_root() could not move it and every git call ran in the WIZARD's
+# repo. The bundle then attested the wizard's own commit as the candidate, and
+# the release freeze rejected it. Verified by behaviour, not by reading source.
+_probe = Path(tempfile.mkdtemp(prefix="stage-b-root-"))
+(_probe / "VERSION").write_text("9.9.9\n", encoding="utf-8")
+_original_root = module.ROOT
+try:
+    module.use_root(_probe)
+    check(module.ROOT == _probe.resolve(),
+          "use_root repoints the wizard at the given checkout")
+    _seen = module.capture(
+        [sys.executable, "-c", "import os,sys; sys.stdout.write(os.getcwd())"]
+    )
+    check(Path(_seen).resolve() == _probe.resolve(),
+          "capture runs in the checkout use_root selected, not the wizard's own")
+finally:
+    module.use_root(_original_root)
+
 check("def installed_worker_exe_sha256" in source
       and "def released_worker_exe_sha256" in source
       and '"worker_exe_sha256"' in source
