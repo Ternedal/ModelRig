@@ -526,14 +526,26 @@ class GitHubReadTests(unittest.TestCase):
             )
         self.assertEqual(transport.calls, [])
 
-    def test_validated_task_snapshot_cannot_be_replaced(self):
+    def test_validated_adapter_authority_cannot_be_retargeted(self):
         transport = FakeTransport(response({"sha": BASE_SHA}))
-        adapter = GitHubReadAdapter(task(), transport=transport)
-        with self.assertRaises(AttributeError):
-            adapter.task = replace(task(), base_sha="main")
+        adapter = GitHubReadAdapter(task(), transport=transport, token="secret-token")
+        replacements = (
+            ("task", replace(task(), base_sha="b" * 40)),
+            ("_snapshot", adapter._snapshot),
+            ("_repository_path", "/repos/Other/Repo"),
+            ("_token", "replacement-token"),
+            ("timeout_seconds", 1),
+            ("transport", FakeTransport(response({"sha": "b" * 40}))),
+        )
+        for name, value in replacements:
+            with self.subTest(name=name), self.assertRaisesRegex(
+                GitHubReadError, "immutable"
+            ):
+                setattr(adapter, name, value)
         receipt = adapter.verify_base_commit()
         self.assertEqual(receipt.base_sha, BASE_SHA)
-        self.assertIn("/commits/" + BASE_SHA, transport.calls[0][0])
+        self.assertIn("/repos/Ternedal/ModelRig/commits/" + BASE_SHA, transport.calls[0][0])
+        self.assertEqual(transport.calls[0][1]["Authorization"], "Bearer secret-token")
 
     def test_verify_base_commit_is_fixed_exact_sha_get(self):
         transport = FakeTransport(response({"sha": BASE_SHA}))
