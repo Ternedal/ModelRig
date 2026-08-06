@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -50,6 +51,10 @@ class Slice2Tests(unittest.TestCase):
         (self.repo / "devcontrol/tests").mkdir(parents=True)
         (self.repo / "devcontrol/target.txt").write_text(
             "old\n",
+            encoding="utf-8",
+        )
+        (self.repo / "devcontrol/other.txt").write_text(
+            "other\n",
             encoding="utf-8",
         )
         (self.repo / "devcontrol/tests/test_dummy.py").write_text(
@@ -143,6 +148,43 @@ class Slice2Tests(unittest.TestCase):
             run(self.repo, "git", "diff", "--cached", "--name-only"),
             "devcontrol/target.txt",
         )
+
+    def test_patch_rejects_and_clears_hidden_index_flags(self) -> None:
+        patch = """diff --git a/devcontrol/other.txt b/devcontrol/other.txt
+--- a/devcontrol/other.txt
++++ b/devcontrol/other.txt
+@@ -1 +1 @@
+-other
++changed
+"""
+        target = self.repo / "devcontrol/target.txt"
+        other = self.repo / "devcontrol/other.txt"
+        for option in ("--assume-unchanged", "--skip-worktree"):
+            with self.subTest(option=option):
+                run(
+                    self.repo,
+                    "git",
+                    "update-index",
+                    option,
+                    "devcontrol/target.txt",
+                )
+                target.write_text("hidden\n", encoding="utf-8")
+                with self.assertRaisesRegex(PatchError, "hidden index"):
+                    PatchApplier().apply(self.task, self.repo, patch)
+                self.assertEqual(target.read_text(encoding="utf-8"), "old\n")
+                self.assertEqual(other.read_text(encoding="utf-8"), "other\n")
+                self.assertEqual(
+                    run(
+                        self.repo,
+                        "git",
+                        "ls-files",
+                        "-v",
+                        "--",
+                        "devcontrol/target.txt",
+                    ),
+                    "H devcontrol/target.txt",
+                )
+                self.assertEqual(run(self.repo, "git", "status", "--porcelain"), "")
 
     def test_protected_patch_is_rejected_without_mutation(self) -> None:
         patch = """diff --git a/.github/workflow.yml b/.github/workflow.yml
@@ -293,10 +335,9 @@ class Slice2Tests(unittest.TestCase):
             "text=True,capture_output=True); "
             "assert child.returncode!=0; "
             "assert not Path(os.environ['OUTSIDE_MARKER']).exists(); "
-            "subprocess.run(['git','remote','add','injected',"
-            "'https://example.invalid/repo.git'], check=True); "
-            "h=Path('.git/hooks/pre-commit'); "
-            "h.write_text('#!/bin/sh\\nexit 1\\n'); h.chmod(0o755)"
+            "cfg=Path('.git/config'); "
+            "cfg.write_text(cfg.read_text()+'\\n[remote \\\"injected\\\"]\\n\\turl = https://example.invalid/repo.git\\n'); "
+            "Path('.git/hooks/pre-commit').write_text('#!/bin/sh\\nexit 1\\n')"
         )
         template = CommandTemplate(
             command_id=command_id,
@@ -315,6 +356,54 @@ class Slice2Tests(unittest.TestCase):
         self.assertFalse(hook.exists())
         self.assertEqual(run(self.repo, "git", "remote"), "")
         self.assertEqual(run(self.repo, "git", "status", "--porcelain"), "")
+
+    def test_command_descendant_cannot_mutate_host_metadata(self) -> None:
+        outside = self.root / "outside-metadata.txt"
+        outside.write_text("host\n", encoding="utf-8")
+        outside.chmod(0o600)
+        os.utime(outside, ns=(1_700_000_000_000_000_000,) * 2)
+        before = outside.stat()
+        command_id = "python.metadata-escape"
+        child_script = (
+            "import os; p=os.environ['OUTSIDE_METADATA']; "
+            "actions=("
+            "lambda: os.chmod(p,0o644),"
+            "lambda: os.chown(p,os.getuid(),os.getgid()),"
+            "lambda: os.setxattr(p,b'user.kaliv',b'x'),"
+            "lambda: os.utime(p,ns=(1800000000000000000,1800000000000000000))"
+            "); "
+            "[(lambda f: (f(), (_ for _ in ()).throw(AssertionError('metadata escape'))))(f) "
+            "if False else None for f in ()]; "
+            "exec('for action in actions:\\n"
+            "    try:\\n"
+            "        action()\\n"
+            "    except PermissionError:\\n"
+            "        pass\\n"
+            "    else:\\n"
+            "        raise AssertionError(\\\"metadata escape\\\")')"
+        )
+        script = (
+            "import subprocess,sys; "
+            f"child=subprocess.run([sys.executable,'-c',{child_script!r}],"
+            "text=True,capture_output=True); "
+            "assert child.returncode==0,(child.stdout,child.stderr)"
+        )
+        template = CommandTemplate(
+            command_id=command_id,
+            argv=(sys.executable, "-c", script),
+            env={"OUTSIDE_METADATA": str(outside)},
+        )
+        receipt = CommandExecutor(
+            registry=CommandRegistry((template,))
+        ).execute(self._task_for(command_id), self.repo, command_id)
+        after = outside.stat()
+        self.assertTrue(receipt.passed)
+        self.assertTrue(receipt.workspace_unchanged)
+        self.assertEqual(stat.S_IMODE(after.st_mode), stat.S_IMODE(before.st_mode))
+        self.assertEqual(after.st_mtime_ns, before.st_mtime_ns)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "host\n")
+        with self.assertRaises(OSError):
+            os.getxattr(outside, b"user.kaliv")
 
     def test_command_rejects_literal_source_workspace_argument(self) -> None:
         command_id = "python.source-path"
