@@ -19,6 +19,12 @@ A qualifying verdict must:
   Git repository created through a temporary bundle;
 - confirm the bundle and origin are removed before execution, no object alternate
   or source path is exposed, and the sandbox has isolated command context;
+- confirm Linux Landlock handles persistent filesystem write, create, delete,
+  truncate and refer operations before the reviewed argv starts, granting those
+  rights only below the disposable sandbox root, with `/dev/null` as the sole
+  non-persistent sink exception;
+- confirm the Landlock restriction is inherited by descendants, an absolute or
+  parent escape write leaves no host artifact and unavailable Landlock fails closed;
 - confirm receipts bind both sandbox worktree state and complete bounded sandbox
   Git-metadata state;
 - confirm metadata and worktree writes remain confined to the disposable sandbox,
