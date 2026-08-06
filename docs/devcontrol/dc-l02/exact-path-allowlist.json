@@ -14,6 +14,7 @@
     "devcontrol/src/kaliv_dev_control/store.py",
     "devcontrol/tests/test_campaign_review.py",
     "devcontrol/tests/test_durable_publication.py",
+    "devcontrol/tests/test_foundation.py",
     "devcontrol/tests/test_proposal_reload.py",
     "devcontrol/tests/test_review_reload.py",
     "devcontrol/tests/test_store_proposal.py",
@@ -47,11 +48,12 @@
   "hard_exclusions": [
     "devcontrol/src/kaliv_dev_control/streaming_publication.py"
   ],
-  "path_count": 26,
+  "path_count": 27,
   "progressive_surfaces": [
     "devcontrol/README.md",
     "devcontrol/pyproject.toml",
     "devcontrol/src/kaliv_dev_control/__init__.py",
+    "devcontrol/tests/test_foundation.py",
     "tests/workflow_test_coverage.py"
   ],
   "schema": "modelrig-devcontrol-exact-path-allowlist/v1",
