@@ -187,8 +187,8 @@ class GitHubReadAdapter:
             raise GitHubReadError('GitHub timeout is outside bounds')
         if token is not None and (not isinstance(token, str) or not token or len(token) > 4096 or any((char.isspace() for char in token)) or ('\x00' in token)):
             raise GitHubReadError('GitHub token is invalid')
-        if not _valid_repository(task.repository):
-            raise GitHubReadError('task repository is invalid')
+        if not isinstance(task.task_id, str) or _TASK_ID.fullmatch(task.task_id) is None or not _valid_repository(task.repository) or not isinstance(task.base_sha, str) or _HEX40.fullmatch(task.base_sha) is None:
+            raise GitHubReadError('task identity is invalid')
         self.task = task
         self.transport = transport or UrllibReadOnlyTransport()
         self._token = token
