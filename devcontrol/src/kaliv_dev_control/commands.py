@@ -663,6 +663,28 @@ class CommandExecutor:
         if head != task.base_sha:
             raise CommandExecutionError("workspace HEAD does not match task base SHA")
 
+    def _hidden_index_state(self, workspace: Path) -> str:
+        output = self._run_git(
+            workspace,
+            "ls-files", "-v", "-z", "--",
+            max_output_bytes=2_000_000,
+        )
+        hidden: list[str] = []
+        for record in output.split("\x00"):
+            if not record:
+                continue
+            if len(record) < 3 or record[1] != " ":
+                raise CommandExecutionError("git index flag output is malformed")
+            tag = record[0]
+            path = record[2:]
+            if not path:
+                raise CommandExecutionError("git index flag path is empty")
+            if tag.islower():
+                hidden.append(f"assume:{path}")
+            if tag.upper() == "S":
+                hidden.append(f"skip:{path}")
+        return "\x00".join(sorted(set(hidden)))
+
     def _snapshot(self, workspace: Path) -> tuple[str, bool]:
         cached = self._run_git(
             workspace, "diff", "--cached", "--binary", "--no-ext-diff", "--"
@@ -677,8 +699,13 @@ class CommandExecutor:
             workspace,
             "ls-files", "--others", "--ignored", "--exclude-standard", "-z",
         )
-        fingerprint = self._sha256(cached.encode("utf-8", errors="replace"))
-        return fingerprint, not bool(cached or unstaged or untracked or ignored)
+        hidden = self._hidden_index_state(workspace)
+        fingerprint = self._sha256(
+            (cached + "\x00" + hidden).encode("utf-8", errors="replace")
+        )
+        return fingerprint, not bool(
+            cached or unstaged or untracked or ignored or hidden
+        )
 
     def _verify_source_clean(
         self,
@@ -690,7 +717,7 @@ class CommandExecutor:
         fingerprint, clean = self._snapshot(workspace)
         if not clean:
             raise CommandExecutionError(
-                "source workspace has staged, unstaged, untracked or ignored changes"
+                "source workspace has staged, unstaged, untracked, ignored or hidden index state"
             )
         if expected_fingerprint is not None and fingerprint != expected_fingerprint:
             raise CommandExecutionError(
