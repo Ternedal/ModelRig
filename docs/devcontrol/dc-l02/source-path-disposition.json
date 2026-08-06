@@ -1,6 +1,6 @@
 {
-  "exact_copy_count": 10,
-  "projected_count": 4,
+  "exact_copy_count": 9,
+  "projected_count": 5,
   "unassigned_count": 0,
   "schema": "modelrig-devcontrol-source-path-disposition/v1",
   "slice": "DC-L02",
@@ -11,7 +11,7 @@
     {"path":"devcontrol/schemas/development-draft-pr-proposal-v1.schema.json","disposition":"exact_copy"},
     {"path":"devcontrol/schemas/development-review-request-v1.schema.json","disposition":"exact_copy"},
     {"path":"devcontrol/schemas/development-review-verdict-v1.schema.json","disposition":"exact_copy"},
-    {"path":"devcontrol/src/kaliv_dev_control/campaign.py","disposition":"exact_copy"},
+    {"path":"devcontrol/src/kaliv_dev_control/campaign.py","disposition":"project"},
     {"path":"devcontrol/src/kaliv_dev_control/durable_publication.py","disposition":"project"},
     {"path":"devcontrol/src/kaliv_dev_control/proposal.py","disposition":"exact_copy"},
     {"path":"devcontrol/src/kaliv_dev_control/review.py","disposition":"exact_copy"},
