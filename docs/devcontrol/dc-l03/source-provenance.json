@@ -22,17 +22,17 @@
     {
       "path": "devcontrol/src/kaliv_dev_control/catalog.py",
       "source_blob": "98cb4ce673b166b8802dda9004af7654bbb51d97",
-      "reason": "retain the locked catalog while adding bounded canonical fields, loader/Git environment rejection, descriptor-based POSIX executable hashing and fail-closed Windows behavior"
+      "reason": "retain the locked catalog while adding bounded canonical fields, loader/Git environment rejection, sealed descriptor-based POSIX executable pinning, process-lifetime descriptor retirement that prevents fd reuse, and fail-closed Windows behavior"
     },
     {
       "path": "devcontrol/src/kaliv_dev_control/github_read.py",
       "source_blob": "2637ad2a9f4bc3ff49afaf123f71b06645c86971",
-      "reason": "retain the fixed GET-only API while disabling environment proxies, hardening response metadata, validating task identities and verifying decoded Git blob identity"
+      "reason": "retain the fixed GET-only API while disabling environment proxies, rejecting non-exact task SHAs before transport, hardening response metadata, validating task identities and verifying decoded Git blob identity"
     },
     {
       "path": "devcontrol/tests/test_slice5.py",
       "source_blob": "cb2766909a788d588285047c0495029dec4b1c97",
-      "reason": "preserve source coverage and add executable regressions for blob identity, proxy/authority restrictions, loader-hook rejection, linked executables and strict receipt reload"
+      "reason": "preserve source coverage and add regressions for blob identity, proxy/authority restrictions, loader-hook rejection, pathname swaps, descriptor retirement, linked executables, moving refs and strict receipt reload"
     }
   ]
 }
