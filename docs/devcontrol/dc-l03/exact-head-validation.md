@@ -1,8 +1,15 @@
 # DC-L03 exact-head validation
 
-Status: **pending**
+Status: **candidate committed; exact-head checks pending**
 
-Candidate head: not yet committed.
+Implementation candidate: `f1d3ff20cbec37532ae118dfa5da04ed948b9c84`.
+
+The implementation candidate contains the complete 16-path allowlist and includes
+sealed Linux executable-object pinning, strict catalog environment policy,
+fixed-host GET-only GitHub reads, Git-blob verification and executable
+regressions. This evidence update intentionally changes the branch head; all
+final conclusions must bind to the resulting exact head, not the implementation
+candidate above.
 
 Required gates:
 
