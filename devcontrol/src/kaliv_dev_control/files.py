@@ -137,15 +137,19 @@ class WorkspaceFiles:
                 if not self._allowed(relative):
                     continue
 
+                remaining = max_scan_bytes - scanned
+                if remaining <= 0:
+                    raise FileAccessError("search exceeded scan budget")
+                read_limit = min(max_file_bytes, remaining)
                 try:
                     if path.stat().st_size > max_file_bytes:
                         continue
-                    data = self._read_bounded(path, max_file_bytes)
+                    data = self._read_bounded(path, read_limit)
                 except FileAccessError:
+                    if read_limit < max_file_bytes:
+                        raise FileAccessError("search exceeded scan budget")
                     continue
                 scanned += len(data)
-                if scanned > max_scan_bytes:
-                    raise FileAccessError("search exceeded scan budget")
 
                 if b"\x00" in data:
                     continue
