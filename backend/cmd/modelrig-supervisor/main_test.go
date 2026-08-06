@@ -93,3 +93,43 @@ func TestRotateLog(t *testing.T) {
 		t.Fatalf("original log should be moved after rotation")
 	}
 }
+
+// A child that dies immediately after a successful Start() must leave a trace.
+//
+// On the rig, a supervisor logged "server was not running -> restarted" every
+// 10 seconds for seven minutes while no server process existed, port 8080 was
+// free, and the exe started fine by hand. restart() reports only whether
+// Start() succeeded, so "died on startup" and "never started" produced the
+// identical line -- and the log could not distinguish them. procChild now
+// records how the previous child ended, and superviseOnce reads it BEFORE
+// restarting (restart clears it for the new child).
+func TestSuperviseOnce_ReportsHowThePreviousChildDied(t *testing.T) {
+	p := &procChild{label: "server"}
+	p.alive = false
+	p.lastExit = "pid 4242: exit status 3"
+
+	if got := exitNoteOf(p); got != "pid 4242: exit status 3" {
+		t.Fatalf("exit note not surfaced to the loop: %q", got)
+	}
+	// A fake that cannot answer must not break the loop.
+	if got := exitNoteOf(&fakeChild{nm: "w"}); got != "" {
+		t.Fatalf("child without exitNote should report nothing, got %q", got)
+	}
+}
+
+// running() must not consult cmd.ProcessState: Wait() writes it from the reaper
+// goroutine without holding mu, which raced the restart decision itself.
+func TestProcChild_RunningReadsGuardedState(t *testing.T) {
+	p := &procChild{label: "worker"}
+	if p.running() {
+		t.Fatal("a child that was never started must not report running")
+	}
+	p.alive = true
+	if !p.running() {
+		t.Fatal("a started child must report running")
+	}
+	p.alive = false
+	if p.running() {
+		t.Fatal("a reaped child must not report running")
+	}
+}
