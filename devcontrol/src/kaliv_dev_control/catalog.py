@@ -1,9 +1,11 @@
 from __future__ import annotations
+import fcntl
 import hashlib
 import json
 import os
 import re
 import stat
+import sys
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -243,7 +245,7 @@ class IsolationVerifier(Protocol):
 
 class ExecutableVerifier(Protocol):
 
-    def verify(self, binding: ToolBinding) -> None:
+    def verify(self, binding: ToolBinding) -> str:
         ...
 
 class RejectUnverifiedIsolation:
@@ -254,10 +256,32 @@ class RejectUnverifiedIsolation:
 
 class LocalExecutableHashVerifier:
 
-    def verify(self, binding: ToolBinding) -> None:
+    def __init__(self) -> None:
+        self._pins: dict[str, tuple[ToolBinding, int, str]] = {}
+
+    def close(self) -> None:
+        for _, descriptor, _ in tuple(self._pins.values()):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        self._pins.clear()
+
+    def __del__(self) -> None:
+        self.close()
+
+    def verify(self, binding: ToolBinding) -> str:
+        existing = self._pins.get(binding.tool_id)
+        if existing is not None:
+            previous, _, invocation = existing
+            if previous != binding:
+                raise CatalogError(f'tool id was rebound after verification: {binding.tool_id}')
+            return invocation
+        if os.name == 'nt' or not sys.platform.startswith('linux'):
+            raise CatalogError('pinned executable verification requires Linux')
+        if not hasattr(os, 'memfd_create'):
+            raise CatalogError('sealed executable objects are unavailable')
         path = Path(binding.executable)
-        if os.name == 'nt':
-            raise CatalogError('portable executable verification is unavailable on Windows')
         try:
             if _linkish(path) or path.resolve(strict=True) != path:
                 raise CatalogError(f'tool executable path is linked or non-canonical: {binding.tool_id}')
@@ -265,41 +289,65 @@ class LocalExecutableHashVerifier:
             raise CatalogError(f'tool executable cannot be resolved: {binding.tool_id}') from exc
         flags = os.O_RDONLY | getattr(os, 'O_CLOEXEC', 0) | getattr(os, 'O_NOFOLLOW', 0)
         try:
-            descriptor = os.open(path, flags)
+            source = os.open(path, flags)
         except OSError as exc:
             raise CatalogError(f'tool executable cannot be opened safely: {binding.tool_id}') from exc
+        pinned: int | None = None
         try:
-            before = os.fstat(descriptor)
+            before = os.fstat(source)
             if not stat.S_ISREG(before.st_mode):
                 raise CatalogError(f'tool executable is not a regular file: {binding.tool_id}')
             if before.st_size < 0 or before.st_size > _MAX_EXECUTABLE_BYTES:
                 raise CatalogError(f'tool executable exceeds the verification bound: {binding.tool_id}')
-            if before.st_mode & 73 == 0:
+            if before.st_mode & 0o111 == 0:
                 raise CatalogError(f'tool executable is not marked executable: {binding.tool_id}')
+            memfd_flags = getattr(os, 'MFD_CLOEXEC', 0) | getattr(os, 'MFD_ALLOW_SEALING', 0)
+            pinned = os.memfd_create(f'kaliv-{binding.tool_id}', flags=memfd_flags)
             digest = hashlib.sha256()
             total = 0
             while True:
-                chunk = os.read(descriptor, 1048576)
+                chunk = os.read(source, 1048576)
                 if not chunk:
                     break
                 total += len(chunk)
                 if total > _MAX_EXECUTABLE_BYTES:
                     raise CatalogError(f'tool executable exceeds the verification bound: {binding.tool_id}')
                 digest.update(chunk)
-            after = os.fstat(descriptor)
+                view = memoryview(chunk)
+                while view:
+                    written = os.write(pinned, view)
+                    if written <= 0:
+                        raise CatalogError(f'tool executable could not be pinned: {binding.tool_id}')
+                    view = view[written:]
+            after = os.fstat(source)
             identity_before = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
             identity_after = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
-            if identity_after != identity_before:
+            if identity_after != identity_before or total != before.st_size:
                 raise CatalogError(f'tool executable changed during verification: {binding.tool_id}')
             observed_path = path.stat(follow_symlinks=False)
             if not stat.S_ISREG(observed_path.st_mode) or (observed_path.st_dev, observed_path.st_ino) != (before.st_dev, before.st_ino):
                 raise CatalogError(f'tool executable path changed during verification: {binding.tool_id}')
             if digest.hexdigest() != binding.executable_sha256:
                 raise CatalogError(f'tool executable hash mismatch: {binding.tool_id}')
+            os.fchmod(pinned, 0o500)
+            seals = fcntl.F_SEAL_SEAL | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE
+            fcntl.fcntl(pinned, fcntl.F_ADD_SEALS, seals)
+            invocation = f'/proc/{os.getpid()}/fd/{pinned}'
+            pinned_stat = Path(invocation).stat()
+            sealed_stat = os.fstat(pinned)
+            if pinned_stat.st_size != total or sealed_stat.st_size != total:
+                raise CatalogError(f'pinned executable size could not be verified: {binding.tool_id}')
+            self._pins[binding.tool_id] = (binding, pinned, invocation)
+            pinned = None
+            return invocation
+        except CatalogError:
+            raise
         except OSError as exc:
             raise CatalogError(f'tool executable could not be verified: {binding.tool_id}') from exc
         finally:
-            os.close(descriptor)
+            os.close(source)
+            if pinned is not None:
+                os.close(pinned)
 
 class CatalogMaterializer:
 
@@ -324,18 +372,23 @@ class CatalogMaterializer:
             raise CatalogError('isolation attestation is not bound to this exact authority')
         self.isolation_verifier.verify(attestation)
         templates: list[CommandTemplate] = []
-        verified_tools: set[str] = set()
+        invocation_paths: dict[str, str] = {}
         for spec in selected:
             if spec.required_boundary is not IsolationBoundary.OS_ISOLATED:
                 raise CatalogError('catalog boundary weakened unexpectedly')
             if spec.network_mode is not NetworkMode.DENY:
                 raise CatalogError('catalog command unexpectedly permits network')
             binding = toolchain.resolve(spec.tool_id)
-            if binding.tool_id not in verified_tools:
-                self.executable_verifier.verify(binding)
-                verified_tools.add(binding.tool_id)
-            templates.append(CommandTemplate(command_id=spec.command_id, argv=(binding.executable, *spec.args), cwd=spec.cwd, max_timeout_seconds=spec.max_timeout_seconds, env=spec.env))
-        return CommandRegistry(templates)
+            invocation = invocation_paths.get(binding.tool_id)
+            if invocation is None:
+                invocation = self.executable_verifier.verify(binding)
+                if not isinstance(invocation, str) or not invocation or not _is_absolute_executable(invocation):
+                    raise CatalogError('executable verifier did not return a pinned absolute object')
+                invocation_paths[binding.tool_id] = invocation
+            templates.append(CommandTemplate(command_id=spec.command_id, argv=(invocation, *spec.args), cwd=spec.cwd, max_timeout_seconds=spec.max_timeout_seconds, env=spec.env))
+        registry = CommandRegistry(templates)
+        setattr(registry, '_catalog_executable_verifier', self.executable_verifier)
+        return registry
 
 def modelrig_command_catalog() -> ModelRigCommandCatalog:
     common = {'CI': '1', 'MODELRIG_DEVCONTROL': '1'}
