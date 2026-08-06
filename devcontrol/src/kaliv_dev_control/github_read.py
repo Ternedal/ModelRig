@@ -327,7 +327,13 @@ class GitHubReadAdapter:
         "_token",
         "timeout_seconds",
         "_repository_path",
+        "_sealed",
     )
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if getattr(self, "_sealed", False):
+            raise GitHubReadError("GitHub read adapter authority is immutable")
+        object.__setattr__(self, name, value)
 
     @property
     def task(self) -> DevelopmentTask:
@@ -387,6 +393,7 @@ class GitHubReadAdapter:
             urllib.parse.quote(owner, safe=""),
             urllib.parse.quote(repo, safe=""),
         )
+        object.__setattr__(self, "_sealed", True)
 
     @staticmethod
     def _sha256(data: bytes) -> str:
