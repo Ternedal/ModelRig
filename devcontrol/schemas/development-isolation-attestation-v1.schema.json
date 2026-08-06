@@ -18,7 +18,7 @@
   ],
   "properties": {
     "schema": {"const": "kaliv-development-isolation-attestation/v1"},
-    "task_id": {"type": "string", "minLength": 1, "maxLength": 64},
+    "task_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]{2,63}$"},
     "task_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "repository": {"const": "Ternedal/ModelRig"},
     "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
