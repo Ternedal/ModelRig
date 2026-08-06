@@ -147,7 +147,7 @@ class GitHubReadReceipt:
             normalized = _normalize_path(self.path, name='receipt.path')
             if normalized != self.path:
                 raise GitHubReadError('GitHub receipt path is not canonical')
-        if isinstance(self.status, bool) or not isinstance(self.status, int) or self.status != 200 or isinstance(self.response_bytes, bool) or (not isinstance(self.response_bytes, int)) or (not 0 <= self.response_bytes <= _MAX_RESPONSE_BYTES):
+        if self.status != 200 or isinstance(self.response_bytes, bool) or (not isinstance(self.response_bytes, int)) or (not 0 <= self.response_bytes <= _MAX_RESPONSE_BYTES):
             raise GitHubReadError('GitHub receipt response metadata is invalid')
         if not isinstance(self.response_sha256, str) or not isinstance(self.etag_sha256, str) or _HEX64.fullmatch(self.response_sha256) is None or (_HEX64.fullmatch(self.etag_sha256) is None):
             raise GitHubReadError('GitHub receipt response hash is invalid')
@@ -183,18 +183,28 @@ class GitHubReadAdapter:
     def __init__(self, task: DevelopmentTask, *, transport: ReadOnlyTransport | None=None, token: str | None=None, timeout_seconds: int=30) -> None:
         if not isinstance(task, DevelopmentTask):
             raise GitHubReadError('GitHub adapter requires a development task')
+        try:
+            task_snapshot = DevelopmentTask.from_mapping(task.to_dict())
+        except (AttributeError, ContractError, TypeError, ValueError) as exc:
+            raise GitHubReadError('task identity is invalid') from exc
+        if _HEX40.fullmatch(task_snapshot.base_sha) is None:
+            raise GitHubReadError('task identity is invalid')
         if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or (not 1 <= timeout_seconds <= 120):
             raise GitHubReadError('GitHub timeout is outside bounds')
         if token is not None and (not isinstance(token, str) or not token or len(token) > 4096 or any((char.isspace() for char in token)) or ('\x00' in token)):
             raise GitHubReadError('GitHub token is invalid')
-        if not isinstance(task.task_id, str) or _TASK_ID.fullmatch(task.task_id) is None or not _valid_repository(task.repository) or not isinstance(task.base_sha, str) or _HEX40.fullmatch(task.base_sha) is None:
-            raise GitHubReadError('task identity is invalid')
-        self.task = task
+        if not _valid_repository(task_snapshot.repository):
+            raise GitHubReadError('task repository is invalid')
+        self._task = task_snapshot
         self.transport = transport or UrllibReadOnlyTransport()
         self._token = token
         self.timeout_seconds = timeout_seconds
-        owner, repo = task.repository.split('/', 1)
+        owner, repo = task_snapshot.repository.split('/', 1)
         self._repository_path = '/repos/{}/{}'.format(urllib.parse.quote(owner, safe=''), urllib.parse.quote(repo, safe=''))
+
+    @property
+    def task(self) -> DevelopmentTask:
+        return self._task
 
     @staticmethod
     def _sha256(data: bytes) -> str:
@@ -207,7 +217,7 @@ class GitHubReadAdapter:
     def _readable(self, path: str) -> bool:
         if path == '.git' or path.startswith('.git/'):
             return False
-        return any((self._matches(path, pattern) for pattern in self.task.allowed_paths)) and (not any((self._matches(path, pattern) for pattern in self.task.protected_paths)))
+        return any((self._matches(path, pattern) for pattern in self._task.allowed_paths)) and (not any((self._matches(path, pattern) for pattern in self._task.protected_paths)))
 
     def _headers(self) -> Mapping[str, str]:
         values = {'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': _API_VERSION, 'User-Agent': 'kaliv-dev-control/1'}
@@ -226,7 +236,7 @@ class GitHubReadAdapter:
         parsed = urllib.parse.urlsplit(url)
         if parsed.scheme != 'https' or parsed.hostname != _API_HOST or parsed.port not in {None, 443} or (parsed.username is not None) or (parsed.password is not None) or parsed.fragment or (not parsed.path.startswith(self._repository_path + '/')):
             raise GitHubReadError('GitHub endpoint escaped the fixed API authority')
-        max_bytes = min(self.task.budget.max_output_bytes, _MAX_RESPONSE_BYTES)
+        max_bytes = min(self._task.budget.max_output_bytes, _MAX_RESPONSE_BYTES)
         response = self.transport.get(url, headers=self._headers(), timeout_seconds=self.timeout_seconds, max_bytes=max_bytes)
         if not isinstance(response, HttpResponse):
             raise GitHubReadError('GitHub transport returned an invalid response')
@@ -249,12 +259,12 @@ class GitHubReadAdapter:
 
     def _receipt(self, *, operation: str, path: str, subject_sha: str, response: HttpResponse) -> GitHubReadReceipt:
         etag = response.headers.get('etag', '').encode('utf-8')
-        return GitHubReadReceipt(task_id=self.task.task_id, task_sha256=self._sha256(self.task.canonical_json().encode('utf-8')), repository=self.task.repository, base_sha=self.task.base_sha, operation=operation, path=path, subject_sha=subject_sha, status=response.status, response_sha256=self._sha256(response.body), response_bytes=len(response.body), etag_sha256=self._sha256(etag))
+        return GitHubReadReceipt(task_id=self._task.task_id, task_sha256=self._sha256(self._task.canonical_json().encode('utf-8')), repository=self._task.repository, base_sha=self._task.base_sha, operation=operation, path=path, subject_sha=subject_sha, status=response.status, response_sha256=self._sha256(response.body), response_bytes=len(response.body), etag_sha256=self._sha256(etag))
 
     def verify_base_commit(self) -> GitHubReadReceipt:
-        payload, response = self._get(operation='verify_base_commit', suffix='/commits/' + self.task.base_sha, path='')
+        payload, response = self._get(operation='verify_base_commit', suffix='/commits/' + self._task.base_sha, path='')
         sha = payload.get('sha')
-        if sha != self.task.base_sha:
+        if sha != self._task.base_sha:
             raise GitHubReadError('GitHub commit response does not match task base SHA')
         return self._receipt(operation='verify_base_commit', path='', subject_sha=sha, response=response)
 
@@ -262,11 +272,11 @@ class GitHubReadAdapter:
         normalized = _normalize_path(path, name='path')
         if not self._readable(normalized):
             raise GitHubReadError('GitHub path is outside readable task scope')
-        upper = min(self.task.budget.max_output_bytes, 1000000)
+        upper = min(self._task.budget.max_output_bytes, 1000000)
         if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or (not 1 <= max_bytes <= upper):
             raise GitHubReadError('GitHub file bound is invalid')
         encoded = urllib.parse.quote(normalized, safe='/')
-        payload, response = self._get(operation='read_file', suffix='/contents/' + encoded, path=normalized, query={'ref': self.task.base_sha})
+        payload, response = self._get(operation='read_file', suffix='/contents/' + encoded, path=normalized, query={'ref': self._task.base_sha})
         if payload.get('type') != 'file' or payload.get('path') != normalized:
             raise GitHubReadError('GitHub content response is not the requested file')
         blob_sha = payload.get('sha')
