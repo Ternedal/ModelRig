@@ -38,17 +38,26 @@ assert spec is not None and spec.loader is not None
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
-# The five lifecycle trials must all be driven, in the order the campaign needs.
+# The five lifecycle trials must all be driven, and the update must come FIRST.
+#
+# _validate_lifecycle compares reboot.backend_version, reboot.worker_version and
+# both supervisor_*.active_version against the CANDIDATE's version. Until the
+# good update lands, the rig is still running the previous release, so measuring
+# those trials first attests the wrong version and the campaign rejects the
+# bundle with "expected <candidate>, got <previous>". This assertion had the
+# order backwards and pinned the bug in place; the physical run on 1.58.149
+# proved it. Reboot and the supervisor restarts are claims about the candidate,
+# so they must be measured while the candidate is what is running.
 flow = (
+    "trial_good_update(observations, state)",
     "trial_reboot(observations, state)",
     'trial_supervisor(observations, state, "backend", 8080)',
     'trial_supervisor(observations, state, "worker", 8099)',
-    "trial_good_update(observations, state)",
     "trial_bad_update(observations, state)",
 )
 check(all(step in source for step in flow), "all five lifecycle trials are driven")
 check([source.index(s) for s in flow] == sorted(source.index(s) for s in flow),
-      "the trials run in campaign order")
+      "the good update runs before the trials that must observe the candidate")
 
 # Every field the chain validator reads must be measured, not typed by a human.
 for probe, label in (
@@ -60,6 +69,26 @@ for probe, label in (
     ("def data_snapshot", "data and schedule survival is counted before and after"),
 ):
     check(probe in source, label)
+
+# The three identity fields the validator rejected when they were left unset.
+check("def released_commit" in source
+      and 'released_commit(source_version)' in source
+      and 'state.get("source_git_sha")' not in source,
+      "good_update.source_git_sha is resolved from the source release tag")
+check("must differ from the candidate" in source,
+      "the source-SHA helper records why it may not be the candidate's own SHA")
+check("def remote_release_identity" in source
+      and "remote_release_identity(bad_repo)" in source
+      and '"attempted_version": attempted_version' in source
+      and '"attempted_git_sha": attempted_git_sha' in source,
+      "bad_update names the release it actually attempted")
+
+# Without MODELRIG_TOKEN the fingerprint and schedule count come back empty and
+# the campaign rejects the bundle -- so the wizard must stop before the operator
+# spends a physical run that cannot verify.
+check("MODELRIG_TOKEN er ikke sat" in source
+      and "raise StageBError(\n            \"MODELRIG_TOKEN er ikke sat" in source,
+      "a missing MODELRIG_TOKEN stops preflight instead of degrading the bundle")
 
 check("evidence_sha256" in source and "sha256_file(log)" in source,
       "each trial stamps its own log digest")

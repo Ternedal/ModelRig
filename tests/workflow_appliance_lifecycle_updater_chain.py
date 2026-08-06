@@ -84,11 +84,25 @@ def write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
+def write_log(path: Path, text: str) -> None:
+    """Write a fixture log exactly as the updater does -- raw bytes, no newline
+    translation.
+
+    The real log comes from run_updater's open(..., "wb"), so its bytes are what
+    the updater emitted. write_text() would expand "\\n" to "\\r\\n" on Windows
+    while the fixture's evidence_sha256 hashes the untranslated string, so the
+    bound digest never matched and these contracts could not run on the Windows
+    rig they exist to protect. On Linux CI the two happened to agree, which is
+    why it stayed hidden.
+    """
+    path.write_bytes(text.encode("utf-8"))
+
+
 def lifecycle_fixture(base: Path, *, bad_log: str = BAD_REJECTION_LOG) -> tuple[Path, Path, Path]:
     good_path = base / "good_update.log"
     bad_path = base / "bad_update.log"
-    good_path.write_text(GOOD_LOG, encoding="utf-8")
-    bad_path.write_text(bad_log, encoding="utf-8")
+    write_log(good_path, GOOD_LOG)
+    write_log(bad_path, bad_log)
     lifecycle = {
         "schema": module.LIFECYCLE_SCHEMA,
         "candidate": {
@@ -170,7 +184,7 @@ try:
         "updater: supervisor heartbeat advanced past the restart -- crash-recovery is running\n",
         "",
     )
-    good_path.write_text(weakened, encoding="utf-8")
+    write_log(good_path, weakened)
     lifecycle = json.loads(lifecycle_path.read_text(encoding="utf-8"))
     lifecycle["trials"]["good_update"]["evidence_sha256"] = hashlib.sha256(
         weakened.encode()
@@ -187,7 +201,7 @@ try:
 
     lifecycle_path, good_path, bad_path = lifecycle_fixture(temp)
     bypassed = GOOD_LOG + "updater: WARNING: installing WITHOUT provenance verification (-skip-attestation)\n"
-    good_path.write_text(bypassed, encoding="utf-8")
+    write_log(good_path, bypassed)
     lifecycle = json.loads(lifecycle_path.read_text(encoding="utf-8"))
     lifecycle["trials"]["good_update"]["evidence_sha256"] = hashlib.sha256(
         bypassed.encode()
@@ -204,7 +218,7 @@ try:
 
     lifecycle_path, good_path, bad_path = lifecycle_fixture(temp)
     after_stop = BAD_REJECTION_LOG + "updater: stopping supervisor + processes so the exes unlock\n"
-    bad_path.write_text(after_stop, encoding="utf-8")
+    write_log(bad_path, after_stop)
     lifecycle = json.loads(lifecycle_path.read_text(encoding="utf-8"))
     lifecycle["trials"]["bad_update"]["evidence_sha256"] = hashlib.sha256(
         after_stop.encode()
