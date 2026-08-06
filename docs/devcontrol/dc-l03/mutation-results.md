@@ -57,10 +57,11 @@ Load-bearing mutations and expected failures:
 17. Accept a directly constructed task whose `base_sha` is a moving ref such as
     `main` and issue a GitHub request before validation.
     Expected: `test_invalid_direct_task_sha_fails_before_network` fails.
-18. Allow callers to replace `adapter.task` after construction and make later
-    requests dereference the replacement task.
-    Expected: `test_validated_task_snapshot_cannot_be_replaced` fails unless all
-    requests and receipts use a private immutable validated snapshot.
+18. Retarget any GitHub adapter authority after construction, including task
+    snapshot, repository path, token, timeout or transport.
+    Expected: `test_validated_adapter_authority_cannot_be_retargeted` fails unless
+    the complete adapter authority is sealed and the original request metadata
+    remains in force.
 19. Accept `200.0` as a persisted receipt status because it compares equal to
     integer `200` in Python.
     Expected: `test_receipt_reload_types_and_task_binding_are_strict` fails.
