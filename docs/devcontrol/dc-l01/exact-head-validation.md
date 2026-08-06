@@ -34,20 +34,27 @@ python3 tests/workflow_test_coverage.py
   mismatch returns no passing receipt.
 - Staged, unstaged, untracked and ignored source state is rejected before a
   registered command starts.
-- Staged, unstaged, untracked and ignored patch-workspace state is rejected and
-  verified-reset before any `git apply` invocation.
+- Staged, unstaged, untracked, ignored, assume-unchanged and skip-worktree patch
+  state is rejected and verified-reset before any `git apply` invocation.
+- Hidden index flags are explicitly cleared before hard reset and verified absent
+  after reset and after successful patch application.
 - Each registered command executes in a bounded independent exact-HEAD Git
   repository created through a temporary bundle.
 - The bundle and origin are removed before command execution; the sandbox uses no
   object alternates and exposes no source path through arguments, environment,
   Git configuration or logs.
-- Before the reviewed argv starts, Linux Landlock handles persistent filesystem
-  write, create, delete, truncate and refer operations; only the disposable
-  sandbox root receives those rights, with `/dev/null` as the sole non-persistent
-  sink exception required by Git.
-- The Landlock restriction is inherited by descendants. An absolute or parent
-  escape write outside the sandbox must fail, leave no host artifact and never
-  coexist with positive command evidence; unavailable Landlock fails closed.
+- Before the reviewed argv starts, Linux Landlock ABI 3+ handles persistent
+  filesystem write, create, delete, truncate and refer operations; only the
+  disposable sandbox root receives those rights, with `/dev/null` as the sole
+  non-persistent sink exception required by Git.
+- Landlock ABI below 3 or unavailable Landlock fails closed before command
+  execution.
+- An architecture-checked inherited seccomp filter denies chmod, chown,
+  extended-attribute and timestamp mutation syscall families which Landlock
+  cannot mediate; unsupported architectures or filter installation fail closed.
+- Descendant attempts to write content or mutate mode, ownership, xattrs or
+  timestamps outside the sandbox must fail and leave the host file byte-for-byte
+  and metadata-equivalent to its pre-command state.
 - Worktree state and the complete bounded sandbox `.git` metadata fingerprint
   jointly determine command receipt state.
 - Config, hook, ref, object, ignored-file and nested-repository mutations remain
@@ -63,8 +70,8 @@ python3 tests/workflow_test_coverage.py
 - Ignored files and nested Git repositories count as patch-workspace mutations,
   cannot coexist with a positive patch receipt and are physically removed by
   double-force cleanup during patch reset.
-- Patch reset verifies exact HEAD and zero staged, unstaged, untracked and ignored
-  residual state before success is claimed.
+- Patch reset verifies exact HEAD and zero staged, unstaged, untracked, ignored or
+  hidden-index residual state before success is claimed.
 - No merge, release, deployment or activation adapter exists in the slice.
 - Any commit after review invalidates the verdict and requires complete rerun.
 

@@ -19,25 +19,26 @@ verification.
 - `default_registry()` is empty.
 - `WorkspaceManager` requires an injected local Git protocol.
 - Commands execute only in independent disposable exact-HEAD repositories.
-- Linux command descendants inherit a Landlock filesystem-write boundary.
+- Linux command descendants inherit Landlock ABI 3+ and seccomp boundaries.
 - Windows command containment fails closed until its later native boundary.
 - Merge remains human-only.
 
 Command templates freeze argv and reject non-canonical raw `cwd` authority before
 `PurePosixPath` normalization. The executor verifies a clean exact-HEAD source,
 creates a temporary bundle clone, removes the bundle and origin, exposes no object
-alternate or real metadata backup, isolates command context, applies a Linux
-Landlock ruleset before the reviewed argv starts, fingerprints both worktree and
-bounded Git metadata, destroys the sandbox and re-verifies the source before
-returning evidence. Persistent filesystem write, create, delete, truncate and
-refer rights are granted only below the disposable sandbox root; `/dev/null` is
-the sole non-persistent sink exception required by Git. The restriction is
-inherited by descendants, and unavailable Landlock fails closed.
+alternate or real metadata backup, isolates command context, requires Linux
+Landlock ABI 3+, applies the Landlock domain and installs an architecture-checked
+seccomp filter before the reviewed argv starts. Landlock persistent write, create,
+delete, truncate and refer rights exist only below the disposable sandbox root;
+`/dev/null` is the sole non-persistent sink exception. Seccomp denies chmod,
+chown, extended-attribute and timestamp mutation syscall families that Landlock
+cannot mediate. Both restrictions are inherited by descendants; unavailable or
+insufficient containment fails closed.
 
-Patch application verifies exact HEAD and checks staged, unstaged, untracked and
-ignored state before parsing or invoking `git apply`. A dirty ephemeral workspace
-is verified-reset to the task base and rejected. Post-apply evidence retains the
-ignored-file, nested-repository and double-force reset protections.
+Patch application verifies exact HEAD and checks staged, unstaged, untracked,
+ignored, assume-unchanged and skip-worktree state before parsing or invoking
+`git apply`. Hidden index flags are explicitly cleared before verified reset and
+must remain absent after reset and successful application.
 
 ## Projection summary
 
@@ -45,11 +46,12 @@ Six files remain exact copies and fourteen are documented projections. The final
 projections additionally include:
 
 - canonical raw command cwd validation in `commands.py`;
-- inherited Landlock confinement for command filesystem writes in `commands.py`;
-- dirty patch-workspace rejection before `git apply` in `patch.py`; and
-- executable regressions proving ambiguous cwd values fail, pre-staged patch
-  state triggers reset without any `git apply` call, and descendant absolute-path
-  writes outside the sandbox leave no host artifact.
+- inherited Landlock ABI 3+ and seccomp confinement in `commands.py`;
+- dirty and hidden-index patch-workspace rejection before `git apply` in
+  `patch.py`; and
+- executable regressions proving descendant content and metadata escape attempts
+  fail, hidden index flags are cleared, and direct sandbox metadata/nested-repo
+  mutations remain observable and disposable.
 
 ## Required gates
 
@@ -60,17 +62,17 @@ projections additionally include:
 5. Task paths and command cwd authority are canonical before normalization.
 6. Command and patch evidence binds to exact task HEAD.
 7. Dirty command source state is rejected before execution.
-8. Dirty patch state is rejected and reset before any `git apply` call.
+8. Dirty or hidden-index patch state is rejected and reset before `git apply`.
 9. Command execution is confined to the independent disposable sandbox.
-10. Landlock denies persistent writes outside that sandbox for commands and
-    descendants, with only `/dev/null` allowed as a non-persistent sink.
-11. Worktree and complete bounded Git metadata jointly determine receipts.
-12. Sandbox cleanup and final source verification are mandatory.
-13. Linux escaped descendants are terminated only with positive acknowledgement;
+10. Landlock ABI 3+ denies persistent content mutation outside that sandbox.
+11. Seccomp denies host mode, ownership, xattr and timestamp mutation families.
+12. Worktree and complete bounded Git metadata jointly determine receipts.
+13. Sandbox cleanup and final source verification are mandatory.
+14. Linux escaped descendants are terminated only with positive acknowledgement;
     unsupported containment fails closed.
-14. Ignored artifacts and nested repositories cannot coexist with positive
-    command or patch evidence.
-15. CI, CodeQL, diagnostics and independent exact-head review pass.
+15. Ignored artifacts, hidden index flags and nested repositories cannot coexist
+    with positive command or patch evidence.
+16. CI, CodeQL, diagnostics and independent exact-head review pass.
 
 ## Definition of done
 

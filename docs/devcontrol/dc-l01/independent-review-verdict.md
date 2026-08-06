@@ -13,18 +13,25 @@ A qualifying verdict must:
 - confirm command and patch execution bind evidence to the exact task base SHA;
 - confirm staged, unstaged, untracked and ignored source state is rejected before
   a registered command starts;
-- confirm staged, unstaged, untracked and ignored patch-workspace state is rejected
-  and verified-reset before any `git apply` invocation;
+- confirm staged, unstaged, untracked, ignored, assume-unchanged and skip-worktree
+  patch state is rejected and verified-reset before any `git apply` invocation;
+- confirm hidden index flags are explicitly cleared before reset and verified
+  absent after reset and successful patch application;
 - confirm registered commands execute only inside a bounded independent exact-HEAD
   Git repository created through a temporary bundle;
 - confirm the bundle and origin are removed before execution, no object alternate
   or source path is exposed, and the sandbox has isolated command context;
-- confirm Linux Landlock handles persistent filesystem write, create, delete,
-  truncate and refer operations before the reviewed argv starts, granting those
-  rights only below the disposable sandbox root, with `/dev/null` as the sole
-  non-persistent sink exception;
-- confirm the Landlock restriction is inherited by descendants, an absolute or
-  parent escape write leaves no host artifact and unavailable Landlock fails closed;
+- confirm Linux Landlock ABI 3+ handles persistent filesystem write, create,
+  delete, truncate and refer operations before the reviewed argv starts, granting
+  those rights only below the disposable sandbox root, with `/dev/null` as the
+  sole non-persistent sink exception;
+- confirm Landlock ABI below 3 and unavailable Landlock fail closed;
+- confirm an inherited architecture-checked seccomp filter denies chmod, chown,
+  extended-attribute and timestamp mutation syscall families not mediated by
+  Landlock, and unsupported architectures/filter installation fail closed;
+- confirm descendants cannot modify host content, mode, ownership, xattrs or
+  timestamps outside the sandbox and the executable regressions prove the host
+  target remains unchanged;
 - confirm receipts bind both sandbox worktree state and complete bounded sandbox
   Git-metadata state;
 - confirm metadata and worktree writes remain confined to the disposable sandbox,
@@ -35,10 +42,8 @@ A qualifying verdict must:
 - confirm the Linux subreaper terminates descendants that create new sessions and
   emits proof only after positive quiescence acknowledgement;
 - confirm unsupported platform containment fails closed;
-- confirm ignored files and nested repositories count as patch mutations and are
-  removed by verified double-force patch reset;
-- confirm patch reset verifies exact HEAD plus zero staged, unstaged, untracked
-  and ignored residual state before success is claimed;
+- confirm ignored files, hidden index flags and nested repositories count as patch
+  mutations and are removed by verified reset;
 - confirm no future-slice implementation, non-empty default command registry,
   publication, merge, release, deployment or activation authority exists;
 - confirm all required GitHub checks are green on that exact head; and
