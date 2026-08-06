@@ -3,8 +3,8 @@
 Command arguments come from the registry, never from a model or task payload.
 Each command runs at the exact task SHA in a disposable local Git sandbox. A
 Linux Landlock domain confines persistent filesystem writes to that sandbox,
-while an inherited seccomp filter denies metadata-mutating syscall families that
-Landlock cannot mediate, before positive evidence can be issued.
+while an inherited seccomp filter denies alternate metadata mutation entrypoints
+that Landlock cannot mediate, before positive evidence can be issued.
 """
 
 from __future__ import annotations
@@ -51,7 +51,9 @@ SECCOMP_RET_ERRNO = 0x00050000
 SECCOMP_RET_ALLOW = 0x7FFF0000
 BPF_LD_W_ABS = 0x20
 BPF_JMP_JEQ_K = 0x15
+BPF_JMP_JSET_K = 0x45
 BPF_RET_K = 0x06
+X32_SYSCALL_BIT = 0x40000000
 
 LANDLOCK_ACCESS_FS_WRITE_FILE = 1 << 1
 LANDLOCK_ACCESS_FS_REMOVE_DIR = 1 << 4
@@ -103,34 +105,51 @@ def syscall(number, *args):
 
 def install_metadata_seccomp():
     machine = os.uname().machine.lower()
+    common_modern = (425, 426, 427, 452, 463, 466, 469)
     profiles = {
         "x86_64": (
             0xC000003E,
             (
+                16,
                 90, 91, 92, 93, 94, 132,
                 188, 189, 190, 197, 198, 199,
-                235, 260, 261, 268, 280, 452,
+                235, 260, 261, 268, 280,
+                *common_modern,
             ),
+            True,
         ),
         "amd64": (
             0xC000003E,
             (
+                16,
                 90, 91, 92, 93, 94, 132,
                 188, 189, 190, 197, 198, 199,
-                235, 260, 261, 268, 280, 452,
+                235, 260, 261, 268, 280,
+                *common_modern,
             ),
+            True,
         ),
         "aarch64": (
             0xC00000B7,
-            (5, 6, 7, 14, 15, 16, 52, 53, 54, 55, 88, 452),
+            (
+                5, 6, 7, 14, 15, 16, 29,
+                52, 53, 54, 55, 88,
+                *common_modern,
+            ),
+            False,
         ),
         "arm64": (
             0xC00000B7,
-            (5, 6, 7, 14, 15, 16, 52, 53, 54, 55, 88, 452),
+            (
+                5, 6, 7, 14, 15, 16, 29,
+                52, 53, 54, 55, 88,
+                *common_modern,
+            ),
+            False,
         ),
     }
     try:
-        audit_arch, denied_syscalls = profiles[machine]
+        audit_arch, denied_syscalls, reject_x32 = profiles[machine]
     except KeyError as exc:
         raise RuntimeError(f"unsupported seccomp architecture: {machine}") from exc
 
@@ -140,6 +159,18 @@ def install_metadata_seccomp():
         SockFilter(BPF_RET_K, 0, 0, SECCOMP_RET_KILL_PROCESS),
         SockFilter(BPF_LD_W_ABS, 0, 0, 0),
     ]
+    if reject_x32:
+        instructions.extend(
+            (
+                SockFilter(BPF_JMP_JSET_K, 0, 1, X32_SYSCALL_BIT),
+                SockFilter(
+                    BPF_RET_K,
+                    0,
+                    0,
+                    SECCOMP_RET_ERRNO | errno.EPERM,
+                ),
+            )
+        )
     for number in sorted(set(denied_syscalls)):
         instructions.extend(
             (
