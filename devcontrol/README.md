@@ -9,9 +9,12 @@ DC-L00 decomposition contract.
 - immutable development-task contracts with human-only merge authority;
 - canonical repository-relative task paths, command working directories and
   budget policy;
-- bounded UTF-8 reads and literal search inside approved paths;
+- UTF-8 reads and literal search whose per-file byte caps are enforced during I/O;
 - fail-closed non-binary unified-diff parsing, application and staged receipts;
 - fixed command templates selected only from an immutable registry;
+- pre-spawn removal or rejection of inherited and explicit dynamic-loader hooks;
+- raw stdout/stderr evidence preserved for exact hashes and byte counts even when
+  display text requires replacement decoding;
 - Linux streaming subprocess containment through a subreaper supervisor that
   terminates descendants even when they create a new session;
 - command execution in a bounded independent exact-HEAD repository created from a
@@ -19,8 +22,8 @@ DC-L00 decomposition contract.
 - Linux Landlock ABI 3+ write confinement inherited by command descendants,
   allowing persistent filesystem mutation only below the disposable sandbox root,
   with `/dev/null` as the sole non-persistent sink exception;
-- an inherited seccomp filter that denies chmod, chown, extended-attribute and
-  timestamp mutation syscall families which Landlock cannot mediate;
+- an inherited architecture-checked seccomp filter denying direct and alternate
+  metadata mutation paths, including xattr-at, io_uring and x86_64 x32 variants;
 - no object alternate or real Git-metadata backup exposed to command code;
 - combined sandbox worktree and metadata receipt fingerprints plus isolated
   command context;
@@ -41,8 +44,8 @@ compatible runner.
 Windows command containment deliberately fails closed in DC-L01. Linux command
 execution also fails closed when Landlock ABI 3+, the supported seccomp audit
 architecture or seccomp installation is unavailable. Commands requiring denied
-host metadata mutation fail closed. The native Windows Job Object boundary belongs
-to DC-L05 and is not imported early.
+host metadata mutation or dynamic-loader authority fail closed. The native Windows
+Job Object boundary belongs to DC-L05 and is not imported early.
 
 Product code must not import `kaliv_dev_control`.
 
