@@ -1,7 +1,8 @@
 # DC-L01 preflight — task, scope, workspace and bounded command foundation
 
 **Slice:** DC-L01  
-**Base:** `main @ 4c7f4c7c31d97faea98147ebdfa97d0479abbdc1`  
+**Original branch base:** `main @ 4c7f4c7c31d97faea98147ebdfa97d0479abbdc1`  
+**Synchronized current main:** `6644512e1d442349f263ffc157fe63e18886507f`  
 **Source reference:** PR #338 at `07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f`  
 **Depends on:** landed DC-L00 (PR #352)  
 **Status:** exact-head validation and independent review required before merge
