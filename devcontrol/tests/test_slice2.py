@@ -117,10 +117,7 @@ class Slice2Tests(unittest.TestCase):
 
     def test_read_and_literal_search_are_bounded_by_scope(self) -> None:
         files = WorkspaceFiles(self.task, self.repo)
-        self.assertEqual(
-            files.read_text("devcontrol/target.txt"),
-            "old\n",
-        )
+        self.assertEqual(files.read_text("devcontrol/target.txt"), "old\n")
         matches = files.search_text("old")
         self.assertEqual(
             [(match.path, match.line_number) for match in matches],
@@ -253,10 +250,7 @@ class Slice2Tests(unittest.TestCase):
 +++ b/not-a-header
 """
         summary = PatchApplier().parse(self.task, patch)
-        self.assertEqual(
-            (summary.added_lines, summary.deleted_lines),
-            (1, 1),
-        )
+        self.assertEqual((summary.added_lines, summary.deleted_lines), (1, 1))
 
     def test_submodule_or_symlink_file_modes_are_rejected(self) -> None:
         for mode in ("120000", "160000"):
@@ -302,11 +296,7 @@ class Slice2Tests(unittest.TestCase):
         )
         receipt = CommandExecutor(
             registry=CommandRegistry((template,))
-        ).execute(
-            self.task,
-            self.repo,
-            "python.unittest",
-        )
+        ).execute(self.task, self.repo, "python.unittest")
         self.assertTrue(receipt.passed)
         self.assertTrue(receipt.workspace_unchanged)
         self.assertFalse(receipt.workspace_reset)
@@ -372,8 +362,6 @@ class Slice2Tests(unittest.TestCase):
             "lambda: os.setxattr(p,b'user.kaliv',b'x'),"
             "lambda: os.utime(p,ns=(1800000000000000000,1800000000000000000))"
             "); "
-            "[(lambda f: (f(), (_ for _ in ()).throw(AssertionError('metadata escape'))))(f) "
-            "if False else None for f in ()]; "
             "exec('for action in actions:\\n"
             "    try:\\n"
             "        action()\\n"
@@ -404,6 +392,71 @@ class Slice2Tests(unittest.TestCase):
         self.assertEqual(outside.read_text(encoding="utf-8"), "host\n")
         with self.assertRaises(OSError):
             os.getxattr(outside, b"user.kaliv")
+
+    def test_command_raw_metadata_syscall_aliases_fail_closed(self) -> None:
+        outside = self.root / "outside-raw-metadata.txt"
+        outside.write_text("host\n", encoding="utf-8")
+        outside.chmod(0o600)
+        before = outside.stat()
+        command_id = "python.raw-metadata-escape"
+        child_script = """
+import ctypes
+import errno
+import os
+
+libc = ctypes.CDLL(None, use_errno=True)
+libc.syscall.restype = ctypes.c_long
+machine = os.uname().machine.lower()
+
+def blocked(number, *arguments):
+    ctypes.set_errno(0)
+    result = libc.syscall(ctypes.c_long(number), *arguments)
+    error = ctypes.get_errno()
+    assert result == -1 and error == errno.EPERM, (number, result, error)
+
+for number in (425, 426, 427, 463, 466, 469):
+    blocked(number, 0, 0, 0, 0, 0, 0)
+
+path = os.environ['OUTSIDE_RAW_METADATA']
+fd = os.open(path, os.O_RDONLY)
+try:
+    flags = ctypes.c_uint(0)
+    ioctl_number = 16 if machine in {'x86_64', 'amd64'} else 29
+    blocked(
+        ioctl_number,
+        ctypes.c_int(fd),
+        ctypes.c_ulong(0x40086602),
+        ctypes.byref(flags),
+    )
+    if machine in {'x86_64', 'amd64'}:
+        blocked(
+            0x40000000 | 91,
+            ctypes.c_int(fd),
+            ctypes.c_uint(0o644),
+        )
+finally:
+    os.close(fd)
+"""
+        script = (
+            "import subprocess,sys; "
+            f"child=subprocess.run([sys.executable,'-c',{child_script!r}],"
+            "text=True,capture_output=True); "
+            "assert child.returncode==0,(child.stdout,child.stderr)"
+        )
+        template = CommandTemplate(
+            command_id=command_id,
+            argv=(sys.executable, "-c", script),
+            env={"OUTSIDE_RAW_METADATA": str(outside)},
+        )
+        receipt = CommandExecutor(
+            registry=CommandRegistry((template,))
+        ).execute(self._task_for(command_id), self.repo, command_id)
+        after = outside.stat()
+        self.assertTrue(receipt.passed)
+        self.assertTrue(receipt.workspace_unchanged)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "host\n")
+        self.assertEqual(stat.S_IMODE(after.st_mode), stat.S_IMODE(before.st_mode))
+        self.assertEqual(after.st_mtime_ns, before.st_mtime_ns)
 
     def test_command_rejects_literal_source_workspace_argument(self) -> None:
         command_id = "python.source-path"
