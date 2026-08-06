@@ -237,7 +237,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(verifier.seen, ["python"])
         self.assertIs(getattr(registry, "_catalog_executable_verifier"), verifier)
 
-    def test_materialized_registry_rejects_unattested_task(self):
+    def test_materialized_registry_rejects_unattested_task_and_retargeting(self):
         t = task("modelrig.devcontrol.tests")
         tc = toolchain()
         registry = CatalogMaterializer(
@@ -245,6 +245,10 @@ class CatalogTests(unittest.TestCase):
             isolation_verifier=AcceptIsolation(),
             executable_verifier=AcceptExecutable(),
         ).materialize(t, tc, attestation(t, tc))
+        self.assertEqual(
+            registry.resolve(t, "modelrig.devcontrol.tests").command_id,
+            "modelrig.devcontrol.tests",
+        )
         other = DevelopmentTask.from_mapping(
             {
                 **t.to_dict(),
@@ -252,6 +256,13 @@ class CatalogTests(unittest.TestCase):
                 "base_sha": "b" * 40,
             }
         )
+        with self.assertRaisesRegex(CommandPolicyError, "immutable"):
+            registry._bound_task_identity = (
+                other.task_id,
+                hashlib.sha256(other.canonical_json().encode()).hexdigest(),
+                other.repository,
+                other.base_sha,
+            )
         with self.assertRaisesRegex(CommandPolicyError, "exact task"):
             registry.resolve(other, "modelrig.devcontrol.tests")
 
