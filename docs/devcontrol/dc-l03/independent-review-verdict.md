@@ -2,24 +2,32 @@
 
 Status: **pending fresh exact-head review**
 
-Independent review of `5ca477c95b6e6a5ac396b6ff9d55db2de49b3511`
-found one actionable P2 issue: the default urllib TLS context could honor
-`SSL_CERT_FILE` or `SSL_CERT_DIR` from an untrusted process environment.
+Independent review of `96967da26134cb68cc59242fbee004cc403228ba`
+found two actionable issues:
 
-Candidate `852c4604376d48290700c7a1a7f05729623106ee` closes that finding with an
-explicit TLS client context, compiled/native system trust-root loading, empty
-proxy inheritance, fail-closed trust setup and an executable regression. The
-focused exact-blob suite passes 24/24 tests.
+1. the injected isolation verifier received an authority object that could be
+   mutated after the materializer's initial comparison;
+2. executable verification opened a candidate with blocking `O_RDONLY`, allowing
+   a FIFO with no writer to hang before regular-file validation.
 
-No final independent verdict is claimed until the resulting evidence head is
-reviewed without an actionable finding.
+Candidate `660e85dcb0281cdbc0991d9cb5c06a7f0064ff6f` closes both findings with:
+
+- private reconstructed attestation snapshots before and after the callback;
+- canonical and authority revalidation after the callback;
+- `O_NONBLOCK` on the no-follow descriptor open;
+- executable regressions for callback mutation and FIFO rejection without a
+  writer.
+
+The focused suite passes **26/26 tests**. No final independent verdict is claimed
+until the resulting evidence head is reviewed without an actionable finding.
 
 Required review focus:
 
 1. immutable catalog and toolchain canonicalization;
-2. exact task/catalog/toolchain binding before materialization;
+2. exact task/catalog/toolchain/attestation binding before materialization and
+   after the external isolation-verifier callback;
 3. fail-closed default isolation and Windows executable verification;
-4. POSIX executable link, mutation and size handling;
+4. POSIX executable link, mutation, non-regular-file, FIFO and size handling;
 5. fixed GET-only GitHub host/method/ref authority;
 6. explicit TLS trust roots independent of `SSL_CERT_FILE`, `SSL_CERT_DIR` and
    environment proxy configuration;
