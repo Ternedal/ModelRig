@@ -3,12 +3,14 @@
 Status: **authority candidate validated; repository workflow gates pending**
 
 Authority implementation and regression candidate:
-`4cbd642573546e62b995541d97d5b8909081b873`.
+`695e789c208c99f2185642bb40929ad656aed89b`.
 
 The candidate keeps the complete 16-path allowlist and includes:
 
-- one immutable toolchain snapshot used for both the attested hash and every
-  later binding lookup;
+- one immutable catalog snapshot used for both command resolution and the
+  attested catalog hash;
+- one immutable toolchain snapshot used for both the attested toolchain hash and
+  every later binding lookup;
 - sealed Linux executable-object pinning and process-lifetime descriptor
   retirement, preventing pathname replacement and stale fd retargeting;
 - fail-closed Windows/non-Linux executable verification;
@@ -21,19 +23,25 @@ The candidate keeps the complete 16-path allowlist and includes:
   bounded response/base64 handling and decoded Git-blob verification;
 - concrete integer receipt status validation, including rejection of `200.0`.
 
-Focused DC-L03 validation produced **18/18 passing tests** in an isolated harness
+Focused DC-L03 validation produced **19/19 passing tests** in an isolated harness
 containing the committed DC-L03 implementations and their landed dependencies.
-The suite covers both exact-head review findings, pathname replacement,
-descriptor retirement, symlinks, hash mismatch, moving refs, public task
-reassignment, protected paths, proxy/redirect escape, blob mismatch, token
-non-persistence and strict persisted types.
+The suite covers catalog replacement during command resolution, toolchain
+mutation during isolation verification, pathname replacement, descriptor
+retirement, symlinks, hash mismatch, moving refs, public task reassignment,
+protected paths, proxy/redirect escape, blob mismatch, token non-persistence and
+strict persisted types.
+
+The independent review of exact head
+`6d1012ebfc758656f4d9922b2e973a6a23483a26` found one additional actionable
+catalog-race issue. That issue is closed by the catalog snapshot and its focused
+regression in candidate `695e789c208c99f2185642bb40929ad656aed89b`.
+A fresh independent review is required for the resulting exact head.
 
 Verified repository facts:
 
 - diff equals `exact-path-allowlist.json` at 16 paths;
 - branch merge base is declared fresh `main` head
   `c9bda459f10e682ec200fdfea8484d726c6c0057` and branch is 0 commits behind;
-- all review threads opened before this evidence update are resolved;
 - all five locked source paths have projection disposition and provenance;
 - package activation surface remains unchanged and `default_registry()` remains
   empty;
