@@ -145,6 +145,10 @@ class ModelRigCommandCatalog:
             values[spec.command_id] = spec
         self._specs = MappingProxyType(values)
 
+    def snapshot(self) -> "ModelRigCommandCatalog":
+        current = self._specs
+        return ModelRigCommandCatalog(tuple(current[key] for key in sorted(current)))
+
     @property
     def command_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self._specs))
@@ -433,12 +437,13 @@ class CatalogMaterializer:
             raise CatalogError("materializer authority inputs are invalid")
         if task.repository != "Ternedal/ModelRig":
             raise CatalogError("ModelRig catalog cannot authorize another repository")
-        specs = tuple(self.catalog.resolve(item) for item in task.allowed_command_ids)
+        catalog = self.catalog.snapshot()
+        specs = tuple(catalog.resolve(item) for item in task.allowed_command_ids)
         snapshot = toolchain.snapshot()
         expected = {
             "task_id": task.task_id, "task_sha256": _task_sha(task),
             "repository": task.repository, "base_sha": task.base_sha,
-            "catalog_sha256": self.catalog.sha256,
+            "catalog_sha256": catalog.sha256,
             "toolchain_sha256": snapshot.sha256,
             "boundary": IsolationBoundary.OS_ISOLATED,
             "network_mode": NetworkMode.DENY,
