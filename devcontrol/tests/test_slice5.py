@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 import urllib.request
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -225,6 +226,24 @@ class CatalogTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 Path(pinned).write_bytes(b"tampered")
 
+            descriptor = int(Path(pinned).name)
+            verifier.close()
+            unrelated = os.open("/bin/echo", os.O_RDONLY)
+            try:
+                self.assertNotEqual(unrelated, descriptor)
+                after_close = subprocess.run(
+                    [pinned, "-c", "print('still-pinned')"],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(after_close.returncode, 0, after_close.stderr)
+                self.assertEqual(after_close.stdout.strip(), "still-pinned")
+            finally:
+                os.close(unrelated)
+            with self.assertRaisesRegex(CatalogError, "closed"):
+                verifier.verify(ToolBinding("python", str(source.resolve()), digest))
+
     @unittest.skipIf(os.name == "nt", "Windows verifier fails closed")
     def test_linked_executable_and_hash_mismatch_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -254,6 +273,13 @@ class CatalogTests(unittest.TestCase):
 
 
 class GitHubReadTests(unittest.TestCase):
+    def test_invalid_direct_task_base_sha_fails_before_network(self):
+        transport = FakeTransport()
+        malformed = replace(task(), base_sha="main")
+        with self.assertRaisesRegex(GitHubReadError, "identity"):
+            GitHubReadAdapter(malformed, transport=transport)
+        self.assertEqual(transport.calls, [])
+
     def test_verify_base_commit_is_fixed_exact_sha_get(self):
         transport = FakeTransport(response({"sha": BASE_SHA}))
         receipt = GitHubReadAdapter(task(), transport=transport).verify_base_commit()
