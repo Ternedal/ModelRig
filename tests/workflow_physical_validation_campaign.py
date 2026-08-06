@@ -223,6 +223,7 @@ def valid_reports() -> dict[str, dict]:
                     "rollback_observed": False,
                     "data_preserved": True,
                     "schedules_preserved": True,
+                    "schedules_binding": "api",
                 },
                 "bad_update": {
                     "performed": True,
@@ -235,6 +236,7 @@ def valid_reports() -> dict[str, dict]:
                     "ready": True,
                     "data_preserved": True,
                     "schedules_preserved": True,
+                    "schedules_binding": "api",
                 },
             },
         },
@@ -454,6 +456,56 @@ try:
             any("reboot.performed is not true" in error for error in typed["evidence"]["lifecycle"]["errors"]),
             "lifecycle type failure is explicit",
         )
+
+        # A normal appliance sets neither KALIV_AGENT3_ENABLED nor
+        # KALIV_SCHEDULER_API, so the running build must be bindable without
+        # them: the installed worker exe, checked against the published digest.
+        reports = reports_with_artifacts(temp)
+        life = reports["lifecycle"]
+        life["candidate"]["worker_exe_sha256"] = "e" * 64
+        life["trials"]["reboot"]["worker_code_sha256"] = ""
+        life["trials"]["reboot"]["worker_exe_sha256"] = "e" * 64
+        for name in ("supervisor_backend", "supervisor_worker"):
+            life["trials"][name]["active_code_sha256"] = ""
+            life["trials"][name]["active_exe_sha256"] = "e" * 64
+        write(temp / "lifecycle.json", life)
+        by_exe, by_exe_exit = campaign.campaign_report(args_for(temp, "verify"))
+        check(by_exe_exit == 0 and by_exe["evidence"]["lifecycle"]["status"] == "pass",
+              "the installed worker exe binds the trials without an experimental route")
+
+        # ...but a trial that binds the worker to nothing proves nothing.
+        reports = reports_with_artifacts(temp)
+        life = reports["lifecycle"]
+        life["trials"]["reboot"]["worker_code_sha256"] = ""
+        write(temp / "lifecycle.json", life)
+        unbound, unbound_exit = campaign.campaign_report(args_for(temp, "verify"))
+        check(unbound_exit == 1
+              and any("does not bind the running worker" in e
+                      for e in unbound["evidence"]["lifecycle"]["errors"]),
+              "a trial binding the worker to nothing is rejected by name")
+
+        # The wrong exe is not the candidate's, even if it is a valid digest.
+        reports = reports_with_artifacts(temp)
+        life = reports["lifecycle"]
+        life["candidate"]["worker_exe_sha256"] = "e" * 64
+        life["trials"]["reboot"]["worker_code_sha256"] = ""
+        life["trials"]["reboot"]["worker_exe_sha256"] = "f" * 64
+        write(temp / "lifecycle.json", life)
+        wrong_exe, wrong_exe_exit = campaign.campaign_report(args_for(temp, "verify"))
+        check(wrong_exe_exit == 1
+              and any("reboot.worker_exe_sha256" in e
+                      for e in wrong_exe["evidence"]["lifecycle"]["errors"]),
+              "an installed worker that is not the published build fails by name")
+
+        # Comparing two unmeasured values used to report "preserved: true".
+        reports = reports_with_artifacts(temp)
+        del reports["lifecycle"]["trials"]["good_update"]["schedules_binding"]
+        write(temp / "lifecycle.json", reports["lifecycle"])
+        unbound_sched, unbound_sched_exit = campaign.campaign_report(args_for(temp, "verify"))
+        check(unbound_sched_exit == 1
+              and any("schedules_binding must name how schedules were observed" in e
+                      for e in unbound_sched["evidence"]["lifecycle"]["errors"]),
+              "schedules_preserved without a named binding is rejected")
 
         reports = reports_with_artifacts(temp)
         reports["lifecycle"]["started_at"] = (NOW + timedelta(minutes=1)).isoformat()

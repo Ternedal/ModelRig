@@ -21,6 +21,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import socket
 import subprocess
 import sys
@@ -64,6 +65,8 @@ def use_root(new_root: Path) -> None:
     JOURNAL = ROOT / "update-transaction.json"
 
 LIFECYCLE_SCHEMA = "kaliv-appliance-lifecycle-observations/v1"
+RELEASE_REPO = "Ternedal/ModelRig"
+_SHA40 = re.compile(r"^[0-9a-f]{40}$")
 BACKEND_HEALTH = "http://127.0.0.1:8080/healthz"
 WORKER_HEALTH = "http://127.0.0.1:8099/healthz"
 AGENT3_STATUS = "http://127.0.0.1:8080/api/v1/experimental/agent3/status"
@@ -160,6 +163,107 @@ def candidate_identity() -> dict[str, Any]:
     return {"version": version, "git_sha": git_sha, "code_sha256": code_fingerprint()}
 
 
+def released_commit(version: str) -> str:
+    """The commit a published release tag points at.
+
+    good_update.source_git_sha must name the release the rig actually started
+    on. It used to fall back to the candidate's own SHA, which the validator
+    rejects outright ("source_git_sha must differ from the candidate") -- and
+    rightly so: a source equal to the target would prove no transition happened.
+    """
+    tag = version if version.startswith("v") else f"v{version}"
+    try:
+        sha = capture(["git", "rev-list", "-n", "1", tag])
+    except StageBError:
+        raise StageBError(
+            f"Kunne ikke slå {tag} op i checkouten. Hent tags med "
+            "'git fetch --tags origin', så kildereleasens commit kan måles."
+        ) from None
+    if not _SHA40.fullmatch(sha):
+        raise StageBError(f"{tag} gav ikke en gyldig 40-tegns commit: {sha!r}")
+    return sha
+
+
+def remote_release_identity(repo: str) -> tuple[str, str]:
+    """Version and commit of the release an invalid-update trial actually hit.
+
+    Measured from the release the updater was pointed at, so the attested
+    attempt names a real artifact instead of an empty string.
+    """
+    try:
+        release = get_json(
+            f"https://api.github.com/repos/{repo}/releases/latest", timeout=15.0
+        )
+        tag = str(release.get("tag_name") or "")
+        if not tag:
+            return "", ""
+        ref = get_json(
+            f"https://api.github.com/repos/{repo}/git/ref/tags/{tag}", timeout=15.0
+        )
+        obj = ref.get("object") if isinstance(ref, dict) else None
+        sha = str(obj.get("sha") or "") if isinstance(obj, dict) else ""
+        # An annotated tag points at a tag object; dereference it to the commit.
+        if isinstance(obj, dict) and obj.get("type") == "tag" and _SHA40.fullmatch(sha):
+            tag_obj = get_json(
+                f"https://api.github.com/repos/{repo}/git/tags/{sha}", timeout=15.0
+            )
+            inner = tag_obj.get("object") if isinstance(tag_obj, dict) else None
+            if isinstance(inner, dict):
+                sha = str(inner.get("sha") or "")
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        return "", ""
+    version = tag[1:] if tag.startswith("v") else tag
+    return version, sha if _SHA40.fullmatch(sha) else ""
+
+
+WORKER_ASSET = "modelrig-worker-windows-x64.exe"
+
+
+def installed_worker_exe_sha256() -> str:
+    """Digest of the worker exe the updater actually swapped in.
+
+    This is the binding that does not need a token or a feature flag: whatever
+    file is sitting in the appliance right now is what the supervisor restarts
+    and what survives a reboot.
+    """
+    path = appliance_root() / "worker" / WORKER_ASSET
+    if not path.is_file():
+        return ""
+    return sha256_file(path)
+
+
+def released_worker_exe_sha256(version: str) -> str:
+    """The same digest as published for this candidate, from its SHA256SUMS.txt.
+
+    Comparing the two proves the installed worker is the released build, without
+    asking the running process to introspect itself.
+    """
+    tag = version if version.startswith("v") else f"v{version}"
+    try:
+        release = get_json(
+            f"https://api.github.com/repos/{RELEASE_REPO}/releases/tags/{tag}",
+            timeout=15.0,
+        )
+        assets = release.get("assets") if isinstance(release, dict) else None
+        url = ""
+        for asset in assets or []:
+            if isinstance(asset, dict) and asset.get("name") == "SHA256SUMS.txt":
+                url = str(asset.get("browser_download_url") or "")
+                break
+        if not url:
+            return ""
+        with urllib.request.urlopen(url, timeout=20.0) as response:
+            text = response.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        return ""
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and fields[-1].lstrip("*") == WORKER_ASSET:
+            digest = fields[0].lower()
+            return digest if re.fullmatch(r"[0-9a-f]{64}", digest) else ""
+    return ""
+
+
 def live_versions() -> dict[str, Any]:
     """Read what the running appliance reports -- the honest post-condition."""
     out: dict[str, Any] = {}
@@ -172,6 +276,7 @@ def live_versions() -> dict[str, Any]:
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
         out["worker_version"] = ""
     out["worker_code_sha256"] = worker_fingerprint()
+    out["worker_exe_sha256"] = installed_worker_exe_sha256()
     return out
 
 
@@ -215,10 +320,21 @@ def listener_pid(port: int) -> int | None:
         return None
 
 
+SCHEDULE_STORE = "kaliv-schedules.db"
+
+
 def data_snapshot() -> dict[str, Any]:
-    """Cheap before/after fingerprint so data_preserved is measured, not claimed."""
+    """Cheap before/after fingerprint so data_preserved is measured, not claimed.
+
+    Schedules are read two ways. The admin API is preferred, but it only exists
+    when KALIV_SCHEDULER_API=1, which a normal appliance does not set -- and
+    comparing two unmeasured None values used to yield "preserved: true" without
+    anything having been observed at all. So when the API is unavailable the
+    schedule store on disk is digested instead, and the snapshot records WHICH
+    binding produced the answer so the bundle cannot claim an unmade measurement.
+    """
     token = os.environ.get("MODELRIG_TOKEN", "").strip()
-    snapshot: dict[str, Any] = {"schedules": None, "documents": None}
+    snapshot: dict[str, Any] = {"schedules": None, "documents": None, "schedules_binding": ""}
     try:
         snapshot["documents"] = get_json(WORKER_HEALTH).get("documents")
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
@@ -227,9 +343,19 @@ def data_snapshot() -> dict[str, Any]:
         try:
             payload = get_json("http://127.0.0.1:8080/api/v1/schedules", token=token)
             items = payload.get("schedules") if isinstance(payload, dict) else None
-            snapshot["schedules"] = len(items) if isinstance(items, list) else None
+            if isinstance(items, list):
+                snapshot["schedules"] = len(items)
+                snapshot["schedules_binding"] = "api"
         except (urllib.error.URLError, OSError, json.JSONDecodeError):
             pass
+    if not snapshot["schedules_binding"]:
+        store = appliance_root() / SCHEDULE_STORE
+        if store.is_file():
+            snapshot["schedules"] = sha256_file(store)
+            snapshot["schedules_binding"] = "store_digest"
+        else:
+            snapshot["schedules"] = "absent"
+            snapshot["schedules_binding"] = "store_absent"
     return snapshot
 
 
@@ -240,9 +366,10 @@ def trial_reboot(observations: dict[str, Any], state: dict[str, Any]) -> None:
     if state.get("reboot_done"):
         ok("Reboot-beviset er allerede indsamlet.")
         return
-    heading("1/5  MANUELT PAUSEPUNKT — normal reboot")
-    print("  Genstart riggen normalt (Start -> Genstart). Log ind igen når den er oppe,")
-    print("  og kør denne wizard igen. Supervisoren skal selv bringe backend + worker op.")
+    heading("2/5  MANUELT PAUSEPUNKT — normal reboot")
+    print("  Riggen kører nu kandidaten. Genstart normalt (Start -> Genstart), log ind")
+    print("  igen når den er oppe, og kør denne wizard igen. Supervisoren skal selv")
+    print("  bringe backend + worker op — på kandidatens version, ikke den forrige.")
     print("  Wizard'en måler selv, hvor lang tid det tog, og hvilke versioner der kom op.")
     log = EVIDENCE / "reboot.log"
     state["reboot_pending_since"] = datetime.now(timezone.utc).isoformat()
@@ -258,6 +385,7 @@ def trial_reboot(observations: dict[str, Any], state: dict[str, Any]) -> None:
         f"backend_version={versions['backend_version']}",
         f"worker_version={versions['worker_version']}",
         f"worker_code_sha256={versions['worker_code_sha256']}",
+        f"worker_exe_sha256={versions['worker_exe_sha256']}",
     ]
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -271,6 +399,7 @@ def trial_reboot(observations: dict[str, Any], state: dict[str, Any]) -> None:
             "backend_version": versions["backend_version"],
             "worker_version": versions["worker_version"],
             "worker_code_sha256": versions["worker_code_sha256"],
+            "worker_exe_sha256": versions["worker_exe_sha256"],
             "notes": "Målt af stage_b_one_click efter operatørens genstart.",
             "evidence_path": "validation/appliance-lifecycle-evidence/reboot.log",
             "evidence_sha256": sha256_file(log),
@@ -291,7 +420,7 @@ def trial_supervisor(
     if state.get(f"{key}_done"):
         ok(f"Supervisor-{which} er allerede bevist.")
         return
-    heading(f"{'2' if which == 'backend' else '3'}/5  AUTOMATISK — supervisor genstarter {which}")
+    heading(f"{'3' if which == 'backend' else '4'}/5  AUTOMATISK — supervisor genstarter {which}")
     before = listener_pid(port)
     if before is None:
         raise StageBError(f"Ingen {which} lytter på port {port}; start appliancen først.")
@@ -329,6 +458,7 @@ def trial_supervisor(
                 f"restart_ms={restart_ms}",
                 f"active_version={active_version}",
                 f"active_code_sha256={versions['worker_code_sha256']}",
+                f"active_exe_sha256={versions['worker_exe_sha256']}",
             ]
         )
         + "\n",
@@ -344,6 +474,7 @@ def trial_supervisor(
             "restart_ms": restart_ms,
             "active_version": active_version,
             "active_code_sha256": versions["worker_code_sha256"],
+            "active_exe_sha256": versions["worker_exe_sha256"],
             "notes": f"Supervisor bragte {which} tilbage; målt af stage_b_one_click.",
             "evidence_path": f"validation/appliance-lifecycle-evidence/supervisor_{which}.log",
             "evidence_sha256": sha256_file(log),
@@ -412,7 +543,7 @@ def trial_good_update(observations: dict[str, Any], state: dict[str, Any]) -> No
     if state.get("good_update_done"):
         ok("Den gode opdatering er allerede bevist.")
         return
-    heading("4/5  AUTOMATISK — gyldig opdatering til den publicerede release")
+    heading("1/5  AUTOMATISK — gyldig opdatering til den publicerede release")
     candidate = candidate_identity()
     before_versions = live_versions()
     before_data = data_snapshot()
@@ -436,14 +567,18 @@ def trial_good_update(observations: dict[str, Any], state: dict[str, Any]) -> No
         {
             "performed": True,
             "source_version": source_version,
-            "source_git_sha": state.get("source_git_sha") or candidate["git_sha"],
+            "source_git_sha": released_commit(source_version),
             "target_version": candidate["version"],
             "target_git_sha": candidate["git_sha"],
             "target_code_sha256": candidate["code_sha256"],
             "ready": after_versions["backend_version"] == candidate["version"],
             "rollback_observed": "rolling back" in log.read_text(encoding="utf-8", errors="replace").lower(),
             "data_preserved": before_data["documents"] == after_data["documents"],
-            "schedules_preserved": before_data["schedules"] == after_data["schedules"],
+            "schedules_preserved": (
+                before_data["schedules"] == after_data["schedules"]
+                and bool(after_data["schedules_binding"])
+            ),
+            "schedules_binding": after_data["schedules_binding"],
             "notes": "Kørt og målt af stage_b_one_click; hele updater-outputtet er gemt.",
             "evidence_path": "validation/appliance-lifecycle-evidence/good_update.log",
             "evidence_sha256": sha256_file(log),
@@ -477,6 +612,14 @@ def trial_bad_update(observations: dict[str, Any], state: dict[str, Any]) -> Non
     bad_repo = os.environ.get("KALIV_STAGE_B_BAD_REPO", "").strip()
     log = EVIDENCE / "bad_update.log"
     candidate = candidate_identity()
+    # Name the artifact the refusal was actually aimed at. These used to be read
+    # from a state key nothing ever wrote, so they attested as empty strings and
+    # the validator rejected the trial.
+    attempted_version, attempted_git_sha = ("", "")
+    if bad_repo:
+        attempted_version, attempted_git_sha = remote_release_identity(bad_repo)
+    attempted_version = attempted_version or str(state.get("bad_attempted_version") or "")
+    attempted_git_sha = attempted_git_sha or str(state.get("bad_attempted_git_sha") or "")
 
     if bad_repo:
         note(f"Kører updateren mod {bad_repo}, hvis release bevidst har en forkert checksum.")
@@ -516,15 +659,19 @@ def trial_bad_update(observations: dict[str, Any], state: dict[str, Any]) -> Non
     trial.update(
         {
             "performed": True,
-            "attempted_version": state.get("bad_attempted_version") or "",
-            "attempted_git_sha": state.get("bad_attempted_git_sha") or "",
+            "attempted_version": attempted_version,
+            "attempted_git_sha": attempted_git_sha,
             "rejected_or_rolled_back": True,
             "active_version": after_versions["backend_version"],
             "active_git_sha": candidate["git_sha"],
             "active_code_sha256": candidate["code_sha256"],
             "ready": after_versions["backend_version"] == candidate["version"],
             "data_preserved": after_data["documents"] is not None,
-            "schedules_preserved": after_data["schedules"] is not None,
+            "schedules_preserved": (
+                after_data["schedules"] is not None
+                and bool(after_data["schedules_binding"])
+            ),
+            "schedules_binding": after_data["schedules_binding"],
             "notes": "Afvist før swap" if rejected else "Fuld rollback gennemført",
             "evidence_path": "validation/appliance-lifecycle-evidence/bad_update.log",
             "evidence_sha256": sha256_file(log),
@@ -571,8 +718,30 @@ def preflight() -> dict[str, Any]:
     versions = live_versions()
     ok(f"Backend kører {versions['backend_version'] or '(nede)'}")
     ok(f"Worker kører {versions['worker_version'] or '(nede)'}")
-    if not os.environ.get("MODELRIG_TOKEN", "").strip():
-        note("MODELRIG_TOKEN er ikke sat; worker-fingerprint og schedule-tælling springes over.")
+    # Both token-backed readings sit behind experimental flags a normal
+    # appliance does not set: the worker fingerprint needs KALIV_AGENT3_ENABLED,
+    # the schedule count needs KALIV_SCHEDULER_API. The bundle therefore binds
+    # the running build to the installed worker exe and the schedule store on
+    # disk instead, which need neither. A token only adds the stronger readings
+    # on a rig that already exposes them -- it is not required, and its absence
+    # no longer lets an unmeasured value pass as an observation.
+    if os.environ.get("MODELRIG_TOKEN", "").strip():
+        ok("MODELRIG_TOKEN er sat; fingerprint og schedule-API bruges hvis de svarer.")
+    else:
+        note("MODELRIG_TOKEN er ikke sat; binder mod installeret exe og schedule-lager.")
+    exe = installed_worker_exe_sha256()
+    if not exe:
+        raise StageBError(
+            f"Kunne ikke læse {WORKER_ASSET} i {appliance_root() / 'worker'}. "
+            "Uden den kan den kørende worker ikke bindes til kandidaten."
+        )
+    published = released_worker_exe_sha256(candidate["version"])
+    if not published:
+        raise StageBError(
+            f"Kunne ikke hente {WORKER_ASSET}s checksum fra den publicerede "
+            f"v{candidate['version']}. Bundlen ville mangle sin worker-binding."
+        )
+    ok(f"Worker-binding klar (publiceret {published[:16]}…).")
     return candidate
 
 
@@ -586,6 +755,12 @@ def build_observations(candidate: dict[str, Any]) -> dict[str, Any]:
             pass
     observations = json.loads(EXAMPLE.read_text(encoding="utf-8"))
     observations["candidate"] = dict(candidate)
+    # What the published release says the worker exe should hash to. The trials
+    # compare the installed file against this, so the bundle binds the running
+    # build without needing the experimental agent3 route enabled on the rig.
+    observations["candidate"]["worker_exe_sha256"] = released_worker_exe_sha256(
+        candidate["version"]
+    )
     observations["host"] = {
         "hostname": socket.gethostname(),
         "windows_version": platform.platform(),
@@ -636,10 +811,18 @@ def main(argv: list[str] | None = None) -> int:
     observations = build_observations(candidate)
     EVIDENCE.mkdir(parents=True, exist_ok=True)
 
+    # The update comes FIRST, and everything after it is measured on the
+    # installed candidate. The old order (reboot -> supervisor x2 -> update)
+    # measured the PREVIOUS release, because the rig is still running it until
+    # the update lands -- so every run attested
+    # "reboot.backend_version mismatch: expected <candidate>, got <previous>"
+    # and no run could ever produce a valid bundle. Reboot and the supervisor
+    # restarts are claims about the candidate; they have to happen while the
+    # candidate is what is actually running.
+    trial_good_update(observations, state)
     trial_reboot(observations, state)
     trial_supervisor(observations, state, "backend", 8080)
     trial_supervisor(observations, state, "worker", 8099)
-    trial_good_update(observations, state)
     trial_bad_update(observations, state)
 
     observations["finished_at"] = datetime.now(timezone.utc).isoformat()
