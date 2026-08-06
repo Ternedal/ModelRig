@@ -1,5 +1,8 @@
 from __future__ import annotations
-import fcntl
+try:
+    import fcntl as _fcntl
+except ImportError:
+    _fcntl = None
 import hashlib
 import json
 import os
@@ -21,7 +24,7 @@ _HEX64 = re.compile('^[0-9a-f]{64}$')
 _TOOL_ID = re.compile('^[a-z][a-z0-9_.-]{1,63}$')
 _TASK_ID = re.compile('^[A-Z][A-Z0-9_-]{2,63}$')
 _FORBIDDEN_ENV_NAMES = {'HOME', 'XDG_CONFIG_HOME', 'TMPDIR', 'PWD', 'PYTHONHOME', 'PYTHONPATH', 'LD_PRELOAD', 'LD_AUDIT'}
-_MAX_EXECUTABLE_BYTES = 1000000000
+_MAX_EXECUTABLE_BYTES = 256000000
 
 class CatalogError(ValueError):
     pass
@@ -277,7 +280,7 @@ class LocalExecutableHashVerifier:
             if previous != binding:
                 raise CatalogError(f'tool id was rebound after verification: {binding.tool_id}')
             return invocation
-        if os.name == 'nt' or not sys.platform.startswith('linux'):
+        if os.name == 'nt' or not sys.platform.startswith('linux') or _fcntl is None:
             raise CatalogError('pinned executable verification requires Linux')
         if not hasattr(os, 'memfd_create'):
             raise CatalogError('sealed executable objects are unavailable')
@@ -330,8 +333,8 @@ class LocalExecutableHashVerifier:
             if digest.hexdigest() != binding.executable_sha256:
                 raise CatalogError(f'tool executable hash mismatch: {binding.tool_id}')
             os.fchmod(pinned, 0o500)
-            seals = fcntl.F_SEAL_SEAL | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE
-            fcntl.fcntl(pinned, fcntl.F_ADD_SEALS, seals)
+            seals = _fcntl.F_SEAL_SEAL | _fcntl.F_SEAL_SHRINK | _fcntl.F_SEAL_GROW | _fcntl.F_SEAL_WRITE
+            _fcntl.fcntl(pinned, _fcntl.F_ADD_SEALS, seals)
             invocation = f'/proc/{os.getpid()}/fd/{pinned}'
             pinned_stat = Path(invocation).stat()
             sealed_stat = os.fstat(pinned)
