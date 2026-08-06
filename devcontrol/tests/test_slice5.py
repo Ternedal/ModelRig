@@ -210,6 +210,7 @@ class CatalogTests(unittest.TestCase):
             pinned = verifier.verify(
                 ToolBinding("python", str(source.resolve()), digest)
             )
+            source.chmod(0o700)
             source.write_bytes(b"not the verified executable")
             source.chmod(0o500)
             result = subprocess.run(
