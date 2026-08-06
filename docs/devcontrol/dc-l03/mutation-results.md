@@ -43,8 +43,8 @@ Load-bearing mutations and expected failures:
     toolchain owns a deep copy of every binding.
 13. Replace `materializer.executable_verifier` from inside the isolation verifier
     callback.
-    Expected: `test_materialization_uses_original_executable_verifier_snapshot`
-    fails unless the originally reviewed verifier is used and retained.
+    Expected: the executable-verifier snapshot regression fails unless the
+    originally reviewed verifier is used and retained.
 14. Reuse or retarget a registry materialized for task A with task B that grants
     the same command ID but has a different task hash or base SHA.
     Expected: the task-bound registry regression fails unless registry authority
@@ -64,11 +64,20 @@ Load-bearing mutations and expected failures:
     remains in force.
 19. Accept `200.0` as a persisted receipt status because it compares equal to
     integer `200` in Python.
-    Expected: `test_receipt_reload_types_and_task_binding_are_strict` fails.
+    Expected: the strict receipt reload regression fails.
 20. Materialize the reviewed catalog without an injected isolation verifier.
     Expected: the default fail-closed materialization regression fails.
 21. Let `HTTPS_PROXY`, `SSL_CERT_FILE`, `SSL_CERT_DIR` or environment-resolved
     CA paths choose the network or TLS trust authority used for GitHub reads.
-    Expected: `test_transport_ignores_environment_network_and_tls_authority`
-    fails unless proxy inheritance is empty and an explicit TLS client context
-    loads only compiled OpenSSL paths or explicit Windows certificate stores.
+    Expected: the network/TLS authority regression fails unless proxy inheritance
+    is empty and an explicit TLS client context loads only compiled OpenSSL paths
+    or explicit Windows certificate stores.
+22. Mutate the `IsolationAttestation` object received by the injected verifier
+    after the materializer's first authority comparison.
+    Expected: `test_materialization_uses_private_stable_attestation_snapshot`
+    fails unless the verifier receives a private copy and the same canonical
+    authority is revalidated after the callback.
+23. Present an executable FIFO with no writer.
+    Expected: `test_fifo_executable_candidate_is_rejected_without_blocking` times
+    out unless the descriptor is opened nonblocking and rejected as non-regular
+    before any read can wait indefinitely.
