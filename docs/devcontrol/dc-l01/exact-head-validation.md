@@ -41,6 +41,13 @@ python3 tests/workflow_test_coverage.py
 - The bundle and origin are removed before command execution; the sandbox uses no
   object alternates and exposes no source path through arguments, environment,
   Git configuration or logs.
+- Before the reviewed argv starts, Linux Landlock handles persistent filesystem
+  write, create, delete, truncate and refer operations; only the disposable
+  sandbox root receives those rights, with `/dev/null` as the sole non-persistent
+  sink exception required by Git.
+- The Landlock restriction is inherited by descendants. An absolute or parent
+  escape write outside the sandbox must fail, leave no host artifact and never
+  coexist with positive command evidence; unavailable Landlock fails closed.
 - Worktree state and the complete bounded sandbox `.git` metadata fingerprint
   jointly determine command receipt state.
 - Config, hook, ref, object, ignored-file and nested-repository mutations remain
@@ -51,8 +58,8 @@ python3 tests/workflow_test_coverage.py
   receipt can be returned.
 - Empty, dot and parent raw task-path segments are rejected before path
   normalization can alter authority.
-- Linux containment kills descendants that escape into new sessions and requires
-  positive quiescence acknowledgement; unsupported paths fail closed.
+- Linux subprocess containment kills descendants that escape into new sessions
+  and requires positive quiescence acknowledgement; unsupported paths fail closed.
 - Ignored files and nested Git repositories count as patch-workspace mutations,
   cannot coexist with a positive patch receipt and are physically removed by
   double-force cleanup during patch reset.
