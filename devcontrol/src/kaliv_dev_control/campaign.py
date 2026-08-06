@@ -17,6 +17,7 @@ _ZERO_HASH = "0" * 64
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _SHA64 = re.compile(r"^[0-9a-f]{64}$")
 _CAMPAIGN_ID = re.compile(r"^[A-Z][A-Z0-9_-]{2,63}$")
+_TASK_ID = re.compile(r"^[A-Z][A-Z0-9_-]{2,63}$")
 
 
 class CampaignError(ValueError):
@@ -93,6 +94,10 @@ def _clean_detail(value: Any) -> str:
     return value
 
 
+def _valid_identifier(value: Any, pattern: re.Pattern[str]) -> bool:
+    return isinstance(value, str) and pattern.fullmatch(value) is not None
+
+
 @dataclass(frozen=True, slots=True)
 class CampaignEvent:
     sequence: int
@@ -115,9 +120,14 @@ class CampaignEvent:
     ) -> "CampaignEvent":
         if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
             raise CampaignError("event sequence must be a non-negative integer")
-        if _SHA64.fullmatch(evidence_sha256) is None:
+        if not isinstance(state, CampaignState):
+            raise CampaignError("campaign event state is unsupported")
+        if not isinstance(evidence_sha256, str) or _SHA64.fullmatch(evidence_sha256) is None:
             raise CampaignError("event evidence hash is invalid")
-        if _SHA64.fullmatch(previous_event_sha256) is None:
+        if (
+            not isinstance(previous_event_sha256, str)
+            or _SHA64.fullmatch(previous_event_sha256) is None
+        ):
             raise CampaignError("previous event hash is invalid")
         detail = _clean_detail(detail)
         payload = {
@@ -197,7 +207,7 @@ class DevelopmentCampaign:
         campaign_id: str,
         task: DevelopmentTask,
     ) -> "DevelopmentCampaign":
-        if _CAMPAIGN_ID.fullmatch(campaign_id) is None:
+        if not _valid_identifier(campaign_id, _CAMPAIGN_ID):
             raise CampaignError("campaign id has invalid syntax")
         task_hash = hashlib.sha256(
             task.canonical_json().encode("utf-8")
@@ -233,11 +243,19 @@ class DevelopmentCampaign:
             raise CampaignError("campaign fields mismatch")
         if value["schema"] != CAMPAIGN_SCHEMA:
             raise CampaignError("campaign schema is unsupported")
-        if _CAMPAIGN_ID.fullmatch(value["campaign_id"]) is None:
+        if not _valid_identifier(value["campaign_id"], _CAMPAIGN_ID):
             raise CampaignError("campaign id has invalid syntax")
-        if _SHA64.fullmatch(value["task_sha256"]) is None:
+        if not _valid_identifier(value["task_id"], _TASK_ID):
+            raise CampaignError("campaign task id has invalid syntax")
+        if (
+            not isinstance(value["task_sha256"], str)
+            or _SHA64.fullmatch(value["task_sha256"]) is None
+        ):
             raise CampaignError("campaign task hash is invalid")
-        if _SHA40.fullmatch(value["base_sha"]) is None:
+        if (
+            not isinstance(value["base_sha"], str)
+            or _SHA40.fullmatch(value["base_sha"]) is None
+        ):
             raise CampaignError("campaign base SHA is invalid")
         if not isinstance(value["events"], list) or not value["events"]:
             raise CampaignError("campaign events must be a non-empty array")
@@ -284,11 +302,23 @@ class DevelopmentCampaign:
         return campaign
 
     def verify(self) -> None:
-        if not self.events:
+        if self.schema != CAMPAIGN_SCHEMA:
+            raise CampaignError("campaign schema is unsupported")
+        if not _valid_identifier(self.campaign_id, _CAMPAIGN_ID):
+            raise CampaignError("campaign id has invalid syntax")
+        if not _valid_identifier(self.task_id, _TASK_ID):
+            raise CampaignError("campaign task id has invalid syntax")
+        if not isinstance(self.task_sha256, str) or _SHA64.fullmatch(self.task_sha256) is None:
+            raise CampaignError("campaign task hash is invalid")
+        if not isinstance(self.base_sha, str) or _SHA40.fullmatch(self.base_sha) is None:
+            raise CampaignError("campaign base SHA is invalid")
+        if not isinstance(self.events, tuple) or not self.events:
             raise CampaignError("campaign contains no events")
         previous_hash = _ZERO_HASH
         previous_state: CampaignState | None = None
         for sequence, event in enumerate(self.events):
+            if not isinstance(event, CampaignEvent):
+                raise CampaignError("campaign event is invalid")
             if event.sequence != sequence:
                 raise CampaignError("campaign event sequence is not contiguous")
             if event.previous_event_sha256 != previous_hash:
