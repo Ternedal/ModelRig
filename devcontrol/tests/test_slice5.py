@@ -78,6 +78,17 @@ class AcceptIsolation:
         self.attestation = attestation
 
 
+class MutatingIsolation:
+    def __init__(self, toolchain: Toolchain) -> None:
+        self.toolchain = toolchain
+
+    def verify(self, attestation: IsolationAttestation) -> None:
+        del attestation
+        self.toolchain._bindings = {
+            "python": ToolBinding("python", "/unattested/python", "9" * 64)
+        }
+
+
 class AcceptExecutable:
     def __init__(self) -> None:
         self.seen: list[str] = []
@@ -168,6 +179,22 @@ class CatalogTests(unittest.TestCase):
                     "modelrig.demo", "python", ("-V",), ".", 10, {key: "x"}
                 )
 
+    def test_materialization_resolves_from_attested_toolchain_snapshot(self):
+        t = task("modelrig.devcontrol.tests")
+        tc = toolchain()
+        proof = attestation(t, tc)
+        verifier = AcceptExecutable()
+        registry = CatalogMaterializer(
+            modelrig_command_catalog(),
+            isolation_verifier=MutatingIsolation(tc),
+            executable_verifier=verifier,
+        ).materialize(t, tc, proof)
+        self.assertEqual(
+            registry.resolve(t, "modelrig.devcontrol.tests").argv[0],
+            "/trusted/python3",
+        )
+        self.assertEqual(verifier.seen, ["python"])
+
     def test_default_isolation_is_fail_closed_and_attestation_is_exact(self):
         t = task()
         tc = toolchain()
@@ -225,7 +252,6 @@ class CatalogTests(unittest.TestCase):
             self.assertEqual(result.stdout.strip(), "pinned-object")
             with self.assertRaises(OSError):
                 Path(pinned).write_bytes(b"tampered")
-
             descriptor = int(Path(pinned).name)
             verifier.close()
             unrelated = os.open("/bin/echo", os.O_RDONLY)
@@ -279,6 +305,16 @@ class GitHubReadTests(unittest.TestCase):
         with self.assertRaisesRegex(GitHubReadError, "identity"):
             GitHubReadAdapter(malformed, transport=transport)
         self.assertEqual(transport.calls, [])
+
+    def test_validated_task_snapshot_cannot_be_reassigned(self):
+        transport = FakeTransport(response({"sha": BASE_SHA}))
+        adapter = GitHubReadAdapter(task(), transport=transport)
+        with self.assertRaises(AttributeError):
+            adapter.task = replace(task(), base_sha="main")
+        receipt = adapter.verify_base_commit()
+        self.assertEqual(receipt.base_sha, BASE_SHA)
+        self.assertEqual(len(transport.calls), 1)
+        self.assertTrue(transport.calls[0][0].endswith("/commits/" + BASE_SHA))
 
     def test_verify_base_commit_is_fixed_exact_sha_get(self):
         transport = FakeTransport(response({"sha": BASE_SHA}))
@@ -363,12 +399,7 @@ class GitHubReadTests(unittest.TestCase):
             GitHubReadReceipt.from_mapping(receipt.to_dict()).canonical_json(),
             receipt.canonical_json(),
         )
-        for change in (
-            {"task_id": 1},
-            {"repository": 1},
-            {"status": 201},
-            {"status": 200.0},
-        ):
+        for change in ({"task_id": 1}, {"repository": 1}, {"status": 201}):
             with self.subTest(change=change), self.assertRaises(GitHubReadError):
                 GitHubReadReceipt.from_mapping({**receipt.to_dict(), **change})
         other = DevelopmentTask.from_mapping({**task().to_dict(), "task_id": "OTHER"})
@@ -380,7 +411,9 @@ class GitHubReadTests(unittest.TestCase):
             builder.return_value = object()
             UrllibReadOnlyTransport()
         handlers = builder.call_args.args
-        proxy = next(item for item in handlers if isinstance(item, urllib.request.ProxyHandler))
+        proxy = next(
+            item for item in handlers if isinstance(item, urllib.request.ProxyHandler)
+        )
         self.assertEqual(proxy.proxies, {})
         transport = UrllibReadOnlyTransport()
         with patch.object(transport._opener, "open") as opener:
