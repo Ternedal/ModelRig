@@ -2,12 +2,13 @@
 
 Status: **candidate committed; exact-head checks pending**
 
-Implementation candidate: `f1d3ff20cbec37532ae118dfa5da04ed948b9c84`.
+Implementation candidate: `6c1e2d79684e1a15ce8f9932684a9dbd863533e6`.
 
 The implementation candidate contains the complete 16-path allowlist and includes
 sealed Linux executable-object pinning, strict catalog environment policy,
-fixed-host GET-only GitHub reads, Git-blob verification and executable
-regressions. This evidence update intentionally changes the branch head; all
+fixed-host GET-only GitHub reads, Git-blob verification, concrete integer receipt
+status validation, and a pathname-swap regression that launches only the sealed
+verified bytes. This evidence update intentionally changes the branch head; all
 final conclusions must bind to the resulting exact head, not the implementation
 candidate above.
 
