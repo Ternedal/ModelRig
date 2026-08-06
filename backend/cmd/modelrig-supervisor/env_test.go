@@ -2,8 +2,8 @@ package main
 
 import (
 	"os"
-	"strings"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -55,6 +55,35 @@ func TestLoadEnvFile_RealExample(t *testing.T) {
 	for k, v := range m {
 		if strings.Contains(v, "#") {
 			t.Errorf("%s=%q still contains an inline comment", k, v)
+		}
+	}
+}
+
+// A UTF-8 BOM must not become part of the first variable's name.
+//
+// PowerShell's Set-Content -Encoding utf8 writes one, and this supervisor runs
+// only on Windows. Without stripping it the file parses, the supervisor logs
+// "loaded N env var(s)", and the child never receives the first variable --
+// because it is named "\ufeffKEY". Every visible signal says the configuration
+// was applied, which is what made this expensive to find on the rig.
+func TestLoadEnvFile_StripsUTF8BOM(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "modelrig.env")
+	body := "\ufeffKALIV_AGENT3_ENABLED=1\nKALIV_AGENT3_TASK_UI=1\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadEnvFile(path)
+	if err != nil {
+		t.Fatalf("loadEnvFile: %v", err)
+	}
+	want := []string{"KALIV_AGENT3_ENABLED=1", "KALIV_AGENT3_TASK_UI=1"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d vars, want %d: %q", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("var %d = %q, want %q", i, got[i], want[i])
 		}
 	}
 }
