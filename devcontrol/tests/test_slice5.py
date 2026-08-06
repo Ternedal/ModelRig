@@ -20,6 +20,7 @@ from kaliv_dev_control.catalog import (
     IsolationAttestation,
     IsolationBoundary,
     LocalExecutableHashVerifier,
+    ModelRigCommandCatalog,
     NetworkMode,
     ProjectCommandSpec,
     ToolBinding,
@@ -82,13 +83,19 @@ def toolchain() -> Toolchain:
     )
 
 
-def attestation(t: DevelopmentTask, tc: Toolchain) -> IsolationAttestation:
+def attestation(
+    t: DevelopmentTask,
+    tc: Toolchain,
+    *,
+    catalog: ModelRigCommandCatalog | None = None,
+) -> IsolationAttestation:
+    authority = catalog or modelrig_command_catalog()
     return IsolationAttestation(
         task_id=t.task_id,
         task_sha256=hashlib.sha256(t.canonical_json().encode()).hexdigest(),
         repository=t.repository,
         base_sha=t.base_sha,
-        catalog_sha256=modelrig_command_catalog().sha256,
+        catalog_sha256=authority.sha256,
         toolchain_sha256=tc.sha256,
         boundary=IsolationBoundary.OS_ISOLATED,
         network_mode=NetworkMode.DENY,
@@ -114,6 +121,23 @@ class MutateToolchainIsolation:
             )
         )
         self.value._bindings = replacement._bindings
+
+
+class ReassignCatalog(ModelRigCommandCatalog):
+    def __init__(
+        self,
+        specs: tuple[ProjectCommandSpec, ...],
+        replacement: ModelRigCommandCatalog,
+    ) -> None:
+        super().__init__(specs)
+        self.replacement = replacement
+        self.materializer: CatalogMaterializer | None = None
+
+    def resolve(self, command_id: str) -> ProjectCommandSpec:
+        spec = super().resolve(command_id)
+        if self.materializer is not None:
+            self.materializer.catalog = self.replacement
+        return spec
 
 
 class AcceptExecutable:
@@ -211,6 +235,38 @@ class CatalogTests(unittest.TestCase):
         )
         self.assertEqual(verifier.seen, ["python"])
         self.assertIs(getattr(registry, "_catalog_executable_verifier"), verifier)
+
+    def test_materialization_uses_attested_catalog_snapshot(self):
+        t = task("modelrig.devcontrol.tests")
+        tc = toolchain()
+        source = modelrig_command_catalog()
+        replacement = ModelRigCommandCatalog(
+            (
+                ProjectCommandSpec(
+                    "modelrig.devcontrol.tests",
+                    "python",
+                    ("-c", "print('replacement')"),
+                    ".",
+                    10,
+                ),
+            )
+        )
+        catalog = ReassignCatalog(
+            tuple(source.resolve(key) for key in source.command_ids),
+            replacement,
+        )
+        materializer = CatalogMaterializer(
+            catalog,
+            isolation_verifier=AcceptIsolation(),
+            executable_verifier=AcceptExecutable(),
+        )
+        catalog.materializer = materializer
+        with self.assertRaisesRegex(CatalogError, "exact authority"):
+            materializer.materialize(
+                t,
+                tc,
+                attestation(t, tc, catalog=replacement),
+            )
 
     def test_materialization_uses_attested_toolchain_snapshot(self):
         t = task("modelrig.devcontrol.tests")
