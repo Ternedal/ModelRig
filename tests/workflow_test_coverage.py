@@ -69,10 +69,14 @@ expected = {
     "test_proposal_reload.py",
     "test_review_reload.py",
     "test_slice2.py",
+    "test_slice5.py",
     "test_store_proposal.py",
 }
 observed = {path.name for path in devcontrol_tests}
-check(observed == expected, f"the eight DC-L01–L02 test modules are present: {sorted(observed)}")
+check(
+    observed == expected,
+    f"the nine DC-L01–L03 test modules are present: {sorted(observed)}",
+)
 check(
     all(path.is_file() for path in devcontrol_tests),
     "every DevControl test matched by unittest discovery is a regular file",

@@ -1,0 +1,49 @@
+{
+  "schema": "modelrig-devcontrol-symbol-ownership/v1",
+  "slice": "DC-L03",
+  "owners": [
+    {
+      "path": "devcontrol/src/kaliv_dev_control/catalog.py",
+      "symbols": [
+        "ProjectCommandSpec",
+        "ModelRigCommandCatalog",
+        "ToolBinding",
+        "Toolchain",
+        "IsolationAttestation",
+        "RejectUnverifiedIsolation",
+        "LocalExecutableHashVerifier",
+        "CatalogMaterializer",
+        "modelrig_command_catalog"
+      ],
+      "authority": "immutable fixed command metadata and isolation-bound local materialization"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/github_read.py",
+      "symbols": [
+        "HttpResponse",
+        "ReadOnlyTransport",
+        "UrllibReadOnlyTransport",
+        "GitHubReadReceipt",
+        "GitHubReadAdapter"
+      ],
+      "authority": "bounded GET-only exact-SHA GitHub commit and file reads"
+    },
+    {
+      "path": "devcontrol/tests/test_slice5.py",
+      "symbols": [
+        "CatalogTests",
+        "GitHubReadTests",
+        "SchemaTests"
+      ],
+      "authority": "executable DC-L03 fail-closed and determinism regressions"
+    }
+  ],
+  "forbidden_ownership": [
+    "HTTP methods other than GET",
+    "GitHub mutation",
+    "remote Git",
+    "credential persistence or receipt serialization",
+    "process launch",
+    "merge, release, deployment or activation"
+  ]
+}

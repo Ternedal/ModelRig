@@ -1,0 +1,38 @@
+{
+  "schema": "modelrig-devcontrol-source-provenance/v1",
+  "slice": "DC-L03",
+  "source": {
+    "pull_request": 338,
+    "head": "07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f"
+  },
+  "exact_copy_count": 0,
+  "projected_count": 5,
+  "exact_copies": [],
+  "projections": [
+    {
+      "path": "devcontrol/schemas/development-github-read-receipt-v1.schema.json",
+      "source_blob": "d00c0519a6c78221e6e506c42e418467fafbc80b",
+      "reason": "align task identity and repository bounds with the landed DevelopmentTask contract"
+    },
+    {
+      "path": "devcontrol/schemas/development-isolation-attestation-v1.schema.json",
+      "source_blob": "561aa1956b5d60d9dde69d271c986b963e1d83c0",
+      "reason": "align task identity syntax with the landed DevelopmentTask contract"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/catalog.py",
+      "source_blob": "98cb4ce673b166b8802dda9004af7654bbb51d97",
+      "reason": "retain the locked catalog while adding bounded canonical fields, loader/Git environment rejection, descriptor-based POSIX executable hashing and fail-closed Windows behavior"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/github_read.py",
+      "source_blob": "2637ad2a9f4bc3ff49afaf123f71b06645c86971",
+      "reason": "retain the fixed GET-only API while disabling environment proxies, hardening response metadata, validating task identities and verifying decoded Git blob identity"
+    },
+    {
+      "path": "devcontrol/tests/test_slice5.py",
+      "source_blob": "cb2766909a788d588285047c0495029dec4b1c97",
+      "reason": "preserve source coverage and add executable regressions for blob identity, proxy/authority restrictions, loader-hook rejection, linked executables and strict receipt reload"
+    }
+  ]
+}

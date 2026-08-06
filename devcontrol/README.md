@@ -1,4 +1,4 @@
-# Kaliv Development Control — DC-L01 and DC-L02 foundations
+# Kaliv Development Control — DC-L01 through DC-L03 foundations
 
 These slices are the dormant, dependency-minimal foundation defined by
 `docs/devcontrol/ADR-DC-001_DEVCONTROL_AUTHORITY_BOUNDARY.md` and the landed
@@ -34,12 +34,36 @@ The campaign store never deletes an unverifiable or live lock. Lock records bind
 PID, stable process identity and a random nonce. Malformed lock evidence fails
 closed.
 
+## DC-L03 authority
+
+DC-L03 adds two narrowly bounded, still-dormant control-plane surfaces:
+
+- an immutable ModelRig command catalog whose entries name reviewed tool IDs,
+  fixed arguments, canonical working directories, bounded timeouts, denied
+  network mode and an OS-isolation requirement;
+- operator-controlled tool bindings to absolute executable paths and exact
+  SHA-256 digests;
+- isolation attestations bound to the exact task, base SHA, catalog and
+  toolchain;
+- fail-closed catalog materialization until an independent isolation verifier is
+  injected;
+- descriptor-based POSIX executable hashing with link, mutation and size checks;
+- an exact-SHA GitHub adapter exposing only `GET` operations for base-commit
+  verification and task-scoped file reads;
+- fixed `api.github.com` authority, disabled redirects and environment proxies,
+  bounded responses, protected-path enforcement and Git-blob verification;
+- deterministic read receipts that contain hashes and metadata but never the
+  optional bearer token.
+
+The reviewed catalog is not installed into `default_registry()`. Importing the
+package or catalog performs no process launch and no network request.
+
 ## Deliberately absent
 
-These slices provide no non-empty command catalog, concrete Git runner, GitHub
-write adapter, credentials, remote publication, merge, release, deployment or
-activation authority. `streaming_publication.py` belongs to DC-L07 and is not
-part of DC-L02.
+These slices provide no GitHub write adapter, remote Git operation, publication,
+merge, release, deployment or activation authority. Windows executable
+verification and signed physical isolation belong to later slices.
+`streaming_publication.py` belongs to DC-L07.
 
 ## Validation
 
@@ -49,5 +73,5 @@ PYTHONPATH=devcontrol/src python -m kaliv_dev_control validate-task task.json
 python3 tests/workflow_test_coverage.py
 ```
 
-Exact-path, provenance, mutation and review evidence for DC-L02 lives under
-`docs/devcontrol/dc-l02/`.
+Exact-path, provenance, mutation and review evidence for each landed slice lives
+under `docs/devcontrol/dc-l0x/`.
