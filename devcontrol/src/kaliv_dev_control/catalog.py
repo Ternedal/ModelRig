@@ -17,12 +17,8 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import MappingProxyType
 from typing import Any, Mapping, Protocol, Sequence
 
-from .commands import (
-    CommandPolicyError,
-    CommandRegistry,
-    CommandTemplate,
-)
-from .contract import DevelopmentTask
+from .commands import CommandPolicyError, CommandRegistry, CommandTemplate
+from .contract import ContractError, DevelopmentTask
 
 CATALOG_SCHEMA = "kaliv-modelrig-command-catalog/v1"
 TOOLCHAIN_SCHEMA = "kaliv-development-toolchain/v1"
@@ -333,44 +329,6 @@ class RejectUnverifiedIsolation:
         raise CatalogError("OS isolation has not been independently verified")
 
 
-class TaskBoundCommandRegistry(CommandRegistry):
-    def __init__(
-        self,
-        templates: Sequence[CommandTemplate],
-        task: DevelopmentTask,
-    ) -> None:
-        super().__init__(templates)
-        self._task_id = task.task_id
-        self._task_sha256 = _task_sha(task)
-        self._repository = task.repository
-        self._base_sha = task.base_sha
-
-    def resolve(
-        self,
-        task: DevelopmentTask,
-        command_id: str,
-    ) -> CommandTemplate:
-        if not isinstance(task, DevelopmentTask):
-            raise CommandPolicyError("registry requires a development task")
-        identity = (
-            task.task_id,
-            _task_sha(task),
-            task.repository,
-            task.base_sha,
-        )
-        expected = (
-            self._task_id,
-            self._task_sha256,
-            self._repository,
-            self._base_sha,
-        )
-        if identity != expected:
-            raise CommandPolicyError(
-                "registry is not bound to this exact task"
-            )
-        return super().resolve(task, command_id)
-
-
 class LocalExecutableHashVerifier:
     def __init__(self) -> None:
         self._pins: dict[str, tuple[ToolBinding, int, str]] = {}
@@ -457,6 +415,44 @@ class LocalExecutableHashVerifier:
                 os.close(pinned)
 
 
+class TaskBoundCommandRegistry(CommandRegistry):
+    def __init__(
+        self,
+        templates: Sequence[CommandTemplate],
+        task: DevelopmentTask,
+        executable_verifier: ExecutableVerifier,
+    ) -> None:
+        super().__init__(templates)
+        object.__setattr__(self, "_bound_task_identity", self._identity(task))
+        object.__setattr__(self, "_catalog_executable_verifier", executable_verifier)
+        object.__setattr__(self, "_sealed", True)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if getattr(self, "_sealed", False):
+            raise CommandPolicyError("task-bound command registry is immutable")
+        object.__setattr__(self, name, value)
+
+    @staticmethod
+    def _identity(task: DevelopmentTask) -> tuple[str, str, str, str]:
+        if not isinstance(task, DevelopmentTask):
+            raise CommandPolicyError("registry resolution requires a development task")
+        try:
+            snapshot = DevelopmentTask.from_mapping(task.to_dict())
+        except (ContractError, AttributeError, TypeError, ValueError) as exc:
+            raise CommandPolicyError("registry resolution task is invalid") from exc
+        return (
+            snapshot.task_id,
+            _task_sha(snapshot),
+            snapshot.repository,
+            snapshot.base_sha,
+        )
+
+    def resolve(self, task: DevelopmentTask, command_id: str) -> CommandTemplate:
+        if self._identity(task) != self._bound_task_identity:
+            raise CommandPolicyError("command registry is not bound to this exact task")
+        return super().resolve(task, command_id)
+
+
 class CatalogMaterializer:
     def __init__(
         self, catalog: ModelRigCommandCatalog, *,
@@ -477,14 +473,18 @@ class CatalogMaterializer:
             raise CatalogError("materializer requires a development task")
         if not isinstance(toolchain, Toolchain) or not isinstance(attestation, IsolationAttestation):
             raise CatalogError("materializer authority inputs are invalid")
-        if task.repository != "Ternedal/ModelRig":
+        try:
+            task_snapshot = DevelopmentTask.from_mapping(task.to_dict())
+        except (ContractError, AttributeError, TypeError, ValueError) as exc:
+            raise CatalogError("materializer task contract is invalid") from exc
+        if task_snapshot.repository != "Ternedal/ModelRig":
             raise CatalogError("ModelRig catalog cannot authorize another repository")
         catalog = self.catalog.snapshot()
-        specs = tuple(catalog.resolve(item) for item in task.allowed_command_ids)
+        specs = tuple(catalog.resolve(item) for item in task_snapshot.allowed_command_ids)
         snapshot = toolchain.snapshot()
         expected = {
-            "task_id": task.task_id, "task_sha256": _task_sha(task),
-            "repository": task.repository, "base_sha": task.base_sha,
+            "task_id": task_snapshot.task_id, "task_sha256": _task_sha(task_snapshot),
+            "repository": task_snapshot.repository, "base_sha": task_snapshot.base_sha,
             "catalog_sha256": catalog.sha256,
             "toolchain_sha256": snapshot.sha256,
             "boundary": IsolationBoundary.OS_ISOLATED,
@@ -515,9 +515,9 @@ class CatalogMaterializer:
                 command_id=spec.command_id, argv=(invocation, *spec.args), cwd=spec.cwd,
                 max_timeout_seconds=spec.max_timeout_seconds, env=spec.env,
             ))
-        registry = TaskBoundCommandRegistry(templates, task)
-        setattr(registry, "_catalog_executable_verifier", self.executable_verifier)
-        return registry
+        return TaskBoundCommandRegistry(
+            templates, task_snapshot, self.executable_verifier
+        )
 
 
 def modelrig_command_catalog() -> ModelRigCommandCatalog:
