@@ -25,6 +25,8 @@ _TOOL_ID = re.compile('^[a-z][a-z0-9_.-]{1,63}$')
 _TASK_ID = re.compile('^[A-Z][A-Z0-9_-]{2,63}$')
 _FORBIDDEN_ENV_NAMES = {'HOME', 'XDG_CONFIG_HOME', 'TMPDIR', 'PWD', 'PYTHONHOME', 'PYTHONPATH', 'LD_PRELOAD', 'LD_AUDIT'}
 _MAX_EXECUTABLE_BYTES = 256000000
+_MAX_PINNED_EXECUTABLES = 128
+_PINNED_EXECUTABLE_DESCRIPTORS: set[int] = set()
 
 class CatalogError(ValueError):
     pass
@@ -261,19 +263,18 @@ class LocalExecutableHashVerifier:
 
     def __init__(self) -> None:
         self._pins: dict[str, tuple[ToolBinding, int, str]] = {}
+        self._closed = False
 
     def close(self) -> None:
-        for _, descriptor, _ in tuple(self._pins.values()):
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
+        self._closed = True
         self._pins.clear()
 
     def __del__(self) -> None:
         self.close()
 
     def verify(self, binding: ToolBinding) -> str:
+        if self._closed:
+            raise CatalogError('executable verifier is closed')
         existing = self._pins.get(binding.tool_id)
         if existing is not None:
             previous, _, invocation = existing
@@ -284,6 +285,8 @@ class LocalExecutableHashVerifier:
             raise CatalogError('pinned executable verification requires Linux')
         if not hasattr(os, 'memfd_create'):
             raise CatalogError('sealed executable objects are unavailable')
+        if len(_PINNED_EXECUTABLE_DESCRIPTORS) >= _MAX_PINNED_EXECUTABLES:
+            raise CatalogError('process executable pin limit was reached')
         path = Path(binding.executable)
         try:
             if _linkish(path) or path.resolve(strict=True) != path:
@@ -340,6 +343,7 @@ class LocalExecutableHashVerifier:
             sealed_stat = os.fstat(pinned)
             if pinned_stat.st_size != total or sealed_stat.st_size != total:
                 raise CatalogError(f'pinned executable size could not be verified: {binding.tool_id}')
+            _PINNED_EXECUTABLE_DESCRIPTORS.add(pinned)
             self._pins[binding.tool_id] = (binding, pinned, invocation)
             pinned = None
             return invocation
