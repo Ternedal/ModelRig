@@ -120,6 +120,18 @@ class ProjectCommandSpec:
             clean[key] = value
         object.__setattr__(self, "env", MappingProxyType(clean))
 
+    def copy(self) -> "ProjectCommandSpec":
+        return ProjectCommandSpec(
+            command_id=self.command_id,
+            tool_id=self.tool_id,
+            args=tuple(self.args),
+            cwd=self.cwd,
+            max_timeout_seconds=self.max_timeout_seconds,
+            env=dict(self.env),
+            required_boundary=self.required_boundary,
+            network_mode=self.network_mode,
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "command_id": self.command_id, "tool_id": self.tool_id,
@@ -136,9 +148,10 @@ class ModelRigCommandCatalog:
         if isinstance(specs, (str, bytes)) or not isinstance(specs, Sequence):
             raise CatalogError("catalog specs must be a sequence")
         values: dict[str, ProjectCommandSpec] = {}
-        for spec in specs:
-            if not isinstance(spec, ProjectCommandSpec):
+        for supplied in specs:
+            if not isinstance(supplied, ProjectCommandSpec):
                 raise CatalogError("catalog contains an invalid command spec")
+            spec = supplied.copy()
             if spec.command_id in values:
                 raise CatalogError(f"duplicate catalog command: {spec.command_id}")
             values[spec.command_id] = spec
@@ -194,6 +207,9 @@ class ToolBinding:
         ) is None:
             raise CatalogError("tool executable hash must be lowercase SHA-256")
 
+    def copy(self) -> "ToolBinding":
+        return ToolBinding(self.tool_id, self.executable, self.executable_sha256)
+
     def to_dict(self) -> dict[str, str]:
         return {
             "tool_id": self.tool_id, "executable": self.executable,
@@ -206,9 +222,10 @@ class Toolchain:
         if isinstance(bindings, (str, bytes)) or not isinstance(bindings, Sequence):
             raise CatalogError("toolchain bindings must be a sequence")
         values: dict[str, ToolBinding] = {}
-        for binding in bindings:
-            if not isinstance(binding, ToolBinding):
+        for supplied in bindings:
+            if not isinstance(supplied, ToolBinding):
                 raise CatalogError("toolchain contains an invalid binding")
+            binding = supplied.copy()
             if binding.tool_id in values:
                 raise CatalogError(f"duplicate tool binding: {binding.tool_id}")
             values[binding.tool_id] = binding
@@ -481,6 +498,8 @@ class CatalogMaterializer:
         catalog = self.catalog.snapshot()
         specs = tuple(catalog.resolve(item) for item in task_snapshot.allowed_command_ids)
         snapshot = toolchain.snapshot()
+        isolation_verifier = self.isolation_verifier
+        executable_verifier = self.executable_verifier
         expected = {
             "task_id": task_snapshot.task_id, "task_sha256": _task_sha(task_snapshot),
             "repository": task_snapshot.repository, "base_sha": task_snapshot.base_sha,
@@ -498,7 +517,7 @@ class CatalogMaterializer:
         }
         if actual != expected:
             raise CatalogError("isolation attestation is not bound to this exact authority")
-        self.isolation_verifier.verify(attestation)
+        isolation_verifier.verify(attestation)
         templates, invocations = [], {}
         for spec in specs:
             if spec.required_boundary is not IsolationBoundary.OS_ISOLATED or spec.network_mode is not NetworkMode.DENY:
@@ -506,7 +525,7 @@ class CatalogMaterializer:
             binding = snapshot.resolve(spec.tool_id)
             invocation = invocations.get(binding.tool_id)
             if invocation is None:
-                invocation = self.executable_verifier.verify(binding)
+                invocation = executable_verifier.verify(binding)
                 if not isinstance(invocation, str) or not invocation or not _absolute(invocation):
                     raise CatalogError("executable verifier did not return a pinned absolute object")
                 invocations[binding.tool_id] = invocation
@@ -515,7 +534,7 @@ class CatalogMaterializer:
                 max_timeout_seconds=spec.max_timeout_seconds, env=spec.env,
             ))
         return TaskBoundCommandRegistry(
-            templates, task_snapshot, self.executable_verifier
+            templates, task_snapshot, executable_verifier
         )
 
 
