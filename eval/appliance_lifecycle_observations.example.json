@@ -3,7 +3,8 @@
   "candidate": {
     "version": "FILL_ME",
     "git_sha": "FILL_ME_40_HEX",
-    "code_sha256": "FILL_ME_64_HEX"
+    "code_sha256": "FILL_ME_64_HEX",
+    "worker_exe_sha256": "FILL_ME_64_HEX"
   },
   "host": {
     "hostname": "FILL_ME",
@@ -18,7 +19,8 @@
       "ready_ms": null,
       "backend_version": "FILL_ME",
       "worker_version": "FILL_ME",
-      "worker_code_sha256": "FILL_ME_64_HEX",
+      "worker_code_sha256": "",
+      "worker_exe_sha256": "FILL_ME_64_HEX",
       "notes": "FILL_ME",
       "evidence_path": "validation/appliance-lifecycle-evidence/reboot.log",
       "evidence_sha256": "FILL_ME_64_HEX"
@@ -29,7 +31,8 @@
       "ready": false,
       "restart_ms": null,
       "active_version": "FILL_ME",
-      "active_code_sha256": "FILL_ME_64_HEX",
+      "active_code_sha256": "",
+      "active_exe_sha256": "FILL_ME_64_HEX",
       "notes": "FILL_ME",
       "evidence_path": "validation/appliance-lifecycle-evidence/supervisor_backend.log",
       "evidence_sha256": "FILL_ME_64_HEX"
@@ -40,7 +43,8 @@
       "ready": false,
       "restart_ms": null,
       "active_version": "FILL_ME",
-      "active_code_sha256": "FILL_ME_64_HEX",
+      "active_code_sha256": "",
+      "active_exe_sha256": "FILL_ME_64_HEX",
       "notes": "FILL_ME",
       "evidence_path": "validation/appliance-lifecycle-evidence/supervisor_worker.log",
       "evidence_sha256": "FILL_ME_64_HEX"
@@ -56,6 +60,7 @@
       "rollback_observed": false,
       "data_preserved": false,
       "schedules_preserved": false,
+      "schedules_binding": "FILL_ME_api_or_store_digest_or_store_absent",
       "notes": "FILL_ME",
       "evidence_path": "validation/appliance-lifecycle-evidence/good_update.log",
       "evidence_sha256": "FILL_ME_64_HEX"
@@ -71,6 +76,7 @@
       "ready": false,
       "data_preserved": false,
       "schedules_preserved": false,
+      "schedules_binding": "FILL_ME_api_or_store_digest_or_store_absent",
       "notes": "FILL_ME",
       "evidence_path": "validation/appliance-lifecycle-evidence/bad_update.log",
       "evidence_sha256": "FILL_ME_64_HEX"

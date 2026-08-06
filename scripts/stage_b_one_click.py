@@ -65,6 +65,7 @@ def use_root(new_root: Path) -> None:
     JOURNAL = ROOT / "update-transaction.json"
 
 LIFECYCLE_SCHEMA = "kaliv-appliance-lifecycle-observations/v1"
+RELEASE_REPO = "Ternedal/ModelRig"
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 BACKEND_HEALTH = "http://127.0.0.1:8080/healthz"
 WORKER_HEALTH = "http://127.0.0.1:8099/healthz"
@@ -215,6 +216,54 @@ def remote_release_identity(repo: str) -> tuple[str, str]:
     return version, sha if _SHA40.fullmatch(sha) else ""
 
 
+WORKER_ASSET = "modelrig-worker-windows-x64.exe"
+
+
+def installed_worker_exe_sha256() -> str:
+    """Digest of the worker exe the updater actually swapped in.
+
+    This is the binding that does not need a token or a feature flag: whatever
+    file is sitting in the appliance right now is what the supervisor restarts
+    and what survives a reboot.
+    """
+    path = appliance_root() / "worker" / WORKER_ASSET
+    if not path.is_file():
+        return ""
+    return sha256_file(path)
+
+
+def released_worker_exe_sha256(version: str) -> str:
+    """The same digest as published for this candidate, from its SHA256SUMS.txt.
+
+    Comparing the two proves the installed worker is the released build, without
+    asking the running process to introspect itself.
+    """
+    tag = version if version.startswith("v") else f"v{version}"
+    try:
+        release = get_json(
+            f"https://api.github.com/repos/{RELEASE_REPO}/releases/tags/{tag}",
+            timeout=15.0,
+        )
+        assets = release.get("assets") if isinstance(release, dict) else None
+        url = ""
+        for asset in assets or []:
+            if isinstance(asset, dict) and asset.get("name") == "SHA256SUMS.txt":
+                url = str(asset.get("browser_download_url") or "")
+                break
+        if not url:
+            return ""
+        with urllib.request.urlopen(url, timeout=20.0) as response:
+            text = response.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        return ""
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and fields[-1].lstrip("*") == WORKER_ASSET:
+            digest = fields[0].lower()
+            return digest if re.fullmatch(r"[0-9a-f]{64}", digest) else ""
+    return ""
+
+
 def live_versions() -> dict[str, Any]:
     """Read what the running appliance reports -- the honest post-condition."""
     out: dict[str, Any] = {}
@@ -227,6 +276,7 @@ def live_versions() -> dict[str, Any]:
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
         out["worker_version"] = ""
     out["worker_code_sha256"] = worker_fingerprint()
+    out["worker_exe_sha256"] = installed_worker_exe_sha256()
     return out
 
 
@@ -270,10 +320,21 @@ def listener_pid(port: int) -> int | None:
         return None
 
 
+SCHEDULE_STORE = "kaliv-schedules.db"
+
+
 def data_snapshot() -> dict[str, Any]:
-    """Cheap before/after fingerprint so data_preserved is measured, not claimed."""
+    """Cheap before/after fingerprint so data_preserved is measured, not claimed.
+
+    Schedules are read two ways. The admin API is preferred, but it only exists
+    when KALIV_SCHEDULER_API=1, which a normal appliance does not set -- and
+    comparing two unmeasured None values used to yield "preserved: true" without
+    anything having been observed at all. So when the API is unavailable the
+    schedule store on disk is digested instead, and the snapshot records WHICH
+    binding produced the answer so the bundle cannot claim an unmade measurement.
+    """
     token = os.environ.get("MODELRIG_TOKEN", "").strip()
-    snapshot: dict[str, Any] = {"schedules": None, "documents": None}
+    snapshot: dict[str, Any] = {"schedules": None, "documents": None, "schedules_binding": ""}
     try:
         snapshot["documents"] = get_json(WORKER_HEALTH).get("documents")
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
@@ -282,9 +343,19 @@ def data_snapshot() -> dict[str, Any]:
         try:
             payload = get_json("http://127.0.0.1:8080/api/v1/schedules", token=token)
             items = payload.get("schedules") if isinstance(payload, dict) else None
-            snapshot["schedules"] = len(items) if isinstance(items, list) else None
+            if isinstance(items, list):
+                snapshot["schedules"] = len(items)
+                snapshot["schedules_binding"] = "api"
         except (urllib.error.URLError, OSError, json.JSONDecodeError):
             pass
+    if not snapshot["schedules_binding"]:
+        store = appliance_root() / SCHEDULE_STORE
+        if store.is_file():
+            snapshot["schedules"] = sha256_file(store)
+            snapshot["schedules_binding"] = "store_digest"
+        else:
+            snapshot["schedules"] = "absent"
+            snapshot["schedules_binding"] = "store_absent"
     return snapshot
 
 
@@ -314,6 +385,7 @@ def trial_reboot(observations: dict[str, Any], state: dict[str, Any]) -> None:
         f"backend_version={versions['backend_version']}",
         f"worker_version={versions['worker_version']}",
         f"worker_code_sha256={versions['worker_code_sha256']}",
+        f"worker_exe_sha256={versions['worker_exe_sha256']}",
     ]
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -327,6 +399,7 @@ def trial_reboot(observations: dict[str, Any], state: dict[str, Any]) -> None:
             "backend_version": versions["backend_version"],
             "worker_version": versions["worker_version"],
             "worker_code_sha256": versions["worker_code_sha256"],
+            "worker_exe_sha256": versions["worker_exe_sha256"],
             "notes": "Målt af stage_b_one_click efter operatørens genstart.",
             "evidence_path": "validation/appliance-lifecycle-evidence/reboot.log",
             "evidence_sha256": sha256_file(log),
@@ -385,6 +458,7 @@ def trial_supervisor(
                 f"restart_ms={restart_ms}",
                 f"active_version={active_version}",
                 f"active_code_sha256={versions['worker_code_sha256']}",
+                f"active_exe_sha256={versions['worker_exe_sha256']}",
             ]
         )
         + "\n",
@@ -400,6 +474,7 @@ def trial_supervisor(
             "restart_ms": restart_ms,
             "active_version": active_version,
             "active_code_sha256": versions["worker_code_sha256"],
+            "active_exe_sha256": versions["worker_exe_sha256"],
             "notes": f"Supervisor bragte {which} tilbage; målt af stage_b_one_click.",
             "evidence_path": f"validation/appliance-lifecycle-evidence/supervisor_{which}.log",
             "evidence_sha256": sha256_file(log),
@@ -499,7 +574,11 @@ def trial_good_update(observations: dict[str, Any], state: dict[str, Any]) -> No
             "ready": after_versions["backend_version"] == candidate["version"],
             "rollback_observed": "rolling back" in log.read_text(encoding="utf-8", errors="replace").lower(),
             "data_preserved": before_data["documents"] == after_data["documents"],
-            "schedules_preserved": before_data["schedules"] == after_data["schedules"],
+            "schedules_preserved": (
+                before_data["schedules"] == after_data["schedules"]
+                and bool(after_data["schedules_binding"])
+            ),
+            "schedules_binding": after_data["schedules_binding"],
             "notes": "Kørt og målt af stage_b_one_click; hele updater-outputtet er gemt.",
             "evidence_path": "validation/appliance-lifecycle-evidence/good_update.log",
             "evidence_sha256": sha256_file(log),
@@ -588,7 +667,11 @@ def trial_bad_update(observations: dict[str, Any], state: dict[str, Any]) -> Non
             "active_code_sha256": candidate["code_sha256"],
             "ready": after_versions["backend_version"] == candidate["version"],
             "data_preserved": after_data["documents"] is not None,
-            "schedules_preserved": after_data["schedules"] is not None,
+            "schedules_preserved": (
+                after_data["schedules"] is not None
+                and bool(after_data["schedules_binding"])
+            ),
+            "schedules_binding": after_data["schedules_binding"],
             "notes": "Afvist før swap" if rejected else "Fuld rollback gennemført",
             "evidence_path": "validation/appliance-lifecycle-evidence/bad_update.log",
             "evidence_sha256": sha256_file(log),
@@ -635,19 +718,30 @@ def preflight() -> dict[str, Any]:
     versions = live_versions()
     ok(f"Backend kører {versions['backend_version'] or '(nede)'}")
     ok(f"Worker kører {versions['worker_version'] or '(nede)'}")
-    # Without a token worker_fingerprint() and the schedule count both return
-    # empty, and the campaign validator then rejects the bundle on
-    # "worker_code_sha256 mismatch: expected ..., got ''" and
-    # "schedules_preserved is not true". Continuing here only buys a full
-    # physical run that cannot possibly verify, so stop while it is still cheap.
-    if not os.environ.get("MODELRIG_TOKEN", "").strip():
+    # Both token-backed readings sit behind experimental flags a normal
+    # appliance does not set: the worker fingerprint needs KALIV_AGENT3_ENABLED,
+    # the schedule count needs KALIV_SCHEDULER_API. The bundle therefore binds
+    # the running build to the installed worker exe and the schedule store on
+    # disk instead, which need neither. A token only adds the stronger readings
+    # on a rig that already exposes them -- it is not required, and its absence
+    # no longer lets an unmeasured value pass as an observation.
+    if os.environ.get("MODELRIG_TOKEN", "").strip():
+        ok("MODELRIG_TOKEN er sat; fingerprint og schedule-API bruges hvis de svarer.")
+    else:
+        note("MODELRIG_TOKEN er ikke sat; binder mod installeret exe og schedule-lager.")
+    exe = installed_worker_exe_sha256()
+    if not exe:
         raise StageBError(
-            "MODELRIG_TOKEN er ikke sat. Uden den kan worker-fingerprint og "
-            "schedule-tællingen ikke måles, og bundlen bliver ugyldig pr. "
-            "konstruktion. Sæt den i DENNE session og kør igen:\n"
-            '    $env:MODELRIG_TOKEN = "<token>"'
+            f"Kunne ikke læse {WORKER_ASSET} i {appliance_root() / 'worker'}. "
+            "Uden den kan den kørende worker ikke bindes til kandidaten."
         )
-    ok("MODELRIG_TOKEN er sat; fingerprint og schedule-tælling kan måles.")
+    published = released_worker_exe_sha256(candidate["version"])
+    if not published:
+        raise StageBError(
+            f"Kunne ikke hente {WORKER_ASSET}s checksum fra den publicerede "
+            f"v{candidate['version']}. Bundlen ville mangle sin worker-binding."
+        )
+    ok(f"Worker-binding klar (publiceret {published[:16]}…).")
     return candidate
 
 
@@ -661,6 +755,12 @@ def build_observations(candidate: dict[str, Any]) -> dict[str, Any]:
             pass
     observations = json.loads(EXAMPLE.read_text(encoding="utf-8"))
     observations["candidate"] = dict(candidate)
+    # What the published release says the worker exe should hash to. The trials
+    # compare the installed file against this, so the bundle binds the running
+    # build without needing the experimental agent3 route enabled on the rig.
+    observations["candidate"]["worker_exe_sha256"] = released_worker_exe_sha256(
+        candidate["version"]
+    )
     observations["host"] = {
         "hostname": socket.gethostname(),
         "windows_version": platform.platform(),

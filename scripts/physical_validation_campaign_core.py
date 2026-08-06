@@ -634,6 +634,74 @@ def _bounded_ms(errors: list[str], label: str, value: Any, maximum: float) -> No
         errors.append(f"{label} must be a number from 0 to {maximum:g}")
 
 
+_SCHEDULE_BINDINGS = ("api", "store_digest", "store_absent")
+
+
+def _schedules_binding(errors: list[str], label: str, trial: dict[str, Any]) -> None:
+    """Require that schedules_preserved rests on an actual observation.
+
+    The admin API needs KALIV_SCHEDULER_API=1, which a normal appliance does not
+    set. When it was unreachable the wizard compared None to None and reported
+    "preserved: true" -- a claim about schedules nobody had looked at. Naming the
+    binding makes an unmade measurement impossible to pass off as a survival.
+    """
+    binding = trial.get("schedules_binding")
+    if binding not in _SCHEDULE_BINDINGS:
+        errors.append(
+            f"{label}.schedules_binding must name how schedules were observed "
+            f"(one of {', '.join(_SCHEDULE_BINDINGS)}), got {binding!r}"
+        )
+
+
+def _worker_binding(
+    errors: list[str],
+    label: str,
+    trial: dict[str, Any],
+    code_key: str,
+    exe_key: str,
+    candidate: dict[str, Any],
+    expected_exe: Any,
+) -> None:
+    """Bind a trial to the worker that was actually running.
+
+    Two bindings are accepted, and at least one must hold:
+
+      <code_key>  the running worker's own code fingerprint, read from
+                  /experimental/agent3/status. Strongest, but that route only
+                  exists when KALIV_AGENT3_ENABLED=1, which a normal appliance
+                  does not set -- and the reboot trial needs the binding to
+                  survive a restart, so it would have to be made permanent.
+                  Requiring it forced a config change on the rig under test.
+
+      <exe_key>   SHA-256 of the installed modelrig-worker exe, checked against
+                  the same digest for the candidate's published release. This is
+                  the file the updater swapped, it is measurable with no token
+                  and no feature flag, and it does not depend on how the rig is
+                  configured.
+
+    Neither present is an error: a trial that binds the worker to nothing proves
+    nothing about which build survived the restart.
+    """
+    code = trial.get(code_key)
+    if isinstance(code, str) and code:
+        _expect_equal(errors, f"{label}.{code_key}", code, candidate["code_sha256"])
+        return
+    exe = trial.get(exe_key)
+    if _valid_digest(exe, 64):
+        if not _valid_digest(expected_exe, 64):
+            errors.append(
+                f"{label}.{exe_key} is set but candidate.worker_exe_sha256 is not a "
+                "64-character digest, so there is nothing to compare it against"
+            )
+            return
+        _expect_equal(errors, f"{label}.{exe_key}", exe, expected_exe)
+        return
+    errors.append(
+        f"{label} does not bind the running worker: set {code_key} (requires "
+        f"KALIV_AGENT3_ENABLED=1) or {exe_key} with candidate.worker_exe_sha256"
+    )
+
+
 def _validate_lifecycle(
     report: dict[str, Any],
     result: dict[str, Any],
@@ -664,6 +732,9 @@ def _validate_lifecycle(
         errors.append("lifecycle trials are missing")
         trials = {}
     root = _thresholds.get("root")
+    # The published worker exe's digest for this candidate, used by trials that
+    # cannot read the running worker's fingerprint without an experimental route.
+    expected_exe = _nested(report, "candidate", "worker_exe_sha256")
     artifacts: dict[str, Any] = {}
     if not isinstance(root, Path):
         errors.append("campaign root is unavailable for lifecycle artifacts")
@@ -689,7 +760,10 @@ def _validate_lifecycle(
         _bounded_ms(errors, "reboot.ready_ms", reboot.get("ready_ms"), 30 * 60 * 1000)
         _expect_equal(errors, "reboot.backend_version", reboot.get("backend_version"), candidate["version"])
         _expect_equal(errors, "reboot.worker_version", reboot.get("worker_version"), candidate["version"])
-        _expect_equal(errors, "reboot.worker_code_sha256", reboot.get("worker_code_sha256"), candidate["code_sha256"])
+        _worker_binding(
+            errors, "reboot", reboot,
+            "worker_code_sha256", "worker_exe_sha256", candidate, expected_exe,
+        )
         capture_artifact("reboot", reboot)
 
     for name in ("supervisor_backend", "supervisor_worker"):
@@ -702,7 +776,10 @@ def _validate_lifecycle(
         _bool(errors, f"{name}.ready", trial.get("ready"))
         _bounded_ms(errors, f"{name}.restart_ms", trial.get("restart_ms"), 10 * 60 * 1000)
         _expect_equal(errors, f"{name}.active_version", trial.get("active_version"), candidate["version"])
-        _expect_equal(errors, f"{name}.active_code_sha256", trial.get("active_code_sha256"), candidate["code_sha256"])
+        _worker_binding(
+            errors, name, trial,
+            "active_code_sha256", "active_exe_sha256", candidate, expected_exe,
+        )
         capture_artifact(name, trial)
 
     good = trials.get("good_update")
@@ -715,6 +792,7 @@ def _validate_lifecycle(
             errors.append("good_update.rollback_observed must be false")
         _bool(errors, "good_update.data_preserved", good.get("data_preserved"))
         _bool(errors, "good_update.schedules_preserved", good.get("schedules_preserved"))
+        _schedules_binding(errors, "good_update", good)
         _expect_equal(errors, "good_update.target_version", good.get("target_version"), candidate["version"])
         _expect_equal(errors, "good_update.target_git_sha", good.get("target_git_sha"), candidate["git_sha"])
         _expect_equal(errors, "good_update.target_code_sha256", good.get("target_code_sha256"), candidate["code_sha256"])
@@ -738,6 +816,7 @@ def _validate_lifecycle(
         _bool(errors, "bad_update.ready", bad.get("ready"))
         _bool(errors, "bad_update.data_preserved", bad.get("data_preserved"))
         _bool(errors, "bad_update.schedules_preserved", bad.get("schedules_preserved"))
+        _schedules_binding(errors, "bad_update", bad)
         _expect_equal(errors, "bad_update.active_version", bad.get("active_version"), candidate["version"])
         _expect_equal(errors, "bad_update.active_git_sha", bad.get("active_git_sha"), candidate["git_sha"])
         _expect_equal(errors, "bad_update.active_code_sha256", bad.get("active_code_sha256"), candidate["code_sha256"])

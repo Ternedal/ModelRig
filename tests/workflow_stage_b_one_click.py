@@ -83,12 +83,21 @@ check("def remote_release_identity" in source
       and '"attempted_git_sha": attempted_git_sha' in source,
       "bad_update names the release it actually attempted")
 
-# Without MODELRIG_TOKEN the fingerprint and schedule count come back empty and
-# the campaign rejects the bundle -- so the wizard must stop before the operator
-# spends a physical run that cannot verify.
-check("MODELRIG_TOKEN er ikke sat" in source
-      and "raise StageBError(\n            \"MODELRIG_TOKEN er ikke sat" in source,
-      "a missing MODELRIG_TOKEN stops preflight instead of degrading the bundle")
+# Both token-backed readings sit behind experimental flags a normal appliance
+# does not set, so the bundle must bind the running build to things that are
+# always measurable: the installed worker exe and the schedule store on disk.
+check("def installed_worker_exe_sha256" in source
+      and "def released_worker_exe_sha256" in source
+      and '"worker_exe_sha256"' in source
+      and '"active_exe_sha256"' in source,
+      "the running worker is bound to the installed exe, not an experimental route")
+check("KALIV_AGENT3_ENABLED" in source and "KALIV_SCHEDULER_API" in source,
+      "preflight records why the token-backed readings are optional")
+check("Kunne ikke hente" in source and "worker-binding" in source,
+      "preflight stops when the worker binding cannot be established")
+check('"schedules_binding": after_data["schedules_binding"]' in source
+      and "store_digest" in source,
+      "schedules name the binding that produced them")
 
 check("evidence_sha256" in source and "sha256_file(log)" in source,
       "each trial stamps its own log digest")
