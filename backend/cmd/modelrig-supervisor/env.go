@@ -57,7 +57,20 @@ func loadEnvFile(path string) ([]string, error) {
 	line := 0
 	for sc.Scan() {
 		line++
-		t := strings.TrimSpace(sc.Text())
+		t := sc.Text()
+		if line == 1 {
+			// Strip a UTF-8 BOM before anything else parses this line.
+			//
+			// This supervisor only runs on Windows, and the obvious way to
+			// write the file there -- PowerShell's Set-Content -Encoding utf8
+			// -- prepends one. The BOM then becomes part of the FIRST key: the
+			// file parses, the supervisor logs "loaded 2 env var(s)", and the
+			// child never sees the variable, because it is named
+			// "\ufeffKALIV_AGENT3_ENABLED". Every visible signal says the
+			// configuration was applied. It cost an hour on the rig.
+			t = strings.TrimPrefix(t, "\ufeff")
+		}
+		t = strings.TrimSpace(t)
 		if t == "" || strings.HasPrefix(t, "#") {
 			continue
 		}

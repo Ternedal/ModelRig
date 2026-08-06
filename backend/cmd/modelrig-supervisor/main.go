@@ -314,7 +314,7 @@ func main() {
 			return
 		case <-ticker.C:
 			fails = superviseOnce(children, fails, *maxFails, nil)
-			res.run(time.Now()) // off the watchdog path; can't block health/restart
+			res.run(time.Now())         // off the watchdog path; can't block health/restart
 			_ = heartbeat.Write(hbPath) // liveness signal the updater checks after an update
 		}
 	}

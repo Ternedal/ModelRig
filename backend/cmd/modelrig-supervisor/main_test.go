@@ -14,7 +14,7 @@ type fakeChild struct {
 	restarts  int
 }
 
-func (f *fakeChild) name() string { return f.nm }
+func (f *fakeChild) name() string  { return f.nm }
 func (f *fakeChild) running() bool { return f.run }
 func (f *fakeChild) healthy() bool { return f.hlth }
 func (f *fakeChild) restart() error {
