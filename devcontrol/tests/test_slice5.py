@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -12,6 +13,7 @@ import unittest
 import urllib.request
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from kaliv_dev_control.catalog import (
@@ -157,20 +159,25 @@ class MutateSpecIsolation:
 
 
 class ReassignCatalog(ModelRigCommandCatalog):
-    def __init__(
-        self,
-        specs: tuple[ProjectCommandSpec, ...],
-        replacement: ModelRigCommandCatalog,
-    ) -> None:
+    def __init__(self, specs, replacement: ModelRigCommandCatalog) -> None:
         super().__init__(specs)
         self.replacement = replacement
-        self.materializer: CatalogMaterializer | None = None
+        self.materializer = None
 
     def resolve(self, command_id: str) -> ProjectCommandSpec:
         spec = super().resolve(command_id)
         if self.materializer is not None:
             self.materializer.catalog = self.replacement
         return spec
+
+
+class SwapExecutableVerifierIsolation:
+    def __init__(self) -> None:
+        self.materializer = None
+
+    def verify(self, proof):
+        del proof
+        self.materializer.executable_verifier = AcceptExecutable()
 
 
 class AcceptExecutable:
@@ -180,28 +187,6 @@ class AcceptExecutable:
     def verify(self, binding: ToolBinding) -> str:
         self.seen.append(binding.tool_id)
         return binding.executable
-
-
-class FixedExecutable:
-    def __init__(self, path: str) -> None:
-        self.path = path
-        self.seen: list[str] = []
-
-    def verify(self, binding: ToolBinding) -> str:
-        self.seen.append(binding.tool_id)
-        return self.path
-
-
-class ReplaceExecutableVerifierIsolation:
-    def __init__(self, replacement: FixedExecutable) -> None:
-        self.replacement = replacement
-        self.materializer: CatalogMaterializer | None = None
-
-    def verify(self, proof: IsolationAttestation) -> None:
-        del proof
-        if self.materializer is None:
-            raise AssertionError("materializer was not attached")
-        self.materializer.executable_verifier = self.replacement
 
 
 class FakeTransport:
@@ -246,18 +231,11 @@ class CatalogTests(unittest.TestCase):
 
     def test_catalog_environment_rejects_authority_variables(self):
         for key in (
-            "LD_PRELOAD",
-            "LD_AUDIT",
-            "LD_LIBRARY_PATH",
-            "DYLD_INSERT_LIBRARIES",
-            "PYTHONPATH",
-            "PYTHONHOME",
-            "GIT_CONFIG_GLOBAL",
+            "LD_PRELOAD", "LD_AUDIT", "DYLD_INSERT_LIBRARIES",
+            "PYTHONPATH", "PYTHONHOME", "GIT_CONFIG_GLOBAL",
         ):
             with self.subTest(key=key), self.assertRaisesRegex(CatalogError, "isolation"):
-                ProjectCommandSpec(
-                    "modelrig.demo", "python", ("-V",), ".", 10, {key: "x"}
-                )
+                ProjectCommandSpec("modelrig.demo", "python", ("-V",), ".", 10, {key: "x"})
 
     def test_default_isolation_is_fail_closed_and_attestation_is_exact(self):
         t, tc = task(), toolchain()
@@ -266,9 +244,7 @@ class CatalogTests(unittest.TestCase):
             CatalogMaterializer(
                 modelrig_command_catalog(), executable_verifier=AcceptExecutable()
             ).materialize(t, tc, proof)
-        tampered = IsolationAttestation.from_mapping(
-            {**proof.to_dict(), "base_sha": "d" * 40}
-        )
+        tampered = IsolationAttestation.from_mapping({**proof.to_dict(), "base_sha": "d" * 40})
         with self.assertRaisesRegex(CatalogError, "exact authority"):
             CatalogMaterializer(
                 modelrig_command_catalog(),
@@ -277,24 +253,18 @@ class CatalogTests(unittest.TestCase):
             ).materialize(t, tc, tampered)
 
     def test_materialization_contains_only_task_grants(self):
-        t = task("modelrig.devcontrol.tests", "modelrig.version.check")
-        tc = toolchain()
-        verifier = AcceptExecutable()
+        t, tc, verifier = task("modelrig.devcontrol.tests", "modelrig.version.check"), toolchain(), AcceptExecutable()
         registry = CatalogMaterializer(
             modelrig_command_catalog(),
             isolation_verifier=AcceptIsolation(),
             executable_verifier=verifier,
         ).materialize(t, tc, attestation(t, tc))
-        self.assertEqual(
-            registry.resolve(t, "modelrig.devcontrol.tests").argv[0],
-            "/trusted/python3",
-        )
+        self.assertEqual(registry.resolve(t, "modelrig.devcontrol.tests").argv[0], "/trusted/python3")
         self.assertEqual(verifier.seen, ["python"])
         self.assertIs(getattr(registry, "_catalog_executable_verifier"), verifier)
 
     def test_materialized_registry_rejects_unattested_task_and_retargeting(self):
-        t = task("modelrig.devcontrol.tests")
-        tc = toolchain()
+        t, tc = task("modelrig.devcontrol.tests"), toolchain()
         registry = CatalogMaterializer(
             modelrig_command_catalog(),
             isolation_verifier=AcceptIsolation(),
@@ -304,13 +274,9 @@ class CatalogTests(unittest.TestCase):
             registry.resolve(t, "modelrig.devcontrol.tests").command_id,
             "modelrig.devcontrol.tests",
         )
-        other = DevelopmentTask.from_mapping(
-            {
-                **t.to_dict(),
-                "task_id": "OTHER",
-                "base_sha": "b" * 40,
-            }
-        )
+        other = DevelopmentTask.from_mapping({
+            **t.to_dict(), "task_id": "OTHER", "base_sha": "b" * 40,
+        })
         with self.assertRaisesRegex(CommandPolicyError, "immutable"):
             registry._bound_task_identity = (
                 other.task_id,
@@ -339,20 +305,14 @@ class CatalogTests(unittest.TestCase):
             registry.resolve(original, "modelrig.devcontrol.tests")
 
     def test_materialization_uses_attested_catalog_snapshot(self):
-        t = task("modelrig.devcontrol.tests")
-        tc = toolchain()
+        t, tc = task("modelrig.devcontrol.tests"), toolchain()
         source = modelrig_command_catalog()
-        replacement = ModelRigCommandCatalog(
-            (
-                ProjectCommandSpec(
-                    "modelrig.devcontrol.tests",
-                    "python",
-                    ("-c", "print('replacement')"),
-                    ".",
-                    10,
-                ),
-            )
-        )
+        replacement = ModelRigCommandCatalog((
+            ProjectCommandSpec(
+                "modelrig.devcontrol.tests", "python",
+                ("-c", "print('replacement')"), ".", 10,
+            ),
+        ))
         catalog = ReassignCatalog(
             tuple(source.resolve(key) for key in source.command_ids),
             replacement,
@@ -365,9 +325,7 @@ class CatalogTests(unittest.TestCase):
         catalog.materializer = materializer
         with self.assertRaisesRegex(CatalogError, "exact authority"):
             materializer.materialize(
-                t,
-                tc,
-                attestation(t, tc, catalog=replacement),
+                t, tc, attestation(t, tc, catalog=replacement)
             )
 
     def test_materialization_deep_copies_catalog_specs(self):
@@ -384,19 +342,28 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("../tests", template.argv)
         self.assertNotIn("unattested-spec", " ".join(template.argv))
 
+    def test_materialization_uses_original_executable_verifier_snapshot(self):
+        t, tc = task("modelrig.devcontrol.tests"), toolchain()
+        original = AcceptExecutable()
+        isolation = SwapExecutableVerifierIsolation()
+        materializer = CatalogMaterializer(
+            modelrig_command_catalog(),
+            isolation_verifier=isolation,
+            executable_verifier=original,
+        )
+        isolation.materializer = materializer
+        registry = materializer.materialize(t, tc, attestation(t, tc))
+        self.assertEqual(original.seen, ["python"])
+        self.assertIs(getattr(registry, "_catalog_executable_verifier"), original)
+
     def test_materialization_uses_attested_toolchain_snapshot(self):
-        t = task("modelrig.devcontrol.tests")
-        tc = toolchain()
-        verifier = AcceptExecutable()
+        t, tc, verifier = task("modelrig.devcontrol.tests"), toolchain(), AcceptExecutable()
         registry = CatalogMaterializer(
             modelrig_command_catalog(),
             isolation_verifier=MutateToolchainIsolation(tc),
             executable_verifier=verifier,
         ).materialize(t, tc, attestation(t, tc))
-        self.assertEqual(
-            registry.resolve(t, "modelrig.devcontrol.tests").argv[0],
-            "/trusted/python3",
-        )
+        self.assertEqual(registry.resolve(t, "modelrig.devcontrol.tests").argv[0], "/trusted/python3")
         self.assertEqual(verifier.seen, ["python"])
 
     def test_materialization_deep_copies_tool_bindings(self):
@@ -415,27 +382,6 @@ class CatalogTests(unittest.TestCase):
         )
         self.assertEqual(verifier.seen, ["python"])
 
-    def test_materialization_freezes_executable_verifier_before_callback(self):
-        t = task("modelrig.devcontrol.tests")
-        tc = toolchain()
-        original = AcceptExecutable()
-        replacement = FixedExecutable("/untrusted/python3")
-        isolation = ReplaceExecutableVerifierIsolation(replacement)
-        materializer = CatalogMaterializer(
-            modelrig_command_catalog(),
-            isolation_verifier=isolation,
-            executable_verifier=original,
-        )
-        isolation.materializer = materializer
-        registry = materializer.materialize(t, tc, attestation(t, tc))
-        self.assertEqual(
-            registry.resolve(t, "modelrig.devcontrol.tests").argv[0],
-            "/trusted/python3",
-        )
-        self.assertEqual(original.seen, ["python"])
-        self.assertEqual(replacement.seen, [])
-        self.assertIs(getattr(registry, "_catalog_executable_verifier"), original)
-
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux-only pinning")
     def test_sealed_object_survives_path_replacement_and_verifier_close(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -444,24 +390,13 @@ class CatalogTests(unittest.TestCase):
             source.chmod(0o500)
             digest = hashlib.sha256(source.read_bytes()).hexdigest()
             verifier = LocalExecutableHashVerifier()
-            pinned = verifier.verify(
-                ToolBinding("python", str(source.resolve()), digest)
-            )
+            pinned = verifier.verify(ToolBinding("python", str(source.resolve()), digest))
             replacement = source.with_name("replacement")
             replacement.write_bytes(b"not the verified executable")
             replacement.chmod(0o500)
             os.replace(replacement, source)
-            result = subprocess.run(
-                [pinned, "-c", "print('pinned-object')"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(
-                (result.returncode, result.stdout.strip()),
-                (0, "pinned-object"),
-                result.stderr,
-            )
+            result = subprocess.run([pinned, "-c", "print('pinned-object')"], text=True, capture_output=True)
+            self.assertEqual((result.returncode, result.stdout.strip()), (0, "pinned-object"), result.stderr)
             with self.assertRaises(OSError):
                 Path(pinned).write_bytes(b"tampered")
             descriptor = int(Path(pinned).name)
@@ -469,23 +404,12 @@ class CatalogTests(unittest.TestCase):
             unrelated = os.open("/bin/echo", os.O_RDONLY)
             try:
                 self.assertNotEqual(unrelated, descriptor)
-                result = subprocess.run(
-                    [pinned, "-c", "print('still-pinned')"],
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                )
-                self.assertEqual(
-                    (result.returncode, result.stdout.strip()),
-                    (0, "still-pinned"),
-                    result.stderr,
-                )
+                result = subprocess.run([pinned, "-c", "print('still-pinned')"], text=True, capture_output=True)
+                self.assertEqual((result.returncode, result.stdout.strip()), (0, "still-pinned"), result.stderr)
             finally:
                 os.close(unrelated)
             with self.assertRaisesRegex(CatalogError, "closed"):
-                verifier.verify(
-                    ToolBinding("python", str(source.resolve()), digest)
-                )
+                verifier.verify(ToolBinding("python", str(source.resolve()), digest))
 
     @unittest.skipIf(os.name == "nt", "Windows verifier fails closed")
     def test_link_and_hash_mismatch_are_rejected(self):
@@ -497,33 +421,22 @@ class CatalogTests(unittest.TestCase):
             alias.symlink_to(path)
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
             with self.assertRaisesRegex(CatalogError, "linked|safely"):
-                LocalExecutableHashVerifier().verify(
-                    ToolBinding("python", str(alias), digest)
-                )
+                LocalExecutableHashVerifier().verify(ToolBinding("python", str(alias), digest))
             with self.assertRaisesRegex(CatalogError, "hash mismatch"):
-                LocalExecutableHashVerifier().verify(
-                    ToolBinding("python", str(path), "0" * 64)
-                )
+                LocalExecutableHashVerifier().verify(ToolBinding("python", str(path), "0" * 64))
 
     def test_attestation_reload_is_strict(self):
         proof = attestation(task(), toolchain())
-        self.assertEqual(
-            IsolationAttestation.from_mapping(proof.to_dict()).canonical_json(),
-            proof.canonical_json(),
-        )
+        self.assertEqual(IsolationAttestation.from_mapping(proof.to_dict()).canonical_json(), proof.canonical_json())
         with self.assertRaises(CatalogError):
-            IsolationAttestation.from_mapping(
-                {**proof.to_dict(), "task_id": "bad"}
-            )
+            IsolationAttestation.from_mapping({**proof.to_dict(), "task_id": "bad"})
 
 
 class GitHubReadTests(unittest.TestCase):
     def test_invalid_direct_task_sha_fails_before_network(self):
         transport = FakeTransport()
         with self.assertRaisesRegex(GitHubReadError, "identity"):
-            GitHubReadAdapter(
-                replace(task(), base_sha="main"), transport=transport
-            )
+            GitHubReadAdapter(replace(task(), base_sha="main"), transport=transport)
         self.assertEqual(transport.calls, [])
 
     def test_validated_adapter_authority_cannot_be_retargeted(self):
@@ -544,31 +457,27 @@ class GitHubReadTests(unittest.TestCase):
                 setattr(adapter, name, value)
         receipt = adapter.verify_base_commit()
         self.assertEqual(receipt.base_sha, BASE_SHA)
-        self.assertIn("/repos/Ternedal/ModelRig/commits/" + BASE_SHA, transport.calls[0][0])
-        self.assertEqual(transport.calls[0][1]["Authorization"], "Bearer secret-token")
+        self.assertIn(
+            "/repos/Ternedal/ModelRig/commits/" + BASE_SHA,
+            transport.calls[0][0],
+        )
+        self.assertEqual(
+            transport.calls[0][1]["Authorization"],
+            "Bearer secret-token",
+        )
 
     def test_verify_base_commit_is_fixed_exact_sha_get(self):
         transport = FakeTransport(response({"sha": BASE_SHA}))
         receipt = GitHubReadAdapter(task(), transport=transport).verify_base_commit()
         url, headers, timeout, maximum = transport.calls[0]
-        self.assertEqual(
-            url,
-            f"https://api.github.com/repos/Ternedal/ModelRig/commits/{BASE_SHA}",
-        )
+        self.assertEqual(url, f"https://api.github.com/repos/Ternedal/ModelRig/commits/{BASE_SHA}")
         self.assertNotIn("Authorization", headers)
-        self.assertEqual(
-            (timeout, maximum, receipt.subject_sha),
-            (30, 1_000_000, BASE_SHA),
-        )
+        self.assertEqual((timeout, maximum, receipt.subject_sha), (30, 1_000_000, BASE_SHA))
 
     def test_scoped_blob_verified_read_and_token_free_receipt(self):
         data = b"print('ok')\n"
-        transport = FakeTransport(
-            response(file_payload("devcontrol/src/demo.py", data))
-        )
-        observed, receipt = GitHubReadAdapter(
-            task(), transport=transport, token="secret-token"
-        ).read_bytes("devcontrol/src/demo.py")
+        transport = FakeTransport(response(file_payload("devcontrol/src/demo.py", data)))
+        observed, receipt = GitHubReadAdapter(task(), transport=transport, token="secret-token").read_bytes("devcontrol/src/demo.py")
         self.assertEqual(observed, data)
         self.assertIn("ref=" + BASE_SHA, transport.calls[0][0])
         self.assertNotIn("secret-token", receipt.canonical_json())
@@ -577,27 +486,11 @@ class GitHubReadTests(unittest.TestCase):
     def test_blob_sha_and_size_mismatches_are_rejected(self):
         with self.assertRaisesRegex(GitHubReadError, "blob SHA"):
             GitHubReadAdapter(
-                task(),
-                transport=FakeTransport(
-                    response(
-                        file_payload(
-                            "devcontrol/readme.txt",
-                            b"hello",
-                            blob_sha="b" * 40,
-                        )
-                    )
-                ),
+                task(), transport=FakeTransport(response(file_payload("devcontrol/readme.txt", b"hello", blob_sha="b" * 40)))
             ).read_bytes("devcontrol/readme.txt")
         with self.assertRaisesRegex(GitHubReadError, "bound|size"):
             GitHubReadAdapter(
-                task(),
-                transport=FakeTransport(
-                    response(
-                        file_payload(
-                            "devcontrol/readme.txt", b"hello", size=99
-                        )
-                    )
-                ),
+                task(), transport=FakeTransport(response(file_payload("devcontrol/readme.txt", b"hello", size=99)))
             ).read_bytes("devcontrol/readme.txt", max_bytes=5)
 
     def test_protected_and_git_paths_fail_before_network(self):
@@ -609,80 +502,72 @@ class GitHubReadTests(unittest.TestCase):
         self.assertEqual(transport.calls, [])
 
     def test_redirect_non_json_and_commit_mismatch_are_rejected(self):
-        redirect = response(
-            {"sha": BASE_SHA},
-            headers={
-                "Content-Type": "application/json",
-                "Location": "https://example.org",
-            },
-        )
+        redirect = response({"sha": BASE_SHA}, headers={"Content-Type": "application/json", "Location": "https://example.org"})
         with self.assertRaisesRegex(GitHubReadError, "redirect"):
-            GitHubReadAdapter(
-                task(), transport=FakeTransport(redirect)
-            ).verify_base_commit()
+            GitHubReadAdapter(task(), transport=FakeTransport(redirect)).verify_base_commit()
         with self.assertRaisesRegex(GitHubReadError, "not JSON"):
-            GitHubReadAdapter(
-                task(),
-                transport=FakeTransport(
-                    HttpResponse(
-                        200,
-                        {"Content-Type": "text/html"},
-                        b"html",
-                    )
-                ),
-            ).verify_base_commit()
+            GitHubReadAdapter(task(), transport=FakeTransport(HttpResponse(200, {"Content-Type": "text/html"}, b"html"))).verify_base_commit()
         with self.assertRaisesRegex(GitHubReadError, "does not match"):
-            GitHubReadAdapter(
-                task(),
-                transport=FakeTransport(response({"sha": "d" * 40})),
-            ).verify_base_commit()
+            GitHubReadAdapter(task(), transport=FakeTransport(response({"sha": "d" * 40}))).verify_base_commit()
 
     def test_receipt_reload_types_and_task_binding_are_strict(self):
-        receipt = GitHubReadAdapter(
-            task(), transport=FakeTransport(response({"sha": BASE_SHA}))
-        ).verify_base_commit()
-        self.assertEqual(
-            GitHubReadReceipt.from_mapping(receipt.to_dict()).canonical_json(),
-            receipt.canonical_json(),
-        )
-        for change in (
-            {"task_id": 1},
-            {"repository": 1},
-            {"status": 201},
-            {"status": 200.0},
-        ):
+        receipt = GitHubReadAdapter(task(), transport=FakeTransport(response({"sha": BASE_SHA}))).verify_base_commit()
+        self.assertEqual(GitHubReadReceipt.from_mapping(receipt.to_dict()).canonical_json(), receipt.canonical_json())
+        for change in ({"task_id": 1}, {"repository": 1}, {"status": 201}, {"status": 200.0}):
             with self.subTest(change=change), self.assertRaises(GitHubReadError):
-                GitHubReadReceipt.from_mapping(
-                    {**receipt.to_dict(), **change}
-                )
+                GitHubReadReceipt.from_mapping({**receipt.to_dict(), **change})
         with self.assertRaisesRegex(GitHubReadError, "exact task"):
-            receipt.verify_task(
-                DevelopmentTask.from_mapping(
-                    {**task().to_dict(), "task_id": "OTHER"}
-                )
-            )
+            receipt.verify_task(DevelopmentTask.from_mapping({**task().to_dict(), "task_id": "OTHER"}))
 
-    def test_transport_disables_proxy_and_rejects_host_escape(self):
-        with patch(
+    def test_transport_ignores_environment_network_and_tls_authority(self):
+        compiled = SimpleNamespace(
+            openssl_cafile="/compiled/ca.pem",
+            openssl_capath="/compiled/certs",
+            cafile="/attacker/ca.pem",
+            capath="/attacker/certs",
+        )
+        context = unittest.mock.MagicMock()
+        with patch.dict(
+            os.environ,
+            {
+                "HTTPS_PROXY": "http://attacker.invalid:8080",
+                "SSL_CERT_FILE": "/attacker/ca.pem",
+                "SSL_CERT_DIR": "/attacker/certs",
+            },
+        ), patch(
+            "kaliv_dev_control.github_read.ssl.SSLContext",
+            return_value=context,
+        ), patch(
+            "kaliv_dev_control.github_read.ssl.get_default_verify_paths",
+            return_value=compiled,
+        ), patch(
             "kaliv_dev_control.github_read.urllib.request.build_opener"
         ) as builder:
             builder.return_value = object()
             UrllibReadOnlyTransport()
+
+        context.load_verify_locations.assert_any_call(cafile="/compiled/ca.pem")
+        context.load_verify_locations.assert_any_call(capath="/compiled/certs")
+        loaded = repr(context.load_verify_locations.call_args_list)
+        self.assertNotIn("/attacker/", loaded)
         handlers = builder.call_args.args
         proxy = next(
-            item
-            for item in handlers
+            item for item in handlers
             if isinstance(item, urllib.request.ProxyHandler)
         )
+        https = next(
+            item for item in handlers
+            if isinstance(item, urllib.request.HTTPSHandler)
+        )
         self.assertEqual(proxy.proxies, {})
+        self.assertIs(https._context, context)
+
         transport = UrllibReadOnlyTransport()
         with patch.object(transport._opener, "open") as opener:
             with self.assertRaisesRegex(GitHubReadError, "fixed GitHub"):
                 transport.get(
                     "https://example.org/repos/Ternedal/ModelRig",
-                    headers={},
-                    timeout_seconds=1,
-                    max_bytes=100,
+                    headers={}, timeout_seconds=1, max_bytes=100,
                 )
             opener.assert_not_called()
 
@@ -695,10 +580,7 @@ class SchemaTests(unittest.TestCase):
             "development-isolation-attestation-v1.schema.json",
         ):
             schema = json.loads((root / name).read_text(encoding="utf-8"))
-            self.assertEqual(
-                schema["properties"]["task_id"]["pattern"],
-                "^[A-Z][A-Z0-9_-]{2,63}$",
-            )
+            self.assertEqual(schema["properties"]["task_id"]["pattern"], "^[A-Z][A-Z0-9_-]{2,63}$")
 
 
 if __name__ == "__main__":

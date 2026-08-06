@@ -6,6 +6,8 @@ import fnmatch
 import hashlib
 import json
 import re
+import ssl
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -22,6 +24,7 @@ _TASK_ID = re.compile(r"^[A-Z][A-Z0-9_-]{2,63}$")
 _API_HOST = "api.github.com"
 _API_VERSION = "2022-11-28"
 _MAX_RESPONSE_BYTES = 4_000_000
+_SERVER_AUTH_OID = "1.3.6.1.5.5.7.3.1"
 
 
 class GitHubReadError(RuntimeError):
@@ -39,7 +42,10 @@ def _valid_repository(value: Any) -> bool:
     ):
         return False
     parts = value.split("/")
-    return len(parts) == 2 and all(part and part.strip() == part for part in parts)
+    return len(parts) == 2 and all(
+        part and part.strip() == part and part not in {".", ".."}
+        for part in parts
+    )
 
 
 def _normalize_path(value: Any, *, name: str) -> str:
@@ -82,7 +88,9 @@ class HttpResponse:
                 or len(key.encode("utf-8")) > 256
                 or len(value.encode("utf-8")) > 8192
             ):
-                raise GitHubReadError("HTTP headers must be bounded canonical strings")
+                raise GitHubReadError(
+                    "HTTP headers must be bounded canonical strings"
+                )
             clean[key.lower()] = value
         object.__setattr__(self, "headers", MappingProxyType(clean))
         if not isinstance(self.body, bytes):
@@ -106,10 +114,68 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def _system_tls_context() -> ssl.SSLContext:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.check_hostname = True
+    loaded = False
+
+    if sys.platform == "win32":
+        enum_certificates = getattr(ssl, "enum_certificates", None)
+        if enum_certificates is None:
+            raise GitHubReadError("system TLS trust roots are unavailable")
+        for store_name in ("ROOT", "CA"):
+            try:
+                certificates = enum_certificates(store_name)
+            except (OSError, ssl.SSLError):
+                continue
+            for certificate, encoding, trust in certificates:
+                if encoding != "x509_asn":
+                    continue
+                trusted = trust is True or (
+                    isinstance(trust, (set, frozenset))
+                    and _SERVER_AUTH_OID in trust
+                )
+                if not trusted:
+                    continue
+                try:
+                    context.load_verify_locations(
+                        cadata=ssl.DER_cert_to_PEM_cert(certificate)
+                    )
+                except (ValueError, ssl.SSLError):
+                    continue
+                loaded = True
+    else:
+        paths = ssl.get_default_verify_paths()
+        locations = (
+            {"cafile": paths.openssl_cafile}
+            if paths.openssl_cafile
+            else None,
+            {"capath": paths.openssl_capath}
+            if paths.openssl_capath
+            else None,
+        )
+        for location in locations:
+            if location is None:
+                continue
+            try:
+                context.load_verify_locations(**location)
+            except (OSError, ssl.SSLError):
+                continue
+            loaded = True
+
+    if not loaded:
+        raise GitHubReadError("system TLS trust roots are unavailable")
+    return context
+
+
 class UrllibReadOnlyTransport:
     def __init__(self) -> None:
+        context = _system_tls_context()
         self._opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({}), _NoRedirect()
+            urllib.request.ProxyHandler({}),
+            urllib.request.HTTPSHandler(context=context),
+            _NoRedirect(),
         )
 
     def get(
@@ -138,7 +204,9 @@ class UrllibReadOnlyTransport:
             or parsed.password is not None
             or parsed.fragment
         ):
-            raise GitHubReadError("transport URL escaped the fixed GitHub API host")
+            raise GitHubReadError(
+                "transport URL escaped the fixed GitHub API host"
+            )
         if not isinstance(headers, Mapping):
             raise GitHubReadError("HTTP headers must be a mapping")
         request_headers: dict[str, str] = {}
@@ -152,7 +220,9 @@ class UrllibReadOnlyTransport:
             ):
                 raise GitHubReadError("HTTP request headers are invalid")
             request_headers[key] = value
-        request = urllib.request.Request(url, headers=request_headers, method="GET")
+        request = urllib.request.Request(
+            url, headers=request_headers, method="GET"
+        )
         try:
             response = self._opener.open(request, timeout=timeout_seconds)
         except urllib.error.HTTPError as exc:
@@ -165,12 +235,18 @@ class UrllibReadOnlyTransport:
                 try:
                     length = int(declared, 10)
                 except (TypeError, ValueError) as exc:
-                    raise GitHubReadError("GitHub Content-Length is invalid") from exc
+                    raise GitHubReadError(
+                        "GitHub Content-Length is invalid"
+                    ) from exc
                 if length < 0 or length > max_bytes:
-                    raise GitHubReadError("GitHub response exceeded the read budget")
+                    raise GitHubReadError(
+                        "GitHub response exceeded the read budget"
+                    )
             body = response.read(max_bytes + 1)
             if len(body) > max_bytes:
-                raise GitHubReadError("GitHub response exceeded the read budget")
+                raise GitHubReadError(
+                    "GitHub response exceeded the read budget"
+                )
             return HttpResponse(
                 status=int(response.status),
                 headers=dict(response.headers.items()),
@@ -220,7 +296,9 @@ class GitHubReadReceipt:
             raise GitHubReadError("GitHub receipt operation is unsupported")
         if self.operation == "verify_base_commit":
             if self.path != "" or self.subject_sha != self.base_sha:
-                raise GitHubReadError("commit receipt is not bound to the base SHA")
+                raise GitHubReadError(
+                    "commit receipt is not bound to the base SHA"
+                )
         elif _normalize_path(self.path, name="receipt.path") != self.path:
             raise GitHubReadError("GitHub receipt path is not canonical")
         if (
@@ -231,17 +309,21 @@ class GitHubReadReceipt:
             or not isinstance(self.response_bytes, int)
             or not 0 <= self.response_bytes <= _MAX_RESPONSE_BYTES
         ):
-            raise GitHubReadError("GitHub receipt response metadata is invalid")
+            raise GitHubReadError(
+                "GitHub receipt response metadata is invalid"
+            )
         if (
             not isinstance(self.response_sha256, str)
             or not isinstance(self.etag_sha256, str)
             or _HEX64.fullmatch(self.response_sha256) is None
             or _HEX64.fullmatch(self.etag_sha256) is None
         ):
-            raise GitHubReadError("GitHub receipt response hash is invalid")
+            raise GitHubReadError(
+                "GitHub receipt response hash is invalid"
+            )
 
     @classmethod
-    def from_mapping(cls, value: Any) -> "GitHubReadReceipt":
+    def from_mapping(cls, value: Any) -> GitHubReadReceipt:
         fields = {
             "schema",
             "task_id",
@@ -261,7 +343,9 @@ class GitHubReadReceipt:
         try:
             return cls(**dict(value))
         except TypeError as exc:
-            raise GitHubReadError("GitHub receipt fields are invalid") from exc
+            raise GitHubReadError(
+                "GitHub receipt fields are invalid"
+            ) from exc
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -289,7 +373,9 @@ class GitHubReadReceipt:
 
     def verify_task(self, task: DevelopmentTask) -> None:
         if not isinstance(task, DevelopmentTask):
-            raise GitHubReadError("receipt verification requires a development task")
+            raise GitHubReadError(
+                "receipt verification requires a development task"
+            )
         expected = {
             "task_id": task.task_id,
             "task_sha256": hashlib.sha256(
@@ -305,7 +391,9 @@ class GitHubReadReceipt:
             "base_sha": self.base_sha,
         }
         if actual != expected:
-            raise GitHubReadError("GitHub receipt is not bound to this exact task")
+            raise GitHubReadError(
+                "GitHub receipt is not bound to this exact task"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -332,7 +420,9 @@ class GitHubReadAdapter:
 
     def __setattr__(self, name: str, value: Any) -> None:
         if getattr(self, "_sealed", False):
-            raise GitHubReadError("GitHub read adapter authority is immutable")
+            raise GitHubReadError(
+                "GitHub read adapter authority is immutable"
+            )
         object.__setattr__(self, name, value)
 
     @property
@@ -348,7 +438,9 @@ class GitHubReadAdapter:
         timeout_seconds: int = 30,
     ) -> None:
         if not isinstance(task, DevelopmentTask):
-            raise GitHubReadError("GitHub adapter requires a development task")
+            raise GitHubReadError(
+                "GitHub adapter requires a development task"
+            )
         if (
             isinstance(timeout_seconds, bool)
             or not isinstance(timeout_seconds, int)
@@ -411,9 +503,11 @@ class GitHubReadAdapter:
         if path == ".git" or path.startswith(".git/"):
             return False
         return any(
-            self._matches(path, item) for item in self._snapshot.allowed_paths
+            self._matches(path, item)
+            for item in self._snapshot.allowed_paths
         ) and not any(
-            self._matches(path, item) for item in self._snapshot.protected_paths
+            self._matches(path, item)
+            for item in self._snapshot.protected_paths
         )
 
     def _headers(self) -> Mapping[str, str]:
@@ -450,10 +544,11 @@ class GitHubReadAdapter:
                 or not value
                 for key, value in query.items()
             ):
-                raise GitHubReadError("internal GitHub query is invalid")
+                raise GitHubReadError(
+                    "internal GitHub query is invalid"
+                )
             url += "?" + urllib.parse.urlencode(
-                query,
-                quote_via=urllib.parse.quote,
+                query, quote_via=urllib.parse.quote
             )
         parsed = urllib.parse.urlsplit(url)
         if (
@@ -465,8 +560,12 @@ class GitHubReadAdapter:
             or parsed.fragment
             or not parsed.path.startswith(self._repository_path + "/")
         ):
-            raise GitHubReadError("GitHub endpoint escaped the fixed API authority")
-        maximum = min(self._snapshot.max_output_bytes, _MAX_RESPONSE_BYTES)
+            raise GitHubReadError(
+                "GitHub endpoint escaped the fixed API authority"
+            )
+        maximum = min(
+            self._snapshot.max_output_bytes, _MAX_RESPONSE_BYTES
+        )
         response = self.transport.get(
             url,
             headers=self._headers(),
@@ -474,7 +573,9 @@ class GitHubReadAdapter:
             max_bytes=maximum,
         )
         if not isinstance(response, HttpResponse):
-            raise GitHubReadError("GitHub transport returned an invalid response")
+            raise GitHubReadError(
+                "GitHub transport returned an invalid response"
+            )
         if "location" in response.headers:
             raise GitHubReadError("GitHub redirects are not accepted")
         if response.status != 200:
@@ -493,11 +594,15 @@ class GitHubReadAdapter:
         }:
             raise GitHubReadError("GitHub response is not JSON")
         if len(response.body) > maximum:
-            raise GitHubReadError("GitHub response exceeded the task budget")
+            raise GitHubReadError(
+                "GitHub response exceeded the task budget"
+            )
         try:
             payload = json.loads(response.body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise GitHubReadError("GitHub response JSON is invalid") from exc
+            raise GitHubReadError(
+                "GitHub response JSON is invalid"
+            ) from exc
         if not isinstance(payload, Mapping):
             raise GitHubReadError("GitHub response must be an object")
         return payload, response
@@ -537,7 +642,9 @@ class GitHubReadAdapter:
             raise GitHubReadError(
                 "GitHub commit response does not match task base SHA"
             )
-        return self._receipt("verify_base_commit", "", sha, response)
+        return self._receipt(
+            "verify_base_commit", "", sha, response
+        )
 
     def read_bytes(
         self,
@@ -547,7 +654,9 @@ class GitHubReadAdapter:
     ) -> tuple[bytes, GitHubReadReceipt]:
         normalized = _normalize_path(path, name="path")
         if not self._readable(normalized):
-            raise GitHubReadError("GitHub path is outside readable task scope")
+            raise GitHubReadError(
+                "GitHub path is outside readable task scope"
+            )
         upper = min(self._snapshot.max_output_bytes, 1_000_000)
         if (
             isinstance(max_bytes, bool)
@@ -557,42 +666,71 @@ class GitHubReadAdapter:
             raise GitHubReadError("GitHub file bound is invalid")
         payload, response = self._get(
             operation="read_file",
-            suffix="/contents/" + urllib.parse.quote(normalized, safe="/"),
+            suffix="/contents/"
+            + urllib.parse.quote(normalized, safe="/"),
             query={"ref": self._snapshot.base_sha},
         )
-        if payload.get("type") != "file" or payload.get("path") != normalized:
-            raise GitHubReadError("GitHub content response is not the requested file")
+        if (
+            payload.get("type") != "file"
+            or payload.get("path") != normalized
+        ):
+            raise GitHubReadError(
+                "GitHub content response is not the requested file"
+            )
         blob_sha = payload.get("sha")
-        if not isinstance(blob_sha, str) or _HEX40.fullmatch(blob_sha) is None:
-            raise GitHubReadError("GitHub content response has an invalid blob SHA")
+        if (
+            not isinstance(blob_sha, str)
+            or _HEX40.fullmatch(blob_sha) is None
+        ):
+            raise GitHubReadError(
+                "GitHub content response has an invalid blob SHA"
+            )
         content = payload.get("content")
-        if payload.get("encoding") != "base64" or not isinstance(content, str):
-            raise GitHubReadError("GitHub content response is not inline base64")
+        if (
+            payload.get("encoding") != "base64"
+            or not isinstance(content, str)
+        ):
+            raise GitHubReadError(
+                "GitHub content response is not inline base64"
+            )
         size = payload.get("size")
         if (
             isinstance(size, bool)
             or not isinstance(size, int)
             or not 0 <= size <= max_bytes
         ):
-            raise GitHubReadError("GitHub file exceeds the requested bound")
-        if any(char.isspace() and char not in "\r\n" for char in content):
+            raise GitHubReadError(
+                "GitHub file exceeds the requested bound"
+            )
+        if any(
+            char.isspace() and char not in "\r\n"
+            for char in content
+        ):
             raise GitHubReadError(
                 "GitHub file base64 contains unsupported whitespace"
             )
         compact = content.replace("\r", "").replace("\n", "")
         if len(compact) > (max_bytes + 2) // 3 * 4:
-            raise GitHubReadError("GitHub file base64 exceeds the requested bound")
+            raise GitHubReadError(
+                "GitHub file base64 exceeds the requested bound"
+            )
         try:
             data = base64.b64decode(compact, validate=True)
         except (ValueError, binascii.Error) as exc:
-            raise GitHubReadError("GitHub file base64 is invalid") from exc
+            raise GitHubReadError(
+                "GitHub file base64 is invalid"
+            ) from exc
         if len(data) != size:
             raise GitHubReadError(
                 "GitHub file size does not match decoded content"
             )
         if _git_blob_sha(data) != blob_sha:
-            raise GitHubReadError("GitHub blob SHA does not match decoded content")
-        return data, self._receipt("read_file", normalized, blob_sha, response)
+            raise GitHubReadError(
+                "GitHub blob SHA does not match decoded content"
+            )
+        return data, self._receipt(
+            "read_file", normalized, blob_sha, response
+        )
 
     def read_text(
         self,
@@ -606,4 +744,6 @@ class GitHubReadAdapter:
         try:
             return data.decode("utf-8"), receipt
         except UnicodeDecodeError as exc:
-            raise GitHubReadError("GitHub file is not UTF-8 text") from exc
+            raise GitHubReadError(
+                "GitHub file is not UTF-8 text"
+            ) from exc
