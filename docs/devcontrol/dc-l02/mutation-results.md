@@ -1,6 +1,6 @@
 # DC-L02 mutation results
 
-Status: **tests authored; CI execution pending**
+Status: **tests authored; exact-head CI execution pending**
 
 Load-bearing mutations:
 
@@ -8,11 +8,19 @@ Load-bearing mutations:
    Expected result: recovery test fails because the lock must remain.
 2. Remove the stale-lock reclaim path.
    Expected result: dead-owner recovery test fails.
-3. Remove parent `fsync` after POSIX atomic replace.
+3. Remove the per-campaign kernel guard or release it before the campaign critical
+   section ends. Expected result: guard serialization/concurrent creator tests fail.
+4. Treat a Linux zombie as a live owner.
+   Expected result: zombie-owner recovery test fails.
+5. Replace the Windows directory flush with a no-op.
+   Expected result: Windows handle-open/flush regression fails.
+6. Remove parent `fsync` after POSIX atomic replace.
    Expected result: durable replacement regression fails.
-4. Stop syncing each newly created store parent.
+7. Stop syncing each newly created store parent.
    Expected result: nested-parent durability regression fails.
-5. Accept malformed lock JSON as stale.
+8. Accept malformed lock JSON as stale.
    Expected result: malformed-lock fail-closed test fails.
-6. Permit two-event or divergent campaign saves.
-   Expected result: compare-and-swap/one-append tests fail.
+9. Accept a malformed persisted `task_id`.
+   Expected result: campaign reload validation test fails.
+10. Permit two-event or divergent campaign saves.
+    Expected result: compare-and-swap/one-append tests fail.
