@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 import tempfile
+import threading
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
-from kaliv_dev_control.campaign import CampaignState, DevelopmentCampaign
+from kaliv_dev_control.campaign import (
+    CampaignError,
+    CampaignState,
+    DevelopmentCampaign,
+)
 from kaliv_dev_control.proposal import DraftProposalBuilder, ProposalError
 from kaliv_dev_control.review import IndependentPolicyReviewer, ReviewRequest
 from kaliv_dev_control.store import CampaignStore, CampaignStoreError
@@ -50,6 +59,13 @@ class StoreProposalTests(unittest.TestCase):
             path.write_text('{"schema":"tampered"}\n', encoding="utf-8")
             with self.assertRaises(CampaignStoreError):
                 store.load("SDC-004")
+
+    def test_campaign_reload_rejects_invalid_task_id(self) -> None:
+        campaign = DevelopmentCampaign.create("SDC-004", task())
+        value = campaign.to_dict()
+        value["task_id"] = "lowercase"
+        with self.assertRaisesRegex(CampaignError, "task id"):
+            DevelopmentCampaign.from_mapping(value)
 
     def test_store_rejects_existing_malformed_lock(self) -> None:
         value = task()
@@ -118,6 +134,113 @@ class StoreProposalTests(unittest.TestCase):
                 with self.assertRaisesRegex(CampaignStoreError, "live operation"):
                     CampaignStore(root).create(campaign)
             self.assertTrue(lock.is_file())
+
+    def test_campaign_guard_serializes_the_reclaim_window(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = CampaignStore(Path(temporary) / "campaigns")
+            store._prepare_root()
+            first_entered = threading.Event()
+            release_first = threading.Event()
+            second_entered = threading.Event()
+            errors: list[BaseException] = []
+
+            def first() -> None:
+                try:
+                    with store._campaign_guard("SDC-004"):
+                        first_entered.set()
+                        if not release_first.wait(5):
+                            raise RuntimeError("guard test timed out")
+                except BaseException as exc:  # test worker propagation
+                    errors.append(exc)
+
+            def second() -> None:
+                try:
+                    if not first_entered.wait(5):
+                        raise RuntimeError("first guard never entered")
+                    with store._campaign_guard("SDC-004"):
+                        second_entered.set()
+                except BaseException as exc:  # test worker propagation
+                    errors.append(exc)
+
+            first_thread = threading.Thread(target=first)
+            second_thread = threading.Thread(target=second)
+            first_thread.start()
+            self.assertTrue(first_entered.wait(5))
+            second_thread.start()
+            self.assertFalse(second_entered.wait(0.2))
+            release_first.set()
+            first_thread.join(5)
+            second_thread.join(5)
+            self.assertFalse(first_thread.is_alive())
+            self.assertFalse(second_thread.is_alive())
+            self.assertTrue(second_entered.is_set())
+            self.assertEqual(errors, [])
+
+    def test_concurrent_stale_reclaim_has_exactly_one_creator(self) -> None:
+        campaign = DevelopmentCampaign.create("SDC-004", task())
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "campaigns"
+            root.mkdir()
+            lock = root / ".SDC-004.lock"
+            lock.write_text(
+                json.dumps(
+                    {
+                        "schema": "kaliv-development-campaign-lock/v1",
+                        "pid": 999999,
+                        "identity": "dead-owner",
+                        "nonce": "c" * 64,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            start = threading.Barrier(2)
+
+            def identity(pid: int) -> str:
+                return "" if pid == 999999 else "current-owner"
+
+            def create() -> Path | CampaignStoreError:
+                start.wait(timeout=5)
+                try:
+                    return CampaignStore(root).create(campaign)
+                except CampaignStoreError as exc:
+                    return exc
+
+            with patch("kaliv_dev_control.store._identity", side_effect=identity):
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    results = list(pool.map(lambda _: create(), range(2)))
+            winners = [item for item in results if isinstance(item, Path)]
+            losers = [item for item in results if isinstance(item, CampaignStoreError)]
+            self.assertEqual(len(winners), 1)
+            self.assertEqual(len(losers), 1)
+            self.assertEqual(
+                CampaignStore(root).load("SDC-004").canonical_json(),
+                campaign.canonical_json(),
+            )
+            self.assertFalse(lock.exists())
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and hasattr(os, "fork"),
+        "zombie process identity is Linux-specific",
+    )
+    def test_linux_zombie_lock_owner_is_treated_as_dead(self) -> None:
+        from kaliv_dev_control import store as store_module
+
+        pid = os.fork()
+        if pid == 0:
+            os._exit(0)
+        try:
+            observed: str | None = None
+            for _ in range(200):
+                observed = store_module._identity(pid)
+                if observed == "":
+                    break
+                time.sleep(0.01)
+            self.assertEqual(observed, "")
+        finally:
+            os.waitpid(pid, 0)
 
     def test_nested_store_creation_syncs_each_new_parent(self) -> None:
         value = task()
