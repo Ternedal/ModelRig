@@ -1,29 +1,51 @@
 # DC-L03 exact-head validation
 
-Status: **candidate committed; exact-head checks pending**
+Status: **authority candidate validated; repository workflow gates pending**
 
-Implementation candidate: `05b6028e82b2bf9a63f0944a22cfdc9e76b1133f`.
+Authority implementation and regression candidate:
+`4cbd642573546e62b995541d97d5b8909081b873`.
 
-The implementation candidate contains the complete 16-path allowlist and includes
-sealed Linux executable-object pinning, process-lifetime descriptor retirement
-that prevents stale `/proc/<pid>/fd/<n>` paths from being retargeted, strict
-catalog environment policy, fixed-host GET-only GitHub reads, pre-transport
-exact-SHA task validation, Git-blob verification, concrete integer receipt status
-validation, and pathname-swap/close regressions that launch only the sealed
-verified bytes. This evidence update intentionally changes the branch head; all
-final conclusions must bind to the resulting exact head, not the implementation
-candidate above.
+The candidate keeps the complete 16-path allowlist and includes:
 
-Required gates:
+- one immutable toolchain snapshot used for both the attested hash and every
+  later binding lookup;
+- sealed Linux executable-object pinning and process-lifetime descriptor
+  retirement, preventing pathname replacement and stale fd retargeting;
+- fail-closed Windows/non-Linux executable verification;
+- strict catalog environment policy;
+- a private reconstructed DevelopmentTask snapshot used for every GitHub host,
+  repository, path, budget, ref and receipt decision;
+- fixed-host HTTPS GET-only GitHub reads with redirects and environment proxies
+  disabled;
+- exact-SHA validation before transport, protected-path denial before network,
+  bounded response/base64 handling and decoded Git-blob verification;
+- concrete integer receipt status validation, including rejection of `200.0`.
 
-- diff equals the 16-path allowlist;
-- branch is based on the declared fresh `main` head;
-- all five locked source paths have one projection disposition and provenance;
-- package import remains dormant;
-- `default_registry()` remains empty;
-- no product code imports `kaliv_dev_control`;
-- no GitHub write, non-GET HTTP, remote Git or activation authority appears;
-- all nine landed DevControl test modules are reached by CI;
-- full CI, CodeQL, agent3-diagnostics and agent3-full-diagnostics succeed on the
-  exact candidate head;
-- independent reviewer different from the author returns no actionable finding.
+Focused DC-L03 validation produced **18/18 passing tests** in an isolated harness
+containing the committed DC-L03 implementations and their landed dependencies.
+The suite covers both exact-head review findings, pathname replacement,
+descriptor retirement, symlinks, hash mismatch, moving refs, public task
+reassignment, protected paths, proxy/redirect escape, blob mismatch, token
+non-persistence and strict persisted types.
+
+Verified repository facts:
+
+- diff equals `exact-path-allowlist.json` at 16 paths;
+- branch merge base is declared fresh `main` head
+  `c9bda459f10e682ec200fdfea8484d726c6c0057` and branch is 0 commits behind;
+- all review threads opened before this evidence update are resolved;
+- all five locked source paths have projection disposition and provenance;
+- package activation surface remains unchanged and `default_registry()` remains
+  empty;
+- no GitHub write, non-GET HTTP, remote Git, merge, publication, deployment or
+  activation authority is introduced.
+
+Still required before merge:
+
+- an independent review of the resulting exact head with no actionable finding;
+- repository CI, CodeQL, agent3-diagnostics and agent3-full-diagnostics on the
+  exact head. GitHub has not created Actions runs for connector-authored heads,
+  so no workflow success is claimed here.
+
+This evidence update changes the branch head. Final conclusions must bind to the
+resulting exact head rather than the implementation candidate above.
