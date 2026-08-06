@@ -124,6 +124,15 @@ class MutateToolchainIsolation:
         self.value._bindings = replacement._bindings
 
 
+class MutateTaskIsolation:
+    def __init__(self, value: DevelopmentTask) -> None:
+        self.value = value
+
+    def verify(self, proof: IsolationAttestation) -> None:
+        del proof
+        object.__setattr__(self.value, "base_sha", "b" * 40)
+
+
 class ReassignCatalog(ModelRigCommandCatalog):
     def __init__(
         self,
@@ -194,6 +203,7 @@ class CatalogTests(unittest.TestCase):
         for key in (
             "LD_PRELOAD",
             "LD_AUDIT",
+            "LD_LIBRARY_PATH",
             "DYLD_INSERT_LIBRARIES",
             "PYTHONPATH",
             "PYTHONHOME",
@@ -265,6 +275,23 @@ class CatalogTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(CommandPolicyError, "exact task"):
             registry.resolve(other, "modelrig.devcontrol.tests")
+
+    def test_materialization_uses_validated_task_snapshot(self):
+        original = task("modelrig.devcontrol.tests")
+        expected = DevelopmentTask.from_mapping(original.to_dict())
+        tc = toolchain()
+        registry = CatalogMaterializer(
+            modelrig_command_catalog(),
+            isolation_verifier=MutateTaskIsolation(original),
+            executable_verifier=AcceptExecutable(),
+        ).materialize(original, tc, attestation(expected, tc))
+        self.assertEqual(original.base_sha, "b" * 40)
+        self.assertEqual(
+            registry.resolve(expected, "modelrig.devcontrol.tests").argv[0],
+            "/trusted/python3",
+        )
+        with self.assertRaisesRegex(CommandPolicyError, "exact task"):
+            registry.resolve(original, "modelrig.devcontrol.tests")
 
     def test_materialization_uses_attested_catalog_snapshot(self):
         t = task("modelrig.devcontrol.tests")
