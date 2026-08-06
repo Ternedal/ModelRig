@@ -27,6 +27,7 @@ from kaliv_dev_control.catalog import (
     Toolchain,
     modelrig_command_catalog,
 )
+from kaliv_dev_control.commands import CommandPolicyError
 from kaliv_dev_control.contract import DevelopmentTask
 from kaliv_dev_control.github_read import (
     GitHubReadAdapter,
@@ -235,6 +236,24 @@ class CatalogTests(unittest.TestCase):
         )
         self.assertEqual(verifier.seen, ["python"])
         self.assertIs(getattr(registry, "_catalog_executable_verifier"), verifier)
+
+    def test_materialized_registry_rejects_unattested_task(self):
+        t = task("modelrig.devcontrol.tests")
+        tc = toolchain()
+        registry = CatalogMaterializer(
+            modelrig_command_catalog(),
+            isolation_verifier=AcceptIsolation(),
+            executable_verifier=AcceptExecutable(),
+        ).materialize(t, tc, attestation(t, tc))
+        other = DevelopmentTask.from_mapping(
+            {
+                **t.to_dict(),
+                "task_id": "OTHER",
+                "base_sha": "b" * 40,
+            }
+        )
+        with self.assertRaisesRegex(CommandPolicyError, "exact task"):
+            registry.resolve(other, "modelrig.devcontrol.tests")
 
     def test_materialization_uses_attested_catalog_snapshot(self):
         t = task("modelrig.devcontrol.tests")
