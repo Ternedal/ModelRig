@@ -16,6 +16,9 @@ DC-L00 decomposition contract.
   terminates descendants even when they create a new session;
 - command execution in a bounded independent exact-HEAD repository created from a
   temporary bundle, with the bundle and origin removed before execution;
+- Linux Landlock write confinement inherited by command descendants, allowing
+  persistent filesystem mutation only below the disposable sandbox root, with
+  `/dev/null` as the sole non-persistent sink exception;
 - no object alternate or real Git-metadata backup exposed to command code;
 - combined sandbox worktree and metadata receipt fingerprints plus isolated
   command context;
@@ -33,8 +36,9 @@ runner, no publication and no activation path. `default_registry()` is empty.
 `WorkspaceManager` cannot do anything until a later reviewed slice injects a
 compatible runner.
 
-Windows command containment deliberately fails closed in DC-L01. The native Job
-Object boundary belongs to DC-L05 and is not imported early.
+Windows command containment deliberately fails closed in DC-L01. Linux command
+execution also fails closed when the required Landlock ABI is unavailable. The
+native Windows Job Object boundary belongs to DC-L05 and is not imported early.
 
 Product code must not import `kaliv_dev_control`.
 
