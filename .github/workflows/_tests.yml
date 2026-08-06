@@ -90,6 +90,85 @@ jobs:
           set -o pipefail
           PYTHONPATH=devcontrol/src python3 -m unittest discover -s devcontrol/tests -p 'test_*.py' -v 2>&1 | tee -a /tmp/modelrig-ci-test.log
 
+      - name: DevControl final boundary regressions
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=devcontrol/src python3 - <<'PY' 2>&1 | tee -a /tmp/modelrig-ci-test.log
+          from pathlib import Path
+          import hashlib
+          import sys
+
+          from kaliv_dev_control.files import FileAccessError, WorkspaceFiles
+          from kaliv_dev_control.workspace import SubprocessRunner, WorkspaceError
+
+          runner = SubprocessRunner()
+          for key in ("LD_PRELOAD", "LD_AUDIT", "LD_LIBRARY_PATH"):
+              try:
+                  runner.run(
+                      (sys.executable, "-c", "pass"),
+                      cwd=Path.cwd(),
+                      timeout_seconds=10,
+                      max_output_bytes=64_000,
+                      env={key: "/tmp/untrusted-loader.so"},
+                  )
+              except WorkspaceError as exc:
+                  assert "dynamic-loader hooks" in str(exc)
+              else:
+                  raise AssertionError(f"{key} was not rejected before spawn")
+
+          requested = []
+
+          class BoundedReader:
+              def __enter__(self):
+                  return self
+
+              def __exit__(self, exc_type, exc, traceback):
+                  return False
+
+              def read(self, size):
+                  requested.append(size)
+                  return b"x" * size
+
+          class BoundedPath:
+              def open(self, mode):
+                  assert mode == "rb"
+                  return BoundedReader()
+
+          try:
+              WorkspaceFiles._read_bounded(BoundedPath(), 8)
+          except FileAccessError as exc:
+              assert "exceeds read bound" in str(exc)
+          else:
+              raise AssertionError("bounded read accepted max_bytes + 1 bytes")
+          assert requested == [9]
+
+          raw = runner.run(
+              (
+                  sys.executable,
+                  "-c",
+                  "import os; os.write(1, b'\\xff'); os.write(2, b'\\xfe')",
+              ),
+              cwd=Path.cwd(),
+              timeout_seconds=10,
+              max_output_bytes=64_000,
+              env={},
+          )
+          stdout = raw.stdout.encode("utf-8")
+          stderr = raw.stderr.encode("utf-8")
+          assert stdout == b"\xff"
+          assert stderr == b"\xfe"
+          assert hashlib.sha256(stdout).hexdigest() == hashlib.sha256(b"\xff").hexdigest()
+          assert hashlib.sha256(stderr).hexdigest() == hashlib.sha256(b"\xfe").hexdigest()
+          assert len(stdout) + len(stderr) == 2
+
+          preflight = Path("docs/devcontrol/dc-l01/preflight.md").read_text(encoding="utf-8")
+          assert "ee1d828b9f956284216b78ff8784c6787c3736dc" in preflight
+          assert "6644512e1d442349f263ffc157fe63e18886507f" not in preflight
+          PY
+
       - name: Upload full failed Python test log
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
