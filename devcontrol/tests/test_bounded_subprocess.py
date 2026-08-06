@@ -309,7 +309,6 @@ class WorkspaceResetRegressionTests(unittest.TestCase):
     def _repo(directory: str) -> tuple[Path, Path, str]:
         repo = Path(directory) / "repo"
         repo.mkdir()
-        _git(repo, "git", "init") if False else None
         _git(repo, "init")
         _git(repo, "config", "user.email", "test@example.com")
         _git(repo, "config", "user.name", "Test")
@@ -324,16 +323,18 @@ class WorkspaceResetRegressionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             repo, _, base_sha = self._repo(directory)
             command_id = "python.nested-repo"
+            script = (
+                "from pathlib import Path; "
+                "root=Path('nested'); metadata=root/'.git'; "
+                "(metadata/'objects').mkdir(parents=True); "
+                "(metadata/'refs/heads').mkdir(parents=True); "
+                "(metadata/'HEAD').write_text('ref: refs/heads/main\\n'); "
+                "(metadata/'config').write_text('[core]\\n\\trepositoryformatversion = 0\\n'); "
+                "(root/'payload.txt').write_text('nested\\n')"
+            )
             template = CommandTemplate(
                 command_id=command_id,
-                argv=(
-                    sys.executable,
-                    "-c",
-                    "from pathlib import Path; "
-                    "metadata=Path('nested/.git'); "
-                    "metadata.mkdir(parents=True); "
-                    "(metadata/'config').write_text('[core]\\n')",
-                ),
+                argv=(sys.executable, "-c", script),
             )
             receipt = CommandExecutor(
                 registry=CommandRegistry((template,))
