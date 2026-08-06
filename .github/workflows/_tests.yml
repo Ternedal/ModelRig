@@ -99,8 +99,11 @@ jobs:
           PYTHONPATH=devcontrol/src python3 - <<'PY' 2>&1 | tee -a /tmp/modelrig-ci-test.log
           from pathlib import Path
           import hashlib
+          import subprocess
           import sys
+          import tempfile
 
+          from kaliv_dev_control.commands import CommandExecutor
           from kaliv_dev_control.files import FileAccessError, WorkspaceFiles
           from kaliv_dev_control.workspace import SubprocessRunner, WorkspaceError
 
@@ -163,6 +166,32 @@ jobs:
           assert hashlib.sha256(stdout).hexdigest() == hashlib.sha256(b"\xff").hexdigest()
           assert hashlib.sha256(stderr).hexdigest() == hashlib.sha256(b"\xfe").hexdigest()
           assert len(stdout) + len(stderr) == 2
+
+          def git(repository, *args):
+              return subprocess.run(
+                  ("git", *args),
+                  cwd=repository,
+                  check=True,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE,
+                  text=True,
+              ).stdout
+
+          for hidden_flag in ("--assume-unchanged", "--skip-worktree"):
+              with tempfile.TemporaryDirectory() as directory:
+                  repository = Path(directory)
+                  git(repository, "init", "--quiet")
+                  git(repository, "config", "user.name", "DC-L01 Test")
+                  git(repository, "config", "user.email", "dc-l01@example.invalid")
+                  tracked = repository / "tracked.txt"
+                  tracked.write_text("base\n", encoding="utf-8")
+                  git(repository, "add", "tracked.txt")
+                  git(repository, "commit", "--quiet", "-m", "base")
+                  git(repository, "update-index", hidden_flag, "--", "tracked.txt")
+                  tracked.write_text("hidden mutation\n", encoding="utf-8")
+                  assert not git(repository, "diff", "--name-only", "--").strip()
+                  _, clean = CommandExecutor()._snapshot(repository)
+                  assert not clean, hidden_flag
 
           preflight = Path("docs/devcontrol/dc-l01/preflight.md").read_text(encoding="utf-8")
           assert "ee1d828b9f956284216b78ff8784c6787c3736dc" in preflight
