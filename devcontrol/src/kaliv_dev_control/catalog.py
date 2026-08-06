@@ -17,7 +17,11 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import MappingProxyType
 from typing import Any, Mapping, Protocol, Sequence
 
-from .commands import CommandRegistry, CommandTemplate
+from .commands import (
+    CommandPolicyError,
+    CommandRegistry,
+    CommandTemplate,
+)
 from .contract import DevelopmentTask
 
 CATALOG_SCHEMA = "kaliv-modelrig-command-catalog/v1"
@@ -329,6 +333,44 @@ class RejectUnverifiedIsolation:
         raise CatalogError("OS isolation has not been independently verified")
 
 
+class TaskBoundCommandRegistry(CommandRegistry):
+    def __init__(
+        self,
+        templates: Sequence[CommandTemplate],
+        task: DevelopmentTask,
+    ) -> None:
+        super().__init__(templates)
+        self._task_id = task.task_id
+        self._task_sha256 = _task_sha(task)
+        self._repository = task.repository
+        self._base_sha = task.base_sha
+
+    def resolve(
+        self,
+        task: DevelopmentTask,
+        command_id: str,
+    ) -> CommandTemplate:
+        if not isinstance(task, DevelopmentTask):
+            raise CommandPolicyError("registry requires a development task")
+        identity = (
+            task.task_id,
+            _task_sha(task),
+            task.repository,
+            task.base_sha,
+        )
+        expected = (
+            self._task_id,
+            self._task_sha256,
+            self._repository,
+            self._base_sha,
+        )
+        if identity != expected:
+            raise CommandPolicyError(
+                "registry is not bound to this exact task"
+            )
+        return super().resolve(task, command_id)
+
+
 class LocalExecutableHashVerifier:
     def __init__(self) -> None:
         self._pins: dict[str, tuple[ToolBinding, int, str]] = {}
@@ -473,7 +515,7 @@ class CatalogMaterializer:
                 command_id=spec.command_id, argv=(invocation, *spec.args), cwd=spec.cwd,
                 max_timeout_seconds=spec.max_timeout_seconds, env=spec.env,
             ))
-        registry = CommandRegistry(templates)
+        registry = TaskBoundCommandRegistry(templates, task)
         setattr(registry, "_catalog_executable_verifier", self.executable_verifier)
         return registry
 
