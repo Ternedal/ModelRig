@@ -6,10 +6,14 @@
 - Dependency satisfied: DC-L01 merged through PR #355
 - Locked source reference: PR #338 at `07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f`
 - Assigned source paths: 14
-- Progressive surfaces: 4
+- Progressive surfaces: 5
 - Slice-control artifacts: 8
-- Complete allowlist: 26 paths
+- Complete allowlist: 27 paths
 - Hard exclusion: `devcontrol/src/kaliv_dev_control/streaming_publication.py`
+
+The fifth progressive surface is `devcontrol/tests/test_foundation.py`. Its
+future-slice import gate advances through the landed DC-L02 modules while
+continuing to prohibit DC-L03–DC-L15 and product-specific imports.
 
 ## Required finding closures
 
