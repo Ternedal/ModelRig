@@ -57,6 +57,17 @@ check("PYTHONDONTWRITEBYTECODE" in cmd_text, "launcher suppresses Python bytecod
 check("%*" not in cmd_text, "launcher accepts no free-form arguments")
 check("agent3_readonly_pilot.py" in script_text, "operator reuses the canonical harness")
 check("run-agent3-rig-validation.ps1" in script_text, "fresh rig validation is mandatory")
+# ...but it must not regenerate ACTIVATION_READINESS.md while doing so.
+# That file is TRACKED, and the generator stamps it with a generation time
+# and absolute machine paths, so regenerating it dirties the working tree.
+# The very next step refuses to collect evidence unless the tree is clean,
+# so every run that actually performed rig validation killed itself one step
+# later with "working tree must be clean while collecting pilot evidence".
+# Read the .retained sibling: the .py shim only exec()s it, so the argument
+# list this asserts on does not literally appear in the shim.
+retained_text = (ROOT / "scripts" / "agent3_readonly_pilot_one_click.retained").read_text(encoding="utf-8")
+check("-SkipReadinessRegeneration" in retained_text,
+      "rig validation does not dirty the tree the next step requires clean")
 check("stage.start_stack(planner)" in script_text, "exact-head stack is started")
 check("stage.ensure_device_token()" in script_text, "paired token uses the hidden helper")
 check("def ensure_planner_model" in script_text, "operator owns a planner-only model selector")
