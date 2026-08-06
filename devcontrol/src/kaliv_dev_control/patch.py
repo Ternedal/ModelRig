@@ -17,6 +17,7 @@ from .workspace import Runner, SubprocessRunner
 
 PATCH_SCHEMA = "kaliv-development-patch-receipt/v1"
 _REGULAR_FILE_MODES = {"100644", "100755"}
+_INDEX_FLAG_BATCH = 256
 
 
 class PatchError(RuntimeError):
@@ -181,11 +182,47 @@ class PatchApplier:
         if head != task.base_sha:
             raise PatchError("workspace HEAD does not match task base SHA")
 
+    def _index_flags(
+        self,
+        task: DevelopmentTask,
+        workspace: Path,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        output = self._run(
+            workspace,
+            ["ls-files", "-v", "-z", "--"],
+            task,
+            2_000_000,
+        )
+        assume_unchanged: list[str] = []
+        skip_worktree: list[str] = []
+        for record in output.split("\x00"):
+            if not record:
+                continue
+            if len(record) < 3 or record[1] != " ":
+                raise PatchError("git index flag output is malformed")
+            tag = record[0]
+            path = normalize_repo_path(record[2:], name="index path")
+            if tag.islower():
+                assume_unchanged.append(path)
+            if tag.upper() == "S":
+                skip_worktree.append(path)
+        return (
+            tuple(sorted(set(assume_unchanged))),
+            tuple(sorted(set(skip_worktree))),
+        )
+
     def _workspace_state(
         self,
         task: DevelopmentTask,
         workspace: Path,
-    ) -> tuple[str, str, str, str]:
+    ) -> tuple[str, str, str, str, str]:
+        assume_unchanged, skip_worktree = self._index_flags(task, workspace)
+        encoded_flags = "\x00".join(
+            (
+                *(f"assume:{path}" for path in assume_unchanged),
+                *(f"skip:{path}" for path in skip_worktree),
+            )
+        )
         return (
             self._run(
                 workspace,
@@ -217,9 +254,30 @@ class PatchApplier:
                 task,
                 2_000_000,
             ),
+            encoded_flags,
         )
 
+    def _clear_index_flags(
+        self,
+        task: DevelopmentTask,
+        workspace: Path,
+    ) -> None:
+        assume_unchanged, skip_worktree = self._index_flags(task, workspace)
+        for option, paths in (
+            ("--no-assume-unchanged", assume_unchanged),
+            ("--no-skip-worktree", skip_worktree),
+        ):
+            for start in range(0, len(paths), _INDEX_FLAG_BATCH):
+                batch = paths[start : start + _INDEX_FLAG_BATCH]
+                self._run(
+                    workspace,
+                    ["update-index", option, "--", *batch],
+                    task,
+                    2_000_000,
+                )
+
     def _reset(self, task: DevelopmentTask, workspace: Path) -> None:
+        self._clear_index_flags(task, workspace)
         for args in (
             ["reset", "--hard", task.base_sha],
             ["clean", "-ffdx"],
@@ -238,7 +296,7 @@ class PatchApplier:
             return
         self._reset(task, workspace)
         raise PatchError(
-            "workspace has staged, unstaged, untracked or ignored changes"
+            "workspace has staged, unstaged, untracked, ignored or hidden index changes"
         )
 
     @staticmethod
@@ -312,9 +370,10 @@ class PatchApplier:
             ],
             task,
         )
-        if unstaged or untracked or ignored:
+        assume_unchanged, skip_worktree = self._index_flags(task, workspace)
+        if unstaged or untracked or ignored or assume_unchanged or skip_worktree:
             raise PatchError(
-                "patch left unstaged, untracked or ignored changes"
+                "patch left unstaged, untracked, ignored or hidden index changes"
             )
 
         decision = PathPolicy(task).evaluate(
