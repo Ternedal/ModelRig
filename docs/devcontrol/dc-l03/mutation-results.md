@@ -34,17 +34,21 @@ Load-bearing mutations and expected failures:
     verifier after the attested toolchain hash has been checked.
     Expected: `test_materialization_uses_attested_toolchain_snapshot` fails unless
     binding resolution uses the same immutable snapshot that was hashed.
-11. Accept a lowercase or malformed persisted task ID.
+11. Reuse a registry materialized and attested for task A with task B that grants
+    the same command ID but has a different task hash or base SHA.
+    Expected: `test_materialized_registry_rejects_unattested_task` fails unless
+    the registry enforces the exact attested task identity on every resolution.
+12. Accept a lowercase or malformed persisted task ID.
     Expected: schema and reload regressions fail.
-12. Accept a directly constructed task whose `base_sha` is a moving ref such as
+13. Accept a directly constructed task whose `base_sha` is a moving ref such as
     `main` and issue a GitHub request before validation.
     Expected: `test_invalid_direct_task_sha_fails_before_network` fails.
-13. Allow callers to replace `adapter.task` after construction and make later
+14. Allow callers to replace `adapter.task` after construction and make later
     requests dereference the replacement task.
     Expected: `test_validated_task_snapshot_cannot_be_replaced` fails unless all
     requests and receipts use a private immutable validated snapshot.
-14. Accept `200.0` as a persisted receipt status because it compares equal to
+15. Accept `200.0` as a persisted receipt status because it compares equal to
     integer `200` in Python.
     Expected: `test_receipt_reload_types_and_task_binding_are_strict` fails.
-15. Materialize the reviewed catalog without an injected isolation verifier.
+16. Materialize the reviewed catalog without an injected isolation verifier.
     Expected: the default fail-closed materialization regression fails.
