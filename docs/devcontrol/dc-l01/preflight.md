@@ -24,7 +24,10 @@ exact-SHA workspace verification.
 - Windows command containment fails closed until its later native boundary.
 - Merge remains human-only.
 
-The executor verifies a clean exact-HEAD source, creates a temporary bundle clone,
+The executor verifies a clean exact-HEAD source, including staged, unstaged,
+untracked, ignored, assume-unchanged and skip-worktree state. Hidden command-source
+index flags are included in the snapshot fingerprint before execution and during
+final source re-verification. The executor then creates a temporary bundle clone,
 removes the bundle and origin, exposes no object alternate or real metadata backup,
 isolates command context, requires Linux Landlock ABI 3+, applies the Landlock
 domain and installs an architecture-checked seccomp filter before the reviewed
@@ -50,13 +53,14 @@ must remain absent after reset and successful application.
 Five files remain exact copies and fifteen are documented projections. The final
 projections additionally include:
 
-- inherited Landlock ABI 3+ and seccomp confinement in `commands.py`;
+- hidden command-source index detection plus inherited Landlock ABI 3+ and seccomp
+  confinement in `commands.py`;
 - pre-spawn dynamic-loader rejection and raw-byte output preservation in
   `workspace.py`;
 - physically bounded read/search I/O in `files.py`;
 - dirty and hidden-index patch-workspace rejection before `git apply`; and
-- executable CI regressions for loader hooks, max-plus-one reads, non-UTF-8 output
-  evidence and synchronized-main attestation.
+- executable CI regressions for loader hooks, max-plus-one reads, non-UTF-8 output,
+  hidden command-source flags and synchronized-main attestation.
 
 ## Required gates
 
@@ -69,11 +73,13 @@ projections additionally include:
 7. File reads remain physically bounded during I/O.
 8. Command receipts preserve exact raw output hashes and byte counts.
 9. Command and patch evidence binds to exact task HEAD.
-10. Dirty command source state is rejected before execution.
+10. Staged, unstaged, untracked, ignored, assume-unchanged and skip-worktree
+    command source state is rejected before execution and during final verification.
 11. Dirty or hidden-index patch state is rejected and reset before `git apply`.
 12. Command execution is confined to the independent disposable sandbox.
 13. Landlock ABI 3+ and seccomp deny content and metadata mutation escapes.
-14. Worktree and complete bounded Git metadata jointly determine receipts.
+14. Worktree, hidden index state and complete bounded Git metadata jointly
+    determine receipts.
 15. Sandbox cleanup and final source verification are mandatory.
 16. Linux escaped descendants are terminated only with positive acknowledgement;
     unsupported containment fails closed.
