@@ -3,7 +3,7 @@
 Status: **authority candidate validated; repository workflow gates pending**
 
 Authority implementation and regression candidate:
-`d68785da6c9e973fbbd3d72339024d00d955acf4`.
+`ddcbf355a173d59dca3e8c695ae3cd2f393d2bc6`.
 
 The candidate keeps the complete 16-path allowlist and includes:
 
@@ -22,8 +22,8 @@ The candidate keeps the complete 16-path allowlist and includes:
 - fail-closed Windows/non-Linux executable verification;
 - strict catalog environment policy rejecting all `LD_*`, `DYLD_*`, `GIT_*`,
   Python path and sandbox-reserved authority variables;
-- a private reconstructed DevelopmentTask snapshot used for every GitHub host,
-  repository, path, budget, ref and receipt decision;
+- a sealed GitHub adapter whose reconstructed task snapshot, repository path,
+  token, timeout and transport authority cannot be retargeted after construction;
 - fixed-host HTTPS GET-only GitHub reads with redirects and environment proxies
   disabled;
 - exact-SHA validation before transport, protected-path denial before network,
@@ -35,9 +35,9 @@ with the landed DC-L03 implementations and dependencies. The suite covers deep
 mutation of catalog specs and tool bindings, verifier replacement during an
 external callback, task mutation, registry retargeting and cross-task reuse,
 catalog replacement, toolchain mutation, pathname replacement, descriptor
-retirement, symlinks, hash mismatch, moving refs, public task reassignment,
-protected paths, proxy/redirect escape, blob mismatch, token non-persistence and
-strict persisted types.
+retirement, symlinks, hash mismatch, moving refs, complete GitHub adapter
+retargeting, protected paths, proxy/redirect escape, blob mismatch, token
+non-persistence and strict persisted types.
 
 Verified repository facts:
 
