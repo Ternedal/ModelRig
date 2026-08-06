@@ -309,6 +309,7 @@ class WorkspaceResetRegressionTests(unittest.TestCase):
     def _repo(directory: str) -> tuple[Path, Path, str]:
         repo = Path(directory) / "repo"
         repo.mkdir()
+        _git(repo, "git", "init") if False else None
         _git(repo, "init")
         _git(repo, "config", "user.email", "test@example.com")
         _git(repo, "config", "user.name", "Test")
@@ -328,8 +329,10 @@ class WorkspaceResetRegressionTests(unittest.TestCase):
                 argv=(
                     sys.executable,
                     "-c",
-                    "import subprocess; "
-                    "subprocess.run(['git','init','nested'], check=True)",
+                    "from pathlib import Path; "
+                    "metadata=Path('nested/.git'); "
+                    "metadata.mkdir(parents=True); "
+                    "(metadata/'config').write_text('[core]\\n')",
                 ),
             )
             receipt = CommandExecutor(
@@ -348,12 +351,11 @@ class WorkspaceResetRegressionTests(unittest.TestCase):
             config_before = config.read_bytes()
             command_id = "python.git-metadata-mutator"
             script = (
-                "import subprocess; from pathlib import Path; "
-                "subprocess.run(['git','remote','add','injected',"
-                "'https://example.invalid/repo.git'], check=True); "
-                "hook=Path('.git/hooks/pre-commit'); "
-                "hook.write_text('#!/bin/sh\\nexit 1\\n'); "
-                "hook.chmod(0o755)"
+                "from pathlib import Path; "
+                "config=Path('.git/config'); "
+                "config.write_text(config.read_text()+'\\n[remote \\\"injected\\\"]\\n'"
+                "+'\\turl = https://example.invalid/repo.git\\n'); "
+                "Path('.git/hooks/pre-commit').write_text('#!/bin/sh\\nexit 1\\n')"
             )
             template = CommandTemplate(
                 command_id=command_id,
