@@ -1,6 +1,6 @@
 # DC-L03 mutation results
 
-Status: **mutations designed; exact-head CI pending**
+Status: **focused mutations covered; exact-head repository CI pending**
 
 Load-bearing mutations and expected failures:
 
@@ -17,21 +17,29 @@ Load-bearing mutations and expected failures:
    Expected: the catalog isolation-environment regression fails.
 6. Execute the original pathname after verification instead of the sealed
    verified object.
-   Expected: `test_sealed_executable_object_is_launched_after_source_replacement`
-   fails after `os.replace()` swaps the pathname to unverified bytes.
+   Expected: the sealed-object regression fails after `os.replace()` swaps the
+   pathname to unverified bytes.
 7. Close a verified descriptor and allow its fd number to be reused while an old
    command template still names `/proc/<pid>/fd/<n>`.
-   Expected: the same sealed-object regression fails after `close()` and an
-   unrelated open; the verified descriptor must remain retired until process exit.
+   Expected: the sealed-object regression fails after `close()` and an unrelated
+   open; the verified descriptor must remain retired until process exit.
 8. Follow a linked executable or accept an executable hash mismatch.
    Expected: the linked executable/hash regression fails.
-9. Accept a lowercase or malformed persisted task ID.
-   Expected: schema and reload regressions fail.
-10. Accept a directly constructed task whose `base_sha` is a moving ref such as
+9. Mutate the original `Toolchain._bindings` from the injected isolation verifier
+   after the attested toolchain hash has been checked.
+   Expected: `test_materialization_uses_attested_toolchain_snapshot` fails unless
+   binding resolution uses the same immutable snapshot that was hashed.
+10. Accept a lowercase or malformed persisted task ID.
+    Expected: schema and reload regressions fail.
+11. Accept a directly constructed task whose `base_sha` is a moving ref such as
     `main` and issue a GitHub request before validation.
-    Expected: `test_invalid_direct_task_base_sha_fails_before_network` fails.
-11. Accept `200.0` as a persisted receipt status because it compares equal to
+    Expected: `test_invalid_direct_task_sha_fails_before_network` fails.
+12. Allow callers to replace `adapter.task` after construction and make later
+    requests dereference the replacement task.
+    Expected: `test_validated_task_snapshot_cannot_be_replaced` fails unless all
+    requests and receipts use a private immutable validated snapshot.
+13. Accept `200.0` as a persisted receipt status because it compares equal to
     integer `200` in Python.
     Expected: `test_receipt_reload_types_and_task_binding_are_strict` fails.
-12. Materialize the reviewed catalog without an injected isolation verifier.
+14. Materialize the reviewed catalog without an injected isolation verifier.
     Expected: the default fail-closed materialization regression fails.
