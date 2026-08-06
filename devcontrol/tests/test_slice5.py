@@ -124,6 +124,16 @@ class MutateToolchainIsolation:
         self.value._bindings = replacement._bindings
 
 
+class MutateBindingIsolation:
+    def __init__(self, value: ToolBinding) -> None:
+        self.value = value
+
+    def verify(self, proof: IsolationAttestation) -> None:
+        del proof
+        object.__setattr__(self.value, "executable", "/untrusted/python3")
+        object.__setattr__(self.value, "executable_sha256", "9" * 64)
+
+
 class MutateTaskIsolation:
     def __init__(self, value: DevelopmentTask) -> None:
         self.value = value
@@ -131,6 +141,19 @@ class MutateTaskIsolation:
     def verify(self, proof: IsolationAttestation) -> None:
         del proof
         object.__setattr__(self.value, "base_sha", "b" * 40)
+
+
+class MutateSpecIsolation:
+    def __init__(self, value: ProjectCommandSpec) -> None:
+        self.value = value
+
+    def verify(self, proof: IsolationAttestation) -> None:
+        del proof
+        object.__setattr__(
+            self.value,
+            "args",
+            ("-c", "print('unattested-spec')"),
+        )
 
 
 class ReassignCatalog(ModelRigCommandCatalog):
@@ -157,6 +180,28 @@ class AcceptExecutable:
     def verify(self, binding: ToolBinding) -> str:
         self.seen.append(binding.tool_id)
         return binding.executable
+
+
+class FixedExecutable:
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self.seen: list[str] = []
+
+    def verify(self, binding: ToolBinding) -> str:
+        self.seen.append(binding.tool_id)
+        return self.path
+
+
+class ReplaceExecutableVerifierIsolation:
+    def __init__(self, replacement: FixedExecutable) -> None:
+        self.replacement = replacement
+        self.materializer: CatalogMaterializer | None = None
+
+    def verify(self, proof: IsolationAttestation) -> None:
+        del proof
+        if self.materializer is None:
+            raise AssertionError("materializer was not attached")
+        self.materializer.executable_verifier = self.replacement
 
 
 class FakeTransport:
@@ -325,6 +370,20 @@ class CatalogTests(unittest.TestCase):
                 attestation(t, tc, catalog=replacement),
             )
 
+    def test_materialization_deep_copies_catalog_specs(self):
+        t = task("modelrig.devcontrol.tests")
+        tc = toolchain()
+        catalog = modelrig_command_catalog()
+        owned_spec = catalog.resolve("modelrig.devcontrol.tests")
+        registry = CatalogMaterializer(
+            catalog,
+            isolation_verifier=MutateSpecIsolation(owned_spec),
+            executable_verifier=AcceptExecutable(),
+        ).materialize(t, tc, attestation(t, tc, catalog=catalog))
+        template = registry.resolve(t, "modelrig.devcontrol.tests")
+        self.assertIn("../tests", template.argv)
+        self.assertNotIn("unattested-spec", " ".join(template.argv))
+
     def test_materialization_uses_attested_toolchain_snapshot(self):
         t = task("modelrig.devcontrol.tests")
         tc = toolchain()
@@ -339,6 +398,43 @@ class CatalogTests(unittest.TestCase):
             "/trusted/python3",
         )
         self.assertEqual(verifier.seen, ["python"])
+
+    def test_materialization_deep_copies_tool_bindings(self):
+        t = task("modelrig.devcontrol.tests")
+        tc = toolchain()
+        owned_binding = tc.resolve("python")
+        verifier = AcceptExecutable()
+        registry = CatalogMaterializer(
+            modelrig_command_catalog(),
+            isolation_verifier=MutateBindingIsolation(owned_binding),
+            executable_verifier=verifier,
+        ).materialize(t, tc, attestation(t, tc))
+        self.assertEqual(
+            registry.resolve(t, "modelrig.devcontrol.tests").argv[0],
+            "/trusted/python3",
+        )
+        self.assertEqual(verifier.seen, ["python"])
+
+    def test_materialization_freezes_executable_verifier_before_callback(self):
+        t = task("modelrig.devcontrol.tests")
+        tc = toolchain()
+        original = AcceptExecutable()
+        replacement = FixedExecutable("/untrusted/python3")
+        isolation = ReplaceExecutableVerifierIsolation(replacement)
+        materializer = CatalogMaterializer(
+            modelrig_command_catalog(),
+            isolation_verifier=isolation,
+            executable_verifier=original,
+        )
+        isolation.materializer = materializer
+        registry = materializer.materialize(t, tc, attestation(t, tc))
+        self.assertEqual(
+            registry.resolve(t, "modelrig.devcontrol.tests").argv[0],
+            "/trusted/python3",
+        )
+        self.assertEqual(original.seen, ["python"])
+        self.assertEqual(replacement.seen, [])
+        self.assertIs(getattr(registry, "_catalog_executable_verifier"), original)
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux-only pinning")
     def test_sealed_object_survives_path_replacement_and_verifier_close(self):
