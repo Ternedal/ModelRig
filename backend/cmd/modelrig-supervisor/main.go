@@ -41,6 +41,17 @@ type child interface {
 	restart() error // (re)start it, replacing any previous process
 }
 
+// exitNoteOf reports how a child last ended, when the child can say.
+//
+// Kept as an optional capability rather than a method on the child interface so
+// the loop's fakes stay minimal; a fake that cannot answer simply says nothing.
+func exitNoteOf(c child) string {
+	if n, ok := c.(interface{ exitNote() string }); ok {
+		return n.exitNote()
+	}
+	return ""
+}
+
 // superviseOnce runs one supervision pass. A child is restarted when it is not
 // running, or when it has been unhealthy for maxFails consecutive passes (a
 // single failed poll -- a GC pause, a busy moment -- must not bounce a process
@@ -53,10 +64,16 @@ func superviseOnce(children []child, fails map[string]int, maxFails int, restart
 	for _, c := range children {
 		if !c.running() {
 			fails[c.name()] = 0
+			// Read this BEFORE restart(), which clears it for the new child.
+			note := exitNoteOf(c)
 			if err := c.restart(); err != nil {
 				log.Printf("supervisor: restart %s failed: %v", c.name(), err)
 			} else {
-				log.Printf("supervisor: %s was not running -> restarted", c.name())
+				if note != "" {
+					log.Printf("supervisor: %s was not running (%s) -> restarted", c.name(), note)
+				} else {
+					log.Printf("supervisor: %s was not running -> restarted", c.name())
+				}
 				if restarted != nil {
 					*restarted = append(*restarted, c.name())
 				}
@@ -97,6 +114,14 @@ type procChild struct {
 
 	mu  sync.Mutex
 	cmd *exec.Cmd
+	// alive is owned by mu and cleared by the reaper goroutine. running() used
+	// to read cmd.ProcessState, which Wait() writes from that goroutine without
+	// holding mu -- a data race on the value the restart decision depends on.
+	alive bool
+	// What a bare "restarted" line could never tell you: which process was
+	// started, and how the previous one ended.
+	startedPID int
+	lastExit   string
 }
 
 func (p *procChild) name() string { return p.label }
@@ -104,11 +129,21 @@ func (p *procChild) name() string { return p.label }
 func (p *procChild) running() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.cmd == nil || p.cmd.Process == nil {
-		return false
-	}
-	// ProcessState is set once the process has exited (we Wait in a goroutine).
-	return p.cmd.ProcessState == nil
+	return p.alive
+}
+
+// exitNote returns how the last child ended, or "" if none has ended yet.
+//
+// A rig once logged "server was not running -> restarted" every 10 seconds for
+// seven minutes while no server process existed, port 8080 stayed free, and the
+// exe started fine by hand. restart() only reports whether Start() succeeded,
+// so a child that dies immediately afterwards is indistinguishable from one
+// that never started -- and the log said the same thing either way. Recording
+// the exit means the next occurrence leaves evidence instead of a mystery.
+func (p *procChild) exitNote() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lastExit
 }
 
 func (p *procChild) healthy() bool {
@@ -125,7 +160,7 @@ func (p *procChild) healthy() bool {
 func (p *procChild) restart() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.cmd != nil && p.cmd.Process != nil && p.cmd.ProcessState == nil {
+	if p.cmd != nil && p.cmd.Process != nil && p.alive {
 		_ = p.cmd.Process.Kill()
 	}
 	if err := rotateLog(p.logPath, p.logMaxMB*1024*1024); err != nil {
@@ -147,9 +182,26 @@ func (p *procChild) restart() error {
 		return fmt.Errorf("start %s: %w", p.exePath, err)
 	}
 	p.cmd = cmd
-	// Reap the process so ProcessState is set on exit (running() reads it), and
-	// close this run's log handle when the process ends.
-	go func() { _ = cmd.Wait(); f.Close() }()
+	p.alive = true
+	p.startedPID = cmd.Process.Pid
+	p.lastExit = ""
+	// Reap the process, clear alive under the lock, and record HOW it ended so a
+	// child that dies straight after a successful Start() leaves a trace. Also
+	// closes this run's log handle.
+	go func() {
+		err := cmd.Wait()
+		note := "exit status 0"
+		if err != nil {
+			note = err.Error()
+		}
+		p.mu.Lock()
+		if p.cmd == cmd { // still the current child, not one we already replaced
+			p.alive = false
+			p.lastExit = fmt.Sprintf("pid %d: %s", cmd.Process.Pid, note)
+		}
+		p.mu.Unlock()
+		f.Close()
+	}()
 	return nil
 }
 
