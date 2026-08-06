@@ -104,6 +104,8 @@ def _identity(pid: int) -> str | None:
         fields = text[close + 2 :].split() if close >= 0 else []
         if len(fields) < 20 or not fields[19].isdigit() or not boot:
             return None
+        if fields[0] in {"Z", "X", "x"}:
+            return ""
         return f"linux:{boot}:{fields[19]}"
     return None
 
@@ -164,6 +166,9 @@ class CampaignStore:
 
     def _lock_path(self, campaign_id: str) -> Path:
         return self.root / f".{campaign_id}.lock"
+
+    def _guard_path(self, campaign_id: str) -> Path:
+        return self.root / f".{campaign_id}.guard"
 
     @staticmethod
     def _read_bounded(path: Path, maximum: int) -> bytes:
@@ -226,7 +231,72 @@ class CampaignStore:
             raise CampaignStoreError("campaign lock identity is invalid")
         return value
 
+    @contextmanager
+    def _campaign_guard(self, campaign_id: str) -> Iterator[None]:
+        """Kernel-released per-campaign guard covering reclaim and critical work."""
+        guard = self._guard_path(campaign_id)
+        if self._linkish(guard):
+            raise CampaignStoreError("campaign guard must not be a link")
+        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(guard, flags, 0o600)
+        except OSError as exc:
+            raise CampaignStoreError("campaign guard could not be opened") from exc
+        locked = False
+        try:
+            opened = os.fstat(descriptor)
+            try:
+                named = guard.stat(follow_symlinks=False)
+            except FileNotFoundError as exc:
+                raise CampaignStoreError("campaign guard disappeared") from exc
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_nlink != 1
+                or not stat.S_ISREG(named.st_mode)
+                or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+            ):
+                raise CampaignStoreError("campaign guard is irregular")
+            if opened.st_size == 0:
+                os.write(descriptor, b"\x00")
+            elif opened.st_size != 1:
+                raise CampaignStoreError("campaign guard has invalid contents")
+            os.fsync(descriptor)
+            sync_directory(self.root)
+
+            if os.name == "posix":
+                import fcntl
+
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+                locked = True
+            elif os.name == "nt":
+                import msvcrt
+
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+                locked = True
+            else:
+                raise CampaignStoreError(
+                    "campaign guard is unsupported on this platform"
+                )
+            yield
+        except DurablePublicationError as exc:
+            raise CampaignStoreError("campaign guard durability failed") from exc
+        finally:
+            if locked:
+                if os.name == "posix":
+                    import fcntl
+
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                elif os.name == "nt":
+                    import msvcrt
+
+                    os.lseek(descriptor, 0, os.SEEK_SET)
+                    msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+            os.close(descriptor)
+
     def _reclaim_stale_lock(self, lock: Path) -> bool:
+        """Reclaim while the per-campaign kernel guard is held."""
         if self._linkish(lock):
             raise CampaignStoreError("campaign lock must not be a link")
         try:
@@ -280,50 +350,49 @@ class CampaignStore:
                 "nonce": secrets.token_hex(32),
             }
         )
-        acquired: os.stat_result | None = None
-        for _ in range(3):
-            try:
-                create_once_file(lock, record)
-                acquired = lock.stat(follow_symlinks=False)
-                break
-            except FileExistsError as exc:
-                if not self._reclaim_stale_lock(lock):
+        with self._campaign_guard(campaign_id):
+            acquired: os.stat_result | None = None
+            for _ in range(3):
+                try:
+                    create_once_file(lock, record)
+                    acquired = lock.stat(follow_symlinks=False)
+                    break
+                except FileExistsError as exc:
+                    if not self._reclaim_stale_lock(lock):
+                        raise CampaignStoreError(
+                            "campaign is locked by another live operation"
+                        ) from exc
+                except (OSError, DurablePublicationError) as exc:
                     raise CampaignStoreError(
-                        "campaign is locked by another live operation"
+                        "campaign lock could not be acquired durably"
                     ) from exc
-            except (OSError, DurablePublicationError) as exc:
-                raise CampaignStoreError(
-                    "campaign lock could not be acquired durably"
-                ) from exc
-        if acquired is None:
-            raise CampaignStoreError("campaign lock recovery did not converge")
-        try:
-            # create_once_file already persists the directory entry; this
-            # explicit sync keeps the lock boundary independently auditable.
-            sync_directory(self.root)
-            yield
-        except DurablePublicationError as exc:
-            raise CampaignStoreError("campaign lock durability failed") from exc
-        finally:
-            if self._linkish(lock):
-                raise CampaignStoreError("campaign lock ownership changed")
+            if acquired is None:
+                raise CampaignStoreError("campaign lock recovery did not converge")
             try:
-                observed = lock.stat(follow_symlinks=False)
-            except FileNotFoundError as exc:
-                raise CampaignStoreError("campaign lock disappeared") from exc
-            if (observed.st_dev, observed.st_ino) != (
-                acquired.st_dev,
-                acquired.st_ino,
-            ):
-                raise CampaignStoreError("campaign lock ownership changed")
-            if self._read_bounded(lock, _LOCK_MAX) != record:
-                raise CampaignStoreError("campaign lock ownership changed")
-            try:
-                unlink_durable(lock)
+                sync_directory(self.root)
+                yield
             except DurablePublicationError as exc:
-                raise CampaignStoreError(
-                    "campaign lock was not durably released"
-                ) from exc
+                raise CampaignStoreError("campaign lock durability failed") from exc
+            finally:
+                if self._linkish(lock):
+                    raise CampaignStoreError("campaign lock ownership changed")
+                try:
+                    observed = lock.stat(follow_symlinks=False)
+                except FileNotFoundError as exc:
+                    raise CampaignStoreError("campaign lock disappeared") from exc
+                if (observed.st_dev, observed.st_ino) != (
+                    acquired.st_dev,
+                    acquired.st_ino,
+                ):
+                    raise CampaignStoreError("campaign lock ownership changed")
+                if self._read_bounded(lock, _LOCK_MAX) != record:
+                    raise CampaignStoreError("campaign lock ownership changed")
+                try:
+                    unlink_durable(lock)
+                except DurablePublicationError as exc:
+                    raise CampaignStoreError(
+                        "campaign lock was not durably released"
+                    ) from exc
 
     def _read(self, path: Path) -> DevelopmentCampaign:
         if self._linkish(path) or not path.is_file():
