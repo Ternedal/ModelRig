@@ -304,6 +304,27 @@ def worker_fingerprint() -> str:
     return str(value) if isinstance(value, str) else ""
 
 
+def seconds_since_boot() -> float | None:
+    """How long ago this machine started, so the reboot trial has a real clock.
+
+    The trial's ready_ms only times the wait after the operator confirms the
+    rig is back, which is near zero whenever they confirm after it is already
+    up. That number has been read as a boot duration. This one cannot be.
+    """
+    # InvariantCulture is not optional: this rig runs a Danish Windows, where
+    # TotalSeconds formats as "12091,615852" and float() rejects it. The first
+    # version of this returned None on the only machine it was written for.
+    script = (
+        "$b=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime; "
+        "Write-Output (((Get-Date) - $b).TotalSeconds)"
+        ".ToString([System.Globalization.CultureInfo]::InvariantCulture)"
+    )
+    try:
+        return round(float(powershell(script, timeout=30.0).splitlines()[-1].strip()), 1)
+    except (StageBError, ValueError, IndexError):
+        return None
+
+
 def wait_ready(timeout: float = READY_TIMEOUT_S) -> float | None:
     """Block until backend AND worker answer; return the milliseconds it took."""
     start = time.monotonic()
@@ -382,7 +403,8 @@ def trial_reboot(observations: dict[str, Any], state: dict[str, Any]) -> None:
     print("  Riggen kører nu kandidaten. Genstart normalt (Start -> Genstart), log ind")
     print("  igen når den er oppe, og kør denne wizard igen. Supervisoren skal selv")
     print("  bringe backend + worker op — på kandidatens version, ikke den forrige.")
-    print("  Wizard'en måler selv, hvor lang tid det tog, og hvilke versioner der kom op.")
+    print("  Wizard'en måler, hvilke versioner der kom op, og hvor længe siden")
+    print("  maskinen bootede — ikke hvor lang tid opstarten tog.")
     log = EVIDENCE / "reboot.log"
     state["reboot_pending_since"] = datetime.now(timezone.utc).isoformat()
     save_state(state)
@@ -391,9 +413,16 @@ def trial_reboot(observations: dict[str, Any], state: dict[str, Any]) -> None:
     note("Venter på at supervisoren bringer backend + worker op...")
     ready_ms = wait_ready()
     versions = live_versions()
+    # ready_ms is the wait from THIS moment until both services answer -- so it
+    # is ~0 whenever the operator presses Enter after the rig is already up,
+    # which is the normal case. Runs have recorded 0 ms and 31 ms, and both were
+    # read as "the rig booted in 31 milliseconds". It never measured that. The
+    # boot age is recorded alongside so the number cannot be misread: it says
+    # how long ago the machine actually started.
     lines = [
         f"stage-b reboot trial at {datetime.now(timezone.utc).isoformat()}",
-        f"ready_ms={ready_ms}",
+        f"ready_ms={ready_ms}  # wait from operator confirmation, NOT boot duration",
+        f"seconds_since_boot={seconds_since_boot()}",
         f"backend_version={versions['backend_version']}",
         f"worker_version={versions['worker_version']}",
         f"worker_code_sha256={versions['worker_code_sha256']}",
@@ -412,7 +441,12 @@ def trial_reboot(observations: dict[str, Any], state: dict[str, Any]) -> None:
             "worker_version": versions["worker_version"],
             "worker_code_sha256": versions["worker_code_sha256"],
             "worker_exe_sha256": versions["worker_exe_sha256"],
-            "notes": "Målt af stage_b_one_click efter operatørens genstart.",
+            "notes": (
+                "Målt af stage_b_one_click efter operatørens genstart. "
+                "ready_ms er ventetiden fra operatørens bekræftelse til begge "
+                "services svarer — ikke opstartstiden; se seconds_since_boot "
+                "i reboot.log."
+            ),
             "evidence_path": "validation/appliance-lifecycle-evidence/reboot.log",
             "evidence_sha256": sha256_file(log),
         }
