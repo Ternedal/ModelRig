@@ -34,10 +34,13 @@ python3 tests/workflow_test_coverage.py
 - Real subprocess output retains its original bytes for SHA-256 and byte-count
   evidence even when display decoding uses replacement characters.
 - Command and patch execution bind evidence to `HEAD == task.base_sha`.
-- Dirty command source state fails before a registered command starts.
+- Command source snapshots inspect `git ls-files -v -z`; staged, unstaged,
+  untracked, ignored, assume-unchanged and skip-worktree state fails before a
+  registered command starts and during final source re-verification.
+- Hidden command-source index state participates in the source fingerprint.
 - Staged, unstaged, untracked, ignored, assume-unchanged and skip-worktree patch
   state is rejected and verified-reset before any `git apply` invocation.
-- Hidden index flags are explicitly cleared before reset and verified absent.
+- Hidden patch index flags are explicitly cleared before reset and verified absent.
 - Each registered command executes in a bounded independent exact-HEAD Git
   repository created through a temporary bundle.
 - The bundle and origin are removed; no object alternate, source path or real Git
@@ -48,8 +51,8 @@ python3 tests/workflow_test_coverage.py
 - An inherited architecture-checked seccomp filter denies direct and alternate
   host metadata mutation paths, including xattr-at, io_uring and x86_64 x32
   syscall variants; unsupported confinement fails closed.
-- Worktree state and complete bounded sandbox Git metadata jointly determine
-  command receipt state.
+- Worktree state, hidden index state and complete bounded sandbox Git metadata
+  jointly determine command receipt state.
 - Sandbox cleanup is mandatory and the source repository is re-verified at the
   exact task HEAD with zero residual state before a receipt can return.
 - Linux subprocess containment kills descendants that escape into new sessions
