@@ -48,10 +48,57 @@ def _directory(path: Path, *, name: str) -> Path:
     return resolved
 
 
+def _windows_sync_directory(directory: Path) -> None:
+    """Flush one Windows directory handle or fail closed."""
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = [
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    ]
+    create_file.restype = ctypes.c_void_p
+    flush = kernel32.FlushFileBuffers
+    flush.argtypes = [ctypes.c_void_p]
+    flush.restype = ctypes.c_int
+    close = kernel32.CloseHandle
+    close.argtypes = [ctypes.c_void_p]
+    close.restype = ctypes.c_int
+
+    handle = create_file(
+        str(directory),
+        0xC0000000,  # GENERIC_READ | GENERIC_WRITE
+        0x00000007,  # share read/write/delete
+        None,
+        3,  # OPEN_EXISTING
+        0x82000000,  # BACKUP_SEMANTICS | WRITE_THROUGH
+        None,
+    )
+    invalid = ctypes.c_void_p(-1).value
+    if handle in {None, 0, invalid}:
+        code = ctypes.get_last_error()
+        raise DurablePublicationError(
+            f"Windows directory open for sync failed with error {code}"
+        )
+    try:
+        if not flush(handle):
+            code = ctypes.get_last_error()
+            raise DurablePublicationError(
+                f"Windows directory sync failed with error {code}"
+            )
+    finally:
+        close(handle)
+
+
 def sync_directory(path: Path) -> None:
-    """Persist directory metadata where the platform exposes that primitive."""
+    """Persist directory metadata using a real platform primitive."""
     directory = _directory(path, name="directory sync target")
     if os.name == "nt":
+        _windows_sync_directory(directory)
         return
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
     try:
@@ -125,9 +172,9 @@ def _windows_move(source: Path, destination: Path, *, replace: bool) -> None:
     move_file = kernel32.MoveFileExW
     move_file.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
     move_file.restype = ctypes.c_int
-    flags = 0x00000008
+    flags = 0x00000008  # MOVEFILE_WRITE_THROUGH
     if replace:
-        flags |= 0x00000001
+        flags |= 0x00000001  # MOVEFILE_REPLACE_EXISTING
     if move_file(str(source), str(destination), flags):
         return
     code = ctypes.get_last_error()
@@ -176,6 +223,7 @@ def rename_directory_no_replace(source: Path, destination: Path) -> None:
     sync_tree(pending)
     if os.name == "nt":
         _windows_move(pending, final, replace=False)
+        sync_directory(parent)
     elif os.name == "posix" and hasattr(os, "uname") and os.uname().sysname == "Linux":
         _linux_rename_no_replace(pending, final)
         sync_directory(parent)
@@ -211,6 +259,7 @@ def create_once_file(path: Path, payload: bytes, *, mode: int = 0o600) -> None:
         if os.name == "nt":
             _windows_move(temporary, destination, replace=False)
             published = True
+            sync_directory(parent)
         else:
             try:
                 os.link(temporary, destination)
@@ -234,8 +283,7 @@ def create_once_file(path: Path, payload: bytes, *, mode: int = 0o600) -> None:
         if temporary.exists():
             try:
                 temporary.unlink()
-                if os.name != "nt":
-                    sync_directory(parent)
+                sync_directory(parent)
             except OSError:
                 if not published:
                     raise
@@ -261,7 +309,7 @@ def replace_file_durable(source: Path, destination: Path) -> None:
             _windows_move(pending, final, replace=True)
         else:
             os.replace(pending, final)
-            sync_directory(parent)
+        sync_directory(parent)
     except OSError as exc:
         raise DurablePublicationError("durable file replacement failed") from exc
 
@@ -277,8 +325,7 @@ def unlink_durable(path: Path) -> None:
         return
     except OSError as exc:
         raise DurablePublicationError("durable unlink failed") from exc
-    if os.name != "nt":
-        sync_directory(parent)
+    sync_directory(parent)
 
 
 def remove_tree_durable(path: Path) -> None:
@@ -296,5 +343,4 @@ def remove_tree_durable(path: Path) -> None:
         shutil.rmtree(candidate)
     except OSError as exc:
         raise DurablePublicationError("durable tree removal failed") from exc
-    if os.name != "nt":
-        sync_directory(parent)
+    sync_directory(parent)
