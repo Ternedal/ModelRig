@@ -2,8 +2,9 @@
 
 Command arguments come from the registry, never from a model or task payload.
 Each command runs at the exact task SHA in a disposable local Git sandbox. A
-Linux Landlock domain confines all filesystem writes from the command and
-its descendants to that sandbox before a positive receipt can be issued.
+Linux Landlock domain confines persistent filesystem writes to that sandbox,
+while an inherited seccomp filter denies metadata-mutating syscall families that
+Landlock cannot mediate, before positive evidence can be issued.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ _RESERVED_ENV = {"HOME", "XDG_CONFIG_HOME", "TMPDIR", "PWD"}
 
 _LANDLOCK_SANDBOX_BOOTSTRAP = r"""
 import ctypes
+import errno
 import os
 import sys
 
@@ -42,6 +44,14 @@ SYS_LANDLOCK_RESTRICT_SELF = 446
 LANDLOCK_CREATE_RULESET_VERSION = 1
 LANDLOCK_RULE_PATH_BENEATH = 1
 PR_SET_NO_NEW_PRIVS = 38
+PR_SET_SECCOMP = 22
+SECCOMP_MODE_FILTER = 2
+SECCOMP_RET_KILL_PROCESS = 0x80000000
+SECCOMP_RET_ERRNO = 0x00050000
+SECCOMP_RET_ALLOW = 0x7FFF0000
+BPF_LD_W_ABS = 0x20
+BPF_JMP_JEQ_K = 0x15
+BPF_RET_K = 0x06
 
 LANDLOCK_ACCESS_FS_WRITE_FILE = 1 << 1
 LANDLOCK_ACCESS_FS_REMOVE_DIR = 1 << 4
@@ -65,6 +75,20 @@ class PathBeneathAttr(ctypes.Structure):
         ("parent_fd", ctypes.c_int),
     ]
 
+class SockFilter(ctypes.Structure):
+    _fields_ = [
+        ("code", ctypes.c_ushort),
+        ("jt", ctypes.c_ubyte),
+        ("jf", ctypes.c_ubyte),
+        ("k", ctypes.c_uint32),
+    ]
+
+class SockFprog(ctypes.Structure):
+    _fields_ = [
+        ("length", ctypes.c_ushort),
+        ("filter", ctypes.POINTER(SockFilter)),
+    ]
+
 libc = ctypes.CDLL(None, use_errno=True)
 
 def fail(name):
@@ -76,6 +100,72 @@ def syscall(number, *args):
     if result < 0:
         fail("syscall")
     return int(result)
+
+def install_metadata_seccomp():
+    machine = os.uname().machine.lower()
+    profiles = {
+        "x86_64": (
+            0xC000003E,
+            (
+                90, 91, 92, 93, 94, 132,
+                188, 189, 190, 197, 198, 199,
+                235, 260, 261, 268, 280, 452,
+            ),
+        ),
+        "amd64": (
+            0xC000003E,
+            (
+                90, 91, 92, 93, 94, 132,
+                188, 189, 190, 197, 198, 199,
+                235, 260, 261, 268, 280, 452,
+            ),
+        ),
+        "aarch64": (
+            0xC00000B7,
+            (5, 6, 7, 14, 15, 16, 52, 53, 54, 55, 88, 452),
+        ),
+        "arm64": (
+            0xC00000B7,
+            (5, 6, 7, 14, 15, 16, 52, 53, 54, 55, 88, 452),
+        ),
+    }
+    try:
+        audit_arch, denied_syscalls = profiles[machine]
+    except KeyError as exc:
+        raise RuntimeError(f"unsupported seccomp architecture: {machine}") from exc
+
+    instructions = [
+        SockFilter(BPF_LD_W_ABS, 0, 0, 4),
+        SockFilter(BPF_JMP_JEQ_K, 1, 0, audit_arch),
+        SockFilter(BPF_RET_K, 0, 0, SECCOMP_RET_KILL_PROCESS),
+        SockFilter(BPF_LD_W_ABS, 0, 0, 0),
+    ]
+    for number in sorted(set(denied_syscalls)):
+        instructions.extend(
+            (
+                SockFilter(BPF_JMP_JEQ_K, 0, 1, number),
+                SockFilter(
+                    BPF_RET_K,
+                    0,
+                    0,
+                    SECCOMP_RET_ERRNO | errno.EPERM,
+                ),
+            )
+        )
+    instructions.append(SockFilter(BPF_RET_K, 0, 0, SECCOMP_RET_ALLOW))
+    filters = (SockFilter * len(instructions))(*instructions)
+    program = SockFprog(
+        len(instructions),
+        ctypes.cast(filters, ctypes.POINTER(SockFilter)),
+    )
+    if libc.prctl(
+        PR_SET_SECCOMP,
+        SECCOMP_MODE_FILTER,
+        ctypes.byref(program),
+        0,
+        0,
+    ) != 0:
+        fail("seccomp")
 
 try:
     if len(sys.argv) < 4:
@@ -92,6 +182,8 @@ try:
         ctypes.c_size_t(0),
         ctypes.c_uint(LANDLOCK_CREATE_RULESET_VERSION),
     )
+    if abi < 3:
+        raise RuntimeError("Landlock ABI 3 or newer is required")
     handled = (
         LANDLOCK_ACCESS_FS_WRITE_FILE
         | LANDLOCK_ACCESS_FS_REMOVE_DIR
@@ -103,11 +195,9 @@ try:
         | LANDLOCK_ACCESS_FS_MAKE_FIFO
         | LANDLOCK_ACCESS_FS_MAKE_BLOCK
         | LANDLOCK_ACCESS_FS_MAKE_SYM
+        | LANDLOCK_ACCESS_FS_REFER
+        | LANDLOCK_ACCESS_FS_TRUNCATE
     )
-    if abi >= 2:
-        handled |= LANDLOCK_ACCESS_FS_REFER
-    if abi >= 3:
-        handled |= LANDLOCK_ACCESS_FS_TRUNCATE
 
     ruleset_attr = RulesetAttr(handled)
     ruleset_fd = syscall(
@@ -132,9 +222,7 @@ try:
     finally:
         os.close(root_fd)
 
-    null_access = LANDLOCK_ACCESS_FS_WRITE_FILE
-    if abi >= 3:
-        null_access |= LANDLOCK_ACCESS_FS_TRUNCATE
+    null_access = LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_TRUNCATE
     null_fd = os.open("/dev/null", os.O_PATH | os.O_CLOEXEC)
     try:
         null_attr = PathBeneathAttr(null_access, null_fd)
@@ -156,6 +244,7 @@ try:
         ctypes.c_uint(0),
     )
     os.close(ruleset_fd)
+    install_metadata_seccomp()
     os.chdir(command_cwd)
     os.execvpe(command[0], command, os.environ)
 except BaseException as exc:
