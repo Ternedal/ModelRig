@@ -111,6 +111,9 @@ type procChild struct {
 	logPath   string
 	logMaxMB  int64
 	extraEnv  []string
+	// tree owns this child and everything it spawns, so a kill reaches the whole
+	// tree and nothing outlives the supervisor. May be nil; adopt() tolerates it.
+	tree *processTree
 
 	mu  sync.Mutex
 	cmd *exec.Cmd
@@ -185,6 +188,10 @@ func (p *procChild) restart() error {
 	p.alive = true
 	p.startedPID = cmd.Process.Pid
 	p.lastExit = ""
+	// Adopt immediately, so anything the child spawns is already inside the job.
+	if err := p.tree.adopt(cmd.Process); err != nil {
+		log.Printf("supervisor: %s not adopted into the process tree: %v", p.label, err)
+	}
 	// Reap the process, clear alive under the lock, and record HOW it ended so a
 	// child that dies straight after a successful Start() leaves a trace. Also
 	// closes this run's log handle.
@@ -265,15 +272,28 @@ func main() {
 	} else {
 		log.Printf("no env file at %s; children inherit the supervisor's environment (MODELRIG_HOST must be set for remote access)", *envFile)
 	}
+	// Own the children as a TREE. Without this, killing a child leaves its
+	// grandchildren behind -- the PyInstaller worker's real Python process keeps
+	// port 8099, and every replacement dies on Errno 10048 forever -- and
+	// killing the SUPERVISOR strands them entirely. Both happened on the rig.
+	// Best-effort: a supervisor that refuses to start is worse than one whose
+	// cleanup is weaker, so a failure here is logged and the loop continues.
+	tree, err := newProcessTree()
+	if err != nil {
+		log.Printf("process tree unavailable, children may outlive a kill: %v", err)
+		tree = nil
+	}
+	defer tree.Close()
+
 	worker := &procChild{
 		label: "worker", exePath: *workerExe, workDir: filepath.Dir(*workerExe),
 		healthURL: *workerHealth, logPath: filepath.Join(*logDir, "worker.log"), logMaxMB: *logMB,
-		extraEnv: childEnv,
+		extraEnv: childEnv, tree: tree,
 	}
 	server := &procChild{
 		label: "server", exePath: *serverExe, workDir: filepath.Dir(*serverExe),
 		healthURL: *serverHealth, logPath: filepath.Join(*logDir, "server.log"), logMaxMB: *logMB,
-		extraEnv: childEnv,
+		extraEnv: childEnv, tree: tree,
 	}
 
 	// Start the worker first and give it a moment to bind before the server
