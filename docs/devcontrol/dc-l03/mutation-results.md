@@ -19,12 +19,19 @@ Load-bearing mutations and expected failures:
    verified object.
    Expected: `test_sealed_executable_object_is_launched_after_source_replacement`
    fails after `os.replace()` swaps the pathname to unverified bytes.
-7. Follow a linked executable or accept an executable hash mismatch.
+7. Close a verified descriptor and allow its fd number to be reused while an old
+   command template still names `/proc/<pid>/fd/<n>`.
+   Expected: the same sealed-object regression fails after `close()` and an
+   unrelated open; the verified descriptor must remain retired until process exit.
+8. Follow a linked executable or accept an executable hash mismatch.
    Expected: the linked executable/hash regression fails.
-8. Accept a lowercase or malformed persisted task ID.
+9. Accept a lowercase or malformed persisted task ID.
    Expected: schema and reload regressions fail.
-9. Accept `200.0` as a persisted receipt status because it compares equal to
-   integer `200` in Python.
-   Expected: `test_receipt_reload_types_and_task_binding_are_strict` fails.
-10. Materialize the reviewed catalog without an injected isolation verifier.
+10. Accept a directly constructed task whose `base_sha` is a moving ref such as
+    `main` and issue a GitHub request before validation.
+    Expected: `test_invalid_direct_task_base_sha_fails_before_network` fails.
+11. Accept `200.0` as a persisted receipt status because it compares equal to
+    integer `200` in Python.
+    Expected: `test_receipt_reload_types_and_task_binding_are_strict` fails.
+12. Materialize the reviewed catalog without an injected isolation verifier.
     Expected: the default fail-closed materialization regression fails.
