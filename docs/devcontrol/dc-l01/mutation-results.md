@@ -17,9 +17,11 @@ was required to turn red.
 | Search reads remain bounded after stat | Trust `st_size` and call whole-file `read_bytes()` | **RED** — a concurrently growing file bypasses the scan bound |
 | Raw command output evidence is lossless | Hash replacement-decoded UTF-8 text | **RED** — distinct invalid byte streams collapse and byte counts change |
 | Pre-staged command workspaces are rejected | Ignore cached diff in clean-state check | **RED** — command starts on staged state |
+| Hidden command source state is rejected | Omit `git ls-files -v -z` from command snapshots | **RED** — assume-unchanged/skip-worktree source mutation is accepted before and after execution |
+| Hidden command state participates in evidence | Omit encoded hidden flags from the command fingerprint | **RED** — an index-flag change can escape final source comparison |
 | Dirty patch state is rejected before apply | Remove the pre-apply state gate | **RED** — `git apply` runs against dirty state |
-| Hidden index state is rejected | Ignore lowercase/S tags from `git ls-files -v` | **RED** — hidden tracked mutation survives |
-| Hidden index state is physically cleared | Omit update-index clearing before reset | **RED** — flags survive reset |
+| Hidden patch index state is rejected | Ignore lowercase/S tags from `git ls-files -v` | **RED** — hidden tracked mutation survives |
+| Hidden patch index state is physically cleared | Omit update-index clearing before reset | **RED** — flags survive reset |
 | Commands do not execute in source checkout | Run registered argv with `cwd=source` | **RED** — source authority is exposed |
 | Persistent host writes are denied | Remove Landlock or grant rights above sandbox | **RED** — descendant creates a host artifact |
 | Truncate is always mediated | Permit Landlock ABI 1/2 or omit `TRUNCATE` | **RED** — host file can be truncated |
@@ -48,19 +50,20 @@ was required to turn red.
 
 The unmodified candidate passed the focused harness for exact-SHA binding,
 immutable argv, canonical paths, loader-hook rejection, physically bounded reads,
-lossless raw-byte output evidence, dirty and hidden-index preconditions,
-independent sandbox execution, Landlock ABI 3+ content confinement, inherited
-seccomp metadata confinement, combined worktree/Git-metadata evidence, mandatory
-cleanup, source re-verification, process-tree containment, ignored-artifact
-handling and nested-repository cleanup.
+lossless raw-byte output evidence, dirty and hidden-index command/patch
+preconditions, independent sandbox execution, Landlock ABI 3+ content confinement,
+inherited seccomp metadata confinement, combined worktree/hidden-index/Git-metadata
+evidence, mandatory cleanup, source re-verification, process-tree containment,
+ignored-artifact handling and nested-repository cleanup.
 
 Executable descendants attempted absolute writes plus chmod, chown, xattr and
 utime changes against host targets. Raw-syscall regressions require `EPERM` for
 io_uring, xattr-at, file-setattr, ioctl and x86_64 x32 paths. Additional CI
 regressions prove all explicit `LD_*` loader hooks fail before spawn, bounded reads
 request only limit-plus-one bytes, non-UTF-8 stdout/stderr retain their original
-hash inputs and byte counts, and the preflight attests to synchronized current
-main.
+hash inputs and byte counts, assume-unchanged/skip-worktree source mutations remain
+dirty despite empty ordinary diffs, and the preflight attests to synchronized
+current main.
 
 The exact-head execution remains authoritative; this document does not substitute
 for repository checks and external review bound to the reviewed commit.
