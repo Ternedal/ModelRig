@@ -92,10 +92,22 @@ def note(text: str) -> None:
     print(f"  ->    {text}")
 
 
-def capture(args: list[str], *, cwd: Path = ROOT, timeout: float = 120.0) -> str:
+def capture(args: list[str], *, cwd: Path | None = None, timeout: float = 120.0) -> str:
+    # Resolve ROOT at call time, not at def time. `cwd: Path = ROOT` bound the
+    # default to whatever ROOT was when this module was imported, so use_root()
+    # could not move it -- and --root exists precisely to run a newer wizard
+    # against a frozen release checkout. The result was that `git rev-parse
+    # HEAD` and the clean-tree check both ran in the WIZARD's repo, so the
+    # bundle attested the wizard's commit as the candidate instead of the
+    # released one, and the release freeze rejected it.
     try:
         result = subprocess.run(
-            args, cwd=cwd, text=True, capture_output=True, check=False, timeout=timeout
+            args,
+            cwd=cwd or ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise StageBError(f"Kommandoen kunne ikke gennemføres: {' '.join(args)}") from exc

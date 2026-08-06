@@ -96,7 +96,12 @@ def campaign_report(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     if not hasattr(args, "task_ui_report"):
         return _legacy_campaign_report(args)
 
-    root = Path(__file__).resolve().parents[1]
+    # See the note in physical_validation_campaign_core.campaign_report: a newer
+    # campaign must be able to judge a frozen release checkout, because the
+    # contract shipped inside a release is not always one that release can
+    # satisfy. Candidate identity still comes from the checkout under test.
+    root = getattr(args, "root", None) or Path(__file__).resolve().parents[1]
+    root = Path(root).resolve()
     now = datetime.now(timezone.utc)
     candidate = candidate_identity(root)
     assessor = _load_agent3_assessor(root)
@@ -199,6 +204,16 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_PATHS["scheduler_pilot"],
     )
     parser.add_argument("--task-ui-report", type=Path, default=DEFAULT_PATHS["task_ui"])
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=None,
+        help=(
+            "checkout hvis evidens skal vurderes (default: validatorens eget "
+            "repo). Brug den udcheckede release, naar kampagnen koeres fra en "
+            "nyere worktree."
+        ),
+    )
     parser.add_argument("--max-age-hours", type=float, default=168.0)
     parser.add_argument("--min-model-exact", type=float, default=1.0)
     args = parser.parse_args(argv)
