@@ -4,20 +4,20 @@
     {"blob_sha":"841efd0c56c3c75e08e9a07b11afcab2477a305e","path":"devcontrol/schemas/development-draft-pr-proposal-v1.schema.json"},
     {"blob_sha":"ece86b9d86f0b770c2c980711a427c2601afbd50","path":"devcontrol/schemas/development-review-request-v1.schema.json"},
     {"blob_sha":"0471817cb8e485e35a4b588196648c4133b91dd3","path":"devcontrol/schemas/development-review-verdict-v1.schema.json"},
-    {"blob_sha":"1ad00f69bc03e127eebec4d03e446c06d2aae196","path":"devcontrol/src/kaliv_dev_control/campaign.py"},
     {"blob_sha":"a6e3b28634c7a134ec7fcec54640be6e7910e250","path":"devcontrol/src/kaliv_dev_control/proposal.py"},
     {"blob_sha":"3c70f5d13a7c7731578b20cc479616f919e6342c","path":"devcontrol/src/kaliv_dev_control/review.py"},
     {"blob_sha":"223c7e83ec16216fc0d7cb9c07bf44f3a54656e2","path":"devcontrol/tests/test_campaign_review.py"},
     {"blob_sha":"e32b8797c1503207f098b0c084cc8e1c1259e2bb","path":"devcontrol/tests/test_proposal_reload.py"},
     {"blob_sha":"6c9d9b29410be26535efbfe02a676d6d758be912","path":"devcontrol/tests/test_review_reload.py"}
   ],
-  "exact_copy_count": 10,
-  "projected_count": 4,
+  "exact_copy_count": 9,
+  "projected_count": 5,
   "projections": [
-    {"path":"devcontrol/src/kaliv_dev_control/durable_publication.py","reason":"add durable atomic file replacement with Windows write-through and POSIX parent fsync","source_blob":"246e5f4000853368ca3d187dc1c40a9bb2dac810"},
-    {"path":"devcontrol/src/kaliv_dev_control/store.py","reason":"close stale-lock recovery and parent-directory durability findings","source_blob":"2290e58f713f5010b164b5b003bca043a4305224"},
-    {"path":"devcontrol/tests/test_durable_publication.py","reason":"executable regression for parent fsync after atomic replacement","source_blob":"54c66d5856510c307c31ac9360d45f5bbb08f937"},
-    {"path":"devcontrol/tests/test_store_proposal.py","reason":"executable stale/dead/live lock and nested-parent durability regressions","source_blob":"a0120f37b3ff3b1a33761409d4bbb9e603de4aac"}
+    {"path":"devcontrol/src/kaliv_dev_control/campaign.py","reason":"validate persisted campaign/task metadata during reload and direct verification","source_blob":"1ad00f69bc03e127eebec4d03e446c06d2aae196"},
+    {"path":"devcontrol/src/kaliv_dev_control/durable_publication.py","reason":"add real Windows directory flush plus durable atomic file replacement and POSIX parent fsync","source_blob":"246e5f4000853368ca3d187dc1c40a9bb2dac810"},
+    {"path":"devcontrol/src/kaliv_dev_control/store.py","reason":"close stale-lock recovery races, stable owner identity, zombie handling and parent-directory durability findings","source_blob":"2290e58f713f5010b164b5b003bca043a4305224"},
+    {"path":"devcontrol/tests/test_durable_publication.py","reason":"executable regressions for parent fsync and Windows directory flush","source_blob":"54c66d5856510c307c31ac9360d45f5bbb08f937"},
+    {"path":"devcontrol/tests/test_store_proposal.py","reason":"executable stale/dead/live/zombie lock, kernel guard, task-id and nested-parent durability regressions","source_blob":"a0120f37b3ff3b1a33761409d4bbb9e603de4aac"}
   ],
   "schema": "modelrig-devcontrol-source-provenance/v1",
   "slice": "DC-L02",
