@@ -18,15 +18,20 @@ verification.
 - `default_registry()` is empty.
 - `WorkspaceManager` requires an injected local Git protocol.
 - Commands execute only in independent disposable exact-HEAD repositories.
+- Linux command descendants inherit a Landlock filesystem-write boundary.
 - Windows command containment fails closed until its later native boundary.
 - Merge remains human-only.
 
 Command templates freeze argv and reject non-canonical raw `cwd` authority before
 `PurePosixPath` normalization. The executor verifies a clean exact-HEAD source,
 creates a temporary bundle clone, removes the bundle and origin, exposes no object
-alternate or real metadata backup, isolates command context, fingerprints both
-worktree and bounded Git metadata, destroys the sandbox and re-verifies the source
-before returning evidence.
+alternate or real metadata backup, isolates command context, applies a Linux
+Landlock ruleset before the reviewed argv starts, fingerprints both worktree and
+bounded Git metadata, destroys the sandbox and re-verifies the source before
+returning evidence. Persistent filesystem write, create, delete, truncate and
+refer rights are granted only below the disposable sandbox root; `/dev/null` is
+the sole non-persistent sink exception required by Git. The restriction is
+inherited by descendants, and unavailable Landlock fails closed.
 
 Patch application verifies exact HEAD and checks staged, unstaged, untracked and
 ignored state before parsing or invoking `git apply`. A dirty ephemeral workspace
@@ -39,9 +44,11 @@ Six files remain exact copies and fourteen are documented projections. The final
 projections additionally include:
 
 - canonical raw command cwd validation in `commands.py`;
+- inherited Landlock confinement for command filesystem writes in `commands.py`;
 - dirty patch-workspace rejection before `git apply` in `patch.py`; and
-- executable regressions proving ambiguous cwd values fail and pre-staged patch
-  state triggers reset without any `git apply` call.
+- executable regressions proving ambiguous cwd values fail, pre-staged patch
+  state triggers reset without any `git apply` call, and descendant absolute-path
+  writes outside the sandbox leave no host artifact.
 
 ## Required gates
 
@@ -54,13 +61,15 @@ projections additionally include:
 7. Dirty command source state is rejected before execution.
 8. Dirty patch state is rejected and reset before any `git apply` call.
 9. Command execution is confined to the independent disposable sandbox.
-10. Worktree and complete bounded Git metadata jointly determine receipts.
-11. Sandbox cleanup and final source verification are mandatory.
-12. Linux escaped descendants are terminated only with positive acknowledgement;
+10. Landlock denies persistent writes outside that sandbox for commands and
+    descendants, with only `/dev/null` allowed as a non-persistent sink.
+11. Worktree and complete bounded Git metadata jointly determine receipts.
+12. Sandbox cleanup and final source verification are mandatory.
+13. Linux escaped descendants are terminated only with positive acknowledgement;
     unsupported containment fails closed.
-13. Ignored artifacts and nested repositories cannot coexist with positive
+14. Ignored artifacts and nested repositories cannot coexist with positive
     command or patch evidence.
-14. CI, CodeQL, diagnostics and independent exact-head review pass.
+15. CI, CodeQL, diagnostics and independent exact-head review pass.
 
 ## Definition of done
 
