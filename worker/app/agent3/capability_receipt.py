@@ -55,7 +55,31 @@ def capability_graph_sha256(graph: CapabilityGraph) -> str:
 
 
 def agent_run_plan_sha256(run: AgentRun) -> str:
-    """Hash execution-relevant plan data without exposing it in the receipt."""
+    """Identify the PLAN, so a finished run can be matched to what was approved.
+
+    This digest answers one question: "is this the plan the operator reviewed?"
+    It therefore covers only what the operator was shown and agreed to -- the
+    route, and each step's action, arguments and risk axes.
+
+    It must NOT cover anything that changes by executing the plan, and it used
+    to cover two such things:
+
+      step.id     _clone_steps mints a fresh uuid4 per step when the run is
+                  created from the approved template (AgentStep.cloned_for_retry).
+      step.state  PENDING while under review, SUCCEEDED once the step has run.
+
+    Both change by construction, so the durable receipt stored against a
+    finished run could never equal the receipt shown at preview. Preview and
+    start agreed only because both hash the still-pending template. The
+    consequence was that the capability receipt -- the record that exists to
+    prove which plan actually ran -- could not bind any completed run to its
+    approval, and the read-only pilot failed 20/20 on the rig with
+    "durable capability receipt is not bound to the reviewed plan".
+
+    A step's identity, for this purpose, is what it DOES. If execution state
+    ever needs attesting, it belongs in a separate digest, so a verifier can ask
+    "was this the approved plan?" and "how did it go?" independently.
+    """
     return _sha256(
         {
             "route": {
@@ -68,7 +92,6 @@ def agent_run_plan_sha256(run: AgentRun) -> str:
             "voice": run.request.voice,
             "steps": [
                 {
-                    "id": step.id,
                     "tool": step.tool,
                     "args": step.args,
                     "risk": step.risk.value,
@@ -76,7 +99,6 @@ def agent_run_plan_sha256(run: AgentRun) -> str:
                     "egress": step.egress.value,
                     "origin": step.origin,
                     "conversation_id": step.conversation_id,
-                    "state": step.state.value,
                 }
                 for step in run.steps
             ],
