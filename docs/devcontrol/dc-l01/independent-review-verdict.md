@@ -14,10 +14,12 @@ A qualifying verdict must:
 - confirm file reads and search reads enforce their byte caps during I/O;
 - confirm raw stdout/stderr hashes and byte counts survive lossy display decoding;
 - confirm command and patch evidence binds to the exact task base SHA;
-- confirm dirty source state fails before a registered command starts;
+- confirm command source snapshots inspect `git ls-files -v -z`, reject staged,
+  unstaged, untracked, ignored, assume-unchanged and skip-worktree state before
+  execution and include hidden index state in final source verification;
 - confirm staged, unstaged, untracked, ignored, assume-unchanged and skip-worktree
   patch state is rejected and verified-reset before `git apply`;
-- confirm hidden index flags are explicitly cleared and verified absent;
+- confirm hidden patch index flags are explicitly cleared and verified absent;
 - confirm commands execute only inside independent exact-HEAD bundle-created Git
   repositories with no origin, bundle, alternate, source path or real metadata
   backup exposed;
@@ -25,7 +27,8 @@ A qualifying verdict must:
   below the disposable sandbox, with `/dev/null` as the sole non-persistent sink;
 - confirm inherited seccomp denies direct and alternate host metadata mutation,
   including xattr-at, io_uring and x86_64 x32 syscall variants;
-- confirm receipts bind sandbox worktree and complete bounded Git-metadata state;
+- confirm receipts bind sandbox worktree, hidden index state and complete bounded
+  Git-metadata state;
 - confirm mandatory cleanup and final exact-HEAD/clean-state verification preserve
   the source repository;
 - confirm the Linux subreaper terminates escaped-session descendants only with
