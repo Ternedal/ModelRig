@@ -3,8 +3,8 @@
 > **Genereret af `scripts/activation_readiness.py`. Ret ikke i hånden.**
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
-**Version på main:** `1.58.148`
-**Genereret:** 2026-08-04 18:07 UTC
+**Version på main:** `1.58.149`
+**Genereret:** 2026-08-05 21:01 UTC
 
 ---
 
