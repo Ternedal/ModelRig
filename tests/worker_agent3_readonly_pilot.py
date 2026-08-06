@@ -182,7 +182,10 @@ def test_run_pilot_continues_after_one_task_failure_and_binds_candidate() -> Non
     assert report['success'] is False
     assert report['summary']['successes'] == 19
     assert report['summary']['failures'] == 1
-    assert report['summary']['error_types'] == {'plan_contract': 1}
+    # 'planner plan mismatch' is a plan mismatch, and now says so. It used to be
+    # folded into the catch-all plan_contract along with receipt and route
+    # failures, which is what made a real 20/20 failure unreadable on the rig.
+    assert report['summary']['error_types'] == {'plan_mismatch': 1}
     assert report['candidate']['git_sha'] == '1' * 40
     failed = [item for item in report['results'] if not item['success']]
     assert len(failed) == 1
@@ -194,6 +197,32 @@ def test_atomic_report_writer_emits_valid_json() -> None:
         MODULE._write_json_atomic(path, {'schema': MODULE.SCHEMA, 'success': True})
         assert json.loads(path.read_text(encoding='utf-8')) == {'schema': MODULE.SCHEMA, 'success': True}
         assert not list(path.parent.glob('*.tmp'))
+def test_error_type_names_the_actual_cause_not_the_nearest_keyword() -> None:
+    """The report stores only sha256(message), so this label is all a reader gets.
+
+    It answered 'plan_contract' to anything containing "plan", "preview",
+    "route" or "capability receipt". On the rig that reported
+    "plan_contract: 19" for a run where the model planned correctly and every
+    route worked -- the real fault was the durable capability receipt
+    disagreeing with the approved plan. The label pointed at the planner.
+    """
+    assert MODULE._error_type(
+        'durable capability receipt is not bound to the reviewed plan'
+    ) == 'capability_receipt'
+    assert MODULE._error_type(
+        'capability receipt changed between preview and start'
+    ) == 'capability_receipt'
+    assert MODULE._error_type(
+        "task 01 plan mismatch: expected [...], got [...]"
+    ) == 'plan_mismatch'
+    assert MODULE._error_type(
+        'working tree must be clean while collecting pilot evidence'
+    ) == 'dirty_tree'
+    # The general cases must still work.
+    assert MODULE._error_type('plan preview is missing route') == 'plan_contract'
+    assert MODULE._error_type('cannot reach http://127.0.0.1:8080: refused') == 'transport'
+    assert MODULE._error_type('run did not reach a terminal state') == 'timeout'
+
 TESTS = [value for name, value in sorted(globals().items()) if name.startswith('test_')]
 if __name__ == '__main__':
     for test_case in TESTS:

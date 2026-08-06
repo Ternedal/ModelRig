@@ -427,6 +427,21 @@ def run_stop_fallback_probe(client: Requester, *, planner_model: str, fallback_m
     return {'success': True, 'run_id': run_id, 'prompt_sha256': hashlib.sha256(prompt.encode('utf-8')).hexdigest(), 'agent3_state': final_run.get('state'), 'completed_agent3_steps': 1, 'pending_steps_after_stop': 1, 'event_kinds': kinds, 'fallback_path': '/api/v1/chat', 'fallback_model': fallback_model, 'fallback_latency_ms': round(fallback_ms, 3), 'fallback': fallback}
 
 def _error_type(message: str) -> str:
+    """Name the failure precisely enough to act on.
+
+    The report stores only sha256(message), so this label is all a reader gets.
+    It used to answer 'plan_contract' to anything mentioning "plan", "preview",
+    "route" or "capability receipt" -- three unrelated failures under one name.
+
+    On the rig that produced "plan_contract: 19" for a run where the model was
+    planning perfectly and every route worked; the real fault was the durable
+    capability receipt disagreeing with the approved plan. Recovering that took
+    running the pilot's own code for a single task by hand, because the label
+    pointed at the planner and the message was only a hash.
+
+    Specific causes are therefore matched BEFORE the general ones. Adding a
+    cause here is cheap; a reader mis-led by a wrong label is not.
+    """
     value = message.lower()
     if 'did not reach' in value or 'timeout' in value or 'timed out' in value:
         return 'timeout'
@@ -434,7 +449,13 @@ def _error_type(message: str) -> str:
         return 'transport'
     if 'answer-preview' in value or 'answer preview' in value:
         return 'answer'
-    if 'plan' in value or 'preview' in value or 'route' in value or ('capability receipt' in value):
+    if 'capability receipt' in value:
+        return 'capability_receipt'
+    if 'plan mismatch' in value:
+        return 'plan_mismatch'
+    if 'working tree' in value:
+        return 'dirty_tree'
+    if 'plan' in value or 'preview' in value or 'route' in value:
         return 'plan_contract'
     if 'event' in value or 'run' in value or 'step' in value or ('execution' in value):
         return 'execution'
