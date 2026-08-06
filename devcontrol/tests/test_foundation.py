@@ -482,11 +482,12 @@ class FoundationTests(unittest.TestCase):
             self.assertEqual(target.read_text(encoding="utf-8"), "old\n")
             self.assertEqual(_git(repo, "status", "--porcelain"), "")
 
-    def test_foundation_has_no_future_slice_import(self) -> None:
+    def test_foundation_has_no_unlanded_future_slice_import(self) -> None:
         source = Path(__file__).resolve().parents[1] / "src" / "kaliv_dev_control"
+        # DC-L02 campaign/review/store imports are now landed. Keep the gate on
+        # DC-L03+ authority and product-specific containment imports.
         forbidden = (
             "trusted_git_runtime",
-            "campaign",
             "catalog",
             "physical_isolation",
             "runtime_staging",
