@@ -15,6 +15,9 @@ DC-L00 decomposition contract.
 - pre-spawn removal or rejection of inherited and explicit dynamic-loader hooks;
 - raw stdout/stderr evidence preserved for exact hashes and byte counts even when
   display text requires replacement decoding;
+- command source snapshots that reject staged, unstaged, untracked, ignored,
+  assume-unchanged and skip-worktree state before execution and during final
+  source re-verification;
 - Linux streaming subprocess containment through a subreaper supervisor that
   terminates descendants even when they create a new session;
 - command execution in a bounded independent exact-HEAD repository created from a
@@ -25,8 +28,8 @@ DC-L00 decomposition contract.
 - an inherited architecture-checked seccomp filter denying direct and alternate
   metadata mutation paths, including xattr-at, io_uring and x86_64 x32 variants;
 - no object alternate or real Git-metadata backup exposed to command code;
-- combined sandbox worktree and metadata receipt fingerprints plus isolated
-  command context;
+- combined sandbox worktree, hidden-index and metadata receipt fingerprints plus
+  isolated command context;
 - exact-HEAD and clean-state checks before and after command execution;
 - patch preconditions that reject and verified-reset staged, unstaged, untracked,
   ignored, assume-unchanged and skip-worktree state before any `git apply` call;
