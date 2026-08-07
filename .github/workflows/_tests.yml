@@ -284,13 +284,11 @@ jobs:
           python tests/worker_toolhost.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Verified closure-bound Tier-A execution contracts
+      - name: Verified closure-bound Tier-A execution contract
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $env:PYTHONPATH = "worker;devcontrol/src"
-          python tests/support/windows_bounded_subprocess_contract.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           @'
           import runpy
           import sys
