@@ -3,7 +3,7 @@
 Status: **authority candidate hardened; exact-head workflow gates pending**
 
 Current authority implementation/regression candidate:
-`5eb237398cd4b9867e50bc42656476835ca4a057`.
+`ac4eaa44fa501eba797818d8563e82c9b83ce8f0`.
 
 The candidate keeps the complete 16-path allowlist and includes:
 
@@ -12,38 +12,40 @@ The candidate keeps the complete 16-path allowlist and includes:
 - sealed exact-task command registries and reviewed verifier retention;
 - Linux no-follow, nonblocking, bounded executable reads and sealed memfd launch;
 - process-lifetime descriptor retirement and fail-closed non-Linux verification;
-- a fixed-value environment positive list containing `CI=1`,
-  `MODELRIG_DEVCONTROL=1`, `GOTOOLCHAIN=local` and the reviewed child-tool
-  `PATH=/usr/bin:/bin`;
+- a fixed-value environment positive list with `PATH=/usr/bin:/bin` injected into
+  every accepted catalog entry, including entries supplied with `env={}`;
+- rejection of every explicitly different PATH and all unreviewed interpreter,
+  loader and toolchain environment authority;
 - fixed-host HTTPS GET-only GitHub reads with redirects and proxies disabled;
 - explicit system TLS roots independent of environment CA overrides;
-- one monotonic wall-clock deadline covering response-body reads;
-- a supervised reader thread so blocking chunk framing inside `read1()` cannot
-  outlive the caller deadline;
-- socket shutdown/close and response close on deadline expiry;
-- fail-closed response handling when the transport cannot expose a socket on
-  which cancellation and timeouts can be enforced;
+- a raw owned HTTPS connection supervised from request start through status,
+  headers, chunk framing and response body under one monotonic deadline;
+- socket shutdown/close, response close and connection close on deadline expiry;
+- fail-closed handling when a deadline-capable transport socket is unavailable;
 - exact-SHA and protected-path checks before transport, bounded JSON/base64
   handling and decoded Git-blob identity verification;
 - strict receipt runtime/schema identity, status and repository validation.
 
 Latest landed authority blobs:
 
-- catalog: `1f312db26214153052c923adbb06896124f21b6a`;
-- GitHub read transport: `d6ffca324ca2f69db256814ec08f08a714feb00c`;
+- catalog: `e562bbbf9acb6833279491303b6ab7b508bc3e0e`;
+- GitHub read transport: `0b32313fe2d613367c15e4df23ede556943c27c5`;
 - receipt schema: `40615abb093d890a98391ad8dc38d90fb8166c2d`;
-- workflow contract/regressions: `f20d6d73cbadebab5d6c98e3f4ac0586a81f53ba`.
+- workflow contract/regressions: `8e1eeb504aff2829a2dfe025d1972b6832070006`.
 
 The latest complete focused DC-L03 run before the final environment/deadline
-hardening produced **26/26 passing tests**. Additional executable contract
-regressions and direct validation now cover:
+hardening produced **26/26 passing tests**. Existing public test surfaces were
+preserved while additional executable contract regressions and direct validation
+now cover:
 
 - rejection of `GOROOT=.`, `PYTHONUSERBASE=.`, `GOTOOLCHAIN=auto` and an
-  attacker-selected `PATH`;
-- presence of the fixed `/usr/bin:/bin` PATH on reviewed catalog commands;
-- a `read1()` call that blocks internally until the socket is cancelled;
-- wall-clock rejection in approximately 0.05 seconds, response/socket closure,
-  preserved successful reads and preserved byte-budget rejection.
+  attacker-selected PATH;
+- automatic fixed-PATH insertion for a caller-supplied `env={}` spec;
+- a `read1()` call that blocks internally until socket cancellation;
+- a `getresponse()` call that blocks while reading HTTP status/headers;
+- wall-clock rejection in approximately 0.05 seconds with socket, response and
+  connection closure;
+- preserved successful reads, fixed-host validation and byte-budget rejection.
 
 Review history:
 
@@ -56,10 +58,14 @@ Review history:
   toolchain environment authority and missing end-to-end response-read deadline;
   candidate `b7cabc3524a75d980cd5e0710b2acfeed7a15eb2` closed them;
 - review of `9829fe24227f363141c779237a9e042a1a1af2ca` found ambient PATH authority and
-  chunk-framing work occurring inside one `read1()` call; candidates
-  `59bbd4a113fe13d274b05ae8fee8f789ec80b4cd`,
-  `e73934c1bc6536e0b89b66eb30819ee7f602210b` and
-  `5eb237398cd4b9867e50bc42656476835ca4a057` close those findings.
+  chunk-framing work occurring inside one `read1()` call; candidate
+  `5eb237398cd4b9867e50bc42656476835ca4a057` closed them;
+- review of `3483ac687a267d6ec31aa71eaa4896baa5604d74` found that omitted PATH still
+  inherited ambient authority and status/header framing remained outside the
+  supervisor; candidates `5944d164badbb1af773ab7d63408e37c01c54bf1`,
+  `58dac7690c9ed669b2648049382321b50f7119d9`,
+  `bfe8bedf1c5115615db3b3986a2fd7759c15c9d7` and
+  `ac4eaa44fa501eba797818d8563e82c9b83ce8f0` close those findings.
 
 Verified repository facts:
 
