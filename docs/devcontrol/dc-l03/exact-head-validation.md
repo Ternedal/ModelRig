@@ -1,11 +1,21 @@
 # DC-L03 exact-head validation
 
-Status: **authority candidate hardened; exact-head workflow gates pending**
+Status: **authority and 16-path scope validated; resulting evidence head review and workflows pending**
 
-Current authority implementation/regression candidate:
+Authority implementation and regression candidate:
 `c7c018c8f866867507eb9f3adcbaf4ae1e0d7eef`.
 
-The candidate keeps the complete 16-path allowlist and includes:
+Exact 16-path scope and workflow snapshot:
+`03b8d348a9dab654fa6094bf22f72dee7ba05b3f`.
+
+The implementation candidate is contained in the later exact scope snapshot. The
+scope snapshot adds only the final control/evidence commits needed to restore
+`devcontrol/README.md` byte-for-byte to base and replace it with
+`devcontrol/src/kaliv_dev_control/commands.py` as the third progressive surface.
+Its complete base diff is exactly the declared 16 paths and it is 0 commits
+behind `main`.
+
+The validated authority includes:
 
 - reconstructed DevelopmentTask, catalog, toolchain and attestation snapshots;
 - one strict private execution-task snapshot used for command resolution, source
@@ -37,7 +47,7 @@ The candidate keeps the complete 16-path allowlist and includes:
   handling and decoded Git-blob identity verification;
 - strict receipt runtime/schema identity, status and repository validation.
 
-Latest landed authority blobs:
+Latest landed authority blobs at the exact scope snapshot:
 
 - catalog: `e562bbbf9acb6833279491303b6ab7b508bc3e0e`;
 - execution snapshot surface: `f55e3a898e0135d3d207e63a051bccb6f554fc1b`;
@@ -45,9 +55,9 @@ Latest landed authority blobs:
 - receipt schema: `40615abb093d890a98391ad8dc38d90fb8166c2d`;
 - workflow contract/regressions: `25b6c4d163d0071d170d0cfc1f719f0314e64319`.
 
-The latest complete focused DC-L03 run before the final hardening produced
-**26/26 passing tests**. Existing public test surfaces were preserved while
-additional executable contract regressions and direct validation now cover:
+The latest complete focused DC-L03 run before the final narrowly scoped hardening
+produced **26/26 passing tests**. Existing public test surfaces were preserved
+while additional executable contract regressions and direct validation cover:
 
 - mutation of the caller-owned task during command execution while sandbox,
   budgets, verification and receipt remain bound to one private task A snapshot;
@@ -64,6 +74,14 @@ additional executable contract regressions and direct validation now cover:
   and delayed continuation proves there is no automatic reconnect or auth send;
 - wall-clock rejection with socket, response and connection closure;
 - preserved successful reads, fixed-host validation and byte-budget rejection.
+
+Repository workflow gates completed successfully on exact scope snapshot
+`03b8d348a9dab654fa6094bf22f72dee7ba05b3f`:
+
+- `ci` run 2980;
+- `codeql` run 1996;
+- `agent3-diagnostics` run 1141;
+- `agent3-full-diagnostics` run 2223.
 
 Review history:
 
@@ -93,13 +111,18 @@ Review history:
   a copied task but the executor continued with the mutable caller object;
   candidates `a17506cd0217e5a7a5fbd22ba147c20ee5d08086` and
   `c7c018c8f866867507eb9f3adcbaf4ae1e0d7eef` carry one private snapshot through
-  the complete pre-existing execution path and add the mutation regression.
+  the complete pre-existing execution path and add the mutation regression;
+- review of exact scope snapshot `03b8d348a9dab654fa6094bf22f72dee7ba05b3f`
+  found no new runtime-authority issue, but found that the verdict file described
+  the implementation candidate as though it also contained the later 16-path
+  replacement. The evidence now records the two snapshots separately.
 
 Verified repository facts:
 
 - the README is restored byte-for-byte to base and `commands.py` replaces it as
   the third progressive surface;
-- diff must equal `exact-path-allowlist.json` at 16 paths;
+- diff equals `exact-path-allowlist.json` at 16 paths on the validated scope
+  snapshot;
 - merge base is fresh `main` head
   `c9bda459f10e682ec200fdfea8484d726c6c0057` and branch is 0 commits behind;
 - package activation remains unchanged and `default_registry()` remains empty;
@@ -108,10 +131,12 @@ Verified repository facts:
 
 Still required before merge:
 
-- an independent review of the resulting exact head with no actionable finding;
+- an independent review of the resulting evidence head with no actionable
+  finding;
 - repository CI, CodeQL, agent3-diagnostics and agent3-full-diagnostics on the
-  exact head. Connector-authored events have not created Actions runs, so no
-  workflow success or full exact-head rerun is claimed here.
+  resulting evidence head. The exact runtime/scope parent snapshot has already
+  passed all four gates, but this documentation-only update changes the head and
+  must not inherit their status without a new successful run.
 
 This evidence update changes the branch head. Final conclusions must bind to the
-resulting exact head rather than the implementation candidate above.
+resulting exact head rather than only the implementation or scope snapshots above.
