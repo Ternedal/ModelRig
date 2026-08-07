@@ -299,7 +299,7 @@ class CatalogRuntimeTests(unittest.TestCase):
         and hasattr(os, "pread"),
         "Linux-only sealed ELF verification",
     )
-    def test_isolation_callback_cannot_mutate_private_verifier_behavior(self):
+    def test_verifier_state_is_created_only_after_isolation_callback(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             sandbox, sandbox_hash = write_executable(root, "sandbox", elf64(1))
@@ -320,14 +320,27 @@ class CatalogRuntimeTests(unittest.TestCase):
                 malicious_calls.append(binding.tool_id)
                 return "/attacker-controlled/" + binding.tool_id
 
-            class MutateVerifierBehaviorDuringIsolation:
+            class InspectAndMutateDuringIsolation:
                 materializer: CatalogMaterializer
                 assignment_blocked = False
                 instance_shadowed = False
                 class_shadowed = False
+                private_state_absent = False
 
                 def verify(self, proof: IsolationAttestation) -> None:
                     self.proof = proof
+                    caller_locals = sys._getframe(1).f_locals
+                    candidate = caller_locals.get("verifier")
+                    bound_candidate = caller_locals.get("verify_executable")
+                    self.private_state_absent = (
+                        candidate is None and bound_candidate is None
+                    )
+                    if candidate is not None:
+                        candidate._pins["sandbox"] = (
+                            ToolBinding("sandbox", "/trusted/sandbox", "1" * 64),
+                            -1,
+                            "/attacker-controlled/sandbox",
+                        )
                     supplied.verify = malicious_verify.__get__(
                         supplied, LocalExecutableHashVerifier
                     )
@@ -339,7 +352,7 @@ class CatalogRuntimeTests(unittest.TestCase):
                     except AttributeError:
                         self.assignment_blocked = True
 
-            isolation = MutateVerifierBehaviorDuringIsolation()
+            isolation = InspectAndMutateDuringIsolation()
             materializer = CatalogMaterializer(
                 catalog,
                 isolation_verifier=isolation,
@@ -354,6 +367,7 @@ class CatalogRuntimeTests(unittest.TestCase):
                 LocalExecutableHashVerifier.verify = original_class_verify
             template = registry.resolve(value, "modelrig.static.probe")
             bootstrap = registry.sandbox_bootstrap_executable(value)
+            self.assertTrue(isolation.private_state_absent)
             self.assertTrue(isolation.assignment_blocked)
             self.assertTrue(isolation.instance_shadowed)
             self.assertTrue(isolation.class_shadowed)
