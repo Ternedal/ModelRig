@@ -1,0 +1,48 @@
+{
+  "schema": "modelrig-devcontrol-dc-l08-source-provenance/v1",
+  "source": {
+    "pull_request": 338,
+    "head": "07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f"
+  },
+  "base": "3777dc456bf72238339e91f714dd239a97ec02b9",
+  "copied_exact_paths": [
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py"
+  ],
+  "projected_paths": [
+    {
+      "path": "devcontrol/tests/test_h10r_tier_a_legacy_runner_extraction.py",
+      "reason": "prove the private legacy and modern executor ownership and fail-closed boundary without importing the deferred DC-L09 public facade or command receipt"
+    }
+  ],
+  "progressive_projections": [
+    {
+      "path": ".github/workflows/_tests.yml",
+      "reason": "run all twenty-eight DevControl modules, assert the private-only execution boundary and activate the real-Windows closure-bound executor contract through a test-only in-memory shim"
+    },
+    {
+      "path": "devcontrol/README.md",
+      "reason": "describe verified-only execution and the still-absent public, receipt and trusted-Git surfaces"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
+      "reason": "remain an import-only compatibility facade and reject accidental executor exports"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
+      "reason": "advance the exact authority hash to v6 and bind both private executor sources"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
+      "reason": "advance the exact v6 authority bundle without exporting process-launch functions"
+    },
+    {
+      "path": "devcontrol/tests/test_slice9.py",
+      "reason": "require the private DC-L08 executor sources in the authority bundle while retaining the absent public facade"
+    },
+    {
+      "path": "tests/workflow_test_coverage.py",
+      "reason": "extend CI discovery to twenty-eight modules and require both native Windows execution contracts while leaving receipt testing deferred"
+    }
+  ]
+}
