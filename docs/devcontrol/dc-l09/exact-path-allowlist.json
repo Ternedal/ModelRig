@@ -2,7 +2,7 @@
   "schema": "modelrig-devcontrol-dc-l09-exact-path-allowlist/v1",
   "slice": "DC-L09",
   "base": "70a40a27201ccaa33b1dffe0fff65faa113cd0f7",
-  "expected_path_count": 32,
+  "expected_path_count": 33,
   "paths": [
     ".github/workflows/_tests.yml",
     "devcontrol/README.md",
@@ -14,6 +14,7 @@
     "devcontrol/schemas/development-trusted-git-runtime-recovery-receipt-v1.schema.json",
     "devcontrol/schemas/development-trusted-git-runtime-staging-receipt-v1.schema.json",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
+    "devcontrol/src/kaliv_dev_control/bounded_subprocess.py",
     "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
     "devcontrol/src/kaliv_dev_control/tier_a_command_receipt.py",
     "devcontrol/src/kaliv_dev_control/tier_a_execution.py",
