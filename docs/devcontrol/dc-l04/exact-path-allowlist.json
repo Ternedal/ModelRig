@@ -1,7 +1,7 @@
 {
   "schema": "modelrig-devcontrol-dc-l04-exact-path-allowlist/v1",
   "base": "b717055790947ea848418964e7ebd78c39c39ee3",
-  "expected_path_count": 19,
+  "expected_path_count": 20,
   "paths": [
     "devcontrol/PHYSICAL_ISOLATION_DURABLE_PUBLICATION.md",
     "devcontrol/README.md",
@@ -10,6 +10,7 @@
     "devcontrol/src/kaliv_dev_control/__init__.py",
     "devcontrol/src/kaliv_dev_control/__main__.py",
     "devcontrol/src/kaliv_dev_control/physical_isolation.py",
+    "devcontrol/tests/test_foundation.py",
     "devcontrol/tests/test_physical_isolation_durable_publication_h10b.py",
     "devcontrol/tests/test_slice6.py",
     "devcontrol/tests/test_slice6_hardening.py",
