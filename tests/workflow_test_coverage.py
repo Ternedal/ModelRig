@@ -232,22 +232,22 @@ check(retarget_rejected, "task-bound registry rejects cross-task retargeting")
 native_windows_contracts = (
     "tests/support/windows_job_contract.py",
     "tests/support/windows_job_close_contract.py",
-    "tests/support/windows_bounded_subprocess_contract.py",
     "tests/support/windows_restricted_contract.py",
     "tests/support/windows_tier_a_environment_contract.py",
     "tests/worker_toolhost.py",
 )
 check(
     all(f"python {path}" in workflow for path in native_windows_contracts),
-    "CI reaches every DC-L05 native Windows containment contract",
+    "CI reaches every DC-L05 product-side native Windows contract",
 )
-future_windows_contracts = (
+deferred_windows_contracts = (
+    "tests/support/windows_bounded_subprocess_contract.py",
     "tests/support/windows_catalog_tier_a_contract.py",
     "tests/support/windows_tier_a_receipt_contract.py",
 )
 check(
-    all(f"python {path}" not in workflow for path in future_windows_contracts),
-    "DC-L05 does not activate later Tier-A or trusted-Git integration contracts",
+    all(f"python {path}" not in workflow for path in deferred_windows_contracts),
+    "DC-L05 does not activate later DevControl execution, Tier-A or trusted-Git contracts",
 )
 product_modules = (
     "worker/app/toolhost.py",
