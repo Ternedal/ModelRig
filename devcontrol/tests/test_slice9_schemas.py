@@ -8,6 +8,7 @@ from pathlib import Path
 
 from kaliv_dev_control.catalog import IsolationBoundary, NetworkMode
 from kaliv_dev_control.tier_a_authority import (
+    TIER_A_APPLICATION_ENVIRONMENT,
     TierAExecutionLease,
     TierALaunchPlan as TierALaunchPlanV1,
     working_directory_authority_sha256,
@@ -120,7 +121,7 @@ class TierASchemaParityTests(unittest.TestCase):
                 cwd=".",
                 max_timeout_seconds=30,
                 max_output_bytes=4096,
-                env={"CI": "1", "PYTHONDONTWRITEBYTECODE": "1"},
+                env=TIER_A_APPLICATION_ENVIRONMENT,
                 catalog_sha256=HASH_B,
                 toolchain_sha256=HASH_C,
                 lease_sha256=HASH_D,
