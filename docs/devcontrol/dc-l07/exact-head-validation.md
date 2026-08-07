@@ -18,11 +18,14 @@ as PR #387 and the branch is zero commits behind `main`.
 
 ## Required structural checks
 
-- exact diff equals the 44 paths in `exact-path-allowlist.json`;
+- exact diff equals the 45 paths in `exact-path-allowlist.json`;
 - all twenty-seven DC-L01–DC-L07 test modules are reached by CI;
+- v1 lease and launch-plan schema compatibility remains exact;
+- v3 plan and execution-result schema parity is validated without DC-L08 imports;
 - no executor, command receipt, trusted-Git, publisher or remote-authority module is present;
 - prepared permission metadata is flushed before create-once publication;
 - Windows permission repair is flushed before positive staging evidence;
+- repeated staging of an already locked Unix closure remains deterministic;
 - unresolved review-thread count is zero; and
 - the independent verdict names the same frozen head.
 
