@@ -74,16 +74,19 @@ expected_modules = {
     "test_campaign_review.py",
     "test_durable_publication.py",
     "test_foundation.py",
+    "test_physical_isolation_durable_publication_h10b.py",
     "test_proposal_reload.py",
     "test_review_reload.py",
     "test_slice2.py",
     "test_slice5.py",
+    "test_slice6.py",
+    "test_slice6_hardening.py",
     "test_store_proposal.py",
 }
 observed_modules = {
     path.name for path in (root / "devcontrol/tests").glob("test_*.py")
 }
-check(observed_modules == expected_modules, f"the nine DC-L01–L03 test modules are present: {sorted(observed_modules)}")
+check(observed_modules == expected_modules, f"the twelve DC-L01–L04 test modules are present: {sorted(observed_modules)}")
 
 receipt_schema = json.loads(
     (root / "devcontrol/schemas/development-github-read-receipt-v1.schema.json").read_text(encoding="utf-8")
