@@ -1,9 +1,10 @@
-"""Dormant DC-L08 Tier-A authority and verified-execution identity.
+"""Dormant DC-L09 Tier-A authority and complete local execution identity.
 
 This stage can materialize authority, verify and stage signed runtime closures,
-construct closure-bound plans and execute only through the private v3 module.
-The authority surface itself exposes no process-launch function, final public
-facade, trusted-Git, receipt, publisher, credential, remote or activation power.
+construct closure-bound plans, execute through the private v3 implementation and
+bind the trusted local Git runtime plus command receipt and public facade into the
+signed source identity. The authority module itself still exposes no process
+launcher, credential, remote Git, publisher, deployment or activation power.
 """
 from __future__ import annotations
 
@@ -34,9 +35,8 @@ TIER_A_APPLICATION_ENVIRONMENT = _core.TIER_A_APPLICATION_ENVIRONMENT
 workspace_root_authority_sha256 = _core.workspace_root_authority_sha256
 
 # Preserve the landed DC-L06 v1 compatibility exports. DC-L07's closure-bound
-# v3 plan lives in ``tier_a_plan`` and is exported from the package root. These
-# aliases keep earlier bounded tests and consumers working without exposing the
-# private DC-L08 executor from this authority surface.
+# v3 plan lives in ``tier_a_plan`` and the final DC-L09 facade. These aliases
+# retain earlier bounded consumers without exposing an executor from this module.
 TierALaunchPlan = _core.TierALaunchPlan
 build_tier_a_launch_plan = _core.build_tier_a_launch_plan
 
@@ -46,14 +46,14 @@ for _private_execution_name in (
 ):
     if hasattr(_core, _private_execution_name) or _private_execution_name in globals():
         raise TierAExecutionError(
-            f"DC-L08 authority exposes private execution authority: "
+            f"DC-L09 authority exposes process execution authority: "
             f"{_private_execution_name}"
         )
 del _private_execution_name
 
-# Exact source chain that can issue, transform or privately execute DC-L08
-# runtime authority. The v6 domain excludes the final DC-L09 facade, command
-# receipt, trusted-Git, publisher and remote-authority modules.
+# Exact source chain that can issue, transform, privately execute or join DC-L09
+# runtime authority to trusted local Git evidence. The v7 domain deliberately
+# excludes semantic review, publisher, credentials, remote Git and activation.
 _TIER_A_BUNDLE_FILES = (
     "worker/app/__init__.py",
     "worker/app/windows_job.py",
@@ -89,6 +89,13 @@ _TIER_A_BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/tier_a_plan.py",
     "devcontrol/src/kaliv_dev_control/tier_a_result.py",
     "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_model.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_staging.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_h4.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_runner.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_command_receipt.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_execution.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_lease.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py",
@@ -176,14 +183,14 @@ def working_directory_authority_sha256(root: Path, relative: str) -> str:
 
 
 def tier_a_toolhost_sha256(control_plane_root: Path) -> str:
-    """Hash the complete private v6 DC-L08 verified-execution source chain."""
+    """Hash the complete v7 DC-L09 trusted-Git and receipt source chain."""
 
     root = _core._canonical_directory(
         control_plane_root,
         name="control-plane root",
     )
     digest = hashlib.sha256()
-    digest.update(b"kaliv-tier-a-toolhost/v6\0")
+    digest.update(b"kaliv-tier-a-toolhost/v7\0")
     for relative in _TIER_A_BUNDLE_FILES:
         path = root / PurePosixPath(relative)
         if _has_linkish_component(path) or not path.is_file():
