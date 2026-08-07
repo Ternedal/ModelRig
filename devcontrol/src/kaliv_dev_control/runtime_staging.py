@@ -5,9 +5,9 @@ authority. It copies one operator-bound executable into a deterministic
 workspace location only after the exact task, leased command registry, catalog,
 toolchain and signed workspace authority agree.
 
-The public Tier-A runtime consumes the immutable receipt by rebinding exactly one
-leased command template to the verified staged path. Staging still cannot launch
-a process by itself.
+The DC-L07 planning surface can consume the immutable receipt by rebinding
+exactly one leased command template to the verified staged path. Staging still
+cannot launch a process by itself.
 """
 from __future__ import annotations
 
@@ -22,11 +22,12 @@ from typing import Any, Mapping
 from .catalog import CatalogError
 from .commands import CommandRegistry, CommandTemplate
 from .contract import DevelopmentTask
+from .durable_publication import DurablePublicationError, sync_directory
 from .streaming_publication import (
     StreamingPublicationError,
     publish_stream_once,
 )
-from .tier_a_execution import (
+from .tier_a_authority import (
     LeasedCommandRegistry,
     workspace_root_authority_sha256,
 )
@@ -156,19 +157,32 @@ def _secure_directory_chain(root: Path, relative: PurePosixPath) -> Path:
 
 
 def _fix_published_permissions(destination: Path, *, published_here: bool) -> None:
-    """Make the final name read-only without blocking Windows temp-name cleanup."""
+    """Make final metadata durable without blocking Windows temp cleanup."""
 
+    descriptor = -1
     try:
+        flags = os.O_RDWR | getattr(os, "O_BINARY", 0)
+        descriptor = os.open(destination, flags)
         os.chmod(destination, 0o555)
-    except OSError as exc:
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        sync_directory(destination.parent)
+    except (OSError, DurablePublicationError) as exc:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
         if published_here:
             try:
                 os.chmod(destination, 0o755)
                 destination.unlink()
-            except OSError:
+                sync_directory(destination.parent)
+            except (OSError, DurablePublicationError):
                 pass
         raise RuntimeStagingError(
-            "staged runtime permissions could not be fixed"
+            "staged runtime permissions could not be made durable"
         ) from exc
 
 
@@ -451,6 +465,7 @@ class TrustedRuntimeStager:
                     "staged runtime destination already exists with different bytes"
                 )
         else:
+
             def validate_concurrent(path: Path) -> None:
                 if _is_linkish(path) or not path.is_file():
                     raise RuntimeStagingError(
@@ -504,7 +519,7 @@ class TrustedRuntimeStager:
         # Windows' read-only attribute applies to every hard-link name. Setting it
         # on the temporary name before unlink would make temp cleanup fail with
         # WinError 5. Publish without overwrite, remove the private name, then lock
-        # the final name. The receipt verification below rehashes the final bytes.
+        # and fsync the final name before issuing a positive receipt.
         if os.name == "nt":
             _fix_published_permissions(destination, published_here=published_here)
 
@@ -581,7 +596,7 @@ class TrustedRuntimeStager:
         task: DevelopmentTask,
         command_id: str,
     ) -> LeasedCommandRegistry:
-        """Rebind exactly one leased template to its verified staged executable."""
+        """Rebind one leased template for plan construction; never execute it."""
 
         destination = self.verify(receipt, registry, task, command_id)
         original = registry.resolve(task, command_id)
