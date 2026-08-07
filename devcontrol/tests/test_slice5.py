@@ -27,7 +27,6 @@ from kaliv_dev_control.catalog import (
     Toolchain,
     modelrig_command_catalog,
 )
-from kaliv_dev_control.commands import CommandExecutor, CommandPolicyError
 from kaliv_dev_control.contract import DevelopmentTask
 from kaliv_dev_control.github_read import (
     GitHubReadAdapter,
@@ -79,7 +78,6 @@ def task(
     *commands: str,
     allowed_paths: tuple[str, ...] = ("devcontrol/**",),
 ) -> DevelopmentTask:
-    effective_commands = commands or ("modelrig.devcontrol.tests",)
     return DevelopmentTask.from_mapping(
         {
             "schema": "kaliv-development-task/v1",
@@ -91,7 +89,7 @@ def task(
             "risk": "low",
             "allowed_paths": list(allowed_paths),
             "protected_paths": ["devcontrol/secrets/**"],
-            "allowed_command_ids": list(effective_commands),
+            "allowed_command_ids": list(commands),
             "required_tests": ["DC-L03 fixed-authority regressions"],
             "budget": {
                 "max_changed_files": 20,
@@ -149,7 +147,11 @@ def attestation(
 
 
 class AcceptIsolation:
+    def __init__(self) -> None:
+        self.called = False
+
     def verify(self, proof: IsolationAttestation) -> None:
+        self.called = True
         self.proof = proof
 
 
@@ -223,17 +225,38 @@ class CatalogRuntimeTests(unittest.TestCase):
                         {key: value},
                     )
 
-    def test_empty_default_catalog_rejects_valid_task_before_launch(self):
+    def test_empty_default_catalog_rejects_unknown_command_before_callback(self):
         catalog = modelrig_command_catalog()
         value = task("modelrig.devcontrol.tests")
         tools = Toolchain(())
+        isolation = AcceptIsolation()
         with self.assertRaisesRegex(CatalogError, "not in the ModelRig catalog"):
             CatalogMaterializer(
-                catalog, isolation_verifier=AcceptIsolation()
+                catalog, isolation_verifier=isolation
             ).materialize(value, tools, attestation(value, tools, catalog))
+        self.assertFalse(isolation.called)
 
-    def test_default_isolation_and_exact_authority_fail_closed(self):
-        catalog, value, tools = static_catalog(), task("modelrig.static.probe"), static_toolchain()
+    def test_empty_catalog_materializes_only_an_immutable_empty_registry(self):
+        catalog = modelrig_command_catalog()
+        value = task()
+        tools = Toolchain(())
+        isolation = AcceptIsolation()
+        registry = CatalogMaterializer(
+            catalog, isolation_verifier=isolation
+        ).materialize(value, tools, attestation(value, tools, catalog))
+        self.assertTrue(isolation.called)
+        execution_task = registry.execution_task(value)
+        self.assertIsNot(execution_task, value)
+        self.assertEqual(execution_task.canonical_json(), value.canonical_json())
+        with self.assertRaisesRegex(Exception, "no launch authority"):
+            registry.sandbox_bootstrap_executable(execution_task)
+        with self.assertRaisesRegex(Exception, "not allowed"):
+            registry.resolve(execution_task, "modelrig.static.probe")
+        with self.assertRaises(Exception):
+            registry._bootstrap_executable = "/attacker"
+
+    def test_default_isolation_and_exact_authority_fail_closed_for_empty_catalog(self):
+        catalog, value, tools = modelrig_command_catalog(), task(), Toolchain(())
         proof = attestation(value, tools, catalog)
         with self.assertRaisesRegex(CatalogError, "not been independently verified"):
             CatalogMaterializer(catalog).materialize(value, tools, proof)
@@ -243,7 +266,7 @@ class CatalogRuntimeTests(unittest.TestCase):
             ).materialize(value, tools, replace(proof, base_sha="b" * 40))
 
     def test_isolation_verifier_cannot_mutate_private_attestation(self):
-        catalog, value, tools = static_catalog(), task("modelrig.static.probe"), static_toolchain()
+        catalog, value, tools = modelrig_command_catalog(), task(), Toolchain(())
         with self.assertRaisesRegex(CatalogError, "mutated"):
             CatalogMaterializer(
                 catalog, isolation_verifier=MutateIsolation()
@@ -259,122 +282,74 @@ class CatalogRuntimeTests(unittest.TestCase):
                 ),
             )
 
-    @unittest.skipUnless(
-        sys.platform.startswith("linux")
-        and hasattr(os, "memfd_create")
-        and hasattr(os, "pread"),
-        "Linux-only sealed ELF verification",
-    )
-    def test_static_catalog_materializes_sealed_static_objects(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            sandbox, sandbox_hash = write_executable(root, "sandbox", elf64(1))
-            tool, tool_hash = write_executable(root, "tool", elf64(1))
-            catalog = static_catalog()
-            value = task("modelrig.static.probe")
-            tools = Toolchain(
-                (
-                    ToolBinding("sandbox", str(sandbox), sandbox_hash),
-                    ToolBinding("statictool", str(tool), tool_hash),
-                )
-            )
-            registry = CatalogMaterializer(
-                catalog, isolation_verifier=AcceptIsolation()
-            ).materialize(value, tools, attestation(value, tools, catalog))
-            template = registry.resolve(value, "modelrig.static.probe")
-            bootstrap = registry.sandbox_bootstrap_executable(value)
-            self.assertTrue(template.argv[0].startswith(f"/proc/{os.getpid()}/fd/"))
-            self.assertTrue(bootstrap.startswith(f"/proc/{os.getpid()}/fd/"))
-            self.assertEqual(registry.sandbox_bootstrap_mode(value), "static")
-            confined = CommandExecutor._confined_argv(
-                Path("/sandbox"), Path("/sandbox/repository"), template.argv,
-                bootstrap, "static",
-            )
-            self.assertEqual(confined[:3], (bootstrap, "/sandbox", "/sandbox/repository"))
-            self.assertEqual(confined[3:], template.argv)
+    def test_nonempty_catalog_is_rejected_before_callback_or_verifier(self):
+        catalog = static_catalog()
+        value = task("modelrig.static.probe")
+        tools = static_toolchain()
+        isolation = AcceptIsolation()
+        supplied = LocalExecutableHashVerifier()
+        with patch.object(
+            LocalExecutableHashVerifier,
+            "verify",
+            side_effect=AssertionError("executable verifier must not be called"),
+        ):
+            with self.assertRaisesRegex(CatalogError, "deferred fail closed"):
+                CatalogMaterializer(
+                    catalog,
+                    isolation_verifier=isolation,
+                    executable_verifier=supplied,
+                ).materialize(value, tools, attestation(value, tools, catalog))
+        self.assertFalse(isolation.called)
+        self.assertEqual(supplied._pins, {})
 
-    @unittest.skipUnless(
-        sys.platform.startswith("linux")
-        and hasattr(os, "memfd_create")
-        and hasattr(os, "pread"),
-        "Linux-only sealed ELF verification",
-    )
-    def test_verifier_state_is_created_only_after_isolation_callback(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            sandbox, sandbox_hash = write_executable(root, "sandbox", elf64(1))
-            tool, tool_hash = write_executable(root, "tool", elf64(1))
-            catalog = static_catalog()
-            value = task("modelrig.static.probe")
-            tools = Toolchain(
-                (
-                    ToolBinding("sandbox", str(sandbox), sandbox_hash),
-                    ToolBinding("statictool", str(tool), tool_hash),
-                )
-            )
-            supplied = LocalExecutableHashVerifier()
-            malicious_calls: list[str] = []
-            original_class_verify = LocalExecutableHashVerifier.verify
+    def test_nonempty_catalog_never_invokes_frame_inspecting_callback(self):
+        catalog = static_catalog()
+        value = task("modelrig.static.probe")
+        tools = static_toolchain()
 
-            def malicious_verify(_self, binding: ToolBinding) -> str:
-                malicious_calls.append(binding.tool_id)
-                return "/attacker-controlled/" + binding.tool_id
+        class FrameInspector:
+            called = False
 
-            class InspectAndMutateDuringIsolation:
-                materializer: CatalogMaterializer
-                assignment_blocked = False
-                instance_shadowed = False
-                class_shadowed = False
-                private_state_absent = False
-
-                def verify(self, proof: IsolationAttestation) -> None:
-                    self.proof = proof
-                    caller_locals = sys._getframe(1).f_locals
-                    candidate = caller_locals.get("verifier")
-                    bound_candidate = caller_locals.get("verify_executable")
-                    self.private_state_absent = (
-                        candidate is None and bound_candidate is None
-                    )
-                    if candidate is not None:
+            def verify(self, proof: IsolationAttestation) -> None:
+                del proof
+                self.called = True
+                caller_locals = sys._getframe(1).f_locals
+                for candidate in caller_locals.values():
+                    if isinstance(candidate, LocalExecutableHashVerifier):
                         candidate._pins["sandbox"] = (
                             ToolBinding("sandbox", "/trusted/sandbox", "1" * 64),
                             -1,
                             "/attacker-controlled/sandbox",
                         )
-                    supplied.verify = malicious_verify.__get__(
-                        supplied, LocalExecutableHashVerifier
-                    )
-                    self.instance_shadowed = supplied.verify.__func__ is malicious_verify
-                    LocalExecutableHashVerifier.verify = malicious_verify
-                    self.class_shadowed = LocalExecutableHashVerifier.verify is malicious_verify
-                    try:
-                        self.materializer.executable_verifier = supplied
-                    except AttributeError:
-                        self.assignment_blocked = True
 
-            isolation = InspectAndMutateDuringIsolation()
-            materializer = CatalogMaterializer(
-                catalog,
-                isolation_verifier=isolation,
-                executable_verifier=supplied,
+        isolation = FrameInspector()
+        with self.assertRaisesRegex(CatalogError, "deferred fail closed"):
+            CatalogMaterializer(
+                catalog, isolation_verifier=isolation
+            ).materialize(value, tools, attestation(value, tools, catalog))
+        self.assertFalse(isolation.called)
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux")
+        and hasattr(os, "memfd_create")
+        and hasattr(os, "pread"),
+        "Linux-only sealed ELF verification",
+    )
+    def test_static_verifier_directly_pins_sealed_static_objects(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sandbox, sandbox_hash = write_executable(root, "sandbox", elf64(1))
+            tool, tool_hash = write_executable(root, "tool", elf64(1))
+            verifier = LocalExecutableHashVerifier()
+            sandbox_invocation = verifier.verify(
+                ToolBinding("sandbox", str(sandbox), sandbox_hash)
             )
-            isolation.materializer = materializer
-            try:
-                registry = materializer.materialize(
-                    value, tools, attestation(value, tools, catalog)
-                )
-            finally:
-                LocalExecutableHashVerifier.verify = original_class_verify
-            template = registry.resolve(value, "modelrig.static.probe")
-            bootstrap = registry.sandbox_bootstrap_executable(value)
-            self.assertTrue(isolation.private_state_absent)
-            self.assertTrue(isolation.assignment_blocked)
-            self.assertTrue(isolation.instance_shadowed)
-            self.assertTrue(isolation.class_shadowed)
-            self.assertFalse(hasattr(materializer, "executable_verifier"))
-            self.assertEqual(malicious_calls, [])
-            self.assertTrue(template.argv[0].startswith(f"/proc/{os.getpid()}/fd/"))
-            self.assertTrue(bootstrap.startswith(f"/proc/{os.getpid()}/fd/"))
+            tool_invocation = verifier.verify(
+                ToolBinding("statictool", str(tool), tool_hash)
+            )
+            self.assertTrue(sandbox_invocation.startswith(f"/proc/{os.getpid()}/fd/"))
+            self.assertTrue(tool_invocation.startswith(f"/proc/{os.getpid()}/fd/"))
+            self.assertNotEqual(sandbox_invocation, tool_invocation)
 
     @unittest.skipUnless(
         sys.platform.startswith("linux")
