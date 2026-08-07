@@ -49,7 +49,9 @@ Three progressive production files are therefore projected:
 
 Seven source tests are projected away from the future package facade, v2/v3
 plans, execution result, runtime closure and executor. Their replacement
-assertions explicitly prove those later surfaces remain absent.
+assertions explicitly prove those later surfaces remain absent. The repository
+workflow-coverage contract is also progressively extended so CI proves that all
+twenty DevControl test modules landed through DC-L06 are discovered.
 
 ## Hard exclusions
 
@@ -78,7 +80,7 @@ DC-L06 must not contain or expose:
 
 ## Review and merge gate
 
-The final pull-request head must differ from the recorded base by exactly the 26
+The final pull-request head must differ from the recorded base by exactly the 27
 paths in `exact-path-allowlist.json`. All applicable CI, CodeQL and diagnostics
 workflows must pass on that exact head. An independent reviewer distinct from
 the author must then approve that same head. Any subsequent commit makes the
