@@ -267,7 +267,10 @@ check(
 )
 check(
     "kaliv_dev_control.tier_a_execution_v3" in workflow
-    and "kaliv_dev_control.tier_a_execution\"" not in workflow,
+    and not (
+        root
+        / "devcontrol/src/kaliv_dev_control/tier_a_execution.py"
+    ).exists(),
     "CI activates the private v3 executor without landing the final public facade",
 )
 
