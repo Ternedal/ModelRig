@@ -405,6 +405,15 @@ class CommandRegistry:
             values[template.command_id] = template
         self._templates = MappingProxyType(values)
 
+    def execution_task(self, task: DevelopmentTask) -> DevelopmentTask:
+        """Return one strict private task snapshot for the complete execution."""
+        if not isinstance(task, DevelopmentTask):
+            raise CommandPolicyError("command execution requires a development task")
+        try:
+            return DevelopmentTask.from_mapping(task.to_dict())
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise CommandPolicyError("command execution task is invalid") from exc
+
     def resolve(self, task: DevelopmentTask, command_id: str) -> CommandTemplate:
         if command_id not in task.allowed_command_ids:
             raise CommandPolicyError("command is not allowed by the task contract")
@@ -764,17 +773,18 @@ class CommandExecutor:
         workspace: Path,
         command_id: str,
     ) -> CommandReceipt:
-        template = self.registry.resolve(task, command_id)
+        execution_task = self.registry.execution_task(task)
+        template = self.registry.resolve(execution_task, command_id)
         source = workspace.resolve()
         source_text = str(source)
         if any(source_text in argument for argument in template.argv):
             raise CommandPolicyError(
                 "command arguments cannot disclose the source workspace"
             )
-        source_before = self._verify_source_clean(task, source)
+        source_before = self._verify_source_clean(execution_task, source)
         self._cwd(source, template.cwd)
 
-        sandbox = _CommandSandbox(self, task, source)
+        sandbox = _CommandSandbox(self, execution_task, source)
         result = None
         duration_ms = 0
         before_worktree = ""
@@ -795,10 +805,10 @@ class CommandExecutor:
                     confined_argv,
                     cwd=cwd,
                     timeout_seconds=min(
-                        task.budget.max_runtime_seconds,
+                        execution_task.budget.max_runtime_seconds,
                         template.max_timeout_seconds,
                     ),
-                    max_output_bytes=task.budget.max_output_bytes,
+                    max_output_bytes=execution_task.budget.max_output_bytes,
                     env=command_env,
                 )
             except WorkspaceError as exc:
@@ -807,7 +817,7 @@ class CommandExecutor:
                 ) from exc
             duration_ms = max(0, int((time.monotonic() - started) * 1_000))
             try:
-                self._verify_head(task, sandbox.repository)
+                self._verify_head(execution_task, sandbox.repository)
                 after_worktree, after_clean = self._snapshot(sandbox.repository)
                 after_metadata = sandbox.metadata_fingerprint()
             except (WorkspaceError, CommandExecutionError) as exc:
@@ -823,7 +833,7 @@ class CommandExecutor:
                 cleanup_error = exc
             try:
                 self._verify_source_clean(
-                    task, source, expected_fingerprint=source_before
+                    execution_task, source, expected_fingerprint=source_before
                 )
             except Exception as exc:
                 source_error = exc
@@ -841,16 +851,16 @@ class CommandExecutor:
         unchanged = before_sha == after_sha and after_clean
         reset = not unchanged
 
-        task_sha = self._sha256(task.canonical_json().encode("utf-8"))
+        task_sha = self._sha256(execution_task.canonical_json().encode("utf-8"))
         stdout = result.stdout.encode("utf-8")
         stderr = result.stderr.encode("utf-8")
         argv = json.dumps(
             list(template.argv), ensure_ascii=False, separators=(",", ":")
         ).encode("utf-8")
         return CommandReceipt(
-            task_id=task.task_id,
+            task_id=execution_task.task_id,
             task_sha256=task_sha,
-            base_sha=task.base_sha,
+            base_sha=execution_task.base_sha,
             command_id=command_id,
             argv_sha256=self._sha256(argv),
             cwd=template.cwd,
