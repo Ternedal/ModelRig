@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from kaliv_dev_control.catalog import (
+    CatalogError,
     IsolationAttestation,
     IsolationBoundary,
     ModelRigCommandCatalog,
@@ -251,12 +252,10 @@ class VersionCheckClosureBuilderTests(unittest.TestCase):
 
     def test_rejects_legacy_python_profile(self):
         with tempfile.TemporaryDirectory() as directory:
-            task, registry, trusted, workspace, _ = make_authority(
-                Path(directory), legacy_profile=True
-            )
-            builder = ModelRigVersionCheckClosureBuilder(trusted, workspace)
-            with self.assertRaisesRegex(RuntimeClosureError, "single-file profile"):
-                builder.build(registry, task)
+            with self.assertRaisesRegex(
+                CatalogError, "self-contained runtime attestation"
+            ):
+                make_authority(Path(directory), legacy_profile=True)
 
     def test_rejects_workspace_not_named_by_lease(self):
         with tempfile.TemporaryDirectory() as directory:
