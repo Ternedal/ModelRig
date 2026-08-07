@@ -510,6 +510,9 @@ class CatalogMaterializer:
         catalog = self.catalog.snapshot()
         specs = tuple(catalog.resolve(item) for item in task_snapshot.allowed_command_ids)
         snapshot = toolchain.snapshot()
+        verifier = self.executable_verifier
+        if specs and type(verifier) is not LocalExecutableHashVerifier:
+            raise CatalogError("materializer executable verifier snapshot is invalid")
         expected = {
             "task_id": task_snapshot.task_id, "task_sha256": _task_sha(task_snapshot),
             "repository": task_snapshot.repository, "base_sha": task_snapshot.base_sha,
@@ -539,7 +542,6 @@ class CatalogMaterializer:
             raise CatalogError("isolation verifier mutated the attestation")
         if not specs:
             return TaskBoundCommandRegistry((), task_snapshot, None, None)
-        verifier = self.executable_verifier
         bootstrap = verifier.verify(snapshot.resolve("sandbox"))
         if not isinstance(bootstrap, str) or not _absolute(bootstrap):
             raise CatalogError("executable verifier did not return a pinned sandbox helper")
