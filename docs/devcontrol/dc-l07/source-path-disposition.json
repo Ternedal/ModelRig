@@ -32,6 +32,7 @@
     "devcontrol/tests/test_slice10c_output_result.py",
     "devcontrol/tests/test_slice10d_runtime_closure.py",
     "devcontrol/tests/test_slice10e_version_check_closure.py",
+    "devcontrol/tests/test_slice9_schemas.py",
     "devcontrol/tests/test_streaming_publication_h10g.py"
   ],
   "progressive_paths": [
@@ -54,14 +55,15 @@
     "docs/devcontrol/dc-l07/symbol-ownership.json"
   ],
   "projected_source_paths": {
-    "devcontrol/src/kaliv_dev_control/_runtime_closure_common.py": "make post-publication permission repair and parent-directory metadata crash durable",
+    "devcontrol/src/kaliv_dev_control/_runtime_closure_common.py": "make post-publication permission repair and parent-directory metadata crash durable while preserving repeated staging of already locked Unix files",
     "devcontrol/src/kaliv_dev_control/runtime_staging.py": "bind staging to the landed DC-L07 authority surface and durably flush Windows permission repair before a receipt is issued",
     "devcontrol/src/kaliv_dev_control/streaming_publication.py": "fsync caller-prepared metadata before create-once publication",
     "devcontrol/tests/test_slice10_runtime_staging.py": "replace future executor imports with the landed stage-local authority",
     "devcontrol/tests/test_slice10b_runtime_binding.py": "retain deterministic rebinding tests while explicitly excluding process launch",
     "devcontrol/tests/test_slice10c_output_result.py": "retain bounded result identity without importing a future executor",
     "devcontrol/tests/test_slice10d_runtime_closure.py": "retain closure, cwd and plan evidence while removing DC-L08 execution requirements",
-    "devcontrol/tests/test_slice10e_version_check_closure.py": "bind version-check closure tests to DC-L07 runtime and authority modules",
+    "devcontrol/tests/test_slice10e_version_check_closure.py": "bind version-check closure tests to DC-L07 runtime and authority modules and prove repeated staging is idempotent",
+    "devcontrol/tests/test_slice9_schemas.py": "preserve DC-L06 v1 schema parity while adding DC-L07 v3 plan and execution-result schema parity without importing a future executor",
     "devcontrol/tests/test_streaming_publication_h10g.py": "prove prepare-sync-link ordering and fail-closed metadata-sync failure"
   },
   "hard_exclusions": [
