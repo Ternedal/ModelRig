@@ -50,16 +50,16 @@ activating DevControl:
 
 - Job Object assignment before resume, process and memory limits, and kill-on-close;
 - AppContainer/restricted-token launch with a workspace-scoped capability;
-- bounded stdout/stderr capture and whole-process-tree cleanup;
+- bounded product-side stdout/stderr capture and whole-process-tree cleanup;
 - exact working-directory and reviewed environment handling;
 - runtime-lifetime immutability checks; and
 - a dormant Tier-A Windows launch surface used only by explicit product-side tests.
 
 The product modules under `worker/app/` do not import `kaliv_dev_control`.
 DC-L05 does not register a command, populate the empty catalog, validate physical
-evidence, create a Git authority, or expose a route/remote operation. The
-integration support files that require later Tier-A or trusted-Git slices are
-landed as dormant source only and are not executed by the DC-L05 workflow.
+evidence, create a Git authority, or expose a route/remote operation. Support
+programs that exercise the later DevControl Windows executor, Tier-A catalog or
+trusted-Git receipt remain landed but dormant until their owning slices exist.
 
 ## Physical evidence operator flow
 
