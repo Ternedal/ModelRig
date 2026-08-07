@@ -6,7 +6,6 @@
     "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_lease.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py",
-    "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py",
     "devcontrol/tests/test_h10k_tier_a_environment_extraction.py",
     "devcontrol/tests/test_h10l_tier_a_error_extraction.py",
@@ -20,6 +19,7 @@
   "progressive": [
     "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
+    "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py",
     "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
     "tests/workflow_test_coverage.py"
   ],
