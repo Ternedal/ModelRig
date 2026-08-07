@@ -256,6 +256,15 @@ class CatalogTests(unittest.TestCase):
         ):
             with self.subTest(key=key), self.assertRaisesRegex(CatalogError, "isolation"):
                 ProjectCommandSpec("modelrig.demo", "python", ("-V",), ".", 10, {key: "x"})
+        with self.assertRaisesRegex(CatalogError, "isolation"):
+            ProjectCommandSpec(
+                "modelrig.demo",
+                "python",
+                ("-V",),
+                ".",
+                10,
+                {"GOTOOLCHAIN": "local"},
+            )
 
     def test_catalog_environment_overrides_ambient_locale_and_timezone(self):
         spec = ProjectCommandSpec(
@@ -367,27 +376,26 @@ class CatalogTests(unittest.TestCase):
         with self.assertRaisesRegex(CommandPolicyError, "exact task"):
             registry.sandbox_bootstrap_executable(other)
 
-    def test_materialized_go_command_uses_attested_pinned_bootstrap(self):
-        t, tc, verifier = task("modelrig.backend.vet"), toolchain(), AcceptExecutable()
-        registry = CatalogMaterializer(
-            modelrig_command_catalog(),
-            isolation_verifier=AcceptIsolation(),
-            executable_verifier=verifier,
-        ).materialize(t, tc, attestation(t, tc))
-        template = registry.resolve(t, "modelrig.backend.vet")
-        self.assertEqual(template.argv[0], "/trusted/go")
-        self.assertEqual(verifier.seen, ["python", "go"])
-        bootstrap = registry.sandbox_bootstrap_executable(t)
-        self.assertEqual(bootstrap, "/trusted/python3")
-        with patch("kaliv_dev_control.commands.sys.executable", "/attacker/python"):
-            confined = CommandExecutor._confined_argv(
-                Path("/sandbox"),
-                Path("/sandbox/repository"),
-                template.argv,
-                registry.sandbox_bootstrap_executable(t),
+    def test_go_commands_are_fail_closed_until_helpers_are_attested(self):
+        catalog = modelrig_command_catalog()
+        self.assertNotIn("modelrig.backend.vet", catalog.command_ids)
+        self.assertNotIn("modelrig.backend.tests", catalog.command_ids)
+        with self.assertRaisesRegex(CatalogError, "complete helper toolchain"):
+            ProjectCommandSpec(
+                "modelrig.backend.vet",
+                "go",
+                ("vet", "./..."),
+                "backend",
+                900,
+                {},
             )
-        self.assertEqual(confined[0], "/trusted/python3")
-        self.assertEqual(confined[-len(template.argv):], template.argv)
+        t, tc = task("modelrig.backend.vet"), toolchain()
+        with self.assertRaisesRegex(CatalogError, "not in the ModelRig catalog"):
+            CatalogMaterializer(
+                catalog,
+                isolation_verifier=AcceptIsolation(),
+                executable_verifier=AcceptExecutable(),
+            ).materialize(t, tc, attestation(t, tc, catalog=catalog))
 
     def test_materialization_uses_validated_task_snapshot(self):
         original = task("modelrig.devcontrol.tests")
