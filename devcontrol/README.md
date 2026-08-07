@@ -1,4 +1,4 @@
-# Kaliv Development Control — landed foundations through DC-L09
+# Kaliv Development Control — landed foundations through DC-L10
 
 These slices are the dormant, bounded foundation defined by
 `docs/devcontrol/ADR-DC-001_DEVCONTROL_AUTHORITY_BOUNDARY.md` and the landed
@@ -121,6 +121,28 @@ command receipt and final facade. Package root, `tier_a_authority`,
 function. The default catalog remains empty, so no product route or normal
 package import activates execution.
 
+## DC-L10 authority
+
+DC-L10 adds two separate offline verification boundaries without extending
+Tier-A process authority:
+
+- verification-only Ed25519 authority with pinned public keys, issuer identities,
+  validity windows, monotonic keyring epochs, custody-policy binding and
+  verification-time revocation;
+- canonical semantic-review requests bound to one exact task, staged patch,
+  passing Git-aware Tier-A receipt, fixed review policy and current v7 execution
+  authority identity;
+- structured independent verdicts with one ordered assessment per acceptance
+  criterion and fail-closed approval semantics;
+- authenticated v1 review-verdict compatibility using reviewer-held HMAC material
+  outside the developer and execution workspace; and
+- crash-durable, create-once offline publication of requests and signed verdicts.
+
+The Ed25519 runtime contains no private-key type, signer, private-key loader,
+credential adapter or transport. Semantic review cannot inspect a mutable
+workspace, launch a process, reset Git or select another command. Neither module
+is exported from package root or included in the v7 Tier-A execution bundle.
+
 ## Physical evidence operator flow
 
 The physical harness writes one canonical unsigned report matching
@@ -144,11 +166,12 @@ PYTHONPATH=devcontrol/src python -m kaliv_dev_control verify-physical-report \
 
 ## Deliberately absent
 
-DC-L01–DC-L09 provide no credential loader, remote Git transport, fetch, push,
-GitHub write adapter, pull-request mutation, reviewer request, semantic approval,
-publisher authorization, merge, release, deployment or activation authority.
-The trusted Git runtime permits only bounded local repository operations, and the
-default command catalog remains empty.
+DC-L01–DC-L10 provide no private Ed25519 signing key, remote Git transport,
+fetch, push, GitHub write adapter, pull-request mutation, reviewer request,
+draft-readiness authority, publisher request or authorization, merge, release,
+deployment or activation authority. The trusted Git runtime permits only bounded
+local repository operations, semantic review remains offline, and the default
+command catalog remains empty.
 
 ## Validation
 
@@ -159,9 +182,7 @@ python3 tests/workflow_test_coverage.py
 cd backend && go test ./cmd/modelrig-version-check
 ```
 
-CI runs the closure-bound executor and Git-aware receipt against a real Windows
-kernel. It proves AppContainer containment, Job Object cleanup, bounded output,
-nested cwd, timeout handling, runtime immutability, pinned Git-runtime staging,
-workspace evidence and fail-closed mutation reset. Exact-path, provenance,
-mutation, validation and review evidence for this slice lives under
-`docs/devcontrol/dc-l09/`.
+CI keeps the closure-bound executor and Git-aware receipt on a real Windows
+kernel, while DC-L10's asymmetric and semantic-review gates remain portable and
+offline. Exact-path, provenance, mutation, validation and review evidence for this
+slice lives under `docs/devcontrol/dc-l10/`.
