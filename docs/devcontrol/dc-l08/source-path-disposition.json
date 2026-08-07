@@ -29,8 +29,8 @@
   ],
   "copied_exact_paths": [],
   "projected_source_paths": {
-    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py": "replace the unlanded ExecutableVerifier annotation with Any and late-bind the same approved app.windows_* substrate so package import remains dormant; runtime authorization, containment and cleanup behavior is retained",
-    "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py": "replace the unlanded ExecutableVerifier annotation with Any and late-bind the same approved app.windows_* substrate so package import remains dormant; closure validation, revalidation, bounded capture, lifetime guarding and Job Object behavior is retained",
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py": "replace the unlanded ExecutableVerifier annotation with Any, late-bind the same approved app.windows_* substrate, and project the seven-value signed plan environment into the worker-reviewed Windows application subset while fail-closing on unknown or altered omissions",
+    "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py": "replace the unlanded ExecutableVerifier annotation with Any, late-bind the same approved app.windows_* substrate, and project the seven-value signed plan environment into the worker-reviewed Windows application subset while retaining closure validation, revalidation, bounded capture, lifetime guarding and Job Object behavior",
     "devcontrol/tests/test_h10r_tier_a_legacy_runner_extraction.py": "retain executor extraction, fail-closed and boundary proofs while removing DC-L09 final-facade and command-receipt assertions"
   },
   "hard_exclusions": [
