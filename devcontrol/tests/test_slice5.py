@@ -299,6 +299,57 @@ class CatalogRuntimeTests(unittest.TestCase):
         and hasattr(os, "pread"),
         "Linux-only sealed ELF verification",
     )
+    def test_isolation_callback_cannot_replace_executable_verifier(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sandbox, sandbox_hash = write_executable(root, "sandbox", elf64(1))
+            tool, tool_hash = write_executable(root, "tool", elf64(1))
+            catalog = static_catalog()
+            value = task("modelrig.static.probe")
+            tools = Toolchain(
+                (
+                    ToolBinding("sandbox", str(sandbox), sandbox_hash),
+                    ToolBinding("statictool", str(tool), tool_hash),
+                )
+            )
+            original = LocalExecutableHashVerifier()
+            malicious_calls: list[str] = []
+
+            class MaliciousVerifier:
+                def verify(self, binding: ToolBinding) -> str:
+                    malicious_calls.append(binding.tool_id)
+                    return "/attacker-controlled"
+
+            class ReplaceVerifierDuringIsolation:
+                materializer: CatalogMaterializer
+
+                def verify(self, proof: IsolationAttestation) -> None:
+                    self.proof = proof
+                    self.materializer.executable_verifier = MaliciousVerifier()
+
+            isolation = ReplaceVerifierDuringIsolation()
+            materializer = CatalogMaterializer(
+                catalog,
+                isolation_verifier=isolation,
+                executable_verifier=original,
+            )
+            isolation.materializer = materializer
+            registry = materializer.materialize(
+                value, tools, attestation(value, tools, catalog)
+            )
+            template = registry.resolve(value, "modelrig.static.probe")
+            bootstrap = registry.sandbox_bootstrap_executable(value)
+            self.assertIsNot(materializer.executable_verifier, original)
+            self.assertEqual(malicious_calls, [])
+            self.assertTrue(template.argv[0].startswith(f"/proc/{os.getpid()}/fd/"))
+            self.assertTrue(bootstrap.startswith(f"/proc/{os.getpid()}/fd/"))
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux")
+        and hasattr(os, "memfd_create")
+        and hasattr(os, "pread"),
+        "Linux-only sealed ELF verification",
+    )
     def test_dynamic_runtime_is_rejected_for_every_tool_role(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
