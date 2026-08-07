@@ -290,9 +290,9 @@ jobs:
           $ErrorActionPreference = "Stop"
           $env:PYTHONPATH = "worker;devcontrol/src"
           @'
-          import runpy
           import sys
           import types
+          from pathlib import Path
 
           from kaliv_dev_control.runtime_closure import (
               HmacRuntimeClosureSigner,
@@ -335,9 +335,20 @@ jobs:
           }.items():
               setattr(shim, name, value)
           sys.modules[shim.__name__] = shim
-          runpy.run_path(
-              "tests/support/windows_catalog_tier_a_contract.py",
-              run_name="__main__",
+
+          contract_path = Path("tests/support/windows_catalog_tier_a_contract.py")
+          contract_source = contract_path.read_text(encoding="utf-8")
+          later_env = '"PYTHONDONTWRITEBYTECODE": "1"'
+          landed_env = '"MODELRIG_DEVCONTROL": "1"'
+          assert contract_source.count(later_env) == 1
+          contract_source = contract_source.replace(later_env, landed_env)
+          exec(
+              compile(contract_source, str(contract_path), "exec"),
+              {
+                  "__name__": "__main__",
+                  "__file__": str(contract_path),
+                  "__package__": None,
+              },
           )
           '@ | python -
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
