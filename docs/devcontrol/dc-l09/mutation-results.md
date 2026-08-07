@@ -14,6 +14,8 @@ The following changes must fail one or more landed contracts:
 | Route the final facade to the legacy runner | H10R identity assertions and workflow boundary |
 | Restore Windows fail-closed behavior in `bounded_subprocess` | native bounded-subprocess and receipt contracts |
 | Replace the Linux subreaper with a weaker generic process-group path | Linux bounded-subprocess tests and source review |
+| Keep DC-L09 modules in the foundation future-import denylist | foundation inventory test |
+| Admit semantic-review, publisher or activation modules into the landed foundation set | foundation future-import test |
 | Permit shell execution or inherited host Git configuration | trusted-Git runtime tests |
 | Permit credentials, prompts or non-local protocol transport | trusted-Git runner environment and argument tests |
 | Skip runtime-file revalidation before or after Git execution | trusted-Git runtime tamper tests |
@@ -31,12 +33,25 @@ The raw seventeen-file source import was intentionally opened before progressive
 changes. Existing DC-L08 Windows execution remained green, proving that the new
 files did not silently alter the private executor.
 
-Static integration review then exposed a real dependency before the first L09
-receipt run: the merged DC-L01 `bounded_subprocess` deliberately failed closed on
-Windows, while `TrustedGitRunner` requires bounded Git execution on Windows. The
-correction retains the newer Linux subreaper supervisor and adds only PR #338's
-native Job Object spawn, termination and close adapter. The path is documented as
-a progressive projection and is not claimed source-exact.
+Static integration review exposed a real dependency before the first L09 receipt
+run: the merged DC-L01 `bounded_subprocess` deliberately failed closed on Windows,
+while `TrustedGitRunner` requires bounded Git execution on Windows. The correction
+retains the newer Linux subreaper supervisor and adds only PR #338's native Job
+Object spawn, termination and close adapter. The path is documented as a
+progressive projection and is not claimed source-exact.
+
+The first native receipt run then failed before process launch because its later
+fixture used `PYTHONDONTWRITEBYTECODE`, which is outside the landed reviewed
+application-environment positive list. CI now projects only that fixture value to
+`MODELRIG_DEVCONTROL=1`; production policy remains unchanged and fail-closed.
+
+The same candidate's portable suite exposed two stale DC-L08 source expectations:
+`bounded_subprocess` still forbade all Windows Job Object references, and the
+foundation inventory still classified the final facade, receipt and trusted-Git
+modules as future. The adapter is now late-bound while preserving the Linux
+subreaper source contract, and the foundation test moves only DC-L09 modules into
+the landed set. All later semantic-review, publisher and activation imports remain
+forbidden.
 
 Progressive tests moved the signed bundle to v7, recognized the final facade and
 activated bounded Git plus command-receipt Windows proof. Further concrete red
