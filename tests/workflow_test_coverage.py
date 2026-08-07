@@ -80,6 +80,7 @@ expected_modules = {
     "test_h10n_tier_a_path_authority_extraction.py",
     "test_h10o_tier_a_materialization_extraction.py",
     "test_h10q_tier_a_legacy_plan_extraction.py",
+    "test_h10r_tier_a_legacy_runner_extraction.py",
     "test_physical_isolation_durable_publication_h10b.py",
     "test_proposal_reload.py",
     "test_review_reload.py",
@@ -103,7 +104,7 @@ observed_modules = {
 }
 check(
     observed_modules == expected_modules,
-    f"the twenty-seven DC-L01–L07 test modules are present: {sorted(observed_modules)}",
+    f"the twenty-eight DC-L01–L08 test modules are present: {sorted(observed_modules)}",
 )
 
 receipt_schema = json.loads(
@@ -253,20 +254,23 @@ native_windows_contracts = (
     "tests/support/windows_restricted_contract.py",
     "tests/support/windows_tier_a_environment_contract.py",
     "tests/worker_toolhost.py",
-)
-check(
-    all(f"python {path}" in workflow for path in native_windows_contracts),
-    "CI reaches every landed product-side native Windows contract",
-)
-deferred_windows_contracts = (
     "tests/support/windows_bounded_subprocess_contract.py",
     "tests/support/windows_catalog_tier_a_contract.py",
-    "tests/support/windows_tier_a_receipt_contract.py",
 )
 check(
-    all(f"python {path}" not in workflow for path in deferred_windows_contracts),
-    "DC-L07 does not activate later execution, receipt or trusted-Git contracts",
+    all(path in workflow for path in native_windows_contracts),
+    "CI reaches every landed product-side and DC-L08 native Windows contract",
 )
+check(
+    "tests/support/windows_tier_a_receipt_contract.py" not in workflow,
+    "DC-L08 leaves the command-receipt Windows contract deferred to DC-L09",
+)
+check(
+    "kaliv_dev_control.tier_a_execution_v3" in workflow
+    and "kaliv_dev_control.tier_a_execution\"" not in workflow,
+    "CI activates the private v3 executor without landing the final public facade",
+)
+
 product_modules = (
     "worker/app/toolhost.py",
     "worker/app/windows_capture.py",
