@@ -22,7 +22,8 @@
   "progressive_surfaces": [
     "devcontrol/README.md",
     "devcontrol/src/kaliv_dev_control/__init__.py",
-    "devcontrol/src/kaliv_dev_control/__main__.py"
+    "devcontrol/src/kaliv_dev_control/__main__.py",
+    "tests/workflow_test_coverage.py"
   ],
   "forbidden_symbols_or_authority": [
     "Windows process launcher",
