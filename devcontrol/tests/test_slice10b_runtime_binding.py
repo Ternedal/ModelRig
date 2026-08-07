@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import os
 import tempfile
 import unittest
@@ -10,7 +9,6 @@ from kaliv_dev_control.runtime_staging import (
     RuntimeStagingError,
     TrustedRuntimeStager,
 )
-from kaliv_dev_control.tier_a_execution import run_verified_tier_a_command
 from test_slice10_runtime_staging import COMMAND_ID, make_authority
 
 
@@ -60,11 +58,11 @@ class RuntimeStagingLaunchBindingTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeStagingError, "no longer match"):
                 stager.bind_for_launch(receipt, registry, task, COMMAND_ID)
 
-    def test_public_runtime_requires_operator_runtime_root(self):
-        signature = inspect.signature(run_verified_tier_a_command)
-        parameter = signature.parameters["trusted_runtime_root"]
-        self.assertEqual(parameter.kind, inspect.Parameter.KEYWORD_ONLY)
-        self.assertIs(parameter.default, inspect.Parameter.empty)
+    def test_slice_exposes_no_process_launch_entrypoint(self):
+        import kaliv_dev_control.runtime_staging as runtime_staging
+
+        self.assertFalse(hasattr(runtime_staging, "run_verified_tier_a_command"))
+        self.assertFalse(hasattr(runtime_staging, "_run_tier_a_launch_plan"))
 
 
 if __name__ == "__main__":
