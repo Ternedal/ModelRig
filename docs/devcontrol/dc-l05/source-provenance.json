@@ -27,7 +27,7 @@
       "path": ".github/workflows/_tests.yml",
       "source_blob": "0dc87d714d05d8a14edae4b96fbd635940581e83",
       "base_blob": "132327562b84ba8cb82a40315c6c4739403806a3",
-      "reason": "activate only native DC-L05 Windows contracts; defer Tier-A catalog and Git-aware receipt integration"
+      "reason": "activate only product-side native DC-L05 Windows contracts; defer DevControl bounded-subprocess, Tier-A catalog and Git-aware receipt integration"
     },
     {
       "path": "devcontrol/README.md",
