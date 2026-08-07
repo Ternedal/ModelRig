@@ -9,11 +9,12 @@ The independent reviewer must verify:
 - exact 26-path scope and locked source-blob provenance;
 - no product-to-DevControl import or activation route;
 - suspended Job Object assignment before child execution;
-- finite process/memory/output budgets and whole-tree cleanup;
+- finite process/memory/product-output budgets and whole-tree cleanup;
 - AppContainer/restricted-token workspace confinement;
 - reviewed environment filtering with no parent credentials;
 - runtime lifetime guard behavior;
-- later Tier-A catalog and Git-aware receipt support programs remain inactive;
+- later DevControl bounded-subprocess, Tier-A catalog and Git-aware receipt support
+  programs remain inactive;
 - `worker/requirements.txt` does not acquire the later asymmetric-authority
   dependency;
 - all real-Windows and portable exact-head workflows pass; and
