@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
+import importlib.util
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import kaliv_dev_control.tier_a_execution as tier_a_module
+import kaliv_dev_control.tier_a_authority as tier_a_module
 from kaliv_dev_control.catalog import (
     CatalogError,
     IsolationAttestation,
@@ -26,12 +28,12 @@ from kaliv_dev_control.physical_isolation import (
     WindowsPhysicalIsolationVerifier,
     write_signed_report,
 )
-from kaliv_dev_control.tier_a_authority import _TIER_A_BUNDLE_FILES
-from kaliv_dev_control.tier_a_execution import (
+from kaliv_dev_control.tier_a_authority import (
     LeasedCatalogMaterializer,
     TIER_A_APPLICATION_ENVIRONMENT,
     TierAExecutionError,
     TierALaunchPlan,
+    _TIER_A_BUNDLE_FILES,
     build_tier_a_launch_plan,
     tier_a_toolhost_sha256,
     workspace_root_authority_sha256,
@@ -44,9 +46,6 @@ NOW = datetime(2026, 8, 3, 12, 15, tzinfo=timezone.utc)
 SECRET = b"x" * 32
 KEY_ID = "operator-key-test"
 
-# Synthetic control roots must use the production authority bundle directly.
-# A parallel fixture list can silently drift and weaken the physical-evidence
-# tests whenever an authority-reachable source file is added.
 BUNDLE_FILES = _TIER_A_BUNDLE_FILES
 
 
@@ -58,7 +57,9 @@ def task(command_id: str = "modelrig.tier-a.probe") -> DevelopmentTask:
             "repository": "Ternedal/ModelRig",
             "base_sha": BASE_SHA,
             "goal": "Bind a fixed command to signed Tier-A authority.",
-            "acceptance_criteria": ["The launch plan is exact and fail closed."],
+            "acceptance_criteria": [
+                "The launch plan is exact and fail closed."
+            ],
             "risk": "low",
             "allowed_paths": ["devcontrol/**"],
             "protected_paths": ["devcontrol/secrets/**"],
@@ -153,7 +154,7 @@ def issue(root: Path, *, failed_probe: bool = False, env=None):
         toolchain_sha256=toolchain.sha256,
         rig_id="modelrig-test-rig",
         rig_fingerprint_sha256="1" * 64,
-        candidate_version="slice-9-test",
+        candidate_version="dc-l06-test",
         windows_build="Windows test contract",
         toolhost_sha256=tier_a_toolhost_sha256(control),
         workspace_root_sha256=workspace_root_authority_sha256(workspace),
@@ -169,7 +170,8 @@ def issue(root: Path, *, failed_probe: bool = False, env=None):
     )
     signed = HmacIsolationReportSigner(KEY_ID, SECRET).sign(report)
     signed_hash = write_signed_report(
-        (evidence / "report.json").resolve(), signed
+        (evidence / "report.json").resolve(),
+        signed,
     )
     attestation = IsolationAttestation(
         task_id=development_task.task_id,
@@ -200,7 +202,7 @@ def issue(root: Path, *, failed_probe: bool = False, env=None):
 
 
 class TierAExecutionLeaseTests(unittest.TestCase):
-    def test_signed_report_becomes_immutable_launch_plan(self):
+    def test_signed_report_becomes_immutable_launch_plan(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             values = issue(Path(directory))
             (
@@ -213,8 +215,13 @@ class TierAExecutionLeaseTests(unittest.TestCase):
                 control,
             ) = values
             registry = LeasedCatalogMaterializer(
-                catalog, verifier
-            ).materialize(development_task, toolchain, attestation)
+                catalog,
+                verifier,
+            ).materialize(
+                development_task,
+                toolchain,
+                attestation,
+            )
             plan = build_tier_a_launch_plan(
                 registry,
                 development_task,
@@ -224,41 +231,90 @@ class TierAExecutionLeaseTests(unittest.TestCase):
             )
             self.assertEqual(plan.task_sha256, attestation.task_sha256)
             self.assertEqual(
-                plan.signed_report_sha256, attestation.evidence_sha256[0]
+                plan.signed_report_sha256,
+                attestation.evidence_sha256[0],
             )
             self.assertEqual(
                 plan.workspace_root_sha256,
                 workspace_root_authority_sha256(workspace),
             )
             self.assertEqual(
-                plan.max_output_bytes,
-                development_task.budget.max_output_bytes,
+                dict(plan.env),
+                dict(TIER_A_APPLICATION_ENVIRONMENT),
             )
-            self.assertEqual(dict(plan.env), dict(TIER_A_APPLICATION_ENVIRONMENT))
             self.assertEqual(
                 TierALaunchPlan.from_mapping(plan.to_dict()).canonical_json(),
                 plan.canonical_json(),
             )
 
-    def test_public_runtime_requires_fresh_verification_not_a_plan(self):
-        self.assertFalse(hasattr(tier_a_module, "run_tier_a_launch_plan"))
-        self.assertTrue(hasattr(tier_a_module, "run_verified_tier_a_command"))
-
-    def test_registry_cannot_be_rebound_to_another_task(self):
-        with tempfile.TemporaryDirectory() as directory:
-            development_task, catalog, toolchain, attestation, verifier, _, _ = issue(
-                Path(directory)
+    def test_dc_l06_exposes_no_supported_process_launch_entrypoint(self) -> None:
+        core = importlib.import_module(
+            "kaliv_dev_control._tier_a_execution_core"
+        )
+        self.assertIsNone(
+            importlib.util.find_spec("kaliv_dev_control.tier_a_execution")
+        )
+        for surface in (tier_a_module, core):
+            self.assertFalse(
+                hasattr(surface, "_run_tier_a_launch_plan")
             )
+            self.assertFalse(
+                hasattr(surface, "run_verified_tier_a_command")
+            )
+
+    def test_stage_local_bundle_projections_are_identical(self) -> None:
+        toolhost = importlib.import_module(
+            "kaliv_dev_control._tier_a_legacy_toolhost"
+        )
+        self.assertEqual(
+            tier_a_module._TIER_A_BUNDLE_FILES,
+            toolhost._TIER_A_BUNDLE_FILES,
+        )
+        forbidden_fragments = (
+            "runtime_staging",
+            "runtime_closure",
+            "tier_a_execution.py",
+            "tier_a_execution_v3.py",
+            "tier_a_result.py",
+            "trusted_git",
+            "semantic_review",
+            "publisher",
+        )
+        for path in tier_a_module._TIER_A_BUNDLE_FILES:
+            self.assertFalse(
+                any(fragment in path for fragment in forbidden_fragments),
+                path,
+            )
+
+    def test_registry_cannot_be_rebound_to_another_task(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            (
+                development_task,
+                catalog,
+                toolchain,
+                attestation,
+                verifier,
+                _,
+                _,
+            ) = issue(Path(directory))
             registry = LeasedCatalogMaterializer(
-                catalog, verifier
-            ).materialize(development_task, toolchain, attestation)
+                catalog,
+                verifier,
+            ).materialize(
+                development_task,
+                toolchain,
+                attestation,
+            )
             other = DevelopmentTask.from_mapping(
                 {**development_task.to_dict(), "task_id": "OTHER_A9"}
             )
-            with self.assertRaisesRegex(TierAExecutionError, "another task"):
+            with self.assertRaisesRegex(
+                TierAExecutionError,
+                "another task",
+            ):
                 registry.resolve(other, "modelrig.tier-a.probe")
 
-    def test_any_authority_source_change_after_report_is_rejected(self):
+    def test_any_authority_source_change_after_report_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             (
                 development_task,
@@ -270,12 +326,21 @@ class TierAExecutionLeaseTests(unittest.TestCase):
                 control,
             ) = issue(Path(directory))
             registry = LeasedCatalogMaterializer(
-                catalog, verifier
-            ).materialize(development_task, toolchain, attestation)
-            (control / "worker/app/windows_capture.py").write_text(
-                "# changed after evidence\n", encoding="utf-8"
+                catalog,
+                verifier,
+            ).materialize(
+                development_task,
+                toolchain,
+                attestation,
             )
-            with self.assertRaisesRegex(TierAExecutionError, "authority code"):
+            (control / "worker/app/windows_capture.py").write_text(
+                "# changed after evidence\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                TierAExecutionError,
+                "authority code",
+            ):
                 build_tier_a_launch_plan(
                     registry,
                     development_task,
@@ -284,17 +349,23 @@ class TierAExecutionLeaseTests(unittest.TestCase):
                     control_plane_root=control.resolve(),
                 )
 
-    def test_missing_capture_authority_source_is_rejected(self):
+    def test_missing_stage_local_authority_source_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             control = Path(directory) / "control"
             control.mkdir()
             create_control_plane(control)
-            (control / "devcontrol/src/kaliv_dev_control/tier_a_result.py").unlink()
+            (
+                control
+                / "devcontrol/src/kaliv_dev_control/_tier_a_environment.py"
+            ).unlink()
 
-            with self.assertRaisesRegex(TierAExecutionError, "missing or unsafe"):
+            with self.assertRaisesRegex(
+                TierAExecutionError,
+                "missing or unsafe",
+            ):
                 tier_a_toolhost_sha256(control)
 
-    def test_executable_change_after_materialization_is_rejected(self):
+    def test_executable_change_after_materialization_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             (
                 development_task,
@@ -306,10 +377,18 @@ class TierAExecutionLeaseTests(unittest.TestCase):
                 control,
             ) = issue(Path(directory))
             registry = LeasedCatalogMaterializer(
-                catalog, verifier
-            ).materialize(development_task, toolchain, attestation)
+                catalog,
+                verifier,
+            ).materialize(
+                development_task,
+                toolchain,
+                attestation,
+            )
             (workspace / "probe.exe").write_bytes(b"tampered")
-            with self.assertRaisesRegex(TierAExecutionError, "changed after"):
+            with self.assertRaisesRegex(
+                TierAExecutionError,
+                "changed after",
+            ):
                 build_tier_a_launch_plan(
                     registry,
                     development_task,
@@ -318,9 +397,12 @@ class TierAExecutionLeaseTests(unittest.TestCase):
                     control_plane_root=control.resolve(),
                 )
 
-    def test_unreviewed_application_environment_is_rejected(self):
+    def test_unreviewed_application_environment_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            values = issue(Path(directory), env={"API_TOKEN": "secret"})
+            values = issue(
+                Path(directory),
+                env={"API_TOKEN": "secret"},
+            )
             (
                 development_task,
                 catalog,
@@ -331,9 +413,17 @@ class TierAExecutionLeaseTests(unittest.TestCase):
                 control,
             ) = values
             registry = LeasedCatalogMaterializer(
-                catalog, verifier
-            ).materialize(development_task, toolchain, attestation)
-            with self.assertRaisesRegex(TierAExecutionError, "not reviewed"):
+                catalog,
+                verifier,
+            ).materialize(
+                development_task,
+                toolchain,
+                attestation,
+            )
+            with self.assertRaisesRegex(
+                TierAExecutionError,
+                "not reviewed",
+            ):
                 build_tier_a_launch_plan(
                     registry,
                     development_task,
@@ -342,17 +432,31 @@ class TierAExecutionLeaseTests(unittest.TestCase):
                     control_plane_root=control.resolve(),
                 )
 
-    def test_failed_physical_probe_cannot_issue_a_lease(self):
+    def test_failed_physical_probe_cannot_issue_a_lease(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            development_task, catalog, toolchain, attestation, verifier, _, _ = issue(
-                Path(directory), failed_probe=True
+            (
+                development_task,
+                catalog,
+                toolchain,
+                attestation,
+                verifier,
+                _,
+                _,
+            ) = issue(
+                Path(directory),
+                failed_probe=True,
             )
             with self.assertRaisesRegex(CatalogError, "failed probes"):
-                LeasedCatalogMaterializer(catalog, verifier).materialize(
-                    development_task, toolchain, attestation
+                LeasedCatalogMaterializer(
+                    catalog,
+                    verifier,
+                ).materialize(
+                    development_task,
+                    toolchain,
+                    attestation,
                 )
 
-    def test_plan_reload_rejects_extra_authority(self):
+    def test_plan_reload_rejects_extra_authority(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             (
                 development_task,
@@ -364,8 +468,13 @@ class TierAExecutionLeaseTests(unittest.TestCase):
                 control,
             ) = issue(Path(directory))
             registry = LeasedCatalogMaterializer(
-                catalog, verifier
-            ).materialize(development_task, toolchain, attestation)
+                catalog,
+                verifier,
+            ).materialize(
+                development_task,
+                toolchain,
+                attestation,
+            )
             plan = build_tier_a_launch_plan(
                 registry,
                 development_task,
@@ -374,7 +483,9 @@ class TierAExecutionLeaseTests(unittest.TestCase):
                 control_plane_root=control.resolve(),
             )
             with self.assertRaises(TierAExecutionError):
-                TierALaunchPlan.from_mapping({**plan.to_dict(), "extra": True})
+                TierALaunchPlan.from_mapping(
+                    {**plan.to_dict(), "extra": True}
+                )
 
 
 if __name__ == "__main__":
