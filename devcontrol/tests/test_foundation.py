@@ -503,15 +503,18 @@ class FoundationTests(unittest.TestCase):
             "trusted_git_runtime_model.py",
             "trusted_git_runtime_runner.py",
             "trusted_git_runtime_staging.py",
+            "asymmetric_authority.py",
+            "_semantic_review_core.py",
+            "semantic_review.py",
+            "draft_pr_readiness.py",
+            "publisher_dry_run.py",
         }
         self.assertTrue(landed <= {path.name for path in source.glob("*.py")})
 
         future = (
-            "asymmetric_authority",
-            "semantic_review",
-            "draft_pr_readiness",
-            "publisher_dry_run",
             "publisher_authorization",
+            "publisher_replay_h4",
+            "publisher_recovery_authorization",
             "local_candidate_materialization",
             "publisher",
         )
