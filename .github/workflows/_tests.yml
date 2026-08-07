@@ -222,8 +222,9 @@ jobs:
         working-directory: backend
         run: go test ./cmd/modelrig-updater/ ./cmd/modelrig-supervisor/ ./internal/heartbeat/
 
-  # DC-L05 proves native Windows containment on a real kernel. Later Tier-A and
-  # trusted-Git integration contracts are deliberately not activated here.
+  # DC-L05 proves the product-side native Windows substrate on a real kernel.
+  # DevControl execution, Tier-A catalog and trusted-Git integration contracts
+  # remain dormant until their owning slices land.
   test-windows-tool-isolation:
     runs-on: windows-latest
     steps:
@@ -236,16 +237,14 @@ jobs:
       - name: Install worker deps
         run: pip install -r worker/requirements.txt
 
-      - name: Native Job Object, AppContainer and bounded-capture contracts
+      - name: Native Job Object, AppContainer, environment and ToolHost contracts
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $env:PYTHONPATH = "worker;devcontrol/src"
+          $env:PYTHONPATH = "worker"
           python tests/support/windows_job_contract.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/support/windows_job_close_contract.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tests/support/windows_bounded_subprocess_contract.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/support/windows_restricted_contract.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
