@@ -3,21 +3,22 @@
   "product_modules": {
     "worker/app/windows_job.py": "Job Object creation, suspended assignment, process/memory limits and kill-on-close",
     "worker/app/windows_restricted.py": "AppContainer profile, restricted launch and workspace capability authority",
-    "worker/app/windows_capture.py": "bounded output capture, exact cwd and process-tree supervision",
+    "worker/app/windows_capture.py": "bounded product-side output capture, exact cwd and process-tree supervision",
     "worker/app/windows_runtime_guard.py": "runtime closure lifetime immutability checks",
     "worker/app/windows_tier_a.py": "dormant reviewed Windows launch composition",
     "worker/app/toolhost.py": "product-side ToolHost hardening without DevControl imports"
   },
-  "native_contracts": [
+  "active_native_contracts": [
     "tests/support/windows_job_contract.py",
     "tests/support/windows_job_close_contract.py",
-    "tests/support/windows_bounded_subprocess_contract.py",
     "tests/support/windows_restricted_contract.py",
     "tests/support/windows_tier_a_environment_contract.py",
-    "tests/support/windows_capture_helper.c",
+    "tests/worker_toolhost.py",
     "tests/support/windows_restricted_helper.c"
   ],
-  "dormant_future_contracts": [
+  "dormant_later_contracts": [
+    "tests/support/windows_bounded_subprocess_contract.py",
+    "tests/support/windows_capture_helper.c",
     "tests/support/windows_catalog_tier_a_contract.py",
     "tests/support/windows_tier_a_receipt_contract.py"
   ],
