@@ -299,7 +299,7 @@ class CatalogRuntimeTests(unittest.TestCase):
         and hasattr(os, "pread"),
         "Linux-only sealed ELF verification",
     )
-    def test_isolation_callback_cannot_replace_executable_verifier(self):
+    def test_isolation_callback_cannot_mutate_private_verifier_behavior(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             sandbox, sandbox_hash = write_executable(root, "sandbox", elf64(1))
@@ -312,34 +312,52 @@ class CatalogRuntimeTests(unittest.TestCase):
                     ToolBinding("statictool", str(tool), tool_hash),
                 )
             )
-            original = LocalExecutableHashVerifier()
+            supplied = LocalExecutableHashVerifier()
             malicious_calls: list[str] = []
+            original_class_verify = LocalExecutableHashVerifier.verify
 
-            class MaliciousVerifier:
-                def verify(self, binding: ToolBinding) -> str:
-                    malicious_calls.append(binding.tool_id)
-                    return "/attacker-controlled"
+            def malicious_verify(_self, binding: ToolBinding) -> str:
+                malicious_calls.append(binding.tool_id)
+                return "/attacker-controlled/" + binding.tool_id
 
-            class ReplaceVerifierDuringIsolation:
+            class MutateVerifierBehaviorDuringIsolation:
                 materializer: CatalogMaterializer
+                assignment_blocked = False
+                instance_shadowed = False
+                class_shadowed = False
 
                 def verify(self, proof: IsolationAttestation) -> None:
                     self.proof = proof
-                    self.materializer.executable_verifier = MaliciousVerifier()
+                    supplied.verify = malicious_verify.__get__(
+                        supplied, LocalExecutableHashVerifier
+                    )
+                    self.instance_shadowed = supplied.verify.__func__ is malicious_verify
+                    LocalExecutableHashVerifier.verify = malicious_verify
+                    self.class_shadowed = LocalExecutableHashVerifier.verify is malicious_verify
+                    try:
+                        self.materializer.executable_verifier = supplied
+                    except AttributeError:
+                        self.assignment_blocked = True
 
-            isolation = ReplaceVerifierDuringIsolation()
+            isolation = MutateVerifierBehaviorDuringIsolation()
             materializer = CatalogMaterializer(
                 catalog,
                 isolation_verifier=isolation,
-                executable_verifier=original,
+                executable_verifier=supplied,
             )
             isolation.materializer = materializer
-            registry = materializer.materialize(
-                value, tools, attestation(value, tools, catalog)
-            )
+            try:
+                registry = materializer.materialize(
+                    value, tools, attestation(value, tools, catalog)
+                )
+            finally:
+                LocalExecutableHashVerifier.verify = original_class_verify
             template = registry.resolve(value, "modelrig.static.probe")
             bootstrap = registry.sandbox_bootstrap_executable(value)
-            self.assertIsNot(materializer.executable_verifier, original)
+            self.assertTrue(isolation.assignment_blocked)
+            self.assertTrue(isolation.instance_shadowed)
+            self.assertTrue(isolation.class_shadowed)
+            self.assertFalse(hasattr(materializer, "executable_verifier"))
             self.assertEqual(malicious_calls, [])
             self.assertTrue(template.argv[0].startswith(f"/proc/{os.getpid()}/fd/"))
             self.assertTrue(bootstrap.startswith(f"/proc/{os.getpid()}/fd/"))
