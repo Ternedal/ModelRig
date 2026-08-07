@@ -369,6 +369,22 @@ jobs:
           assert contract_source.count(later_env) == 1
           contract_source = contract_source.replace(later_env, landed_env)
 
+          verifier_constructor = (
+              "physical_verifier = WindowsPhysicalIsolationVerifier(\n"
+          )
+          fixture_verifier = (
+              "class _DC_L09_ReceiptFixtureVerifier(WindowsPhysicalIsolationVerifier):\n"
+              "    def _load_candidates(self, allowed_hashes):\n"
+              "        return (signed_report,) if signed_report.sha256 in allowed_hashes else ()\n"
+              "\n"
+              "physical_verifier = _DC_L09_ReceiptFixtureVerifier(\n"
+          )
+          assert contract_source.count(verifier_constructor) == 1
+          contract_source = contract_source.replace(
+              verifier_constructor,
+              fixture_verifier,
+          )
+
           exec(
               compile(contract_source, str(contract_path), "exec"),
               {
