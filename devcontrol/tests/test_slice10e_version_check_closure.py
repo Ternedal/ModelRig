@@ -206,6 +206,10 @@ class VersionCheckClosureBuilderTests(unittest.TestCase):
             receipt = stager.stage(
                 signed, verifier, registry, task, VERSION_CHECK_COMMAND_ID
             )
+            repeated = stager.stage(
+                signed, verifier, registry, task, VERSION_CHECK_COMMAND_ID
+            )
+            self.assertEqual(repeated, receipt)
             rebound = stager.bind_for_launch(
                 receipt,
                 signed,
