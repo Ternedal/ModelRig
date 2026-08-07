@@ -2,7 +2,7 @@ from __future__ import annotations
 
 try:
     import fcntl as _fcntl
-except ImportError:
+except ImportError:  # pragma: no cover
     _fcntl = None
 
 import hashlib
@@ -28,20 +28,11 @@ _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
 _TASK_ID = re.compile(r"^[A-Z][A-Z0-9_-]{2,63}$")
-_FIXED_PROCESS_ENV = MappingProxyType(
-    {
-        "PATH": "/usr/bin:/bin",
-        "LANG": "C",
-        "LC_ALL": "C",
-        "LC_CTYPE": "C",
-        "TZ": "UTC",
-    }
-)
-_ALLOWED_ENV = {
-    "CI": "1",
-    "MODELRIG_DEVCONTROL": "1",
-    **_FIXED_PROCESS_ENV,
-}
+_FIXED_ENV = MappingProxyType({
+    "PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C",
+    "LC_CTYPE": "C", "TZ": "UTC",
+})
+_ALLOWED_ENV = {"CI": "1", "MODELRIG_DEVCONTROL": "1", **_FIXED_ENV}
 _MAX_EXECUTABLE_BYTES = 256_000_000
 _MAX_PINNED_EXECUTABLES = 128
 _RETIRED_DESCRIPTORS: set[int] = set()
@@ -81,57 +72,45 @@ def _linked(path: Path) -> bool:
 
 
 def _require_static_elf(fd: int, size: int, tool_id: str) -> None:
-    """Require the exact pinned sandbox bytes to have no dynamic loader runtime."""
-    if tool_id != "sandbox":
-        return
+    """Reject all externally backed runtimes, not only the sandbox helper."""
     try:
         header = os.pread(fd, 64, 0)
         if len(header) < 52 or header[:4] != b"\x7fELF" or header[6] != 1:
-            raise CatalogError("sandbox bootstrap must be a static ELF executable")
-        elf_class = header[4]
-        data_encoding = header[5]
-        if data_encoding == 1:
-            prefix = "<"
-        elif data_encoding == 2:
-            prefix = ">"
-        else:
-            raise CatalogError("sandbox bootstrap must be a static ELF executable")
+            raise CatalogError(f"executable runtime must be a static ELF object: {tool_id}")
+        elf_class, data_encoding = header[4], header[5]
+        prefix = "<" if data_encoding == 1 else ">" if data_encoding == 2 else None
+        if prefix is None:
+            raise CatalogError(f"executable runtime must be a static ELF object: {tool_id}")
         if elf_class == 2:
-            if len(header) < 64:
-                raise CatalogError("sandbox bootstrap must be a static ELF executable")
-            program_offset = struct.unpack_from(prefix + "Q", header, 32)[0]
+            offset = struct.unpack_from(prefix + "Q", header, 32)[0]
             entry_size = struct.unpack_from(prefix + "H", header, 54)[0]
-            entry_count = struct.unpack_from(prefix + "H", header, 56)[0]
-            minimum_entry_size = 56
+            count = struct.unpack_from(prefix + "H", header, 56)[0]
+            minimum = 56
         elif elf_class == 1:
-            program_offset = struct.unpack_from(prefix + "I", header, 28)[0]
+            offset = struct.unpack_from(prefix + "I", header, 28)[0]
             entry_size = struct.unpack_from(prefix + "H", header, 42)[0]
-            entry_count = struct.unpack_from(prefix + "H", header, 44)[0]
-            minimum_entry_size = 32
+            count = struct.unpack_from(prefix + "H", header, 44)[0]
+            minimum = 32
         else:
-            raise CatalogError("sandbox bootstrap must be a static ELF executable")
-        table_size = entry_size * entry_count
-        if (
-            entry_count < 1
-            or entry_count > 1024
-            or entry_size < minimum_entry_size
-            or program_offset > size
-            or table_size > size - program_offset
-        ):
-            raise CatalogError("sandbox bootstrap must be a static ELF executable")
-        for index in range(entry_count):
-            record = os.pread(fd, 4, program_offset + index * entry_size)
+            raise CatalogError(f"executable runtime must be a static ELF object: {tool_id}")
+        table_size = entry_size * count
+        if not 1 <= count <= 1024 or entry_size < minimum or offset > size or table_size > size - offset:
+            raise CatalogError(f"executable runtime has an invalid ELF program table: {tool_id}")
+        saw_load = False
+        for index in range(count):
+            record = os.pread(fd, 4, offset + index * entry_size)
             if len(record) != 4:
-                raise CatalogError("sandbox bootstrap must be a static ELF executable")
-            segment_type = struct.unpack(prefix + "I", record)[0]
-            if segment_type in {2, 3}:  # PT_DYNAMIC or PT_INTERP
-                raise CatalogError(
-                    "sandbox bootstrap must not depend on a dynamic runtime"
-                )
+                raise CatalogError(f"executable runtime has an incomplete ELF program table: {tool_id}")
+            kind = struct.unpack(prefix + "I", record)[0]
+            saw_load = saw_load or kind == 1
+            if kind in {2, 3}:
+                raise CatalogError(f"executable runtime must not depend on a dynamic runtime: {tool_id}")
+        if not saw_load:
+            raise CatalogError(f"executable runtime lacks a loadable ELF segment: {tool_id}")
     except CatalogError:
         raise
     except (OSError, struct.error, OverflowError) as exc:
-        raise CatalogError("sandbox bootstrap static ELF validation failed") from exc
+        raise CatalogError(f"executable runtime static ELF validation failed: {tool_id}") from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,61 +129,42 @@ class ProjectCommandSpec:
             raise CatalogError("invalid catalog command id")
         if not isinstance(self.tool_id, str) or _ID.fullmatch(self.tool_id) is None:
             raise CatalogError("invalid catalog tool id")
+        if self.tool_id == "python":
+            raise CatalogError("Python commands require complete self-contained runtime attestation")
         if self.tool_id == "go":
-            raise CatalogError(
-                "Go commands require complete helper toolchain attestation"
-            )
+            raise CatalogError("Go commands require complete helper toolchain attestation")
         if self.tool_id == "sandbox":
             raise CatalogError("sandbox helper cannot be used as a catalog command tool")
         if not isinstance(self.args, tuple) or len(self.args) > 128 or any(
-            not isinstance(arg, str) or not arg or "\0" in arg or len(arg.encode()) > 4096
-            for arg in self.args
+            not isinstance(item, str) or not item or "\0" in item or len(item.encode("utf-8")) > 4096
+            for item in self.args
         ):
             raise CatalogError("catalog arguments must be bounded canonical strings")
         if not isinstance(self.cwd, str) or not self.cwd or "\0" in self.cwd:
             raise CatalogError("catalog cwd must be repository-relative")
         if self.cwd != ".":
             parts = self.cwd.split("/")
-            if self.cwd.startswith("/") or "\\" in self.cwd or any(
-                part in {"", ".", ".."} for part in parts
-            ) or PurePosixPath(self.cwd).as_posix() != self.cwd:
+            if self.cwd.startswith("/") or "\\" in self.cwd or any(part in {"", ".", ".."} for part in parts) or PurePosixPath(self.cwd).as_posix() != self.cwd:
                 raise CatalogError("catalog cwd must be canonical and repository-relative")
-        if isinstance(self.max_timeout_seconds, bool) or not isinstance(
-            self.max_timeout_seconds, int
-        ) or not 1 <= self.max_timeout_seconds <= 86_400:
+        if isinstance(self.max_timeout_seconds, bool) or not isinstance(self.max_timeout_seconds, int) or not 1 <= self.max_timeout_seconds <= 86_400:
             raise CatalogError("catalog timeout is outside bounds")
-        if not isinstance(self.required_boundary, IsolationBoundary) or not isinstance(
-            self.network_mode, NetworkMode
-        ):
+        if not isinstance(self.required_boundary, IsolationBoundary) or not isinstance(self.network_mode, NetworkMode):
             raise CatalogError("catalog isolation policy is invalid")
         if not isinstance(self.env, Mapping):
             raise CatalogError("catalog environment must be an object")
         clean: dict[str, str] = {}
         for key, value in self.env.items():
-            if (
-                not isinstance(key, str) or not key or key.strip() != key or "=" in key
-                or not isinstance(value, str) or "\0" in key + value
-                or len(key.encode()) > 128 or len(value.encode()) > 4096
-            ):
+            if not isinstance(key, str) or not key or key.strip() != key or "=" in key or not isinstance(value, str) or "\0" in key + value or len(key.encode()) > 128 or len(value.encode()) > 4096:
                 raise CatalogError("catalog environment is invalid")
             if key not in _ALLOWED_ENV or value != _ALLOWED_ENV[key]:
                 raise CatalogError("catalog environment is outside the reviewed isolation positive list")
             clean[key] = value
-        for key, value in _FIXED_PROCESS_ENV.items():
+        for key, value in _FIXED_ENV.items():
             clean.setdefault(key, value)
         object.__setattr__(self, "env", MappingProxyType(clean))
 
     def copy(self) -> "ProjectCommandSpec":
-        return ProjectCommandSpec(
-            command_id=self.command_id,
-            tool_id=self.tool_id,
-            args=tuple(self.args),
-            cwd=self.cwd,
-            max_timeout_seconds=self.max_timeout_seconds,
-            env=dict(self.env),
-            required_boundary=self.required_boundary,
-            network_mode=self.network_mode,
-        )
+        return ProjectCommandSpec(self.command_id, self.tool_id, tuple(self.args), self.cwd, self.max_timeout_seconds, dict(self.env), self.required_boundary, self.network_mode)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -232,8 +192,7 @@ class ModelRigCommandCatalog:
         self._specs = MappingProxyType(values)
 
     def snapshot(self) -> "ModelRigCommandCatalog":
-        current = self._specs
-        return ModelRigCommandCatalog(tuple(current[key] for key in sorted(current)))
+        return ModelRigCommandCatalog(tuple(self._specs[key] for key in sorted(self._specs)))
 
     @property
     def command_ids(self) -> tuple[str, ...]:
@@ -248,10 +207,7 @@ class ModelRigCommandCatalog:
             raise CatalogError(f"command is not in the ModelRig catalog: {command_id}") from exc
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema": CATALOG_SCHEMA, "repository": "Ternedal/ModelRig",
-            "commands": [self._specs[key].to_dict() for key in sorted(self._specs)],
-        }
+        return {"schema": CATALOG_SCHEMA, "repository": "Ternedal/ModelRig", "commands": [self._specs[key].to_dict() for key in sorted(self._specs)]}
 
     def canonical_json(self) -> str:
         return _canonical(self.to_dict())
@@ -270,25 +226,16 @@ class ToolBinding:
     def __post_init__(self) -> None:
         if not isinstance(self.tool_id, str) or _ID.fullmatch(self.tool_id) is None:
             raise CatalogError("invalid tool binding id")
-        if (
-            not isinstance(self.executable, str) or not self.executable
-            or self.executable.strip() != self.executable or "\0" in self.executable
-            or len(self.executable.encode()) > 4096 or not _absolute(self.executable)
-        ):
+        if not isinstance(self.executable, str) or not self.executable or self.executable.strip() != self.executable or "\0" in self.executable or len(self.executable.encode()) > 4096 or not _absolute(self.executable):
             raise CatalogError("tool executable must be a canonical absolute path")
-        if not isinstance(self.executable_sha256, str) or _HEX64.fullmatch(
-            self.executable_sha256
-        ) is None:
+        if not isinstance(self.executable_sha256, str) or _HEX64.fullmatch(self.executable_sha256) is None:
             raise CatalogError("tool executable hash must be lowercase SHA-256")
 
     def copy(self) -> "ToolBinding":
         return ToolBinding(self.tool_id, self.executable, self.executable_sha256)
 
     def to_dict(self) -> dict[str, str]:
-        return {
-            "tool_id": self.tool_id, "executable": self.executable,
-            "executable_sha256": self.executable_sha256,
-        }
+        return {"tool_id": self.tool_id, "executable": self.executable, "executable_sha256": self.executable_sha256}
 
 
 class Toolchain:
@@ -306,8 +253,7 @@ class Toolchain:
         self._bindings = MappingProxyType(values)
 
     def snapshot(self) -> "Toolchain":
-        current = self._bindings
-        return Toolchain(tuple(current[key] for key in sorted(current)))
+        return Toolchain(tuple(self._bindings[key] for key in sorted(self._bindings)))
 
     def resolve(self, tool_id: str) -> ToolBinding:
         if not isinstance(tool_id, str) or _ID.fullmatch(tool_id) is None:
@@ -318,10 +264,7 @@ class Toolchain:
             raise CatalogError(f"required tool is not bound: {tool_id}") from exc
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema": TOOLCHAIN_SCHEMA,
-            "bindings": [self._bindings[key].to_dict() for key in sorted(self._bindings)],
-        }
+        return {"schema": TOOLCHAIN_SCHEMA, "bindings": [self._bindings[key].to_dict() for key in sorted(self._bindings)]}
 
     def canonical_json(self) -> str:
         return _canonical(self.to_dict())
@@ -347,9 +290,7 @@ class IsolationAttestation:
     def __post_init__(self) -> None:
         if self.schema != ATTESTATION_SCHEMA:
             raise CatalogError("unsupported isolation attestation schema")
-        if not isinstance(self.task_id, str) or _TASK_ID.fullmatch(
-            self.task_id
-        ) is None or self.repository != "Ternedal/ModelRig":
+        if not isinstance(self.task_id, str) or _TASK_ID.fullmatch(self.task_id) is None or self.repository != "Ternedal/ModelRig":
             raise CatalogError("isolation attestation identity is invalid")
         if not isinstance(self.base_sha, str) or _HEX40.fullmatch(self.base_sha) is None:
             raise CatalogError("attestation base SHA is invalid")
@@ -357,25 +298,14 @@ class IsolationAttestation:
             value = getattr(self, name)
             if not isinstance(value, str) or _HEX64.fullmatch(value) is None:
                 raise CatalogError(f"{name} is invalid")
-        if not isinstance(self.boundary, IsolationBoundary) or not isinstance(
-            self.network_mode, NetworkMode
-        ):
+        if not isinstance(self.boundary, IsolationBoundary) or not isinstance(self.network_mode, NetworkMode):
             raise CatalogError("isolation policy is invalid")
-        if (
-            not isinstance(self.evidence_sha256, tuple)
-            or not 1 <= len(self.evidence_sha256) <= 32
-            or len(set(self.evidence_sha256)) != len(self.evidence_sha256)
-            or any(not isinstance(item, str) or _HEX64.fullmatch(item) is None for item in self.evidence_sha256)
-        ):
+        if not isinstance(self.evidence_sha256, tuple) or not 1 <= len(self.evidence_sha256) <= 32 or len(set(self.evidence_sha256)) != len(self.evidence_sha256) or any(not isinstance(item, str) or _HEX64.fullmatch(item) is None for item in self.evidence_sha256):
             raise CatalogError("isolation evidence must be 1..32 unique SHA-256 hashes")
 
     @classmethod
     def from_mapping(cls, value: Any) -> "IsolationAttestation":
-        fields = {
-            "schema", "task_id", "task_sha256", "repository", "base_sha",
-            "catalog_sha256", "toolchain_sha256", "boundary", "network_mode",
-            "evidence_sha256",
-        }
+        fields = {"schema", "task_id", "task_sha256", "repository", "base_sha", "catalog_sha256", "toolchain_sha256", "boundary", "network_mode", "evidence_sha256"}
         if not isinstance(value, Mapping) or set(value) != fields:
             raise CatalogError("isolation attestation fields mismatch")
         evidence = value["evidence_sha256"]
@@ -409,10 +339,6 @@ class IsolationVerifier(Protocol):
     def verify(self, attestation: IsolationAttestation) -> None: ...
 
 
-class ExecutableVerifier(Protocol):
-    def verify(self, binding: ToolBinding) -> str: ...
-
-
 class RejectUnverifiedIsolation:
     def verify(self, attestation: IsolationAttestation) -> None:
         del attestation
@@ -420,23 +346,13 @@ class RejectUnverifiedIsolation:
 
 
 class TaskBoundCommandRegistry(CommandRegistry):
-    def __init__(
-        self,
-        templates: Sequence[CommandTemplate],
-        task: DevelopmentTask,
-        executable_verifier: ExecutableVerifier,
-        bootstrap_executable: str,
-    ) -> None:
-        super().__init__(templates)
-        if (
-            not isinstance(bootstrap_executable, str)
-            or not bootstrap_executable
-            or "\0" in bootstrap_executable
-            or not _absolute(bootstrap_executable)
-        ):
-            raise CommandPolicyError(
-                "task-bound registry bootstrap executable is invalid"
-            )
+    def __init__(self, templates: Sequence[CommandTemplate], task: DevelopmentTask, executable_verifier: object | None, bootstrap_executable: str | None) -> None:
+        materialized = tuple(templates)
+        super().__init__(materialized)
+        if materialized and (not isinstance(bootstrap_executable, str) or not bootstrap_executable or "\0" in bootstrap_executable or not _absolute(bootstrap_executable)):
+            raise CommandPolicyError("task-bound registry bootstrap executable is invalid")
+        if not materialized and bootstrap_executable is not None:
+            raise CommandPolicyError("empty task-bound registry cannot retain bootstrap authority")
         object.__setattr__(self, "_bound_task_identity", self._identity(task))
         object.__setattr__(self, "_catalog_executable_verifier", executable_verifier)
         object.__setattr__(self, "_bootstrap_executable", bootstrap_executable)
@@ -455,12 +371,7 @@ class TaskBoundCommandRegistry(CommandRegistry):
             snapshot = DevelopmentTask.from_mapping(task.to_dict())
         except (ContractError, AttributeError, TypeError, ValueError) as exc:
             raise CommandPolicyError("registry resolution task is invalid") from exc
-        return (
-            snapshot.task_id,
-            _task_sha(snapshot),
-            snapshot.repository,
-            snapshot.base_sha,
-        )
+        return snapshot.task_id, _task_sha(snapshot), snapshot.repository, snapshot.base_sha
 
     def execution_task(self, task: DevelopmentTask) -> DevelopmentTask:
         snapshot = super().execution_task(task)
@@ -471,11 +382,15 @@ class TaskBoundCommandRegistry(CommandRegistry):
     def sandbox_bootstrap_executable(self, task: DevelopmentTask) -> str:
         if self._identity(task) != self._bound_task_identity:
             raise CommandPolicyError("command registry is not bound to this exact task")
+        if self._bootstrap_executable is None:
+            raise CommandPolicyError("empty command registry has no launch authority")
         return self._bootstrap_executable
 
     def sandbox_bootstrap_mode(self, task: DevelopmentTask) -> str:
         if self._identity(task) != self._bound_task_identity:
             raise CommandPolicyError("command registry is not bound to this exact task")
+        if self._bootstrap_executable is None:
+            raise CommandPolicyError("empty command registry has no launch authority")
         return "static"
 
     def resolve(self, task: DevelopmentTask, command_id: str) -> CommandTemplate:
@@ -485,6 +400,7 @@ class TaskBoundCommandRegistry(CommandRegistry):
 
 
 class LocalExecutableHashVerifier:
+    """Pin and seal self-contained static ELF objects only."""
     def __init__(self) -> None:
         self._pins: dict[str, tuple[ToolBinding, int, str]] = {}
         self._closed = False
@@ -517,13 +433,7 @@ class LocalExecutableHashVerifier:
         except OSError as exc:
             raise CatalogError(f"tool executable cannot be resolved: {binding.tool_id}") from exc
         try:
-            source = os.open(
-                path,
-                os.O_RDONLY
-                | getattr(os, "O_CLOEXEC", 0)
-                | getattr(os, "O_NOFOLLOW", 0)
-                | getattr(os, "O_NONBLOCK", 0),
-            )
+            source = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
         except OSError as exc:
             raise CatalogError(f"tool executable cannot be opened safely: {binding.tool_id}") from exc
         pinned: int | None = None
@@ -531,7 +441,7 @@ class LocalExecutableHashVerifier:
             before = os.fstat(source)
             if not stat.S_ISREG(before.st_mode) or before.st_mode & 0o111 == 0:
                 raise CatalogError(f"tool executable is not a regular executable file: {binding.tool_id}")
-            if not 0 <= before.st_size <= _MAX_EXECUTABLE_BYTES:
+            if not 0 < before.st_size <= _MAX_EXECUTABLE_BYTES:
                 raise CatalogError(f"tool executable exceeds the verification bound: {binding.tool_id}")
             flags = getattr(os, "MFD_CLOEXEC", 0) | getattr(os, "MFD_ALLOW_SEALING", 0)
             pinned = os.memfd_create(f"kaliv-{binding.tool_id}", flags=flags)
@@ -547,9 +457,8 @@ class LocalExecutableHashVerifier:
                     if written <= 0:
                         raise CatalogError(f"tool executable could not be pinned: {binding.tool_id}")
                     view = view[written:]
-            after = os.fstat(source)
+            after, observed = os.fstat(source), path.stat(follow_symlinks=False)
             identity = lambda item: (item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns, item.st_ctime_ns)
-            observed = path.stat(follow_symlinks=False)
             if identity(before) != identity(after) or total != before.st_size:
                 raise CatalogError(f"tool executable changed during verification: {binding.tool_id}")
             if not stat.S_ISREG(observed.st_mode) or (observed.st_dev, observed.st_ino) != (before.st_dev, before.st_ino):
@@ -564,7 +473,7 @@ class LocalExecutableHashVerifier:
             if Path(invocation).stat().st_size != total or os.fstat(pinned).st_size != total:
                 raise CatalogError(f"pinned executable size could not be verified: {binding.tool_id}")
             _RETIRED_DESCRIPTORS.add(pinned)
-            self._pins[binding.tool_id] = (binding, pinned, invocation)
+            self._pins[binding.tool_id] = binding, pinned, invocation
             pinned = None
             return invocation
         except CatalogError:
@@ -578,21 +487,16 @@ class LocalExecutableHashVerifier:
 
 
 class CatalogMaterializer:
-    def __init__(
-        self, catalog: ModelRigCommandCatalog, *,
-        isolation_verifier: IsolationVerifier | None = None,
-        executable_verifier: ExecutableVerifier | None = None,
-    ) -> None:
+    def __init__(self, catalog: ModelRigCommandCatalog, *, isolation_verifier: IsolationVerifier | None = None, executable_verifier: LocalExecutableHashVerifier | None = None) -> None:
         if not isinstance(catalog, ModelRigCommandCatalog):
             raise CatalogError("materializer requires a ModelRig command catalog")
+        if executable_verifier is not None and type(executable_verifier) is not LocalExecutableHashVerifier:
+            raise CatalogError("materializer requires the fixed static-runtime executable verifier")
         self.catalog = catalog
         self.isolation_verifier = isolation_verifier or RejectUnverifiedIsolation()
         self.executable_verifier = executable_verifier or LocalExecutableHashVerifier()
 
-    def materialize(
-        self, task: DevelopmentTask, toolchain: Toolchain,
-        attestation: IsolationAttestation,
-    ) -> CommandRegistry:
+    def materialize(self, task: DevelopmentTask, toolchain: Toolchain, attestation: IsolationAttestation) -> CommandRegistry:
         if not isinstance(task, DevelopmentTask):
             raise CatalogError("materializer requires a development task")
         if not isinstance(toolchain, Toolchain) or not isinstance(attestation, IsolationAttestation):
@@ -604,95 +508,52 @@ class CatalogMaterializer:
         if task_snapshot.repository != "Ternedal/ModelRig":
             raise CatalogError("ModelRig catalog cannot authorize another repository")
         catalog = self.catalog.snapshot()
-        isolation_verifier = self.isolation_verifier
-        executable_verifier = self.executable_verifier
         specs = tuple(catalog.resolve(item) for item in task_snapshot.allowed_command_ids)
         snapshot = toolchain.snapshot()
         expected = {
             "task_id": task_snapshot.task_id, "task_sha256": _task_sha(task_snapshot),
             "repository": task_snapshot.repository, "base_sha": task_snapshot.base_sha,
-            "catalog_sha256": catalog.sha256,
-            "toolchain_sha256": snapshot.sha256,
-            "boundary": IsolationBoundary.OS_ISOLATED,
-            "network_mode": NetworkMode.DENY,
+            "catalog_sha256": catalog.sha256, "toolchain_sha256": snapshot.sha256,
+            "boundary": IsolationBoundary.OS_ISOLATED, "network_mode": NetworkMode.DENY,
         }
         try:
-            attestation_snapshot = IsolationAttestation.from_mapping(
-                attestation.to_dict()
-            )
+            proof = IsolationAttestation.from_mapping(attestation.to_dict())
         except (CatalogError, AttributeError, TypeError, ValueError) as exc:
             raise CatalogError("materializer isolation attestation is invalid") from exc
-
-        def authority(proof: IsolationAttestation) -> dict[str, Any]:
-            return {
-                "task_id": proof.task_id, "task_sha256": proof.task_sha256,
-                "repository": proof.repository, "base_sha": proof.base_sha,
-                "catalog_sha256": proof.catalog_sha256,
-                "toolchain_sha256": proof.toolchain_sha256,
-                "boundary": proof.boundary, "network_mode": proof.network_mode,
-            }
-
-        if authority(attestation_snapshot) != expected:
+        authority = lambda item: {
+            "task_id": item.task_id, "task_sha256": item.task_sha256,
+            "repository": item.repository, "base_sha": item.base_sha,
+            "catalog_sha256": item.catalog_sha256, "toolchain_sha256": item.toolchain_sha256,
+            "boundary": item.boundary, "network_mode": item.network_mode,
+        }
+        if authority(proof) != expected:
             raise CatalogError("isolation attestation is not bound to this exact authority")
-        verifier_attestation = IsolationAttestation.from_mapping(
-            attestation_snapshot.to_dict()
-        )
-        verified_canonical = verifier_attestation.canonical_json()
-        isolation_verifier.verify(verifier_attestation)
+        verifier_proof = IsolationAttestation.from_mapping(proof.to_dict())
+        canonical = verifier_proof.canonical_json()
+        self.isolation_verifier.verify(verifier_proof)
         try:
-            verified_snapshot = IsolationAttestation.from_mapping(
-                verifier_attestation.to_dict()
-            )
+            checked = IsolationAttestation.from_mapping(verifier_proof.to_dict())
         except (CatalogError, AttributeError, TypeError, ValueError) as exc:
             raise CatalogError("isolation verifier mutated the attestation") from exc
-        if (
-            verified_snapshot.canonical_json() != verified_canonical
-            or authority(verified_snapshot) != expected
-        ):
+        if checked.canonical_json() != canonical or authority(checked) != expected:
             raise CatalogError("isolation verifier mutated the attestation")
-
-        bootstrap_binding = snapshot.resolve("sandbox")
-        bootstrap_executable = executable_verifier.verify(bootstrap_binding)
-        if (
-            not isinstance(bootstrap_executable, str)
-            or not bootstrap_executable
-            or not _absolute(bootstrap_executable)
-        ):
-            raise CatalogError(
-                "executable verifier did not return a pinned sandbox helper"
-            )
+        if not specs:
+            return TaskBoundCommandRegistry((), task_snapshot, None, None)
+        verifier = self.executable_verifier
+        bootstrap = verifier.verify(snapshot.resolve("sandbox"))
+        if not isinstance(bootstrap, str) or not _absolute(bootstrap):
+            raise CatalogError("executable verifier did not return a pinned sandbox helper")
         templates: list[CommandTemplate] = []
-        invocations: dict[str, str] = {}
         for spec in specs:
             if spec.required_boundary is not IsolationBoundary.OS_ISOLATED or spec.network_mode is not NetworkMode.DENY:
                 raise CatalogError("catalog command weakened isolation")
-            binding = snapshot.resolve(spec.tool_id)
-            invocation = invocations.get(binding.tool_id)
-            if invocation is None:
-                invocation = executable_verifier.verify(binding)
-                if not isinstance(invocation, str) or not invocation or not _absolute(invocation):
-                    raise CatalogError("executable verifier did not return a pinned absolute object")
-                invocations[binding.tool_id] = invocation
-            templates.append(CommandTemplate(
-                command_id=spec.command_id, argv=(invocation, *spec.args), cwd=spec.cwd,
-                max_timeout_seconds=spec.max_timeout_seconds, env=spec.env,
-            ))
-        return TaskBoundCommandRegistry(
-            templates,
-            task_snapshot,
-            executable_verifier,
-            bootstrap_executable,
-        )
+            invocation = verifier.verify(snapshot.resolve(spec.tool_id))
+            if not isinstance(invocation, str) or not _absolute(invocation):
+                raise CatalogError("executable verifier did not return a pinned static object")
+            templates.append(CommandTemplate(spec.command_id, (invocation, *spec.args), spec.cwd, spec.max_timeout_seconds, spec.env))
+        return TaskBoundCommandRegistry(templates, task_snapshot, verifier, bootstrap)
 
 
 def modelrig_command_catalog() -> ModelRigCommandCatalog:
-    common = {
-        "CI": "1",
-        "MODELRIG_DEVCONTROL": "1",
-        **_FIXED_PROCESS_ENV,
-    }
-    return ModelRigCommandCatalog((
-        ProjectCommandSpec("modelrig.version.check", "python", ("scripts/version_tool.py", "check"), ".", 120, common),
-        ProjectCommandSpec("modelrig.devcontrol.tests", "python", ("-m", "unittest", "discover", "-s", "../tests", "-p", "test_*.py", "-v"), "devcontrol/src", 900, common),
-        ProjectCommandSpec("modelrig.workflow.test-coverage", "python", ("tests/workflow_test_coverage.py",), ".", 3600, common),
-    ))
+    """DC-L03 exposes no default command IDs or execution authority."""
+    return ModelRigCommandCatalog(())
