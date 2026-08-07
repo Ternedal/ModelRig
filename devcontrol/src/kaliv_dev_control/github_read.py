@@ -8,6 +8,7 @@ import json
 import re
 import ssl
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -169,6 +170,69 @@ def _system_tls_context() -> ssl.SSLContext:
     return context
 
 
+def _deadline_socket(response: Any) -> Any:
+    pending = [response]
+    seen: set[int] = set()
+    for _ in range(5):
+        following: list[Any] = []
+        for candidate in pending:
+            marker = id(candidate)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            if callable(getattr(candidate, "settimeout", None)):
+                return candidate
+            for name in ("fp", "raw", "_sock"):
+                child = getattr(candidate, name, None)
+                if child is not None:
+                    following.append(child)
+        pending = following
+    raise GitHubReadError(
+        "GitHub response transport cannot enforce a wall-clock deadline"
+    )
+
+
+def _read_response_body(
+    response: Any,
+    *,
+    max_bytes: int,
+    deadline: float,
+) -> bytes:
+    read_once = getattr(response, "read1", None)
+    fallback = getattr(response, "read", None)
+    if not callable(read_once) and not callable(fallback):
+        raise GitHubReadError("GitHub response body is not readable")
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise GitHubReadError("GitHub read exceeded the wall-clock deadline")
+        socket = _deadline_socket(response)
+        try:
+            socket.settimeout(max(0.001, remaining))
+        except (OSError, ValueError) as exc:
+            raise GitHubReadError(
+                "GitHub response deadline could not be enforced"
+            ) from exc
+        amount = min(65_536, max_bytes + 1 - total)
+        if amount <= 0:
+            raise GitHubReadError("GitHub response exceeded the read budget")
+        try:
+            chunk = read_once(amount) if callable(read_once) else fallback(1)
+        except (TimeoutError, OSError) as exc:
+            raise GitHubReadError("GitHub read did not complete") from exc
+        if not isinstance(chunk, (bytes, bytearray)):
+            raise GitHubReadError("GitHub response body is not bytes")
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise GitHubReadError("GitHub response exceeded the read budget")
+        chunks.append(bytes(chunk))
+    return b"".join(chunks)
+
+
 class UrllibReadOnlyTransport:
     def __init__(self) -> None:
         context = _system_tls_context()
@@ -223,6 +287,7 @@ class UrllibReadOnlyTransport:
         request = urllib.request.Request(
             url, headers=request_headers, method="GET"
         )
+        deadline = time.monotonic() + timeout_seconds
         try:
             response = self._opener.open(request, timeout=timeout_seconds)
         except urllib.error.HTTPError as exc:
@@ -230,6 +295,8 @@ class UrllibReadOnlyTransport:
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise GitHubReadError("GitHub read did not complete") from exc
         try:
+            if time.monotonic() >= deadline:
+                raise GitHubReadError("GitHub read exceeded the wall-clock deadline")
             declared = response.headers.get("Content-Length")
             if declared is not None:
                 try:
@@ -242,11 +309,11 @@ class UrllibReadOnlyTransport:
                     raise GitHubReadError(
                         "GitHub response exceeded the read budget"
                     )
-            body = response.read(max_bytes + 1)
-            if len(body) > max_bytes:
-                raise GitHubReadError(
-                    "GitHub response exceeded the read budget"
-                )
+            body = _read_response_body(
+                response,
+                max_bytes=max_bytes,
+                deadline=deadline,
+            )
             return HttpResponse(
                 status=int(response.status),
                 headers=dict(response.headers.items()),
