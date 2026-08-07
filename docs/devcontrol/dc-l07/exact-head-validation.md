@@ -18,8 +18,9 @@ as PR #387 and the branch is zero commits behind `main`.
 
 ## Required structural checks
 
-- exact diff equals the 46 paths in `exact-path-allowlist.json`;
+- exact diff equals the 47 paths in `exact-path-allowlist.json`;
 - all twenty-seven DC-L01–DC-L07 test modules are reached by CI;
+- the foundation import boundary names the landed DC-L07 modules and still rejects every DC-L08+ module;
 - the toolhost bundle contains the required DC-L07 runtime-evidence modules and excludes every executor and remote-authority module;
 - v1 lease and launch-plan schema compatibility remains exact;
 - v3 plan and execution-result schema parity is validated without DC-L08 imports;
