@@ -10,10 +10,11 @@ The final head must prove:
 - exactly the 27 paths in `exact-path-allowlist.json` differ from
   `main @ 3ede93313233e65599f2fb29b4c64e58f7432990`;
 - the branch is not behind current `main`;
-- the eight exact source blobs and eleven documented projections match
+- the seven exact source blobs and twelve documented projections match
   `source-provenance.json`;
 - `_tier_a_execution_core.py` owns no class or function and imports only
   already-landed DC-L06 identities;
+- materialization binds to the already-landed fixed executable verifier;
 - the two literal stage-local bundle tuples are identical and contain no
   L07-or-later module;
 - `tier_a_authority.py` exposes no process-launch entrypoint;
