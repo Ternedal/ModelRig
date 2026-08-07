@@ -58,6 +58,11 @@
       "source_blob": "042a16d2dfe0b9d05d27a9a7356d7dfadb09f05c",
       "base_blob": "78783d02a90969066594685ffeecf5fb74ac6837",
       "projection": "use_hardened_loaders_and_preserve_operator_supplied_symlink_identity"
+    },
+    {
+      "path": "tests/workflow_test_coverage.py",
+      "base_blob": "4678dae933abd1dd45c5312f355084892c6ec993",
+      "projection": "extend_exact_CI_discovery_contract_to_the_three_DC_L04_test_modules"
     }
   ]
 }
