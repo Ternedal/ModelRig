@@ -414,6 +414,15 @@ class CommandRegistry:
         except (AttributeError, TypeError, ValueError) as exc:
             raise CommandPolicyError("command execution task is invalid") from exc
 
+    def sandbox_bootstrap_executable(self, task: DevelopmentTask) -> str:
+        """Return the interpreter used to install the sandbox boundary.
+
+        Plain registries retain the DC-L01 legacy process interpreter. Later
+        task-bound registries override this hook with an attested pinned object.
+        """
+        del task
+        return sys.executable
+
     def resolve(self, task: DevelopmentTask, command_id: str) -> CommandTemplate:
         if command_id not in task.allowed_command_ids:
             raise CommandPolicyError("command is not allowed by the task contract")
@@ -752,13 +761,23 @@ class CommandExecutor:
         sandbox_root: Path,
         cwd: Path,
         argv: tuple[str, ...],
+        bootstrap_executable: str,
     ) -> tuple[str, ...]:
         if not sys.platform.startswith("linux"):
             raise CommandExecutionError(
                 "filesystem-confined command execution is Linux-only in DC-L01"
             )
+        if (
+            not isinstance(bootstrap_executable, str)
+            or not bootstrap_executable
+            or "\x00" in bootstrap_executable
+            or not Path(bootstrap_executable).is_absolute()
+        ):
+            raise CommandExecutionError(
+                "sandbox bootstrap executable is not a canonical absolute object"
+            )
         return (
-            sys.executable,
+            bootstrap_executable,
             "-I",
             "-c",
             _LANDLOCK_SANDBOX_BOOTSTRAP,
@@ -775,6 +794,9 @@ class CommandExecutor:
     ) -> CommandReceipt:
         execution_task = self.registry.execution_task(task)
         template = self.registry.resolve(execution_task, command_id)
+        bootstrap_executable = self.registry.sandbox_bootstrap_executable(
+            execution_task
+        )
         source = workspace.resolve()
         source_text = str(source)
         if any(source_text in argument for argument in template.argv):
@@ -798,7 +820,12 @@ class CommandExecutor:
                 raise CommandExecutionError("command sandbox was not created")
             cwd = self._cwd(sandbox.repository, template.cwd)
             command_env = sandbox.environment(template.env, cwd)
-            confined_argv = self._confined_argv(sandbox.root, cwd, template.argv)
+            confined_argv = self._confined_argv(
+                sandbox.root,
+                cwd,
+                template.argv,
+                bootstrap_executable,
+            )
             started = time.monotonic()
             try:
                 result = self.runner.run(
