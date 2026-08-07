@@ -3,7 +3,7 @@
 Status: **authority candidate hardened; exact-head workflow gates pending**
 
 Current authority implementation/regression candidate:
-`ac4eaa44fa501eba797818d8563e82c9b83ce8f0`.
+`33b762a9145dedf93365921b359477f81d22eb5f`.
 
 The candidate keeps the complete 16-path allowlist and includes:
 
@@ -18,8 +18,13 @@ The candidate keeps the complete 16-path allowlist and includes:
   loader and toolchain environment authority;
 - fixed-host HTTPS GET-only GitHub reads with redirects and proxies disabled;
 - explicit system TLS roots independent of environment CA overrides;
-- a raw owned HTTPS connection supervised from request start through status,
-  headers, chunk framing and response body under one monotonic deadline;
+- an owned HTTPS connection supervised from connection setup through request,
+  HTTP status, headers, chunk framing and response body under one monotonic
+  deadline;
+- explicit connection establishment followed by cancellation/deadline checks
+  before any authenticated GET may be sent;
+- a single process-global setup slot so an uninterruptible DNS/setup worker
+  cannot accumulate and further attempts fail closed while it remains pending;
 - socket shutdown/close, response close and connection close on deadline expiry;
 - fail-closed handling when a deadline-capable transport socket is unavailable;
 - exact-SHA and protected-path checks before transport, bounded JSON/base64
@@ -29,9 +34,9 @@ The candidate keeps the complete 16-path allowlist and includes:
 Latest landed authority blobs:
 
 - catalog: `e562bbbf9acb6833279491303b6ab7b508bc3e0e`;
-- GitHub read transport: `0b32313fe2d613367c15e4df23ede556943c27c5`;
+- GitHub read transport: `e662352600f663ebf80918f00bc8ae07596b31f9`;
 - receipt schema: `40615abb093d890a98391ad8dc38d90fb8166c2d`;
-- workflow contract/regressions: `8e1eeb504aff2829a2dfe025d1972b6832070006`.
+- workflow contract/regressions: `572f843a52688398f5a457a7569d5222e4efeee7`.
 
 The latest complete focused DC-L03 run before the final environment/deadline
 hardening produced **26/26 passing tests**. Existing public test surfaces were
@@ -43,8 +48,11 @@ now cover:
 - automatic fixed-PATH insertion for a caller-supplied `env={}` spec;
 - a `read1()` call that blocks internally until socket cancellation;
 - a `getresponse()` call that blocks while reading HTTP status/headers;
-- wall-clock rejection in approximately 0.05 seconds with socket, response and
-  connection closure;
+- a `connect()` call that remains blocked beyond the deadline, followed by proof
+  that no authenticated request is sent after delayed setup completion;
+- rejection of a second setup attempt while the first unresolved setup worker
+  still owns the single bounded setup slot;
+- wall-clock rejection with socket, response and connection closure;
 - preserved successful reads, fixed-host validation and byte-budget rejection.
 
 Review history:
@@ -60,12 +68,13 @@ Review history:
 - review of `9829fe24227f363141c779237a9e042a1a1af2ca` found ambient PATH authority and
   chunk-framing work occurring inside one `read1()` call; candidate
   `5eb237398cd4b9867e50bc42656476835ca4a057` closed them;
-- review of `3483ac687a267d6ec31aa71eaa4896baa5604d74` found that omitted PATH still
-  inherited ambient authority and status/header framing remained outside the
-  supervisor; candidates `5944d164badbb1af773ab7d63408e37c01c54bf1`,
-  `58dac7690c9ed669b2648049382321b50f7119d9`,
-  `bfe8bedf1c5115615db3b3986a2fd7759c15c9d7` and
-  `ac4eaa44fa501eba797818d8563e82c9b83ce8f0` close those findings.
+- review of `3483ac687a267d6ec31aa71eaa4896baa5604d74` found omitted PATH authority and
+  status/header framing outside the supervisor; candidate
+  `ac4eaa44fa501eba797818d8563e82c9b83ce8f0` closed them;
+- review of `3a0a99ab987ec22219787a086a97fc7cf13f9998` found that a blocked DNS/setup
+  worker could later send after the caller timed out and repeated calls could
+  accumulate workers; candidates `4455d01657be0769438e4336406406a6f4ead5d3`
+  and `33b762a9145dedf93365921b359477f81d22eb5f` close that finding.
 
 Verified repository facts:
 
