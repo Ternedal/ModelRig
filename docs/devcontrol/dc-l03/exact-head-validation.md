@@ -1,142 +1,74 @@
 # DC-L03 exact-head validation
 
-Status: **authority and 16-path scope validated; resulting evidence head review and workflows pending**
+Status: **runtime candidate validated; resulting evidence head pending workflows and independent review**
 
-Authority implementation and regression candidate:
-`c7c018c8f866867507eb9f3adcbaf4ae1e0d7eef`.
+Validated runtime and regression candidate:
+`fe415f0562f2e3d57d600c80e33673b92b58bfde`.
 
-Exact 16-path scope and workflow snapshot:
-`03b8d348a9dab654fa6094bf22f72dee7ba05b3f`.
+Base and scope:
 
-The implementation candidate is contained in the later exact scope snapshot. The
-scope snapshot adds only the final control/evidence commits needed to restore
-`devcontrol/README.md` byte-for-byte to base and replace it with
-`devcontrol/src/kaliv_dev_control/commands.py` as the third progressive surface.
-Its complete base diff is exactly the declared 16 paths and it is 0 commits
-behind `main`.
+- base: `main @ c9bda459f10e682ec200fdfea8484d726c6c0057`;
+- complete base diff: exactly the 16 paths in `exact-path-allowlist.json`;
+- branch distance: 0 commits behind `main`;
+- package activation unchanged and `default_registry()` remains empty;
+- no merge, release, deployment or activation authority.
 
-The validated authority includes:
+The validated runtime authority includes:
 
-- reconstructed DevelopmentTask, catalog, toolchain and attestation snapshots;
-- one strict private execution-task snapshot used for command resolution, source
-  verification, sandbox creation, runtime/output budgets, post-run verification,
-  cleanup verification and receipt identity;
-- private isolation-verifier proof plus post-callback canonical revalidation;
-- sealed exact-task command registries and reviewed verifier retention;
-- Linux no-follow, nonblocking, bounded executable reads and sealed memfd launch;
-- process-lifetime descriptor retirement and fail-closed non-Linux verification;
-- a fixed-value environment positive list with `PATH=/usr/bin:/bin` injected into
-  every accepted catalog entry, including entries supplied with `env={}`;
-- rejection of every explicitly different PATH and all unreviewed interpreter,
-  loader and toolchain environment authority;
-- fixed-host HTTPS GET-only GitHub reads with redirects and proxies disabled;
-- explicit system TLS roots independent of environment CA overrides;
-- an owned HTTPS connection supervised from connection setup through request,
-  HTTP status, headers, chunk framing and response body under one monotonic
-  deadline;
-- explicit connection establishment followed by cancellation/deadline checks
-  before any authenticated GET may be sent;
-- `auto_open=0` before the sole explicit connection, preventing `http.client`
-  from reconnecting after cancellation closes the socket between authority
-  checks and request output;
-- a single process-global setup slot so an uninterruptible DNS/setup worker
-  cannot accumulate and further attempts fail closed while it remains pending;
-- socket shutdown/close, response close and connection close on deadline expiry;
-- fail-closed handling when a deadline-capable transport socket is unavailable;
-- exact-SHA and protected-path checks before transport, bounded JSON/base64
-  handling and decoded Git-blob identity verification;
-- strict receipt runtime/schema identity, status and repository validation.
+- reconstructed DevelopmentTask, catalog, toolchain and isolation-attestation snapshots;
+- one strict private execution-task snapshot across resolution, sandbox creation,
+  budgets, verification, cleanup and receipt identity;
+- private verifier proof with post-callback canonical revalidation;
+- immutable task-bound registries;
+- descriptor-bound Linux executable verification with no-follow, nonblocking,
+  bounded reads and sealed memfd invocation;
+- an attested and pinned Python interpreter for the Landlock/seccomp bootstrap;
+- fixed process values for `PATH`, `LANG`, `LC_ALL`, `LC_CTYPE` and `TZ` on every
+  accepted catalog entry;
+- fail-closed rejection of `GOTOOLCHAIN` and every `tool_id="go"` until the full
+  `GOROOT/pkg/tool` helper chain can be attested and pinned;
+- a fixed-host HTTPS GET-only GitHub boundary with explicit TLS trust roots,
+  redirects and environment proxy authority disabled;
+- exact-SHA and protected-path checks before transport;
+- one monotonic deadline covering setup, request output, status, headers, chunk
+  framing and response body, including cancellation and reconnect prevention;
+- bounded JSON/base64 handling, decoded Git-blob identity verification and strict
+  receipt/schema reload validation.
 
-Latest landed authority blobs at the exact scope snapshot:
+Runtime blobs on `fe415f0562f2e3d57d600c80e33673b92b58bfde`:
 
-- catalog: `e562bbbf9acb6833279491303b6ab7b508bc3e0e`;
-- execution snapshot surface: `f55e3a898e0135d3d207e63a051bccb6f554fc1b`;
-- GitHub read transport: `dd30559d6b95a155de4a80def6454400719c9889`;
-- receipt schema: `40615abb093d890a98391ad8dc38d90fb8166c2d`;
-- workflow contract/regressions: `25b6c4d163d0071d170d0cfc1f719f0314e64319`.
+- catalog: `062e0b2591662412c3aa7bfb6345ac86c58425e4`;
+- DC-L03 regressions: `c35efd0456088119fca272c2c9ff6b86fc6b6e28`.
 
-The latest complete focused DC-L03 run before the final narrowly scoped hardening
-produced **26/26 passing tests**. Existing public test surfaces were preserved
-while additional executable contract regressions and direct validation cover:
+Repository workflows passed on that exact runtime candidate:
 
-- mutation of the caller-owned task during command execution while sandbox,
-  budgets, verification and receipt remain bound to one private task A snapshot;
-- rejection of `GOROOT=.`, `PYTHONUSERBASE=.`, `GOTOOLCHAIN=auto` and an
-  attacker-selected PATH;
-- automatic fixed-PATH insertion for a caller-supplied `env={}` spec;
-- a `read1()` call that blocks internally until socket cancellation;
-- a `getresponse()` call that blocks while reading HTTP status/headers;
-- a `connect()` call that remains blocked beyond the deadline, followed by proof
-  that no authenticated request is sent after delayed setup completion;
-- rejection of a second setup attempt while the first unresolved setup worker
-  still owns the single bounded setup slot;
-- a race where request output pauses after setup, cancellation closes the socket,
-  and delayed continuation proves there is no automatic reconnect or auth send;
-- wall-clock rejection with socket, response and connection closure;
-- preserved successful reads, fixed-host validation and byte-budget rejection.
+- `ci` run `31156740333`;
+- `codeql` run `31156738980`;
+- `agent3-diagnostics` run `31156739176`;
+- `agent3-full-diagnostics` run `31156738930`.
 
-Repository workflow gates completed successfully on exact scope snapshot
-`03b8d348a9dab654fa6094bf22f72dee7ba05b3f`:
+The full repository log, normal Python suite, DevControl foundation tests and
+final boundary regressions all passed. The focused DC-L03 suite now proves that:
 
-- `ci` run 2980;
-- `codeql` run 1996;
-- `agent3-diagnostics` run 1141;
-- `agent3-full-diagnostics` run 2223.
+- the reviewed catalog contains only the three Python-backed command IDs;
+- `modelrig.backend.vet` and `modelrig.backend.tests` are absent;
+- direct construction of a Go command spec is rejected before materialization;
+- a task granting a removed Go command cannot materialize it;
+- `GOTOOLCHAIN=local` is no longer accepted as catalog environment authority;
+- caller mutation cannot retarget task, catalog, toolchain, verifier proof,
+  executable object, bootstrap interpreter, locale/timezone or GitHub authority.
 
-Review history:
+Review history remains recorded in the pull-request threads. Most recently:
 
-- review of `96967da26134cb68cc59242fbee004cc403228ba` found mutable verifier proof and
-  blocking FIFO-open issues; candidate `660e85dcb0281cdbc0991d9cb5c06a7f0064ff6f`
-  closed both;
-- author-side schema audit found receipt repository syntax looser than runtime;
-  candidate `157b158011d120797a230912f1c96a23babb1ace` aligned them;
-- review of `002306223eb172351f9bfd1665dc1d5f9bdcfd2a` found remaining interpreter/
-  toolchain environment authority and missing end-to-end response-read deadline;
-  candidate `b7cabc3524a75d980cd5e0710b2acfeed7a15eb2` closed them;
-- review of `9829fe24227f363141c779237a9e042a1a1af2ca` found ambient PATH authority and
-  chunk-framing work occurring inside one `read1()` call; candidate
-  `5eb237398cd4b9867e50bc42656476835ca4a057` closed them;
-- review of `3483ac687a267d6ec31aa71eaa4896baa5604d74` found omitted PATH authority and
-  status/header framing outside the supervisor; candidate
-  `ac4eaa44fa501eba797818d8563e82c9b83ce8f0` closed them;
-- review of `3a0a99ab987ec22219787a086a97fc7cf13f9998` found that a blocked DNS/setup
-  worker could later send after caller timeout and repeated calls could
-  accumulate workers; candidate `33b762a9145dedf93365921b359477f81d22eb5f`
-  closed that finding;
-- author-side race audit then found `http.client` could auto-reconnect if the
-  socket closed between the final check and request output; candidates
-  `c147d12c295f6ee5844b757e13c91ac521105977` and
-  `b74701c41ef05775597b930aaf23b919df1a7533` closed that race;
-- review of `64cab512ef45c9ebd8dba5b88ab1202eb08a4b88` found that the registry validated
-  a copied task but the executor continued with the mutable caller object;
-  candidates `a17506cd0217e5a7a5fbd22ba147c20ee5d08086` and
-  `c7c018c8f866867507eb9f3adcbaf4ae1e0d7eef` carry one private snapshot through
-  the complete pre-existing execution path and add the mutation regression;
-- review of exact scope snapshot `03b8d348a9dab654fa6094bf22f72dee7ba05b3f`
-  found no new runtime-authority issue, but found that the verdict file described
-  the implementation candidate as though it also contained the later 16-path
-  replacement. The evidence now records the two snapshots separately.
+1. review of `5c7a969f55f763e37f95aa6f75332c1a9146705c` found an unpinned sandbox
+   bootstrap and ambient locale/timezone authority; `b52e42728fed447981a24b64554a22a0abea175f`
+   closed both;
+2. review of `b52e42728fed447981a24b64554a22a0abea175f` found that the pinned Go driver
+   still launched mutable unpinned helpers from its compiled-in GOROOT;
+3. `fe415f0562f2e3d57d600c80e33673b92b58bfde` closes that finding fail-closed by
+   removing Go commands and rejecting all Go command specs until complete helper
+   attestation exists.
 
-Verified repository facts:
-
-- the README is restored byte-for-byte to base and `commands.py` replaces it as
-  the third progressive surface;
-- diff equals `exact-path-allowlist.json` at 16 paths on the validated scope
-  snapshot;
-- merge base is fresh `main` head
-  `c9bda459f10e682ec200fdfea8484d726c6c0057` and branch is 0 commits behind;
-- package activation remains unchanged and `default_registry()` remains empty;
-- no GitHub write, non-GET HTTP, remote Git, new command/launch authority, merge,
-  publication, deployment or activation authority is introduced.
-
-Still required before merge:
-
-- an independent review of the resulting evidence head with no actionable
-  finding;
-- repository CI, CodeQL, agent3-diagnostics and agent3-full-diagnostics on the
-  resulting evidence head. The exact runtime/scope parent snapshot has already
-  passed all four gates, but this documentation-only update changes the head and
-  must not inherit their status without a new successful run.
-
-This evidence update changes the branch head. Final conclusions must bind to the
-resulting exact head rather than only the implementation or scope snapshots above.
+This documentation update changes the branch head without changing runtime code
+or the 16-path set. Final conclusions must bind to the resulting evidence head,
+which requires its own successful workflows and fresh independent review.
