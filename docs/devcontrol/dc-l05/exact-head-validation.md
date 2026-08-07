@@ -11,10 +11,10 @@ The final head must prove:
   `main @ a1fe16f05ba312e719b1254bba9919809bab4215`;
 - branch distance is 0 commits behind current `main`;
 - product modules contain no `kaliv_dev_control` import;
-- native Job Object, AppContainer, bounded-capture, environment and ToolHost
-  contracts pass on a real Windows runner;
-- the later catalog/closure and Git-aware receipt support programs are not
-  activated by this slice;
+- native Job Object, AppContainer, environment and ToolHost contracts pass on a
+  real Windows runner;
+- the later DevControl bounded-subprocess, catalog/closure and Git-aware receipt
+  support programs are not activated by this slice;
 - portable repository and DevControl tests remain green;
 - CodeQL and both diagnostics workflows pass; and
 - all review threads are resolved.
