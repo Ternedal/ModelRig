@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import os
 import tempfile
 import threading
 import unittest
@@ -133,7 +134,7 @@ class StreamingPublicationH10GTests(unittest.TestCase):
                 )
             self.assertFalse(destination.exists())
 
-    def test_temporary_preparer_runs_before_publication(self) -> None:
+    def test_temporary_preparer_metadata_is_synced_before_publication(self) -> None:
         payload = b"permission callback"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -141,25 +142,77 @@ class StreamingPublicationH10GTests(unittest.TestCase):
             destination = root / "final.bin"
             source.write_bytes(payload)
             observed: list[Path] = []
+            events: list[str] = []
+            original_link = os.link
 
             def prepare(path: Path) -> None:
                 self.assertTrue(path.is_file())
                 self.assertFalse(destination.exists())
                 observed.append(path)
+                events.append("prepare")
 
-            self.assertTrue(
-                publish_stream_once(
-                    source,
-                    destination,
-                    expected_sha256=hashlib.sha256(payload).hexdigest(),
-                    expected_size=len(payload),
-                    maximum=len(payload),
-                    validate_existing=self._validator(payload),
-                    prepare_temporary=prepare,
+            def sync(path: Path) -> None:
+                self.assertEqual(path, observed[0])
+                self.assertFalse(destination.exists())
+                events.append("sync")
+
+            def link(source_path: Path, destination_path: Path) -> None:
+                self.assertEqual(Path(source_path), observed[0])
+                events.append("link")
+                original_link(source_path, destination_path)
+
+            with mock.patch(
+                "kaliv_dev_control.streaming_publication.sync_file",
+                side_effect=sync,
+            ), mock.patch(
+                "kaliv_dev_control.streaming_publication.os.link",
+                side_effect=link,
+            ):
+                self.assertTrue(
+                    publish_stream_once(
+                        source,
+                        destination,
+                        expected_sha256=hashlib.sha256(payload).hexdigest(),
+                        expected_size=len(payload),
+                        maximum=len(payload),
+                        validate_existing=self._validator(payload),
+                        prepare_temporary=prepare,
+                    )
                 )
-            )
+            self.assertEqual(events, ["prepare", "sync", "link"])
             self.assertEqual(len(observed), 1)
             self.assertFalse(observed[0].exists())
+
+    def test_permission_metadata_sync_failure_is_fail_closed(self) -> None:
+        payload = b"permission durability"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            source = root / "source.bin"
+            destination = root / "final.bin"
+            source.write_bytes(payload)
+
+            with mock.patch(
+                "kaliv_dev_control.streaming_publication.sync_file",
+                side_effect=StreamingPublicationError("injected"),
+            ):
+                with self.assertRaisesRegex(
+                    StreamingPublicationError,
+                    "permission_metadata_sync_failed",
+                ):
+                    publish_stream_once(
+                        source,
+                        destination,
+                        expected_sha256=hashlib.sha256(payload).hexdigest(),
+                        expected_size=len(payload),
+                        maximum=len(payload),
+                        validate_existing=self._validator(payload),
+                        prepare_temporary=lambda path: path.chmod(0o500),
+                    )
+            self.assertFalse(destination.exists())
+            self.assertEqual(
+                sorted(item.name for item in root.iterdir()),
+                ["source.bin"],
+            )
 
     def test_durability_failure_is_domain_error_without_temp_sibling(self) -> None:
         payload = b"durability"
@@ -193,6 +246,7 @@ class StreamingPublicationH10GTests(unittest.TestCase):
     def test_implementation_is_streaming_and_never_replaces(self) -> None:
         source = inspect.getsource(publish_stream_once)
         self.assertIn('input_file.read(1024 * 1024)', source)
+        self.assertIn("sync_file(temporary)", source)
         self.assertIn("os.link", source)
         self.assertNotIn("read_bytes", source)
         self.assertNotIn("os.replace", source)
