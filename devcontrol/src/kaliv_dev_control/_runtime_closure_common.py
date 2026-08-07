@@ -196,7 +196,11 @@ def _closure_fix_staged_mode(path: Path) -> None:
 
     descriptor = -1
     try:
-        flags = os.O_RDWR | getattr(os, "O_BINARY", 0)
+        # Windows requires a write-capable handle for FlushFileBuffers. Unix can
+        # fsync an already locked 0555 file through a read-only descriptor, which
+        # keeps repeated deterministic staging idempotent for unprivileged users.
+        access = os.O_RDWR if os.name == "nt" else os.O_RDONLY
+        flags = access | getattr(os, "O_BINARY", 0)
         descriptor = os.open(path, flags)
         os.chmod(path, _closure_staged_mode())
         os.fsync(descriptor)
