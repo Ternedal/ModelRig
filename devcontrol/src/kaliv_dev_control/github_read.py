@@ -355,6 +355,7 @@ def _request_with_deadline(
                     "GitHub read exceeded the wall-clock deadline"
                 )
             connection.timeout = max(0.001, remaining)
+            connection.auto_open = 0
             connection.connect()
             if cancelled.is_set() or time.monotonic() >= deadline:
                 raise GitHubReadError(
