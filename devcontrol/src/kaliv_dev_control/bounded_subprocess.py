@@ -1,7 +1,9 @@
-"""Fail-closed streaming subprocess containment for the DC-L01 foundation.
+"""Fail-closed streaming subprocess containment for local DevControl tools.
 
-DC-L01 contains commands on Linux with a subreaper supervisor. Windows support
-fails closed until the native Job Object boundary lands in DC-L05.
+Linux uses a subreaper supervisor so descendants cannot escape when the direct
+child exits. Windows uses the landed native Job Object boundary. Both paths run
+one no-shell command, drain and hash both byte streams concurrently, enforce one
+combined output budget and fail closed unless process-tree cleanup is proven.
 """
 from __future__ import annotations
 
@@ -40,11 +42,17 @@ class BoundedStreamEvidence:
     def __post_init__(self) -> None:
         if not isinstance(self.prefix, bytes):
             raise BoundedSubprocessError("stream prefix must be bytes")
-        if not isinstance(self.total_bytes, int) or isinstance(self.total_bytes, bool):
+        if (
+            isinstance(self.total_bytes, bool)
+            or not isinstance(self.total_bytes, int)
+            or self.total_bytes < len(self.prefix)
+        ):
             raise BoundedSubprocessError("stream byte count is invalid")
-        if self.total_bytes < len(self.prefix):
-            raise BoundedSubprocessError("stream byte count is inconsistent")
-        if len(self.sha256) != 64 or any(c not in "0123456789abcdef" for c in self.sha256):
+        if (
+            not isinstance(self.sha256, str)
+            or len(self.sha256) != 64
+            or any(character not in "0123456789abcdef" for character in self.sha256)
+        ):
             raise BoundedSubprocessError("stream hash is invalid")
         if self.truncated != (self.total_bytes > len(self.prefix)):
             raise BoundedSubprocessError("stream truncation flag is inconsistent")
@@ -62,16 +70,24 @@ class BoundedSubprocessResult:
     process_tree_terminated: bool
 
     def __post_init__(self) -> None:
-        if not self.args or any(not isinstance(arg, str) or not arg for arg in self.args):
+        if not self.args or any(
+            not isinstance(argument, str) or not argument for argument in self.args
+        ):
             raise BoundedSubprocessError("result arguments are invalid")
         if not isinstance(self.returncode, int) or isinstance(self.returncode, bool):
             raise BoundedSubprocessError("result return code is invalid")
         if self.total_output_bytes != self.stdout.total_bytes + self.stderr.total_bytes:
             raise BoundedSubprocessError("combined output count is inconsistent")
-        flags = (self.output_limit_exceeded, self.timed_out, self.process_tree_terminated)
+        flags = (
+            self.output_limit_exceeded,
+            self.timed_out,
+            self.process_tree_terminated,
+        )
         if any(not isinstance(flag, bool) for flag in flags):
             raise BoundedSubprocessError("result flag is invalid")
-        if (self.output_limit_exceeded or self.timed_out) and not self.process_tree_terminated:
+        if (
+            self.output_limit_exceeded or self.timed_out
+        ) and not self.process_tree_terminated:
             raise BoundedSubprocessError("bounded failure lacks termination proof")
 
 
@@ -109,17 +125,32 @@ def _validate(
     stderr_prefix_bytes: int,
 ) -> tuple[tuple[str, ...], Path, dict[str, str]]:
     args = tuple(command)
-    if not args or any(not isinstance(arg, str) or not arg or "\0" in arg for arg in args):
+    if not args or any(
+        not isinstance(argument, str) or not argument or "\0" in argument
+        for argument in args
+    ):
         raise BoundedSubprocessError("command arguments are invalid")
     root = Path(cwd)
     if not root.is_absolute() or not root.is_dir() or root.is_symlink():
         raise BoundedSubprocessError("subprocess cwd must be an absolute directory")
-    if isinstance(timeout_seconds, bool) or not 1 <= timeout_seconds <= _MAX_TIMEOUT_SECONDS:
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, int)
+        or not 1 <= timeout_seconds <= _MAX_TIMEOUT_SECONDS
+    ):
         raise BoundedSubprocessError("subprocess timeout is invalid")
-    if isinstance(max_output_bytes, bool) or not 1 <= max_output_bytes <= _MAX_OUTPUT_BYTES:
+    if (
+        isinstance(max_output_bytes, bool)
+        or not isinstance(max_output_bytes, int)
+        or not 1 <= max_output_bytes <= _MAX_OUTPUT_BYTES
+    ):
         raise BoundedSubprocessError("subprocess output budget is invalid")
     for value in (stdout_prefix_bytes, stderr_prefix_bytes):
-        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= max_output_bytes:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not 0 <= value <= max_output_bytes
+        ):
             raise BoundedSubprocessError("stream prefix bound is invalid")
     if not isinstance(env, Mapping):
         raise BoundedSubprocessError("subprocess environment is invalid")
@@ -149,7 +180,9 @@ def _linux_parent_map() -> dict[int, int]:
             if not entry.name.isdecimal():
                 continue
             try:
-                tail = Path(entry.path, "stat").read_text(encoding="ascii").rpartition(") ")[2]
+                tail = Path(entry.path, "stat").read_text(
+                    encoding="ascii"
+                ).rpartition(") ")[2]
                 fields = tail.split()
                 if len(fields) >= 2:
                     parents[int(entry.name)] = int(fields[1])
@@ -164,7 +197,8 @@ def _linux_descendants(root_pid: int) -> set[int]:
     frontier = {root_pid}
     while frontier:
         found = {
-            pid for pid, parent in parents.items()
+            pid
+            for pid, parent in parents.items()
             if parent in frontier and pid not in descendants
         }
         descendants.update(found)
@@ -179,7 +213,9 @@ def _enable_subreaper() -> None:
     except (AttributeError, OSError) as exc:
         raise BoundedSubprocessError("Linux subreaper is unavailable") from exc
     if result != 0:
-        raise BoundedSubprocessError(f"Linux subreaper failed with errno {ctypes.get_errno()}")
+        raise BoundedSubprocessError(
+            f"Linux subreaper failed with errno {ctypes.get_errno()}"
+        )
 
 
 def _reap_adopted(root_pid: int) -> None:
@@ -215,7 +251,8 @@ def _supervisor_main(encoded: str) -> int:
     except (ValueError, UnicodeError):
         return 126
     if not isinstance(payload, list) or not payload or any(
-        not isinstance(arg, str) or not arg or "\0" in arg for arg in payload
+        not isinstance(argument, str) or not argument or "\0" in argument
+        for argument in payload
     ):
         return 126
     try:
@@ -256,17 +293,52 @@ def _supervisor_main(encoded: str) -> int:
         time.sleep(0.02)
 
 
-def _spawn(
-    args: tuple[str, ...], cwd: Path, env: dict[str, str], stdin: int
+def _spawn_windows(
+    args: tuple[str, ...],
+    cwd: Path,
+    env: dict[str, str],
+    stdin: int,
 ) -> subprocess.Popen[bytes]:
-    if os.name == "nt":
+    try:
+        from app.windows_job import JobLimits, spawn_in_job
+    except (ImportError, AttributeError) as exc:
         raise BoundedSubprocessError(
-            "Windows containment is deferred to DC-L05 and fails closed in DC-L01"
+            "Windows process-tree Job Object boundary is unavailable"
+        ) from exc
+
+    def factory(command: list[str], **kwargs: object) -> subprocess.Popen[bytes]:
+        return subprocess.Popen(command, cwd=cwd, **kwargs)
+
+    try:
+        return spawn_in_job(
+            list(args),
+            stdin=stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            limits=JobLimits(
+                process_memory_bytes=512 * 1024 * 1024,
+                active_process_limit=16,
+                ui_restrictions=0,
+            ),
+            popen_factory=factory,
         )
-    if not sys.platform.startswith("linux"):
-        raise BoundedSubprocessError("DC-L01 subprocess containment requires Linux")
+    except Exception as exc:
+        raise BoundedSubprocessError(
+            "Windows process tree could not be started in a Job Object"
+        ) from exc
+
+
+def _spawn_linux(
+    args: tuple[str, ...],
+    cwd: Path,
+    env: dict[str, str],
+    stdin: int,
+) -> subprocess.Popen[bytes]:
     encoded = base64.urlsafe_b64encode(
-        json.dumps(list(args), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        json.dumps(list(args), ensure_ascii=False, separators=(",", ":")).encode(
+            "utf-8"
+        )
     ).decode("ascii")
     try:
         return subprocess.Popen(
@@ -285,8 +357,38 @@ def _spawn(
         raise BoundedSubprocessError("subprocess supervisor could not start") from exc
 
 
-def _terminate_tree(process: subprocess.Popen[bytes]) -> bool:
-    """Request termination and accept only the supervisor's quiescent acknowledgement."""
+def _spawn(
+    args: tuple[str, ...], cwd: Path, env: dict[str, str], stdin: int
+) -> subprocess.Popen[bytes]:
+    if os.name == "nt":
+        return _spawn_windows(args, cwd, env, stdin)
+    if sys.platform.startswith("linux"):
+        return _spawn_linux(args, cwd, env, stdin)
+    raise BoundedSubprocessError(
+        "subprocess containment requires Linux subreaper or Windows Job Object"
+    )
+
+
+def _terminate_windows_tree(process: subprocess.Popen[bytes]) -> bool:
+    try:
+        from app.windows_job import terminate_attached_job
+    except (ImportError, AttributeError) as exc:
+        raise BoundedSubprocessError(
+            "Windows process-tree termination boundary is unavailable"
+        ) from exc
+    try:
+        if not terminate_attached_job(process, exit_code=1):
+            raise BoundedSubprocessError(
+                "Windows process was not attached to a Job Object"
+            )
+    except Exception as exc:
+        if isinstance(exc, BoundedSubprocessError):
+            raise
+        raise BoundedSubprocessError("Windows Job Object termination failed") from exc
+    return True
+
+
+def _terminate_linux_tree(process: subprocess.Popen[bytes]) -> bool:
     try:
         os.kill(process.pid, signal.SIGTERM)
     except ProcessLookupError:
@@ -309,6 +411,29 @@ def _terminate_tree(process: subprocess.Popen[bytes]) -> bool:
     except subprocess.TimeoutExpired:
         pass
     return False
+
+
+def _terminate_tree(process: subprocess.Popen[bytes]) -> bool:
+    """Terminate the complete attached tree and return only proven success."""
+
+    if os.name == "nt":
+        return _terminate_windows_tree(process)
+    return _terminate_linux_tree(process)
+
+
+def _close_tree_boundary(process: subprocess.Popen[bytes]) -> None:
+    if os.name != "nt":
+        return
+    try:
+        from app.windows_job import close_attached_job
+    except (ImportError, AttributeError) as exc:
+        raise BoundedSubprocessError(
+            "Windows process-tree close boundary is unavailable"
+        ) from exc
+    try:
+        close_attached_job(process)
+    except Exception as exc:
+        raise BoundedSubprocessError("Windows Job Object close failed") from exc
 
 
 def _drain(
@@ -335,7 +460,10 @@ def _drain(
             state["reader_error"] = state["reader_error"] or exc
             condition.notify_all()
     finally:
-        stream.close()
+        try:
+            stream.close()
+        except OSError:
+            pass
 
 
 def _write_stdin(
@@ -354,7 +482,10 @@ def _write_stdin(
             state["writer_error"] = state["writer_error"] or exc
             condition.notify_all()
     finally:
-        stream.close()
+        try:
+            stream.close()
+        except OSError:
+            pass
 
 
 def run_bounded_subprocess(
@@ -368,20 +499,33 @@ def run_bounded_subprocess(
     stdout_prefix_bytes: int | None = None,
     stderr_prefix_bytes: int | None = None,
 ) -> BoundedSubprocessResult:
-    """Run one command behind the DC-L01 Linux containment boundary."""
+    """Run one command behind the platform-native bounded tree boundary."""
+
     if stdin_bytes is not None and not isinstance(stdin_bytes, bytes):
         raise BoundedSubprocessError("subprocess stdin must be bytes or absent")
-    stdout_limit = max_output_bytes if stdout_prefix_bytes is None else stdout_prefix_bytes
-    stderr_limit = max_output_bytes if stderr_prefix_bytes is None else stderr_prefix_bytes
+    stdout_limit = (
+        max_output_bytes if stdout_prefix_bytes is None else stdout_prefix_bytes
+    )
+    stderr_limit = (
+        max_output_bytes if stderr_prefix_bytes is None else stderr_prefix_bytes
+    )
     args, root, clean_env = _validate(
-        command, cwd, env, timeout_seconds, max_output_bytes, stdout_limit, stderr_limit
+        command,
+        cwd,
+        env,
+        timeout_seconds,
+        max_output_bytes,
+        stdout_limit,
+        stderr_limit,
     )
     process = _spawn(
-        args, root, clean_env,
+        args,
+        root,
+        clean_env,
         subprocess.PIPE if stdin_bytes is not None else subprocess.DEVNULL,
     )
-    stdout_acc = _Accumulator(stdout_limit)
-    stderr_acc = _Accumulator(stderr_limit)
+    stdout_accumulator = _Accumulator(stdout_limit)
+    stderr_accumulator = _Accumulator(stderr_limit)
     condition = threading.Condition()
     state: dict[str, object] = {
         "total": 0,
@@ -392,8 +536,18 @@ def run_bounded_subprocess(
     }
     assert process.stdout is not None and process.stderr is not None
     readers = (
-        threading.Thread(target=_drain, args=(process.stdout, stdout_acc, condition, state), daemon=True),
-        threading.Thread(target=_drain, args=(process.stderr, stderr_acc, condition, state), daemon=True),
+        threading.Thread(
+            target=_drain,
+            args=(process.stdout, stdout_accumulator, condition, state),
+            name="kaliv-stdout-drain",
+            daemon=True,
+        ),
+        threading.Thread(
+            target=_drain,
+            args=(process.stderr, stderr_accumulator, condition, state),
+            name="kaliv-stderr-drain",
+            daemon=True,
+        ),
     )
     for reader in readers:
         reader.start()
@@ -403,11 +557,14 @@ def run_bounded_subprocess(
         writer = threading.Thread(
             target=_write_stdin,
             args=(process.stdin, stdin_bytes, condition, state),
+            name="kaliv-stdin-writer",
             daemon=True,
         )
         writer.start()
     deadline = time.monotonic() + timeout_seconds
-    limit_exceeded = timed_out = terminated = False
+    limit_exceeded = False
+    timed_out = False
+    terminated = False
     failure: BaseException | None = None
     try:
         while True:
@@ -432,7 +589,7 @@ def run_bounded_subprocess(
             terminated = _terminate_tree(process)
             if not terminated:
                 raise BoundedSubprocessError(
-                    "supervisor did not acknowledge process-tree quiescence"
+                    "process-tree boundary did not acknowledge quiescence"
                 )
         try:
             process.wait(timeout=10)
@@ -441,7 +598,7 @@ def run_bounded_subprocess(
                 terminated = _terminate_tree(process)
                 if not terminated:
                     raise BoundedSubprocessError(
-                        "supervisor did not acknowledge process-tree quiescence"
+                        "process-tree boundary did not acknowledge quiescence"
                     )
             try:
                 process.wait(timeout=10)
@@ -464,22 +621,25 @@ def run_bounded_subprocess(
                 terminated = _terminate_tree(process)
                 if not terminated:
                     raise BoundedSubprocessError(
-                        "supervisor did not acknowledge process-tree quiescence"
+                        "process-tree boundary did not acknowledge quiescence"
                     )
         return BoundedSubprocessResult(
             args=args,
             returncode=int(process.returncode),
-            stdout=stdout_acc.evidence(),
-            stderr=stderr_acc.evidence(),
+            stdout=stdout_accumulator.evidence(),
+            stderr=stderr_accumulator.evidence(),
             total_output_bytes=int(state["total"]),
             output_limit_exceeded=limit_exceeded,
             timed_out=timed_out,
             process_tree_terminated=terminated,
         )
     finally:
-        if process.poll() is None or any(r.is_alive() for r in readers) or (
-            writer is not None and writer.is_alive()
-        ):
+        tree_may_be_live = (
+            process.poll() is None
+            or any(reader.is_alive() for reader in readers)
+            or (writer is not None and writer.is_alive())
+        )
+        if tree_may_be_live:
             try:
                 _terminate_tree(process)
             finally:
@@ -487,6 +647,7 @@ def run_bounded_subprocess(
                     process.wait(timeout=10)
                 except Exception:
                     pass
+        _close_tree_boundary(process)
 
 
 if __name__ == "__main__":
