@@ -1,0 +1,63 @@
+{
+  "schema": "modelrig-devcontrol-dc-l06-source-path-disposition/v1",
+  "land": [
+    "devcontrol/schemas/development-execution-lease-v1.schema.json",
+    "devcontrol/schemas/development-tier-a-launch-plan-v1.schema.json",
+    "devcontrol/src/kaliv_dev_control/_tier_a_lease.py",
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py",
+    "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py",
+    "devcontrol/tests/test_h10k_tier_a_environment_extraction.py",
+    "devcontrol/tests/test_h10l_tier_a_error_extraction.py",
+    "devcontrol/tests/test_h10m_tier_a_lease_model_extraction.py",
+    "devcontrol/tests/test_h10n_tier_a_path_authority_extraction.py",
+    "devcontrol/tests/test_h10o_tier_a_materialization_extraction.py",
+    "devcontrol/tests/test_h10q_tier_a_legacy_plan_extraction.py",
+    "devcontrol/tests/test_slice9.py",
+    "devcontrol/tests/test_slice9_schemas.py"
+  ],
+  "progressive": [
+    "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
+    "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
+    "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
+    "tests/workflow_test_coverage.py"
+  ],
+  "projected_source_tests": [
+    "devcontrol/tests/test_h10k_tier_a_environment_extraction.py",
+    "devcontrol/tests/test_h10l_tier_a_error_extraction.py",
+    "devcontrol/tests/test_h10m_tier_a_lease_model_extraction.py",
+    "devcontrol/tests/test_h10n_tier_a_path_authority_extraction.py",
+    "devcontrol/tests/test_h10o_tier_a_materialization_extraction.py",
+    "devcontrol/tests/test_slice9.py",
+    "devcontrol/tests/test_slice9_schemas.py"
+  ],
+  "new_control_artifacts": [
+    "docs/devcontrol/dc-l06/exact-head-validation.md",
+    "docs/devcontrol/dc-l06/exact-path-allowlist.json",
+    "docs/devcontrol/dc-l06/independent-review-verdict.md",
+    "docs/devcontrol/dc-l06/mutation-results.md",
+    "docs/devcontrol/dc-l06/preflight.md",
+    "docs/devcontrol/dc-l06/source-path-disposition.json",
+    "docs/devcontrol/dc-l06/source-provenance.json",
+    "docs/devcontrol/dc-l06/symbol-ownership.json"
+  ],
+  "deferred_until_later_slices": {
+    "DC-L07": [
+      "runtime staging and closure",
+      "Tier-A launch-plan v2/v3",
+      "Tier-A execution result"
+    ],
+    "DC-L08": [
+      "retained legacy runner",
+      "modern verified executor",
+      "supported process launch"
+    ],
+    "DC-L09+": [
+      "trusted Git runtime",
+      "command receipt",
+      "public tier_a_execution facade",
+      "semantic review and publisher authority"
+    ]
+  }
+}

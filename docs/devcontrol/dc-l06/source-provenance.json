@@ -1,0 +1,96 @@
+{
+  "schema": "modelrig-devcontrol-dc-l06-source-provenance/v1",
+  "source": {
+    "pull_request": 338,
+    "head": "07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f"
+  },
+  "base": "3ede93313233e65599f2fb29b4c64e58f7432990",
+  "copied_exact_blobs": {
+    "devcontrol/schemas/development-execution-lease-v1.schema.json": "53afd2b0a53ea560d2e9cbce34bf0bd34c29c9d3",
+    "devcontrol/schemas/development-tier-a-launch-plan-v1.schema.json": "32d99602091ce05d720b2f5396d0fdda1545a189",
+    "devcontrol/src/kaliv_dev_control/_tier_a_lease.py": "244cf114ed5df5923555b3d797140073319da2f7",
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py": "1d9cee5d7029ceb34a7dffe1d1ecb3e90cf3048a",
+    "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py": "58663373a9a404538899895697c018c04afd96ba",
+    "devcontrol/tests/test_h10q_tier_a_legacy_plan_extraction.py": "18b9004189d3791d19e6fbed8abd395a6fd85a04"
+  },
+  "projections": [
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
+      "source_blob": "68cee74aa519e41cb9b8e3a5e74e3dbb90a6d78d",
+      "base_blob": null,
+      "reason": "replace future interpreter/toolchain keys with the exact fixed environment already accepted by the landed hardened catalog"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
+      "source_blob": "744768b781a7c9742c8deec3a8f34add024ba306",
+      "base_blob": null,
+      "reason": "retain only already-landed lease, environment, path, materialization, toolhost and v1 plan re-exports; omit the DC-L08 legacy runner"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
+      "source_blob": "a5a064b31333f001268a4bc10d7b29c10386e654",
+      "base_blob": null,
+      "reason": "replace future runtime-staging and public-execution entries with the exact DC-L06 stage-local authority closure while retaining the v2 hash domain"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py",
+      "source_blob": "52b7e4939b2c45dd044eb4b781449ad9be9aede8",
+      "base_blob": null,
+      "reason": "create only signed command identities from the landed catalog and toolchain; defer executable verification and process launch while retaining exact plan-time hash checks"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
+      "source_blob": "f94d698f090aba7eb8ddc5e4118e46c406345377",
+      "base_blob": null,
+      "reason": "expose only already-landed identities and the literal stage-local bundle; omit cwd v3, executor, closure, trusted Git and receipt authority"
+    },
+    {
+      "path": "devcontrol/tests/test_h10k_tier_a_environment_extraction.py",
+      "source_blob": "de9476d78ff226a154c5351f7979a49c3addcbd3",
+      "base_blob": null,
+      "reason": "remove references to future public package/execution surfaces and bind the test to the DC-L06 core and authority identities"
+    },
+    {
+      "path": "devcontrol/tests/test_h10l_tier_a_error_extraction.py",
+      "source_blob": "259e648288122451dc250d1514f612de44f44c96",
+      "base_blob": null,
+      "reason": "remove references to future public package/execution surfaces and bind the test to the DC-L06 core and authority identities"
+    },
+    {
+      "path": "devcontrol/tests/test_h10m_tier_a_lease_model_extraction.py",
+      "source_blob": "7e2d277f135066d276d2e5bb75decde22e239f5c",
+      "base_blob": null,
+      "reason": "remove references to future public package/execution surfaces and bind the test to the DC-L06 core and authority identities"
+    },
+    {
+      "path": "devcontrol/tests/test_h10n_tier_a_path_authority_extraction.py",
+      "source_blob": "311b4b51e582d5b0c08abeb5316b8149dc3c1000",
+      "base_blob": null,
+      "reason": "remove references to future public package/execution surfaces and bind the test to the DC-L06 core and authority identities"
+    },
+    {
+      "path": "devcontrol/tests/test_h10o_tier_a_materialization_extraction.py",
+      "source_blob": "ee127d4cbe75710217b8522cd8ec86fa31a21cab",
+      "base_blob": null,
+      "reason": "bind the materialization extraction boundary to the projected environment policy and non-executing DC-L06 registry"
+    },
+    {
+      "path": "devcontrol/tests/test_slice9.py",
+      "source_blob": "ae5b1e52d549f6b3caaaef03653db4eb455b1a05",
+      "base_blob": null,
+      "reason": "project source Slice 9 coverage to landed catalog policy, signed identity materialization and v1 plan only; explicitly reject later execution authority"
+    },
+    {
+      "path": "devcontrol/tests/test_slice9_schemas.py",
+      "source_blob": "c5e4843232e06375d1af87eada05bc997f26c6bd",
+      "base_blob": null,
+      "reason": "project source Slice 9 coverage to lease, materialization and v1 plan only; explicitly reject later schemas, results and process-launch authority"
+    },
+    {
+      "path": "tests/workflow_test_coverage.py",
+      "source_blob": null,
+      "base_blob": "64d089492a0ffc9b40144faaf8e926c69830d7e8",
+      "reason": "extend the landed DevControl module inventory from DC-L01–L05 to the twenty modules present through DC-L06"
+    }
+  ]
+}

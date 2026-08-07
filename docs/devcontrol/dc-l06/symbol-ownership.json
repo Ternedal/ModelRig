@@ -1,0 +1,101 @@
+{
+  "schema": "modelrig-devcontrol-dc-l06-symbol-ownership/v1",
+  "owned_symbols": {
+    "devcontrol/src/kaliv_dev_control/_tier_a_lease.py": [
+      "LEASE_SCHEMA",
+      "_HEX40",
+      "_HEX64",
+      "_TASK_ID",
+      "TierAExecutionError",
+      "_canonical",
+      "_sha256",
+      "_task_sha",
+      "TierAExecutionLease"
+    ],
+    "devcontrol/src/kaliv_dev_control/_tier_a_environment.py": [
+      "TIER_A_APPLICATION_ENVIRONMENT",
+      "_validated_application_env"
+    ],
+    "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py": [
+      "_has_symlink_component",
+      "_canonical_directory",
+      "workspace_root_authority_sha256",
+      "_regular_file_hash"
+    ],
+    "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py": [
+      "_LeaseCapturingVerifier",
+      "LeasedCommandRegistry",
+      "LeasedCatalogMaterializer"
+    ],
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py": [
+      "_TIER_A_BUNDLE_FILES",
+      "tier_a_toolhost_sha256"
+    ],
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py": [
+      "PLAN_SCHEMA",
+      "_COMMAND_ID",
+      "TierALaunchPlan",
+      "build_tier_a_launch_plan"
+    ]
+  },
+  "import_only_facade": {
+    "path": "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
+    "owns_classes_or_functions": false,
+    "reexports": [
+      "LEASE_SCHEMA",
+      "TierAExecutionError",
+      "TierAExecutionLease",
+      "_HEX40",
+      "_HEX64",
+      "_TASK_ID",
+      "_canonical",
+      "_sha256",
+      "_task_sha",
+      "_canonical_directory",
+      "_has_symlink_component",
+      "_regular_file_hash",
+      "workspace_root_authority_sha256",
+      "_TIER_A_BUNDLE_FILES",
+      "tier_a_toolhost_sha256",
+      "PLAN_SCHEMA",
+      "_COMMAND_ID",
+      "TierALaunchPlan",
+      "build_tier_a_launch_plan",
+      "_LeaseCapturingVerifier",
+      "LeasedCommandRegistry",
+      "LeasedCatalogMaterializer",
+      "TIER_A_APPLICATION_ENVIRONMENT",
+      "_validated_application_env"
+    ]
+  },
+  "stage_local_authority_surface": {
+    "path": "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
+    "exports": [
+      "LEASE_SCHEMA",
+      "PLAN_SCHEMA",
+      "TierAExecutionError",
+      "TierAExecutionLease",
+      "LeasedCommandRegistry",
+      "LeasedCatalogMaterializer",
+      "TierALaunchPlan",
+      "build_tier_a_launch_plan",
+      "TIER_A_APPLICATION_ENVIRONMENT",
+      "workspace_root_authority_sha256",
+      "tier_a_toolhost_sha256",
+      "_TIER_A_BUNDLE_FILES"
+    ]
+  },
+  "schemas": [
+    "kaliv-development-execution-lease/v1",
+    "kaliv-development-tier-a-launch-plan/v1"
+  ],
+  "forbidden_ownership": [
+    "process launch or subprocess execution",
+    "runtime staging or runtime closure",
+    "Tier-A execution result",
+    "trusted Git runtime or command receipt",
+    "semantic review, publisher or remote authority",
+    "package-level public Tier-A execution facade",
+    "GitHub write, remote Git, merge, release, deployment or activation"
+  ]
+}
