@@ -39,7 +39,6 @@ _FIXED_PROCESS_ENV = MappingProxyType(
 _ALLOWED_ENV = {
     "CI": "1",
     "MODELRIG_DEVCONTROL": "1",
-    "GOTOOLCHAIN": "local",
     **_FIXED_PROCESS_ENV,
 }
 _MAX_EXECUTABLE_BYTES = 256_000_000
@@ -96,6 +95,10 @@ class ProjectCommandSpec:
             raise CatalogError("invalid catalog command id")
         if not isinstance(self.tool_id, str) or _ID.fullmatch(self.tool_id) is None:
             raise CatalogError("invalid catalog tool id")
+        if self.tool_id == "go":
+            raise CatalogError(
+                "Go commands require complete helper toolchain attestation"
+            )
         if not isinstance(self.args, tuple) or len(self.args) > 128 or any(
             not isinstance(arg, str) or not arg or "\0" in arg or len(arg.encode()) > 4096
             for arg in self.args
@@ -629,6 +632,4 @@ def modelrig_command_catalog() -> ModelRigCommandCatalog:
         ProjectCommandSpec("modelrig.version.check", "python", ("scripts/version_tool.py", "check"), ".", 120, common),
         ProjectCommandSpec("modelrig.devcontrol.tests", "python", ("-m", "unittest", "discover", "-s", "../tests", "-p", "test_*.py", "-v"), "devcontrol/src", 900, common),
         ProjectCommandSpec("modelrig.workflow.test-coverage", "python", ("tests/workflow_test_coverage.py",), ".", 3600, common),
-        ProjectCommandSpec("modelrig.backend.vet", "go", ("vet", "./..."), "backend", 900, {**common, "GOTOOLCHAIN": "local"}),
-        ProjectCommandSpec("modelrig.backend.tests", "go", ("test", "./..."), "backend", 3600, {**common, "GOTOOLCHAIN": "local"}),
     ))
