@@ -5,20 +5,25 @@
     "head": "07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f"
   },
   "base": "3777dc456bf72238339e91f714dd239a97ec02b9",
-  "copied_exact_paths": [
-    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py",
-    "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py"
-  ],
+  "copied_exact_paths": [],
   "projected_paths": [
     {
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py",
+      "reason": "replace the later ExecutableVerifier annotation with Any and late-bind the same approved native worker modules; all authorization, AppContainer, Job Object, timeout and cleanup behavior remains"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py",
+      "reason": "replace the later ExecutableVerifier annotation with Any and late-bind the same approved native worker modules; all closure checks, exact revalidation, bounded capture, lifetime guarding and process-tree cleanup behavior remains"
+    },
+    {
       "path": "devcontrol/tests/test_h10r_tier_a_legacy_runner_extraction.py",
-      "reason": "prove the private legacy and modern executor ownership and fail-closed boundary without importing the deferred DC-L09 public facade or command receipt"
+      "reason": "prove private legacy and modern executor ownership and fail-closed boundaries without importing the deferred DC-L09 public facade or command receipt"
     }
   ],
   "progressive_projections": [
     {
       "path": ".github/workflows/_tests.yml",
-      "reason": "run all twenty-eight DevControl modules, assert the private-only execution boundary and activate the real-Windows closure-bound executor contract through a test-only in-memory shim"
+      "reason": "run all twenty-eight DevControl modules, assert the private-only execution boundary and activate the real-Windows closure-bound executor contract through a test-only in-memory shim with the landed reviewed environment"
     },
     {
       "path": "devcontrol/README.md",
@@ -42,7 +47,7 @@
     },
     {
       "path": "tests/workflow_test_coverage.py",
-      "reason": "extend CI discovery to twenty-eight modules and require both native Windows execution contracts while leaving receipt testing deferred"
+      "reason": "extend CI discovery to twenty-eight modules and require the owned closure-bound Windows execution contract while leaving generic bounded-subprocess and receipt testing deferred"
     }
   ]
 }
