@@ -1,4 +1,4 @@
-# Kaliv Development Control — landed foundations through DC-L08
+# Kaliv Development Control — landed foundations through DC-L09
 
 These slices are the dormant, bounded foundation defined by
 `docs/devcontrol/ADR-DC-001_DEVCONTROL_AUTHORITY_BOUNDARY.md` and the landed
@@ -100,10 +100,26 @@ DC-L08 adds verified-only Tier-A execution through the private
   timed-out result through `TierAExecutionTimeout`; and
 - runtime-closure lifetime locks remain held until process-tree shutdown is proven.
 
-The v6 toolhost identity includes both private executor sources. Neither the
-package root, `tier_a_authority`, nor `_tier_a_execution_core` exports a launch
-function. The retained legacy runner exists only as compatibility authority; the
-closure-bound v3 module is the sole modern executor.
+## DC-L09 authority
+
+DC-L09 adds the complete local trusted-Git and command-receipt boundary:
+
+- a manifest for every file in one operator-reviewed Git runtime package;
+- create-once, crash-durable runtime staging and authenticated recovery evidence;
+- a no-shell `TrustedGitRunner` with isolated HOME, configuration, hooks and temp;
+- fixed local-only Git protocol policy with prompts, credentials and remote
+  transports disabled;
+- canonical before/after/reset workspace snapshots with bounded binary diffs;
+- one-command receipt orchestration that joins the exact Git runtime identity to
+  the canonical Tier-A result and resets mutations to the exact task base; and
+- `tier_a_execution.py` as the single final public compatibility facade routing
+  to the v3 executor and the Git-aware receipt orchestrator.
+
+The v7 toolhost identity includes the private executor, trusted-Git runtime,
+command receipt and final facade. Package root, `tier_a_authority`,
+`runtime_staging` and `_tier_a_execution_core` still expose no process-launch
+function. The default catalog remains empty, so no product route or normal
+package import activates execution.
 
 ## Physical evidence operator flow
 
@@ -128,11 +144,11 @@ PYTHONPATH=devcontrol/src python -m kaliv_dev_control verify-physical-report \
 
 ## Deliberately absent
 
-DC-L01–DC-L08 provide no final public Tier-A execution facade, command receipt,
-trusted Git runtime, credential loader, GitHub write adapter, remote Git, push,
-pull-request mutation, reviewer request, merge, release, deployment or
-activation authority. The default catalog remains empty, so the private executor
-cannot be reached through normal product or package entrypoints.
+DC-L01–DC-L09 provide no credential loader, remote Git transport, fetch, push,
+GitHub write adapter, pull-request mutation, reviewer request, semantic approval,
+publisher authorization, merge, release, deployment or activation authority.
+The trusted Git runtime permits only bounded local repository operations, and the
+default command catalog remains empty.
 
 ## Validation
 
@@ -143,8 +159,9 @@ python3 tests/workflow_test_coverage.py
 cd backend && go test ./cmd/modelrig-version-check
 ```
 
-CI also runs the closure-bound executor against a real Windows kernel, compiling
-a deterministic static fixture and proving AppContainer containment, Job Object
-cleanup, bounded output, nested cwd, timeout handling and runtime immutability.
-Exact-path, provenance, mutation, validation and review evidence for this slice
-lives under `docs/devcontrol/dc-l08/`.
+CI runs the closure-bound executor and Git-aware receipt against a real Windows
+kernel. It proves AppContainer containment, Job Object cleanup, bounded output,
+nested cwd, timeout handling, runtime immutability, pinned Git-runtime staging,
+workspace evidence and fail-closed mutation reset. Exact-path, provenance,
+mutation, validation and review evidence for this slice lives under
+`docs/devcontrol/dc-l09/`.
