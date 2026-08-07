@@ -83,6 +83,12 @@ expected_modules = {
     "test_physical_isolation_durable_publication_h10b.py",
     "test_proposal_reload.py",
     "test_review_reload.py",
+    "test_runtime_staging_concurrency_h10h.py",
+    "test_slice10_runtime_staging.py",
+    "test_slice10b_runtime_binding.py",
+    "test_slice10c_output_result.py",
+    "test_slice10d_runtime_closure.py",
+    "test_slice10e_version_check_closure.py",
     "test_slice2.py",
     "test_slice5.py",
     "test_slice6.py",
@@ -90,11 +96,15 @@ expected_modules = {
     "test_slice9.py",
     "test_slice9_schemas.py",
     "test_store_proposal.py",
+    "test_streaming_publication_h10g.py",
 }
 observed_modules = {
     path.name for path in (root / "devcontrol/tests").glob("test_*.py")
 }
-check(observed_modules == expected_modules, f"the twenty DC-L01–L06 test modules are present: {sorted(observed_modules)}")
+check(
+    observed_modules == expected_modules,
+    f"the twenty-seven DC-L01–L07 test modules are present: {sorted(observed_modules)}",
+)
 
 receipt_schema = json.loads(
     (root / "devcontrol/schemas/development-github-read-receipt-v1.schema.json").read_text(encoding="utf-8")
@@ -246,7 +256,7 @@ native_windows_contracts = (
 )
 check(
     all(f"python {path}" in workflow for path in native_windows_contracts),
-    "CI reaches every DC-L05 product-side native Windows contract",
+    "CI reaches every landed product-side native Windows contract",
 )
 deferred_windows_contracts = (
     "tests/support/windows_bounded_subprocess_contract.py",
@@ -255,7 +265,7 @@ deferred_windows_contracts = (
 )
 check(
     all(f"python {path}" not in workflow for path in deferred_windows_contracts),
-    "DC-L05 does not activate later DevControl execution, Tier-A or trusted-Git contracts",
+    "DC-L07 does not activate later execution, receipt or trusted-Git contracts",
 )
 product_modules = (
     "worker/app/toolhost.py",
@@ -270,7 +280,7 @@ check(
         "kaliv_dev_control" not in (root / path).read_text(encoding="utf-8")
         for path in product_modules
     ),
-    "DC-L05 product code does not import DevControl",
+    "landed product code does not import DevControl",
 )
 
 allowlist = json.loads(
