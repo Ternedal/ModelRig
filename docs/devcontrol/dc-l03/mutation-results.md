@@ -58,9 +58,13 @@ Load-bearing mutations and expected failures:
 23. Start repeated requests while one uninterruptible setup worker remains.
     Expected: the bounded setup-slot regression fails unless later requests fail
     closed without spawning further workers.
-24. Hide the underlying transport socket.
+24. Close the connected socket between the final cancellation check and request
+    output while leaving `http.client` automatic open enabled.
+    Expected: reconnect-race regression fails unless auto reconnect is disabled
+    and no second connect or auth send occurs.
+25. Hide the underlying transport socket.
     Expected: request handling fails closed before accepting response evidence.
-25. Remove socket shutdown, socket close, response close or connection close at
+26. Remove socket shutdown, socket close, response close or connection close at
     deadline expiry.
     Expected: body/header cancellation assertions fail.
 
@@ -68,6 +72,6 @@ The latest complete focused runtime run produced **26/26 passing tests** before
 the final environment/deadline changes. Those final findings have executable
 contract regressions, clean narrowly scoped commit diffs, and direct validation
 of omitted-PATH insertion, setup/body/header timeout, no post-timeout send,
-bounded setup workers, cancellation, successful read and byte-budget behavior.
-Full exact-head CI and diagnostics remain pending because no Actions run has been
-created for connector-authored heads.
+bounded setup workers, disabled reconnect, cancellation, successful read and
+byte-budget behavior. Full exact-head CI and diagnostics remain pending because
+no Actions run has been created for connector-authored heads.
