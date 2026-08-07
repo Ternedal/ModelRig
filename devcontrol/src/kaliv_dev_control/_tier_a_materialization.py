@@ -1,16 +1,17 @@
 """Physical-evidence capture and leased command materialization."""
 from __future__ import annotations
 
+from ._tier_a_environment import TIER_A_APPLICATION_ENVIRONMENT
 from ._tier_a_lease import (
     TierAExecutionError,
     TierAExecutionLease,
     _task_sha,
 )
 from .catalog import (
-    CatalogMaterializer,
     IsolationAttestation,
-    LocalExecutableHashVerifier,
+    IsolationBoundary,
     ModelRigCommandCatalog,
+    NetworkMode,
     Toolchain,
 )
 from .commands import CommandRegistry, CommandTemplate
@@ -98,22 +99,25 @@ class LeasedCommandRegistry:
 
 
 class LeasedCatalogMaterializer:
-    """Materialize fixed commands and retain signed physical evidence."""
+    """Create a signed, non-executing Tier-A command identity registry."""
 
     def __init__(
         self,
         catalog: ModelRigCommandCatalog,
         physical_verifier: WindowsPhysicalIsolationVerifier,
         *,
-        executable_verifier: LocalExecutableHashVerifier | None = None,
+        executable_verifier: object | None = None,
     ) -> None:
-        self.catalog = catalog
         self._capturing = _LeaseCapturingVerifier(physical_verifier)
-        self._materializer = CatalogMaterializer(
-            catalog,
-            isolation_verifier=self._capturing,
-            executable_verifier=executable_verifier,
-        )
+        if not isinstance(catalog, ModelRigCommandCatalog):
+            raise TierAExecutionError(
+                "leased materialization requires a ModelRig command catalog"
+            )
+        if executable_verifier is not None:
+            raise TierAExecutionError(
+                "executable verification is deferred until process launch"
+            )
+        self.catalog = catalog.snapshot()
 
     def materialize(
         self,
@@ -121,14 +125,80 @@ class LeasedCatalogMaterializer:
         toolchain: Toolchain,
         attestation: IsolationAttestation,
     ) -> LeasedCommandRegistry:
-        registry = self._materializer.materialize(
-            task, toolchain, attestation
-        )
+        if not isinstance(task, DevelopmentTask):
+            raise TierAExecutionError(
+                "leased materialization requires a development task"
+            )
+        if not isinstance(toolchain, Toolchain):
+            raise TierAExecutionError(
+                "leased materialization requires a toolchain"
+            )
+        if not isinstance(attestation, IsolationAttestation):
+            raise TierAExecutionError(
+                "leased materialization requires an isolation attestation"
+            )
+        try:
+            task_snapshot = DevelopmentTask.from_mapping(task.to_dict())
+            toolchain_snapshot = toolchain.snapshot()
+            proof = IsolationAttestation.from_mapping(attestation.to_dict())
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise TierAExecutionError(
+                "leased materialization authority is invalid"
+            ) from exc
+
+        expected = {
+            "task_id": task_snapshot.task_id,
+            "task_sha256": _task_sha(task_snapshot),
+            "repository": task_snapshot.repository,
+            "base_sha": task_snapshot.base_sha,
+            "catalog_sha256": self.catalog.sha256,
+            "toolchain_sha256": toolchain_snapshot.sha256,
+            "boundary": IsolationBoundary.OS_ISOLATED,
+            "network_mode": NetworkMode.DENY,
+        }
+        actual = {
+            "task_id": proof.task_id,
+            "task_sha256": proof.task_sha256,
+            "repository": proof.repository,
+            "base_sha": proof.base_sha,
+            "catalog_sha256": proof.catalog_sha256,
+            "toolchain_sha256": proof.toolchain_sha256,
+            "boundary": proof.boundary,
+            "network_mode": proof.network_mode,
+        }
+        if actual != expected:
+            raise TierAExecutionError(
+                "isolation attestation is not bound to this exact Tier-A authority"
+            )
+
+        self._capturing.verify(proof)
+        templates: list[CommandTemplate] = []
+        for command_id in task_snapshot.allowed_command_ids:
+            specification = self.catalog.resolve(command_id)
+            if specification.required_boundary is not IsolationBoundary.OS_ISOLATED:
+                raise TierAExecutionError(
+                    "Tier-A catalog boundary is not OS isolated"
+                )
+            if specification.network_mode is not NetworkMode.DENY:
+                raise TierAExecutionError(
+                    "Tier-A catalog network mode is not deny"
+                )
+            binding = toolchain_snapshot.resolve(specification.tool_id)
+            templates.append(
+                CommandTemplate(
+                    command_id=specification.command_id,
+                    argv=(binding.executable, *specification.args),
+                    cwd=specification.cwd,
+                    max_timeout_seconds=specification.max_timeout_seconds,
+                    env=TIER_A_APPLICATION_ENVIRONMENT,
+                )
+            )
+
         return LeasedCommandRegistry(
-            registry,
+            CommandRegistry(templates),
             self._capturing.lease,
-            task=task,
+            task=task_snapshot,
             catalog=self.catalog,
-            toolchain=toolchain,
-            attestation=attestation,
+            toolchain=toolchain_snapshot,
+            attestation=proof,
         )
