@@ -2,40 +2,43 @@
 
 Status: **pending fresh exact-head review**
 
-Independent review of `96967da26134cb68cc59242fbee004cc403228ba`
-found two actionable issues:
+Independent review history:
 
-1. the injected isolation verifier could mutate its received attestation after
-   the materializer's initial comparison;
-2. executable verification used a blocking open, allowing a FIFO with no writer
-   to hang before regular-file validation.
+1. Review of `96967da26134cb68cc59242fbee004cc403228ba` found mutable
+   isolation-verifier proof and blocking FIFO-open issues. Candidate
+   `660e85dcb0281cdbc0991d9cb5c06a7f0064ff6f` closed both with private proof
+   snapshots, post-callback revalidation, `O_NONBLOCK` and regressions.
+2. Author-side schema review found receipt repository syntax looser than runtime.
+   Candidate `157b158011d120797a230912f1c96a23babb1ace` aligned schema/runtime and
+   added a repository-pattern contract regression.
+3. Review of `002306223eb172351f9bfd1665dc1d5f9bdcfd2a` found two further issues:
+   unreviewed `GOROOT`/`PYTHONUSERBASE` authority and absence of a monotonic
+   wall-clock deadline for slow-drip GitHub responses.
 
-Candidate `660e85dcb0281cdbc0991d9cb5c06a7f0064ff6f` closes both findings with:
+Current candidate `b7cabc3524a75d980cd5e0710b2acfeed7a15eb2` closes the latest findings with:
 
-- private reconstructed attestation snapshots before and after the callback;
-- canonical and authority revalidation after the callback;
-- `O_NONBLOCK` on the no-follow descriptor open;
-- regressions for callback mutation and FIFO rejection without a writer.
+- a fixed-value catalog environment positive list containing only `CI=1`,
+  `MODELRIG_DEVCONTROL=1` and `GOTOOLCHAIN=local`;
+- a monotonic response-read deadline with remaining-time socket deadlines before
+  every `read1` and fail-closed handling when no deadline-capable socket exists;
+- executable contract regressions for `GOROOT`, `PYTHONUSERBASE`,
+  `GOTOOLCHAIN=auto` and an endless slow-drip response;
+- preservation of the existing `CatalogError` isolation-message contract.
 
-Author-side review then found a receipt-schema/runtime mismatch: the JSON schema
-permitted owner/name dot segments and NUL authority that runtime rejected.
-Candidate `157b158011d120797a230912f1c96a23babb1ace` aligns the schema with runtime
-and adds a repository-pattern contract regression.
-
-Focused runtime validation passes **26/26 tests**. No final independent verdict
-is claimed until the resulting evidence head is reviewed without an actionable
-finding.
+The latest complete focused runtime run passes **26/26 tests** before these final
+two narrowly scoped fixes. The additional targeted regressions pass in direct
+validation. No final independent verdict is claimed until the resulting evidence
+head is reviewed without an actionable finding.
 
 Required review focus:
 
-1. immutable catalog and toolchain canonicalization;
-2. exact task/catalog/toolchain/attestation binding before materialization and
-   after the isolation-verifier callback;
-3. fail-closed default isolation and Windows executable verification;
-4. POSIX executable link, mutation, non-regular-file, FIFO and size handling;
+1. positive-list process environment authority;
+2. exact task/catalog/toolchain/attestation binding and callback snapshots;
+3. fail-closed isolation and executable verification;
+4. POSIX executable link, mutation, FIFO and size handling;
 5. fixed GET-only GitHub host/method/ref authority;
-6. explicit TLS roots independent of environment proxy and CA overrides;
-7. task-scope and protected-path enforcement before network access;
-8. response/file bounds, JSON/base64 validation and Git blob identity;
-9. receipt runtime/schema identity alignment and token non-persistence;
+6. monotonic wall-clock response deadline and fail-closed socket discovery;
+7. explicit TLS roots independent of environment proxy and CA overrides;
+8. task scope, protected paths, response bounds and Git blob identity;
+9. receipt runtime/schema alignment and token non-persistence;
 10. absence of write, remote Git, publication, merge or activation authority.
