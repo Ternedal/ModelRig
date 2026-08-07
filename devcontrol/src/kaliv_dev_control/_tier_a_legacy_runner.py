@@ -1,6 +1,7 @@
 """Retained non-capturing Windows executor removed from the modern authority surface."""
 from __future__ import annotations
 
+import importlib
 import os
 import subprocess
 from pathlib import Path
@@ -50,32 +51,24 @@ def _run_tier_a_launch_plan(
         raise TierAExecutionError("Tier-A executable changed after planning")
 
     try:
-        from app.windows_job import (
-            JobLimits,
-            close_attached_job,
-            terminate_attached_job,
-        )
-        from app.windows_restricted import (
-            AppContainerProfile,
-            RestrictedLaunchPolicy,
-            provision_workspace_acl,
-        )
-        from app.windows_tier_a import spawn_tier_a_in_job
+        windows_job = importlib.import_module("app.windows_job")
+        windows_restricted = importlib.import_module("app.windows_restricted")
+        windows_tier_a = importlib.import_module("app.windows_tier_a")
     except ImportError as exc:
         raise TierAExecutionError(
             "authoritative worker Tier-A modules are unavailable"
         ) from exc
 
-    policy = RestrictedLaunchPolicy(os.fspath(root))
-    profile = AppContainerProfile(policy)
+    policy = windows_restricted.RestrictedLaunchPolicy(os.fspath(root))
+    profile = windows_restricted.AppContainerProfile(policy)
     process = None
     try:
-        receipt = provision_workspace_acl(policy, profile)
-        process = spawn_tier_a_in_job(
+        receipt = windows_restricted.provision_workspace_acl(policy, profile)
+        process = windows_tier_a.spawn_tier_a_in_job(
             plan.argv,
             source_env=os.environ if source_env is None else source_env,
             application_env=plan.env,
-            limits=JobLimits(
+            limits=windows_job.JobLimits(
                 process_memory_bytes=process_memory_bytes,
                 active_process_limit=active_process_limit,
             ),
@@ -86,7 +79,7 @@ def _run_tier_a_launch_plan(
         try:
             return process.wait(timeout=plan.max_timeout_seconds)
         except subprocess.TimeoutExpired as exc:
-            terminate_attached_job(process)
+            windows_job.terminate_attached_job(process)
             try:
                 process.wait(timeout=5)
             except Exception:
@@ -97,7 +90,7 @@ def _run_tier_a_launch_plan(
         finally:
             if process is not None:
                 try:
-                    close_attached_job(process)
+                    windows_job.close_attached_job(process)
                 except Exception:
                     pass
                 try:
