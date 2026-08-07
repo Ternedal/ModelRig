@@ -71,7 +71,7 @@ jobs:
           done
           exit "$status"
 
-      - name: DevControl DC-L01 through DC-L10 tests
+      - name: DevControl DC-L01 through DC-L11 tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         shell: bash
@@ -121,8 +121,6 @@ jobs:
                   assert not hasattr(module, name), (module.__name__, name)
 
           for future_module in (
-              "kaliv_dev_control.draft_pr_readiness",
-              "kaliv_dev_control.publisher_dry_run",
               "kaliv_dev_control.publisher_authorization",
               "kaliv_dev_control.local_candidate_materialization",
           ):
@@ -182,10 +180,85 @@ jobs:
           )
 
           for future_module in (
-              "kaliv_dev_control.draft_pr_readiness",
-              "kaliv_dev_control.publisher_dry_run",
               "kaliv_dev_control.publisher_authorization",
               "kaliv_dev_control.publisher_authorization_v2",
+              "kaliv_dev_control.publisher_recovery_authorization",
+              "kaliv_dev_control.local_candidate_materialization",
+          ):
+              assert importlib.util.find_spec(future_module) is None, future_module
+          PY
+
+      - name: DevControl DC-L11 readiness and publisher dry-run boundary
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=devcontrol/src python3 - <<'PY' 2>&1 | tee -a /tmp/modelrig-ci-test.log
+          import importlib
+          import importlib.util
+          import inspect
+
+          import kaliv_dev_control
+
+          readiness = importlib.import_module("kaliv_dev_control.draft_pr_readiness")
+          publisher = importlib.import_module("kaliv_dev_control.publisher_dry_run")
+          tier_a_facade = importlib.import_module("kaliv_dev_control.tier_a_execution")
+          toolhost = importlib.import_module("kaliv_dev_control._tier_a_legacy_toolhost")
+
+          assert callable(readiness.DraftPrReadinessGate.ready)
+          assert callable(readiness.write_authenticated_draft_pr_readiness_proposal)
+          assert callable(publisher.PublisherDryRunGate.valid)
+          assert callable(publisher.write_publisher_request)
+          assert callable(publisher.write_signed_publisher_request)
+          assert callable(publisher.write_publisher_dry_run_receipt)
+
+          for name in (
+              "AuthenticatedDraftPrReadinessProposal",
+              "DraftPrReadinessGate",
+              "PublisherRequest",
+              "PublisherDryRunReceipt",
+              "PublisherDryRunGate",
+          ):
+              assert not hasattr(kaliv_dev_control, name), name
+              assert not hasattr(tier_a_facade, name), name
+
+          assert all(
+              "draft_pr_readiness" not in path
+              and "publisher_dry_run" not in path
+              for path in toolhost._TIER_A_BUNDLE_FILES
+          )
+
+          readiness_names = set(dir(readiness))
+          publisher_names = set(dir(publisher))
+          for forbidden in (
+              "create_pull_request",
+              "update_pull_request",
+              "push_branch",
+              "request_reviewers",
+              "mark_ready_for_review",
+              "merge_pull_request",
+              "release",
+              "deploy",
+          ):
+              assert forbidden not in readiness_names, forbidden
+              assert forbidden not in publisher_names, forbidden
+
+          source = inspect.getsource(readiness) + inspect.getsource(publisher)
+          for token in (
+              "Authorization:",
+              "requests.",
+              "urllib",
+              "http.client",
+              "subprocess",
+          ):
+              assert token not in source, token
+
+          for future_module in (
+              "kaliv_dev_control.publisher_authorization",
+              "kaliv_dev_control.publisher_authorization_v2",
+              "kaliv_dev_control.publisher_authorization_chain_v2",
+              "kaliv_dev_control.publisher_replay_h4",
               "kaliv_dev_control.publisher_recovery_authorization",
               "kaliv_dev_control.local_candidate_materialization",
           ):
