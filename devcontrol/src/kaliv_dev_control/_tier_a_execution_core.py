@@ -1,9 +1,10 @@
-"""Import-only compatibility facade for landed non-executing Tier-A identities.
+"""Import-only compatibility facade for landed Tier-A authority identities.
 
-DC-L07 keeps this historical facade limited to lease, environment, path,
+DC-L08 adds verified execution in the focused ``tier_a_execution_v3`` module,
+while this historical core remains limited to lease, environment, path,
 materialization, stage-local toolhost and retained v1 launch-plan identities.
-Runtime staging, signed closures, v3 planning and result evidence live in their
-focused modules. Process launch remains deliberately absent until DC-L08.
+The private legacy runner and modern executor are deliberately not re-exported
+through this facade.
 """
 from __future__ import annotations
 
@@ -50,7 +51,7 @@ for _forbidden_execution_name in (
 ):
     if _forbidden_execution_name in globals():
         raise TierAExecutionError(
-            f"DC-L07 compatibility core exposes forbidden execution authority: "
+            f"DC-L08 compatibility core exposes private execution authority: "
             f"{_forbidden_execution_name}"
         )
 del _forbidden_execution_name
