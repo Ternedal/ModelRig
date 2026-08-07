@@ -7,13 +7,13 @@ import json
 from datetime import timedelta
 from pathlib import Path
 
-from .catalog import IsolationAttestation
 from .contract import ContractError, DevelopmentTask
 from .evidence import build_scope_receipt
 from .physical_isolation import (
     HmacIsolationReportSigner,
     PhysicalIsolationError,
     WindowsPhysicalIsolationVerifier,
+    load_isolation_attestation,
     load_signing_secret,
     load_unsigned_report,
     write_signed_report,
@@ -22,31 +22,11 @@ from .policy import PathPolicy
 
 
 def _absolute(value: str) -> Path:
-    path = Path(value).absolute()
-    if not path.is_absolute():
-        raise PhysicalIsolationError("operator path must be absolute")
-    return path
+    return Path(value).absolute()
 
 
 def _task(path: str) -> DevelopmentTask:
     return DevelopmentTask.from_json(_absolute(path).read_text(encoding="utf-8"))
-
-
-def _attestation(path: str) -> IsolationAttestation:
-    candidate = _absolute(path)
-    if candidate.is_symlink() or not candidate.is_file():
-        raise PhysicalIsolationError("isolation attestation must be a regular non-symlink file")
-    try:
-        raw = candidate.read_bytes()
-        if len(raw) > 2_000_000:
-            raise PhysicalIsolationError("isolation attestation is too large")
-        value = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise PhysicalIsolationError("isolation attestation JSON is invalid") from exc
-    attestation = IsolationAttestation.from_mapping(value)
-    if raw != attestation.canonical_json().encode("utf-8"):
-        raise PhysicalIsolationError("isolation attestation is not canonical JSON")
-    return attestation
 
 
 def main() -> int:
@@ -79,8 +59,8 @@ def main() -> int:
     try:
         if args.command == "sign-physical-report":
             report = load_unsigned_report(_absolute(args.unsigned_report))
-            secret = load_signing_secret(_absolute(args.key_file))
-            signed = HmacIsolationReportSigner(args.key_id, secret).sign(report)
+            key_material = load_signing_secret(_absolute(args.key_file))
+            signed = HmacIsolationReportSigner(args.key_id, key_material).sign(report)
             digest = write_signed_report(_absolute(args.output), signed)
             print(digest)
             return 0
@@ -88,11 +68,11 @@ def main() -> int:
         if args.command == "verify-physical-report":
             if not 1 <= args.max_age_days <= 366:
                 raise PhysicalIsolationError("max-age-days must be in 1..366")
-            isolation = _attestation(args.attestation)
-            secret = load_signing_secret(_absolute(args.key_file))
+            isolation = load_isolation_attestation(_absolute(args.attestation))
+            key_material = load_signing_secret(_absolute(args.key_file))
             verifier = WindowsPhysicalIsolationVerifier(
                 _absolute(args.evidence_root),
-                {args.key_id: secret},
+                {args.key_id: key_material},
                 max_age=timedelta(days=args.max_age_days),
             )
             verifier.verify(isolation)

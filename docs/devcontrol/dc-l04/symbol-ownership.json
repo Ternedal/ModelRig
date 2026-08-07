@@ -10,6 +10,7 @@
     "SignedWindowsIsolationReport",
     "WindowsIsolationPhysicalReport",
     "WindowsPhysicalIsolationVerifier",
+    "load_isolation_attestation",
     "load_signing_secret",
     "load_unsigned_report",
     "write_signed_report"

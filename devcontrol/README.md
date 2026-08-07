@@ -47,7 +47,8 @@ The contract provides:
   authority-code binding;
 - separate collector and approver identities;
 - detached HMAC-SHA256 signing with an operator-controlled key;
-- exactly one fresh matching evidence artifact for verification; and
+- exactly one fresh matching evidence artifact for verification;
+- bounded stable regular-file reads with link/reparse rejection; and
 - crash-durable, create-once publication of canonical signed evidence.
 
 A failed probe can be recorded honestly but cannot authorize anything. Historical
@@ -59,25 +60,27 @@ fresh physical campaign is run.
 The physical harness writes one canonical unsigned report matching
 `schemas/windows-isolation-physical-report-v1.schema.json`. Signing and
 verification are separate operator actions. The key file must remain outside the
-developer workspace and must not be a symlink.
+developer workspace.
 
 ```bash
 PYTHONPATH=devcontrol/src python -m kaliv_dev_control sign-physical-report \
-  C:/ModelRigEvidence/i0b-unsigned.json \
-  C:/ModelRigEvidence/i0b-signed.json \
-  --key-file C:/ModelRigOperator/isolation.key \
+  /operator/evidence/i0b-unsigned.json \
+  /operator/evidence/i0b-signed.json \
+  --key-file /operator/keys/isolation.key \
   --key-id operator-key-2026
 
 PYTHONPATH=devcontrol/src python -m kaliv_dev_control verify-physical-report \
-  C:/ModelRigEvidence/attestation.json \
-  --evidence-root C:/ModelRigEvidence \
-  --key-file C:/ModelRigOperator/isolation.key \
+  /operator/evidence/attestation.json \
+  --evidence-root /operator/evidence \
+  --key-file /operator/keys/isolation.key \
   --key-id operator-key-2026
 ```
 
-HMAC proves exact artifact/key binding only while the operator key remains under a
-separate custody boundary. Copying the key into the developer workspace invalidates
-the claimed independence.
+On POSIX, the key loader requires one owner-only regular file with no additional
+hard links in an owner-controlled non-writable directory. On Windows, key loading
+fails closed until a native owner/DACL handle verifier lands. HMAC proves exact
+artifact/key binding only while a separately operated operator process retains
+custody of the key.
 
 ## Deliberately absent
 

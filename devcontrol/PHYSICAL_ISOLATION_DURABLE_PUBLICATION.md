@@ -1,54 +1,54 @@
-# Durable physical-isolation evidence publication (H10B)
+# Durable physical-isolation evidence publication (DC-L04)
 
-H10B migrates the signed Windows physical-isolation evidence writer to the
-shared crash-durable create-once publication primitive.
-
-The physical report model, signed-report model, JSON schemas, canonical UTF-8
-serialization, detached HMAC and SHA-256 identity are unchanged. Only the local
-publication mechanism changes.
+DC-L04 publishes one canonical signed Windows physical-isolation evidence
+artifact through the shared crash-durable create-once primitive.
 
 ## Publication contract
 
-`write_signed_report()` now:
+`write_signed_report()`:
 
 1. accepts only an exact `SignedWindowsIsolationReport`;
-2. requires an absolute output path under an existing link-free directory;
-3. rejects an existing output or symlink;
-4. serializes the same canonical JSON bytes as before;
-5. enforces the existing physical-evidence size boundary;
+2. requires an absolute output path below an existing link-free directory;
+3. rejects an existing output, symlink, junction or reparse-point component;
+4. serializes canonical UTF-8 JSON;
+5. enforces the physical-evidence byte bound;
 6. publishes through `durable_publication.create_once_file()`;
 7. translates replacement races and durability failures to
    `PhysicalIsolationError`; and
-8. returns the SHA-256 of the exact published canonical bytes.
+8. returns the SHA-256 of the exact published bytes.
 
-The shared primitive provides no-replace create-once semantics, file durability
-and parent-directory durability. A concurrent process cannot replace the
-winning evidence artifact.
+The shared primitive supplies no-replace create-once semantics, file durability
+and parent-directory durability. Concurrent publishers can produce exactly one
+winner and no temporary sibling is retained.
+
+## Evidence boundary
+
+The report and detached HMAC signature are evidence contracts only. They do not
+implement Windows Job Objects, AppContainer, ACL provisioning, process launch or
+catalog activation. Those runtime capabilities are deferred to later slices.
+
+The signing key is an external operator-custody boundary. On POSIX the loader
+requires an owner-only regular file in an owner-controlled non-writable directory.
+On Windows DC-L04 fails closed until a native owner/DACL handle verifier is
+available.
+
+A valid signed artifact proves exact report/key binding, not that the physical
+probes were honestly performed. Separate collection and approval actors, the
+eleven required probe receipts and operational key custody remain external
+physical controls.
 
 ## Verification coverage
 
-H10B tests require:
+The portable regressions require:
 
-- byte-identical canonical output and an unchanged signed-report hash;
-- canonical reparse of the published evidence;
-- exactly one winner across 24 concurrent publication attempts;
-- rejection of all losing attempts;
-- no sibling or temporary artifact left behind;
-- fail-closed behavior with no output when durable publication is injected to
-  fail; and
-- absence of the prior `tempfile.mkstemp()` and `os.replace()` writer path.
+- byte-identical canonical publication and stable signed-report identity;
+- exactly one winner under concurrent publication;
+- no final artifact after injected durability failure;
+- bounded stable no-follow reads for unsigned reports and evidence candidates;
+- restrictive operator-key custody;
+- rejection of links, junction-like components, special files, replacement races,
+  stale/future evidence, duplicate candidates and non-canonical JSON; and
+- preservation of DC-L03's empty, non-launchable catalog boundary.
 
-## Authority consequence
-
-`physical_isolation.py` is included in the Tier-A authority bundle. This change
-therefore changes the authority digest and intentionally makes earlier physical
-I0b reports stale. It does not manufacture replacement evidence. A fresh
-physical campaign is still required only after the authority code is frozen.
-
-## Capability boundary
-
-This remains a local evidence writer. H10B adds no credential, token, new
-signer, private-key loader, subprocess, Git command, remote, socket, HTTP
-client, GitHub writer, pull-request mutation, reviewer request,
-ready-for-review conversion, merge, release, settings, deployment or production
-authority.
+No GitHub write, remote Git, pull-request mutation, merge, release, deployment or
+activation authority is added.

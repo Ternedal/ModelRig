@@ -9,37 +9,37 @@
     {
       "path": "devcontrol/PHYSICAL_ISOLATION_DURABLE_PUBLICATION.md",
       "source_blob": "3055076021c57893fd74adeb5b5bff83c71fef20",
-      "projection": "exact_copy"
+      "projection": "remove_future_tier_a_claims_and_describe_dc_l04_only"
     },
     {
       "path": "devcontrol/schemas/windows-isolation-physical-report-v1.schema.json",
       "source_blob": "aa37c4c033b2e28c80625870aaceb653b6a99d59",
-      "projection": "exact_copy_pending_schema_review"
+      "projection": "require_each_of_the_eleven_probe_names_exactly_once"
     },
     {
       "path": "devcontrol/schemas/windows-isolation-signed-report-v1.schema.json",
       "source_blob": "1b590853e35fb19c0b452ebb6a3970a5cf4fb357",
-      "projection": "exact_copy_pending_schema_review"
+      "projection": "exact_copy"
     },
     {
       "path": "devcontrol/src/kaliv_dev_control/physical_isolation.py",
       "source_blob": "13163dd91ac1f67e4812aef33686e51b2490dcee",
-      "projection": "hardened_for_stable_bounded_reads_and_exact_attestation_snapshot"
+      "projection": "stable_bounded_regular_file_reads_link_reparse_rejection_key_custody_and_attestation_snapshot"
     },
     {
       "path": "devcontrol/tests/test_physical_isolation_durable_publication_h10b.py",
       "source_blob": "8cbf7d61efed5da63065e9dafe95feadb8750898",
-      "projection": "projected_to_current_slice_contract"
+      "projection": "exact_copy"
     },
     {
       "path": "devcontrol/tests/test_slice6.py",
       "source_blob": "8081bb288aff5f998c8b6b2f46d9d60f29a55f61",
-      "projection": "remove_obsolete_positive_catalog_execution_and_add_fail_closed_regressions"
+      "projection": "preserve_empty_dc_l03_catalog_and_remove_cleartext_secret_fixture"
     },
     {
       "path": "devcontrol/tests/test_slice6_hardening.py",
       "source_blob": "0c07a6585b90470f162a8a0cdfb021a27eaf8530",
-      "projection": "expanded_for_path_identity_and_bounds"
+      "projection": "expanded_for_links_bounds_special_files_replacement_key_custody_schema_and_attestation_mutation"
     },
     {
       "path": "devcontrol/README.md",
@@ -57,7 +57,7 @@
       "path": "devcontrol/src/kaliv_dev_control/__main__.py",
       "source_blob": "042a16d2dfe0b9d05d27a9a7356d7dfadb09f05c",
       "base_blob": "78783d02a90969066594685ffeecf5fb74ac6837",
-      "projection": "add_local_operator_sign_verify_commands_without_resolving_away_symlinks"
+      "projection": "use_hardened_loaders_and_preserve_operator_supplied_symlink_identity"
     }
   ]
 }

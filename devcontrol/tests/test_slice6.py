@@ -9,11 +9,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from kaliv_dev_control.catalog import (
+    CatalogError,
     CatalogMaterializer,
     IsolationAttestation,
     IsolationBoundary,
     NetworkMode,
-    ToolBinding,
     Toolchain,
     modelrig_command_catalog,
 )
@@ -33,34 +33,37 @@ from kaliv_dev_control.physical_isolation import (
 )
 
 BASE_SHA = "a" * 40
-SECRET = b"operator-owned-secret-material-0001"
 NOW = datetime(2026, 8, 3, 12, 0, 0, tzinfo=timezone.utc)
 STARTED = "2026-08-03T10:00:00Z"
 OBSERVED = "2026-08-03T10:30:00Z"
 COMPLETED = "2026-08-03T11:00:00Z"
 
 
-def task() -> DevelopmentTask:
+def fixture_key(label: str = "primary") -> bytes:
+    return hashlib.sha256(f"dc-l04-unit-fixture:{label}".encode("utf-8")).digest()
+
+
+def task(command_id: str = "modelrig.devcontrol.tests") -> DevelopmentTask:
     return DevelopmentTask.from_mapping(
         {
             "schema": "kaliv-development-task/v1",
             "task_id": "I0B_TEST",
             "repository": "Ternedal/ModelRig",
             "base_sha": BASE_SHA,
-            "goal": "Validate physical Windows isolation evidence.",
+            "goal": "Validate signed physical Windows isolation evidence.",
             "acceptance_criteria": ["Every required I0b probe passes."],
             "risk": "low",
             "allowed_paths": ["devcontrol/**"],
             "protected_paths": ["devcontrol/secrets/**"],
-            "allowed_command_ids": ["modelrig.devcontrol.tests"],
-            "required_tests": ["modelrig.devcontrol.tests"],
+            "allowed_command_ids": [command_id],
+            "required_tests": ["DC-L04 physical evidence regressions"],
             "budget": {
                 "max_changed_files": 20,
                 "max_added_lines": 5000,
                 "max_deleted_lines": 5000,
                 "max_attempts": 2,
                 "max_runtime_seconds": 3600,
-                "max_output_bytes": 1000000,
+                "max_output_bytes": 1_000_000,
             },
             "merge_authority": "human",
         }
@@ -68,31 +71,38 @@ def task() -> DevelopmentTask:
 
 
 def toolchain() -> Toolchain:
-    return Toolchain((ToolBinding("python", "/trusted/python3", "1" * 64),))
+    return Toolchain(())
 
 
 def probe(name: ProbeName, *, passed: bool = True) -> PhysicalProbeResult:
     return PhysicalProbeResult(
         name=name,
         passed=passed,
-        receipt_sha256=hashlib.sha256(name.value.encode()).hexdigest(),
+        receipt_sha256=hashlib.sha256(name.value.encode("utf-8")).hexdigest(),
         detail=f"Physical probe {name.value} completed.",
         observed_at=OBSERVED,
     )
 
 
-def report(*, failed: ProbeName | None = None, **overrides) -> WindowsIsolationPhysicalReport:
-    t = task()
+def report(
+    *,
+    failed: ProbeName | None = None,
+    source_task: DevelopmentTask | None = None,
+    **overrides,
+) -> WindowsIsolationPhysicalReport:
+    selected_task = source_task or task()
     catalog = modelrig_command_catalog()
-    tc = toolchain()
+    selected_toolchain = toolchain()
     values = {
         "report_id": "i0b-20260803-candidate",
-        "task_id": t.task_id,
-        "task_sha256": hashlib.sha256(t.canonical_json().encode()).hexdigest(),
-        "repository": t.repository,
-        "base_sha": t.base_sha,
+        "task_id": selected_task.task_id,
+        "task_sha256": hashlib.sha256(
+            selected_task.canonical_json().encode("utf-8")
+        ).hexdigest(),
+        "repository": selected_task.repository,
+        "base_sha": selected_task.base_sha,
         "catalog_sha256": catalog.sha256,
-        "toolchain_sha256": tc.sha256,
+        "toolchain_sha256": selected_toolchain.sha256,
         "rig_id": "modelrig-primary",
         "rig_fingerprint_sha256": "2" * 64,
         "candidate_version": "1.58.147",
@@ -100,7 +110,7 @@ def report(*, failed: ProbeName | None = None, **overrides) -> WindowsIsolationP
         "toolhost_sha256": "3" * 64,
         "workspace_root_sha256": "4" * 64,
         "collected_by": "rig-collector",
-        "approved_by": "anders-operator",
+        "approved_by": "operator-approver",
         "started_at": STARTED,
         "completed_at": COMPLETED,
         "boot_marker_before_sha256": "5" * 64,
@@ -116,16 +126,26 @@ def report(*, failed: ProbeName | None = None, **overrides) -> WindowsIsolationP
 
 
 def signed_report(**kwargs) -> SignedWindowsIsolationReport:
-    return HmacIsolationReportSigner("operator-key-2026", SECRET).sign(report(**kwargs))
+    return HmacIsolationReportSigner(
+        "operator-key-2026",
+        fixture_key(),
+    ).sign(report(**kwargs))
 
 
-def attestation(evidence_hash: str, **overrides) -> IsolationAttestation:
-    t = task()
+def attestation(
+    evidence_hash: str,
+    *,
+    source_task: DevelopmentTask | None = None,
+    **overrides,
+) -> IsolationAttestation:
+    selected_task = source_task or task()
     values = {
-        "task_id": t.task_id,
-        "task_sha256": hashlib.sha256(t.canonical_json().encode()).hexdigest(),
-        "repository": t.repository,
-        "base_sha": t.base_sha,
+        "task_id": selected_task.task_id,
+        "task_sha256": hashlib.sha256(
+            selected_task.canonical_json().encode("utf-8")
+        ).hexdigest(),
+        "repository": selected_task.repository,
+        "base_sha": selected_task.base_sha,
         "catalog_sha256": modelrig_command_catalog().sha256,
         "toolchain_sha256": toolchain().sha256,
         "boundary": IsolationBoundary.OS_ISOLATED,
@@ -134,11 +154,6 @@ def attestation(evidence_hash: str, **overrides) -> IsolationAttestation:
     }
     values.update(overrides)
     return IsolationAttestation(**values)
-
-
-class AcceptExecutable:
-    def verify(self, binding):
-        return None
 
 
 class PhysicalReportContractTests(unittest.TestCase):
@@ -173,7 +188,7 @@ class PhysicalReportContractTests(unittest.TestCase):
             )
 
     def test_probe_timestamp_must_be_inside_report_window(self):
-        bad = PhysicalProbeResult(
+        outside = PhysicalProbeResult(
             name=ProbeName.NETWORK_DENIED,
             passed=True,
             receipt_sha256="7" * 64,
@@ -181,7 +196,7 @@ class PhysicalReportContractTests(unittest.TestCase):
             observed_at="2026-08-03T09:59:59Z",
         )
         values = tuple(
-            bad if name is ProbeName.NETWORK_DENIED else probe(name)
+            outside if name is ProbeName.NETWORK_DENIED else probe(name)
             for name in REQUIRED_PROBES
         )
         with self.assertRaisesRegex(PhysicalIsolationError, "outside report window"):
@@ -199,136 +214,126 @@ class PhysicalReportContractTests(unittest.TestCase):
 
 
 class PhysicalVerifierTests(unittest.TestCase):
-    def _write(self, root: Path, signed: SignedWindowsIsolationReport, name="evidence.json") -> Path:
+    def _write(
+        self,
+        root: Path,
+        signed: SignedWindowsIsolationReport,
+        name: str = "evidence.json",
+    ) -> Path:
         path = root / name
-        path.write_bytes(signed.canonical_json().encode())
+        path.write_bytes(signed.canonical_json().encode("utf-8"))
         return path
+
+    def _verifier(self, root: Path, **kwargs) -> WindowsPhysicalIsolationVerifier:
+        return WindowsPhysicalIsolationVerifier(
+            root,
+            {"operator-key-2026": fixture_key()},
+            now=lambda: NOW,
+            **kwargs,
+        )
 
     def test_valid_signed_exact_task_report_is_accepted(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             signed = signed_report()
             self._write(root, signed)
-            WindowsPhysicalIsolationVerifier(
-                root,
-                {"operator-key-2026": SECRET},
-                now=lambda: NOW,
-            ).verify(attestation(signed.sha256))
+            self._verifier(root).verify(attestation(signed.sha256))
 
     def test_missing_evidence_hash_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             self._write(root, signed_report())
             with self.assertRaisesRegex(PhysicalIsolationError, "exactly one"):
-                WindowsPhysicalIsolationVerifier(
-                    root,
-                    {"operator-key-2026": SECRET},
-                    now=lambda: NOW,
-                ).verify(attestation("f" * 64))
+                self._verifier(root).verify(attestation("f" * 64))
 
     def test_wrong_signing_key_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             signed = signed_report()
             self._write(root, signed)
             with self.assertRaisesRegex(PhysicalIsolationError, "signature is invalid"):
                 WindowsPhysicalIsolationVerifier(
                     root,
-                    {"operator-key-2026": b"different-operator-secret-000000"},
+                    {"operator-key-2026": fixture_key("different")},
                     now=lambda: NOW,
                 ).verify(attestation(signed.sha256))
 
     def test_untrusted_key_id_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             signed = signed_report()
             self._write(root, signed)
             with self.assertRaisesRegex(PhysicalIsolationError, "not trusted"):
                 WindowsPhysicalIsolationVerifier(
                     root,
-                    {"another-key": SECRET},
+                    {"another-key": fixture_key()},
                     now=lambda: NOW,
                 ).verify(attestation(signed.sha256))
 
-    def test_failed_probe_keeps_materialization_closed(self):
+    def test_failed_probe_keeps_authority_closed(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             signed = signed_report(failed=ProbeName.NETWORK_DENIED)
             self._write(root, signed)
             with self.assertRaisesRegex(PhysicalIsolationError, "failed probes"):
-                WindowsPhysicalIsolationVerifier(
-                    root,
-                    {"operator-key-2026": SECRET},
-                    now=lambda: NOW,
-                ).verify(attestation(signed.sha256))
+                self._verifier(root).verify(attestation(signed.sha256))
 
     def test_report_must_bind_to_exact_task(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             signed = signed_report(base_sha="b" * 40)
             self._write(root, signed)
             with self.assertRaisesRegex(PhysicalIsolationError, "not bound"):
-                WindowsPhysicalIsolationVerifier(
-                    root,
-                    {"operator-key-2026": SECRET},
-                    now=lambda: NOW,
-                ).verify(attestation(signed.sha256))
+                self._verifier(root).verify(attestation(signed.sha256))
 
     def test_stale_report_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             signed = signed_report()
             self._write(root, signed)
             with self.assertRaisesRegex(PhysicalIsolationError, "stale"):
                 WindowsPhysicalIsolationVerifier(
                     root,
-                    {"operator-key-2026": SECRET},
+                    {"operator-key-2026": fixture_key()},
                     now=lambda: NOW + timedelta(days=31),
                 ).verify(attestation(signed.sha256))
 
     def test_future_report_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             signed = signed_report()
             self._write(root, signed)
             with self.assertRaisesRegex(PhysicalIsolationError, "future"):
                 WindowsPhysicalIsolationVerifier(
                     root,
-                    {"operator-key-2026": SECRET},
+                    {"operator-key-2026": fixture_key()},
                     now=lambda: datetime(2026, 8, 3, 10, 0, tzinfo=timezone.utc),
                 ).verify(attestation(signed.sha256))
 
     def test_noncanonical_json_is_not_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             signed = signed_report()
             (root / "pretty.json").write_text(
-                json.dumps(signed.to_dict(), indent=2), encoding="utf-8"
+                json.dumps(signed.to_dict(), indent=2),
+                encoding="utf-8",
             )
             with self.assertRaisesRegex(PhysicalIsolationError, "exactly one"):
-                WindowsPhysicalIsolationVerifier(
-                    root,
-                    {"operator-key-2026": SECRET},
-                    now=lambda: NOW,
-                ).verify(attestation(signed.sha256))
+                self._verifier(root).verify(attestation(signed.sha256))
 
     def test_duplicate_matching_files_are_rejected_as_ambiguous(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             signed = signed_report()
             self._write(root, signed, "one.json")
             self._write(root, signed, "two.json")
             with self.assertRaisesRegex(PhysicalIsolationError, "exactly one"):
-                WindowsPhysicalIsolationVerifier(
-                    root,
-                    {"operator-key-2026": SECRET},
-                    now=lambda: NOW,
-                ).verify(attestation(signed.sha256))
+                self._verifier(root).verify(attestation(signed.sha256))
 
     @unittest.skipIf(not hasattr(os, "symlink"), "symlink support unavailable")
     def test_symlinked_evidence_file_is_ignored(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             signed = signed_report()
             target = self._write(root, signed, "target.data")
             try:
@@ -336,60 +341,63 @@ class PhysicalVerifierTests(unittest.TestCase):
             except OSError:
                 self.skipTest("symlinks are unavailable to this account")
             with self.assertRaisesRegex(PhysicalIsolationError, "exactly one"):
-                WindowsPhysicalIsolationVerifier(
-                    root,
-                    {"operator-key-2026": SECRET},
-                    now=lambda: NOW,
-                ).verify(attestation(signed.sha256))
+                self._verifier(root).verify(attestation(signed.sha256))
 
-    def test_materializer_accepts_report_only_through_verifier(self):
+    def test_valid_physical_evidence_does_not_activate_empty_catalog(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            signed = signed_report()
+            root = Path(directory).resolve()
+            selected_task = task()
+            signed = signed_report(source_task=selected_task)
+            proof = attestation(signed.sha256, source_task=selected_task)
             self._write(root, signed)
-            t = task()
-            registry = CatalogMaterializer(
-                modelrig_command_catalog(),
-                isolation_verifier=WindowsPhysicalIsolationVerifier(
-                    root,
-                    {"operator-key-2026": SECRET},
-                    now=lambda: NOW,
-                ),
-                executable_verifier=AcceptExecutable(),
-            ).materialize(t, toolchain(), attestation(signed.sha256))
-            command = registry.resolve(t, "modelrig.devcontrol.tests")
-            self.assertEqual(command.argv[0], "/trusted/python3")
+            verifier = self._verifier(root)
+            verifier.verify(proof)
+            with self.assertRaisesRegex(CatalogError, "not in the ModelRig catalog"):
+                CatalogMaterializer(
+                    modelrig_command_catalog(),
+                    isolation_verifier=verifier,
+                ).materialize(selected_task, toolchain(), proof)
 
 
 class OperatorFileTests(unittest.TestCase):
     def test_unsigned_loader_requires_canonical_json(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             evidence = report()
             canonical = root / "canonical.json"
-            canonical.write_bytes(evidence.canonical_json().encode())
+            canonical.write_bytes(evidence.canonical_json().encode("utf-8"))
             self.assertEqual(load_unsigned_report(canonical).sha256, evidence.sha256)
             pretty = root / "pretty.json"
-            pretty.write_text(json.dumps(evidence.to_dict(), indent=2), encoding="utf-8")
+            pretty.write_text(
+                json.dumps(evidence.to_dict(), indent=2),
+                encoding="utf-8",
+            )
             with self.assertRaisesRegex(PhysicalIsolationError, "not canonical"):
                 load_unsigned_report(pretty)
 
-    def test_signing_secret_requires_absolute_regular_file(self):
+    @unittest.skipIf(os.name == "nt", "Windows key custody fails closed")
+    def test_signing_key_requires_restrictive_operator_file(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory).resolve() / "operator.key"
-            path.write_bytes(SECRET)
-            self.assertEqual(load_signing_secret(path), SECRET)
-            with self.assertRaises(PhysicalIsolationError):
-                load_signing_secret(Path("relative.key"))
+            root = Path(directory).resolve()
+            path = root / "operator.key"
+            path.write_bytes(fixture_key())
+            path.chmod(0o600)
+            self.assertEqual(load_signing_secret(path), fixture_key())
+            path.chmod(0o640)
+            with self.assertRaisesRegex(PhysicalIsolationError, "permissions"):
+                load_signing_secret(path)
 
-    def test_signed_report_writer_is_atomic_and_no_overwrite(self):
+    def test_signed_report_writer_is_create_once(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             output = root / "evidence.json"
             signed = signed_report()
             digest = write_signed_report(output, signed)
             self.assertEqual(digest, signed.sha256)
-            self.assertEqual(output.read_bytes(), signed.canonical_json().encode())
+            self.assertEqual(
+                output.read_bytes(),
+                signed.canonical_json().encode("utf-8"),
+            )
             with self.assertRaisesRegex(PhysicalIsolationError, "already exists"):
                 write_signed_report(output, signed)
 
