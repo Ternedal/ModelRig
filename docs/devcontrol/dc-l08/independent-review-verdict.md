@@ -15,6 +15,9 @@ DC-L08 pull-request head and confirms all of the following:
 - the v6 bundle includes both private executor sources;
 - package root, compatibility core and authority do not expose process launch;
 - no final facade, command receipt, trusted-Git or remote authority is present;
+- the Windows test-only verifier subclass supplies only the already signed
+  candidate while base signature, binding, probe and freshness checks still run;
+- file-backed physical-evidence discovery is not falsely re-claimed from DC-L04;
 - all exact-head workflows and the owned native Windows execution contract are green;
 - generic bounded-subprocess and receipt contracts are not falsely claimed; and
 - no unresolved review thread remains.
