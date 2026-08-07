@@ -12,7 +12,8 @@
   "progressive": [
     "devcontrol/README.md",
     "devcontrol/src/kaliv_dev_control/__init__.py",
-    "devcontrol/src/kaliv_dev_control/__main__.py"
+    "devcontrol/src/kaliv_dev_control/__main__.py",
+    "tests/workflow_test_coverage.py"
   ],
   "new_control_artifacts": [
     "docs/devcontrol/dc-l04/exact-head-validation.md",
