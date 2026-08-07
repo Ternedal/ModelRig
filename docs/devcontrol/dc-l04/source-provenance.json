@@ -1,0 +1,63 @@
+{
+  "schema": "modelrig-devcontrol-dc-l04-source-provenance/v1",
+  "source": {
+    "pull_request": 338,
+    "head": "07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f"
+  },
+  "base": "b717055790947ea848418964e7ebd78c39c39ee3",
+  "entries": [
+    {
+      "path": "devcontrol/PHYSICAL_ISOLATION_DURABLE_PUBLICATION.md",
+      "source_blob": "3055076021c57893fd74adeb5b5bff83c71fef20",
+      "projection": "exact_copy"
+    },
+    {
+      "path": "devcontrol/schemas/windows-isolation-physical-report-v1.schema.json",
+      "source_blob": "aa37c4c033b2e28c80625870aaceb653b6a99d59",
+      "projection": "exact_copy_pending_schema_review"
+    },
+    {
+      "path": "devcontrol/schemas/windows-isolation-signed-report-v1.schema.json",
+      "source_blob": "1b590853e35fb19c0b452ebb6a3970a5cf4fb357",
+      "projection": "exact_copy_pending_schema_review"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/physical_isolation.py",
+      "source_blob": "13163dd91ac1f67e4812aef33686e51b2490dcee",
+      "projection": "hardened_for_stable_bounded_reads_and_exact_attestation_snapshot"
+    },
+    {
+      "path": "devcontrol/tests/test_physical_isolation_durable_publication_h10b.py",
+      "source_blob": "8cbf7d61efed5da63065e9dafe95feadb8750898",
+      "projection": "projected_to_current_slice_contract"
+    },
+    {
+      "path": "devcontrol/tests/test_slice6.py",
+      "source_blob": "8081bb288aff5f998c8b6b2f46d9d60f29a55f61",
+      "projection": "remove_obsolete_positive_catalog_execution_and_add_fail_closed_regressions"
+    },
+    {
+      "path": "devcontrol/tests/test_slice6_hardening.py",
+      "source_blob": "0c07a6585b90470f162a8a0cdfb021a27eaf8530",
+      "projection": "expanded_for_path_identity_and_bounds"
+    },
+    {
+      "path": "devcontrol/README.md",
+      "source_blob": "c5c0e0e21ea979447a0138616b3f749219cf0a40",
+      "base_blob": "e73d82e6c8e5456c7f976f0b5830211827f15da4",
+      "projection": "cumulative_dc_l01_through_dc_l04_only"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/__init__.py",
+      "source_blob": "cb5a33e7f0116c9f37b0b596948bd66a71097821",
+      "base_blob": "7e688cd62230abe3d429f716b3a59b648ca381e0",
+      "projection": "add_only_dc_l04_public_evidence_symbols"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/__main__.py",
+      "source_blob": "042a16d2dfe0b9d05d27a9a7356d7dfadb09f05c",
+      "base_blob": "78783d02a90969066594685ffeecf5fb74ac6837",
+      "projection": "add_local_operator_sign_verify_commands_without_resolving_away_symlinks"
+    }
+  ]
+}
