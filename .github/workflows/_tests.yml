@@ -82,7 +82,7 @@ jobs:
           done
           exit "$status"
 
-      - name: DevControl DC-L01 through DC-L07 tests
+      - name: DevControl DC-L01 through DC-L08 tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         shell: bash
@@ -90,19 +90,26 @@ jobs:
           set -o pipefail
           PYTHONPATH=devcontrol/src python3 -m unittest discover -s devcontrol/tests -p 'test_*.py' -v 2>&1 | tee -a /tmp/modelrig-ci-test.log
 
-      - name: DevControl DC-L07 non-execution boundary
+      - name: DevControl DC-L08 verified-only execution boundary
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         shell: bash
         run: |
           set -o pipefail
           PYTHONPATH=devcontrol/src python3 - <<'PY' 2>&1 | tee -a /tmp/modelrig-ci-test.log
+          import importlib
           import importlib.util
 
           import kaliv_dev_control
           import kaliv_dev_control._tier_a_execution_core as compatibility_core
           import kaliv_dev_control.runtime_staging as runtime_staging
           import kaliv_dev_control.tier_a_authority as tier_a_authority
+
+          private_execution = importlib.import_module(
+              "kaliv_dev_control.tier_a_execution_v3"
+          )
+          assert callable(private_execution._run_tier_a_launch_plan)
+          assert callable(private_execution.run_verified_tier_a_command)
 
           forbidden_symbols = (
               "_run_tier_a_launch_plan",
@@ -264,8 +271,8 @@ jobs:
         run: go test ./cmd/modelrig-updater/ ./cmd/modelrig-supervisor/ ./internal/heartbeat/
 
   # DC-L05 proves the product-side native Windows substrate on a real kernel.
-  # DC-L07 adds non-executing runtime evidence only; the DevControl executor,
-  # command receipt and trusted-Git contracts remain deferred to later slices.
+  # DC-L08 adds the private verified executor; command receipts and trusted-Git
+  # integration remain deferred to DC-L09.
   test-windows-tool-isolation:
     runs-on: windows-latest
     steps:
