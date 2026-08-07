@@ -32,46 +32,52 @@ Load-bearing mutations and expected failures:
     Expected: verifier-snapshot regression fails.
 13. Reuse or retarget a registry for another task.
     Expected: exact-task registry regression fails.
-14. Accept malformed receipt fields, repository syntax or `200.0` status.
+14. Mutate the caller-owned task after registry authorization or during command
+    execution.
+    Expected: execution-task regression fails unless sandbox creation, budgets,
+    post-run and cleanup verification, task hash and receipt all use one private
+    reconstructed task snapshot.
+15. Accept malformed receipt fields, repository syntax or `200.0` status.
     Expected: runtime/schema reload regressions fail.
-15. Accept a moving base ref before transport.
+16. Accept a moving base ref before transport.
     Expected: exact-SHA pre-network regression fails.
-16. Retarget adapter task, repository, token, timeout or transport.
+17. Retarget adapter task, repository, token, timeout or transport.
     Expected: sealed-adapter regression fails.
-17. Materialize without independently supplied isolation evidence.
+18. Materialize without independently supplied isolation evidence.
     Expected: fail-closed default regression fails.
-18. Let environment proxy or CA settings choose GitHub authority.
+19. Let environment proxy or CA settings choose GitHub authority.
     Expected: explicit proxy/TLS trust regression fails.
-19. Return a slow-drip response that always emits a byte before each inactivity
+20. Return a slow-drip response that always emits a byte before each inactivity
     timeout.
     Expected: the monotonic deadline regression fails unless the total budget is
     enforced independently of inactivity timeouts.
-20. Block inside `HTTPResponse.read1()` while parsing chunk framing.
+21. Block inside `HTTPResponse.read1()` while parsing chunk framing.
     Expected: body supervisor regression fails unless the socket and response are
     cancelled at the absolute deadline.
-21. Block inside `HTTPSConnection.getresponse()` while parsing status/headers.
+22. Block inside `HTTPSConnection.getresponse()` while parsing status/headers.
     Expected: request supervisor regression fails unless the owned connection is
     cancelled at the absolute deadline.
-22. Block DNS/connection setup until after the caller deadline.
+23. Block DNS/connection setup until after the caller deadline.
     Expected: setup regression fails unless cancellation is checked before any
     authenticated request send after delayed setup completion.
-23. Start repeated requests while one uninterruptible setup worker remains.
+24. Start repeated requests while one uninterruptible setup worker remains.
     Expected: the bounded setup-slot regression fails unless later requests fail
     closed without spawning further workers.
-24. Close the connected socket between the final cancellation check and request
+25. Close the connected socket between the final cancellation check and request
     output while leaving `http.client` automatic open enabled.
     Expected: reconnect-race regression fails unless auto reconnect is disabled
     and no second connect or auth send occurs.
-25. Hide the underlying transport socket.
+26. Hide the underlying transport socket.
     Expected: request handling fails closed before accepting response evidence.
-26. Remove socket shutdown, socket close, response close or connection close at
+27. Remove socket shutdown, socket close, response close or connection close at
     deadline expiry.
     Expected: body/header cancellation assertions fail.
 
 The latest complete focused runtime run produced **26/26 passing tests** before
-the final environment/deadline changes. Those final findings have executable
-contract regressions, clean narrowly scoped commit diffs, and direct validation
-of omitted-PATH insertion, setup/body/header timeout, no post-timeout send,
-bounded setup workers, disabled reconnect, cancellation, successful read and
-byte-budget behavior. Full exact-head CI and diagnostics remain pending because
-no Actions run has been created for connector-authored heads.
+the final hardening. The additional findings have executable contract
+regressions, clean narrowly scoped commit diffs, and direct validation of private
+execution-task identity, budgets and receipts; omitted-PATH insertion;
+setup/body/header timeout; no post-timeout send; bounded setup workers; disabled
+reconnect; cancellation; successful reads and byte-budget behavior. Full
+exact-head CI and diagnostics remain pending because no Actions run has been
+created for connector-authored heads.
