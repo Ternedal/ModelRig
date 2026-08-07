@@ -1,4 +1,4 @@
-# Kaliv Development Control — landed foundations through DC-L07
+# Kaliv Development Control — landed foundations through DC-L08
 
 These slices are the dormant, bounded foundation defined by
 `docs/devcontrol/ADR-DC-001_DEVCONTROL_AUTHORITY_BOUNDARY.md` and the landed
@@ -82,9 +82,28 @@ DC-L07 adds deterministic, non-executing runtime evidence:
 - a reviewed single-file `modelrig-version-check` closure builder; and
 - a v5 toolhost hash over the complete stage-local non-executing authority chain.
 
-`bind_for_launch()` only returns a verified command template for plan construction.
-DC-L07 contains no function that creates a process. Positive staging evidence is
-not issued until file metadata and the containing directory have been flushed.
+Positive staging evidence is not issued until file metadata and the containing
+directory have been flushed.
+
+## DC-L08 authority
+
+DC-L08 adds verified-only Tier-A execution through the private
+`tier_a_execution_v3` module:
+
+- every invocation rematerializes a fresh lease from signed physical evidence;
+- only a command-specific signed runtime closure may be staged and launched;
+- the exact executable, cwd, workspace, authority bundle, manifest, signature and
+  staging receipt are rechecked immediately before process creation;
+- execution uses the existing AppContainer and Job Object substrate;
+- stdout and stderr are captured as bounded binary-safe evidence;
+- timeout closes the Job Object, reaps the process tree and returns a canonical
+  timed-out result through `TierAExecutionTimeout`; and
+- runtime-closure lifetime locks remain held until process-tree shutdown is proven.
+
+The v6 toolhost identity includes both private executor sources. Neither the
+package root, `tier_a_authority`, nor `_tier_a_execution_core` exports a launch
+function. The retained legacy runner exists only as compatibility authority; the
+closure-bound v3 module is the sole modern executor.
 
 ## Physical evidence operator flow
 
@@ -109,10 +128,11 @@ PYTHONPATH=devcontrol/src python -m kaliv_dev_control verify-physical-report \
 
 ## Deliberately absent
 
-DC-L01–DC-L07 provide no supported DevControl process launch, Tier-A executor,
-trusted Git runtime, command receipt, credential loader, GitHub write adapter,
-remote Git, push, pull-request mutation, reviewer request, merge, release,
-deployment or activation authority.
+DC-L01–DC-L08 provide no final public Tier-A execution facade, command receipt,
+trusted Git runtime, credential loader, GitHub write adapter, remote Git, push,
+pull-request mutation, reviewer request, merge, release, deployment or
+activation authority. The default catalog remains empty, so the private executor
+cannot be reached through normal product or package entrypoints.
 
 ## Validation
 
@@ -123,6 +143,8 @@ python3 tests/workflow_test_coverage.py
 cd backend && go test ./cmd/modelrig-version-check
 ```
 
-Native Windows containment contracts run in the reusable CI workflow on a real
-Windows runner. Exact-path, provenance, mutation, validation and review evidence
-for DC-L07 lives under `docs/devcontrol/dc-l07/`.
+CI also runs the closure-bound executor against a real Windows kernel, compiling
+a deterministic static fixture and proving AppContainer containment, Job Object
+cleanup, bounded output, nested cwd, timeout handling and runtime immutability.
+Exact-path, provenance, mutation, validation and review evidence for this slice
+lives under `docs/devcontrol/dc-l08/`.
