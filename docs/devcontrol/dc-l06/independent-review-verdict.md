@@ -6,9 +6,11 @@ Author self-review satisfies gate: **no**
 
 The independent reviewer must verify:
 
-- exact 26-path scope and locked source-blob provenance;
-- the seven test projections remove only later-slice dependencies and preserve
-  the load-bearing lease/materialization/plan assertions;
+- exact 27-path scope and locked source/blob/base provenance;
+- the seven source-test projections remove only later-slice dependencies and
+  preserve the load-bearing lease/materialization/plan assertions;
+- the repository workflow-coverage projection reaches all twenty DevControl
+  modules landed through DC-L06 without weakening earlier checks;
 - the import-only core owns no implementation symbols;
 - the stage-local bundle is literal, identical across both files and excludes
   all DC-L07-or-later authority;
