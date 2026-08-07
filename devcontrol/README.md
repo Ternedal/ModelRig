@@ -1,4 +1,4 @@
-# Kaliv Development Control — DC-L01–DC-L05 foundations
+# Kaliv Development Control — landed foundations through DC-L07
 
 These slices are the dormant, bounded foundation defined by
 `docs/devcontrol/ADR-DC-001_DEVCONTROL_AUTHORITY_BOUNDARY.md` and the landed
@@ -26,11 +26,10 @@ DC-L02 adds local, dormant campaign and review structure:
 
 ## DC-L03 authority
 
-DC-L03 adds immutable catalog and toolchain contracts plus a fixed-host,
-HTTPS, GET-only GitHub read boundary. The default ModelRig catalog and default
-registry remain empty, and every non-empty catalog materialization is rejected
-fail-closed. Python, Go, sandbox and custom-static command execution remain
-deferred.
+DC-L03 adds immutable catalog and toolchain contracts plus a fixed-host, HTTPS,
+GET-only GitHub read boundary. The default ModelRig catalog and default registry
+remain empty, and every non-empty catalog materialization is rejected fail-closed.
+Python, Go, sandbox and custom-static command execution remain deferred.
 
 ## DC-L04 authority
 
@@ -56,10 +55,36 @@ activating DevControl:
 - a dormant Tier-A Windows launch surface used only by explicit product-side tests.
 
 The product modules under `worker/app/` do not import `kaliv_dev_control`.
-DC-L05 does not register a command, populate the empty catalog, validate physical
-evidence, create a Git authority, or expose a route/remote operation. Support
-programs that exercise the later DevControl Windows executor, Tier-A catalog or
-trusted-Git receipt remain landed but dormant until their owning slices exist.
+
+## DC-L06 authority
+
+DC-L06 lands the first non-executing Tier-A authority identities:
+
+- exact execution-lease identity and canonical task binding;
+- reviewed application environment policy;
+- canonical workspace and regular-file authority;
+- signed physical-evidence capture and leased catalog materialization;
+- retained v1 launch-plan identity and deterministic construction; and
+- an import-only compatibility core with no process-launch entrypoint.
+
+The default catalog remains empty and no command is activated.
+
+## DC-L07 authority
+
+DC-L07 adds deterministic, non-executing runtime evidence:
+
+- bounded streaming create-once publication;
+- crash-durable permission metadata before immutable publication evidence;
+- deterministic single-runtime staging receipts;
+- signed multi-file runtime-closure models, verification and staging receipts;
+- canonical Tier-A launch-plan v2/v3 identity with exact cwd and closure binding;
+- bounded binary-safe execution-result models without an executor;
+- a reviewed single-file `modelrig-version-check` closure builder; and
+- a v5 toolhost hash over the complete stage-local non-executing authority chain.
+
+`bind_for_launch()` only returns a verified command template for plan construction.
+DC-L07 contains no function that creates a process. Positive staging evidence is
+not issued until file metadata and the containing directory have been flushed.
 
 ## Physical evidence operator flow
 
@@ -84,10 +109,10 @@ PYTHONPATH=devcontrol/src python -m kaliv_dev_control verify-physical-report \
 
 ## Deliberately absent
 
-DC-L01–DC-L05 provide no non-empty executable catalog, Tier-A authority
-materialization, verified DevControl execution facade, trusted Git runtime,
-credential loader, GitHub write adapter, remote Git, push, pull-request mutation,
-reviewer request, merge, release, deployment or activation authority.
+DC-L01–DC-L07 provide no supported DevControl process launch, Tier-A executor,
+trusted Git runtime, command receipt, credential loader, GitHub write adapter,
+remote Git, push, pull-request mutation, reviewer request, merge, release,
+deployment or activation authority.
 
 ## Validation
 
@@ -95,8 +120,9 @@ reviewer request, merge, release, deployment or activation authority.
 PYTHONPATH=devcontrol/src python -m unittest discover -s devcontrol/tests -p 'test_*.py' -v
 PYTHONPATH=devcontrol/src python -m kaliv_dev_control validate-task task.json
 python3 tests/workflow_test_coverage.py
+cd backend && go test ./cmd/modelrig-version-check
 ```
 
 Native Windows containment contracts run in the reusable CI workflow on a real
-Windows runner. Exact-path, provenance, mutation and review evidence for this
-slice lives under `docs/devcontrol/dc-l05/`.
+Windows runner. Exact-path, provenance, mutation, validation and review evidence
+for DC-L07 lives under `docs/devcontrol/dc-l07/`.

@@ -1,0 +1,74 @@
+{
+  "schema": "modelrig-devcontrol-dc-l07-symbol-ownership/v1",
+  "slice": "DC-L07",
+  "owned": {
+    "streaming_publication": [
+      "StreamingPublicationError",
+      "publish_stream_once"
+    ],
+    "runtime_staging": [
+      "RUNTIME_STAGING_SCHEMA",
+      "RuntimeStagingError",
+      "RuntimeStagingReceipt",
+      "TrustedRuntimeStager"
+    ],
+    "runtime_closure": [
+      "RuntimeClosureError",
+      "RuntimeClosureFile",
+      "RuntimeClosureManifest",
+      "SignedRuntimeClosureManifest",
+      "HmacRuntimeClosureSigner",
+      "RuntimeClosureVerifier",
+      "RuntimeClosureStagingReceipt",
+      "TrustedRuntimeClosureStager",
+      "trusted_runtime_root_sha256"
+    ],
+    "version_check_closure": [
+      "VERSION_CHECK_COMMAND_ID",
+      "VERSION_CHECK_TOOL_ID",
+      "modelrig_version_check_closure_catalog",
+      "ModelRigVersionCheckClosureBuilder"
+    ],
+    "tier_a_authority": [
+      "PLAN_SCHEMA",
+      "working_directory_authority_sha256",
+      "tier_a_toolhost_sha256"
+    ],
+    "tier_a_plan": [
+      "TierALaunchPlan",
+      "build_tier_a_launch_plan"
+    ],
+    "tier_a_result": [
+      "RESULT_SCHEMA",
+      "TierAResultError",
+      "TierAOutputStream",
+      "TierAExecutionResult"
+    ]
+  },
+  "inherited": {
+    "DC-L06": [
+      "LEASE_SCHEMA",
+      "TierAExecutionError",
+      "TierAExecutionLease",
+      "LeasedCommandRegistry",
+      "LeasedCatalogMaterializer",
+      "TIER_A_APPLICATION_ENVIRONMENT",
+      "workspace_root_authority_sha256"
+    ],
+    "DC-L05": [
+      "product-side Windows Job Object, AppContainer, bounded capture and runtime-lifetime guard substrate"
+    ]
+  },
+  "forbidden": [
+    "_run_tier_a_launch_plan",
+    "run_verified_tier_a_command",
+    "TierACommandReceipt",
+    "TrustedGitRuntime",
+    "GitHub write authority",
+    "publisher authority",
+    "credential authority",
+    "remote Git authority",
+    "activation authority"
+  ],
+  "boundary": "DC-L07 may construct and verify exact runtime and launch evidence, but it cannot create a process or mutate a remote system."
+}

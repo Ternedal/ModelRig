@@ -151,7 +151,7 @@ def issue(root: Path, *, failed_probe: bool = False, env=None):
         toolchain_sha256=toolchain.sha256,
         rig_id="modelrig-test-rig",
         rig_fingerprint_sha256="1" * 64,
-        candidate_version="dc-l06-test",
+        candidate_version="dc-l07-test",
         windows_build="Windows test contract",
         toolhost_sha256=tier_a_toolhost_sha256(control),
         workspace_root_sha256=workspace_root_authority_sha256(workspace),
@@ -236,22 +236,43 @@ class TierAExecutionLeaseTests(unittest.TestCase):
             )
             self.assertEqual(plan.task_id, development_task.task_id)
 
-    def test_dc_l06_exposes_no_supported_process_launch_entrypoint(self) -> None:
+    def test_dc_l07_exposes_no_supported_process_launch_entrypoint(self) -> None:
         core = importlib.import_module("kaliv_dev_control._tier_a_execution_core")
-        self.assertIsNone(importlib.util.find_spec("kaliv_dev_control.tier_a_execution"))
+        self.assertIsNone(
+            importlib.util.find_spec("kaliv_dev_control.tier_a_execution")
+        )
         for surface in (tier_a_module, core):
             self.assertFalse(hasattr(surface, "_run_tier_a_launch_plan"))
             self.assertFalse(hasattr(surface, "run_verified_tier_a_command"))
 
-    def test_stage_local_bundle_projections_are_identical(self) -> None:
-        toolhost = importlib.import_module("kaliv_dev_control._tier_a_legacy_toolhost")
-        self.assertEqual(tier_a_module._TIER_A_BUNDLE_FILES, toolhost._TIER_A_BUNDLE_FILES)
+    def test_stage_local_bundle_projections_are_identical_and_non_executing(self) -> None:
+        toolhost = importlib.import_module(
+            "kaliv_dev_control._tier_a_legacy_toolhost"
+        )
+        self.assertEqual(
+            tier_a_module._TIER_A_BUNDLE_FILES,
+            toolhost._TIER_A_BUNDLE_FILES,
+        )
+        required = (
+            "runtime_staging.py",
+            "streaming_publication.py",
+            "runtime_closure.py",
+            "runtime_closure_model.py",
+            "runtime_closure_verify.py",
+            "runtime_closure_staging.py",
+            "tier_a_plan.py",
+            "tier_a_result.py",
+        )
+        for fragment in required:
+            self.assertTrue(
+                any(fragment in path for path in tier_a_module._TIER_A_BUNDLE_FILES),
+                fragment,
+            )
         forbidden = (
-            "runtime_staging",
-            "runtime_closure",
+            "_tier_a_legacy_runner.py",
             "tier_a_execution.py",
             "tier_a_execution_v3.py",
-            "tier_a_result.py",
+            "tier_a_command_receipt.py",
             "trusted_git",
             "semantic_review",
             "publisher",
@@ -295,7 +316,7 @@ class TierAExecutionLeaseTests(unittest.TestCase):
             create_control_plane(control)
             (
                 control
-                / "devcontrol/src/kaliv_dev_control/_tier_a_environment.py"
+                / "devcontrol/src/kaliv_dev_control/runtime_closure_model.py"
             ).unlink()
             with self.assertRaisesRegex(TierAExecutionError, "missing or unsafe"):
                 tier_a_toolhost_sha256(control)

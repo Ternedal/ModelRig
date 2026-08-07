@@ -1,8 +1,8 @@
-"""DC-L06 retained v2 Tier-A source-bundle identity.
+"""DC-L07 non-executing v5 Tier-A source-bundle identity.
 
-The tuple is the exact stage-local authority closure. It contains no runtime
-staging, executor, trusted-Git, receipt, reviewer, publisher or remote-authority
-module from a later landing slice.
+The tuple covers the exact stage-local authority closure for leases, runtime
+staging, signed closures, plan identity and bounded result evidence. It contains
+no executor, command receipt, trusted-Git, publisher or remote-authority module.
 """
 from __future__ import annotations
 
@@ -35,8 +35,18 @@ _TIER_A_BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/policy.py",
     "devcontrol/src/kaliv_dev_control/proposal.py",
     "devcontrol/src/kaliv_dev_control/review.py",
+    "devcontrol/src/kaliv_dev_control/runtime_staging.py",
+    "devcontrol/src/kaliv_dev_control/streaming_publication.py",
+    "devcontrol/src/kaliv_dev_control/_runtime_closure_common.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure_model.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure_verify.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure_staging.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure_builder.py",
     "devcontrol/src/kaliv_dev_control/store.py",
-    "devcontrol/src/kaliv_dev_control/workspace.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_plan.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_result.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_lease.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py",
@@ -44,18 +54,16 @@ _TIER_A_BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
-    "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
+    "devcontrol/src/kaliv_dev_control/workspace.py",
 )
 
 
 def tier_a_toolhost_sha256(control_plane_root: Path) -> str:
-    """Hash the complete DC-L06 source chain that can shape Tier-A authority."""
+    """Hash the complete non-executing DC-L07 authority source chain."""
 
-    root = _canonical_directory(
-        control_plane_root, name="control-plane root"
-    )
+    root = _canonical_directory(control_plane_root, name="control-plane root")
     digest = hashlib.sha256()
-    digest.update(b"kaliv-tier-a-toolhost/v2\0")
+    digest.update(b"kaliv-tier-a-toolhost/v5\0")
     for relative in _TIER_A_BUNDLE_FILES:
         path = root / PurePosixPath(relative)
         if path.is_symlink() or not path.is_file():

@@ -482,23 +482,45 @@ class FoundationTests(unittest.TestCase):
             self.assertEqual(target.read_text(encoding="utf-8"), "old\n")
             self.assertEqual(_git(repo, "status", "--porcelain"), "")
 
-    def test_foundation_has_no_unlanded_future_slice_import(self) -> None:
+    def test_foundation_tracks_landed_and_future_slice_imports(self) -> None:
         source = Path(__file__).resolve().parents[1] / "src" / "kaliv_dev_control"
-        # DC-L02 campaign/review/store, DC-L03 catalog and DC-L04 physical
-        # evidence imports are landed. Keep the gate on DC-L05+ authority and
-        # product-specific containment imports.
-        forbidden = (
+        landed = {
+            "runtime_staging.py",
+            "streaming_publication.py",
+            "runtime_closure.py",
+            "runtime_closure_model.py",
+            "runtime_closure_verify.py",
+            "runtime_closure_staging.py",
+            "tier_a_authority.py",
+            "tier_a_plan.py",
+            "tier_a_result.py",
+        }
+        self.assertTrue(landed <= {path.name for path in source.glob("*.py")})
+
+        future = (
+            "_tier_a_legacy_runner",
+            "tier_a_execution",
+            "tier_a_execution_v3",
+            "tier_a_command_receipt",
             "trusted_git_runtime",
-            "runtime_staging",
-            "tier_a_",
-            "publisher_",
+            "trusted_git_runtime_h4",
+            "trusted_git_runtime_model",
+            "trusted_git_runtime_runner",
+            "trusted_git_runtime_staging",
+            "publisher",
         )
         for path in source.glob("*.py"):
             text = path.read_text(encoding="utf-8")
-            for name in forbidden:
-                self.assertNotIn(f"from .{name}", text, f"future import in {path.name}")
-                self.assertNotIn(f"import .{name}", text, f"future import in {path.name}")
-            self.assertNotIn("from app.windows_job", text, f"product import in {path.name}")
+            for name in future:
+                self.assertNotIn(
+                    f"from .{name}", text, f"future import in {path.name}"
+                )
+                self.assertNotIn(
+                    f"import .{name}", text, f"future import in {path.name}"
+                )
+            self.assertNotIn(
+                "from app.windows_job", text, f"product import in {path.name}"
+            )
 
 
 if __name__ == "__main__":

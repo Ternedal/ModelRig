@@ -1,4 +1,9 @@
-"""Dormant Kaliv Development Control foundations (DC-L01 through DC-L04)."""
+"""Dormant Kaliv Development Control foundations through DC-L07.
+
+DC-L07 exposes deterministic runtime evidence, signed closure verification,
+launch-plan identity and bounded result models. It exposes no Tier-A process
+launch, trusted-Git, remote, publisher or activation authority.
+"""
 
 from .bounded_subprocess import (
     BoundedStreamEvidence,
@@ -63,7 +68,50 @@ from .review import (
     ReviewRequest,
     ReviewVerdict,
 )
+from .runtime_closure import (
+    HmacRuntimeClosureSigner,
+    RuntimeClosureError,
+    RuntimeClosureFile,
+    RuntimeClosureManifest,
+    RuntimeClosureStagingReceipt,
+    RuntimeClosureVerifier,
+    SignedRuntimeClosureManifest,
+    TrustedRuntimeClosureStager,
+    trusted_runtime_root_sha256,
+)
+from .runtime_closure_builder import (
+    ModelRigVersionCheckClosureBuilder,
+    VERSION_CHECK_COMMAND_ID,
+    VERSION_CHECK_TOOL_ID,
+    modelrig_version_check_closure_catalog,
+)
+from .runtime_staging import (
+    RUNTIME_STAGING_SCHEMA,
+    RuntimeStagingError,
+    RuntimeStagingReceipt,
+    TrustedRuntimeStager,
+)
 from .store import CampaignStore, CampaignStoreError
+from .streaming_publication import StreamingPublicationError, publish_stream_once
+from .tier_a_authority import (
+    LEASE_SCHEMA,
+    PLAN_SCHEMA,
+    TIER_A_APPLICATION_ENVIRONMENT,
+    LeasedCatalogMaterializer,
+    LeasedCommandRegistry,
+    TierAExecutionError,
+    TierAExecutionLease,
+    tier_a_toolhost_sha256,
+    working_directory_authority_sha256,
+    workspace_root_authority_sha256,
+)
+from .tier_a_plan import TierALaunchPlan, build_tier_a_launch_plan
+from .tier_a_result import (
+    RESULT_SCHEMA,
+    TierAExecutionResult,
+    TierAOutputStream,
+    TierAResultError,
+)
 from .workspace import (
     CommandResult,
     Runner,
@@ -99,8 +147,14 @@ __all__ = [
     "DurablePublicationError",
     "FileAccessError",
     "HmacIsolationReportSigner",
+    "HmacRuntimeClosureSigner",
     "IndependentPolicyReviewer",
+    "LEASE_SCHEMA",
+    "LeasedCatalogMaterializer",
+    "LeasedCommandRegistry",
     "MergeAuthority",
+    "ModelRigVersionCheckClosureBuilder",
+    "PLAN_SCHEMA",
     "PatchApplier",
     "PatchError",
     "PatchReceipt",
@@ -111,19 +165,41 @@ __all__ = [
     "ProbeName",
     "ProposalError",
     "REQUIRED_PROBES",
+    "RESULT_SCHEMA",
+    "RUNTIME_STAGING_SCHEMA",
     "ReviewDecision",
     "ReviewError",
     "ReviewRequest",
     "ReviewVerdict",
     "Risk",
     "Runner",
+    "RuntimeClosureError",
+    "RuntimeClosureFile",
+    "RuntimeClosureManifest",
+    "RuntimeClosureStagingReceipt",
+    "RuntimeClosureVerifier",
+    "RuntimeStagingError",
+    "RuntimeStagingReceipt",
     "ScopeDecision",
     "ScopeReceipt",
     "ScopeViolation",
     "SearchMatch",
+    "SignedRuntimeClosureManifest",
     "SignedWindowsIsolationReport",
+    "StreamingPublicationError",
     "SubprocessRunner",
+    "TIER_A_APPLICATION_ENVIRONMENT",
     "TaskBudget",
+    "TierAExecutionError",
+    "TierAExecutionLease",
+    "TierAExecutionResult",
+    "TierALaunchPlan",
+    "TierAOutputStream",
+    "TierAResultError",
+    "TrustedRuntimeClosureStager",
+    "TrustedRuntimeStager",
+    "VERSION_CHECK_COMMAND_ID",
+    "VERSION_CHECK_TOOL_ID",
     "WindowsIsolationPhysicalReport",
     "WindowsPhysicalIsolationVerifier",
     "WorkspaceError",
@@ -131,12 +207,15 @@ __all__ = [
     "WorkspaceGitRunner",
     "WorkspaceManager",
     "build_scope_receipt",
+    "build_tier_a_launch_plan",
     "create_once_file",
     "default_registry",
     "load_isolation_attestation",
     "load_signing_secret",
     "load_unsigned_report",
+    "modelrig_version_check_closure_catalog",
     "normalize_repo_path",
+    "publish_stream_once",
     "remove_tree_durable",
     "rename_directory_no_replace",
     "replace_file_durable",
@@ -144,6 +223,10 @@ __all__ = [
     "sync_directory",
     "sync_file",
     "sync_tree",
+    "tier_a_toolhost_sha256",
+    "trusted_runtime_root_sha256",
     "unlink_durable",
+    "working_directory_authority_sha256",
+    "workspace_root_authority_sha256",
     "write_signed_report",
 ]
