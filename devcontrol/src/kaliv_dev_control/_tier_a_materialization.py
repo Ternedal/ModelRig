@@ -8,8 +8,8 @@ from ._tier_a_lease import (
 )
 from .catalog import (
     CatalogMaterializer,
-    ExecutableVerifier,
     IsolationAttestation,
+    LocalExecutableHashVerifier,
     ModelRigCommandCatalog,
     Toolchain,
 )
@@ -105,7 +105,7 @@ class LeasedCatalogMaterializer:
         catalog: ModelRigCommandCatalog,
         physical_verifier: WindowsPhysicalIsolationVerifier,
         *,
-        executable_verifier: ExecutableVerifier | None = None,
+        executable_verifier: LocalExecutableHashVerifier | None = None,
     ) -> None:
         self.catalog = catalog
         self._capturing = _LeaseCapturingVerifier(physical_verifier)
