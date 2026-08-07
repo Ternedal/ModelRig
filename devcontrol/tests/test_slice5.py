@@ -239,14 +239,14 @@ class CatalogRuntimeTests(unittest.TestCase):
                 catalog, isolation_verifier=AcceptIsolation()
             ).materialize(value, tools, attestation(value, tools, catalog))
 
-    def test_exact_authority_is_checked_before_fail_closed_rejection(self):
+    def test_fail_closed_rejection_precedes_authority_details(self):
         catalog = static_catalog()
         value = task("modelrig.static.probe")
         tools = static_toolchain()
         proof = attestation(value, tools, catalog)
         with self.assertRaisesRegex(CatalogError, "deferred fail closed"):
             CatalogMaterializer(catalog).materialize(value, tools, proof)
-        with self.assertRaisesRegex(CatalogError, "exact authority"):
+        with self.assertRaisesRegex(CatalogError, "deferred fail closed"):
             CatalogMaterializer(catalog).materialize(
                 value, tools, replace(proof, base_sha="b" * 40)
             )
