@@ -9,7 +9,6 @@ from typing import Any, Mapping
 
 from . import _tier_a_execution_core as _core
 from .catalog import (
-    ExecutableVerifier,
     IsolationAttestation,
     ModelRigCommandCatalog,
     Toolchain,
@@ -266,7 +265,7 @@ def run_verified_tier_a_command(
     workspace_root: Path,
     control_plane_root: Path,
     source_env: Mapping[str, str] | None = None,
-    executable_verifier: ExecutableVerifier | None = None,
+    executable_verifier: Any | None = None,
     process_memory_bytes: int = 512 * 1024 * 1024,
     active_process_limit: int = 8,
 ) -> TierAExecutionResult:
