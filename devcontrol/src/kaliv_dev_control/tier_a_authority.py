@@ -1,8 +1,9 @@
-"""Dormant DC-L07 Tier-A authority, runtime identity and cwd binding.
+"""Dormant DC-L08 Tier-A authority and verified-execution identity.
 
-This stage can materialize and verify runtime evidence and launch-plan identity,
-but deliberately exposes no process-launch, trusted-Git, receipt, publisher,
-credential, remote or activation authority.
+This stage can materialize authority, verify and stage signed runtime closures,
+construct closure-bound plans and execute only through the private v3 module.
+The authority surface itself exposes no process-launch function, final public
+facade, trusted-Git, receipt, publisher, credential, remote or activation power.
 """
 from __future__ import annotations
 
@@ -34,25 +35,25 @@ workspace_root_authority_sha256 = _core.workspace_root_authority_sha256
 
 # Preserve the landed DC-L06 v1 compatibility exports. DC-L07's closure-bound
 # v3 plan lives in ``tier_a_plan`` and is exported from the package root. These
-# aliases keep earlier bounded tests and consumers working without importing or
-# activating any executor.
+# aliases keep earlier bounded tests and consumers working without exposing the
+# private DC-L08 executor from this authority surface.
 TierALaunchPlan = _core.TierALaunchPlan
 build_tier_a_launch_plan = _core.build_tier_a_launch_plan
 
-for _forbidden_execution_name in (
+for _private_execution_name in (
     "_run_tier_a_launch_plan",
     "run_verified_tier_a_command",
 ):
-    if hasattr(_core, _forbidden_execution_name):
+    if hasattr(_core, _private_execution_name) or _private_execution_name in globals():
         raise TierAExecutionError(
-            f"DC-L07 core exposes forbidden execution authority: "
-            f"{_forbidden_execution_name}"
+            f"DC-L08 authority exposes private execution authority: "
+            f"{_private_execution_name}"
         )
-del _forbidden_execution_name
+del _private_execution_name
 
-# Exact source chain that can issue or transform DC-L07 runtime evidence. The
-# v5 domain intentionally excludes every DC-L08+ executor, command receipt,
-# trusted-Git, publisher and remote-authority module.
+# Exact source chain that can issue, transform or privately execute DC-L08
+# runtime authority. The v6 domain excludes the final DC-L09 facade, command
+# receipt, trusted-Git, publisher and remote-authority modules.
 _TIER_A_BUNDLE_FILES = (
     "worker/app/__init__.py",
     "worker/app/windows_job.py",
@@ -87,12 +88,14 @@ _TIER_A_BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
     "devcontrol/src/kaliv_dev_control/tier_a_plan.py",
     "devcontrol/src/kaliv_dev_control/tier_a_result.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_lease.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py",
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
     "devcontrol/src/kaliv_dev_control/workspace.py",
 )
@@ -173,14 +176,14 @@ def working_directory_authority_sha256(root: Path, relative: str) -> str:
 
 
 def tier_a_toolhost_sha256(control_plane_root: Path) -> str:
-    """Hash the complete non-executing v5 DC-L07 authority source chain."""
+    """Hash the complete private v6 DC-L08 verified-execution source chain."""
 
     root = _core._canonical_directory(
         control_plane_root,
         name="control-plane root",
     )
     digest = hashlib.sha256()
-    digest.update(b"kaliv-tier-a-toolhost/v5\0")
+    digest.update(b"kaliv-tier-a-toolhost/v6\0")
     for relative in _TIER_A_BUNDLE_FILES:
         path = root / PurePosixPath(relative)
         if _has_linkish_component(path) or not path.is_file():
