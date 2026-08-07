@@ -23,7 +23,7 @@
   "progressive_projections": [
     {
       "path": ".github/workflows/_tests.yml",
-      "reason": "run all twenty-eight DevControl modules, assert the private-only execution boundary and activate the real-Windows closure-bound executor contract through a test-only in-memory shim with the landed reviewed environment"
+      "reason": "run all twenty-eight DevControl modules, assert the private-only execution boundary and activate the real-Windows closure-bound executor contract through a test-only in-memory facade; project the later environment key to the landed reviewed value and use a WindowsPhysicalIsolationVerifier subclass that supplies the already signed report candidate while retaining base signature, binding, probe and freshness verification"
     },
     {
       "path": "devcontrol/README.md",
