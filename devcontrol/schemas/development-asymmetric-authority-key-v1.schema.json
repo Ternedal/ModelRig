@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/kaliv-asymmetric-authority-key-v1.json",
+  "title": "Kaliv trusted Ed25519 authority key v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "key_id",
+    "issuer_actor_id",
+    "issuer_system_id",
+    "public_key_hex",
+    "valid_from_utc",
+    "valid_until_utc",
+    "keyring_epoch",
+    "custody_policy_sha256",
+    "revoked_at_utc"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-asymmetric-authority-key/v1"},
+    "key_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"},
+    "issuer_actor_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@-]{1,127}$"},
+    "issuer_system_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"},
+    "public_key_hex": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "valid_from_utc": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "valid_until_utc": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "keyring_epoch": {"type": "integer", "minimum": 1},
+    "custody_policy_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "revoked_at_utc": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"}
+      ]
+    }
+  }
+}
