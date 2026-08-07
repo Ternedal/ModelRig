@@ -10,6 +10,7 @@ import json
 import os
 import re
 import stat
+import struct
 import sys
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -79,6 +80,60 @@ def _linked(path: Path) -> bool:
     return path.is_symlink() or bool(junction and junction())
 
 
+def _require_static_elf(fd: int, size: int, tool_id: str) -> None:
+    """Require the exact pinned sandbox bytes to have no dynamic loader runtime."""
+    if tool_id != "sandbox":
+        return
+    try:
+        header = os.pread(fd, 64, 0)
+        if len(header) < 52 or header[:4] != b"\x7fELF" or header[6] != 1:
+            raise CatalogError("sandbox bootstrap must be a static ELF executable")
+        elf_class = header[4]
+        data_encoding = header[5]
+        if data_encoding == 1:
+            prefix = "<"
+        elif data_encoding == 2:
+            prefix = ">"
+        else:
+            raise CatalogError("sandbox bootstrap must be a static ELF executable")
+        if elf_class == 2:
+            if len(header) < 64:
+                raise CatalogError("sandbox bootstrap must be a static ELF executable")
+            program_offset = struct.unpack_from(prefix + "Q", header, 32)[0]
+            entry_size = struct.unpack_from(prefix + "H", header, 54)[0]
+            entry_count = struct.unpack_from(prefix + "H", header, 56)[0]
+            minimum_entry_size = 56
+        elif elf_class == 1:
+            program_offset = struct.unpack_from(prefix + "I", header, 28)[0]
+            entry_size = struct.unpack_from(prefix + "H", header, 42)[0]
+            entry_count = struct.unpack_from(prefix + "H", header, 44)[0]
+            minimum_entry_size = 32
+        else:
+            raise CatalogError("sandbox bootstrap must be a static ELF executable")
+        table_size = entry_size * entry_count
+        if (
+            entry_count < 1
+            or entry_count > 1024
+            or entry_size < minimum_entry_size
+            or program_offset > size
+            or table_size > size - program_offset
+        ):
+            raise CatalogError("sandbox bootstrap must be a static ELF executable")
+        for index in range(entry_count):
+            record = os.pread(fd, 4, program_offset + index * entry_size)
+            if len(record) != 4:
+                raise CatalogError("sandbox bootstrap must be a static ELF executable")
+            segment_type = struct.unpack(prefix + "I", record)[0]
+            if segment_type in {2, 3}:  # PT_DYNAMIC or PT_INTERP
+                raise CatalogError(
+                    "sandbox bootstrap must not depend on a dynamic runtime"
+                )
+    except CatalogError:
+        raise
+    except (OSError, struct.error, OverflowError) as exc:
+        raise CatalogError("sandbox bootstrap static ELF validation failed") from exc
+
+
 @dataclass(frozen=True, slots=True)
 class ProjectCommandSpec:
     command_id: str
@@ -99,6 +154,8 @@ class ProjectCommandSpec:
             raise CatalogError(
                 "Go commands require complete helper toolchain attestation"
             )
+        if self.tool_id == "sandbox":
+            raise CatalogError("sandbox helper cannot be used as a catalog command tool")
         if not isinstance(self.args, tuple) or len(self.args) > 128 or any(
             not isinstance(arg, str) or not arg or "\0" in arg or len(arg.encode()) > 4096
             for arg in self.args
@@ -416,6 +473,11 @@ class TaskBoundCommandRegistry(CommandRegistry):
             raise CommandPolicyError("command registry is not bound to this exact task")
         return self._bootstrap_executable
 
+    def sandbox_bootstrap_mode(self, task: DevelopmentTask) -> str:
+        if self._identity(task) != self._bound_task_identity:
+            raise CommandPolicyError("command registry is not bound to this exact task")
+        return "static"
+
     def resolve(self, task: DevelopmentTask, command_id: str) -> CommandTemplate:
         if self._identity(task) != self._bound_task_identity:
             raise CommandPolicyError("command registry is not bound to this exact task")
@@ -444,7 +506,7 @@ class LocalExecutableHashVerifier:
             return invocation
         if os.name == "nt" or not sys.platform.startswith("linux") or _fcntl is None:
             raise CatalogError("pinned executable verification requires Linux")
-        if not hasattr(os, "memfd_create"):
+        if not hasattr(os, "memfd_create") or not hasattr(os, "pread"):
             raise CatalogError("sealed executable objects are unavailable")
         if len(_RETIRED_DESCRIPTORS) >= _MAX_PINNED_EXECUTABLES:
             raise CatalogError("process executable pin limit was reached")
@@ -494,6 +556,7 @@ class LocalExecutableHashVerifier:
                 raise CatalogError(f"tool executable path changed during verification: {binding.tool_id}")
             if digest.hexdigest() != binding.executable_sha256:
                 raise CatalogError(f"tool executable hash mismatch: {binding.tool_id}")
+            _require_static_elf(pinned, total, binding.tool_id)
             os.fchmod(pinned, 0o500)
             seals = _fcntl.F_SEAL_SEAL | _fcntl.F_SEAL_SHRINK | _fcntl.F_SEAL_GROW | _fcntl.F_SEAL_WRITE
             _fcntl.fcntl(pinned, _fcntl.F_ADD_SEALS, seals)
@@ -588,7 +651,7 @@ class CatalogMaterializer:
         ):
             raise CatalogError("isolation verifier mutated the attestation")
 
-        bootstrap_binding = snapshot.resolve("python")
+        bootstrap_binding = snapshot.resolve("sandbox")
         bootstrap_executable = executable_verifier.verify(bootstrap_binding)
         if (
             not isinstance(bootstrap_executable, str)
@@ -596,10 +659,10 @@ class CatalogMaterializer:
             or not _absolute(bootstrap_executable)
         ):
             raise CatalogError(
-                "executable verifier did not return a pinned bootstrap object"
+                "executable verifier did not return a pinned sandbox helper"
             )
         templates: list[CommandTemplate] = []
-        invocations = {bootstrap_binding.tool_id: bootstrap_executable}
+        invocations: dict[str, str] = {}
         for spec in specs:
             if spec.required_boundary is not IsolationBoundary.OS_ISOLATED or spec.network_mode is not NetworkMode.DENY:
                 raise CatalogError("catalog command weakened isolation")
