@@ -1,6 +1,6 @@
 # DC-L10 mutation results
 
-**Status:** load-bearing mutations encoded; final exact-head execution pending.
+**Status:** load-bearing mutations encoded; implementation candidate green.
 
 ## Required red states
 
@@ -21,16 +21,19 @@
 | Add L11+ readiness, publisher, materialization or remote mutation modules | future-module gates |
 | Omit any of the 35 landed test modules from the exact inventory | workflow coverage contract |
 
-## Observed integration state
+## Observed integration states
 
 The raw fifteen-file source import was opened before progressive changes. CodeQL,
 Agent diagnostics, product-side Windows isolation, trusted-Git receipt, browser,
 desktop and appliance gates remained green. The repository test loop failed only
 because `tests/workflow_test_coverage.py` still required the exact 31-module
-DC-L09 inventory while 35 modules were present. The correction advances that
-exact inventory and adds dependency and authority-boundary assertions; it does
-not weaken or bypass a product or DevControl test.
+DC-L09 inventory while 35 modules were present.
 
-Further concrete red states found on the frozen candidate head will be appended
-before approval. Green evidence is valid only when all four required workflows
-finish successfully on one unchanged commit.
+The correction advances that exact inventory, pins `cryptography==49.0.0` in both
+package and CI/runtime dependency surfaces, and adds an explicit offline L10
+authority gate. It does not weaken or bypass a product or DevControl test. The
+first complete 28-path candidate then passed every repository, DevControl,
+security-analysis and platform workflow without another red state.
+
+Green evidence remains valid only when the final documentation head also passes
+all four required workflows unchanged.

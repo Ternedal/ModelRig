@@ -1,14 +1,14 @@
 # DC-L10 independent review verdict
 
-**Status:** pending exact-head freeze and external review availability.
+**Status:** technical self-review complete; independent automated review not claimed.
 
-## Review target
+## Exact review scope
 
-The reviewer must inspect the exact final pull-request head, the 28-path allowlist,
-all fifteen source blob identities, the five progressive projections and the four
-exact-head workflow results.
+The implementation candidate was reviewed against the 28-path allowlist, all
+fifteen source blob identities, the five progressive projections, the explicit
+workflow boundaries and the four exact-head workflow results.
 
-## Required findings
+## Technical findings
 
 - Ed25519 authority is verification-only and contains no private signing path.
 - Semantic-review v1 HMAC compatibility is described honestly and kept separate
@@ -17,9 +17,16 @@ exact-head workflow results.
 - Package root and execution facade remain free of DC-L10 authority exports.
 - L11+ readiness, publisher, authorization, materialization and remote mutation
   surfaces remain absent.
-- All 35 landed modules and existing platform gates pass on the exact head.
+- All 35 landed modules and existing platform gates passed on the implementation
+  candidate.
 
-A self-review or stale-head review must not be represented as independent
-approval. If automated independent review is unavailable, that limitation must be
-recorded explicitly in the pull request rather than replaced with a fabricated
-verdict. Human terminal merge authority remains unchanged.
+## Independence limitation
+
+No external model-provider or human reviewer verdict is available in this run.
+This document therefore does **not** claim independent approval. The limitation
+must remain explicit in the pull-request body. Technical exact-head gates,
+source provenance and zero-behind status may support the user's terminal merge
+authority, but they do not manufacture an independent reviewer identity.
+
+The final documentation head must rerun all four workflows before merge; any code
+or scope change invalidates this review.
