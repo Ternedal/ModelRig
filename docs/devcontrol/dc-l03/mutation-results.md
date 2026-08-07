@@ -14,9 +14,9 @@ Load-bearing mutations and expected failures:
    Expected: token non-persistence assertion fails.
 5. Permit unreviewed process environment authority.
    Expected: the fixed-value positive-list regression rejects `GOROOT`,
-   `PYTHONUSERBASE`, non-local `GOTOOLCHAIN` and an attacker-selected `PATH`.
-6. Omit the reviewed `PATH=/usr/bin:/bin` from catalog commands.
-   Expected: the child-tool PATH regression fails.
+   `PYTHONUSERBASE`, non-local `GOTOOLCHAIN` and an attacker-selected PATH.
+6. Accept a catalog entry with omitted PATH without injecting the reviewed value.
+   Expected: the default-PATH insertion regression fails.
 7. Execute a pathname after verification instead of its sealed object.
    Expected: pathname-replacement regression fails.
 8. Reuse a retired descriptor for an old `/proc/<pid>/fd/<n>` template.
@@ -47,16 +47,20 @@ Load-bearing mutations and expected failures:
     Expected: the monotonic deadline regression fails unless the total budget is
     enforced independently of inactivity timeouts.
 20. Block inside `HTTPResponse.read1()` while parsing chunk framing.
-    Expected: supervised-reader regression fails unless the caller cancels the
-    socket/response and returns at the absolute deadline.
-21. Hide the underlying response socket so cancellation cannot be applied.
-    Expected: transport fails closed before accepting body evidence.
-22. Remove socket shutdown, socket close or response close at deadline expiry.
-    Expected: blocking-reader cancellation assertions fail.
+    Expected: body supervisor regression fails unless the socket and response are
+    cancelled at the absolute deadline.
+21. Block inside `HTTPSConnection.getresponse()` while parsing status/headers.
+    Expected: request supervisor regression fails unless the owned connection is
+    cancelled at the absolute deadline.
+22. Hide the underlying transport socket.
+    Expected: request handling fails closed before accepting response evidence.
+23. Remove socket shutdown, socket close, response close or connection close at
+    deadline expiry.
+    Expected: body/header cancellation assertions fail.
 
 The latest complete focused runtime run produced **26/26 passing tests** before
 the final environment/deadline changes. Those final findings have executable
 contract regressions, clean narrowly scoped commit diffs, and direct validation
-of timeout, cancellation, successful read and byte-budget behavior. Full
-exact-head CI and diagnostics remain pending because no Actions run has been
-created for connector-authored heads.
+of omitted-PATH insertion, body/header timeout, cancellation, successful read and
+byte-budget behavior. Full exact-head CI and diagnostics remain pending because
+no Actions run has been created for connector-authored heads.
