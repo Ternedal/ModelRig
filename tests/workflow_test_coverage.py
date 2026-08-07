@@ -205,7 +205,7 @@ snapshot_registry = TaskBoundCommandRegistry(
     ),
     snapshot_task,
     object(),
-    "/trusted/python3",
+    "/trusted/kaliv-sandbox",
 )
 
 
@@ -299,10 +299,18 @@ class _SnapshotExecutor(CommandExecutor):
         return workspace
 
     @staticmethod
-    def _confined_argv(sandbox_root, cwd, argv, bootstrap_executable):
+    def _confined_argv(
+        sandbox_root,
+        cwd,
+        argv,
+        bootstrap_executable,
+        bootstrap_mode="python",
+    ):
         del sandbox_root, cwd
-        if bootstrap_executable != "/trusted/python3":
-            raise AssertionError("executor did not use the pinned sandbox bootstrap")
+        if bootstrap_executable != "/trusted/kaliv-sandbox":
+            raise AssertionError("executor did not use the pinned sandbox helper")
+        if bootstrap_mode != "static":
+            raise AssertionError("executor did not use the static helper protocol")
         return argv
 
 
