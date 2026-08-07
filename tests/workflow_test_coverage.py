@@ -5,6 +5,7 @@ Run: python3 tests/workflow_test_coverage.py
 from __future__ import annotations
 
 import fnmatch
+import importlib
 import json
 import re
 import sys
@@ -90,6 +91,7 @@ expected_modules = {
     "test_slice10c_output_result.py",
     "test_slice10d_runtime_closure.py",
     "test_slice10e_version_check_closure.py",
+    "test_slice10g_command_receipt.py",
     "test_slice2.py",
     "test_slice5.py",
     "test_slice6.py",
@@ -98,13 +100,15 @@ expected_modules = {
     "test_slice9_schemas.py",
     "test_store_proposal.py",
     "test_streaming_publication_h10g.py",
+    "test_trusted_git_runtime.py",
+    "test_trusted_git_runtime_recovery.py",
 }
 observed_modules = {
     path.name for path in (root / "devcontrol/tests").glob("test_*.py")
 }
 check(
     observed_modules == expected_modules,
-    f"the twenty-eight DC-L01–L08 test modules are present: {sorted(observed_modules)}",
+    f"the thirty-one DC-L01–L09 test modules are present: {sorted(observed_modules)}",
 )
 
 receipt_schema = json.loads(
@@ -251,27 +255,34 @@ check(retarget_rejected, "task-bound registry rejects cross-task retargeting")
 native_windows_contracts = (
     "tests/support/windows_job_contract.py",
     "tests/support/windows_job_close_contract.py",
+    "tests/support/windows_bounded_subprocess_contract.py",
     "tests/support/windows_restricted_contract.py",
     "tests/support/windows_tier_a_environment_contract.py",
     "tests/worker_toolhost.py",
     "tests/support/windows_catalog_tier_a_contract.py",
+    "tests/support/windows_tier_a_receipt_contract.py",
 )
 check(
     all(path in workflow for path in native_windows_contracts),
-    "CI reaches every landed product-side and DC-L08 native Windows contract",
+    "CI reaches every landed product-side and DC-L09 native Windows contract",
 )
 check(
-    "tests/support/windows_bounded_subprocess_contract.py" not in workflow
-    and "tests/support/windows_tier_a_receipt_contract.py" not in workflow,
-    "DC-L08 leaves generic bounded-subprocess and command-receipt Windows contracts deferred",
+    "tests/support/windows_bounded_subprocess_contract.py" in workflow
+    and "tests/support/windows_tier_a_receipt_contract.py" in workflow,
+    "DC-L09 activates bounded trusted-Git and command-receipt Windows contracts",
+)
+
+facade = importlib.import_module("kaliv_dev_control.tier_a_execution")
+modern = importlib.import_module("kaliv_dev_control.tier_a_execution_v3")
+receipt = importlib.import_module("kaliv_dev_control.tier_a_command_receipt")
+check(
+    facade.run_verified_tier_a_command is modern.run_verified_tier_a_command,
+    "the final public facade routes to the sole v3 verified executor",
 )
 check(
-    "kaliv_dev_control.tier_a_execution_v3" in workflow
-    and not (
-        root
-        / "devcontrol/src/kaliv_dev_control/tier_a_execution.py"
-    ).exists(),
-    "CI activates the private v3 executor without landing the final public facade",
+    facade.run_single_verified_tier_a_command_with_receipt
+    is receipt.run_single_verified_tier_a_command_with_receipt,
+    "the final public facade routes to the sole Git-aware receipt orchestrator",
 )
 
 product_modules = (
