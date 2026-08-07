@@ -78,6 +78,7 @@ def task(
     *commands: str,
     allowed_paths: tuple[str, ...] = ("devcontrol/**",),
 ) -> DevelopmentTask:
+    effective_commands = commands or ("modelrig.devcontrol.tests",)
     return DevelopmentTask.from_mapping(
         {
             "schema": "kaliv-development-task/v1",
@@ -89,7 +90,7 @@ def task(
             "risk": "low",
             "allowed_paths": list(allowed_paths),
             "protected_paths": ["devcontrol/secrets/**"],
-            "allowed_command_ids": list(commands),
+            "allowed_command_ids": list(effective_commands),
             "required_tests": ["DC-L03 fixed-authority regressions"],
             "budget": {
                 "max_changed_files": 20,
@@ -156,7 +157,11 @@ class AcceptIsolation:
 
 
 class MutateIsolation:
+    def __init__(self) -> None:
+        self.called = False
+
     def verify(self, proof: IsolationAttestation) -> None:
+        self.called = True
         object.__setattr__(proof, "base_sha", "b" * 40)
 
 
@@ -225,52 +230,37 @@ class CatalogRuntimeTests(unittest.TestCase):
                         {key: value},
                     )
 
-    def test_empty_default_catalog_rejects_unknown_command_before_callback(self):
+    def test_empty_default_catalog_rejects_valid_task_before_launch(self):
         catalog = modelrig_command_catalog()
         value = task("modelrig.devcontrol.tests")
         tools = Toolchain(())
-        isolation = AcceptIsolation()
         with self.assertRaisesRegex(CatalogError, "not in the ModelRig catalog"):
+            CatalogMaterializer(
+                catalog, isolation_verifier=AcceptIsolation()
+            ).materialize(value, tools, attestation(value, tools, catalog))
+
+    def test_exact_authority_is_checked_before_fail_closed_rejection(self):
+        catalog = static_catalog()
+        value = task("modelrig.static.probe")
+        tools = static_toolchain()
+        proof = attestation(value, tools, catalog)
+        with self.assertRaisesRegex(CatalogError, "deferred fail closed"):
+            CatalogMaterializer(catalog).materialize(value, tools, proof)
+        with self.assertRaisesRegex(CatalogError, "exact authority"):
+            CatalogMaterializer(catalog).materialize(
+                value, tools, replace(proof, base_sha="b" * 40)
+            )
+
+    def test_isolation_callback_is_never_invoked(self):
+        catalog = static_catalog()
+        value = task("modelrig.static.probe")
+        tools = static_toolchain()
+        isolation = MutateIsolation()
+        with self.assertRaisesRegex(CatalogError, "deferred fail closed"):
             CatalogMaterializer(
                 catalog, isolation_verifier=isolation
             ).materialize(value, tools, attestation(value, tools, catalog))
         self.assertFalse(isolation.called)
-
-    def test_empty_catalog_materializes_only_an_immutable_empty_registry(self):
-        catalog = modelrig_command_catalog()
-        value = task()
-        tools = Toolchain(())
-        isolation = AcceptIsolation()
-        registry = CatalogMaterializer(
-            catalog, isolation_verifier=isolation
-        ).materialize(value, tools, attestation(value, tools, catalog))
-        self.assertTrue(isolation.called)
-        execution_task = registry.execution_task(value)
-        self.assertIsNot(execution_task, value)
-        self.assertEqual(execution_task.canonical_json(), value.canonical_json())
-        with self.assertRaisesRegex(Exception, "no launch authority"):
-            registry.sandbox_bootstrap_executable(execution_task)
-        with self.assertRaisesRegex(Exception, "not allowed"):
-            registry.resolve(execution_task, "modelrig.static.probe")
-        with self.assertRaises(Exception):
-            registry._bootstrap_executable = "/attacker"
-
-    def test_default_isolation_and_exact_authority_fail_closed_for_empty_catalog(self):
-        catalog, value, tools = modelrig_command_catalog(), task(), Toolchain(())
-        proof = attestation(value, tools, catalog)
-        with self.assertRaisesRegex(CatalogError, "not been independently verified"):
-            CatalogMaterializer(catalog).materialize(value, tools, proof)
-        with self.assertRaisesRegex(CatalogError, "exact authority"):
-            CatalogMaterializer(
-                catalog, isolation_verifier=AcceptIsolation()
-            ).materialize(value, tools, replace(proof, base_sha="b" * 40))
-
-    def test_isolation_verifier_cannot_mutate_private_attestation(self):
-        catalog, value, tools = modelrig_command_catalog(), task(), Toolchain(())
-        with self.assertRaisesRegex(CatalogError, "mutated"):
-            CatalogMaterializer(
-                catalog, isolation_verifier=MutateIsolation()
-            ).materialize(value, tools, attestation(value, tools, catalog))
 
     def test_fake_executable_verifier_is_rejected(self):
         with self.assertRaisesRegex(CatalogError, "fixed static-runtime"):
@@ -282,7 +272,7 @@ class CatalogRuntimeTests(unittest.TestCase):
                 ),
             )
 
-    def test_nonempty_catalog_is_rejected_before_callback_or_verifier(self):
+    def test_nonempty_catalog_rejects_before_callback_or_verifier(self):
         catalog = static_catalog()
         value = task("modelrig.static.probe")
         tools = static_toolchain()
@@ -301,33 +291,6 @@ class CatalogRuntimeTests(unittest.TestCase):
                 ).materialize(value, tools, attestation(value, tools, catalog))
         self.assertFalse(isolation.called)
         self.assertEqual(supplied._pins, {})
-
-    def test_nonempty_catalog_never_invokes_frame_inspecting_callback(self):
-        catalog = static_catalog()
-        value = task("modelrig.static.probe")
-        tools = static_toolchain()
-
-        class FrameInspector:
-            called = False
-
-            def verify(self, proof: IsolationAttestation) -> None:
-                del proof
-                self.called = True
-                caller_locals = sys._getframe(1).f_locals
-                for candidate in caller_locals.values():
-                    if isinstance(candidate, LocalExecutableHashVerifier):
-                        candidate._pins["sandbox"] = (
-                            ToolBinding("sandbox", "/trusted/sandbox", "1" * 64),
-                            -1,
-                            "/attacker-controlled/sandbox",
-                        )
-
-        isolation = FrameInspector()
-        with self.assertRaisesRegex(CatalogError, "deferred fail closed"):
-            CatalogMaterializer(
-                catalog, isolation_verifier=isolation
-            ).materialize(value, tools, attestation(value, tools, catalog))
-        self.assertFalse(isolation.called)
 
     @unittest.skipUnless(
         sys.platform.startswith("linux")
