@@ -28,12 +28,14 @@
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
     "devcontrol/src/kaliv_dev_control/bounded_subprocess.py",
     "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
+    "devcontrol/tests/test_foundation.py",
     "devcontrol/tests/test_h10r_tier_a_legacy_runner_extraction.py",
     "devcontrol/tests/test_slice9.py",
     "tests/workflow_test_coverage.py"
   ],
   "progressive_projection": {
-    "devcontrol/src/kaliv_dev_control/bounded_subprocess.py": "retain the landed Linux subreaper supervisor and add only the locked source Windows Job Object spawn, termination and close boundary needed by TrustedGitRunner"
+    "devcontrol/src/kaliv_dev_control/bounded_subprocess.py": "retain the landed Linux subreaper supervisor and add only the locked source Windows Job Object spawn, termination and close boundary needed by TrustedGitRunner",
+    "devcontrol/tests/test_foundation.py": "move the DC-L09 trusted-Git, command-receipt and final-facade modules from the future import denylist into the landed inventory while preserving all later semantic-review, publisher and activation exclusions"
   },
   "control_paths": [
     "docs/devcontrol/dc-l09/exact-head-validation.md",
