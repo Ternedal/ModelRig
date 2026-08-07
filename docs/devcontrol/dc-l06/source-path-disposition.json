@@ -20,7 +20,8 @@
   "progressive": [
     "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
-    "devcontrol/src/kaliv_dev_control/tier_a_authority.py"
+    "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
+    "tests/workflow_test_coverage.py"
   ],
   "projected_source_tests": [
     "devcontrol/tests/test_h10k_tier_a_environment_extraction.py",
