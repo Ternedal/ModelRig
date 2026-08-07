@@ -1,21 +1,157 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 import kaliv_dev_control.physical_isolation as physical_module
+from kaliv_dev_control.catalog import (
+    IsolationAttestation,
+    IsolationBoundary,
+    NetworkMode,
+    Toolchain,
+    modelrig_command_catalog,
+)
+from kaliv_dev_control.contract import DevelopmentTask
 from kaliv_dev_control.physical_isolation import (
+    HmacIsolationReportSigner,
     PhysicalIsolationError,
+    PhysicalProbeResult,
+    ProbeName,
+    REQUIRED_PROBES,
+    SignedWindowsIsolationReport,
+    WindowsIsolationPhysicalReport,
     WindowsPhysicalIsolationVerifier,
     load_isolation_attestation,
     load_signing_secret,
     load_unsigned_report,
 )
-from test_slice6 import NOW, attestation, fixture_key, report, signed_report
+
+BASE_SHA = "a" * 40
+NOW = datetime(2026, 8, 3, 12, 0, 0, tzinfo=timezone.utc)
+STARTED = "2026-08-03T10:00:00Z"
+OBSERVED = "2026-08-03T10:30:00Z"
+COMPLETED = "2026-08-03T11:00:00Z"
+
+
+def fixture_key(label: str = "primary") -> bytes:
+    return hashlib.sha256(f"dc-l04-hardening-fixture:{label}".encode("utf-8")).digest()
+
+
+def task(command_id: str = "modelrig.devcontrol.tests") -> DevelopmentTask:
+    return DevelopmentTask.from_mapping(
+        {
+            "schema": "kaliv-development-task/v1",
+            "task_id": "I0B_HARDENING",
+            "repository": "Ternedal/ModelRig",
+            "base_sha": BASE_SHA,
+            "goal": "Harden signed physical Windows isolation evidence.",
+            "acceptance_criteria": ["Every DC-L04 hardening regression passes."],
+            "risk": "low",
+            "allowed_paths": ["devcontrol/**"],
+            "protected_paths": ["devcontrol/secrets/**"],
+            "allowed_command_ids": [command_id],
+            "required_tests": ["DC-L04 hardening regressions"],
+            "budget": {
+                "max_changed_files": 20,
+                "max_added_lines": 5000,
+                "max_deleted_lines": 5000,
+                "max_attempts": 2,
+                "max_runtime_seconds": 3600,
+                "max_output_bytes": 1_000_000,
+            },
+            "merge_authority": "human",
+        }
+    )
+
+
+def toolchain() -> Toolchain:
+    return Toolchain(())
+
+
+def probe(name: ProbeName, *, passed: bool = True) -> PhysicalProbeResult:
+    return PhysicalProbeResult(
+        name=name,
+        passed=passed,
+        receipt_sha256=hashlib.sha256(name.value.encode("utf-8")).hexdigest(),
+        detail=f"Physical probe {name.value} completed.",
+        observed_at=OBSERVED,
+    )
+
+
+def report(
+    *,
+    failed: ProbeName | None = None,
+    source_task: DevelopmentTask | None = None,
+    **overrides,
+) -> WindowsIsolationPhysicalReport:
+    selected_task = source_task or task()
+    values = {
+        "report_id": "i0b-20260803-hardening",
+        "task_id": selected_task.task_id,
+        "task_sha256": hashlib.sha256(
+            selected_task.canonical_json().encode("utf-8")
+        ).hexdigest(),
+        "repository": selected_task.repository,
+        "base_sha": selected_task.base_sha,
+        "catalog_sha256": modelrig_command_catalog().sha256,
+        "toolchain_sha256": toolchain().sha256,
+        "rig_id": "modelrig-primary",
+        "rig_fingerprint_sha256": "2" * 64,
+        "candidate_version": "1.58.147",
+        "windows_build": "Windows 11 24H2 build 26100",
+        "toolhost_sha256": "3" * 64,
+        "workspace_root_sha256": "4" * 64,
+        "collected_by": "rig-collector",
+        "approved_by": "operator-approver",
+        "started_at": STARTED,
+        "completed_at": COMPLETED,
+        "boot_marker_before_sha256": "5" * 64,
+        "boot_marker_after_sha256": "6" * 64,
+        "boundary": IsolationBoundary.OS_ISOLATED,
+        "network_mode": NetworkMode.DENY,
+        "probes": tuple(
+            probe(name, passed=name is not failed) for name in REQUIRED_PROBES
+        ),
+    }
+    values.update(overrides)
+    return WindowsIsolationPhysicalReport(**values)
+
+
+def signed_report(**kwargs) -> SignedWindowsIsolationReport:
+    return HmacIsolationReportSigner(
+        "operator-key-2026",
+        fixture_key(),
+    ).sign(report(**kwargs))
+
+
+def attestation(
+    evidence_hash: str,
+    *,
+    source_task: DevelopmentTask | None = None,
+    **overrides,
+) -> IsolationAttestation:
+    selected_task = source_task or task()
+    values = {
+        "task_id": selected_task.task_id,
+        "task_sha256": hashlib.sha256(
+            selected_task.canonical_json().encode("utf-8")
+        ).hexdigest(),
+        "repository": selected_task.repository,
+        "base_sha": selected_task.base_sha,
+        "catalog_sha256": modelrig_command_catalog().sha256,
+        "toolchain_sha256": toolchain().sha256,
+        "boundary": IsolationBoundary.OS_ISOLATED,
+        "network_mode": NetworkMode.DENY,
+        "evidence_sha256": (evidence_hash,),
+    }
+    values.update(overrides)
+    return IsolationAttestation(**values)
 
 
 class Slice6HardeningTests(unittest.TestCase):
