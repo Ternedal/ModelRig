@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import fnmatch
 import importlib
+import importlib.util
 import json
 import re
 import sys
@@ -71,6 +72,7 @@ command = (
 check(command in workflow, "CI runs the exact DevControl unittest discovery command")
 
 expected_modules = {
+    "test_asymmetric_authority.py",
     "test_bounded_subprocess.py",
     "test_campaign_review.py",
     "test_durable_publication.py",
@@ -86,12 +88,15 @@ expected_modules = {
     "test_proposal_reload.py",
     "test_review_reload.py",
     "test_runtime_staging_concurrency_h10h.py",
+    "test_semantic_review_core_cleanup_h10e.py",
+    "test_semantic_review_durable_publication_h10d.py",
     "test_slice10_runtime_staging.py",
     "test_slice10b_runtime_binding.py",
     "test_slice10c_output_result.py",
     "test_slice10d_runtime_closure.py",
     "test_slice10e_version_check_closure.py",
     "test_slice10g_command_receipt.py",
+    "test_slice10h_semantic_review.py",
     "test_slice2.py",
     "test_slice5.py",
     "test_slice6.py",
@@ -108,7 +113,56 @@ observed_modules = {
 }
 check(
     observed_modules == expected_modules,
-    f"the thirty-one DC-L01–L09 test modules are present: {sorted(observed_modules)}",
+    f"the thirty-five DC-L01–L10 test modules are present: {sorted(observed_modules)}",
+)
+
+worker_requirements = (root / "worker/requirements.txt").read_text(encoding="utf-8")
+pyproject = (root / "devcontrol/pyproject.toml").read_text(encoding="utf-8")
+check(
+    worker_requirements.count("cryptography==49.0.0") == 1,
+    "the CI/runtime environment pins the reviewed Ed25519 implementation exactly once",
+)
+check(
+    pyproject.count('"cryptography==49.0.0"') == 1,
+    "the DevControl package metadata pins the same Ed25519 implementation",
+)
+
+asymmetric = importlib.import_module("kaliv_dev_control.asymmetric_authority")
+semantic = importlib.import_module("kaliv_dev_control.semantic_review")
+check(
+    callable(asymmetric.Ed25519AuthorityVerifier),
+    "DC-L10 exposes verification-only Ed25519 authority",
+)
+check(
+    callable(semantic.SemanticReviewApprovalGate.ready),
+    "DC-L10 exposes the offline semantic-review approval gate",
+)
+asymmetric_source = (
+    root / "devcontrol/src/kaliv_dev_control/asymmetric_authority.py"
+).read_text(encoding="utf-8")
+check(
+    all(
+        token not in asymmetric_source
+        for token in (
+            "Ed25519PrivateKey",
+            "class Ed25519AuthorityIssuer",
+            "load_private",
+            ".sign(",
+        )
+    ),
+    "the landed asymmetric runtime contains no private-key or signer boundary",
+)
+check(
+    all(
+        importlib.util.find_spec(module) is None
+        for module in (
+            "kaliv_dev_control.draft_pr_readiness",
+            "kaliv_dev_control.publisher_dry_run",
+            "kaliv_dev_control.publisher_authorization",
+            "kaliv_dev_control.local_candidate_materialization",
+        )
+    ),
+    "DC-L11–L13 readiness, publisher and materialization modules remain absent",
 )
 
 receipt_schema = json.loads(
@@ -270,6 +324,10 @@ check(
     "tests/support/windows_bounded_subprocess_contract.py" in workflow
     and "tests/support/windows_tier_a_receipt_contract.py" in workflow,
     "DC-L09 activates bounded trusted-Git and command-receipt Windows contracts",
+)
+check(
+    "DevControl DC-L10 asymmetric and semantic-review boundary" in workflow,
+    "CI contains an explicit offline DC-L10 authority boundary gate",
 )
 
 facade = importlib.import_module("kaliv_dev_control.tier_a_execution")
