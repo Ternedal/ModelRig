@@ -4,6 +4,7 @@ import base64
 import binascii
 import fnmatch
 import hashlib
+import http.client
 import json
 import re
 import socket
@@ -11,9 +12,7 @@ import ssl
 import sys
 import threading
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping, Protocol
@@ -111,12 +110,6 @@ class ReadOnlyTransport(Protocol):
     ) -> HttpResponse: ...
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        del req, fp, code, msg, headers, newurl
-        return None
-
-
 def _system_tls_context() -> ssl.SSLContext:
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.verify_mode = ssl.CERT_REQUIRED
@@ -172,45 +165,31 @@ def _system_tls_context() -> ssl.SSLContext:
     return context
 
 
-def _deadline_socket(response: Any) -> Any:
-    pending = [response]
-    seen: set[int] = set()
-    for _ in range(5):
-        following: list[Any] = []
-        for candidate in pending:
-            marker = id(candidate)
-            if marker in seen:
-                continue
-            seen.add(marker)
-            if callable(getattr(candidate, "settimeout", None)):
-                return candidate
-            for name in ("fp", "raw", "_sock"):
-                child = getattr(candidate, name, None)
-                if child is not None:
-                    following.append(child)
-        pending = following
-    raise GitHubReadError(
-        "GitHub response transport cannot enforce a wall-clock deadline"
-    )
-
-
-def _abort_response(response: Any, transport_socket: Any) -> None:
+def _abort_connection(connection: Any, response: Any | None) -> None:
+    transport_socket = getattr(connection, "sock", None)
+    if transport_socket is not None:
+        try:
+            transport_socket.shutdown(socket.SHUT_RDWR)
+        except (AttributeError, OSError):
+            pass
+        try:
+            transport_socket.close()
+        except (AttributeError, OSError):
+            pass
+    if response is not None:
+        try:
+            response.close()
+        except (AttributeError, OSError):
+            pass
     try:
-        transport_socket.shutdown(socket.SHUT_RDWR)
-    except (AttributeError, OSError):
-        pass
-    try:
-        transport_socket.close()
-    except (AttributeError, OSError):
-        pass
-    try:
-        response.close()
+        connection.close()
     except (AttributeError, OSError):
         pass
 
 
 def _read_response_body(
     response: Any,
+    transport_socket: Any,
     *,
     max_bytes: int,
     deadline: float,
@@ -219,92 +198,156 @@ def _read_response_body(
     fallback = getattr(response, "read", None)
     if not callable(read_once) and not callable(fallback):
         raise GitHubReadError("GitHub response body is not readable")
-    transport_socket = _deadline_socket(response)
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise GitHubReadError("GitHub read exceeded the wall-clock deadline")
+        try:
+            transport_socket.settimeout(max(0.001, remaining))
+        except (AttributeError, OSError, ValueError) as exc:
+            raise GitHubReadError(
+                "GitHub response deadline could not be enforced"
+            ) from exc
+        amount = min(65_536, max_bytes + 1 - total)
+        if amount <= 0:
+            raise GitHubReadError("GitHub response exceeded the read budget")
+        try:
+            chunk = read_once(amount) if callable(read_once) else fallback(1)
+        except (TimeoutError, OSError) as exc:
+            raise GitHubReadError("GitHub read did not complete") from exc
+        if not isinstance(chunk, (bytes, bytearray)):
+            raise GitHubReadError("GitHub response body is not bytes")
+        if not chunk:
+            return b"".join(chunks)
+        total += len(chunk)
+        if total > max_bytes:
+            raise GitHubReadError("GitHub response exceeded the read budget")
+        chunks.append(bytes(chunk))
+
+
+def _request_with_deadline(
+    connection: Any,
+    target: str,
+    *,
+    headers: Mapping[str, str],
+    max_bytes: int,
+    deadline: float,
+) -> HttpResponse:
     completed = threading.Event()
-    result: list[bytes] = []
-    failures: list[BaseException] = []
+    cancelled = threading.Event()
+    results: list[HttpResponse] = []
+    failures: list[Exception] = []
+    responses: list[Any] = []
 
     def consume() -> None:
-        chunks: list[bytes] = []
-        total = 0
+        response: Any | None = None
         try:
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise GitHubReadError(
-                        "GitHub read exceeded the wall-clock deadline"
-                    )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise GitHubReadError(
+                    "GitHub read exceeded the wall-clock deadline"
+                )
+            connection.timeout = max(0.001, remaining)
+            connection.request("GET", target, headers=dict(headers))
+            if cancelled.is_set():
+                raise GitHubReadError(
+                    "GitHub read exceeded the wall-clock deadline"
+                )
+            transport_socket = getattr(connection, "sock", None)
+            if transport_socket is None or not callable(
+                getattr(transport_socket, "settimeout", None)
+            ):
+                raise GitHubReadError(
+                    "GitHub response transport cannot enforce a wall-clock deadline"
+                )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise GitHubReadError(
+                    "GitHub read exceeded the wall-clock deadline"
+                )
+            transport_socket.settimeout(max(0.001, remaining))
+            response = connection.getresponse()
+            responses.append(response)
+            if cancelled.is_set():
+                raise GitHubReadError(
+                    "GitHub read exceeded the wall-clock deadline"
+                )
+            declared = response.getheader("Content-Length")
+            if declared is not None:
                 try:
-                    transport_socket.settimeout(max(0.001, remaining))
-                except (OSError, ValueError) as exc:
+                    length = int(declared, 10)
+                except (TypeError, ValueError) as exc:
                     raise GitHubReadError(
-                        "GitHub response deadline could not be enforced"
+                        "GitHub Content-Length is invalid"
                     ) from exc
-                amount = min(65_536, max_bytes + 1 - total)
-                if amount <= 0:
+                if length < 0 or length > max_bytes:
                     raise GitHubReadError(
                         "GitHub response exceeded the read budget"
                     )
-                chunk = read_once(amount) if callable(read_once) else fallback(1)
-                if not isinstance(chunk, (bytes, bytearray)):
-                    raise GitHubReadError(
-                        "GitHub response body is not bytes"
-                    )
-                if not chunk:
-                    result.append(b"".join(chunks))
-                    return
-                total += len(chunk)
-                if total > max_bytes:
-                    raise GitHubReadError(
-                        "GitHub response exceeded the read budget"
-                    )
-                chunks.append(bytes(chunk))
-        except BaseException as exc:
+            body = _read_response_body(
+                response,
+                transport_socket,
+                max_bytes=max_bytes,
+                deadline=deadline,
+            )
+            results.append(
+                HttpResponse(
+                    status=int(response.status),
+                    headers=dict(response.getheaders()),
+                    body=body,
+                )
+            )
+        except Exception as exc:
             failures.append(exc)
         finally:
+            if response is not None:
+                try:
+                    response.close()
+                except (AttributeError, OSError):
+                    pass
+            try:
+                connection.close()
+            except (AttributeError, OSError):
+                pass
             completed.set()
 
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise GitHubReadError("GitHub read exceeded the wall-clock deadline")
-    try:
-        transport_socket.settimeout(max(0.001, remaining))
-    except (OSError, ValueError) as exc:
-        raise GitHubReadError(
-            "GitHub response deadline could not be enforced"
-        ) from exc
     worker = threading.Thread(
         target=consume,
-        name="kaliv-github-read",
+        name="kaliv-github-request",
         daemon=True,
     )
     worker.start()
     if not completed.wait(remaining):
-        _abort_response(response, transport_socket)
+        cancelled.set()
+        _abort_connection(connection, responses[0] if responses else None)
         raise GitHubReadError("GitHub read exceeded the wall-clock deadline")
     if time.monotonic() > deadline:
-        _abort_response(response, transport_socket)
+        cancelled.set()
+        _abort_connection(connection, responses[0] if responses else None)
         raise GitHubReadError("GitHub read exceeded the wall-clock deadline")
     if failures:
         failure = failures[0]
         if isinstance(failure, GitHubReadError):
             raise failure
-        if isinstance(failure, (TimeoutError, OSError)):
+        if isinstance(
+            failure,
+            (TimeoutError, OSError, http.client.HTTPException, ssl.SSLError),
+        ):
             raise GitHubReadError("GitHub read did not complete") from failure
-        raise GitHubReadError("GitHub response body could not be read") from failure
-    if len(result) != 1:
-        raise GitHubReadError("GitHub response body could not be read")
-    return result[0]
+        raise GitHubReadError("GitHub response could not be read") from failure
+    if len(results) != 1:
+        raise GitHubReadError("GitHub response could not be read")
+    return results[0]
 
 
 class UrllibReadOnlyTransport:
     def __init__(self) -> None:
-        context = _system_tls_context()
-        self._opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({}),
-            urllib.request.HTTPSHandler(context=context),
-            _NoRedirect(),
-        )
+        self._context = _system_tls_context()
 
     def get(
         self,
@@ -348,43 +391,23 @@ class UrllibReadOnlyTransport:
             ):
                 raise GitHubReadError("HTTP request headers are invalid")
             request_headers[key] = value
-        request = urllib.request.Request(
-            url, headers=request_headers, method="GET"
-        )
+        target = parsed.path or "/"
+        if parsed.query:
+            target += "?" + parsed.query
         deadline = time.monotonic() + timeout_seconds
-        try:
-            response = self._opener.open(request, timeout=timeout_seconds)
-        except urllib.error.HTTPError as exc:
-            response = exc
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise GitHubReadError("GitHub read did not complete") from exc
-        try:
-            if time.monotonic() >= deadline:
-                raise GitHubReadError("GitHub read exceeded the wall-clock deadline")
-            declared = response.headers.get("Content-Length")
-            if declared is not None:
-                try:
-                    length = int(declared, 10)
-                except (TypeError, ValueError) as exc:
-                    raise GitHubReadError(
-                        "GitHub Content-Length is invalid"
-                    ) from exc
-                if length < 0 or length > max_bytes:
-                    raise GitHubReadError(
-                        "GitHub response exceeded the read budget"
-                    )
-            body = _read_response_body(
-                response,
-                max_bytes=max_bytes,
-                deadline=deadline,
-            )
-            return HttpResponse(
-                status=int(response.status),
-                headers=dict(response.headers.items()),
-                body=body,
-            )
-        finally:
-            response.close()
+        connection = http.client.HTTPSConnection(
+            _API_HOST,
+            443,
+            timeout=timeout_seconds,
+            context=self._context,
+        )
+        return _request_with_deadline(
+            connection,
+            target,
+            headers=request_headers,
+            max_bytes=max_bytes,
+            deadline=deadline,
+        )
 
 
 @dataclass(frozen=True, slots=True)
