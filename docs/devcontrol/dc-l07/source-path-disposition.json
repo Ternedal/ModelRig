@@ -32,6 +32,7 @@
     "devcontrol/tests/test_slice10c_output_result.py",
     "devcontrol/tests/test_slice10d_runtime_closure.py",
     "devcontrol/tests/test_slice10e_version_check_closure.py",
+    "devcontrol/tests/test_slice9.py",
     "devcontrol/tests/test_slice9_schemas.py",
     "devcontrol/tests/test_streaming_publication_h10g.py"
   ],
@@ -63,6 +64,7 @@
     "devcontrol/tests/test_slice10c_output_result.py": "retain bounded result identity without importing a future executor",
     "devcontrol/tests/test_slice10d_runtime_closure.py": "retain closure, cwd and plan evidence while removing DC-L08 execution requirements",
     "devcontrol/tests/test_slice10e_version_check_closure.py": "bind version-check closure tests to DC-L07 runtime and authority modules and prove repeated staging is idempotent",
+    "devcontrol/tests/test_slice9.py": "advance the exact toolhost-bundle assertion from DC-L06 exclusions to the required DC-L07 non-executing runtime evidence closure",
     "devcontrol/tests/test_slice9_schemas.py": "preserve DC-L06 v1 schema parity while adding DC-L07 v3 plan and execution-result schema parity without importing a future executor",
     "devcontrol/tests/test_streaming_publication_h10g.py": "prove prepare-sync-link ordering and fail-closed metadata-sync failure"
   },
