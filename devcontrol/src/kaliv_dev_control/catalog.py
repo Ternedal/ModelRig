@@ -27,10 +27,12 @@ _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
 _TASK_ID = re.compile(r"^[A-Z][A-Z0-9_-]{2,63}$")
+_FIXED_PATH = "/usr/bin:/bin"
 _ALLOWED_ENV = {
     "CI": "1",
     "MODELRIG_DEVCONTROL": "1",
     "GOTOOLCHAIN": "local",
+    "PATH": _FIXED_PATH,
 }
 _MAX_EXECUTABLE_BYTES = 256_000_000
 _MAX_PINNED_EXECUTABLES = 128
@@ -571,7 +573,11 @@ class CatalogMaterializer:
 
 
 def modelrig_command_catalog() -> ModelRigCommandCatalog:
-    common = {"CI": "1", "MODELRIG_DEVCONTROL": "1"}
+    common = {
+        "CI": "1",
+        "MODELRIG_DEVCONTROL": "1",
+        "PATH": _FIXED_PATH,
+    }
     return ModelRigCommandCatalog((
         ProjectCommandSpec("modelrig.version.check", "python", ("scripts/version_tool.py", "check"), ".", 120, common),
         ProjectCommandSpec("modelrig.devcontrol.tests", "python", ("-m", "unittest", "discover", "-s", "../tests", "-p", "test_*.py", "-v"), "devcontrol/src", 900, common),
