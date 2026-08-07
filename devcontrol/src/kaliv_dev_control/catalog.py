@@ -511,9 +511,8 @@ class CatalogMaterializer:
         catalog = self.catalog.snapshot()
         specs = tuple(catalog.resolve(item) for item in task_snapshot.allowed_command_ids)
         snapshot = toolchain.snapshot()
-        verifier_type = LocalExecutableHashVerifier
-        verifier_init = LocalExecutableHashVerifier.__init__
-        verify_impl = LocalExecutableHashVerifier.verify
+        if specs:
+            raise CatalogError("DC-L03 catalog execution is deferred fail closed")
         expected = {
             "task_id": task_snapshot.task_id, "task_sha256": _task_sha(task_snapshot),
             "repository": task_snapshot.repository, "base_sha": task_snapshot.base_sha,
@@ -541,23 +540,7 @@ class CatalogMaterializer:
             raise CatalogError("isolation verifier mutated the attestation") from exc
         if checked.canonical_json() != canonical or authority(checked) != expected:
             raise CatalogError("isolation verifier mutated the attestation")
-        if not specs:
-            return TaskBoundCommandRegistry((), task_snapshot, None, None)
-        verifier = object.__new__(verifier_type)
-        verifier_init(verifier)
-        verify_executable = verify_impl.__get__(verifier, verifier_type)
-        bootstrap = verify_executable(snapshot.resolve("sandbox"))
-        if not isinstance(bootstrap, str) or not _absolute(bootstrap):
-            raise CatalogError("executable verifier did not return a pinned sandbox helper")
-        templates: list[CommandTemplate] = []
-        for spec in specs:
-            if spec.required_boundary is not IsolationBoundary.OS_ISOLATED or spec.network_mode is not NetworkMode.DENY:
-                raise CatalogError("catalog command weakened isolation")
-            invocation = verify_executable(snapshot.resolve(spec.tool_id))
-            if not isinstance(invocation, str) or not _absolute(invocation):
-                raise CatalogError("executable verifier did not return a pinned static object")
-            templates.append(CommandTemplate(spec.command_id, (invocation, *spec.args), spec.cwd, spec.max_timeout_seconds, spec.env))
-        return TaskBoundCommandRegistry(templates, task_snapshot, verifier, bootstrap)
+        return TaskBoundCommandRegistry((), task_snapshot, None, None)
 
 
 def modelrig_command_catalog() -> ModelRigCommandCatalog:
