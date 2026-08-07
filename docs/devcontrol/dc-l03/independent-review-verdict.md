@@ -30,9 +30,15 @@ Independent review history:
    registry validated a reconstructed task but `CommandExecutor.execute()` then
    continued with the caller-owned mutable object for sandbox, budgets,
    verification and receipt authority.
+9. Review of exact head `03b8d348a9dab654fa6094bf22f72dee7ba05b3f`
+   found no new runtime-authority defect, but identified a stale evidence
+   reference: the implementation candidate alone still had a 17-path base diff.
+   This document now distinguishes the implementation snapshot from the later
+   exact 16-path scope snapshot.
 
-Current candidate `c7c018c8f866867507eb9f3adcbaf4ae1e0d7eef`
-closes the latest finding with:
+Authority implementation and regression candidate
+`c7c018c8f866867507eb9f3adcbaf4ae1e0d7eef` closes the latest runtime finding
+with:
 
 - `CommandRegistry.execution_task()` reconstructing one strict private
   `DevelopmentTask` before command resolution;
@@ -44,15 +50,30 @@ closes the latest finding with:
 - an executable regression whose runner mutates caller task A into B during
   execution and proves every observed execution task remains the same private A
   object, budgets remain A and the receipt remains bound to A;
-- no new command ID, generic process launcher or activation authority;
-- `devcontrol/README.md` restored to base and `commands.py` taking its place as a
-  progressive surface, preserving the 16-path scope.
+- no new command ID, generic process launcher or activation authority.
+
+Exact scope and workflow snapshot
+`03b8d348a9dab654fa6094bf22f72dee7ba05b3f` contains the later scope-finalizing
+commits that restore `devcontrol/README.md` byte-for-byte to base and replace it
+with `devcontrol/src/kaliv_dev_control/commands.py` in the allowlist. Its complete
+base diff is exactly the declared 16 paths and is 0 commits behind `main`.
+
+Repository workflows completed successfully on that exact scope snapshot:
+
+- `ci` run 2980;
+- `codeql` run 1996;
+- `agent3-diagnostics` run 1141;
+- `agent3-full-diagnostics` run 2223.
 
 The latest complete focused runtime run remains **26/26 passing** from before the
-final narrowly scoped hardening. The new execution-task regression is present on
-the existing repository-level CI contract surface. No final independent verdict
-is claimed until the resulting evidence head is reviewed without an actionable
-finding.
+final narrowly scoped execution-task and evidence hardening. The execution-task
+regression is present on the repository-level CI contract surface and the exact
+scope snapshot passed the repository workflow gates above.
+
+This evidence correction changes the branch head without changing runtime code or
+the 16-path set. No final independent verdict is claimed until the resulting
+exact evidence head is reviewed without an actionable finding and its required
+workflow gates complete.
 
 Required review focus:
 
