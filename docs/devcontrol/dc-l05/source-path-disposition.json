@@ -36,6 +36,7 @@
     "docs/devcontrol/dc-l05/symbol-ownership.json"
   ],
   "deferred_activation": [
+    "tests/support/windows_bounded_subprocess_contract.py",
     "tests/support/windows_catalog_tier_a_contract.py",
     "tests/support/windows_tier_a_receipt_contract.py"
   ]
