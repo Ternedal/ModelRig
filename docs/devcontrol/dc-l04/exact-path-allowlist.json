@@ -1,7 +1,7 @@
 {
   "schema": "modelrig-devcontrol-dc-l04-exact-path-allowlist/v1",
   "base": "b717055790947ea848418964e7ebd78c39c39ee3",
-  "expected_path_count": 18,
+  "expected_path_count": 19,
   "paths": [
     "devcontrol/PHYSICAL_ISOLATION_DURABLE_PUBLICATION.md",
     "devcontrol/README.md",
@@ -20,6 +20,7 @@
     "docs/devcontrol/dc-l04/preflight.md",
     "docs/devcontrol/dc-l04/source-path-disposition.json",
     "docs/devcontrol/dc-l04/source-provenance.json",
-    "docs/devcontrol/dc-l04/symbol-ownership.json"
+    "docs/devcontrol/dc-l04/symbol-ownership.json",
+    "tests/workflow_test_coverage.py"
   ]
 }
