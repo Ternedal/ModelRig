@@ -52,15 +52,22 @@ Load-bearing mutations and expected failures:
 21. Block inside `HTTPSConnection.getresponse()` while parsing status/headers.
     Expected: request supervisor regression fails unless the owned connection is
     cancelled at the absolute deadline.
-22. Hide the underlying transport socket.
+22. Block DNS/connection setup until after the caller deadline.
+    Expected: setup regression fails unless cancellation is checked before any
+    authenticated request send after delayed setup completion.
+23. Start repeated requests while one uninterruptible setup worker remains.
+    Expected: the bounded setup-slot regression fails unless later requests fail
+    closed without spawning further workers.
+24. Hide the underlying transport socket.
     Expected: request handling fails closed before accepting response evidence.
-23. Remove socket shutdown, socket close, response close or connection close at
+25. Remove socket shutdown, socket close, response close or connection close at
     deadline expiry.
     Expected: body/header cancellation assertions fail.
 
 The latest complete focused runtime run produced **26/26 passing tests** before
 the final environment/deadline changes. Those final findings have executable
 contract regressions, clean narrowly scoped commit diffs, and direct validation
-of omitted-PATH insertion, body/header timeout, cancellation, successful read and
-byte-budget behavior. Full exact-head CI and diagnostics remain pending because
-no Actions run has been created for connector-authored heads.
+of omitted-PATH insertion, setup/body/header timeout, no post-timeout send,
+bounded setup workers, cancellation, successful read and byte-budget behavior.
+Full exact-head CI and diagnostics remain pending because no Actions run has been
+created for connector-authored heads.
