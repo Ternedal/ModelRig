@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-import inspect
 import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
 
+import kaliv_dev_control.tier_a_authority as tier_a_authority
 from kaliv_dev_control.catalog import (
     IsolationAttestation,
     IsolationBoundary,
@@ -19,26 +19,26 @@ from kaliv_dev_control.catalog import (
 )
 from kaliv_dev_control.commands import CommandRegistry, CommandTemplate
 from kaliv_dev_control.contract import DevelopmentTask
-from kaliv_dev_control.tier_a_execution import (
+from kaliv_dev_control.runtime_closure import (
     HmacRuntimeClosureSigner,
-    LeasedCommandRegistry,
     RuntimeClosureError,
     RuntimeClosureFile,
     RuntimeClosureManifest,
     RuntimeClosureStagingReceipt,
     RuntimeClosureVerifier,
     SignedRuntimeClosureManifest,
+    TrustedRuntimeClosureStager,
+    trusted_runtime_root_sha256,
+)
+from kaliv_dev_control.tier_a_authority import (
+    LeasedCommandRegistry,
     TierAExecutionError,
     TierAExecutionLease,
-    TrustedRuntimeClosureStager,
-    _run_tier_a_launch_plan,
-    build_tier_a_launch_plan,
-    run_verified_tier_a_command,
     tier_a_toolhost_sha256,
-    trusted_runtime_root_sha256,
     working_directory_authority_sha256,
     workspace_root_authority_sha256,
 )
+from kaliv_dev_control.tier_a_plan import build_tier_a_launch_plan
 from test_slice9 import create_control_plane
 
 BASE_SHA = "a" * 40
@@ -81,7 +81,7 @@ def make_authority(root: Path):
             "base_sha": BASE_SHA,
             "goal": "Prove one signed runtime closure and exact nested cwd.",
             "acceptance_criteria": [
-                "Only the signed exact runtime tree can be launched."
+                "Only the signed exact runtime tree can be planned."
             ],
             "risk": "low",
             "allowed_paths": ["devcontrol/**"],
@@ -405,7 +405,7 @@ class RuntimeClosureTests(unittest.TestCase):
                 working_directory_authority_sha256(workspace, "backend"),
             )
 
-    def test_review_only_plan_without_closure_cannot_execute(self):
+    def test_review_only_plan_without_closure_stays_non_executable(self):
         with tempfile.TemporaryDirectory() as directory:
             task, registry, _, workspace, control, _, _, _ = make_authority(
                 Path(directory)
@@ -439,12 +439,10 @@ class RuntimeClosureTests(unittest.TestCase):
                 control_plane_root=control,
             )
             self.assertFalse(plan.runtime_closure_verified)
-            with self.assertRaisesRegex(TierAExecutionError, "verified signed closure"):
-                _run_tier_a_launch_plan(
-                    plan,
-                    runtime_closure_receipt=None,
-                    control_plane_root=control,
-                )
+            self.assertFalse(
+                hasattr(tier_a_authority, "run_verified_tier_a_command")
+            )
+            self.assertFalse(hasattr(tier_a_authority, "_run_tier_a_launch_plan"))
 
     def test_working_directory_link_is_rejected_when_supported(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -461,12 +459,11 @@ class RuntimeClosureTests(unittest.TestCase):
             with self.assertRaisesRegex(TierAExecutionError, "unsafe"):
                 working_directory_authority_sha256(workspace, "backend")
 
-    def test_public_runtime_requires_both_closure_authorities(self):
-        signature = inspect.signature(run_verified_tier_a_command)
-        for name in ("signed_runtime_closure", "runtime_closure_verifier"):
-            parameter = signature.parameters[name]
-            self.assertEqual(parameter.kind, inspect.Parameter.KEYWORD_ONLY)
-            self.assertIs(parameter.default, inspect.Parameter.empty)
+    def test_dc_l07_exposes_closure_authorities_without_process_launch(self):
+        self.assertTrue(callable(RuntimeClosureVerifier))
+        self.assertTrue(callable(TrustedRuntimeClosureStager))
+        self.assertFalse(hasattr(tier_a_authority, "run_verified_tier_a_command"))
+        self.assertFalse(hasattr(tier_a_authority, "_run_tier_a_launch_plan"))
 
     def test_receipt_mapping_rejects_extra_fields(self):
         with tempfile.TemporaryDirectory() as directory:
