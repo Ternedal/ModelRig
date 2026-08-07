@@ -7,7 +7,7 @@ contains only the seven locked source files and is not merge evidence.
 
 The final exact head must prove:
 
-- changed paths equal the 18-path allowlist;
+- changed paths equal the 19-path allowlist;
 - branch base is the merged DC-L03 main commit
   `b717055790947ea848418964e7ebd78c39c39ee3` or a documented later current-main
   synchronization;
