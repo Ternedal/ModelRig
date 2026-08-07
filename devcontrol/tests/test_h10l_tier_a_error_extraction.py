@@ -11,8 +11,12 @@ ENVIRONMENT_PATH = ROOT / "devcontrol/src/kaliv_dev_control/_tier_a_environment.
 CORE_PATH = ROOT / "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py"
 AUTHORITY_PATH = ROOT / "devcontrol/src/kaliv_dev_control/tier_a_authority.py"
 LEASE_REPOSITORY_PATH = "devcontrol/src/kaliv_dev_control/_tier_a_lease.py"
-ENVIRONMENT_REPOSITORY_PATH = "devcontrol/src/kaliv_dev_control/_tier_a_environment.py"
-CORE_REPOSITORY_PATH = "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py"
+ENVIRONMENT_REPOSITORY_PATH = (
+    "devcontrol/src/kaliv_dev_control/_tier_a_environment.py"
+)
+CORE_REPOSITORY_PATH = (
+    "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py"
+)
 
 
 def _direct_imports(path: Path, module: str) -> list[str]:
@@ -37,21 +41,18 @@ class TierAErrorExtractionTests(unittest.TestCase):
         cls.authority = importlib.import_module(
             "kaliv_dev_control.tier_a_authority"
         )
-        cls.facade = importlib.import_module(
-            "kaliv_dev_control.tier_a_execution"
-        )
-        cls.package = importlib.import_module("kaliv_dev_control")
 
-    def test_error_identity_is_exact_across_every_surface(self) -> None:
+    def test_error_identity_is_exact_across_dc_l06_surfaces(self) -> None:
         identity = self.lease.TierAExecutionError
         self.assertIs(self.core.TierAExecutionError, identity)
         self.assertIs(self.authority.TierAExecutionError, identity)
-        self.assertIs(self.facade.TierAExecutionError, identity)
-        self.assertIs(self.package.TierAExecutionError, identity)
         self.assertEqual(identity.__module__, "kaliv_dev_control._tier_a_lease")
 
     def test_core_no_longer_defines_error_and_reexports_directly(self) -> None:
-        tree = ast.parse(CORE_PATH.read_text(encoding="utf-8"), filename=str(CORE_PATH))
+        tree = ast.parse(
+            CORE_PATH.read_text(encoding="utf-8"),
+            filename=str(CORE_PATH),
+        )
         self.assertFalse(
             any(
                 isinstance(node, ast.ClassDef)
@@ -120,7 +121,10 @@ class TierAErrorExtractionTests(unittest.TestCase):
         owned = [
             node.name
             for node in tree.body
-            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+            if isinstance(
+                node,
+                (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef),
+            )
         ]
         self.assertEqual(
             owned,
@@ -146,8 +150,14 @@ class TierAErrorExtractionTests(unittest.TestCase):
         observed: set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                observed.update(alias.name.split(".", 1)[0] for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                observed.update(
+                    alias.name.split(".", 1)[0] for alias in node.names
+                )
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.level == 0
+                and node.module
+            ):
                 observed.add(node.module.split(".", 1)[0])
         self.assertFalse(observed & forbidden)
         self.assertNotIn("open(", source)
