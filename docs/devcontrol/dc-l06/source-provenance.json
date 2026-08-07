@@ -8,13 +8,18 @@
   "copied_exact_blobs": {
     "devcontrol/schemas/development-execution-lease-v1.schema.json": "53afd2b0a53ea560d2e9cbce34bf0bd34c29c9d3",
     "devcontrol/schemas/development-tier-a-launch-plan-v1.schema.json": "32d99602091ce05d720b2f5396d0fdda1545a189",
-    "devcontrol/src/kaliv_dev_control/_tier_a_environment.py": "68cee74aa519e41cb9b8e3a5e74e3dbb90a6d78d",
     "devcontrol/src/kaliv_dev_control/_tier_a_lease.py": "244cf114ed5df5923555b3d797140073319da2f7",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py": "1d9cee5d7029ceb34a7dffe1d1ecb3e90cf3048a",
     "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py": "58663373a9a404538899895697c018c04afd96ba",
     "devcontrol/tests/test_h10q_tier_a_legacy_plan_extraction.py": "18b9004189d3791d19e6fbed8abd395a6fd85a04"
   },
   "projections": [
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
+      "source_blob": "68cee74aa519e41cb9b8e3a5e74e3dbb90a6d78d",
+      "base_blob": null,
+      "reason": "replace future interpreter/toolchain keys with the exact fixed environment already accepted by the landed hardened catalog"
+    },
     {
       "path": "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
       "source_blob": "744768b781a7c9742c8deec3a8f34add024ba306",
@@ -31,7 +36,7 @@
       "path": "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py",
       "source_blob": "52b7e4939b2c45dd044eb4b781449ad9be9aede8",
       "base_blob": null,
-      "reason": "bind the source materializer to the already-landed LocalExecutableHashVerifier identity after ExecutableVerifier was intentionally removed by the hardened catalog landing"
+      "reason": "create only signed command identities from the landed catalog and toolchain; defer executable verification and process launch while retaining exact plan-time hash checks"
     },
     {
       "path": "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
@@ -67,13 +72,13 @@
       "path": "devcontrol/tests/test_h10o_tier_a_materialization_extraction.py",
       "source_blob": "ee127d4cbe75710217b8522cd8ec86fa31a21cab",
       "base_blob": null,
-      "reason": "remove references to future public package/execution surfaces and bind the test to the DC-L06 core and authority identities"
+      "reason": "bind the materialization extraction boundary to the projected environment policy and non-executing DC-L06 registry"
     },
     {
       "path": "devcontrol/tests/test_slice9.py",
       "source_blob": "ae5b1e52d549f6b3caaaef03653db4eb455b1a05",
       "base_blob": null,
-      "reason": "project source Slice 9 coverage to lease, materialization and v1 plan only; explicitly reject later schemas, results and process-launch authority"
+      "reason": "project source Slice 9 coverage to landed catalog policy, signed identity materialization and v1 plan only; explicitly reject later execution authority"
     },
     {
       "path": "devcontrol/tests/test_slice9_schemas.py",
