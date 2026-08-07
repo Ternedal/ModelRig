@@ -22,29 +22,28 @@ Independent review history:
 6. Review of `3a0a99ab987ec22219787a086a97fc7cf13f9998` found that blocked DNS/
    connection setup could finish after the caller deadline and transmit the
    authenticated GET, while repeated timeouts could accumulate setup workers.
+   Candidate `33b762a9145dedf93365921b359477f81d22eb5f` closed them.
+7. Author-side race review then found that `http.client` could automatically
+   reconnect if cancellation closed the socket after the final check but before
+   request output.
 
-Current candidate `33b762a9145dedf93365921b359477f81d22eb5f`
-closes the latest finding with:
+Current candidate `b74701c41ef05775597b930aaf23b919df1a7533`
+closes the latest race with:
 
-- explicit `connect()` before request construction/sending;
-- cancellation and monotonic-deadline checks immediately after setup and again
-  before `connection.request()`;
-- no authenticated GET when delayed setup completes after caller timeout;
-- a process-global single setup slot, retained until the worker definitively
-  exits, so repeated attempts fail closed instead of accumulating workers;
-- bounded cancellation grace for phases where socket/connection closure can
-  immediately stop the worker;
-- an executable regression that blocks setup, observes deadline return, verifies
-  a second setup is rejected, releases setup and proves `request()` was never
-  called before definitive worker exit.
+- `connection.auto_open = 0` before the sole explicit `connect()`;
+- no implicit reconnect if cancellation closes the socket before `_send_output`;
+- an executable regression that pauses request output, lets the caller reach the
+  deadline and close the socket, then resumes output and proves there is exactly
+  one connect and no authenticated request send;
+- continued explicit setup checks, bounded pending setup workers and transport
+  cleanup.
 
-Direct validation returns the deadline error in approximately 0.10 seconds
-including cancellation grace, records no request send before or after delayed
-setup completion, rejects a concurrent setup and confirms definitive worker
-exit. Existing public test surfaces were preserved. The latest complete focused
-runtime run remains **26/26 passing** from before these final narrowly scoped
-changes. No final independent verdict is claimed until the resulting evidence
-head is reviewed without an actionable finding.
+Direct validation returns the caller deadline error, resumes the paused worker,
+records `connect_count == 1`, `auto_open == 0`, no request send and definitive
+worker exit. Existing public test surfaces were preserved. The latest complete
+focused runtime run remains **26/26 passing** from before these final narrowly
+scoped changes. No final independent verdict is claimed until the resulting
+evidence head is reviewed without an actionable finding.
 
 Required review focus:
 
@@ -55,9 +54,10 @@ Required review focus:
 5. fixed GET-only GitHub host/method/ref authority;
 6. caller-enforced monotonic deadline across setup, request, status, headers,
    chunk framing and body reads;
-7. prevention of post-timeout request sends after delayed connection setup;
-8. bounded setup workers and fail-closed concurrent attempts;
-9. cancellation by socket shutdown/close, response close and connection close;
-10. explicit TLS roots independent of environment proxy and CA overrides;
-11. task scope, response bounds, Git blob identity and receipt/schema alignment;
-12. absence of write, remote Git, publication, merge or activation authority.
+7. prevention of post-timeout request sends after delayed setup;
+8. disabled `http.client` auto reconnect after socket cancellation;
+9. bounded setup workers and fail-closed concurrent attempts;
+10. cancellation by socket shutdown/close, response close and connection close;
+11. explicit TLS roots independent of environment proxy and CA overrides;
+12. task scope, response bounds, Git blob identity and receipt/schema alignment;
+13. absence of write, remote Git, publication, merge or activation authority.
