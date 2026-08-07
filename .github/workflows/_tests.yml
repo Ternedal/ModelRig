@@ -343,6 +343,24 @@ jobs:
           assert contract_source.count(later_env) == 1
           contract_source = contract_source.replace(later_env, landed_env)
 
+          later_agreement = (
+              "dict(WINDOWS_TIER_A_APPLICATION_ENVIRONMENT)\n"
+              "    == dict(TIER_A_APPLICATION_ENVIRONMENT)"
+          )
+          landed_agreement = (
+              "{\n"
+              "        key: value\n"
+              "        for key, value in TIER_A_APPLICATION_ENVIRONMENT.items()\n"
+              "        if key in WINDOWS_TIER_A_APPLICATION_ENVIRONMENT\n"
+              "    }\n"
+              "    == catalog_env"
+          )
+          assert contract_source.count(later_agreement) == 1
+          contract_source = contract_source.replace(
+              later_agreement,
+              landed_agreement,
+          )
+
           verifier_constructor = "verifier = WindowsPhysicalIsolationVerifier(\n"
           fixture_verifier = (
               "class _DC_L08_FixtureVerifier(WindowsPhysicalIsolationVerifier):\n"
