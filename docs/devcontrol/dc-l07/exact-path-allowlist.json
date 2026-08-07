@@ -1,7 +1,7 @@
 {
   "schema": "modelrig-devcontrol-dc-l07-exact-path-allowlist/v1",
   "base": "0d64603fdb28c7b59a91007f527606314779f5f3",
-  "expected_path_count": 45,
+  "expected_path_count": 46,
   "paths": [
     ".github/workflows/_tests.yml",
     "backend/cmd/modelrig-version-check/main.go",
@@ -37,6 +37,7 @@
     "devcontrol/tests/test_slice10c_output_result.py",
     "devcontrol/tests/test_slice10d_runtime_closure.py",
     "devcontrol/tests/test_slice10e_version_check_closure.py",
+    "devcontrol/tests/test_slice9.py",
     "devcontrol/tests/test_slice9_schemas.py",
     "devcontrol/tests/test_streaming_publication_h10g.py",
     "docs/devcontrol/dc-l07/exact-head-validation.md",
