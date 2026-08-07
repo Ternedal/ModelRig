@@ -1,0 +1,48 @@
+{
+  "schema": "modelrig-devcontrol-symbol-ownership/v1",
+  "slice": "DC-L11",
+  "owners": {
+    "devcontrol/src/kaliv_dev_control/draft_pr_readiness.py": [
+      "AuthenticatedDraftPrReadinessProposal",
+      "DraftPrReadinessGate",
+      "DraftPrReadinessError",
+      "draft_pr_readiness_policy_sha256",
+      "load_authenticated_draft_pr_readiness_proposal",
+      "write_authenticated_draft_pr_readiness_proposal"
+    ],
+    "devcontrol/src/kaliv_dev_control/publisher_dry_run.py": [
+      "PublisherRequest",
+      "SignedPublisherRequest",
+      "HmacPublisherRequestSigner",
+      "TrustedPublisherKey",
+      "PublisherRequestVerifier",
+      "PublisherDryRunReceipt",
+      "PublisherDryRunGate",
+      "PublisherOperationKind",
+      "publisher_dry_run_policy_sha256",
+      "load_publisher_request",
+      "write_publisher_request",
+      "load_signed_publisher_request",
+      "write_signed_publisher_request",
+      "load_publisher_dry_run_receipt",
+      "write_publisher_dry_run_receipt"
+    ]
+  },
+  "non_owners": {
+    "devcontrol/src/kaliv_dev_control/__init__.py": "must not export DC-L11 symbols",
+    "devcontrol/src/kaliv_dev_control/tier_a_execution.py": "must not expose readiness or publisher intent",
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py": "v7 execution bundle must not include DC-L11 modules",
+    "worker/**": "product code must not import DevControl"
+  },
+  "forbidden_symbols": [
+    "create_pull_request",
+    "update_pull_request",
+    "push_branch",
+    "request_reviewers",
+    "mark_ready_for_review",
+    "merge_pull_request",
+    "authorize_publication",
+    "release",
+    "deploy"
+  ]
+}

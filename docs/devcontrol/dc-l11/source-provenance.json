@@ -1,0 +1,23 @@
+{
+  "schema": "modelrig-devcontrol-source-provenance/v1",
+  "slice": "DC-L11",
+  "source_repository": "Ternedal/ModelRig",
+  "source_pull_request": 338,
+  "source_head": "07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f",
+  "source_blobs": {
+    "devcontrol/DRAFT_PR_READINESS.md": "4132de40f6328d4139330c1572b20ff198db92f0",
+    "devcontrol/DRAFT_PR_READINESS_DURABLE_PUBLICATION.md": "b94c85bfe59c45f246be8fc30e5feb5cfaa3af1d",
+    "devcontrol/PUBLISHER_DRY_RUN.md": "f3826971eaeb70ee32e8ee3664b7b17c73dbd8b0",
+    "devcontrol/PUBLISHER_DRY_RUN_DURABLE_PUBLICATION.md": "50af789f2ade39f49334f9d4a23aed37192ff8c4",
+    "devcontrol/schemas/development-authenticated-draft-pr-readiness-proposal-v1.schema.json": "71fed063f7e4219eca29b7cf237bf1fab35adcba",
+    "devcontrol/schemas/development-publisher-dry-run-receipt-v1.schema.json": "eb059fb576ed10955c3f826765f77b0a74ee8ad7",
+    "devcontrol/schemas/development-publisher-request-v1.schema.json": "ffdb9fc168d2fd55ac82b58aaaba209a485f0e50",
+    "devcontrol/schemas/development-signed-publisher-request-v1.schema.json": "b797d8d13c36fd569ee4107c5dbc1a0e91ca2744",
+    "devcontrol/src/kaliv_dev_control/draft_pr_readiness.py": "bea74853120c2d11253a4283c4d3645b09ce11b9",
+    "devcontrol/src/kaliv_dev_control/publisher_dry_run.py": "8f032d8d2d03329c2a1010ca1935f3c952f87067",
+    "devcontrol/tests/test_draft_pr_readiness_durable_h10.py": "bd6e70e85d24f58332c4f1bc9203ba223fba3c54",
+    "devcontrol/tests/test_publisher_dry_run_durable_publication_h10c.py": "f9d66acc11e8f445d52c4caa1f69a1ae2e5196d7",
+    "devcontrol/tests/test_slice10i_draft_pr_readiness.py": "00ff25b087c5cfc7d9b34ef63270c230e4313e92",
+    "devcontrol/tests/test_slice10j_publisher_dry_run.py": "a4f3beffbf8fdd4f70101036fdf41e3d91bf9f4b"
+  }
+}

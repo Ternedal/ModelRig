@@ -1,0 +1,33 @@
+{
+  "schema": "modelrig-devcontrol-exact-path-allowlist/v1",
+  "slice": "DC-L11",
+  "base_sha": "7c9bc3fefde1e3276e9f4fae452510c90658d114",
+  "paths": [
+    ".github/workflows/_tests.yml",
+    "devcontrol/DRAFT_PR_READINESS.md",
+    "devcontrol/DRAFT_PR_READINESS_DURABLE_PUBLICATION.md",
+    "devcontrol/PUBLISHER_DRY_RUN.md",
+    "devcontrol/PUBLISHER_DRY_RUN_DURABLE_PUBLICATION.md",
+    "devcontrol/README.md",
+    "devcontrol/schemas/development-authenticated-draft-pr-readiness-proposal-v1.schema.json",
+    "devcontrol/schemas/development-publisher-dry-run-receipt-v1.schema.json",
+    "devcontrol/schemas/development-publisher-request-v1.schema.json",
+    "devcontrol/schemas/development-signed-publisher-request-v1.schema.json",
+    "devcontrol/src/kaliv_dev_control/draft_pr_readiness.py",
+    "devcontrol/src/kaliv_dev_control/publisher_dry_run.py",
+    "devcontrol/tests/test_draft_pr_readiness_durable_h10.py",
+    "devcontrol/tests/test_foundation.py",
+    "devcontrol/tests/test_publisher_dry_run_durable_publication_h10c.py",
+    "devcontrol/tests/test_slice10i_draft_pr_readiness.py",
+    "devcontrol/tests/test_slice10j_publisher_dry_run.py",
+    "docs/devcontrol/dc-l11/exact-head-validation.md",
+    "docs/devcontrol/dc-l11/exact-path-allowlist.json",
+    "docs/devcontrol/dc-l11/independent-review-verdict.md",
+    "docs/devcontrol/dc-l11/mutation-results.md",
+    "docs/devcontrol/dc-l11/preflight.md",
+    "docs/devcontrol/dc-l11/source-path-disposition.json",
+    "docs/devcontrol/dc-l11/source-provenance.json",
+    "docs/devcontrol/dc-l11/symbol-ownership.json",
+    "tests/workflow_test_coverage.py"
+  ]
+}
