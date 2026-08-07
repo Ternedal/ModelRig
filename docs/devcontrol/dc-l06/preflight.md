@@ -35,19 +35,22 @@ This slice owns:
 
 ## Deliberate source projection
 
-Four focused private modules, two schemas and one extraction test are copied
-exactly from the locked source head. The final source branch cannot otherwise be
-copied byte-for-byte because it imports later-slice authority or refers to a
-protocol identity removed by the already-landed hardened catalog.
+Three focused private modules, two schemas and one extraction test are copied
+exactly from the locked source head. The remaining source cannot be copied
+byte-for-byte because it imports later-slice authority or predates the hardened
+catalog that already landed.
 
-Four progressive production files are therefore projected:
+Five progressive production files are therefore projected:
 
-1. `_tier_a_execution_core.py` omits the DC-L08 legacy runner.
-2. `_tier_a_legacy_toolhost.py` replaces future closure/execution files with the
+1. `_tier_a_environment.py` uses the exact fixed environment accepted by the
+   landed catalog and defers later interpreter/toolchain keys.
+2. `_tier_a_execution_core.py` omits the DC-L08 legacy runner.
+3. `_tier_a_legacy_toolhost.py` replaces future closure/execution files with the
    exact DC-L06 stage-local bundle while preserving the v2 hash domain.
-3. `_tier_a_materialization.py` binds to the landed
-   `LocalExecutableHashVerifier` rather than the removed generic protocol.
-4. `tier_a_authority.py` exposes only lease, environment, path,
+4. `_tier_a_materialization.py` creates signed command identities without
+   executable verification or process launch; plan construction still checks
+   the staged executable hash against the signed toolchain.
+5. `tier_a_authority.py` exposes only lease, environment, path,
    materialization, toolhost and v1 plan identities.
 
 Seven source tests are projected away from the future package facade, v2/v3
