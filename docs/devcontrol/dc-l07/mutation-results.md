@@ -17,10 +17,15 @@ then proved two additional compatibility failures:
 - the foundation boundary rejected a literal future-slice-style
   `from .tier_a_...` import in `runtime_staging.py`.
 
-A subsequent source review found that the unchanged DC-L06 schema test also
-required v2/v3/result schemas to remain absent. DC-L07 necessarily lands those
-schemas, so the test is now an explicit projection that preserves v1 parity and
-adds v3 plan/result parity without importing an executor.
+A subsequent source review found two additional DC-L06-only assumptions:
+
+- the schema test required v2/v3/result schemas to remain absent; and
+- the bundle test prohibited runtime staging, closure and result modules that
+  DC-L07 must bind into the non-executing toolhost identity.
+
+Both tests are now explicit projections. They preserve v1 parity, validate v3
+plan/result parity, require the exact DC-L07 runtime-evidence closure and continue
+to reject every executor and remote-authority module.
 
 The coverage contract now requires all twenty-seven modules through DC-L07.
 
@@ -36,6 +41,8 @@ The following mutations are required to fail:
 | Require a write-open descriptor for repeated Unix closure staging | repeated staging assertion in `test_slice10e_version_check_closure.py` |
 | Remove the retained v1 launch-plan compatibility aliases | v1 parity in `test_slice9.py` and `test_slice9_schemas.py` |
 | Remove or weaken v3 plan/result schema parity | `test_slice9_schemas.py` and the dedicated plan/result tests |
+| Remove a required DC-L07 runtime-evidence module from the v5 toolhost bundle | `test_stage_local_bundle_projections_are_identical_and_non_executing` |
+| Add an executor, command-receipt, trusted-Git or publisher module to the v5 toolhost bundle | the projected Slice 9 bundle test and the `DevControl DC-L07 non-execution boundary` workflow step |
 | Reintroduce `tier_a_execution.py` or an executor symbol | the `DevControl DC-L07 non-execution boundary` workflow step and projected Slice 10B–10D tests |
 | Accept a changed runtime source or staged destination | runtime-staging and runtime-closure hash/tamper tests |
 | Accept an unmanifested closure file, case collision, traversal or hardlink alias | `test_slice10d_runtime_closure.py` |
