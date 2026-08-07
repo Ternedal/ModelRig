@@ -6,9 +6,10 @@
 
 - base branch: `main`
 - exact base: `70a40a27201ccaa33b1dffe0fff65faa113cd0f7`
-- changed paths: exactly 32 and identical to `exact-path-allowlist.json`
+- changed paths: exactly 33 and identical to `exact-path-allowlist.json`
 - commits behind `main`: 0
 - source-exact paths: 17, matching `source-provenance.json`
+- bounded subprocess: one documented Linux-preserving Windows projection
 - unresolved review threads: 0
 
 ## Required workflows
