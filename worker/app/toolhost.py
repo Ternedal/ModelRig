@@ -8,13 +8,17 @@ substrate, tested, before any tool needs it.
 What the process boundary buys (F-012 / ISOLATION_DESIGN §3):
   * T1 a hung tool is KILLED at the timeout instead of pinning a worker thread
   * T2 a crashing tool takes down the child, not the rig
-  * T3/T4 a place to drop privileges -- the Windows half (Job Object,
-    restricted token, low integrity) is I0b and needs the rig
+  * T3/T4 a place to drop privileges
   * output bounded WHILE IT IS PRODUCED, not after
 
-What it does NOT buy, stated plainly: this is Tier A isolation. Desktop tools
-(Tier B) still reach the user's session by definition -- their safety comes
-from the gate, the target allowlist and screenshot binding, not from here.
+Windows I0b is deliberately split into independently provable controls. This
+module now uses a suspended child + Job Object with kill-on-close, process and
+memory limits, and Tier-A UI restrictions. Restricted-token launch, scoped OS
+ACLs and network denial are still absent and remain physical activation gates.
+
+What this does NOT buy: Tier B desktop tools still reach the user's session by
+definition -- their safety comes from the gate, target allowlist and screenshot
+binding, not from this process boundary.
 
 Per-call spawn, deliberately, not a daemon: tools that own background work
 (pull_model) keep their thread in the worker and already have the JobStore,
@@ -30,9 +34,19 @@ import sys
 import threading
 import time
 
+from .windows_job import (
+    JobLimits,
+    WindowsIsolationError,
+    close_attached_job,
+    spawn_in_job,
+    terminate_attached_job,
+)
+
 DEFAULT_TIMEOUT_S = 30
 DEFAULT_OUTPUT_CAP = 20_000
 DEFAULT_STDERR_CAP = 8_000
+DEFAULT_PROCESS_MEMORY_BYTES = 512 * 1024 * 1024
+DEFAULT_ACTIVE_PROCESS_LIMIT = 8
 _READ_CHUNK = 8192
 _POLL_S = 0.05
 
@@ -77,24 +91,32 @@ def child_env(tool=None, source: dict | None = None) -> dict:
     return {k: v for k, v in env.items() if k in allowed}
 
 
-def _spawn_kwargs() -> dict:
-    """Put the child in its own process group so the whole tree can be killed."""
-    if os.name == "posix":
-        return {"start_new_session": True}
-    return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+def _spawn_process(command: list[str], *, tool, job_limits: JobLimits):
+    """Create one isolated child, with a race-free Job Object on Windows."""
+
+    kwargs = {
+        "stdin": subprocess.PIPE,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "env": child_env(tool),
+    }
+    if os.name == "nt":
+        return spawn_in_job(command, limits=job_limits, **kwargs)
+    return subprocess.Popen(command, start_new_session=True, **kwargs)
 
 
 def kill_tree(proc: subprocess.Popen) -> None:
     """Kill the child AND anything it started.
 
-    proc.kill() alone reaps only the direct child; a tool that spawned a
-    helper would leave it running with the socket/file still open. On POSIX the
-    process group does it. On Windows taskkill /T is the best available until
-    I0b lands a Job Object with kill-on-close, which is the real fix and needs
-    the rig (ISOLATION_DESIGN §4.1).
+    Windows isolated children are born suspended and assigned to a Job Object
+    before they run; terminating that job reaps the entire tree. POSIX uses the
+    process group. ``taskkill /T`` remains only a defensive fallback for a
+    foreign/non-isolated Windows ``Popen`` and is never an authorization path.
     """
     try:
-        if os.name == "posix":
+        if terminate_attached_job(proc):
+            pass
+        elif os.name == "posix":
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
         else:
             subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
@@ -146,11 +168,17 @@ class ProcessExecutor:
     def __init__(self, fallback, *, timeout_s: int = DEFAULT_TIMEOUT_S,
                  output_cap: int = DEFAULT_OUTPUT_CAP,
                  stderr_cap: int = DEFAULT_STDERR_CAP,
+                 process_memory_bytes: int = DEFAULT_PROCESS_MEMORY_BYTES,
+                 active_process_limit: int = DEFAULT_ACTIVE_PROCESS_LIMIT,
                  child_cmd: list[str] | None = None) -> None:
         self.fallback = fallback
         self.timeout_s = timeout_s
         self.output_cap = output_cap
         self.stderr_cap = stderr_cap
+        self.job_limits = JobLimits(
+            process_memory_bytes=process_memory_bytes,
+            active_process_limit=active_process_limit,
+        )
         self.child_cmd = child_cmd or child_command()
 
     def execute(self, tool, args: dict) -> str:
@@ -163,11 +191,8 @@ class ProcessExecutor:
 
         req = json.dumps({"tool": tool.name, "args": args}, ensure_ascii=False)
         try:
-            proc = subprocess.Popen(
-                self.child_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, env=child_env(tool), **_spawn_kwargs(),
-            )
-        except OSError as e:
+            proc = _spawn_process(self.child_cmd, tool=tool, job_limits=self.job_limits)
+        except (OSError, WindowsIsolationError) as e:
             raise ToolError(f"kunne ikke starte isoleret tool-proces: {e}") from e
 
         out_chunks: list[bytes] = []
@@ -206,6 +231,13 @@ class ProcessExecutor:
         finally:
             for t in readers:
                 t.join(timeout=1)
+            # On a normal direct-child exit, closing the kill-on-close handle
+            # also reaps any helper that tried to outlive it. On error paths
+            # kill_tree already terminated/closed it; this is idempotent.
+            try:
+                close_attached_job(proc)
+            except Exception:
+                kill_tree(proc)
 
         # The cap can also end the run WITHOUT us killing anything: when the
         # reader stops at the limit it closes the pipe, and the child dies of a
