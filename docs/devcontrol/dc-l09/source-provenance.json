@@ -24,5 +24,5 @@
     "devcontrol/tests/test_trusted_git_runtime.py": "627a879ab40f25dec17874586f63674d59405a19",
     "devcontrol/tests/test_trusted_git_runtime_recovery.py": "0ff259a015cff1431cdad05cda15f4283770179e"
   },
-  "progressive_projection_reason": "Preserve the merged DC-L08 core split, dormant package root and verified v3 executor while advancing only bundle identity, facade expectations, test inventory, native receipt coverage and documentation to DC-L09."
+  "progressive_projection_reason": "Preserve the merged DC-L08 core split, dormant package root and verified v3 executor while advancing bundle identity, facade expectations, test inventory, bounded Windows Git execution and native receipt coverage to DC-L09. The Windows closure and receipt fixtures project only later environment values and signed-report candidate discovery; both retain the landed verifier's base signature, binding, probe and freshness checks."
 }
