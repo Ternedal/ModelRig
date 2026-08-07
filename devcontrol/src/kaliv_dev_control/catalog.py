@@ -27,8 +27,10 @@ _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
 _TASK_ID = re.compile(r"^[A-Z][A-Z0-9_-]{2,63}$")
-_FORBIDDEN_ENV = {
-    "HOME", "XDG_CONFIG_HOME", "TMPDIR", "PWD", "PYTHONHOME", "PYTHONPATH",
+_ALLOWED_ENV = {
+    "CI": "1",
+    "MODELRIG_DEVCONTROL": "1",
+    "GOTOOLCHAIN": "local",
 }
 _MAX_EXECUTABLE_BYTES = 256_000_000
 _MAX_PINNED_EXECUTABLES = 128
@@ -115,8 +117,8 @@ class ProjectCommandSpec:
                 or len(key.encode()) > 128 or len(value.encode()) > 4096
             ):
                 raise CatalogError("catalog environment is invalid")
-            if key.startswith(("GIT_", "DYLD_", "LD_")) or key in _FORBIDDEN_ENV:
-                raise CatalogError("catalog environment cannot weaken process isolation")
+            if key not in _ALLOWED_ENV or value != _ALLOWED_ENV[key]:
+                raise CatalogError("catalog environment is outside the reviewed positive list")
             clean[key] = value
         object.__setattr__(self, "env", MappingProxyType(clean))
 
