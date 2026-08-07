@@ -41,7 +41,9 @@ def _owned_names(path: Path) -> list[str]:
     for node in tree.body:
         if isinstance(node, ast.Assign):
             result.extend(
-                target.id for target in node.targets if isinstance(target, ast.Name)
+                target.id
+                for target in node.targets
+                if isinstance(target, ast.Name)
             )
         elif isinstance(node, ast.ClassDef):
             result.append(node.name)
@@ -71,13 +73,8 @@ class TierAPathAuthorityExtractionTests(unittest.TestCase):
         cls.authority = importlib.import_module(
             "kaliv_dev_control.tier_a_authority"
         )
-        cls.facade = importlib.import_module(
-            "kaliv_dev_control.tier_a_execution"
-        )
-        cls.package = importlib.import_module("kaliv_dev_control")
-        cls.plan = importlib.import_module("kaliv_dev_control.tier_a_plan")
-        cls.execution_v3 = importlib.import_module(
-            "kaliv_dev_control.tier_a_execution_v3"
+        cls.legacy_plan = importlib.import_module(
+            "kaliv_dev_control._tier_a_legacy_plan"
         )
 
     def test_module_owns_exact_cohesive_path_authority(self) -> None:
@@ -100,25 +97,30 @@ class TierAPathAuthorityExtractionTests(unittest.TestCase):
                 getattr(self.path_authority, symbol),
             )
 
-    def test_public_and_private_consumer_identity_is_unchanged(self) -> None:
-        public_identity = self.path_authority.workspace_root_authority_sha256
-        self.assertIs(self.core.workspace_root_authority_sha256, public_identity)
-        self.assertIs(self.authority.workspace_root_authority_sha256, public_identity)
-        self.assertIs(self.facade.workspace_root_authority_sha256, public_identity)
-        self.assertIs(self.package.workspace_root_authority_sha256, public_identity)
+    def test_dc_l06_consumer_identity_is_unchanged(self) -> None:
+        public_identity = (
+            self.path_authority.workspace_root_authority_sha256
+        )
+        self.assertIs(
+            self.core.workspace_root_authority_sha256,
+            public_identity,
+        )
+        self.assertIs(
+            self.authority.workspace_root_authority_sha256,
+            public_identity,
+        )
+        self.assertIs(
+            self.legacy_plan._canonical_directory,
+            self.path_authority._canonical_directory,
+        )
+        self.assertIs(
+            self.legacy_plan._regular_file_hash,
+            self.path_authority._regular_file_hash,
+        )
 
-        for consumer in (self.authority, self.plan, self.execution_v3):
-            self.assertIs(
-                consumer._core._canonical_directory,
-                self.path_authority._canonical_directory,
-            )
-        for consumer in (self.plan, self.execution_v3):
-            self.assertIs(
-                consumer._core._regular_file_hash,
-                self.path_authority._regular_file_hash,
-            )
-
-    def test_canonical_directory_and_workspace_hash_remain_fail_closed(self) -> None:
+    def test_canonical_directory_and_workspace_hash_remain_fail_closed(
+        self,
+    ) -> None:
         error = self.path_authority.TierAExecutionError
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -142,11 +144,13 @@ class TierAPathAuthorityExtractionTests(unittest.TestCase):
 
             with self.assertRaises(error):
                 self.path_authority._canonical_directory(
-                    Path("relative"), name="workspace root"
+                    Path("relative"),
+                    name="workspace root",
                 )
             with self.assertRaises(error):
                 self.path_authority._canonical_directory(
-                    root / "missing", name="workspace root"
+                    root / "missing",
+                    name="workspace root",
                 )
 
             symlink = root.parent / (root.name + "-link")
@@ -161,12 +165,15 @@ class TierAPathAuthorityExtractionTests(unittest.TestCase):
                     )
                     with self.assertRaises(error):
                         self.path_authority._canonical_directory(
-                            symlink, name="workspace root"
+                            symlink,
+                            name="workspace root",
                         )
                 finally:
                     symlink.unlink(missing_ok=True)
 
-    def test_regular_file_hash_remains_streaming_and_fail_closed(self) -> None:
+    def test_regular_file_hash_remains_streaming_and_fail_closed(
+        self,
+    ) -> None:
         error = self.path_authority.TierAExecutionError
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -175,21 +182,25 @@ class TierAPathAuthorityExtractionTests(unittest.TestCase):
             regular.write_bytes(payload)
             self.assertEqual(
                 self.path_authority._regular_file_hash(
-                    regular, name="Tier-A executable"
+                    regular,
+                    name="Tier-A executable",
                 ),
                 hashlib.sha256(payload).hexdigest(),
             )
             with self.assertRaises(error):
                 self.path_authority._regular_file_hash(
-                    Path("relative.bin"), name="Tier-A executable"
+                    Path("relative.bin"),
+                    name="Tier-A executable",
                 )
             with self.assertRaises(error):
                 self.path_authority._regular_file_hash(
-                    root / "missing.bin", name="Tier-A executable"
+                    root / "missing.bin",
+                    name="Tier-A executable",
                 )
             with self.assertRaises(error):
                 self.path_authority._regular_file_hash(
-                    root, name="Tier-A executable"
+                    root,
+                    name="Tier-A executable",
                 )
 
             symlink = root / "payload-link.bin"
@@ -200,7 +211,8 @@ class TierAPathAuthorityExtractionTests(unittest.TestCase):
             if symlink is not None:
                 with self.assertRaises(error):
                     self.path_authority._regular_file_hash(
-                        symlink, name="Tier-A executable"
+                        symlink,
+                        name="Tier-A executable",
                     )
 
     def test_bundle_contains_path_module_once_before_core(self) -> None:
@@ -234,16 +246,24 @@ class TierAPathAuthorityExtractionTests(unittest.TestCase):
                 break
         self.assertEqual(literal, bundle)
 
-    def test_module_adds_no_execution_network_git_or_publication_authority(self) -> None:
+    def test_module_adds_no_execution_network_git_or_publication_authority(
+        self,
+    ) -> None:
         source = PATH_AUTHORITY_PATH.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(PATH_AUTHORITY_PATH))
         imports: set[str] = set()
         relative_modules: set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                imports.update(alias.name.split(".", 1)[0] for alias in node.names)
+                imports.update(
+                    alias.name.split(".", 1)[0] for alias in node.names
+                )
             elif isinstance(node, ast.ImportFrom):
-                if node.level == 0 and node.module and node.module != "__future__":
+                if (
+                    node.level == 0
+                    and node.module
+                    and node.module != "__future__"
+                ):
                     imports.add(node.module.split(".", 1)[0])
                 elif node.level == 1 and node.module:
                     relative_modules.add(node.module)
@@ -264,7 +284,8 @@ class TierAPathAuthorityExtractionTests(unittest.TestCase):
         call_names = {
             node.func.id
             for node in ast.walk(tree)
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
         }
         self.assertFalse(
             call_names
