@@ -221,6 +221,7 @@ class _BlockingConnectConnection:
     def __init__(self) -> None:
         self.sock = None
         self.timeout = None
+        self.auto_open = 1
         self.release_connect = threading.Event()
         self.worker_finished = threading.Event()
         self.close_count = 0
@@ -276,9 +277,84 @@ check(
     connect_deadline_rejected
     and connect_elapsed < 0.5
     and second_setup_rejected
+    and blocked_connect.auto_open == 0
     and not blocked_connect.requested
     and blocked_connect.worker_finished.is_set(),
-    "blocked connection setup cannot send after timeout or accumulate workers",
+    "blocked setup cannot send after timeout, reconnect, or accumulate workers",
+)
+
+
+class _ReconnectRaceConnection:
+    def __init__(self) -> None:
+        self.sock = None
+        self.timeout = None
+        self.auto_open = 1
+        self.connect_count = 0
+        self.request_entered = threading.Event()
+        self.release_request = threading.Event()
+        self.worker_finished = threading.Event()
+        self.close_count = 0
+        self.requested = False
+
+    def connect(self) -> None:
+        self.connect_count += 1
+        self.sock = _DeadlineSocket()
+
+    def request(self, method: str, target: str, *, headers) -> None:
+        del method, target, headers
+        self.request_entered.set()
+        self.release_request.wait(5)
+        if self.sock is None:
+            if self.auto_open:
+                self.connect()
+            else:
+                raise OSError("automatic reconnect disabled")
+        self.requested = True
+
+    def getresponse(self):
+        raise AssertionError("getresponse must not run after request-send timeout")
+
+    def close(self) -> None:
+        self.close_count += 1
+        if self.sock is not None:
+            self.sock.close()
+        self.sock = None
+        if self.close_count >= 2:
+            self.worker_finished.set()
+
+
+reconnect_race = _ReconnectRaceConnection()
+reconnect_result: list[Exception] = []
+
+
+def run_reconnect_race() -> None:
+    try:
+        github_read_module._request_with_deadline(
+            reconnect_race,
+            "/repos/Ternedal/ModelRig/commits/" + "a" * 40,
+            headers={"Authorization": "Bearer secret"},
+            max_bytes=100,
+            deadline=time.monotonic() + 0.05,
+        )
+    except Exception as exc:
+        reconnect_result.append(exc)
+
+
+race_caller = threading.Thread(target=run_reconnect_race)
+race_caller.start()
+reconnect_race.request_entered.wait(0.5)
+race_caller.join(0.5)
+reconnect_race.release_request.set()
+reconnect_race.worker_finished.wait(0.5)
+check(
+    len(reconnect_result) == 1
+    and isinstance(reconnect_result[0], GitHubReadError)
+    and "wall-clock deadline" in str(reconnect_result[0])
+    and reconnect_race.auto_open == 0
+    and reconnect_race.connect_count == 1
+    and not reconnect_race.requested
+    and reconnect_race.worker_finished.is_set(),
+    "a socket-close race cannot trigger automatic reconnect or an auth send",
 )
 
 
@@ -286,6 +362,7 @@ class _BlockingHeaderConnection:
     def __init__(self) -> None:
         self.sock = _DeadlineSocket()
         self.timeout = None
+        self.auto_open = 1
         self.closed = False
         self.requested = False
 
@@ -293,7 +370,12 @@ class _BlockingHeaderConnection:
         return None
 
     def request(self, method: str, target: str, *, headers) -> None:
-        self.requested = method == "GET" and target.startswith("/") and isinstance(headers, dict)
+        self.requested = (
+            self.auto_open == 0
+            and method == "GET"
+            and target.startswith("/")
+            and isinstance(headers, dict)
+        )
 
     def getresponse(self):
         self.sock.aborted.wait(5)
