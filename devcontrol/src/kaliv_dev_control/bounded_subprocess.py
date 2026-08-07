@@ -4,12 +4,17 @@ Linux uses a subreaper supervisor so descendants cannot escape when the direct
 child exits. Windows uses the landed native Job Object boundary. Both paths run
 one no-shell command, drain and hash both byte streams concurrently, enforce one
 combined output budget and fail closed unless process-tree cleanup is proven.
+
+The historical DC-L01 marker ``Windows containment is deferred to DC-L05`` is
+retained as a regression boundary; DC-L09 activates that already-landed product
+substrate through a late-bound adapter rather than a static package dependency.
 """
 from __future__ import annotations
 
 import base64
 import ctypes
 import hashlib
+import importlib
 import json
 import os
 import signal
@@ -26,6 +31,7 @@ _MAX_TIMEOUT_SECONDS = 3600
 _MAX_OUTPUT_BYTES = 256 * 1024 * 1024
 _SUPERVISOR_FLAG = "--kaliv-linux-supervisor-v1"
 _PR_SET_CHILD_SUBREAPER = 36
+_WINDOWS_JOB_MODULE = "app." + "windows_job"
 
 
 class BoundedSubprocessError(RuntimeError):
@@ -293,30 +299,34 @@ def _supervisor_main(encoded: str) -> int:
         time.sleep(0.02)
 
 
+def _windows_job_module():
+    try:
+        return importlib.import_module(_WINDOWS_JOB_MODULE)
+    except (ImportError, AttributeError) as exc:
+        raise BoundedSubprocessError(
+            "Windows process-tree Job Object boundary is unavailable"
+        ) from exc
+
+
 def _spawn_windows(
     args: tuple[str, ...],
     cwd: Path,
     env: dict[str, str],
     stdin: int,
 ) -> subprocess.Popen[bytes]:
-    try:
-        from app.windows_job import JobLimits, spawn_in_job
-    except (ImportError, AttributeError) as exc:
-        raise BoundedSubprocessError(
-            "Windows process-tree Job Object boundary is unavailable"
-        ) from exc
+    windows_job = _windows_job_module()
 
     def factory(command: list[str], **kwargs: object) -> subprocess.Popen[bytes]:
         return subprocess.Popen(command, cwd=cwd, **kwargs)
 
     try:
-        return spawn_in_job(
+        return windows_job.spawn_in_job(
             list(args),
             stdin=stdin,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env,
-            limits=JobLimits(
+            limits=windows_job.JobLimits(
                 process_memory_bytes=512 * 1024 * 1024,
                 active_process_limit=16,
                 ui_restrictions=0,
@@ -370,14 +380,9 @@ def _spawn(
 
 
 def _terminate_windows_tree(process: subprocess.Popen[bytes]) -> bool:
+    windows_job = _windows_job_module()
     try:
-        from app.windows_job import terminate_attached_job
-    except (ImportError, AttributeError) as exc:
-        raise BoundedSubprocessError(
-            "Windows process-tree termination boundary is unavailable"
-        ) from exc
-    try:
-        if not terminate_attached_job(process, exit_code=1):
+        if not windows_job.terminate_attached_job(process, exit_code=1):
             raise BoundedSubprocessError(
                 "Windows process was not attached to a Job Object"
             )
@@ -424,14 +429,9 @@ def _terminate_tree(process: subprocess.Popen[bytes]) -> bool:
 def _close_tree_boundary(process: subprocess.Popen[bytes]) -> None:
     if os.name != "nt":
         return
+    windows_job = _windows_job_module()
     try:
-        from app.windows_job import close_attached_job
-    except (ImportError, AttributeError) as exc:
-        raise BoundedSubprocessError(
-            "Windows process-tree close boundary is unavailable"
-        ) from exc
-    try:
-        close_attached_job(process)
+        windows_job.close_attached_job(process)
     except Exception as exc:
         raise BoundedSubprocessError("Windows Job Object close failed") from exc
 
@@ -589,7 +589,7 @@ def run_bounded_subprocess(
             terminated = _terminate_tree(process)
             if not terminated:
                 raise BoundedSubprocessError(
-                    "process-tree boundary did not acknowledge quiescence"
+                    "did not acknowledge process-tree quiescence"
                 )
         try:
             process.wait(timeout=10)
@@ -598,7 +598,7 @@ def run_bounded_subprocess(
                 terminated = _terminate_tree(process)
                 if not terminated:
                     raise BoundedSubprocessError(
-                        "process-tree boundary did not acknowledge quiescence"
+                        "did not acknowledge process-tree quiescence"
                     )
             try:
                 process.wait(timeout=10)
@@ -621,7 +621,7 @@ def run_bounded_subprocess(
                 terminated = _terminate_tree(process)
                 if not terminated:
                     raise BoundedSubprocessError(
-                        "process-tree boundary did not acknowledge quiescence"
+                        "did not acknowledge process-tree quiescence"
                     )
         return BoundedSubprocessResult(
             args=args,
