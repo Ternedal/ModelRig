@@ -1,0 +1,98 @@
+{
+  "schema": "modelrig-devcontrol-dc-l07-source-provenance/v1",
+  "source": {
+    "pull_request": 338,
+    "head": "07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f"
+  },
+  "base": "0d64603fdb28c7b59a91007f527606314779f5f3",
+  "copied_exact_paths": [
+    "backend/cmd/modelrig-version-check/main.go",
+    "backend/cmd/modelrig-version-check/main_test.go",
+    "devcontrol/RUNTIME_LIFETIME_GUARD.md",
+    "devcontrol/RUNTIME_STAGING.md",
+    "devcontrol/VERSION_CHECK_CLOSURE.md",
+    "devcontrol/schemas/development-runtime-closure-manifest-v1.schema.json",
+    "devcontrol/schemas/development-runtime-closure-staging-receipt-v1.schema.json",
+    "devcontrol/schemas/development-runtime-staging-receipt-v1.schema.json",
+    "devcontrol/schemas/development-signed-runtime-closure-manifest-v1.schema.json",
+    "devcontrol/schemas/development-tier-a-execution-result-v1.schema.json",
+    "devcontrol/schemas/development-tier-a-launch-plan-v2.schema.json",
+    "devcontrol/schemas/development-tier-a-launch-plan-v3.schema.json",
+    "devcontrol/src/kaliv_dev_control/runtime_closure.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure_builder.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure_model.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure_staging.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure_verify.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_plan.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_result.py",
+    "devcontrol/tests/test_runtime_staging_concurrency_h10h.py"
+  ],
+  "projected_paths": [
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_runtime_closure_common.py",
+      "reason": "close the locked finding by durably flushing staged permission metadata and parent-directory metadata"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/runtime_staging.py",
+      "reason": "replace future tier_a_execution imports with DC-L07 authority and make Windows permission repair durable before receipt issuance"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/streaming_publication.py",
+      "reason": "flush prepare_temporary metadata before the create-once hard link becomes authoritative"
+    },
+    {
+      "path": "devcontrol/tests/test_slice10_runtime_staging.py",
+      "reason": "bind authority fixtures to tier_a_authority rather than the deferred executor"
+    },
+    {
+      "path": "devcontrol/tests/test_slice10b_runtime_binding.py",
+      "reason": "test deterministic planning rebinding and explicitly prove no process-launch entrypoint exists"
+    },
+    {
+      "path": "devcontrol/tests/test_slice10c_output_result.py",
+      "reason": "retain bounded binary-safe result evidence without requiring a future execution facade"
+    },
+    {
+      "path": "devcontrol/tests/test_slice10d_runtime_closure.py",
+      "reason": "retain signed closure, staging, cwd and plan evidence while removing deferred executor requirements"
+    },
+    {
+      "path": "devcontrol/tests/test_slice10e_version_check_closure.py",
+      "reason": "bind the reviewed single-file closure to landed runtime and authority surfaces"
+    },
+    {
+      "path": "devcontrol/tests/test_streaming_publication_h10g.py",
+      "reason": "prove metadata sync happens after preparation and before publication, and fails closed"
+    }
+  ],
+  "progressive_projections": [
+    {
+      "path": ".github/workflows/_tests.yml",
+      "reason": "run all twenty-seven landed tests and assert future executor, receipt, trusted-Git and publisher modules remain absent"
+    },
+    {
+      "path": "devcontrol/README.md",
+      "reason": "describe the landed non-executing boundary through DC-L07"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/__init__.py",
+      "reason": "expose runtime evidence, closure, plan and result identities without process authority"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
+      "reason": "retain an import-only compatibility facade and fail if execution symbols appear"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
+      "reason": "advance the exact non-executing bundle identity to the DC-L07 v5 domain"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
+      "reason": "land v3 plan, cwd and toolhost authority while explicitly excluding execution"
+    },
+    {
+      "path": "tests/workflow_test_coverage.py",
+      "reason": "extend CI discovery coverage from twenty to twenty-seven DevControl test modules"
+    }
+  ]
+}
