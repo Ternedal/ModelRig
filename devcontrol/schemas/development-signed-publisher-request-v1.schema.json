@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.invalid/schemas/development-signed-publisher-request-v1.schema.json",
+  "title": "Signed publisher intent request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "request",
+    "request_sha256",
+    "key_id",
+    "algorithm",
+    "signature_sha256"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-development-signed-publisher-request/v1"},
+    "request": {"type": "object"},
+    "request_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "key_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"},
+    "algorithm": {"const": "hmac-sha256"},
+    "signature_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}
