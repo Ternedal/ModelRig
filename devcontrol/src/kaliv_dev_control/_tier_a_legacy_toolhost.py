@@ -1,9 +1,9 @@
-"""DC-L08 verified-execution v6 Tier-A source-bundle identity.
+"""DC-L09 trusted-Git and command-receipt v7 Tier-A source identity.
 
-The tuple covers the exact stage-local authority and private execution closure.
-It includes the retained legacy runner and the sole closure-bound v3 executor,
-but no final public facade, command receipt, trusted-Git, publisher or remote
-authority module.
+The tuple covers the complete stage-local authority, private verified executor,
+trusted local Git runtime, Git-aware command receipt and final public facade.
+It deliberately excludes semantic review, publisher, credentials, remote Git,
+GitHub mutation, deployment and activation authority.
 """
 from __future__ import annotations
 
@@ -49,6 +49,13 @@ _TIER_A_BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/tier_a_plan.py",
     "devcontrol/src/kaliv_dev_control/tier_a_result.py",
     "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_model.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_staging.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_h4.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_runner.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_command_receipt.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_execution.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_lease.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py",
@@ -62,11 +69,11 @@ _TIER_A_BUNDLE_FILES = (
 
 
 def tier_a_toolhost_sha256(control_plane_root: Path) -> str:
-    """Hash the complete private DC-L08 verified-execution source chain."""
+    """Hash the complete DC-L09 trusted-Git and receipt authority chain."""
 
     root = _canonical_directory(control_plane_root, name="control-plane root")
     digest = hashlib.sha256()
-    digest.update(b"kaliv-tier-a-toolhost/v6\0")
+    digest.update(b"kaliv-tier-a-toolhost/v7\0")
     for relative in _TIER_A_BUNDLE_FILES:
         path = root / PurePosixPath(relative)
         if path.is_symlink() or not path.is_file():
