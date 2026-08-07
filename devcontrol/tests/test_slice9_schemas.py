@@ -68,7 +68,7 @@ class TierASchemaParityTests(unittest.TestCase):
                 argv=(str((workspace / "probe.exe").resolve()), "--version"),
                 cwd=".",
                 max_timeout_seconds=30,
-                env={"CI": "1", "PYTHONDONTWRITEBYTECODE": "1"},
+                env={"CI": "1", "MODELRIG_DEVCONTROL": "1"},
                 catalog_sha256=HASH_B,
                 toolchain_sha256=HASH_C,
                 lease_sha256=HASH_D,
