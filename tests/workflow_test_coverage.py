@@ -75,6 +75,7 @@ expected_modules = {
     "test_asymmetric_authority.py",
     "test_bounded_subprocess.py",
     "test_campaign_review.py",
+    "test_draft_pr_readiness_durable_h10.py",
     "test_durable_publication.py",
     "test_foundation.py",
     "test_h10k_tier_a_environment_extraction.py",
@@ -86,6 +87,7 @@ expected_modules = {
     "test_h10r_tier_a_legacy_runner_extraction.py",
     "test_physical_isolation_durable_publication_h10b.py",
     "test_proposal_reload.py",
+    "test_publisher_dry_run_durable_publication_h10c.py",
     "test_review_reload.py",
     "test_runtime_staging_concurrency_h10h.py",
     "test_semantic_review_core_cleanup_h10e.py",
@@ -97,6 +99,8 @@ expected_modules = {
     "test_slice10e_version_check_closure.py",
     "test_slice10g_command_receipt.py",
     "test_slice10h_semantic_review.py",
+    "test_slice10i_draft_pr_readiness.py",
+    "test_slice10j_publisher_dry_run.py",
     "test_slice2.py",
     "test_slice5.py",
     "test_slice6.py",
@@ -113,7 +117,7 @@ observed_modules = {
 }
 check(
     observed_modules == expected_modules,
-    f"the thirty-five DC-L01–L10 test modules are present: {sorted(observed_modules)}",
+    f"the thirty-nine DC-L01–L11 test modules are present: {sorted(observed_modules)}",
 )
 
 worker_requirements = (root / "worker/requirements.txt").read_text(encoding="utf-8")
@@ -129,6 +133,8 @@ check(
 
 asymmetric = importlib.import_module("kaliv_dev_control.asymmetric_authority")
 semantic = importlib.import_module("kaliv_dev_control.semantic_review")
+readiness = importlib.import_module("kaliv_dev_control.draft_pr_readiness")
+publisher_dry_run = importlib.import_module("kaliv_dev_control.publisher_dry_run")
 check(
     callable(asymmetric.Ed25519AuthorityVerifier),
     "DC-L10 exposes verification-only Ed25519 authority",
@@ -136,6 +142,14 @@ check(
 check(
     callable(semantic.SemanticReviewApprovalGate.ready),
     "DC-L10 exposes the offline semantic-review approval gate",
+)
+check(
+    callable(readiness.DraftPrReadinessGate.ready),
+    "DC-L11 exposes deterministic authenticated draft readiness",
+)
+check(
+    callable(publisher_dry_run.PublisherDryRunGate.valid),
+    "DC-L11 exposes authenticated publisher dry-run evidence",
 )
 asymmetric_source = (
     root / "devcontrol/src/kaliv_dev_control/asymmetric_authority.py"
@@ -152,17 +166,39 @@ check(
     ),
     "the landed asymmetric runtime contains no private-key or signer boundary",
 )
+readiness_source = (
+    root / "devcontrol/src/kaliv_dev_control/draft_pr_readiness.py"
+).read_text(encoding="utf-8")
+publisher_source = (
+    root / "devcontrol/src/kaliv_dev_control/publisher_dry_run.py"
+).read_text(encoding="utf-8")
+check(
+    all(
+        token not in readiness_source + publisher_source
+        for token in (
+            "Authorization:",
+            "requests.",
+            "urllib",
+            "subprocess",
+            "create_pull_request",
+            "update_pull_request",
+            "merge_pull_request",
+        )
+    ),
+    "DC-L11 contains no GitHub, HTTP, credential or process adapter",
+)
 check(
     all(
         importlib.util.find_spec(module) is None
         for module in (
-            "kaliv_dev_control.draft_pr_readiness",
-            "kaliv_dev_control.publisher_dry_run",
             "kaliv_dev_control.publisher_authorization",
+            "kaliv_dev_control.publisher_authorization_v2",
+            "kaliv_dev_control.publisher_recovery_authorization",
+            "kaliv_dev_control.publisher_replay_h4",
             "kaliv_dev_control.local_candidate_materialization",
         )
     ),
-    "DC-L11–L13 readiness, publisher and materialization modules remain absent",
+    "DC-L12–L13 authorization, recovery, replay and materialization modules remain absent",
 )
 
 receipt_schema = json.loads(
@@ -328,6 +364,10 @@ check(
 check(
     "DevControl DC-L10 asymmetric and semantic-review boundary" in workflow,
     "CI contains an explicit offline DC-L10 authority boundary gate",
+)
+check(
+    "DevControl DC-L11 readiness and publisher dry-run boundary" in workflow,
+    "CI contains an explicit non-mutating DC-L11 intent boundary gate",
 )
 
 facade = importlib.import_module("kaliv_dev_control.tier_a_execution")
