@@ -1,4 +1,4 @@
-"""Dormant Kaliv Development Control foundations (DC-L01 and DC-L02)."""
+"""Dormant Kaliv Development Control foundations (DC-L01 through DC-L04)."""
 
 from .bounded_subprocess import (
     BoundedStreamEvidence,
@@ -38,6 +38,20 @@ from .durable_publication import (
 from .evidence import ScopeReceipt, build_scope_receipt
 from .files import FileAccessError, SearchMatch, WorkspaceFiles
 from .patch import PatchApplier, PatchError, PatchReceipt, PatchSummary
+from .physical_isolation import (
+    HmacIsolationReportSigner,
+    PhysicalIsolationError,
+    PhysicalProbeResult,
+    ProbeName,
+    REQUIRED_PROBES,
+    SignedWindowsIsolationReport,
+    WindowsIsolationPhysicalReport,
+    WindowsPhysicalIsolationVerifier,
+    load_isolation_attestation,
+    load_signing_secret,
+    load_unsigned_report,
+    write_signed_report,
+)
 from .policy import PathPolicy, ScopeDecision, ScopeViolation
 from .proposal import DraftProposalBuilder, DraftPullRequestProposal, ProposalError
 from .review import (
@@ -84,6 +98,7 @@ __all__ = [
     "DraftPullRequestProposal",
     "DurablePublicationError",
     "FileAccessError",
+    "HmacIsolationReportSigner",
     "IndependentPolicyReviewer",
     "MergeAuthority",
     "PatchApplier",
@@ -91,7 +106,11 @@ __all__ = [
     "PatchReceipt",
     "PatchSummary",
     "PathPolicy",
+    "PhysicalIsolationError",
+    "PhysicalProbeResult",
+    "ProbeName",
     "ProposalError",
+    "REQUIRED_PROBES",
     "ReviewDecision",
     "ReviewError",
     "ReviewRequest",
@@ -102,8 +121,11 @@ __all__ = [
     "ScopeReceipt",
     "ScopeViolation",
     "SearchMatch",
+    "SignedWindowsIsolationReport",
     "SubprocessRunner",
     "TaskBudget",
+    "WindowsIsolationPhysicalReport",
+    "WindowsPhysicalIsolationVerifier",
     "WorkspaceError",
     "WorkspaceFiles",
     "WorkspaceGitRunner",
@@ -111,6 +133,9 @@ __all__ = [
     "build_scope_receipt",
     "create_once_file",
     "default_registry",
+    "load_isolation_attestation",
+    "load_signing_secret",
+    "load_unsigned_report",
     "normalize_repo_path",
     "remove_tree_durable",
     "rename_directory_no_replace",
@@ -120,4 +145,5 @@ __all__ = [
     "sync_file",
     "sync_tree",
     "unlink_durable",
+    "write_signed_report",
 ]

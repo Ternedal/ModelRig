@@ -1,0 +1,37 @@
+{
+  "schema": "modelrig-devcontrol-dc-l04-symbol-ownership/v1",
+  "module": "kaliv_dev_control.physical_isolation",
+  "owned_symbols": [
+    "HmacIsolationReportSigner",
+    "PhysicalIsolationError",
+    "PhysicalProbeResult",
+    "ProbeName",
+    "REQUIRED_PROBES",
+    "SignedWindowsIsolationReport",
+    "WindowsIsolationPhysicalReport",
+    "WindowsPhysicalIsolationVerifier",
+    "load_isolation_attestation",
+    "load_signing_secret",
+    "load_unsigned_report",
+    "write_signed_report"
+  ],
+  "operator_cli_commands": [
+    "sign-physical-report",
+    "verify-physical-report"
+  ],
+  "progressive_surfaces": [
+    "devcontrol/README.md",
+    "devcontrol/src/kaliv_dev_control/__init__.py",
+    "devcontrol/src/kaliv_dev_control/__main__.py",
+    "devcontrol/tests/test_foundation.py",
+    "tests/workflow_test_coverage.py"
+  ],
+  "forbidden_symbols_or_authority": [
+    "Windows process launcher",
+    "Job Object or AppContainer implementation",
+    "non-empty default command registry",
+    "GitHub write adapter",
+    "remote Git or credential provider",
+    "merge, release, deployment or activation entrypoint"
+  ]
+}

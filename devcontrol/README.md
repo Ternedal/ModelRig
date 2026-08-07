@@ -1,4 +1,4 @@
-# Kaliv Development Control — DC-L01 and DC-L02 foundations
+# Kaliv Development Control — DC-L01–DC-L04 foundations
 
 These slices are the dormant, dependency-minimal foundation defined by
 `docs/devcontrol/ADR-DC-001_DEVCONTROL_AUTHORITY_BOUNDARY.md` and the landed
@@ -9,37 +9,85 @@ DC-L00 decomposition contract.
 DC-L01 supplies immutable task contracts, canonical repository-relative scope,
 bounded reads/search, fail-closed patching, deterministic raw-byte receipts,
 fixed command templates, exact-HEAD and clean-state binding, bounded subprocess
-supervision, disposable Git sandboxes, Linux Landlock ABI 3+ confinement and an
-architecture-checked seccomp metadata-mutation boundary.
+supervision and disposable Git sandboxes.
 
-`default_registry()` remains empty. Windows command containment remains
-fail-closed until DC-L05. Product code must not import `kaliv_dev_control`.
+`default_registry()` remains empty. Product code must not import
+`kaliv_dev_control`.
 
 ## DC-L02 authority
 
-DC-L02 adds only local, dormant campaign and review structure:
+DC-L02 adds local, dormant campaign and review structure:
 
 - immutable hash-chained campaign state;
 - crash-durable create-once and atomic-replace publication primitives;
-- a compare-and-swap `CampaignStore`;
-- stale-lock recovery only when the recorded owner is provably dead or its
-  process identity no longer matches;
-- durable lock create, reclaim and release operations;
-- parent-directory metadata persistence after directory creation, file
-  publication, replacement and unlink;
-- independent structural review requests and verdicts;
+- a compare-and-swap `CampaignStore` with fail-closed stale-lock recovery;
+- independent structural review requests and verdicts; and
 - deterministic draft pull-request proposals with human-only merge authority.
 
-The campaign store never deletes an unverifiable or live lock. Lock records bind
-PID, stable process identity and a random nonce. Malformed lock evidence fails
-closed.
+## DC-L03 authority
+
+DC-L03 adds immutable catalog and toolchain contracts plus a fixed-host,
+HTTPS, GET-only GitHub read boundary. The default ModelRig catalog and default
+registry remain empty, and every non-empty catalog materialization is rejected
+fail-closed. Python, Go, sandbox and custom-static command execution remain
+deferred.
+
+## DC-L04 authority
+
+DC-L04 defines the signed physical Windows-isolation evidence contract. It does
+not implement Windows containment and cannot activate command execution.
+
+The contract provides:
+
+- eleven mandatory I0b probe identities covering token restriction, workspace
+  access and escape denial, network denial, process-tree cleanup, reboot,
+  memory/process limits and existing-tool compatibility;
+- canonical unsigned and signed JSON report models;
+- exact task, repository, base SHA, catalog, toolchain, rig, workspace and
+  authority-code binding;
+- separate collector and approver identities;
+- detached HMAC-SHA256 signing with an operator-controlled key;
+- exactly one fresh matching evidence artifact for verification;
+- bounded stable regular-file reads with link/reparse rejection; and
+- crash-durable, create-once publication of canonical signed evidence.
+
+A failed probe can be recorded honestly but cannot authorize anything. Historical
+physical evidence remains stale until the final authority closure is frozen and a
+fresh physical campaign is run.
+
+## Operator flow
+
+The physical harness writes one canonical unsigned report matching
+`schemas/windows-isolation-physical-report-v1.schema.json`. Signing and
+verification are separate operator actions. The key file must remain outside the
+developer workspace.
+
+```bash
+PYTHONPATH=devcontrol/src python -m kaliv_dev_control sign-physical-report \
+  /operator/evidence/i0b-unsigned.json \
+  /operator/evidence/i0b-signed.json \
+  --key-file /operator/keys/isolation.key \
+  --key-id operator-key-2026
+
+PYTHONPATH=devcontrol/src python -m kaliv_dev_control verify-physical-report \
+  /operator/evidence/attestation.json \
+  --evidence-root /operator/evidence \
+  --key-file /operator/keys/isolation.key \
+  --key-id operator-key-2026
+```
+
+On POSIX, the key loader requires one owner-only regular file with no additional
+hard links in an owner-controlled non-writable directory. On Windows, key loading
+fails closed until a native owner/DACL handle verifier lands. HMAC proves exact
+artifact/key binding only while a separately operated operator process retains
+custody of the key.
 
 ## Deliberately absent
 
-These slices provide no non-empty command catalog, concrete Git runner, GitHub
-write adapter, credentials, remote publication, merge, release, deployment or
-activation authority. `streaming_publication.py` belongs to DC-L07 and is not
-part of DC-L02.
+DC-L01–DC-L04 provide no Windows containment substrate, non-empty executable
+catalog, GitHub write adapter, credential loader, remote Git, push, pull-request
+mutation, reviewer request, merge, release, deployment or activation authority.
+Native Windows containment belongs to DC-L05.
 
 ## Validation
 
@@ -49,5 +97,5 @@ PYTHONPATH=devcontrol/src python -m kaliv_dev_control validate-task task.json
 python3 tests/workflow_test_coverage.py
 ```
 
-Exact-path, provenance, mutation and review evidence for DC-L02 lives under
-`docs/devcontrol/dc-l02/`.
+Exact-path, provenance, mutation and review evidence for this slice lives under
+`docs/devcontrol/dc-l04/`.

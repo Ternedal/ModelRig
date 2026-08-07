@@ -484,12 +484,11 @@ class FoundationTests(unittest.TestCase):
 
     def test_foundation_has_no_unlanded_future_slice_import(self) -> None:
         source = Path(__file__).resolve().parents[1] / "src" / "kaliv_dev_control"
-        # DC-L02 campaign/review/store imports are now landed. Keep the gate on
-        # DC-L03+ authority and product-specific containment imports.
+        # DC-L02 campaign/review/store, DC-L03 catalog and DC-L04 physical
+        # evidence imports are landed. Keep the gate on DC-L05+ authority and
+        # product-specific containment imports.
         forbidden = (
             "trusted_git_runtime",
-            "catalog",
-            "physical_isolation",
             "runtime_staging",
             "tier_a_",
             "publisher_",
