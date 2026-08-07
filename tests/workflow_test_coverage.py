@@ -8,6 +8,8 @@ import fnmatch
 import json
 import re
 import sys
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,11 +18,12 @@ workflow = (root / ".github/workflows/_tests.yml").read_text(encoding="utf-8")
 sys.path.insert(0, str(root / "devcontrol/src"))
 
 import kaliv_dev_control.github_read as github_read_module
-from kaliv_dev_control.catalog import CatalogError, ProjectCommandSpec
-from kaliv_dev_control.github_read import (
-    GitHubReadError,
-    UrllibReadOnlyTransport,
+from kaliv_dev_control.catalog import (
+    CatalogError,
+    ProjectCommandSpec,
+    modelrig_command_catalog,
 )
+from kaliv_dev_control.github_read import GitHubReadError
 
 passed = failed = 0
 
@@ -122,6 +125,7 @@ for key, value in (
     ("GOROOT", "."),
     ("PYTHONUSERBASE", "."),
     ("GOTOOLCHAIN", "auto"),
+    ("PATH", "/attacker/bin"),
 ):
     try:
         ProjectCommandSpec(
@@ -135,21 +139,32 @@ for key, value in (
     except CatalogError:
         continue
     blocked_environment = False
+catalog_path = modelrig_command_catalog().resolve(
+    "modelrig.devcontrol.tests"
+).env.get("PATH")
 check(
-    blocked_environment,
-    "catalog environment is a fixed-value positive list without runtime authority",
+    blocked_environment and catalog_path == "/usr/bin:/bin",
+    "catalog environment fixes PATH and rejects unreviewed runtime authority",
 )
 
 
 class _DeadlineSocket:
     def __init__(self) -> None:
         self.timeouts: list[float] = []
+        self.aborted = threading.Event()
 
     def settimeout(self, value: float) -> None:
         self.timeouts.append(value)
 
+    def shutdown(self, how: int) -> None:
+        del how
+        self.aborted.set()
 
-class _SlowResponse:
+    def close(self) -> None:
+        self.aborted.set()
+
+
+class _BlockingChunkResponse:
     status = 200
     headers = {"Content-Type": "application/json"}
 
@@ -162,45 +177,33 @@ class _SlowResponse:
 
     def read1(self, amount: int) -> bytes:
         del amount
-        return b"x"
+        self.socket.aborted.wait(5)
+        return b""
 
     def close(self) -> None:
         self.closed = True
+        self.socket.aborted.set()
 
 
-class _SlowOpener:
-    def __init__(self, response: _SlowResponse) -> None:
-        self.response = response
-
-    def open(self, request, timeout):
-        del request, timeout
-        return self.response
-
-
-slow_response = _SlowResponse()
-transport = object.__new__(UrllibReadOnlyTransport)
-transport._opener = _SlowOpener(slow_response)
-ticks = iter((0.0, 0.2, 0.7, 1.1))
-original_monotonic = github_read_module.time.monotonic
-github_read_module.time.monotonic = lambda: next(ticks)
+slow_response = _BlockingChunkResponse()
 deadline_rejected = False
+started = time.monotonic()
 try:
-    try:
-        transport.get(
-            "https://api.github.com/repos/Ternedal/ModelRig/commits/" + "a" * 40,
-            headers={},
-            timeout_seconds=1,
-            max_bytes=100,
-        )
-    except GitHubReadError as exc:
-        deadline_rejected = "wall-clock deadline" in str(exc)
-finally:
-    github_read_module.time.monotonic = original_monotonic
+    github_read_module._read_response_body(
+        slow_response,
+        max_bytes=100,
+        deadline=time.monotonic() + 0.05,
+    )
+except GitHubReadError as exc:
+    deadline_rejected = "wall-clock deadline" in str(exc)
+elapsed = time.monotonic() - started
 check(
     deadline_rejected
+    and elapsed < 0.5
     and slow_response.closed
+    and slow_response.socket.aborted.is_set()
     and bool(slow_response.socket.timeouts),
-    "slow-drip GitHub reads are stopped by one monotonic wall-clock deadline",
+    "blocking chunk framing is cancelled by the monotonic wall-clock deadline",
 )
 
 print(f"\n===== TEST COVERAGE: {passed} passed, {failed} failed =====")
