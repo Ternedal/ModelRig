@@ -55,21 +55,38 @@ class TierAExecutorBoundaryTests(unittest.TestCase):
         self.assertNotIn("tier_a_command_receipt", source)
         self.assertNotIn("trusted_git", source)
 
-    def test_public_and_authority_surfaces_do_not_export_executor(self) -> None:
+    def test_final_facade_routes_only_to_modern_executor(self) -> None:
         package = importlib.import_module("kaliv_dev_control")
         authority = importlib.import_module("kaliv_dev_control.tier_a_authority")
         core = importlib.import_module("kaliv_dev_control._tier_a_execution_core")
         modern = importlib.import_module("kaliv_dev_control.tier_a_execution_v3")
+        facade = importlib.import_module("kaliv_dev_control.tier_a_execution")
+        receipt = importlib.import_module("kaliv_dev_control.tier_a_command_receipt")
 
-        self.assertIsNone(importlib.util.find_spec("kaliv_dev_control.tier_a_execution"))
-        self.assertIsNone(
+        self.assertIsNotNone(
+            importlib.util.find_spec("kaliv_dev_control.tier_a_execution")
+        )
+        self.assertIsNotNone(
             importlib.util.find_spec("kaliv_dev_control.tier_a_command_receipt")
         )
         for surface in (package, authority, core):
             self.assertFalse(hasattr(surface, "_run_tier_a_launch_plan"))
             self.assertFalse(hasattr(surface, "run_verified_tier_a_command"))
-        self.assertTrue(callable(modern._run_tier_a_launch_plan))
-        self.assertTrue(callable(modern.run_verified_tier_a_command))
+        self.assertIs(
+            facade._run_tier_a_launch_plan,
+            modern._run_tier_a_launch_plan,
+        )
+        self.assertIs(
+            facade.run_verified_tier_a_command,
+            modern.run_verified_tier_a_command,
+        )
+        self.assertTrue(
+            callable(receipt.run_single_verified_tier_a_command_with_receipt)
+        )
+        self.assertIs(
+            facade.run_single_verified_tier_a_command_with_receipt,
+            receipt.run_single_verified_tier_a_command_with_receipt,
+        )
 
     def test_modern_executor_fails_closed_off_windows_before_spawn(self) -> None:
         modern = importlib.import_module("kaliv_dev_control.tier_a_execution_v3")
@@ -120,22 +137,37 @@ class TierAExecutorBoundaryTests(unittest.TestCase):
                         control_plane_root=root,
                     )
 
-    def test_toolhost_bundle_binds_both_private_executor_sources(self) -> None:
+    def test_toolhost_bundle_binds_complete_dc_l09_execution_chain(self) -> None:
         authority = importlib.import_module("kaliv_dev_control.tier_a_authority")
         toolhost = importlib.import_module(
             "kaliv_dev_control._tier_a_legacy_toolhost"
         )
         bundle = authority._TIER_A_BUNDLE_FILES
         self.assertEqual(bundle, toolhost._TIER_A_BUNDLE_FILES)
-        legacy = "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py"
-        modern = "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py"
-        core = "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py"
-        self.assertEqual(bundle.count(legacy), 1)
-        self.assertEqual(bundle.count(modern), 1)
-        self.assertLess(bundle.index(legacy), bundle.index(core))
-        self.assertLess(bundle.index(modern), bundle.index(core))
+        required = (
+            "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py",
+            "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py",
+            "devcontrol/src/kaliv_dev_control/trusted_git_runtime_model.py",
+            "devcontrol/src/kaliv_dev_control/trusted_git_runtime_staging.py",
+            "devcontrol/src/kaliv_dev_control/trusted_git_runtime_h4.py",
+            "devcontrol/src/kaliv_dev_control/trusted_git_runtime_runner.py",
+            "devcontrol/src/kaliv_dev_control/trusted_git_runtime.py",
+            "devcontrol/src/kaliv_dev_control/tier_a_command_receipt.py",
+            "devcontrol/src/kaliv_dev_control/tier_a_execution.py",
+            "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
+        )
+        for path in required:
+            self.assertEqual(bundle.count(path), 1, path)
+        self.assertLess(
+            bundle.index("devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py"),
+            bundle.index("devcontrol/src/kaliv_dev_control/tier_a_execution.py"),
+        )
+        self.assertLess(
+            bundle.index("devcontrol/src/kaliv_dev_control/tier_a_command_receipt.py"),
+            bundle.index("devcontrol/src/kaliv_dev_control/tier_a_execution.py"),
+        )
 
-    def test_executor_sources_contain_no_remote_or_publication_authority(self) -> None:
+    def test_private_executor_sources_contain_no_remote_or_publication_authority(self) -> None:
         forbidden = {
             "socket",
             "requests",
@@ -158,7 +190,9 @@ class TierAExecutorBoundaryTests(unittest.TestCase):
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     imported.add(node.module.split(".", 1)[0])
             self.assertFalse(imported & forbidden, (path.name, imported & forbidden))
-            self.assertFalse(any(token in source for token in ("publish_once", "private_key")))
+            self.assertFalse(
+                any(token in source for token in ("publish_once", "private_key"))
+            )
 
     def test_authority_source_does_not_alias_private_execution_functions(self) -> None:
         tree = ast.parse(
