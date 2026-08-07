@@ -5,6 +5,7 @@ Run: python3 tests/workflow_test_coverage.py
 from __future__ import annotations
 
 import fnmatch
+import json
 import re
 from pathlib import Path
 
@@ -80,6 +81,30 @@ check(
 check(
     all(path.is_file() for path in devcontrol_tests),
     "every DevControl test matched by unittest discovery is a regular file",
+)
+
+receipt_schema = json.loads(
+    (
+        root
+        / "devcontrol/schemas/development-github-read-receipt-v1.schema.json"
+    ).read_text(encoding="utf-8")
+)
+repository_pattern = re.compile(
+    receipt_schema["properties"]["repository"]["pattern"]
+)
+check(
+    repository_pattern.fullmatch("Ternedal/ModelRig") is not None,
+    "the GitHub receipt schema accepts the canonical ModelRig repository",
+)
+invalid_repositories = (
+    "./ModelRig",
+    "Ternedal/..",
+    "Ternedal/Model Rig",
+    "Ternedal/\x00ModelRig",
+)
+check(
+    all(repository_pattern.fullmatch(value) is None for value in invalid_repositories),
+    "the GitHub receipt schema rejects dot segments, whitespace and NUL authority",
 )
 
 print(f"\n===== TEST COVERAGE: {passed} passed, {failed} failed =====")
