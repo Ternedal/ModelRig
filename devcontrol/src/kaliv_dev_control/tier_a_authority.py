@@ -32,6 +32,13 @@ LeasedCatalogMaterializer = _core.LeasedCatalogMaterializer
 TIER_A_APPLICATION_ENVIRONMENT = _core.TIER_A_APPLICATION_ENVIRONMENT
 workspace_root_authority_sha256 = _core.workspace_root_authority_sha256
 
+# Preserve the landed DC-L06 v1 compatibility exports. DC-L07's closure-bound
+# v3 plan lives in ``tier_a_plan`` and is exported from the package root. These
+# aliases keep earlier bounded tests and consumers working without importing or
+# activating any executor.
+TierALaunchPlan = _core.TierALaunchPlan
+build_tier_a_launch_plan = _core.build_tier_a_launch_plan
+
 for _forbidden_execution_name in (
     "_run_tier_a_launch_plan",
     "run_verified_tier_a_command",
