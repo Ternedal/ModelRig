@@ -9,11 +9,11 @@
   "projected_paths": [
     {
       "path": "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py",
-      "reason": "replace the later ExecutableVerifier annotation with Any and late-bind the same approved native worker modules; all authorization, AppContainer, Job Object, timeout and cleanup behavior remains"
+      "reason": "replace the later ExecutableVerifier annotation with Any, late-bind the same approved native worker modules, and project the complete signed plan environment into the worker-reviewed Windows application subset while rejecting any unknown or altered omitted value"
     },
     {
       "path": "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py",
-      "reason": "replace the later ExecutableVerifier annotation with Any and late-bind the same approved native worker modules; all closure checks, exact revalidation, bounded capture, lifetime guarding and process-tree cleanup behavior remains"
+      "reason": "replace the later ExecutableVerifier annotation with Any, late-bind the same approved native worker modules, and project the complete signed plan environment into the worker-reviewed Windows application subset; all closure checks, exact revalidation, bounded capture, lifetime guarding and process-tree cleanup behavior remains"
     },
     {
       "path": "devcontrol/tests/test_h10r_tier_a_legacy_runner_extraction.py",
@@ -23,7 +23,7 @@
   "progressive_projections": [
     {
       "path": ".github/workflows/_tests.yml",
-      "reason": "run all twenty-eight DevControl modules, assert the private-only execution boundary and activate the real-Windows closure-bound executor contract through a test-only in-memory facade; project the later environment key to the landed reviewed value and use a WindowsPhysicalIsolationVerifier subclass that supplies the already signed report candidate while retaining base signature, binding, probe and freshness verification"
+      "reason": "run all twenty-eight DevControl modules, assert the private-only execution boundary and activate the real-Windows closure-bound executor contract through a test-only in-memory facade; project the later environment key to the landed reviewed value, assert the signed-to-Windows application subset, and use a WindowsPhysicalIsolationVerifier subclass that supplies the already signed report candidate while retaining base signature, binding, probe and freshness verification"
     },
     {
       "path": "devcontrol/README.md",
