@@ -29,6 +29,11 @@ as the DC-L08 pull request and the branch is zero commits behind `main`.
 - both v6 bundle tuples are identical and include each private executor once;
 - the real-Windows closure-bound AppContainer, Job Object, bounded-output,
   timeout, cwd and runtime-lifetime contract passes;
+- the Windows execution fixture uses a `WindowsPhysicalIsolationVerifier`
+  subclass only to supply the already signed candidate; base signature, binding,
+  probe and freshness verification must still execute;
+- file-backed physical-evidence discovery remains the independently landed
+  DC-L04 contract and is not re-claimed by this execution slice;
 - the generic bounded-subprocess and command-receipt Windows contracts remain
   deferred rather than being claimed by DC-L08;
 - unresolved review-thread count is zero; and
