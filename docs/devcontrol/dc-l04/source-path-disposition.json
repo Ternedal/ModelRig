@@ -13,6 +13,7 @@
     "devcontrol/README.md",
     "devcontrol/src/kaliv_dev_control/__init__.py",
     "devcontrol/src/kaliv_dev_control/__main__.py",
+    "devcontrol/tests/test_foundation.py",
     "tests/workflow_test_coverage.py"
   ],
   "new_control_artifacts": [
