@@ -217,12 +217,80 @@ check(
 )
 
 
+class _BlockingConnectConnection:
+    def __init__(self) -> None:
+        self.sock = None
+        self.timeout = None
+        self.release_connect = threading.Event()
+        self.worker_finished = threading.Event()
+        self.close_count = 0
+        self.requested = False
+
+    def connect(self) -> None:
+        self.release_connect.wait(5)
+        self.sock = _DeadlineSocket()
+
+    def request(self, method: str, target: str, *, headers) -> None:
+        del method, target, headers
+        self.requested = True
+
+    def getresponse(self):
+        raise AssertionError("getresponse must not run after setup timeout")
+
+    def close(self) -> None:
+        self.close_count += 1
+        if self.sock is not None:
+            self.sock.close()
+        if self.close_count >= 2:
+            self.worker_finished.set()
+
+
+blocked_connect = _BlockingConnectConnection()
+connect_deadline_rejected = False
+started = time.monotonic()
+try:
+    github_read_module._request_with_deadline(
+        blocked_connect,
+        "/repos/Ternedal/ModelRig/commits/" + "a" * 40,
+        headers={"Authorization": "Bearer secret"},
+        max_bytes=100,
+        deadline=time.monotonic() + 0.05,
+    )
+except GitHubReadError as exc:
+    connect_deadline_rejected = "wall-clock deadline" in str(exc)
+connect_elapsed = time.monotonic() - started
+second_setup_rejected = False
+try:
+    github_read_module._request_with_deadline(
+        _BlockingConnectConnection(),
+        "/repos/Ternedal/ModelRig/commits/" + "a" * 40,
+        headers={},
+        max_bytes=100,
+        deadline=time.monotonic() + 0.5,
+    )
+except GitHubReadError as exc:
+    second_setup_rejected = "already pending" in str(exc)
+blocked_connect.release_connect.set()
+blocked_connect.worker_finished.wait(0.5)
+check(
+    connect_deadline_rejected
+    and connect_elapsed < 0.5
+    and second_setup_rejected
+    and not blocked_connect.requested
+    and blocked_connect.worker_finished.is_set(),
+    "blocked connection setup cannot send after timeout or accumulate workers",
+)
+
+
 class _BlockingHeaderConnection:
     def __init__(self) -> None:
         self.sock = _DeadlineSocket()
         self.timeout = None
         self.closed = False
         self.requested = False
+
+    def connect(self) -> None:
+        return None
 
     def request(self, method: str, target: str, *, headers) -> None:
         self.requested = method == "GET" and target.startswith("/") and isinstance(headers, dict)
