@@ -7,10 +7,12 @@ pull-request head after all exact-head workflows have completed.
 
 The review must confirm:
 
-- the diff contains exactly the 33 allowlisted paths;
+- the diff contains exactly the 34 allowlisted paths;
 - all seventeen locked source files match PR #338 exactly;
 - the bounded subprocess projection preserves the newer Linux subreaper and adds
   only native Windows Job Object containment;
+- the foundation inventory moves only DC-L09 modules to landed status and keeps
+  semantic-review, publisher and activation modules forbidden;
 - progressive changes preserve the merged DC-L08 executor and dormant package
   boundary while adding only the DC-L09 trusted-Git, receipt and facade scope;
 - trusted Git has no remote transport or credential mechanism;
