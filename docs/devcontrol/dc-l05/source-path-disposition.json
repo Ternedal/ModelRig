@@ -1,0 +1,42 @@
+{
+  "schema": "modelrig-devcontrol-dc-l05-source-path-disposition/v1",
+  "land": [
+    "tests/support/windows_bounded_subprocess_contract.py",
+    "tests/support/windows_capture_helper.c",
+    "tests/support/windows_catalog_tier_a_contract.py",
+    "tests/support/windows_job_close_contract.py",
+    "tests/support/windows_job_contract.py",
+    "tests/support/windows_restricted_contract.py",
+    "tests/support/windows_restricted_helper.c",
+    "tests/support/windows_tier_a_environment_contract.py",
+    "tests/support/windows_tier_a_receipt_contract.py",
+    "worker/app/toolhost.py",
+    "worker/app/windows_capture.py",
+    "worker/app/windows_job.py",
+    "worker/app/windows_restricted.py",
+    "worker/app/windows_runtime_guard.py",
+    "worker/app/windows_tier_a.py"
+  ],
+  "progressive": [
+    ".github/workflows/_tests.yml",
+    "devcontrol/README.md",
+    "tests/workflow_test_coverage.py"
+  ],
+  "inspected_unchanged": {
+    "worker/requirements.txt": "the source cryptography dependency belongs to DC-L10 asymmetric authority and is not required by the native DC-L05 substrate"
+  },
+  "new_control_artifacts": [
+    "docs/devcontrol/dc-l05/exact-head-validation.md",
+    "docs/devcontrol/dc-l05/exact-path-allowlist.json",
+    "docs/devcontrol/dc-l05/independent-review-verdict.md",
+    "docs/devcontrol/dc-l05/mutation-results.md",
+    "docs/devcontrol/dc-l05/preflight.md",
+    "docs/devcontrol/dc-l05/source-path-disposition.json",
+    "docs/devcontrol/dc-l05/source-provenance.json",
+    "docs/devcontrol/dc-l05/symbol-ownership.json"
+  ],
+  "deferred_activation": [
+    "tests/support/windows_catalog_tier_a_contract.py",
+    "tests/support/windows_tier_a_receipt_contract.py"
+  ]
+}

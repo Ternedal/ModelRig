@@ -229,6 +229,42 @@ else:
     retarget_rejected = False
 check(retarget_rejected, "task-bound registry rejects cross-task retargeting")
 
+native_windows_contracts = (
+    "tests/support/windows_job_contract.py",
+    "tests/support/windows_job_close_contract.py",
+    "tests/support/windows_bounded_subprocess_contract.py",
+    "tests/support/windows_restricted_contract.py",
+    "tests/support/windows_tier_a_environment_contract.py",
+    "tests/worker_toolhost.py",
+)
+check(
+    all(f"python {path}" in workflow for path in native_windows_contracts),
+    "CI reaches every DC-L05 native Windows containment contract",
+)
+future_windows_contracts = (
+    "tests/support/windows_catalog_tier_a_contract.py",
+    "tests/support/windows_tier_a_receipt_contract.py",
+)
+check(
+    all(f"python {path}" not in workflow for path in future_windows_contracts),
+    "DC-L05 does not activate later Tier-A or trusted-Git integration contracts",
+)
+product_modules = (
+    "worker/app/toolhost.py",
+    "worker/app/windows_capture.py",
+    "worker/app/windows_job.py",
+    "worker/app/windows_restricted.py",
+    "worker/app/windows_runtime_guard.py",
+    "worker/app/windows_tier_a.py",
+)
+check(
+    all(
+        "kaliv_dev_control" not in (root / path).read_text(encoding="utf-8")
+        for path in product_modules
+    ),
+    "DC-L05 product code does not import DevControl",
+)
+
 allowlist = json.loads(
     (root / "docs/devcontrol/dc-l03/exact-path-allowlist.json").read_text(encoding="utf-8")
 )

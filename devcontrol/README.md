@@ -1,6 +1,6 @@
-# Kaliv Development Control — DC-L01–DC-L04 foundations
+# Kaliv Development Control — DC-L01–DC-L05 foundations
 
-These slices are the dormant, dependency-minimal foundation defined by
+These slices are the dormant, bounded foundation defined by
 `docs/devcontrol/ADR-DC-001_DEVCONTROL_AUTHORITY_BOUNDARY.md` and the landed
 DC-L00 decomposition contract.
 
@@ -34,28 +34,34 @@ deferred.
 
 ## DC-L04 authority
 
-DC-L04 defines the signed physical Windows-isolation evidence contract. It does
-not implement Windows containment and cannot activate command execution.
-
-The contract provides:
-
-- eleven mandatory I0b probe identities covering token restriction, workspace
-  access and escape denial, network denial, process-tree cleanup, reboot,
-  memory/process limits and existing-tool compatibility;
-- canonical unsigned and signed JSON report models;
-- exact task, repository, base SHA, catalog, toolchain, rig, workspace and
-  authority-code binding;
-- separate collector and approver identities;
-- detached HMAC-SHA256 signing with an operator-controlled key;
-- exactly one fresh matching evidence artifact for verification;
-- bounded stable regular-file reads with link/reparse rejection; and
-- crash-durable, create-once publication of canonical signed evidence.
+DC-L04 defines the signed physical Windows-isolation evidence contract. It
+provides eleven mandatory probe identities, canonical unsigned and signed report
+models, exact authority binding, separate collection and approval actors,
+bounded stable evidence reads and crash-durable create-once publication.
 
 A failed probe can be recorded honestly but cannot authorize anything. Historical
 physical evidence remains stale until the final authority closure is frozen and a
 fresh physical campaign is run.
 
-## Operator flow
+## DC-L05 authority
+
+DC-L05 lands the product-side native Windows containment substrate without
+activating DevControl:
+
+- Job Object assignment before resume, process and memory limits, and kill-on-close;
+- AppContainer/restricted-token launch with a workspace-scoped capability;
+- bounded stdout/stderr capture and whole-process-tree cleanup;
+- exact working-directory and reviewed environment handling;
+- runtime-lifetime immutability checks; and
+- a dormant Tier-A Windows launch surface used only by explicit product-side tests.
+
+The product modules under `worker/app/` do not import `kaliv_dev_control`.
+DC-L05 does not register a command, populate the empty catalog, validate physical
+evidence, create a Git authority, or expose a route/remote operation. The
+integration support files that require later Tier-A or trusted-Git slices are
+landed as dormant source only and are not executed by the DC-L05 workflow.
+
+## Physical evidence operator flow
 
 The physical harness writes one canonical unsigned report matching
 `schemas/windows-isolation-physical-report-v1.schema.json`. Signing and
@@ -76,18 +82,12 @@ PYTHONPATH=devcontrol/src python -m kaliv_dev_control verify-physical-report \
   --key-id operator-key-2026
 ```
 
-On POSIX, the key loader requires one owner-only regular file with no additional
-hard links in an owner-controlled non-writable directory. On Windows, key loading
-fails closed until a native owner/DACL handle verifier lands. HMAC proves exact
-artifact/key binding only while a separately operated operator process retains
-custody of the key.
-
 ## Deliberately absent
 
-DC-L01–DC-L04 provide no Windows containment substrate, non-empty executable
-catalog, GitHub write adapter, credential loader, remote Git, push, pull-request
-mutation, reviewer request, merge, release, deployment or activation authority.
-Native Windows containment belongs to DC-L05.
+DC-L01–DC-L05 provide no non-empty executable catalog, Tier-A authority
+materialization, verified DevControl execution facade, trusted Git runtime,
+credential loader, GitHub write adapter, remote Git, push, pull-request mutation,
+reviewer request, merge, release, deployment or activation authority.
 
 ## Validation
 
@@ -97,5 +97,6 @@ PYTHONPATH=devcontrol/src python -m kaliv_dev_control validate-task task.json
 python3 tests/workflow_test_coverage.py
 ```
 
-Exact-path, provenance, mutation and review evidence for this slice lives under
-`docs/devcontrol/dc-l04/`.
+Native Windows containment contracts run in the reusable CI workflow on a real
+Windows runner. Exact-path, provenance, mutation and review evidence for this
+slice lives under `docs/devcontrol/dc-l05/`.

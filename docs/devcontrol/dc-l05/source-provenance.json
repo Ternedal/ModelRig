@@ -1,0 +1,52 @@
+{
+  "schema": "modelrig-devcontrol-dc-l05-source-provenance/v1",
+  "source": {
+    "pull_request": 338,
+    "head": "07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f"
+  },
+  "base": "a1fe16f05ba312e719b1254bba9919809bab4215",
+  "landed_blobs": {
+    "worker/app/toolhost.py": "8723feffb37dfc451789a79142dc2d1c81d70734",
+    "worker/app/windows_capture.py": "97534ed5c8294a553d97fc771f3075998b3ed0b7",
+    "worker/app/windows_job.py": "bb62b8dcee5b3a2aee83e49b29655a28753fef4e",
+    "worker/app/windows_restricted.py": "dcbd7a4b71456cf3eeba1791d21a8d2eea2e9548",
+    "worker/app/windows_runtime_guard.py": "032f1ff85b575d17c628fbd08e289db4cf2033dc",
+    "worker/app/windows_tier_a.py": "5767b3f66576f101de9fa73d484e55a20a1ddd55",
+    "tests/support/windows_bounded_subprocess_contract.py": "f24926c8c162921974d8935bec3f5b2314387798",
+    "tests/support/windows_capture_helper.c": "7d2ffcab7db13c8eda76054fe4389aaf1973aaac",
+    "tests/support/windows_catalog_tier_a_contract.py": "5b2efdb34b9b058b8131acaedcc8f37f6ae42965",
+    "tests/support/windows_job_close_contract.py": "62e420cdfd32977186cc61abaa4d81b17eee95e3",
+    "tests/support/windows_job_contract.py": "935f3852adc579eb02a507f425a7eb0077790e0a",
+    "tests/support/windows_restricted_contract.py": "672b568be3ac61cfe776231a0ab68b651dc473b0",
+    "tests/support/windows_restricted_helper.c": "cc4ba9650cb0afad8e1bc008eaef4d0b02887a72",
+    "tests/support/windows_tier_a_environment_contract.py": "bf9416a5c620794beee3f5fdeeacda5329a076bb",
+    "tests/support/windows_tier_a_receipt_contract.py": "456984d2bb399338d19147ee081a9443e58f1b97"
+  },
+  "projections": [
+    {
+      "path": ".github/workflows/_tests.yml",
+      "source_blob": "0dc87d714d05d8a14edae4b96fbd635940581e83",
+      "base_blob": "132327562b84ba8cb82a40315c6c4739403806a3",
+      "reason": "activate only native DC-L05 Windows contracts; defer Tier-A catalog and Git-aware receipt integration"
+    },
+    {
+      "path": "devcontrol/README.md",
+      "source_blob": "c5c0e0e21ea979447a0138616b3f749219cf0a40",
+      "base_blob": "945f9d5e2c3914bca8b91ceebeda764f5ceb329b",
+      "reason": "describe only the cumulative DC-L01 through DC-L05 boundary"
+    },
+    {
+      "path": "tests/workflow_test_coverage.py",
+      "source_blob": "78fa51aa32ef1973315a5a2ac97c6b8a252a111d",
+      "base_blob": "f6aea5f33875568b9c38f26e418344e52c087116",
+      "reason": "prove native Windows reachability, later-contract dormancy and product-to-DevControl import separation"
+    }
+  ],
+  "inspected_unchanged": {
+    "worker/requirements.txt": {
+      "source_blob": "60fc92ccf71d16d7d64450fe1d7626b2619536d2",
+      "base_blob": "0678207336383bac25f30fb2e987a2a58e8771ae",
+      "reason": "the source cryptography addition belongs to later asymmetric-authority scope"
+    }
+  }
+}
