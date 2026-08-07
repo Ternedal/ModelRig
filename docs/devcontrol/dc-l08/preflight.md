@@ -13,15 +13,24 @@ launch must be bound to a fresh physical-evidence lease, a command-specific
 signed runtime closure, deterministic staging, an exact v3 launch plan and the
 existing Windows AppContainer plus Job Object substrate.
 
-## Locked source paths
+## Locked source paths and projections
 
 - `devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py`;
 - `devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py`; and
 - `devcontrol/tests/test_h10r_tier_a_legacy_runner_extraction.py`.
 
-The two executor modules remain source-exact. The extraction test is projected
-to the DC-L08 boundary because the locked source test also asserts DC-L09's final
-public facade and command-receipt integration.
+All three locked paths are deliberately projected:
+
+1. both executor modules replace the later `ExecutableVerifier` annotation with
+   `Any`, because that protocol is not part of the landed DC-L07 catalog surface;
+2. both executor modules late-bind the approved `app.windows_*` substrate through
+   `importlib`, preserving dormant package import while keeping the same native
+   launch, capture, lifetime-guard and Job Object calls; and
+3. the extraction test removes only DC-L09's final public-facade and
+   command-receipt assertions.
+
+No runtime authorization, revalidation, containment, cleanup, bounded-output or
+fail-closed behavior from the locked executor source is removed.
 
 ## Progressive surfaces
 
@@ -44,7 +53,7 @@ public facade and command-receipt integration.
 ## Merge gates
 
 - exact 18-path diff and source provenance;
-- exact executor symbol ownership;
+- exact executor symbol ownership and documented source projections;
 - no DC-L09+ imports or files;
 - package import remains dormant;
 - closure-bound executor fails closed off Windows;
