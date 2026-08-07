@@ -5,63 +5,71 @@ Run: python3 tests/workflow_test_coverage.py
 from __future__ import annotations
 
 import fnmatch
+import json
 import re
+import sys
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
 workflow = (root / ".github/workflows/_tests.yml").read_text(encoding="utf-8")
+sys.path.insert(0, str(root / "devcontrol/src"))
+
+from kaliv_dev_control.catalog import (
+    CatalogError,
+    ModelRigCommandCatalog,
+    ProjectCommandSpec,
+    TaskBoundCommandRegistry,
+    modelrig_command_catalog,
+)
+from kaliv_dev_control.commands import CommandPolicyError, CommandTemplate
+from kaliv_dev_control.contract import DevelopmentTask
 
 passed = failed = 0
 
 
-def check(cond, msg):
+def check(condition: bool, message: str) -> None:
     global passed, failed
-    if cond:
+    if condition:
         passed += 1
-        print(f"  PASS: {msg}")
+        print(f"  PASS: {message}")
     else:
         failed += 1
-        print(f"  FAIL: {msg}")
+        print(f"  FAIL: {message}")
 
 
-m = re.search(r"for f in ([^;]+); do", workflow)
-check(m is not None, "the workflow still runs repository tests through a readable glob loop")
-if m is None:
-    print("\n===== TEST COVERAGE: cannot verify -- workflow shape changed =====")
+match = re.search(r"for f in ([^;]+); do", workflow)
+check(match is not None, "the workflow still runs repository tests through a readable glob loop")
+if match is None:
     raise SystemExit(1)
+patterns = match.group(1).split()
+check(len(patterns) >= 2, f"repository test globs found: {' '.join(patterns)}")
 
-patterns = m.group(1).split()
-check(len(patterns) >= 2, f"glob patterns found: {' '.join(patterns)}")
-
-files = sorted(p.relative_to(root).as_posix() for p in (root / "tests").glob("*.py"))
-check(len(files) > 10, f"{len(files)} repository test files on disk")
-
-missed = [f for f in files if not any(fnmatch.fnmatch(f, g) for g in patterns)]
-check(
-    not missed,
-    "every repository test file matches a CI pattern"
-    if not missed
-    else f"UNREACHED BY CI: {', '.join(missed)} -- rename them or widen the glob",
+repository_tests = sorted(
+    path.relative_to(root).as_posix() for path in (root / "tests").glob("*.py")
 )
+missed = [
+    path
+    for path in repository_tests
+    if not any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
+]
+check(len(repository_tests) > 10, f"{len(repository_tests)} repository test files on disk")
+check(not missed, "every repository test file matches a CI pattern" if not missed else f"unreached: {missed}")
 
-fake = ["tests/agent_smoke.py", "tests/worker_unit.py"]
-fake_missed = [f for f in fake if not any(fnmatch.fnmatch(f, g) for g in patterns)]
-check(
-    fake_missed == ["tests/agent_smoke.py"],
-    "self-test: a repository file outside the patterns is detected",
-)
+self_test = ["tests/agent_smoke.py", "tests/worker_unit.py"]
+self_test_missed = [
+    path
+    for path in self_test
+    if not any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
+]
+check(self_test_missed == ["tests/agent_smoke.py"], "coverage self-test detects a file outside CI globs")
 
-discovery_command = (
+command = (
     "PYTHONPATH=devcontrol/src python3 -m unittest discover "
     "-s devcontrol/tests -p 'test_*.py' -v"
 )
-check(
-    discovery_command in workflow,
-    "the workflow runs the exact DevControl unittest discovery command",
-)
+check(command in workflow, "CI runs the exact DevControl unittest discovery command")
 
-devcontrol_tests = sorted((root / "devcontrol/tests").glob("test_*.py"))
-expected = {
+expected_modules = {
     "test_bounded_subprocess.py",
     "test_campaign_review.py",
     "test_durable_publication.py",
@@ -69,14 +77,160 @@ expected = {
     "test_proposal_reload.py",
     "test_review_reload.py",
     "test_slice2.py",
+    "test_slice5.py",
     "test_store_proposal.py",
 }
-observed = {path.name for path in devcontrol_tests}
-check(observed == expected, f"the eight DC-L01–L02 test modules are present: {sorted(observed)}")
-check(
-    all(path.is_file() for path in devcontrol_tests),
-    "every DevControl test matched by unittest discovery is a regular file",
+observed_modules = {
+    path.name for path in (root / "devcontrol/tests").glob("test_*.py")
+}
+check(observed_modules == expected_modules, f"the nine DC-L01–L03 test modules are present: {sorted(observed_modules)}")
+
+receipt_schema = json.loads(
+    (root / "devcontrol/schemas/development-github-read-receipt-v1.schema.json").read_text(encoding="utf-8")
 )
+repository_pattern = re.compile(receipt_schema["properties"]["repository"]["pattern"])
+check(repository_pattern.fullmatch("Ternedal/ModelRig") is not None, "receipt schema accepts canonical ModelRig repository")
+check(
+    all(
+        repository_pattern.fullmatch(value) is None
+        for value in ("./ModelRig", "Ternedal/..", "Ternedal/Model Rig", "Ternedal/\x00ModelRig")
+    ),
+    "receipt schema rejects dot segments, whitespace and NUL authority",
+)
+
+catalog = modelrig_command_catalog()
+check(isinstance(catalog, ModelRigCommandCatalog) and catalog.command_ids == (), "DC-L03 default command catalog is empty and dormant")
+removed_ids = (
+    "modelrig.version.check",
+    "modelrig.devcontrol.tests",
+    "modelrig.workflow.test-coverage",
+    "modelrig.backend.vet",
+    "modelrig.backend.tests",
+)
+removed = True
+for command_id in removed_ids:
+    try:
+        catalog.resolve(command_id)
+    except CatalogError:
+        continue
+    removed = False
+check(removed, "no Python or Go command ID is exposed by the default catalog")
+
+runtime_closed = True
+for tool_id in ("python", "go", "sandbox"):
+    try:
+        ProjectCommandSpec(
+            "modelrig.runtime.probe",
+            tool_id,
+            ("probe",),
+            ".",
+            10,
+            {},
+        )
+    except CatalogError:
+        continue
+    runtime_closed = False
+check(runtime_closed, "Python, Go and direct sandbox command runtimes fail closed")
+
+static_spec = ProjectCommandSpec(
+    "modelrig.static.probe",
+    "statictool",
+    ("probe",),
+    ".",
+    10,
+    {"CI": "1"},
+)
+check(
+    dict(static_spec.env)
+    == {
+        "CI": "1",
+        "PATH": "/usr/bin:/bin",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "LC_CTYPE": "C",
+        "TZ": "UTC",
+    },
+    "custom static commands receive the fixed reviewed process environment",
+)
+
+blocked_environment = True
+for key, value in (
+    ("PATH", "/attacker/bin"),
+    ("PYTHONPATH", "."),
+    ("PYTHONUSERBASE", "."),
+    ("GOROOT", "."),
+    ("GOTOOLCHAIN", "auto"),
+    ("LD_PRELOAD", "/tmp/x.so"),
+):
+    try:
+        ProjectCommandSpec(
+            "modelrig.static.probe",
+            "statictool",
+            ("probe",),
+            ".",
+            10,
+            {key: value},
+        )
+    except CatalogError:
+        continue
+    blocked_environment = False
+check(blocked_environment, "ambient loader, interpreter, toolchain and PATH authority is rejected")
+
+snapshot_task = DevelopmentTask.from_mapping(
+    {
+        "schema": "kaliv-development-task/v1",
+        "task_id": "DC_L03_SNAPSHOT",
+        "repository": "Ternedal/ModelRig",
+        "base_sha": "a" * 40,
+        "goal": "Prove exact task binding.",
+        "acceptance_criteria": ["Registry cannot be retargeted."],
+        "risk": "low",
+        "allowed_paths": ["devcontrol/**"],
+        "protected_paths": [".github/**"],
+        "allowed_command_ids": ["modelrig.static.probe"],
+        "required_tests": ["exact task binding"],
+        "budget": {
+            "max_changed_files": 1,
+            "max_added_lines": 1,
+            "max_deleted_lines": 0,
+            "max_attempts": 1,
+            "max_runtime_seconds": 30,
+            "max_output_bytes": 4096,
+        },
+        "merge_authority": "human",
+    }
+)
+registry = TaskBoundCommandRegistry(
+    (
+        CommandTemplate(
+            "modelrig.static.probe",
+            ("/proc/self/fd/100", "probe"),
+            ".",
+            30,
+            {"PATH": "/usr/bin:/bin"},
+        ),
+    ),
+    snapshot_task,
+    object(),
+    "/proc/self/fd/101",
+)
+private_task = registry.execution_task(snapshot_task)
+check(private_task is not snapshot_task and private_task.canonical_json() == snapshot_task.canonical_json(), "registry reconstructs one private exact-task snapshot")
+check(registry.sandbox_bootstrap_mode(private_task) == "static", "task-bound registry uses the static sandbox protocol")
+retargeted = DevelopmentTask.from_mapping({**snapshot_task.to_dict(), "base_sha": "b" * 40})
+try:
+    registry.resolve(retargeted, "modelrig.static.probe")
+except CommandPolicyError:
+    retarget_rejected = True
+else:
+    retarget_rejected = False
+check(retarget_rejected, "task-bound registry rejects cross-task retargeting")
+
+allowlist = json.loads(
+    (root / "docs/devcontrol/dc-l03/exact-path-allowlist.json").read_text(encoding="utf-8")
+)
+paths = allowlist.get("paths") or allowlist.get("allowed_paths")
+check(isinstance(paths, list) and len(paths) == 16 and len(set(paths)) == 16, "DC-L03 exact path allowlist contains 16 unique paths")
 
 print(f"\n===== TEST COVERAGE: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

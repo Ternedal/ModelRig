@@ -1,0 +1,68 @@
+{
+  "schema": "modelrig-devcontrol-symbol-ownership/v1",
+  "slice": "DC-L03",
+  "owners": [
+    {
+      "path": "devcontrol/src/kaliv_dev_control/catalog.py",
+      "symbols": [
+        "ProjectCommandSpec",
+        "ModelRigCommandCatalog",
+        "ToolBinding",
+        "Toolchain",
+        "IsolationAttestation",
+        "RejectUnverifiedIsolation",
+        "LocalExecutableHashVerifier",
+        "CatalogMaterializer",
+        "modelrig_command_catalog"
+      ],
+      "authority": "dormant catalog and isolation contracts; empty default catalog; static-only future custom executable verification"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/commands.py",
+      "symbols": [
+        "CommandRegistry.execution_task",
+        "CommandRegistry.sandbox_bootstrap_mode",
+        "CommandExecutor._confined_argv",
+        "CommandExecutor.execute"
+      ],
+      "authority": "private exact-task execution snapshot and static-helper protocol on the pre-existing execution surface; no default command authority"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/github_read.py",
+      "symbols": [
+        "HttpResponse",
+        "ReadOnlyTransport",
+        "UrllibReadOnlyTransport",
+        "GitHubReadReceipt",
+        "GitHubReadAdapter"
+      ],
+      "authority": "bounded fixed-host GET-only exact-SHA GitHub commit and file reads"
+    },
+    {
+      "path": "devcontrol/tests/test_slice5.py",
+      "symbols": [
+        "CatalogRuntimeTests",
+        "GitHubReadTests"
+      ],
+      "authority": "executable dormant-catalog, static-runtime and GitHub read regressions"
+    },
+    {
+      "path": "tests/workflow_test_coverage.py",
+      "symbols": [
+        "dormant catalog contract",
+        "static runtime contract",
+        "exact task binding",
+        "workflow coverage contract"
+      ],
+      "authority": "repository-level executable control checks reached by CI"
+    }
+  ],
+  "forbidden_ownership": [
+    "default command IDs or Python/Go execution authority",
+    "HTTP methods other than GET",
+    "GitHub mutation or remote Git",
+    "credential persistence or receipt serialization",
+    "generic process-launch authority",
+    "merge, release, deployment or activation"
+  ]
+}

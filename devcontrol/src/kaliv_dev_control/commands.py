@@ -405,6 +405,25 @@ class CommandRegistry:
             values[template.command_id] = template
         self._templates = MappingProxyType(values)
 
+    def execution_task(self, task: DevelopmentTask) -> DevelopmentTask:
+        """Return one strict private task snapshot for the complete execution."""
+        if not isinstance(task, DevelopmentTask):
+            raise CommandPolicyError("command execution requires a development task")
+        try:
+            return DevelopmentTask.from_mapping(task.to_dict())
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise CommandPolicyError("command execution task is invalid") from exc
+
+    def sandbox_bootstrap_executable(self, task: DevelopmentTask) -> str:
+        """Return the executable used to install the sandbox boundary."""
+        del task
+        return sys.executable
+
+    def sandbox_bootstrap_mode(self, task: DevelopmentTask) -> str:
+        """Return the launch protocol for the sandbox bootstrap executable."""
+        del task
+        return "python"
+
     def resolve(self, task: DevelopmentTask, command_id: str) -> CommandTemplate:
         if command_id not in task.allowed_command_ids:
             raise CommandPolicyError("command is not allowed by the task contract")
@@ -743,13 +762,33 @@ class CommandExecutor:
         sandbox_root: Path,
         cwd: Path,
         argv: tuple[str, ...],
+        bootstrap_executable: str,
+        bootstrap_mode: str = "python",
     ) -> tuple[str, ...]:
         if not sys.platform.startswith("linux"):
             raise CommandExecutionError(
                 "filesystem-confined command execution is Linux-only in DC-L01"
             )
+        if (
+            not isinstance(bootstrap_executable, str)
+            or not bootstrap_executable
+            or "\x00" in bootstrap_executable
+            or not Path(bootstrap_executable).is_absolute()
+        ):
+            raise CommandExecutionError(
+                "sandbox bootstrap executable is not a canonical absolute object"
+            )
+        if bootstrap_mode == "static":
+            return (
+                bootstrap_executable,
+                str(sandbox_root),
+                str(cwd),
+                *argv,
+            )
+        if bootstrap_mode != "python":
+            raise CommandExecutionError("sandbox bootstrap protocol is invalid")
         return (
-            sys.executable,
+            bootstrap_executable,
             "-I",
             "-c",
             _LANDLOCK_SANDBOX_BOOTSTRAP,
@@ -764,17 +803,30 @@ class CommandExecutor:
         workspace: Path,
         command_id: str,
     ) -> CommandReceipt:
-        template = self.registry.resolve(task, command_id)
+        execution_task = self.registry.execution_task(task)
+        template = self.registry.resolve(execution_task, command_id)
+        bootstrap_provider = getattr(
+            self.registry, "sandbox_bootstrap_executable", None
+        )
+        bootstrap_executable = (
+            sys.executable
+            if bootstrap_provider is None
+            else bootstrap_provider(execution_task)
+        )
+        mode_provider = getattr(self.registry, "sandbox_bootstrap_mode", None)
+        bootstrap_mode = (
+            "python" if mode_provider is None else mode_provider(execution_task)
+        )
         source = workspace.resolve()
         source_text = str(source)
         if any(source_text in argument for argument in template.argv):
             raise CommandPolicyError(
                 "command arguments cannot disclose the source workspace"
             )
-        source_before = self._verify_source_clean(task, source)
+        source_before = self._verify_source_clean(execution_task, source)
         self._cwd(source, template.cwd)
 
-        sandbox = _CommandSandbox(self, task, source)
+        sandbox = _CommandSandbox(self, execution_task, source)
         result = None
         duration_ms = 0
         before_worktree = ""
@@ -788,17 +840,23 @@ class CommandExecutor:
                 raise CommandExecutionError("command sandbox was not created")
             cwd = self._cwd(sandbox.repository, template.cwd)
             command_env = sandbox.environment(template.env, cwd)
-            confined_argv = self._confined_argv(sandbox.root, cwd, template.argv)
+            confined_argv = self._confined_argv(
+                sandbox.root,
+                cwd,
+                template.argv,
+                bootstrap_executable,
+                bootstrap_mode,
+            )
             started = time.monotonic()
             try:
                 result = self.runner.run(
                     confined_argv,
                     cwd=cwd,
                     timeout_seconds=min(
-                        task.budget.max_runtime_seconds,
+                        execution_task.budget.max_runtime_seconds,
                         template.max_timeout_seconds,
                     ),
-                    max_output_bytes=task.budget.max_output_bytes,
+                    max_output_bytes=execution_task.budget.max_output_bytes,
                     env=command_env,
                 )
             except WorkspaceError as exc:
@@ -807,7 +865,7 @@ class CommandExecutor:
                 ) from exc
             duration_ms = max(0, int((time.monotonic() - started) * 1_000))
             try:
-                self._verify_head(task, sandbox.repository)
+                self._verify_head(execution_task, sandbox.repository)
                 after_worktree, after_clean = self._snapshot(sandbox.repository)
                 after_metadata = sandbox.metadata_fingerprint()
             except (WorkspaceError, CommandExecutionError) as exc:
@@ -823,7 +881,7 @@ class CommandExecutor:
                 cleanup_error = exc
             try:
                 self._verify_source_clean(
-                    task, source, expected_fingerprint=source_before
+                    execution_task, source, expected_fingerprint=source_before
                 )
             except Exception as exc:
                 source_error = exc
@@ -841,16 +899,16 @@ class CommandExecutor:
         unchanged = before_sha == after_sha and after_clean
         reset = not unchanged
 
-        task_sha = self._sha256(task.canonical_json().encode("utf-8"))
+        task_sha = self._sha256(execution_task.canonical_json().encode("utf-8"))
         stdout = result.stdout.encode("utf-8")
         stderr = result.stderr.encode("utf-8")
         argv = json.dumps(
             list(template.argv), ensure_ascii=False, separators=(",", ":")
         ).encode("utf-8")
         return CommandReceipt(
-            task_id=task.task_id,
+            task_id=execution_task.task_id,
             task_sha256=task_sha,
-            base_sha=task.base_sha,
+            base_sha=execution_task.base_sha,
             command_id=command_id,
             argv_sha256=self._sha256(argv),
             cwd=template.cwd,

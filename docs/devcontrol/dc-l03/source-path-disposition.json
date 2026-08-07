@@ -1,0 +1,38 @@
+{
+  "schema": "modelrig-devcontrol-source-path-disposition/v1",
+  "slice": "DC-L03",
+  "locked_source_head": "07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f",
+  "exact_copy_count": 0,
+  "projected_count": 5,
+  "unassigned_count": 0,
+  "hard_exclusions": [
+    "GitHub write or non-GET HTTP operation",
+    "remote Git operation",
+    "default_registry mutation",
+    "physical isolation verification",
+    "Windows executable verification",
+    "new command, process-launch or activation authority"
+  ],
+  "assignments": [
+    {
+      "path": "devcontrol/schemas/development-github-read-receipt-v1.schema.json",
+      "disposition": "project"
+    },
+    {
+      "path": "devcontrol/schemas/development-isolation-attestation-v1.schema.json",
+      "disposition": "project"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/catalog.py",
+      "disposition": "project"
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/github_read.py",
+      "disposition": "project"
+    },
+    {
+      "path": "devcontrol/tests/test_slice5.py",
+      "disposition": "project"
+    }
+  ]
+}
