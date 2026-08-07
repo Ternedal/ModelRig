@@ -1,20 +1,14 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from kaliv_dev_control.catalog import IsolationBoundary, NetworkMode
-from kaliv_dev_control.tier_a_execution import (
+from kaliv_dev_control.tier_a_authority import (
     TierAExecutionLease,
     TierALaunchPlan,
-    working_directory_authority_sha256,
-)
-from kaliv_dev_control.tier_a_result import (
-    TierAExecutionResult,
-    TierAOutputStream,
 )
 
 HASH_A = "a" * 64
@@ -26,7 +20,7 @@ HASH_F = "f" * 64
 
 
 class TierASchemaParityTests(unittest.TestCase):
-    def test_execution_lease_schema_matches_canonical_artifact(self):
+    def test_execution_lease_schema_matches_canonical_artifact(self) -> None:
         lease = TierAExecutionLease(
             task_id="A9_SCHEMA",
             task_sha256=HASH_A,
@@ -57,11 +51,13 @@ class TierASchemaParityTests(unittest.TestCase):
         self.assertEqual(set(schema["required"]), fields)
         self.assertEqual(set(schema["properties"]), fields)
         self.assertEqual(
-            TierAExecutionLease.from_mapping(lease.to_dict()).canonical_json(),
+            TierAExecutionLease.from_mapping(
+                lease.to_dict()
+            ).canonical_json(),
             lease.canonical_json(),
         )
 
-    def test_launch_plan_schema_matches_canonical_artifact(self):
+    def test_v1_launch_plan_schema_matches_canonical_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory).resolve()
             plan = TierALaunchPlan(
@@ -72,7 +68,6 @@ class TierASchemaParityTests(unittest.TestCase):
                 argv=(str((workspace / "probe.exe").resolve()), "--version"),
                 cwd=".",
                 max_timeout_seconds=30,
-                max_output_bytes=4096,
                 env={"CI": "1", "PYTHONDONTWRITEBYTECODE": "1"},
                 catalog_sha256=HASH_B,
                 toolchain_sha256=HASH_C,
@@ -82,9 +77,6 @@ class TierASchemaParityTests(unittest.TestCase):
                 workspace_root_sha256=HASH_F,
                 executable_sha256="0" * 64,
                 toolhost_sha256="1" * 64,
-                working_directory_sha256=working_directory_authority_sha256(
-                    workspace, "."
-                ),
                 boundary=IsolationBoundary.OS_ISOLATED,
                 network_mode=NetworkMode.DENY,
             )
@@ -92,65 +84,31 @@ class TierASchemaParityTests(unittest.TestCase):
             schema = json.loads(
                 (
                     root
-                    / "devcontrol/schemas/development-tier-a-launch-plan-v3.schema.json"
+                    / "devcontrol/schemas/"
+                    "development-tier-a-launch-plan-v1.schema.json"
                 ).read_text(encoding="utf-8")
             )
             fields = set(plan.to_dict())
             self.assertEqual(set(schema["required"]), fields)
             self.assertEqual(set(schema["properties"]), fields)
-            self.assertFalse(schema["properties"]["env"]["additionalProperties"])
+            self.assertFalse(
+                schema["properties"]["env"]["additionalProperties"]
+            )
             self.assertEqual(
-                TierALaunchPlan.from_mapping(plan.to_dict()).canonical_json(),
+                TierALaunchPlan.from_mapping(
+                    plan.to_dict()
+                ).canonical_json(),
                 plan.canonical_json(),
             )
 
-    def test_execution_result_schema_matches_canonical_artifact(self):
-        stdout_bytes = b"captured stdout\n"
-        stderr_bytes = b""
-        stdout = TierAOutputStream(
-            captured=stdout_bytes,
-            sha256=hashlib.sha256(stdout_bytes).hexdigest(),
-            total_bytes=len(stdout_bytes),
-            truncated=False,
-        )
-        stderr = TierAOutputStream(
-            captured=stderr_bytes,
-            sha256=hashlib.sha256(stderr_bytes).hexdigest(),
-            total_bytes=0,
-            truncated=False,
-        )
-        result = TierAExecutionResult.create(
-            task_id="A9_SCHEMA",
-            task_sha256=HASH_A,
-            base_sha="1" * 40,
-            command_id="modelrig.schema.probe",
-            plan_sha256=HASH_B,
-            lease_sha256=HASH_C,
-            signed_report_sha256=HASH_D,
-            returncode=0,
-            duration_ms=25,
-            timed_out=False,
-            max_output_bytes=4096,
-            stdout=stdout,
-            stderr=stderr,
-        )
+    def test_later_slice_schemas_remain_absent(self) -> None:
         root = Path(__file__).resolve().parents[2]
-        schema = json.loads(
-            (
-                root
-                / "devcontrol/schemas/development-tier-a-execution-result-v1.schema.json"
-            ).read_text(encoding="utf-8")
-        )
-        fields = set(result.to_dict())
-        self.assertEqual(set(schema["required"]), fields)
-        self.assertEqual(set(schema["properties"]), fields)
-        stream_fields = set(result.stdout.to_dict())
-        self.assertEqual(set(schema["$defs"]["stream"]["required"]), stream_fields)
-        self.assertEqual(set(schema["$defs"]["stream"]["properties"]), stream_fields)
-        self.assertEqual(
-            TierAExecutionResult.from_mapping(result.to_dict()).canonical_json(),
-            result.canonical_json(),
-        )
+        for relative in (
+            "devcontrol/schemas/development-tier-a-launch-plan-v2.schema.json",
+            "devcontrol/schemas/development-tier-a-launch-plan-v3.schema.json",
+            "devcontrol/schemas/development-tier-a-execution-result-v1.schema.json",
+        ):
+            self.assertFalse((root / relative).exists(), relative)
 
 
 if __name__ == "__main__":
