@@ -27,12 +27,20 @@ _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
 _TASK_ID = re.compile(r"^[A-Z][A-Z0-9_-]{2,63}$")
-_FIXED_PATH = "/usr/bin:/bin"
+_FIXED_PROCESS_ENV = MappingProxyType(
+    {
+        "PATH": "/usr/bin:/bin",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "LC_CTYPE": "C",
+        "TZ": "UTC",
+    }
+)
 _ALLOWED_ENV = {
     "CI": "1",
     "MODELRIG_DEVCONTROL": "1",
     "GOTOOLCHAIN": "local",
-    "PATH": _FIXED_PATH,
+    **_FIXED_PROCESS_ENV,
 }
 _MAX_EXECUTABLE_BYTES = 256_000_000
 _MAX_PINNED_EXECUTABLES = 128
@@ -122,7 +130,8 @@ class ProjectCommandSpec:
             if key not in _ALLOWED_ENV or value != _ALLOWED_ENV[key]:
                 raise CatalogError("catalog environment is outside the reviewed isolation positive list")
             clean[key] = value
-        clean.setdefault("PATH", _FIXED_PATH)
+        for key, value in _FIXED_PROCESS_ENV.items():
+            clean.setdefault(key, value)
         object.__setattr__(self, "env", MappingProxyType(clean))
 
     def copy(self) -> "ProjectCommandSpec":
@@ -356,10 +365,21 @@ class TaskBoundCommandRegistry(CommandRegistry):
         templates: Sequence[CommandTemplate],
         task: DevelopmentTask,
         executable_verifier: ExecutableVerifier,
+        bootstrap_executable: str,
     ) -> None:
         super().__init__(templates)
+        if (
+            not isinstance(bootstrap_executable, str)
+            or not bootstrap_executable
+            or "\0" in bootstrap_executable
+            or not _absolute(bootstrap_executable)
+        ):
+            raise CommandPolicyError(
+                "task-bound registry bootstrap executable is invalid"
+            )
         object.__setattr__(self, "_bound_task_identity", self._identity(task))
         object.__setattr__(self, "_catalog_executable_verifier", executable_verifier)
+        object.__setattr__(self, "_bootstrap_executable", bootstrap_executable)
         object.__setattr__(self, "_sealed", True)
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -381,6 +401,17 @@ class TaskBoundCommandRegistry(CommandRegistry):
             snapshot.repository,
             snapshot.base_sha,
         )
+
+    def execution_task(self, task: DevelopmentTask) -> DevelopmentTask:
+        snapshot = super().execution_task(task)
+        if self._identity(snapshot) != self._bound_task_identity:
+            raise CommandPolicyError("command registry is not bound to this exact task")
+        return snapshot
+
+    def sandbox_bootstrap_executable(self, task: DevelopmentTask) -> str:
+        if self._identity(task) != self._bound_task_identity:
+            raise CommandPolicyError("command registry is not bound to this exact task")
+        return self._bootstrap_executable
 
     def resolve(self, task: DevelopmentTask, command_id: str) -> CommandTemplate:
         if self._identity(task) != self._bound_task_identity:
@@ -553,7 +584,19 @@ class CatalogMaterializer:
             or authority(verified_snapshot) != expected
         ):
             raise CatalogError("isolation verifier mutated the attestation")
-        templates, invocations = [], {}
+
+        bootstrap_binding = snapshot.resolve("python")
+        bootstrap_executable = executable_verifier.verify(bootstrap_binding)
+        if (
+            not isinstance(bootstrap_executable, str)
+            or not bootstrap_executable
+            or not _absolute(bootstrap_executable)
+        ):
+            raise CatalogError(
+                "executable verifier did not return a pinned bootstrap object"
+            )
+        templates: list[CommandTemplate] = []
+        invocations = {bootstrap_binding.tool_id: bootstrap_executable}
         for spec in specs:
             if spec.required_boundary is not IsolationBoundary.OS_ISOLATED or spec.network_mode is not NetworkMode.DENY:
                 raise CatalogError("catalog command weakened isolation")
@@ -569,7 +612,10 @@ class CatalogMaterializer:
                 max_timeout_seconds=spec.max_timeout_seconds, env=spec.env,
             ))
         return TaskBoundCommandRegistry(
-            templates, task_snapshot, executable_verifier
+            templates,
+            task_snapshot,
+            executable_verifier,
+            bootstrap_executable,
         )
 
 
@@ -577,7 +623,7 @@ def modelrig_command_catalog() -> ModelRigCommandCatalog:
     common = {
         "CI": "1",
         "MODELRIG_DEVCONTROL": "1",
-        "PATH": _FIXED_PATH,
+        **_FIXED_PROCESS_ENV,
     }
     return ModelRigCommandCatalog((
         ProjectCommandSpec("modelrig.version.check", "python", ("scripts/version_tool.py", "check"), ".", 120, common),
