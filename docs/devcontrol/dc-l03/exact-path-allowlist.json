@@ -11,8 +11,8 @@
     "devcontrol/tests/test_slice5.py"
   ],
   "progressive_surfaces": [
-    "devcontrol/README.md",
     "devcontrol/pyproject.toml",
+    "devcontrol/src/kaliv_dev_control/commands.py",
     "tests/workflow_test_coverage.py"
   ],
   "control_artifacts": [
@@ -27,11 +27,11 @@
   ],
   "path_count": 16,
   "paths": [
-    "devcontrol/README.md",
     "devcontrol/pyproject.toml",
     "devcontrol/schemas/development-github-read-receipt-v1.schema.json",
     "devcontrol/schemas/development-isolation-attestation-v1.schema.json",
     "devcontrol/src/kaliv_dev_control/catalog.py",
+    "devcontrol/src/kaliv_dev_control/commands.py",
     "devcontrol/src/kaliv_dev_control/github_read.py",
     "devcontrol/tests/test_slice5.py",
     "docs/devcontrol/dc-l03/exact-head-validation.md",
