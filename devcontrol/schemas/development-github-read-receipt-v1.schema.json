@@ -22,7 +22,12 @@
     "schema": {"const": "kaliv-development-github-read-receipt/v1"},
     "task_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]{2,63}$"},
     "task_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "repository": {"type": "string", "minLength": 3, "maxLength": 200, "pattern": "^[^/\\s]+/[^/\\s]+$"},
+    "repository": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 200,
+      "pattern": "^(?!\\.{1,2}/)(?![^/\\s\\u0000]+/\\.{1,2}$)[^/\\s\\u0000]+/[^/\\s\\u0000]+$"
+    },
     "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "operation": {"enum": ["verify_base_commit", "read_file"]},
     "path": {"type": "string", "maxLength": 512},
