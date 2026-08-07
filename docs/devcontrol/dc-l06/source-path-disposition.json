@@ -3,7 +3,6 @@
   "land": [
     "devcontrol/schemas/development-execution-lease-v1.schema.json",
     "devcontrol/schemas/development-tier-a-launch-plan-v1.schema.json",
-    "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_lease.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py",
@@ -17,6 +16,7 @@
     "devcontrol/tests/test_slice9_schemas.py"
   ],
   "progressive": [
+    "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py",
