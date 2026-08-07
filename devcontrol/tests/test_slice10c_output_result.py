@@ -4,10 +4,7 @@ import hashlib
 import unittest
 
 import kaliv_dev_control._tier_a_execution_core as legacy_core
-from kaliv_dev_control.tier_a_execution import (
-    PLAN_SCHEMA,
-    run_verified_tier_a_command,
-)
+import kaliv_dev_control.tier_a_authority as tier_a_authority
 from kaliv_dev_control.tier_a_result import (
     TierAExecutionResult,
     TierAOutputStream,
@@ -133,11 +130,14 @@ class TierAOutputResultTests(unittest.TestCase):
         self.assertTrue(result.timed_out)
         self.assertFalse(result.passed)
 
-    def test_only_public_runtime_path_uses_the_v3_plan(self):
-        self.assertEqual(PLAN_SCHEMA, "kaliv-development-tier-a-launch-plan/v3")
-        self.assertTrue(callable(run_verified_tier_a_command))
-        self.assertFalse(hasattr(legacy_core, "run_verified_tier_a_command"))
-        self.assertFalse(hasattr(legacy_core, "_run_tier_a_launch_plan"))
+    def test_dc_l07_uses_v3_plan_identity_without_execution_authority(self):
+        self.assertEqual(
+            tier_a_authority.PLAN_SCHEMA,
+            "kaliv-development-tier-a-launch-plan/v3",
+        )
+        for module in (tier_a_authority, legacy_core):
+            self.assertFalse(hasattr(module, "run_verified_tier_a_command"))
+            self.assertFalse(hasattr(module, "_run_tier_a_launch_plan"))
 
 
 if __name__ == "__main__":
