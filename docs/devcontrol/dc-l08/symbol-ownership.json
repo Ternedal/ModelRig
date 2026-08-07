@@ -1,0 +1,54 @@
+{
+  "schema": "modelrig-devcontrol-dc-l08-symbol-ownership/v1",
+  "slice": "DC-L08",
+  "modules": {
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py": {
+      "owned_functions": [
+        "_run_tier_a_launch_plan",
+        "run_verified_tier_a_command"
+      ],
+      "owned_classes": [],
+      "role": "retained non-capturing compatibility executor; never re-exported by the modern authority surface"
+    },
+    "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py": {
+      "owned_constants": [
+        "_QUARANTINED_RUNTIME_GUARDS"
+      ],
+      "owned_classes": [
+        "TierAExecutionTimeout"
+      ],
+      "owned_functions": [
+        "_run_tier_a_launch_plan",
+        "run_verified_tier_a_command"
+      ],
+      "role": "sole modern closure-bound executor with canonical bounded result evidence"
+    },
+    "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py": {
+      "owned_classes": [],
+      "owned_functions": [],
+      "forbidden_exports": [
+        "_run_tier_a_launch_plan",
+        "run_verified_tier_a_command"
+      ]
+    },
+    "devcontrol/src/kaliv_dev_control/tier_a_authority.py": {
+      "forbidden_exports": [
+        "_run_tier_a_launch_plan",
+        "run_verified_tier_a_command"
+      ],
+      "authority_bundle_domain": "kaliv-tier-a-toolhost/v6"
+    },
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py": {
+      "authority_bundle_domain": "kaliv-tier-a-toolhost/v6",
+      "required_private_executor_paths": [
+        "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py",
+        "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py"
+      ]
+    }
+  },
+  "forbidden_modules": [
+    "devcontrol/src/kaliv_dev_control/tier_a_execution.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_command_receipt.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime.py"
+  ]
+}
