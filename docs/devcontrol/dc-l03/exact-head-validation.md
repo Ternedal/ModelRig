@@ -3,7 +3,7 @@
 Status: **authority candidate hardened; exact-head workflow gates pending**
 
 Current authority implementation/regression candidate:
-`b7cabc3524a75d980cd5e0710b2acfeed7a15eb2`.
+`5eb237398cd4b9867e50bc42656476835ca4a057`.
 
 The candidate keeps the complete 16-path allowlist and includes:
 
@@ -12,33 +12,38 @@ The candidate keeps the complete 16-path allowlist and includes:
 - sealed exact-task command registries and reviewed verifier retention;
 - Linux no-follow, nonblocking, bounded executable reads and sealed memfd launch;
 - process-lifetime descriptor retirement and fail-closed non-Linux verification;
-- a fixed-value environment positive list containing only `CI=1`,
-  `MODELRIG_DEVCONTROL=1` and `GOTOOLCHAIN=local`;
+- a fixed-value environment positive list containing `CI=1`,
+  `MODELRIG_DEVCONTROL=1`, `GOTOOLCHAIN=local` and the reviewed child-tool
+  `PATH=/usr/bin:/bin`;
 - fixed-host HTTPS GET-only GitHub reads with redirects and proxies disabled;
 - explicit system TLS roots independent of environment CA overrides;
-- one monotonic wall-clock deadline covering response-body reads, with the
-  underlying socket timeout reset to the remaining budget before every read;
+- one monotonic wall-clock deadline covering response-body reads;
+- a supervised reader thread so blocking chunk framing inside `read1()` cannot
+  outlive the caller deadline;
+- socket shutdown/close and response close on deadline expiry;
 - fail-closed response handling when the transport cannot expose a socket on
-  which the deadline can be enforced;
+  which cancellation and timeouts can be enforced;
 - exact-SHA and protected-path checks before transport, bounded JSON/base64
   handling and decoded Git-blob identity verification;
 - strict receipt runtime/schema identity, status and repository validation.
 
 Latest landed authority blobs:
 
-- catalog: `139019db325b48d7137ecf16ee594b3146b5ebc6`;
-- GitHub read transport: `cce71c6bc4aae6068ada7ba6b7a85075d4853441`;
+- catalog: `1f312db26214153052c923adbb06896124f21b6a`;
+- GitHub read transport: `d6ffca324ca2f69db256814ec08f08a714feb00c`;
 - receipt schema: `40615abb093d890a98391ad8dc38d90fb8166c2d`;
-- workflow contract/regressions: `a04459eefe97ac7101e2dd80c58da682d8d7b256`.
+- workflow contract/regressions: `f20d6d73cbadebab5d6c98e3f4ac0586a81f53ba`.
 
 The latest complete focused DC-L03 run before the final environment/deadline
-hardening produced **26/26 passing tests**. The final two findings are covered by
-additional executable contract regressions that:
+hardening produced **26/26 passing tests**. Additional executable contract
+regressions and direct validation now cover:
 
-- reject `GOROOT=.`, `PYTHONUSERBASE=.` and `GOTOOLCHAIN=auto` while preserving
-  the reviewed fixed environment values;
-- simulate an endless slow-drip response and require monotonic wall-clock
-  rejection, response closure and a decreasing socket timeout.
+- rejection of `GOROOT=.`, `PYTHONUSERBASE=.`, `GOTOOLCHAIN=auto` and an
+  attacker-selected `PATH`;
+- presence of the fixed `/usr/bin:/bin` PATH on reviewed catalog commands;
+- a `read1()` call that blocks internally until the socket is cancelled;
+- wall-clock rejection in approximately 0.05 seconds, response/socket closure,
+  preserved successful reads and preserved byte-budget rejection.
 
 Review history:
 
@@ -49,10 +54,12 @@ Review history:
   candidate `157b158011d120797a230912f1c96a23babb1ace` aligned them;
 - review of `002306223eb172351f9bfd1665dc1d5f9bdcfd2a` found remaining interpreter/
   toolchain environment authority and missing end-to-end response-read deadline;
-  candidates `c95a877fbeded87597727b090327ff4c57c3ffca`,
-  `9a644231bd59c9e8a6d32ec504476b92992e1d7a`,
-  `ed5a646b3a457478bdaea4cc7bbcb9b64af12e6c` and
-  `b7cabc3524a75d980cd5e0710b2acfeed7a15eb2` close those findings.
+  candidate `b7cabc3524a75d980cd5e0710b2acfeed7a15eb2` closed them;
+- review of `9829fe24227f363141c779237a9e042a1a1af2ca` found ambient PATH authority and
+  chunk-framing work occurring inside one `read1()` call; candidates
+  `59bbd4a113fe13d274b05ae8fee8f789ec80b4cd`,
+  `e73934c1bc6536e0b89b66eb30819ee7f602210b` and
+  `5eb237398cd4b9867e50bc42656476835ca4a057` close those findings.
 
 Verified repository facts:
 
