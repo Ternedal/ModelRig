@@ -25,8 +25,13 @@ All three locked paths are deliberately projected:
    `Any`, because that protocol is not part of the landed DC-L07 catalog surface;
 2. both executor modules late-bind the approved `app.windows_*` substrate through
    `importlib`, preserving dormant package import while keeping the same native
-   launch, capture, lifetime-guard and Job Object calls; and
-3. the extraction test removes only DC-L09's final public-facade and
+   launch, capture, lifetime-guard and Job Object calls;
+3. both executor modules preserve the complete seven-value signed plan identity,
+   but forward only the worker-reviewed `CI` and `MODELRIG_DEVCONTROL`
+   application values to Windows. The five omitted portable values are accepted
+   only when they equal their exact signed constants; any unknown key or changed
+   value fails before ACL provisioning or process creation; and
+4. the extraction test removes only DC-L09's final public-facade and
    command-receipt assertions.
 
 No runtime authorization, revalidation, containment, cleanup, bounded-output or
@@ -57,6 +62,7 @@ fail-closed behavior from the locked executor source is removed.
 - no DC-L09+ imports or files;
 - package import remains dormant;
 - closure-bound executor fails closed off Windows;
+- signed-to-Windows environment projection rejects unknown or altered omissions;
 - real-Windows AppContainer, Job Object, bounded-output, timeout, cwd and runtime-lifetime tests;
 - all repository, DevControl, CodeQL and diagnostics workflows on one frozen head;
 - zero unresolved review threads; and
