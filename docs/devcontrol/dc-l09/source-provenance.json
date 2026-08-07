@@ -1,0 +1,28 @@
+{
+  "schema": "modelrig-devcontrol-dc-l09-source-provenance/v1",
+  "source": {
+    "pull_request": 338,
+    "head": "07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f"
+  },
+  "base": "70a40a27201ccaa33b1dffe0fff65faa113cd0f7",
+  "exact_blobs": {
+    "devcontrol/TIER_A_COMMAND_RECEIPT.md": "336fe553215e26dc224bd2014ac049a4786b7470",
+    "devcontrol/TIER_A_EXECUTION.md": "6e648783858e3970c15b62e471e60e6ac6f9bbd6",
+    "devcontrol/TRUSTED_GIT_RUNTIME.md": "654b6f4a330dd5578db15f509e3511456ffc9c4a",
+    "devcontrol/schemas/development-trusted-git-runtime-evidence-v1.schema.json": "855f76b77ec605f5fb97e176508041403bb1527e",
+    "devcontrol/schemas/development-trusted-git-runtime-manifest-v1.schema.json": "42e4cc8562fc126e5adc69668a7e793dc60b4e5a",
+    "devcontrol/schemas/development-trusted-git-runtime-recovery-receipt-v1.schema.json": "bcb4ff8e71772903ff7b7e3b4c030172a5097aab",
+    "devcontrol/schemas/development-trusted-git-runtime-staging-receipt-v1.schema.json": "2a199941a96becec3556abead1b18ee71cf0a65d",
+    "devcontrol/src/kaliv_dev_control/tier_a_command_receipt.py": "59b5157822b5a31455c54b6a384bb4c3a2994f98",
+    "devcontrol/src/kaliv_dev_control/tier_a_execution.py": "c678a38e58f30b3882d3bb5836aa8acd22ae1616",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime.py": "517eef4753fc6e3ff04d11f59f95d0871b0271d4",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_h4.py": "925877921aecb2b06dd9f643cc0b107fbc88e3cb",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_model.py": "75bb5c0655c1f561e282ef98533bd43ba23c6f39",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_runner.py": "32742482a9fc80cdd1893fc053862fd112b373f1",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_staging.py": "bea50089960f1ee3b10d6bb49f654dba1b3d8748",
+    "devcontrol/tests/test_slice10g_command_receipt.py": "68b3123c46b5af463fad5a3e9c8c4d1568fd941d",
+    "devcontrol/tests/test_trusted_git_runtime.py": "627a879ab40f25dec17874586f63674d59405a19",
+    "devcontrol/tests/test_trusted_git_runtime_recovery.py": "0ff259a015cff1431cdad05cda15f4283770179e"
+  },
+  "progressive_projection_reason": "Preserve the merged DC-L08 core split, dormant package root and verified v3 executor while advancing only bundle identity, facade expectations, test inventory, native receipt coverage and documentation to DC-L09."
+}
