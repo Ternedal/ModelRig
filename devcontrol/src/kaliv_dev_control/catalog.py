@@ -487,6 +487,8 @@ class LocalExecutableHashVerifier:
 
 
 class CatalogMaterializer:
+    __slots__ = ("catalog", "isolation_verifier")
+
     def __init__(self, catalog: ModelRigCommandCatalog, *, isolation_verifier: IsolationVerifier | None = None, executable_verifier: LocalExecutableHashVerifier | None = None) -> None:
         if not isinstance(catalog, ModelRigCommandCatalog):
             raise CatalogError("materializer requires a ModelRig command catalog")
@@ -494,7 +496,6 @@ class CatalogMaterializer:
             raise CatalogError("materializer requires the fixed static-runtime executable verifier")
         self.catalog = catalog
         self.isolation_verifier = isolation_verifier or RejectUnverifiedIsolation()
-        self.executable_verifier = executable_verifier or LocalExecutableHashVerifier()
 
     def materialize(self, task: DevelopmentTask, toolchain: Toolchain, attestation: IsolationAttestation) -> CommandRegistry:
         if not isinstance(task, DevelopmentTask):
@@ -510,9 +511,8 @@ class CatalogMaterializer:
         catalog = self.catalog.snapshot()
         specs = tuple(catalog.resolve(item) for item in task_snapshot.allowed_command_ids)
         snapshot = toolchain.snapshot()
-        verifier = self.executable_verifier
-        if specs and type(verifier) is not LocalExecutableHashVerifier:
-            raise CatalogError("materializer executable verifier snapshot is invalid")
+        verifier = LocalExecutableHashVerifier() if specs else None
+        verify_executable = verifier.verify if verifier is not None else None
         expected = {
             "task_id": task_snapshot.task_id, "task_sha256": _task_sha(task_snapshot),
             "repository": task_snapshot.repository, "base_sha": task_snapshot.base_sha,
@@ -542,14 +542,16 @@ class CatalogMaterializer:
             raise CatalogError("isolation verifier mutated the attestation")
         if not specs:
             return TaskBoundCommandRegistry((), task_snapshot, None, None)
-        bootstrap = verifier.verify(snapshot.resolve("sandbox"))
+        if verifier is None or verify_executable is None:
+            raise CatalogError("private executable verifier was not created")
+        bootstrap = verify_executable(snapshot.resolve("sandbox"))
         if not isinstance(bootstrap, str) or not _absolute(bootstrap):
             raise CatalogError("executable verifier did not return a pinned sandbox helper")
         templates: list[CommandTemplate] = []
         for spec in specs:
             if spec.required_boundary is not IsolationBoundary.OS_ISOLATED or spec.network_mode is not NetworkMode.DENY:
                 raise CatalogError("catalog command weakened isolation")
-            invocation = verifier.verify(snapshot.resolve(spec.tool_id))
+            invocation = verify_executable(snapshot.resolve(spec.tool_id))
             if not isinstance(invocation, str) or not _absolute(invocation):
                 raise CatalogError("executable verifier did not return a pinned static object")
             templates.append(CommandTemplate(spec.command_id, (invocation, *spec.args), spec.cwd, spec.max_timeout_seconds, spec.env))
