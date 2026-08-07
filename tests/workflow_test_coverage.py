@@ -5,6 +5,7 @@ Run: python3 tests/workflow_test_coverage.py
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import re
 import sys
@@ -12,16 +13,26 @@ import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 root = Path(__file__).resolve().parents[1]
 workflow = (root / ".github/workflows/_tests.yml").read_text(encoding="utf-8")
 sys.path.insert(0, str(root / "devcontrol/src"))
 
+import kaliv_dev_control.commands as commands_module
 import kaliv_dev_control.github_read as github_read_module
 from kaliv_dev_control.catalog import (
     CatalogError,
     ProjectCommandSpec,
+    TaskBoundCommandRegistry,
     modelrig_command_catalog,
+)
+from kaliv_dev_control.commands import CommandExecutor, CommandTemplate
+from kaliv_dev_control.contract import (
+    DevelopmentTask,
+    MergeAuthority,
+    Risk,
+    TaskBudget,
 )
 from kaliv_dev_control.github_read import GitHubReadError
 
@@ -155,6 +166,168 @@ check(
     and catalog_path == "/usr/bin:/bin"
     and injected_path == "/usr/bin:/bin",
     "every accepted catalog entry receives the fixed child-tool PATH",
+)
+
+snapshot_task = DevelopmentTask(
+    task_id="DC-L03-SNAPSHOT",
+    repository="Ternedal/ModelRig",
+    base_sha="a" * 40,
+    goal="Prove one private execution task snapshot.",
+    acceptance_criteria=("Execution remains bound to task A.",),
+    risk=Risk.LOW,
+    allowed_paths=("devcontrol/**",),
+    protected_paths=(".github/**",),
+    allowed_command_ids=("modelrig.snapshot.probe",),
+    required_tests=("snapshot execution regression",),
+    budget=TaskBudget(
+        max_changed_files=1,
+        max_added_lines=1,
+        max_deleted_lines=0,
+        max_attempts=1,
+        max_runtime_seconds=37,
+        max_output_bytes=4096,
+    ),
+    merge_authority=MergeAuthority.HUMAN,
+)
+expected_snapshot_json = snapshot_task.canonical_json()
+expected_snapshot_sha = hashlib.sha256(
+    expected_snapshot_json.encode("utf-8")
+).hexdigest()
+snapshot_registry = TaskBoundCommandRegistry(
+    (
+        CommandTemplate(
+            "modelrig.snapshot.probe",
+            ("/bin/true",),
+            ".",
+            50,
+            {"PATH": "/usr/bin:/bin"},
+        ),
+    ),
+    snapshot_task,
+    object(),
+)
+
+
+class _MutatingRunner:
+    def __init__(self, caller_task: DevelopmentTask) -> None:
+        self.caller_task = caller_task
+        self.timeout_seconds = None
+        self.max_output_bytes = None
+
+    def run(
+        self,
+        argv,
+        *,
+        cwd,
+        timeout_seconds,
+        max_output_bytes,
+        env=None,
+        stdin_data=None,
+    ):
+        del argv, cwd, env, stdin_data
+        self.timeout_seconds = timeout_seconds
+        self.max_output_bytes = max_output_bytes
+        object.__setattr__(self.caller_task, "task_id", "MUTATED")
+        object.__setattr__(self.caller_task, "base_sha", "b" * 40)
+        object.__setattr__(
+            self.caller_task,
+            "budget",
+            TaskBudget(
+                max_changed_files=2,
+                max_added_lines=2,
+                max_deleted_lines=1,
+                max_attempts=2,
+                max_runtime_seconds=999,
+                max_output_bytes=999_999,
+            ),
+        )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+
+class _SnapshotSandbox:
+    observed_task = None
+
+    def __init__(self, executor, task, source) -> None:
+        self.executor = executor
+        self.task = task
+        self.source = source
+        self.root = source
+        self.repository = source
+        type(self).observed_task = task
+
+    def create(self):
+        return "stable", "stable"
+
+    def environment(self, template_env, cwd):
+        del cwd
+        return dict(template_env)
+
+    def metadata_fingerprint(self):
+        return "stable"
+
+    def cleanup(self) -> None:
+        return None
+
+
+class _SnapshotExecutor(CommandExecutor):
+    def __init__(self, registry, runner) -> None:
+        super().__init__(registry=registry, runner=runner)
+        self.observed_tasks = []
+
+    def _verify_source_clean(
+        self,
+        task,
+        workspace,
+        expected_fingerprint=None,
+    ):
+        del workspace, expected_fingerprint
+        self.observed_tasks.append(task)
+        return "source"
+
+    def _verify_head(self, task, workspace) -> None:
+        del workspace
+        self.observed_tasks.append(task)
+
+    def _snapshot(self, workspace):
+        del workspace
+        return "stable", True
+
+    @staticmethod
+    def _cwd(workspace, relative):
+        del relative
+        return workspace
+
+    @staticmethod
+    def _confined_argv(sandbox_root, cwd, argv):
+        del sandbox_root, cwd
+        return argv
+
+
+snapshot_runner = _MutatingRunner(snapshot_task)
+snapshot_executor = _SnapshotExecutor(snapshot_registry, snapshot_runner)
+with patch.object(commands_module, "_CommandSandbox", _SnapshotSandbox):
+    snapshot_receipt = snapshot_executor.execute(
+        snapshot_task,
+        root,
+        "modelrig.snapshot.probe",
+    )
+private_execution_task = _SnapshotSandbox.observed_task
+check(
+    snapshot_task.task_id == "MUTATED"
+    and snapshot_task.base_sha == "b" * 40
+    and private_execution_task is not None
+    and private_execution_task is not snapshot_task
+    and private_execution_task.canonical_json() == expected_snapshot_json
+    and all(
+        observed is private_execution_task
+        for observed in snapshot_executor.observed_tasks
+    )
+    and snapshot_runner.timeout_seconds == 37
+    and snapshot_runner.max_output_bytes == 4096
+    and snapshot_receipt.task_id == "DC-L03-SNAPSHOT"
+    and snapshot_receipt.base_sha == "a" * 40
+    and snapshot_receipt.task_sha256 == expected_snapshot_sha,
+    "executor sandbox, budgets, verification and receipt use one private task snapshot",
 )
 
 
