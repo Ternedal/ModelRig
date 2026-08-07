@@ -118,7 +118,7 @@ class ProjectCommandSpec:
             ):
                 raise CatalogError("catalog environment is invalid")
             if key not in _ALLOWED_ENV or value != _ALLOWED_ENV[key]:
-                raise CatalogError("catalog environment is outside the reviewed positive list")
+                raise CatalogError("catalog environment is outside the reviewed isolation positive list")
             clean[key] = value
         object.__setattr__(self, "env", MappingProxyType(clean))
 
