@@ -75,6 +75,12 @@
       "source_blob": "c5e4843232e06375d1af87eada05bc997f26c6bd",
       "base_blob": null,
       "reason": "project source Slice 9 coverage to lease, materialization and v1 plan only; explicitly reject later schemas, results and process-launch authority"
+    },
+    {
+      "path": "tests/workflow_test_coverage.py",
+      "source_blob": null,
+      "base_blob": "64d089492a0ffc9b40144faaf8e926c69830d7e8",
+      "reason": "extend the landed DevControl module inventory from DC-L01–L05 to the twenty modules present through DC-L06"
     }
   ]
 }
