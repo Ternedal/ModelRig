@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable
 
-from .durable_publication import DurablePublicationError, sync_directory
+from .durable_publication import DurablePublicationError, sync_directory, sync_file
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -36,7 +36,9 @@ def publish_stream_once(
 
     Return ``True`` only when this call created the final name. A concurrent
     winner is accepted only after ``validate_existing`` proves its exact bytes
-    and any caller-specific alias or permission invariants.
+    and any caller-specific alias or permission invariants. When a caller
+    changes permission metadata on the private temporary file, that metadata is
+    flushed before the create-once hard link makes the inode authoritative.
     """
 
     source_path = Path(source)
@@ -88,6 +90,12 @@ def publish_stream_once(
             raise StreamingPublicationError("source_changed")
         if prepare_temporary is not None:
             prepare_temporary(temporary)
+            try:
+                sync_file(temporary)
+            except DurablePublicationError as exc:
+                raise StreamingPublicationError(
+                    "permission_metadata_sync_failed"
+                ) from exc
 
         try:
             os.link(temporary, final_path)
