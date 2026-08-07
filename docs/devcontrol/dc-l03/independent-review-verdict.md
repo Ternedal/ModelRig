@@ -13,40 +13,43 @@ Independent review history:
    interpreter/toolchain environment authority and no total response deadline.
    Candidate `b7cabc3524a75d980cd5e0710b2acfeed7a15eb2` closed them.
 4. Review of `9829fe24227f363141c779237a9e042a1a1af2ca` found ambient PATH
-   authority and chunk-framing work that could remain inside one `read1()` call
-   beyond the surrounding deadline check.
+   authority and chunk-framing work that could remain inside one `read1()` call.
+   Candidate `5eb237398cd4b9867e50bc42656476835ca4a057` closed them.
+5. Review of `3483ac687a267d6ec31aa71eaa4896baa5604d74` found that caller-supplied
+   catalog entries could still omit PATH and that HTTP status/header framing
+   remained outside the response-body supervisor.
 
-Current candidate `5eb237398cd4b9867e50bc42656476835ca4a057`
+Current candidate `ac4eaa44fa501eba797818d8563e82c9b83ce8f0`
 closes the latest findings with:
 
-- reviewed fixed `PATH=/usr/bin:/bin` on every catalog command, overriding the
-  small ambient PATH copied by the subprocess runner;
-- rejection of every other PATH value by the fixed-value environment policy;
-- a supervised daemon reader that is waited on only until the absolute monotonic
-  deadline;
-- socket shutdown/close and response close when blocking chunk framing outlives
-  the deadline;
-- continued per-read remaining-time socket timeouts, body byte bounds and
-  fail-closed socket discovery;
-- executable regressions for hostile PATH and a `read1()` call that blocks until
-  cancellation.
+- automatic `PATH=/usr/bin:/bin` insertion into every accepted
+  `ProjectCommandSpec`, including `env={}`;
+- continued rejection of any explicitly different PATH value;
+- an owned raw `HTTPSConnection` supervised from request start to completion;
+- caller-side cancellation of blocking status/header framing through socket
+  shutdown/close and connection close;
+- continued body/chunk supervision, remaining-time socket timeouts, byte bounds
+  and fail-closed socket checks;
+- executable contract regressions for omitted PATH, blocking `read1()` and
+  blocking `getresponse()`.
 
-Direct validation rejects the blocking read in approximately 0.05 seconds,
-closes the response/socket, preserves successful reads and preserves byte-budget
-rejection. The latest complete focused runtime run remains **26/26 passing**
-from before these final narrowly scoped changes. No final independent verdict is
-claimed until the resulting evidence head is reviewed without an actionable
-finding.
+Direct validation rejects both blocking paths in approximately 0.05 seconds and
+closes the relevant socket, response and connection. Existing public test
+surfaces were preserved. The latest complete focused runtime run remains
+**26/26 passing** from before these final narrowly scoped changes. No final
+independent verdict is claimed until the resulting evidence head is reviewed
+without an actionable finding.
 
 Required review focus:
 
-1. fixed child-tool PATH and positive-list process environment authority;
+1. automatic fixed child-tool PATH on every accepted catalog entry;
 2. exact task/catalog/toolchain/attestation binding and callback snapshots;
 3. fail-closed isolation and executable verification;
 4. POSIX executable link, mutation, FIFO and size handling;
 5. fixed GET-only GitHub host/method/ref authority;
-6. caller-enforced monotonic deadline across chunk framing and body reads;
-7. cancellation by socket shutdown/close and response close;
+6. caller-enforced monotonic deadline across request, status, headers, chunk
+   framing and body reads;
+7. cancellation by socket shutdown/close, response close and connection close;
 8. explicit TLS roots independent of environment proxy and CA overrides;
 9. task scope, response bounds, Git blob identity and receipt/schema alignment;
 10. absence of write, remote Git, publication, merge or activation authority.
