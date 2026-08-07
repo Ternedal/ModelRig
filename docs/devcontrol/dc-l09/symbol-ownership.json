@@ -1,0 +1,69 @@
+{
+  "schema": "modelrig-devcontrol-dc-l09-symbol-ownership/v1",
+  "slice": "DC-L09",
+  "owners": {
+    "tier_a_execution_v3.py": [
+      "TierAExecutionTimeout",
+      "_run_tier_a_launch_plan",
+      "run_verified_tier_a_command"
+    ],
+    "tier_a_command_receipt.py": [
+      "GitWorkspaceSnapshot",
+      "TierACommandReceipt",
+      "TierACommandReceiptError",
+      "run_single_verified_tier_a_command_with_receipt"
+    ],
+    "tier_a_execution.py": [
+      "final public compatibility exports only"
+    ],
+    "trusted_git_runtime_model.py": [
+      "TrustedGitRuntimeFile",
+      "TrustedGitRuntimeManifest",
+      "TrustedGitRuntimeStagingReceipt",
+      "TrustedGitRuntimeEvidence"
+    ],
+    "trusted_git_runtime_staging.py": [
+      "TrustedGitRuntime",
+      "stage_trusted_git_runtime"
+    ],
+    "trusted_git_runtime_h4.py": [
+      "TrustedGitRuntimeRecoveryReceipt",
+      "recover_trusted_git_runtime_transaction"
+    ],
+    "trusted_git_runtime_runner.py": [
+      "TrustedGitRunner"
+    ],
+    "trusted_git_runtime.py": [
+      "trusted Git public aggregation surface"
+    ]
+  },
+  "non_owners": {
+    "kaliv_dev_control.__init__": [
+      "_run_tier_a_launch_plan",
+      "run_verified_tier_a_command"
+    ],
+    "_tier_a_execution_core.py": [
+      "_run_tier_a_launch_plan",
+      "run_verified_tier_a_command"
+    ],
+    "tier_a_authority.py": [
+      "_run_tier_a_launch_plan",
+      "run_verified_tier_a_command"
+    ],
+    "runtime_staging.py": [
+      "_run_tier_a_launch_plan",
+      "run_verified_tier_a_command"
+    ]
+  },
+  "forbidden_authority": [
+    "remote Git",
+    "credentials",
+    "GitHub write",
+    "semantic approval",
+    "publisher",
+    "merge",
+    "release",
+    "deployment",
+    "activation"
+  ]
+}
