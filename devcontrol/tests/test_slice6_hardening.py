@@ -225,7 +225,10 @@ class Slice6HardeningTests(unittest.TestCase):
                 return data
 
             with patch.object(physical_module.os, "read", side_effect=racing_read):
-                with self.assertRaisesRegex(PhysicalIsolationError, "path changed"):
+                with self.assertRaisesRegex(
+                    PhysicalIsolationError,
+                    "unsigned report changed while it was read",
+                ):
                     load_unsigned_report(path)
 
     @unittest.skipIf(os.name == "nt", "POSIX key custody test")
