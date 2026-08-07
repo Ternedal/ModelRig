@@ -30,7 +30,7 @@
   "projected_paths": [
     {
       "path": "devcontrol/src/kaliv_dev_control/_runtime_closure_common.py",
-      "reason": "close the locked finding by durably flushing staged permission metadata and parent-directory metadata"
+      "reason": "close the locked finding by durably flushing staged permission metadata and parent-directory metadata while preserving repeated staging of an already locked Unix file"
     },
     {
       "path": "devcontrol/src/kaliv_dev_control/runtime_staging.py",
@@ -58,7 +58,11 @@
     },
     {
       "path": "devcontrol/tests/test_slice10e_version_check_closure.py",
-      "reason": "bind the reviewed single-file closure to landed runtime and authority surfaces"
+      "reason": "bind the reviewed single-file closure to landed runtime and authority surfaces and prove repeated staging is idempotent"
+    },
+    {
+      "path": "devcontrol/tests/test_slice9_schemas.py",
+      "reason": "preserve v1 lease and plan compatibility while validating the landed v3 plan and execution-result schemas without importing DC-L08 execution authority"
     },
     {
       "path": "devcontrol/tests/test_streaming_publication_h10g.py",
@@ -88,7 +92,7 @@
     },
     {
       "path": "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
-      "reason": "land v3 plan, cwd and toolhost authority while explicitly excluding execution"
+      "reason": "land v3 plan, cwd and toolhost authority while preserving v1 plan compatibility and explicitly excluding execution"
     },
     {
       "path": "tests/workflow_test_coverage.py",
