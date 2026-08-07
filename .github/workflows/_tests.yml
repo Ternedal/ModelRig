@@ -82,13 +82,54 @@ jobs:
           done
           exit "$status"
 
-      - name: DevControl DC-L01 foundation tests
+      - name: DevControl DC-L01 through DC-L07 tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         shell: bash
         run: |
           set -o pipefail
           PYTHONPATH=devcontrol/src python3 -m unittest discover -s devcontrol/tests -p 'test_*.py' -v 2>&1 | tee -a /tmp/modelrig-ci-test.log
+
+      - name: DevControl DC-L07 non-execution boundary
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=devcontrol/src python3 - <<'PY' 2>&1 | tee -a /tmp/modelrig-ci-test.log
+          import importlib.util
+
+          import kaliv_dev_control
+          import kaliv_dev_control._tier_a_execution_core as compatibility_core
+          import kaliv_dev_control.runtime_staging as runtime_staging
+          import kaliv_dev_control.tier_a_authority as tier_a_authority
+
+          forbidden_symbols = (
+              "_run_tier_a_launch_plan",
+              "run_verified_tier_a_command",
+          )
+          for module in (
+              kaliv_dev_control,
+              compatibility_core,
+              runtime_staging,
+              tier_a_authority,
+          ):
+              for name in forbidden_symbols:
+                  assert not hasattr(module, name), (module.__name__, name)
+
+          for future_module in (
+              "kaliv_dev_control.tier_a_execution",
+              "kaliv_dev_control.tier_a_command_receipt",
+              "kaliv_dev_control.trusted_git_runtime",
+              "kaliv_dev_control.publisher",
+          ):
+              assert importlib.util.find_spec(future_module) is None, future_module
+
+          assert tier_a_authority.PLAN_SCHEMA == "kaliv-development-tier-a-launch-plan/v3"
+          assert callable(kaliv_dev_control.build_tier_a_launch_plan)
+          assert callable(kaliv_dev_control.publish_stream_once)
+          assert callable(kaliv_dev_control.TrustedRuntimeClosureStager)
+          PY
 
       - name: DevControl final boundary regressions
         env:
@@ -223,8 +264,8 @@ jobs:
         run: go test ./cmd/modelrig-updater/ ./cmd/modelrig-supervisor/ ./internal/heartbeat/
 
   # DC-L05 proves the product-side native Windows substrate on a real kernel.
-  # DevControl execution, Tier-A catalog and trusted-Git integration contracts
-  # remain dormant until their owning slices land.
+  # DC-L07 adds non-executing runtime evidence only; the DevControl executor,
+  # command receipt and trusted-Git contracts remain deferred to later slices.
   test-windows-tool-isolation:
     runs-on: windows-latest
     steps:
