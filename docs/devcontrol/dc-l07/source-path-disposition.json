@@ -43,6 +43,7 @@
     "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
     "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
+    "devcontrol/tests/test_foundation.py",
     "tests/workflow_test_coverage.py"
   ],
   "control_paths": [
@@ -67,6 +68,9 @@
     "devcontrol/tests/test_slice9.py": "advance the exact toolhost-bundle assertion from DC-L06 exclusions to the required DC-L07 non-executing runtime evidence closure",
     "devcontrol/tests/test_slice9_schemas.py": "preserve DC-L06 v1 schema parity while adding DC-L07 v3 plan and execution-result schema parity without importing a future executor",
     "devcontrol/tests/test_streaming_publication_h10g.py": "prove prepare-sync-link ordering and fail-closed metadata-sync failure"
+  },
+  "progressive_projections": {
+    "devcontrol/tests/test_foundation.py": "advance the import boundary from DC-L04-era blanket exclusions to explicit DC-L07 landed modules and DC-L08+ hard exclusions"
   },
   "hard_exclusions": [
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py",
