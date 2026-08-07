@@ -1,0 +1,45 @@
+{
+  "schema": "modelrig-devcontrol-dc-l10-symbol-ownership/v1",
+  "owners": {
+    "asymmetric_authority.py": [
+      "TrustedEd25519AuthorityKey",
+      "DetachedEd25519AuthoritySignature",
+      "Ed25519AuthorityVerifier",
+      "authority_signing_message",
+      "asymmetric_authority_key_custody_policy_sha256"
+    ],
+    "_semantic_review_core.py": [
+      "SemanticReviewRequest",
+      "CriterionAssessment",
+      "SemanticFinding",
+      "SemanticReviewVerdict",
+      "SignedSemanticReviewVerdict",
+      "HmacSemanticReviewVerdictSigner",
+      "TrustedSemanticReviewerKey",
+      "SemanticReviewVerifier",
+      "SemanticReviewApprovalGate",
+      "canonical loaders and policy identities"
+    ],
+    "semantic_review.py": [
+      "write_semantic_review_request",
+      "write_signed_semantic_review_verdict",
+      "durable create-once publication facade",
+      "public model identity and tier_a_toolhost_sha256 patch point"
+    ]
+  },
+  "retained_boundaries": {
+    "tier_a_execution_bundle": "v7 unchanged; asymmetric and semantic-review modules are excluded",
+    "package_root": "does not export DC-L10 review or asymmetric symbols",
+    "semantic_verdict_v1": "retains hmac-sha256 reviewer compatibility; not misrepresented as Ed25519",
+    "private_signing_material": "external only; no runtime type, loader or signer"
+  },
+  "future_exclusions": [
+    "draft_pr_readiness",
+    "publisher_dry_run",
+    "publisher_authorization",
+    "publisher recovery/replay",
+    "local_candidate_materialization",
+    "remote Git or GitHub mutation",
+    "merge, release, deployment or activation"
+  ]
+}

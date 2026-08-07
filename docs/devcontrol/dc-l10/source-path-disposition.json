@@ -1,0 +1,43 @@
+{
+  "schema": "modelrig-devcontrol-dc-l10-source-path-disposition/v1",
+  "counts": {
+    "source_exact": 15,
+    "progressive": 5,
+    "control": 8,
+    "total": 28
+  },
+  "source_exact": [
+    "devcontrol/ASYMMETRIC_AUTHORITY.md",
+    "devcontrol/SEMANTIC_REVIEW.md",
+    "devcontrol/SEMANTIC_REVIEW_DURABLE_PUBLICATION.md",
+    "devcontrol/schemas/development-asymmetric-authority-key-v1.schema.json",
+    "devcontrol/schemas/development-asymmetric-authority-signature-v1.schema.json",
+    "devcontrol/schemas/development-semantic-review-request-v1.schema.json",
+    "devcontrol/schemas/development-semantic-review-verdict-v1.schema.json",
+    "devcontrol/schemas/development-signed-semantic-review-verdict-v1.schema.json",
+    "devcontrol/src/kaliv_dev_control/_semantic_review_core.py",
+    "devcontrol/src/kaliv_dev_control/asymmetric_authority.py",
+    "devcontrol/src/kaliv_dev_control/semantic_review.py",
+    "devcontrol/tests/test_asymmetric_authority.py",
+    "devcontrol/tests/test_semantic_review_core_cleanup_h10e.py",
+    "devcontrol/tests/test_semantic_review_durable_publication_h10d.py",
+    "devcontrol/tests/test_slice10h_semantic_review.py"
+  ],
+  "progressive": {
+    ".github/workflows/_tests.yml": "Run all 35 landed modules and add an explicit offline L10 authority boundary while preserving every L09 Windows gate.",
+    "devcontrol/README.md": "Describe DC-L10 without claiming asymmetric migration of the HMAC semantic-verdict v1 artifact.",
+    "devcontrol/pyproject.toml": "Pin cryptography 49.0.0 while retaining the exact setuptools build dependency.",
+    "tests/workflow_test_coverage.py": "Advance exact module inventory from 31 through L09 to 35 through L10 and make dependency and future-slice exclusions load-bearing.",
+    "worker/requirements.txt": "Install the same exact public-key verification implementation in CI/runtime without changing existing product dependencies."
+  },
+  "control": [
+    "docs/devcontrol/dc-l10/exact-head-validation.md",
+    "docs/devcontrol/dc-l10/exact-path-allowlist.json",
+    "docs/devcontrol/dc-l10/independent-review-verdict.md",
+    "docs/devcontrol/dc-l10/mutation-results.md",
+    "docs/devcontrol/dc-l10/preflight.md",
+    "docs/devcontrol/dc-l10/source-path-disposition.json",
+    "docs/devcontrol/dc-l10/source-provenance.json",
+    "docs/devcontrol/dc-l10/symbol-ownership.json"
+  ]
+}

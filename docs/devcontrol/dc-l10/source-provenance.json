@@ -1,0 +1,26 @@
+{
+  "schema": "modelrig-devcontrol-dc-l10-source-provenance/v1",
+  "source": {
+    "pull_request": 338,
+    "head": "07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f"
+  },
+  "base": "adf8347f99612e8664c13b23ef268d387dec6d6c",
+  "exact_blobs": {
+    "devcontrol/ASYMMETRIC_AUTHORITY.md": "215aa34e77846860fe1f9dfa750e4e8bb9777c52",
+    "devcontrol/SEMANTIC_REVIEW.md": "00b55cf3abf361926ce71a120ec9e6e30179afc9",
+    "devcontrol/SEMANTIC_REVIEW_DURABLE_PUBLICATION.md": "6982003c0d81fede02ff7352c98ee643a9fa5bf2",
+    "devcontrol/schemas/development-asymmetric-authority-key-v1.schema.json": "303d17849beccc5589a28deb92aeb2279bf28499",
+    "devcontrol/schemas/development-asymmetric-authority-signature-v1.schema.json": "3ce267df3dd269c4623c9e9736a245234b0198dc",
+    "devcontrol/schemas/development-semantic-review-request-v1.schema.json": "138aa0e4fb2cba8800a445555529e1a03e73f961",
+    "devcontrol/schemas/development-semantic-review-verdict-v1.schema.json": "c370bc8ba0a77b5bc4687d1959dbf41ac1ff32bd",
+    "devcontrol/schemas/development-signed-semantic-review-verdict-v1.schema.json": "1b5077c2c3aa83c10fbbac54a598eff891cdca03",
+    "devcontrol/src/kaliv_dev_control/_semantic_review_core.py": "d93c873f72bf89eec03aa3e21f855347a3dbc814",
+    "devcontrol/src/kaliv_dev_control/asymmetric_authority.py": "561149b3454d0c5390cf02c63a616e8a280892ec",
+    "devcontrol/src/kaliv_dev_control/semantic_review.py": "86e9a187df3841f92508de06cb53914969cf2a1f",
+    "devcontrol/tests/test_asymmetric_authority.py": "0c97230a18de35883ec3e2d17acd93d7f471ff63",
+    "devcontrol/tests/test_semantic_review_core_cleanup_h10e.py": "7dce7db11b20d74b2ebef0a1488751517ac425d4",
+    "devcontrol/tests/test_semantic_review_durable_publication_h10d.py": "c91fe07737611c06a414eb22f01f8813d7d6b243",
+    "devcontrol/tests/test_slice10h_semantic_review.py": "438351abd179f2d4b9a1276c5ee8b71bc335406a"
+  },
+  "progressive_projection_reason": "Preserve the merged DC-L09 v7 execution bundle and dormant package root while adding only the exact cryptography dependency, offline DC-L10 workflow coverage and documentation. Semantic review and asymmetric verification remain outside Tier-A process authority."
+}
