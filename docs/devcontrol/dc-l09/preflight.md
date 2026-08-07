@@ -23,7 +23,7 @@ reset and the final `tier_a_execution.py` facade.
 
 ## Progressive projections
 
-Eight landed surfaces are advanced from DC-L08:
+Nine landed surfaces are advanced from DC-L08:
 
 - `.github/workflows/_tests.yml` activates all 31 portable modules plus bounded
   Windows subprocess and Git-aware receipt contracts;
@@ -33,6 +33,9 @@ Eight landed surfaces are advanced from DC-L08:
   adapter required by the trusted local Git runner;
 - `_tier_a_legacy_toolhost.py` and `tier_a_authority.py` advance the signed
   authority domain to v7 and bind all trusted-Git, receipt and facade modules;
+- `test_foundation.py` moves the trusted-Git, receipt and final facade modules
+  from the future-import denylist to the landed inventory while retaining all
+  later semantic-review, publisher and activation exclusions;
 - H10R and Slice 9 tests recognize the final facade while keeping package root,
   compatibility core and authority surfaces non-executing; and
 - `tests/workflow_test_coverage.py` requires the complete L09 test and Windows
@@ -49,10 +52,12 @@ Eight landed surfaces are advanced from DC-L08:
 
 ## Merge gates
 
-- exact 33-path diff and zero commits behind `main`;
+- exact 34-path diff and zero commits behind `main`;
 - all seventeen source blobs match PR #338 exactly;
 - the bounded subprocess projection preserves Linux subreaper containment and
   proves native Windows Job Object cleanup;
+- the foundation import inventory admits only DC-L09 and keeps all later slices
+  fail-closed;
 - v7 bundle identity is identical in toolhost and authority modules;
 - package root, compatibility core, runtime staging and authority expose no
   process-launch functions;
