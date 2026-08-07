@@ -60,6 +60,11 @@
       "projection": "use_hardened_loaders_and_preserve_operator_supplied_symlink_identity"
     },
     {
+      "path": "devcontrol/tests/test_foundation.py",
+      "base_blob": "dff28d3fb57f22e876752beb12967fc37e16fb67",
+      "projection": "advance_future_slice_import_gate_to_allow_landed_DC_L03_and_DC_L04_dependencies"
+    },
+    {
       "path": "tests/workflow_test_coverage.py",
       "base_blob": "4678dae933abd1dd45c5312f355084892c6ec993",
       "projection": "extend_exact_CI_discovery_contract_to_the_three_DC_L04_test_modules"
