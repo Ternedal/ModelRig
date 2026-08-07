@@ -24,7 +24,7 @@ from kaliv_dev_control.runtime_staging import (
     RuntimeStagingReceipt,
     TrustedRuntimeStager,
 )
-from kaliv_dev_control.tier_a_execution import (
+from kaliv_dev_control.tier_a_authority import (
     LeasedCommandRegistry,
     TierAExecutionError,
     TierAExecutionLease,
