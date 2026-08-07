@@ -28,6 +28,8 @@ _API_HOST = "api.github.com"
 _API_VERSION = "2022-11-28"
 _MAX_RESPONSE_BYTES = 4_000_000
 _SERVER_AUTH_OID = "1.3.6.1.5.5.7.3.1"
+_CONNECTION_SETUP_SLOTS = threading.BoundedSemaphore(1)
+_CANCEL_GRACE_SECONDS = 0.05
 
 
 class GitHubReadError(RuntimeError):
@@ -316,6 +318,7 @@ def _read_response_body(
     worker.start()
     if not completed.wait(remaining):
         _abort_response(response, discovered)
+        completed.wait(_CANCEL_GRACE_SECONDS)
         raise GitHubReadError("GitHub read exceeded the wall-clock deadline")
     if time.monotonic() > deadline:
         _abort_response(response, discovered)
@@ -335,6 +338,8 @@ def _request_with_deadline(
     max_bytes: int,
     deadline: float,
 ) -> HttpResponse:
+    if not _CONNECTION_SETUP_SLOTS.acquire(blocking=False):
+        raise GitHubReadError("GitHub connection setup is already pending")
     completed = threading.Event()
     cancelled = threading.Event()
     results: list[HttpResponse] = []
@@ -350,8 +355,8 @@ def _request_with_deadline(
                     "GitHub read exceeded the wall-clock deadline"
                 )
             connection.timeout = max(0.001, remaining)
-            connection.request("GET", target, headers=dict(headers))
-            if cancelled.is_set():
+            connection.connect()
+            if cancelled.is_set() or time.monotonic() >= deadline:
                 raise GitHubReadError(
                     "GitHub read exceeded the wall-clock deadline"
                 )
@@ -361,6 +366,21 @@ def _request_with_deadline(
             ):
                 raise GitHubReadError(
                     "GitHub response transport cannot enforce a wall-clock deadline"
+                )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise GitHubReadError(
+                    "GitHub read exceeded the wall-clock deadline"
+                )
+            transport_socket.settimeout(max(0.001, remaining))
+            if cancelled.is_set() or time.monotonic() >= deadline:
+                raise GitHubReadError(
+                    "GitHub read exceeded the wall-clock deadline"
+                )
+            connection.request("GET", target, headers=dict(headers))
+            if cancelled.is_set():
+                raise GitHubReadError(
+                    "GitHub read exceeded the wall-clock deadline"
                 )
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -411,20 +431,27 @@ def _request_with_deadline(
                 connection.close()
             except (AttributeError, OSError):
                 pass
+            _CONNECTION_SETUP_SLOTS.release()
             completed.set()
 
     remaining = deadline - time.monotonic()
     if remaining <= 0:
+        _CONNECTION_SETUP_SLOTS.release()
         raise GitHubReadError("GitHub read exceeded the wall-clock deadline")
     worker = threading.Thread(
         target=consume,
         name="kaliv-github-request",
         daemon=True,
     )
-    worker.start()
+    try:
+        worker.start()
+    except BaseException:
+        _CONNECTION_SETUP_SLOTS.release()
+        raise
     if not completed.wait(remaining):
         cancelled.set()
         _abort_connection(connection, responses[0] if responses else None)
+        completed.wait(_CANCEL_GRACE_SECONDS)
         raise GitHubReadError("GitHub read exceeded the wall-clock deadline")
     if time.monotonic() > deadline:
         cancelled.set()
