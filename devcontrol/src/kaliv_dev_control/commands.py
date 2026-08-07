@@ -415,13 +415,14 @@ class CommandRegistry:
             raise CommandPolicyError("command execution task is invalid") from exc
 
     def sandbox_bootstrap_executable(self, task: DevelopmentTask) -> str:
-        """Return the interpreter used to install the sandbox boundary.
-
-        Plain registries retain the DC-L01 legacy process interpreter. Later
-        task-bound registries override this hook with an attested pinned object.
-        """
+        """Return the executable used to install the sandbox boundary."""
         del task
         return sys.executable
+
+    def sandbox_bootstrap_mode(self, task: DevelopmentTask) -> str:
+        """Return the launch protocol for the sandbox bootstrap executable."""
+        del task
+        return "python"
 
     def resolve(self, task: DevelopmentTask, command_id: str) -> CommandTemplate:
         if command_id not in task.allowed_command_ids:
@@ -762,6 +763,7 @@ class CommandExecutor:
         cwd: Path,
         argv: tuple[str, ...],
         bootstrap_executable: str,
+        bootstrap_mode: str = "python",
     ) -> tuple[str, ...]:
         if not sys.platform.startswith("linux"):
             raise CommandExecutionError(
@@ -776,6 +778,15 @@ class CommandExecutor:
             raise CommandExecutionError(
                 "sandbox bootstrap executable is not a canonical absolute object"
             )
+        if bootstrap_mode == "static":
+            return (
+                bootstrap_executable,
+                str(sandbox_root),
+                str(cwd),
+                *argv,
+            )
+        if bootstrap_mode != "python":
+            raise CommandExecutionError("sandbox bootstrap protocol is invalid")
         return (
             bootstrap_executable,
             "-I",
@@ -801,6 +812,10 @@ class CommandExecutor:
             sys.executable
             if bootstrap_provider is None
             else bootstrap_provider(execution_task)
+        )
+        mode_provider = getattr(self.registry, "sandbox_bootstrap_mode", None)
+        bootstrap_mode = (
+            "python" if mode_provider is None else mode_provider(execution_task)
         )
         source = workspace.resolve()
         source_text = str(source)
@@ -830,6 +845,7 @@ class CommandExecutor:
                 cwd,
                 template.argv,
                 bootstrap_executable,
+                bootstrap_mode,
             )
             started = time.monotonic()
             try:
