@@ -71,7 +71,7 @@ jobs:
           done
           exit "$status"
 
-      - name: DevControl DC-L01 through DC-L09 tests
+      - name: DevControl DC-L01 through DC-L10 tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         shell: bash
@@ -121,8 +121,6 @@ jobs:
                   assert not hasattr(module, name), (module.__name__, name)
 
           for future_module in (
-              "kaliv_dev_control.asymmetric_authority",
-              "kaliv_dev_control.semantic_review",
               "kaliv_dev_control.draft_pr_readiness",
               "kaliv_dev_control.publisher_dry_run",
               "kaliv_dev_control.publisher_authorization",
@@ -134,6 +132,64 @@ jobs:
           assert callable(kaliv_dev_control.build_tier_a_launch_plan)
           assert callable(kaliv_dev_control.publish_stream_once)
           assert callable(kaliv_dev_control.TrustedRuntimeClosureStager)
+          PY
+
+      - name: DevControl DC-L10 asymmetric and semantic-review boundary
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=devcontrol/src python3 - <<'PY' 2>&1 | tee -a /tmp/modelrig-ci-test.log
+          import importlib
+          import importlib.util
+          import inspect
+
+          import kaliv_dev_control
+
+          asymmetric = importlib.import_module("kaliv_dev_control.asymmetric_authority")
+          semantic = importlib.import_module("kaliv_dev_control.semantic_review")
+          tier_a_facade = importlib.import_module("kaliv_dev_control.tier_a_execution")
+          toolhost = importlib.import_module("kaliv_dev_control._tier_a_legacy_toolhost")
+
+          assert callable(asymmetric.Ed25519AuthorityVerifier)
+          assert callable(asymmetric.authority_signing_message)
+          assert callable(semantic.SemanticReviewApprovalGate.ready)
+          assert callable(semantic.write_semantic_review_request)
+          assert callable(semantic.write_signed_semantic_review_verdict)
+
+          asymmetric_source = inspect.getsource(asymmetric)
+          for token in (
+              "Ed25519PrivateKey",
+              "class Ed25519AuthorityIssuer",
+              "load_private",
+              ".sign(",
+          ):
+              assert token not in asymmetric_source, token
+
+          for name in (
+              "SemanticReviewRequest",
+              "SemanticReviewApprovalGate",
+              "Ed25519AuthorityVerifier",
+          ):
+              assert not hasattr(kaliv_dev_control, name), name
+              assert not hasattr(tier_a_facade, name), name
+
+          assert all(
+              "semantic_review" not in path
+              and "asymmetric_authority" not in path
+              for path in toolhost._TIER_A_BUNDLE_FILES
+          )
+
+          for future_module in (
+              "kaliv_dev_control.draft_pr_readiness",
+              "kaliv_dev_control.publisher_dry_run",
+              "kaliv_dev_control.publisher_authorization",
+              "kaliv_dev_control.publisher_authorization_v2",
+              "kaliv_dev_control.publisher_recovery_authorization",
+              "kaliv_dev_control.local_candidate_materialization",
+          ):
+              assert importlib.util.find_spec(future_module) is None, future_module
           PY
 
       - name: DevControl final boundary regressions
