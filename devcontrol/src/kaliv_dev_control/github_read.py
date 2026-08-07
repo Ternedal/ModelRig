@@ -6,8 +6,10 @@ import fnmatch
 import hashlib
 import json
 import re
+import socket
 import ssl
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -192,6 +194,21 @@ def _deadline_socket(response: Any) -> Any:
     )
 
 
+def _abort_response(response: Any, transport_socket: Any) -> None:
+    try:
+        transport_socket.shutdown(socket.SHUT_RDWR)
+    except (AttributeError, OSError):
+        pass
+    try:
+        transport_socket.close()
+    except (AttributeError, OSError):
+        pass
+    try:
+        response.close()
+    except (AttributeError, OSError):
+        pass
+
+
 def _read_response_body(
     response: Any,
     *,
@@ -202,35 +219,82 @@ def _read_response_body(
     fallback = getattr(response, "read", None)
     if not callable(read_once) and not callable(fallback):
         raise GitHubReadError("GitHub response body is not readable")
-    chunks: list[bytes] = []
-    total = 0
-    while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise GitHubReadError("GitHub read exceeded the wall-clock deadline")
-        socket = _deadline_socket(response)
+    transport_socket = _deadline_socket(response)
+    completed = threading.Event()
+    result: list[bytes] = []
+    failures: list[BaseException] = []
+
+    def consume() -> None:
+        chunks: list[bytes] = []
+        total = 0
         try:
-            socket.settimeout(max(0.001, remaining))
-        except (OSError, ValueError) as exc:
-            raise GitHubReadError(
-                "GitHub response deadline could not be enforced"
-            ) from exc
-        amount = min(65_536, max_bytes + 1 - total)
-        if amount <= 0:
-            raise GitHubReadError("GitHub response exceeded the read budget")
-        try:
-            chunk = read_once(amount) if callable(read_once) else fallback(1)
-        except (TimeoutError, OSError) as exc:
-            raise GitHubReadError("GitHub read did not complete") from exc
-        if not isinstance(chunk, (bytes, bytearray)):
-            raise GitHubReadError("GitHub response body is not bytes")
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > max_bytes:
-            raise GitHubReadError("GitHub response exceeded the read budget")
-        chunks.append(bytes(chunk))
-    return b"".join(chunks)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise GitHubReadError(
+                        "GitHub read exceeded the wall-clock deadline"
+                    )
+                try:
+                    transport_socket.settimeout(max(0.001, remaining))
+                except (OSError, ValueError) as exc:
+                    raise GitHubReadError(
+                        "GitHub response deadline could not be enforced"
+                    ) from exc
+                amount = min(65_536, max_bytes + 1 - total)
+                if amount <= 0:
+                    raise GitHubReadError(
+                        "GitHub response exceeded the read budget"
+                    )
+                chunk = read_once(amount) if callable(read_once) else fallback(1)
+                if not isinstance(chunk, (bytes, bytearray)):
+                    raise GitHubReadError(
+                        "GitHub response body is not bytes"
+                    )
+                if not chunk:
+                    result.append(b"".join(chunks))
+                    return
+                total += len(chunk)
+                if total > max_bytes:
+                    raise GitHubReadError(
+                        "GitHub response exceeded the read budget"
+                    )
+                chunks.append(bytes(chunk))
+        except BaseException as exc:
+            failures.append(exc)
+        finally:
+            completed.set()
+
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise GitHubReadError("GitHub read exceeded the wall-clock deadline")
+    try:
+        transport_socket.settimeout(max(0.001, remaining))
+    except (OSError, ValueError) as exc:
+        raise GitHubReadError(
+            "GitHub response deadline could not be enforced"
+        ) from exc
+    worker = threading.Thread(
+        target=consume,
+        name="kaliv-github-read",
+        daemon=True,
+    )
+    worker.start()
+    if not completed.wait(remaining):
+        _abort_response(response, transport_socket)
+        raise GitHubReadError("GitHub read exceeded the wall-clock deadline")
+    if time.monotonic() > deadline:
+        _abort_response(response, transport_socket)
+        raise GitHubReadError("GitHub read exceeded the wall-clock deadline")
+    if failures:
+        failure = failures[0]
+        if isinstance(failure, GitHubReadError):
+            raise failure
+        if isinstance(failure, (TimeoutError, OSError)):
+            raise GitHubReadError("GitHub read did not complete") from failure
+        raise GitHubReadError("GitHub response body could not be read") from failure
+    if len(result) != 1:
+        raise GitHubReadError("GitHub response body could not be read")
+    return result[0]
 
 
 class UrllibReadOnlyTransport:
