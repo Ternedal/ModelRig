@@ -12,27 +12,27 @@
     {
       "path": "devcontrol/schemas/development-github-read-receipt-v1.schema.json",
       "source_blob": "d00c0519a6c78221e6e506c42e418467fafbc80b",
-      "reason": "align task identity and repository bounds with the landed DevelopmentTask contract"
+      "reason": "align exact task and repository identity with the landed contract"
     },
     {
       "path": "devcontrol/schemas/development-isolation-attestation-v1.schema.json",
       "source_blob": "561aa1956b5d60d9dde69d271c986b963e1d83c0",
-      "reason": "align task identity syntax with the landed DevelopmentTask contract"
+      "reason": "align isolation evidence identity and bounds with the landed contract"
     },
     {
       "path": "devcontrol/src/kaliv_dev_control/catalog.py",
       "source_blob": "98cb4ce673b166b8802dda9004af7654bbb51d97",
-      "reason": "retain the locked catalog while adding bounded canonical fields, loader/Git environment rejection, sealed descriptor-based POSIX executable pinning, process-lifetime descriptor retirement that prevents fd reuse, and fail-closed Windows behavior"
+      "reason": "retain dormant catalog and attestation types while removing default command authority, rejecting Python and Go runtimes, and requiring sealed descriptor-pinned static ELF objects for any future custom tool"
     },
     {
       "path": "devcontrol/src/kaliv_dev_control/github_read.py",
       "source_blob": "2637ad2a9f4bc3ff49afaf123f71b06645c86971",
-      "reason": "retain the fixed GET-only API while disabling environment proxies, rejecting non-exact task SHAs before transport, hardening response metadata, validating task identities and verifying decoded Git blob identity"
+      "reason": "retain GET-only exact-SHA reads while hardening TLS trust, deadlines, scope, response bounds and Git blob identity"
     },
     {
       "path": "devcontrol/tests/test_slice5.py",
       "source_blob": "cb2766909a788d588285047c0495029dec4b1c97",
-      "reason": "preserve source coverage and add regressions for blob identity, proxy/authority restrictions, loader-hook rejection, pathname swaps, descriptor retirement, linked executables, moving refs and strict receipt reload"
+      "reason": "replace source tests with executable regressions for the empty default catalog, static-only runtime boundary and fixed-authority GitHub reads"
     }
   ]
 }
