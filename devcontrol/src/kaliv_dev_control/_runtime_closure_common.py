@@ -1,4 +1,4 @@
-"""Private canonical-path and atomic-file primitives for runtime closure."""
+"""Private canonical-path and durable atomic-file primitives for runtime closure."""
 from __future__ import annotations
 
 import hashlib
@@ -10,6 +10,7 @@ from typing import Any, Mapping
 
 from .catalog import CatalogError
 from .contract import DevelopmentTask
+from .durable_publication import DurablePublicationError, sync_directory
 from .streaming_publication import (
     StreamingPublicationError,
     publish_stream_once,
@@ -161,7 +162,11 @@ def _closure_relative_path(value: Any, *, name: str) -> str:
 
 
 def _closure_working_directory(value: Any) -> str:
-    return "." if value == "." else _closure_relative_path(value, name="working directory")
+    return (
+        "."
+        if value == "."
+        else _closure_relative_path(value, name="working directory")
+    )
 
 
 def _closure_secure_directory_chain(root: Path, relative: PurePosixPath) -> Path:
@@ -182,20 +187,30 @@ def _closure_secure_directory_chain(root: Path, relative: PurePosixPath) -> Path
 
 
 def _closure_staged_mode() -> int:
-    # On Windows, os.chmod(..., 0o555) maps to the DOS read-only attribute. It
-    # is not a security boundary (the same user can clear it), and it prevents
-    # deterministic post-execution cleanup. Windows lifetime immutability is
-    # instead enforced by the protected DACL and deny-write/delete-sharing
-    # handles acquired before the child is created. Unix staging remains 0555.
+    # Windows uses the lifetime guard for immutability; Unix staging remains 0555.
     return 0o755 if os.name == "nt" else 0o555
 
 
 def _closure_fix_staged_mode(path: Path) -> None:
+    """Apply and durably flush the staged mode before evidence is returned."""
+
+    descriptor = -1
     try:
+        flags = os.O_RDWR | getattr(os, "O_BINARY", 0)
+        descriptor = os.open(path, flags)
         os.chmod(path, _closure_staged_mode())
-    except OSError as exc:
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        sync_directory(path.parent)
+    except (OSError, DurablePublicationError) as exc:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
         raise RuntimeClosureError(
-            "staged runtime permissions could not be fixed"
+            "staged runtime permissions could not be made durable"
         ) from exc
 
 
@@ -272,6 +287,7 @@ def _closure_publish_exact_file(
             try:
                 os.chmod(destination, 0o755)
                 destination.unlink()
-            except OSError:
+                sync_directory(destination.parent)
+            except (OSError, DurablePublicationError):
                 pass
             raise
