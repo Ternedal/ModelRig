@@ -7,10 +7,20 @@ from __future__ import annotations
 import fnmatch
 import json
 import re
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 root = Path(__file__).resolve().parents[1]
 workflow = (root / ".github/workflows/_tests.yml").read_text(encoding="utf-8")
+sys.path.insert(0, str(root / "devcontrol/src"))
+
+import kaliv_dev_control.github_read as github_read_module
+from kaliv_dev_control.catalog import CatalogError, ProjectCommandSpec
+from kaliv_dev_control.github_read import (
+    GitHubReadError,
+    UrllibReadOnlyTransport,
+)
 
 passed = failed = 0
 
@@ -105,6 +115,92 @@ invalid_repositories = (
 check(
     all(repository_pattern.fullmatch(value) is None for value in invalid_repositories),
     "the GitHub receipt schema rejects dot segments, whitespace and NUL authority",
+)
+
+blocked_environment = True
+for key, value in (
+    ("GOROOT", "."),
+    ("PYTHONUSERBASE", "."),
+    ("GOTOOLCHAIN", "auto"),
+):
+    try:
+        ProjectCommandSpec(
+            "modelrig.contract.probe",
+            "python",
+            ("-V",),
+            ".",
+            10,
+            {key: value},
+        )
+    except CatalogError:
+        continue
+    blocked_environment = False
+check(
+    blocked_environment,
+    "catalog environment is a fixed-value positive list without runtime authority",
+)
+
+
+class _DeadlineSocket:
+    def __init__(self) -> None:
+        self.timeouts: list[float] = []
+
+    def settimeout(self, value: float) -> None:
+        self.timeouts.append(value)
+
+
+class _SlowResponse:
+    status = 200
+    headers = {"Content-Type": "application/json"}
+
+    def __init__(self) -> None:
+        self.socket = _DeadlineSocket()
+        self.fp = SimpleNamespace(
+            raw=SimpleNamespace(_sock=self.socket)
+        )
+        self.closed = False
+
+    def read1(self, amount: int) -> bytes:
+        del amount
+        return b"x"
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _SlowOpener:
+    def __init__(self, response: _SlowResponse) -> None:
+        self.response = response
+
+    def open(self, request, timeout):
+        del request, timeout
+        return self.response
+
+
+slow_response = _SlowResponse()
+transport = object.__new__(UrllibReadOnlyTransport)
+transport._opener = _SlowOpener(slow_response)
+ticks = iter((0.0, 0.2, 0.7, 1.1))
+original_monotonic = github_read_module.time.monotonic
+github_read_module.time.monotonic = lambda: next(ticks)
+deadline_rejected = False
+try:
+    try:
+        transport.get(
+            "https://api.github.com/repos/Ternedal/ModelRig/commits/" + "a" * 40,
+            headers={},
+            timeout_seconds=1,
+            max_bytes=100,
+        )
+    except GitHubReadError as exc:
+        deadline_rejected = "wall-clock deadline" in str(exc)
+finally:
+    github_read_module.time.monotonic = original_monotonic
+check(
+    deadline_rejected
+    and slow_response.closed
+    and bool(slow_response.socket.timeouts),
+    "slow-drip GitHub reads are stopped by one monotonic wall-clock deadline",
 )
 
 print(f"\n===== TEST COVERAGE: {passed} passed, {failed} failed =====")
