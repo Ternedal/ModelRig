@@ -1,8 +1,9 @@
-"""DC-L07 non-executing v5 Tier-A source-bundle identity.
+"""DC-L08 verified-execution v6 Tier-A source-bundle identity.
 
-The tuple covers the exact stage-local authority closure for leases, runtime
-staging, signed closures, plan identity and bounded result evidence. It contains
-no executor, command receipt, trusted-Git, publisher or remote-authority module.
+The tuple covers the exact stage-local authority and private execution closure.
+It includes the retained legacy runner and the sole closure-bound v3 executor,
+but no final public facade, command receipt, trusted-Git, publisher or remote
+authority module.
 """
 from __future__ import annotations
 
@@ -47,23 +48,25 @@ _TIER_A_BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
     "devcontrol/src/kaliv_dev_control/tier_a_plan.py",
     "devcontrol/src/kaliv_dev_control/tier_a_result.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_lease.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_materialization.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py",
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
     "devcontrol/src/kaliv_dev_control/workspace.py",
 )
 
 
 def tier_a_toolhost_sha256(control_plane_root: Path) -> str:
-    """Hash the complete non-executing DC-L07 authority source chain."""
+    """Hash the complete private DC-L08 verified-execution source chain."""
 
     root = _canonical_directory(control_plane_root, name="control-plane root")
     digest = hashlib.sha256()
-    digest.update(b"kaliv-tier-a-toolhost/v5\0")
+    digest.update(b"kaliv-tier-a-toolhost/v6\0")
     for relative in _TIER_A_BUNDLE_FILES:
         path = root / PurePosixPath(relative)
         if path.is_symlink() or not path.is_file():
