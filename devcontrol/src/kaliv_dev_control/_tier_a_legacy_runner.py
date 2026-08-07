@@ -59,6 +59,40 @@ def _run_tier_a_launch_plan(
             "authoritative worker Tier-A modules are unavailable"
         ) from exc
 
+    # The signed plan binds a platform-neutral fixed environment. The Windows
+    # launcher owns system initialization (including Path) and accepts only its
+    # smaller application-value allowlist. Project only reviewed intersections
+    # and fail closed if any omitted plan value is not one of the exact portable
+    # constants already signed by the plan.
+    portable_only = {
+        "PATH": "/usr/bin:/bin",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "LC_CTYPE": "C",
+        "TZ": "UTC",
+    }
+    windows_allowed = {
+        key.casefold(): (key, expected)
+        for key, expected in (
+            windows_tier_a.WINDOWS_TIER_A_APPLICATION_ENVIRONMENT.items()
+        )
+    }
+    windows_application_env: dict[str, str] = {}
+    for key, value in plan.env.items():
+        allowed = windows_allowed.get(key.casefold())
+        if allowed is not None:
+            canonical_key, expected = allowed
+            if value != expected:
+                raise TierAExecutionError(
+                    f"Tier-A Windows environment value is not reviewed: {canonical_key}"
+                )
+            windows_application_env[canonical_key] = value
+            continue
+        if portable_only.get(key) != value:
+            raise TierAExecutionError(
+                f"Tier-A plan environment cannot be represented on Windows: {key}"
+            )
+
     policy = windows_restricted.RestrictedLaunchPolicy(os.fspath(root))
     profile = windows_restricted.AppContainerProfile(policy)
     process = None
@@ -67,7 +101,7 @@ def _run_tier_a_launch_plan(
         process = windows_tier_a.spawn_tier_a_in_job(
             plan.argv,
             source_env=os.environ if source_env is None else source_env,
-            application_env=plan.env,
+            application_env=windows_application_env,
             limits=windows_job.JobLimits(
                 process_memory_bytes=process_memory_bytes,
                 active_process_limit=active_process_limit,
