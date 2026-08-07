@@ -3,7 +3,7 @@
 Status: **authority candidate hardened; exact-head workflow gates pending**
 
 Current authority implementation/regression candidate:
-`33b762a9145dedf93365921b359477f81d22eb5f`.
+`b74701c41ef05775597b930aaf23b919df1a7533`.
 
 The candidate keeps the complete 16-path allowlist and includes:
 
@@ -23,6 +23,9 @@ The candidate keeps the complete 16-path allowlist and includes:
   deadline;
 - explicit connection establishment followed by cancellation/deadline checks
   before any authenticated GET may be sent;
+- `auto_open=0` before the sole explicit connection, preventing `http.client`
+  from reconnecting after cancellation closes the socket between authority
+  checks and request output;
 - a single process-global setup slot so an uninterruptible DNS/setup worker
   cannot accumulate and further attempts fail closed while it remains pending;
 - socket shutdown/close, response close and connection close on deadline expiry;
@@ -34,9 +37,9 @@ The candidate keeps the complete 16-path allowlist and includes:
 Latest landed authority blobs:
 
 - catalog: `e562bbbf9acb6833279491303b6ab7b508bc3e0e`;
-- GitHub read transport: `e662352600f663ebf80918f00bc8ae07596b31f9`;
+- GitHub read transport: `dd30559d6b95a155de4a80def6454400719c9889`;
 - receipt schema: `40615abb093d890a98391ad8dc38d90fb8166c2d`;
-- workflow contract/regressions: `572f843a52688398f5a457a7569d5222e4efeee7`.
+- workflow contract/regressions: `d1b5c9b97d3b3a3f9d20eea16e28126b75bea9ed`.
 
 The latest complete focused DC-L03 run before the final environment/deadline
 hardening produced **26/26 passing tests**. Existing public test surfaces were
@@ -52,6 +55,8 @@ now cover:
   that no authenticated request is sent after delayed setup completion;
 - rejection of a second setup attempt while the first unresolved setup worker
   still owns the single bounded setup slot;
+- a race where request output pauses after setup, cancellation closes the socket,
+  and delayed continuation proves there is no automatic reconnect or auth send;
 - wall-clock rejection with socket, response and connection closure;
 - preserved successful reads, fixed-host validation and byte-budget rejection.
 
@@ -73,8 +78,12 @@ Review history:
   `ac4eaa44fa501eba797818d8563e82c9b83ce8f0` closed them;
 - review of `3a0a99ab987ec22219787a086a97fc7cf13f9998` found that a blocked DNS/setup
   worker could later send after the caller timed out and repeated calls could
-  accumulate workers; candidates `4455d01657be0769438e4336406406a6f4ead5d3`
-  and `33b762a9145dedf93365921b359477f81d22eb5f` close that finding.
+  accumulate workers; candidate `33b762a9145dedf93365921b359477f81d22eb5f`
+  closed that finding;
+- author-side race audit then found `http.client` could auto-reconnect if the
+  socket closed between the final check and request output; candidates
+  `c147d12c295f6ee5844b757e13c91ac521105977` and
+  `b74701c41ef05775597b930aaf23b919df1a7533` close that race.
 
 Verified repository facts:
 
