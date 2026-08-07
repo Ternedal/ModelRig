@@ -17,17 +17,19 @@ then proved two additional compatibility failures:
 - the foundation boundary rejected a literal future-slice-style
   `from .tier_a_...` import in `runtime_staging.py`.
 
-A subsequent source review found two additional DC-L06-only assumptions:
+A subsequent source review found three additional pre-DC-L07 assumptions:
 
+- the foundation gate classified every runtime-staging and Tier-A import as future;
 - the schema test required v2/v3/result schemas to remain absent; and
 - the bundle test prohibited runtime staging, closure and result modules that
   DC-L07 must bind into the non-executing toolhost identity.
 
-Both tests are now explicit projections. They preserve v1 parity, validate v3
-plan/result parity, require the exact DC-L07 runtime-evidence closure and continue
-to reject every executor and remote-authority module.
+These tests are now explicit projections. They name the landed DC-L07 modules,
+preserve v1 parity, validate v3 plan/result parity, require the exact DC-L07
+runtime-evidence closure and continue to reject every executor and remote-authority
+module.
 
-The coverage contract now requires all twenty-seven modules through DC-L07.
+The coverage contract requires all twenty-seven modules through DC-L07.
 
 ## Load-bearing mutations
 
@@ -39,6 +41,7 @@ The following mutations are required to fail:
 | Allow metadata-sync failure to continue to `os.link` | `test_permission_metadata_sync_failure_is_fail_closed` |
 | Reorder publication to link before metadata sync | the recorded `prepare`, `sync`, `link` event sequence |
 | Require a write-open descriptor for repeated Unix closure staging | repeated staging assertion in `test_slice10e_version_check_closure.py` |
+| Remove a landed DC-L07 module from the foundation inventory or add a DC-L08+ import | `test_foundation_tracks_landed_and_future_slice_imports` |
 | Remove the retained v1 launch-plan compatibility aliases | v1 parity in `test_slice9.py` and `test_slice9_schemas.py` |
 | Remove or weaken v3 plan/result schema parity | `test_slice9_schemas.py` and the dedicated plan/result tests |
 | Remove a required DC-L07 runtime-evidence module from the v5 toolhost bundle | `test_stage_local_bundle_projections_are_identical_and_non_executing` |
