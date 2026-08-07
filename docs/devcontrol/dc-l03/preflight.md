@@ -22,7 +22,9 @@ The complete candidate diff must equal the 16 paths in
 
 The pre-existing command executor is a progressive surface only to carry one
 strict private `DevelopmentTask` snapshot through its already-landed execution
-path. DC-L03 adds no command ID, generic process launcher or activation path.
+path. DC-L03 adds three inactive catalog IDs, but no new activated command,
+generic process launcher, launch authority or activation path because
+`default_registry()` remains empty.
 
 ## Authority boundary
 
@@ -57,3 +59,7 @@ It may not introduce:
 7. GitHub connection setup, request output, headers, chunk framing and body reads
    are covered by one monotonic deadline with bounded setup workers and no
    automatic reconnect after cancellation.
+8. Task-bound DC-L03 commands bootstrap containment through a separately
+   attested, descriptor-pinned static ELF helper. Dynamic-loader and interpreter
+   segments are rejected, so Python standard-library, native-extension and
+   shared-library files cannot execute before the boundary is installed.
