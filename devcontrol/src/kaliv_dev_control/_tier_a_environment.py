@@ -16,8 +16,11 @@ TIER_A_APPLICATION_ENVIRONMENT = MappingProxyType(
     {
         "CI": "1",
         "MODELRIG_DEVCONTROL": "1",
-        "GOTOOLCHAIN": "local",
-        "PYTHONDONTWRITEBYTECODE": "1",
+        "PATH": "/usr/bin:/bin",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "LC_CTYPE": "C",
+        "TZ": "UTC",
     }
 )
 
