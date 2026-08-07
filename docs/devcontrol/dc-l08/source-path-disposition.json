@@ -1,0 +1,46 @@
+{
+  "schema": "modelrig-devcontrol-dc-l08-source-path-disposition/v1",
+  "slice": "DC-L08",
+  "base": "3777dc456bf72238339e91f714dd239a97ec02b9",
+  "locked_source": "07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f",
+  "source_paths": [
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py",
+    "devcontrol/tests/test_h10r_tier_a_legacy_runner_extraction.py"
+  ],
+  "progressive_paths": [
+    ".github/workflows/_tests.yml",
+    "devcontrol/README.md",
+    "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
+    "devcontrol/tests/test_slice9.py",
+    "tests/workflow_test_coverage.py"
+  ],
+  "control_paths": [
+    "docs/devcontrol/dc-l08/exact-head-validation.md",
+    "docs/devcontrol/dc-l08/exact-path-allowlist.json",
+    "docs/devcontrol/dc-l08/independent-review-verdict.md",
+    "docs/devcontrol/dc-l08/mutation-results.md",
+    "docs/devcontrol/dc-l08/preflight.md",
+    "docs/devcontrol/dc-l08/source-path-disposition.json",
+    "docs/devcontrol/dc-l08/source-provenance.json",
+    "docs/devcontrol/dc-l08/symbol-ownership.json"
+  ],
+  "copied_exact_paths": [
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py"
+  ],
+  "projected_source_paths": {
+    "devcontrol/tests/test_h10r_tier_a_legacy_runner_extraction.py": "retain executor extraction, fail-closed and boundary proofs while removing DC-L09 final-facade and command-receipt assertions"
+  },
+  "hard_exclusions": [
+    "devcontrol/src/kaliv_dev_control/tier_a_execution.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_command_receipt.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_h4.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_model.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_runner.py",
+    "devcontrol/src/kaliv_dev_control/trusted_git_runtime_staging.py"
+  ]
+}
