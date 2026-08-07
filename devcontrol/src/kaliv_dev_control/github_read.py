@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping, Protocol
@@ -110,6 +111,12 @@ class ReadOnlyTransport(Protocol):
     ) -> HttpResponse: ...
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        del req, fp, code, msg, headers, newurl
+        return None
+
+
 def _system_tls_context() -> ssl.SSLContext:
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.verify_mode = ssl.CERT_REQUIRED
@@ -165,6 +172,43 @@ def _system_tls_context() -> ssl.SSLContext:
     return context
 
 
+def _deadline_socket(response: Any) -> Any:
+    pending = [response]
+    seen: set[int] = set()
+    for _ in range(5):
+        following: list[Any] = []
+        for candidate in pending:
+            marker = id(candidate)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            if callable(getattr(candidate, "settimeout", None)):
+                return candidate
+            for name in ("fp", "raw", "_sock"):
+                child = getattr(candidate, name, None)
+                if child is not None:
+                    following.append(child)
+        pending = following
+    raise GitHubReadError(
+        "GitHub response transport cannot enforce a wall-clock deadline"
+    )
+
+
+def _abort_response(response: Any, transport_socket: Any) -> None:
+    try:
+        transport_socket.shutdown(socket.SHUT_RDWR)
+    except (AttributeError, OSError):
+        pass
+    try:
+        transport_socket.close()
+    except (AttributeError, OSError):
+        pass
+    try:
+        response.close()
+    except (AttributeError, OSError):
+        pass
+
+
 def _abort_connection(connection: Any, response: Any | None) -> None:
     transport_socket = getattr(connection, "sock", None)
     if transport_socket is not None:
@@ -187,7 +231,7 @@ def _abort_connection(connection: Any, response: Any | None) -> None:
         pass
 
 
-def _read_response_body(
+def _read_response_body_sync(
     response: Any,
     transport_socket: Any,
     *,
@@ -225,6 +269,62 @@ def _read_response_body(
         if total > max_bytes:
             raise GitHubReadError("GitHub response exceeded the read budget")
         chunks.append(bytes(chunk))
+
+
+def _read_response_body(
+    response: Any,
+    transport_socket: Any | None = None,
+    *,
+    max_bytes: int,
+    deadline: float,
+) -> bytes:
+    if transport_socket is not None:
+        return _read_response_body_sync(
+            response,
+            transport_socket,
+            max_bytes=max_bytes,
+            deadline=deadline,
+        )
+    discovered = _deadline_socket(response)
+    completed = threading.Event()
+    results: list[bytes] = []
+    failures: list[Exception] = []
+
+    def consume() -> None:
+        try:
+            results.append(
+                _read_response_body_sync(
+                    response,
+                    discovered,
+                    max_bytes=max_bytes,
+                    deadline=deadline,
+                )
+            )
+        except Exception as exc:
+            failures.append(exc)
+        finally:
+            completed.set()
+
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise GitHubReadError("GitHub read exceeded the wall-clock deadline")
+    worker = threading.Thread(
+        target=consume,
+        name="kaliv-github-body",
+        daemon=True,
+    )
+    worker.start()
+    if not completed.wait(remaining):
+        _abort_response(response, discovered)
+        raise GitHubReadError("GitHub read exceeded the wall-clock deadline")
+    if time.monotonic() > deadline:
+        _abort_response(response, discovered)
+        raise GitHubReadError("GitHub read exceeded the wall-clock deadline")
+    if failures:
+        raise failures[0]
+    if len(results) != 1:
+        raise GitHubReadError("GitHub response body could not be read")
+    return results[0]
 
 
 def _request_with_deadline(
@@ -348,6 +448,11 @@ def _request_with_deadline(
 class UrllibReadOnlyTransport:
     def __init__(self) -> None:
         self._context = _system_tls_context()
+        self._opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            urllib.request.HTTPSHandler(context=self._context),
+            _NoRedirect(),
+        )
 
     def get(
         self,
