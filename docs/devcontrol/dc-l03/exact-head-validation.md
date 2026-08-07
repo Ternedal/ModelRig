@@ -3,11 +3,14 @@
 Status: **authority candidate hardened; exact-head workflow gates pending**
 
 Current authority implementation/regression candidate:
-`b74701c41ef05775597b930aaf23b919df1a7533`.
+`c7c018c8f866867507eb9f3adcbaf4ae1e0d7eef`.
 
 The candidate keeps the complete 16-path allowlist and includes:
 
 - reconstructed DevelopmentTask, catalog, toolchain and attestation snapshots;
+- one strict private execution-task snapshot used for command resolution, source
+  verification, sandbox creation, runtime/output budgets, post-run verification,
+  cleanup verification and receipt identity;
 - private isolation-verifier proof plus post-callback canonical revalidation;
 - sealed exact-task command registries and reviewed verifier retention;
 - Linux no-follow, nonblocking, bounded executable reads and sealed memfd launch;
@@ -37,15 +40,17 @@ The candidate keeps the complete 16-path allowlist and includes:
 Latest landed authority blobs:
 
 - catalog: `e562bbbf9acb6833279491303b6ab7b508bc3e0e`;
+- execution snapshot surface: `f55e3a898e0135d3d207e63a051bccb6f554fc1b`;
 - GitHub read transport: `dd30559d6b95a155de4a80def6454400719c9889`;
 - receipt schema: `40615abb093d890a98391ad8dc38d90fb8166c2d`;
-- workflow contract/regressions: `d1b5c9b97d3b3a3f9d20eea16e28126b75bea9ed`.
+- workflow contract/regressions: `25b6c4d163d0071d170d0cfc1f719f0314e64319`.
 
-The latest complete focused DC-L03 run before the final environment/deadline
-hardening produced **26/26 passing tests**. Existing public test surfaces were
-preserved while additional executable contract regressions and direct validation
-now cover:
+The latest complete focused DC-L03 run before the final hardening produced
+**26/26 passing tests**. Existing public test surfaces were preserved while
+additional executable contract regressions and direct validation now cover:
 
+- mutation of the caller-owned task during command execution while sandbox,
+  budgets, verification and receipt remain bound to one private task A snapshot;
 - rejection of `GOROOT=.`, `PYTHONUSERBASE=.`, `GOTOOLCHAIN=auto` and an
   attacker-selected PATH;
 - automatic fixed-PATH insertion for a caller-supplied `env={}` spec;
@@ -77,23 +82,29 @@ Review history:
   status/header framing outside the supervisor; candidate
   `ac4eaa44fa501eba797818d8563e82c9b83ce8f0` closed them;
 - review of `3a0a99ab987ec22219787a086a97fc7cf13f9998` found that a blocked DNS/setup
-  worker could later send after the caller timed out and repeated calls could
+  worker could later send after caller timeout and repeated calls could
   accumulate workers; candidate `33b762a9145dedf93365921b359477f81d22eb5f`
   closed that finding;
 - author-side race audit then found `http.client` could auto-reconnect if the
   socket closed between the final check and request output; candidates
   `c147d12c295f6ee5844b757e13c91ac521105977` and
-  `b74701c41ef05775597b930aaf23b919df1a7533` close that race.
+  `b74701c41ef05775597b930aaf23b919df1a7533` closed that race;
+- review of `64cab512ef45c9ebd8dba5b88ab1202eb08a4b88` found that the registry validated
+  a copied task but the executor continued with the mutable caller object;
+  candidates `a17506cd0217e5a7a5fbd22ba147c20ee5d08086` and
+  `c7c018c8f866867507eb9f3adcbaf4ae1e0d7eef` carry one private snapshot through
+  the complete pre-existing execution path and add the mutation regression.
 
 Verified repository facts:
 
-- diff equals `exact-path-allowlist.json` at 16 paths;
+- the README is restored byte-for-byte to base and `commands.py` replaces it as
+  the third progressive surface;
+- diff must equal `exact-path-allowlist.json` at 16 paths;
 - merge base is fresh `main` head
   `c9bda459f10e682ec200fdfea8484d726c6c0057` and branch is 0 commits behind;
-- all review threads opened before this evidence update are resolved;
 - package activation remains unchanged and `default_registry()` remains empty;
-- no GitHub write, non-GET HTTP, remote Git, merge, publication, deployment or
-  activation authority is introduced.
+- no GitHub write, non-GET HTTP, remote Git, new command/launch authority, merge,
+  publication, deployment or activation authority is introduced.
 
 Still required before merge:
 
