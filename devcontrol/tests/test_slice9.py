@@ -151,7 +151,7 @@ def issue(root: Path, *, failed_probe: bool = False, env=None):
         toolchain_sha256=toolchain.sha256,
         rig_id="modelrig-test-rig",
         rig_fingerprint_sha256="1" * 64,
-        candidate_version="dc-l08-test",
+        candidate_version="dc-l09-test",
         windows_build="Windows test contract",
         toolhost_sha256=tier_a_toolhost_sha256(control),
         workspace_root_sha256=workspace_root_authority_sha256(workspace),
@@ -236,19 +236,35 @@ class TierAExecutionLeaseTests(unittest.TestCase):
             )
             self.assertEqual(plan.task_id, development_task.task_id)
 
-    def test_dc_l08_exposes_only_private_verified_execution(self) -> None:
+    def test_dc_l09_exposes_one_final_facade_without_authority_aliases(self) -> None:
+        package = importlib.import_module("kaliv_dev_control")
         core = importlib.import_module("kaliv_dev_control._tier_a_execution_core")
         modern = importlib.import_module("kaliv_dev_control.tier_a_execution_v3")
-        self.assertIsNone(
+        facade = importlib.import_module("kaliv_dev_control.tier_a_execution")
+        receipt = importlib.import_module("kaliv_dev_control.tier_a_command_receipt")
+        self.assertIsNotNone(
             importlib.util.find_spec("kaliv_dev_control.tier_a_execution")
         )
-        for surface in (tier_a_module, core):
+        self.assertIsNotNone(
+            importlib.util.find_spec("kaliv_dev_control.tier_a_command_receipt")
+        )
+        for surface in (package, tier_a_module, core):
             self.assertFalse(hasattr(surface, "_run_tier_a_launch_plan"))
             self.assertFalse(hasattr(surface, "run_verified_tier_a_command"))
-        self.assertTrue(callable(modern._run_tier_a_launch_plan))
-        self.assertTrue(callable(modern.run_verified_tier_a_command))
+        self.assertIs(
+            facade._run_tier_a_launch_plan,
+            modern._run_tier_a_launch_plan,
+        )
+        self.assertIs(
+            facade.run_verified_tier_a_command,
+            modern.run_verified_tier_a_command,
+        )
+        self.assertIs(
+            facade.run_single_verified_tier_a_command_with_receipt,
+            receipt.run_single_verified_tier_a_command_with_receipt,
+        )
 
-    def test_stage_local_bundle_projections_are_identical_and_execution_bound(self) -> None:
+    def test_stage_local_bundle_projections_are_identical_and_dc_l09_bound(self) -> None:
         toolhost = importlib.import_module(
             "kaliv_dev_control._tier_a_legacy_toolhost"
         )
@@ -267,6 +283,13 @@ class TierAExecutionLeaseTests(unittest.TestCase):
             "tier_a_result.py",
             "_tier_a_legacy_runner.py",
             "tier_a_execution_v3.py",
+            "trusted_git_runtime_model.py",
+            "trusted_git_runtime_staging.py",
+            "trusted_git_runtime_h4.py",
+            "trusted_git_runtime_runner.py",
+            "trusted_git_runtime.py",
+            "tier_a_command_receipt.py",
+            "tier_a_execution.py",
         )
         for fragment in required:
             self.assertTrue(
@@ -274,11 +297,11 @@ class TierAExecutionLeaseTests(unittest.TestCase):
                 fragment,
             )
         forbidden = (
-            "tier_a_execution.py",
-            "tier_a_command_receipt.py",
-            "trusted_git",
+            "asymmetric_authority",
             "semantic_review",
+            "draft_pr_readiness",
             "publisher",
+            "local_candidate_materialization",
         )
         for path in tier_a_module._TIER_A_BUNDLE_FILES:
             self.assertFalse(any(fragment in path for fragment in forbidden), path)
@@ -312,14 +335,14 @@ class TierAExecutionLeaseTests(unittest.TestCase):
                     control_plane_root=control.resolve(),
                 )
 
-    def test_missing_private_executor_source_is_rejected(self) -> None:
+    def test_missing_trusted_git_authority_source_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             control = Path(directory) / "control"
             control.mkdir()
             create_control_plane(control)
             (
                 control
-                / "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py"
+                / "devcontrol/src/kaliv_dev_control/trusted_git_runtime_runner.py"
             ).unlink()
             with self.assertRaisesRegex(TierAExecutionError, "missing or unsafe"):
                 tier_a_toolhost_sha256(control)
