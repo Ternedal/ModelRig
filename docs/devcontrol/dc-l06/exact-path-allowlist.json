@@ -1,7 +1,7 @@
 {
   "schema": "modelrig-devcontrol-dc-l06-exact-path-allowlist/v1",
   "base": "3ede93313233e65599f2fb29b4c64e58f7432990",
-  "expected_path_count": 26,
+  "expected_path_count": 27,
   "paths": [
     "devcontrol/schemas/development-execution-lease-v1.schema.json",
     "devcontrol/schemas/development-tier-a-launch-plan-v1.schema.json",
@@ -28,6 +28,7 @@
     "docs/devcontrol/dc-l06/preflight.md",
     "docs/devcontrol/dc-l06/source-path-disposition.json",
     "docs/devcontrol/dc-l06/source-provenance.json",
-    "docs/devcontrol/dc-l06/symbol-ownership.json"
+    "docs/devcontrol/dc-l06/symbol-ownership.json",
+    "tests/workflow_test_coverage.py"
   ]
 }
