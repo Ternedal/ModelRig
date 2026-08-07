@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
+from . import tier_a_authority as _authority
 from .catalog import CatalogError
 from .commands import CommandRegistry, CommandTemplate
 from .contract import DevelopmentTask
@@ -27,10 +28,9 @@ from .streaming_publication import (
     StreamingPublicationError,
     publish_stream_once,
 )
-from .tier_a_authority import (
-    LeasedCommandRegistry,
-    workspace_root_authority_sha256,
-)
+
+LeasedCommandRegistry = _authority.LeasedCommandRegistry
+workspace_root_authority_sha256 = _authority.workspace_root_authority_sha256
 
 RUNTIME_STAGING_SCHEMA = "kaliv-development-runtime-staging-receipt/v1"
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
