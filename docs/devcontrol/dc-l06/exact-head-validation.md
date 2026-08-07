@@ -7,10 +7,10 @@ contains only the 15 locked source paths and is not merge evidence.
 
 The final head must prove:
 
-- exactly the 26 paths in `exact-path-allowlist.json` differ from
+- exactly the 27 paths in `exact-path-allowlist.json` differ from
   `main @ 3ede93313233e65599f2fb29b4c64e58f7432990`;
 - the branch is not behind current `main`;
-- the eight exact source blobs and ten documented projections match
+- the eight exact source blobs and eleven documented projections match
   `source-provenance.json`;
 - `_tier_a_execution_core.py` owns no class or function and imports only
   already-landed DC-L06 identities;
@@ -18,6 +18,7 @@ The final head must prove:
   L07-or-later module;
 - `tier_a_authority.py` exposes no process-launch entrypoint;
 - lease, environment, path, materialization, v1-plan and schema tests pass;
+- workflow coverage reaches all twenty DevControl modules landed through DC-L06;
 - package import remains dormant and product code does not import DevControl;
 - portable repository tests, CodeQL and both diagnostics workflows pass; and
 - all review threads are resolved.
