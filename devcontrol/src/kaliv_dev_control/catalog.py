@@ -122,8 +122,7 @@ class ProjectCommandSpec:
             if key not in _ALLOWED_ENV or value != _ALLOWED_ENV[key]:
                 raise CatalogError("catalog environment is outside the reviewed isolation positive list")
             clean[key] = value
-        if clean.get("PATH") != _FIXED_PATH:
-            raise CatalogError("catalog environment must include the reviewed isolation PATH")
+        clean.setdefault("PATH", _FIXED_PATH)
         object.__setattr__(self, "env", MappingProxyType(clean))
 
     def copy(self) -> "ProjectCommandSpec":
