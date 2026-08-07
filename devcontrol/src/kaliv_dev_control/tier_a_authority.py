@@ -1,25 +1,51 @@
-"""Dormant DC-L06 Tier-A authority identities and materialization surface.
+"""Dormant DC-L07 Tier-A authority, runtime identity and cwd binding.
 
-This module exposes only identities that have landed by DC-L06. It deliberately
-contains no process-launch, runtime-staging, trusted-Git, receipt, publication or
-remote authority.
+This stage can materialize and verify runtime evidence and launch-plan identity,
+but deliberately exposes no process-launch, trusted-Git, receipt, publisher,
+credential, remote or activation authority.
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import os
+import re
+from pathlib import Path, PurePosixPath
+from typing import Any, Mapping
+
 from . import _tier_a_execution_core as _core
+from .contract import DevelopmentTask
 
 LEASE_SCHEMA = _core.LEASE_SCHEMA
-PLAN_SCHEMA = _core.PLAN_SCHEMA
+PLAN_SCHEMA = "kaliv-development-tier-a-launch-plan/v3"
+_HEX40 = re.compile(r"^[0-9a-f]{40}$")
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+_TASK_ID = re.compile(r"^[A-Z][A-Z0-9_-]{2,63}$")
+_COMMAND_ID = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
+_MAX_OUTPUT_BYTES = 100_000_000
+_ZERO_SHA256 = "0" * 64
+
 TierAExecutionError = _core.TierAExecutionError
 TierAExecutionLease = _core.TierAExecutionLease
 LeasedCommandRegistry = _core.LeasedCommandRegistry
 LeasedCatalogMaterializer = _core.LeasedCatalogMaterializer
-TierALaunchPlan = _core.TierALaunchPlan
-build_tier_a_launch_plan = _core.build_tier_a_launch_plan
 TIER_A_APPLICATION_ENVIRONMENT = _core.TIER_A_APPLICATION_ENVIRONMENT
 workspace_root_authority_sha256 = _core.workspace_root_authority_sha256
-tier_a_toolhost_sha256 = _core.tier_a_toolhost_sha256
 
+for _forbidden_execution_name in (
+    "_run_tier_a_launch_plan",
+    "run_verified_tier_a_command",
+):
+    if hasattr(_core, _forbidden_execution_name):
+        raise TierAExecutionError(
+            f"DC-L07 core exposes forbidden execution authority: "
+            f"{_forbidden_execution_name}"
+        )
+del _forbidden_execution_name
+
+# Exact source chain that can issue or transform DC-L07 runtime evidence. The
+# v5 domain intentionally excludes every DC-L08+ executor, command receipt,
+# trusted-Git, publisher and remote-authority module.
 _TIER_A_BUNDLE_FILES = (
     "worker/app/__init__.py",
     "worker/app/windows_job.py",
@@ -42,8 +68,18 @@ _TIER_A_BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/policy.py",
     "devcontrol/src/kaliv_dev_control/proposal.py",
     "devcontrol/src/kaliv_dev_control/review.py",
+    "devcontrol/src/kaliv_dev_control/runtime_staging.py",
+    "devcontrol/src/kaliv_dev_control/streaming_publication.py",
+    "devcontrol/src/kaliv_dev_control/_runtime_closure_common.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure_model.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure_verify.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure_staging.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure.py",
+    "devcontrol/src/kaliv_dev_control/runtime_closure_builder.py",
     "devcontrol/src/kaliv_dev_control/store.py",
-    "devcontrol/src/kaliv_dev_control/workspace.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_plan.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_result.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_lease.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_environment.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_path_authority.py",
@@ -51,8 +87,102 @@ _TIER_A_BUNDLE_FILES = (
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_legacy_plan.py",
     "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
-    "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
+    "devcontrol/src/kaliv_dev_control/workspace.py",
 )
 
-if _TIER_A_BUNDLE_FILES != _core._TIER_A_BUNDLE_FILES:
-    raise TierAExecutionError("DC-L06 Tier-A bundle projections disagree")
+
+def _canonical(value: Mapping[str, Any]) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _task_sha(task: DevelopmentTask) -> str:
+    return hashlib.sha256(task.canonical_json().encode("utf-8")).hexdigest()
+
+
+def _is_linkish(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    is_junction = getattr(path, "is_junction", None)
+    return bool(is_junction is not None and is_junction())
+
+
+def _has_linkish_component(path: Path) -> bool:
+    current = path.absolute()
+    while True:
+        if _is_linkish(current):
+            return True
+        if current.parent == current:
+            return False
+        current = current.parent
+
+
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _working_directory(root: Path, relative: str) -> Path:
+    if relative == ".":
+        candidate = root
+    else:
+        if not isinstance(relative, str):
+            raise TierAExecutionError("Tier-A working directory is invalid")
+        parsed = PurePosixPath(relative)
+        if (
+            relative.startswith("/")
+            or "\\" in relative
+            or any(part in {"", ".", ".."} for part in parsed.parts)
+        ):
+            raise TierAExecutionError("Tier-A working directory is invalid")
+        candidate = root.joinpath(*parsed.parts)
+    if _has_linkish_component(candidate) or not candidate.is_dir():
+        raise TierAExecutionError("Tier-A working directory is missing or unsafe")
+    resolved = candidate.resolve()
+    if not _inside(resolved, root):
+        raise TierAExecutionError("Tier-A working directory escaped the workspace")
+    return resolved
+
+
+def working_directory_authority_sha256(root: Path, relative: str) -> str:
+    """Bind a canonical workspace-relative cwd to its exact physical path."""
+
+    canonical_root = _core._canonical_directory(root, name="workspace root")
+    directory = _working_directory(canonical_root, relative)
+    normalized = os.path.normcase(os.fspath(directory))
+    return hashlib.sha256(
+        b"kaliv-tier-a-working-directory/v1\0"
+        + relative.encode("utf-8")
+        + b"\0"
+        + normalized.encode("utf-8", "surrogatepass")
+    ).hexdigest()
+
+
+def tier_a_toolhost_sha256(control_plane_root: Path) -> str:
+    """Hash the complete non-executing v5 DC-L07 authority source chain."""
+
+    root = _core._canonical_directory(
+        control_plane_root,
+        name="control-plane root",
+    )
+    digest = hashlib.sha256()
+    digest.update(b"kaliv-tier-a-toolhost/v5\0")
+    for relative in _TIER_A_BUNDLE_FILES:
+        path = root / PurePosixPath(relative)
+        if _has_linkish_component(path) or not path.is_file():
+            raise TierAExecutionError(
+                f"Tier-A toolhost bundle file is missing or unsafe: {relative}"
+            )
+        payload = path.read_bytes()
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+    return digest.hexdigest()
