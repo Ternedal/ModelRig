@@ -24,6 +24,7 @@ The following changes must fail one or more landed contracts:
 | Allow Git runtime identity to change during orchestration | command-receipt runtime evidence tests |
 | Remove bounded subprocess process-tree cleanup | Linux and native Windows bounded-subprocess contracts |
 | Bypass AppContainer, Job Object, closure or lifetime checks | native Windows execution and receipt contracts |
+| Bypass base physical signature, binding, probe or freshness verification in either Windows fixture projection | leased materializer and verifier base-class execution path |
 | Add remote Git, GitHub mutation, publisher or credential imports | source-boundary and future-module gates |
 | Omit one of the 31 portable modules or two DC-L09 Windows contracts from CI | workflow coverage contract |
 
@@ -52,6 +53,15 @@ modules as future. The adapter is now late-bound while preserving the Linux
 subreaper source contract, and the foundation test moves only DC-L09 modules into
 the landed set. All later semantic-review, publisher and activation imports remain
 forbidden.
+
+The next native receipt run passed bounded Job Object containment and the full
+closure-bound executor, then failed while materializing its physical lease because
+the later fixture's file-discovery assumptions do not match the independently
+landed DC-L04 verifier boundary. The workflow now uses a test-only
+`WindowsPhysicalIsolationVerifier` subclass that supplies the already signed
+in-memory report candidate. Base signature, authority binding, mandatory probes
+and freshness verification still execute unchanged; production verifier code is
+untouched.
 
 Progressive tests moved the signed bundle to v7, recognized the final facade and
 activated bounded Git plus command-receipt Windows proof. Further concrete red
