@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
 
 from ._tier_a_lease import TierAExecutionError
 from ._tier_a_legacy_plan import TierALaunchPlan, build_tier_a_launch_plan
@@ -16,7 +16,6 @@ from ._tier_a_path_authority import (
     workspace_root_authority_sha256,
 )
 from .catalog import (
-    ExecutableVerifier,
     IsolationAttestation,
     ModelRigCommandCatalog,
     Toolchain,
@@ -121,7 +120,7 @@ def run_verified_tier_a_command(
     workspace_root: Path,
     control_plane_root: Path,
     source_env: Mapping[str, str] | None = None,
-    executable_verifier: ExecutableVerifier | None = None,
+    executable_verifier: Any | None = None,
     process_memory_bytes: int = 512 * 1024 * 1024,
     active_process_limit: int = 8,
 ) -> int:
