@@ -1,0 +1,25 @@
+{
+  "schema": "modelrig-devcontrol-dc-l08-exact-path-allowlist/v1",
+  "base": "3777dc456bf72238339e91f714dd239a97ec02b9",
+  "expected_path_count": 18,
+  "paths": [
+    ".github/workflows/_tests.yml",
+    "devcontrol/README.md",
+    "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_runner.py",
+    "devcontrol/src/kaliv_dev_control/_tier_a_legacy_toolhost.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_authority.py",
+    "devcontrol/src/kaliv_dev_control/tier_a_execution_v3.py",
+    "devcontrol/tests/test_h10r_tier_a_legacy_runner_extraction.py",
+    "devcontrol/tests/test_slice9.py",
+    "docs/devcontrol/dc-l08/exact-head-validation.md",
+    "docs/devcontrol/dc-l08/exact-path-allowlist.json",
+    "docs/devcontrol/dc-l08/independent-review-verdict.md",
+    "docs/devcontrol/dc-l08/mutation-results.md",
+    "docs/devcontrol/dc-l08/preflight.md",
+    "docs/devcontrol/dc-l08/source-path-disposition.json",
+    "docs/devcontrol/dc-l08/source-provenance.json",
+    "docs/devcontrol/dc-l08/symbol-ownership.json",
+    "tests/workflow_test_coverage.py"
+  ]
+}
