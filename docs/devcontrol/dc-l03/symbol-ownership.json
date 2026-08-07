@@ -18,6 +18,14 @@
       "authority": "immutable fixed command metadata and isolation-bound local materialization"
     },
     {
+      "path": "devcontrol/src/kaliv_dev_control/commands.py",
+      "symbols": [
+        "CommandRegistry.execution_task",
+        "CommandExecutor.execute"
+      ],
+      "authority": "one private strict task snapshot across the pre-existing local execution path; no new command or launch authority"
+    },
+    {
       "path": "devcontrol/src/kaliv_dev_control/github_read.py",
       "symbols": [
         "HttpResponse",
@@ -36,6 +44,15 @@
         "SchemaTests"
       ],
       "authority": "executable DC-L03 fail-closed and determinism regressions"
+    },
+    {
+      "path": "tests/workflow_test_coverage.py",
+      "symbols": [
+        "execution-task mutation regression",
+        "transport deadline regressions",
+        "workflow coverage contract"
+      ],
+      "authority": "repository-level executable control checks reached by CI"
     }
   ],
   "forbidden_ownership": [
@@ -43,7 +60,7 @@
     "GitHub mutation",
     "remote Git",
     "credential persistence or receipt serialization",
-    "process launch",
+    "new command or process-launch authority",
     "merge, release, deployment or activation"
   ]
 }
