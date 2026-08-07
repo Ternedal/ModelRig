@@ -142,9 +142,19 @@ for key, value in (
 catalog_path = modelrig_command_catalog().resolve(
     "modelrig.devcontrol.tests"
 ).env.get("PATH")
+injected_path = ProjectCommandSpec(
+    "modelrig.contract.default-path",
+    "python",
+    ("-V",),
+    ".",
+    10,
+    {},
+).env.get("PATH")
 check(
-    blocked_environment and catalog_path == "/usr/bin:/bin",
-    "catalog environment fixes PATH and rejects unreviewed runtime authority",
+    blocked_environment
+    and catalog_path == "/usr/bin:/bin"
+    and injected_path == "/usr/bin:/bin",
+    "every accepted catalog entry receives the fixed child-tool PATH",
 )
 
 
@@ -186,7 +196,7 @@ class _BlockingChunkResponse:
 
 
 slow_response = _BlockingChunkResponse()
-deadline_rejected = False
+body_deadline_rejected = False
 started = time.monotonic()
 try:
     github_read_module._read_response_body(
@@ -195,15 +205,59 @@ try:
         deadline=time.monotonic() + 0.05,
     )
 except GitHubReadError as exc:
-    deadline_rejected = "wall-clock deadline" in str(exc)
-elapsed = time.monotonic() - started
+    body_deadline_rejected = "wall-clock deadline" in str(exc)
+body_elapsed = time.monotonic() - started
 check(
-    deadline_rejected
-    and elapsed < 0.5
+    body_deadline_rejected
+    and body_elapsed < 0.5
     and slow_response.closed
     and slow_response.socket.aborted.is_set()
     and bool(slow_response.socket.timeouts),
     "blocking chunk framing is cancelled by the monotonic wall-clock deadline",
+)
+
+
+class _BlockingHeaderConnection:
+    def __init__(self) -> None:
+        self.sock = _DeadlineSocket()
+        self.timeout = None
+        self.closed = False
+        self.requested = False
+
+    def request(self, method: str, target: str, *, headers) -> None:
+        self.requested = method == "GET" and target.startswith("/") and isinstance(headers, dict)
+
+    def getresponse(self):
+        self.sock.aborted.wait(5)
+        raise OSError("connection cancelled")
+
+    def close(self) -> None:
+        self.closed = True
+        self.sock.aborted.set()
+
+
+header_connection = _BlockingHeaderConnection()
+header_deadline_rejected = False
+started = time.monotonic()
+try:
+    github_read_module._request_with_deadline(
+        header_connection,
+        "/repos/Ternedal/ModelRig/commits/" + "a" * 40,
+        headers={},
+        max_bytes=100,
+        deadline=time.monotonic() + 0.05,
+    )
+except GitHubReadError as exc:
+    header_deadline_rejected = "wall-clock deadline" in str(exc)
+header_elapsed = time.monotonic() - started
+check(
+    header_deadline_rejected
+    and header_elapsed < 0.5
+    and header_connection.requested
+    and header_connection.closed
+    and header_connection.sock.aborted.is_set()
+    and bool(header_connection.sock.timeouts),
+    "blocking HTTP status/header framing is cancelled at the absolute deadline",
 )
 
 print(f"\n===== TEST COVERAGE: {passed} passed, {failed} failed =====")
