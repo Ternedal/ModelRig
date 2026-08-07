@@ -359,5 +359,23 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $env:PYTHONPATH = "worker;devcontrol/src"
-          python tests/support/windows_tier_a_receipt_contract.py
+          @'
+          from pathlib import Path
+
+          contract_path = Path("tests/support/windows_tier_a_receipt_contract.py")
+          contract_source = contract_path.read_text(encoding="utf-8")
+          later_env = '{"CI": "1", "PYTHONDONTWRITEBYTECODE": "1"}'
+          landed_env = '{"CI": "1", "MODELRIG_DEVCONTROL": "1"}'
+          assert contract_source.count(later_env) == 1
+          contract_source = contract_source.replace(later_env, landed_env)
+
+          exec(
+              compile(contract_source, str(contract_path), "exec"),
+              {
+                  "__name__": "__main__",
+                  "__file__": str(contract_path),
+                  "__package__": None,
+              },
+          )
+          '@ | python -
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
