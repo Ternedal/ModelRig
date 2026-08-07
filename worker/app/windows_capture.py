@@ -1,0 +1,591 @@
+"""Bounded Tier-A output capture and exact working-directory binding.
+
+This module still does not create or select processes. It wraps the existing
+AppContainer Win32 API narrowly enough to inject three reviewed standard handles
+and, when explicitly configured, replace the lower launcher's workspace-root
+``lpCurrentDirectory`` with one prevalidated directory inside that same
+workspace. Executable selection, arguments, environment construction,
+AppContainer identity and Job Object assignment remain outside this wrapper.
+
+Both output pipes are drained concurrently until EOF. Every byte contributes to
+the stream hash and total byte count, while only a deterministic prefix budget is
+retained in memory.
+"""
+from __future__ import annotations
+
+import ctypes
+import hashlib
+import os
+import threading
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from .windows_job import WindowsIsolationError
+from .windows_restricted import _STARTUPINFOW
+
+ERROR_BROKEN_PIPE = 109
+HANDLE_FLAG_INHERIT = 0x00000001
+STARTF_USESTDHANDLES = 0x00000100
+GENERIC_READ = 0x80000000
+FILE_SHARE_READ = 0x00000001
+FILE_SHARE_WRITE = 0x00000002
+OPEN_EXISTING = 3
+FILE_ATTRIBUTE_NORMAL = 0x00000080
+INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002
+PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES = 0x00020009
+_READ_CHUNK_BYTES = 64 * 1024
+_MAX_CAPTURE_BYTES = 100_000_000
+
+
+class WindowsOutputCaptureError(WindowsIsolationError):
+    """Native output handles or launch-directory binding failed safely."""
+
+
+class _SECURITY_ATTRIBUTES(ctypes.Structure):
+    _fields_ = [
+        ("nLength", ctypes.c_uint32),
+        ("lpSecurityDescriptor", ctypes.c_void_p),
+        ("bInheritHandle", ctypes.c_int),
+    ]
+
+
+def _is_linkish(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    is_junction = getattr(path, "is_junction", None)
+    return bool(is_junction is not None and is_junction())
+
+
+def _has_linkish_component(path: Path) -> bool:
+    current = path.absolute()
+    while True:
+        if _is_linkish(current):
+            return True
+        if current.parent == current:
+            return False
+        current = current.parent
+
+
+def _canonical_directory(path: Path, *, name: str) -> Path:
+    raw = Path(path)
+    if not raw.is_absolute():
+        raise WindowsOutputCaptureError(f"{name} must be absolute")
+    if _has_linkish_component(raw):
+        raise WindowsOutputCaptureError(f"{name} contains a link or junction")
+    resolved = raw.resolve()
+    if not resolved.is_dir():
+        raise WindowsOutputCaptureError(f"{name} must be an existing directory")
+    return resolved
+
+
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+@dataclass(frozen=True, slots=True)
+class CapturedStream:
+    """One completely hashed stream with a bounded retained prefix."""
+
+    captured: bytes
+    sha256: str
+    total_bytes: int
+    truncated: bool
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.captured, bytes):
+            raise WindowsOutputCaptureError("captured stream prefix must be bytes")
+        if (
+            not isinstance(self.sha256, str)
+            or len(self.sha256) != 64
+            or any(character not in "0123456789abcdef" for character in self.sha256)
+        ):
+            raise WindowsOutputCaptureError("captured stream hash is invalid")
+        if (
+            isinstance(self.total_bytes, bool)
+            or not isinstance(self.total_bytes, int)
+            or self.total_bytes < len(self.captured)
+        ):
+            raise WindowsOutputCaptureError("captured stream byte count is invalid")
+        if not isinstance(self.truncated, bool):
+            raise WindowsOutputCaptureError("captured stream truncation flag is invalid")
+        if self.truncated != (self.total_bytes > len(self.captured)):
+            raise WindowsOutputCaptureError(
+                "captured stream truncation flag does not match its byte counts"
+            )
+        if (
+            not self.truncated
+            and hashlib.sha256(self.captured).hexdigest() != self.sha256
+        ):
+            raise WindowsOutputCaptureError(
+                "complete captured stream bytes do not match their hash"
+            )
+
+
+class _PipeReader:
+    def __init__(self, native_api: Any, handle: int, limit: int, name: str) -> None:
+        self._native_api = native_api
+        self._handle = handle
+        self._limit = limit
+        self._name = name
+        self._captured = bytearray()
+        self._digest = hashlib.sha256()
+        self._total = 0
+        self._error: BaseException | None = None
+        self._thread = threading.Thread(
+            target=self._drain,
+            name=f"kaliv-tier-a-{name}-drain",
+            daemon=False,
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def _drain(self) -> None:
+        buffer = ctypes.create_string_buffer(_READ_CHUNK_BYTES)
+        read = ctypes.c_uint32()
+        try:
+            while True:
+                read.value = 0
+                ok = self._native_api.kernel32.ReadFile(
+                    ctypes.c_void_p(self._handle),
+                    buffer,
+                    len(buffer),
+                    ctypes.byref(read),
+                    None,
+                )
+                if not ok:
+                    error = ctypes.get_last_error()
+                    if error == ERROR_BROKEN_PIPE:
+                        break
+                    raise self._native_api.win_error(f"ReadFile({self._name})")
+                if read.value == 0:
+                    break
+                chunk = bytes(buffer.raw[: read.value])
+                self._digest.update(chunk)
+                self._total += len(chunk)
+                remaining = self._limit - len(self._captured)
+                if remaining > 0:
+                    self._captured.extend(chunk[:remaining])
+        except BaseException as exc:
+            self._error = exc
+        finally:
+            handle = self._handle
+            self._handle = 0
+            if handle:
+                try:
+                    self._native_api.close_handle(handle)
+                except BaseException as exc:
+                    if self._error is None:
+                        self._error = exc
+
+    def finish(self, timeout_seconds: float) -> CapturedStream:
+        self._thread.join(timeout_seconds)
+        if self._thread.is_alive():
+            raise WindowsOutputCaptureError(
+                f"{self._name} capture did not reach EOF after process cleanup"
+            )
+        if self._error is not None:
+            raise WindowsOutputCaptureError(
+                f"{self._name} capture failed"
+            ) from self._error
+        captured = bytes(self._captured)
+        return CapturedStream(
+            captured=captured,
+            sha256=self._digest.hexdigest(),
+            total_bytes=self._total,
+            truncated=self._total > len(captured),
+        )
+
+
+class _CaptureKernel32:
+    """Delegate Win32 calls while adding std handles and exact cwd binding."""
+
+    def __init__(self, owner: "WindowsOutputCapture", delegate: Any) -> None:
+        self._owner = owner
+        self._delegate = delegate
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._delegate, name)
+
+    def InitializeProcThreadAttributeList(
+        self,
+        attribute_list: Any,
+        attribute_count: int,
+        flags: int,
+        size: Any,
+    ) -> int:
+        if attribute_count != 1:
+            raise WindowsOutputCaptureError(
+                "capture expected one pre-existing process attribute"
+            )
+        return int(
+            self._delegate.InitializeProcThreadAttributeList(
+                attribute_list,
+                2,
+                flags,
+                size,
+            )
+        )
+
+    def UpdateProcThreadAttribute(self, *arguments: Any) -> int:
+        if len(arguments) != 7:
+            raise WindowsOutputCaptureError(
+                "unexpected UpdateProcThreadAttribute call shape"
+            )
+        attribute = int(arguments[2])
+        if attribute != PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES:
+            raise WindowsOutputCaptureError(
+                "capture may extend only the security-capabilities attribute list"
+            )
+        if self._owner._handle_list_installed:
+            raise WindowsOutputCaptureError("capture handle list was installed twice")
+        if not self._delegate.UpdateProcThreadAttribute(*arguments):
+            return 0
+        forwarded = list(arguments)
+        forwarded[2] = PROC_THREAD_ATTRIBUTE_HANDLE_LIST
+        forwarded[3] = ctypes.cast(self._owner._inherit_handles, ctypes.c_void_p)
+        forwarded[4] = ctypes.sizeof(self._owner._inherit_handles)
+        if not self._delegate.UpdateProcThreadAttribute(*forwarded):
+            return 0
+        self._owner._handle_list_installed = True
+        return 1
+
+    def CreateProcessW(self, *arguments: Any) -> int:
+        if len(arguments) != 10:
+            raise WindowsOutputCaptureError("unexpected CreateProcessW call shape")
+        if not self._owner._handle_list_installed:
+            raise WindowsOutputCaptureError(
+                "CreateProcessW refused capture without a strict handle list"
+            )
+        startup_pointer = arguments[8]
+        startup = ctypes.cast(
+            startup_pointer,
+            ctypes.POINTER(_STARTUPINFOW),
+        ).contents
+        startup.dwFlags |= STARTF_USESTDHANDLES
+        startup.hStdInput = self._owner._stdin_read
+        startup.hStdOutput = self._owner._stdout_write
+        startup.hStdError = self._owner._stderr_write
+        forwarded = list(arguments)
+        forwarded[4] = 1
+        if self._owner.working_directory is not None:
+            requested = arguments[7]
+            if not isinstance(requested, str):
+                raise WindowsOutputCaptureError(
+                    "lower Tier-A launcher supplied an invalid current directory"
+                )
+            requested_path = _canonical_directory(
+                Path(requested), name="lower Tier-A workspace directory"
+            )
+            if os.path.normcase(os.fspath(requested_path)) != os.path.normcase(
+                os.fspath(self._owner.workspace_root)
+            ):
+                raise WindowsOutputCaptureError(
+                    "working-directory wrapper refused a mismatched workspace root"
+                )
+            directory = _canonical_directory(
+                self._owner.working_directory,
+                name="capture working directory at CreateProcessW",
+            )
+            if (
+                not _inside(directory, requested_path)
+                or os.path.normcase(os.fspath(directory))
+                != os.path.normcase(os.fspath(self._owner.working_directory))
+            ):
+                raise WindowsOutputCaptureError(
+                    "working directory changed after capture validation"
+                )
+            is_reparse = getattr(self._owner.native_api, "is_reparse", None)
+            if callable(is_reparse) and is_reparse(os.fspath(directory)):
+                raise WindowsOutputCaptureError(
+                    "working-directory wrapper refused a reparse point"
+                )
+            forwarded[7] = os.fspath(directory)
+            self._owner._working_directory_bound = True
+        try:
+            return int(self._delegate.CreateProcessW(*forwarded))
+        finally:
+            self._owner._close_child_ends(suppress=True)
+
+
+class _CaptureApi:
+    def __init__(self, owner: "WindowsOutputCapture", native_api: Any) -> None:
+        self._native_api = native_api
+        self.kernel32 = _CaptureKernel32(owner, native_api.kernel32)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._native_api, name)
+
+
+class WindowsOutputCapture:
+    """Own concurrent pipe drains, strict handles and optional exact cwd binding."""
+
+    def __init__(
+        self,
+        native_api: Any,
+        max_output_bytes: int,
+        *,
+        workspace_root: Path | None = None,
+        working_directory: Path | None = None,
+    ) -> None:
+        if native_api is None or not hasattr(native_api, "kernel32"):
+            raise WindowsOutputCaptureError("capture requires the launcher's native API")
+        if (
+            isinstance(max_output_bytes, bool)
+            or not isinstance(max_output_bytes, int)
+            or not 1_024 <= max_output_bytes <= _MAX_CAPTURE_BYTES
+        ):
+            raise WindowsOutputCaptureError(
+                "capture budget must be 1024..100000000 bytes"
+            )
+        if (workspace_root is None) != (working_directory is None):
+            raise WindowsOutputCaptureError(
+                "workspace root and working directory must be supplied together"
+            )
+        self.native_api = native_api
+        self.max_output_bytes = max_output_bytes
+        self.workspace_root: Path | None = None
+        self.working_directory: Path | None = None
+        self._working_directory_bound = False
+        if workspace_root is not None and working_directory is not None:
+            root = _canonical_directory(workspace_root, name="capture workspace root")
+            directory = _canonical_directory(
+                working_directory, name="capture working directory"
+            )
+            if not _inside(directory, root):
+                raise WindowsOutputCaptureError(
+                    "capture working directory escaped the workspace"
+                )
+            is_reparse = getattr(native_api, "is_reparse", None)
+            if callable(is_reparse) and (
+                is_reparse(os.fspath(root)) or is_reparse(os.fspath(directory))
+            ):
+                raise WindowsOutputCaptureError(
+                    "capture refuses reparse-point workspace directories"
+                )
+            self.workspace_root = root
+            self.working_directory = directory
+        self.stdout_limit = (max_output_bytes + 1) // 2
+        self.stderr_limit = max_output_bytes // 2
+        self._started = False
+        self._finished = False
+        self._child_ends_closed = False
+        self._child_close_error: BaseException | None = None
+        self._handle_list_installed = False
+        self._configure_api()
+        self._stdout_read, self._stdout_write = self._create_pipe("stdout")
+        try:
+            self._stderr_read, self._stderr_write = self._create_pipe("stderr")
+        except Exception:
+            self._close_handle(self._stdout_read)
+            self._close_handle(self._stdout_write)
+            raise
+        try:
+            self._stdin_read = self._open_nul_stdin()
+        except Exception:
+            self._close_handle(self._stdout_read)
+            self._close_handle(self._stdout_write)
+            self._close_handle(self._stderr_read)
+            self._close_handle(self._stderr_write)
+            raise
+        self._inherit_handles = (ctypes.c_void_p * 3)(
+            self._stdin_read,
+            self._stdout_write,
+            self._stderr_write,
+        )
+        self._stdout_reader = _PipeReader(
+            native_api,
+            self._stdout_read,
+            self.stdout_limit,
+            "stdout",
+        )
+        self._stderr_reader = _PipeReader(
+            native_api,
+            self._stderr_read,
+            self.stderr_limit,
+            "stderr",
+        )
+        self.api = _CaptureApi(self, native_api)
+
+    def _configure_api(self) -> None:
+        kernel32 = self.native_api.kernel32
+        kernel32.CreatePipe.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(_SECURITY_ATTRIBUTES),
+            ctypes.c_uint32,
+        ]
+        kernel32.CreatePipe.restype = ctypes.c_int
+        kernel32.SetHandleInformation.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        ]
+        kernel32.SetHandleInformation.restype = ctypes.c_int
+        kernel32.ReadFile.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.c_void_p,
+        ]
+        kernel32.ReadFile.restype = ctypes.c_int
+        kernel32.CreateFileW.argtypes = [
+            ctypes.c_wchar_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.POINTER(_SECURITY_ATTRIBUTES),
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+        ]
+        kernel32.CreateFileW.restype = ctypes.c_void_p
+
+    @staticmethod
+    def _security_attributes() -> "_SECURITY_ATTRIBUTES":
+        return _SECURITY_ATTRIBUTES(ctypes.sizeof(_SECURITY_ATTRIBUTES), None, 1)
+
+    def _create_pipe(self, name: str) -> tuple[int, int]:
+        read = ctypes.c_void_p()
+        write = ctypes.c_void_p()
+        security = self._security_attributes()
+        if not self.native_api.kernel32.CreatePipe(
+            ctypes.byref(read),
+            ctypes.byref(write),
+            ctypes.byref(security),
+            0,
+        ):
+            raise self.native_api.win_error(f"CreatePipe({name})")
+        read_handle = int(read.value or 0)
+        write_handle = int(write.value or 0)
+        if not read_handle or not write_handle:
+            self._close_handle(read_handle)
+            self._close_handle(write_handle)
+            raise WindowsOutputCaptureError(f"CreatePipe({name}) returned no handles")
+        if not self.native_api.kernel32.SetHandleInformation(
+            ctypes.c_void_p(read_handle),
+            HANDLE_FLAG_INHERIT,
+            0,
+        ):
+            self._close_handle(read_handle)
+            self._close_handle(write_handle)
+            raise self.native_api.win_error(f"SetHandleInformation({name})")
+        return read_handle, write_handle
+
+    def _open_nul_stdin(self) -> int:
+        security = self._security_attributes()
+        handle = self.native_api.kernel32.CreateFileW(
+            "NUL",
+            GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            ctypes.byref(security),
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            None,
+        )
+        value = int(handle or 0)
+        if not value or value == INVALID_HANDLE_VALUE:
+            raise self.native_api.win_error("CreateFileW(NUL)")
+        return value
+
+    def _close_handle(self, handle: int) -> None:
+        if handle:
+            self.native_api.close_handle(handle)
+
+    def _close_child_ends(self, *, suppress: bool = False) -> None:
+        if self._child_ends_closed:
+            if self._child_close_error is not None and not suppress:
+                raise WindowsOutputCaptureError(
+                    "child-side capture handles could not be closed"
+                ) from self._child_close_error
+            return
+        errors: list[BaseException] = []
+        for attribute in ("_stdin_read", "_stdout_write", "_stderr_write"):
+            handle = getattr(self, attribute, 0)
+            setattr(self, attribute, 0)
+            if handle:
+                try:
+                    self._close_handle(handle)
+                except BaseException as exc:
+                    errors.append(exc)
+        self._child_ends_closed = True
+        if errors:
+            self._child_close_error = errors[0]
+            if not suppress:
+                raise WindowsOutputCaptureError(
+                    "child-side capture handles could not be closed"
+                ) from errors[0]
+
+    def assert_spawn_ready(self) -> None:
+        if (
+            not self._started
+            or not self._handle_list_installed
+            or not self._child_ends_closed
+        ):
+            raise WindowsOutputCaptureError(
+                "capture was not bound to one strict completed CreateProcessW call"
+            )
+        if self.working_directory is not None and not self._working_directory_bound:
+            raise WindowsOutputCaptureError(
+                "capture working directory was not bound to CreateProcessW"
+            )
+        if self._child_close_error is not None:
+            raise WindowsOutputCaptureError(
+                "child-side capture handles could not be closed"
+            ) from self._child_close_error
+
+    def start(self) -> None:
+        if self._started or self._finished:
+            raise WindowsOutputCaptureError("capture can only be started once")
+        self._started = True
+        self._stdout_reader.start()
+        self._stderr_reader.start()
+
+    def finish(
+        self,
+        timeout_seconds: float = 10.0,
+    ) -> tuple[CapturedStream, CapturedStream]:
+        if not self._started or self._finished:
+            raise WindowsOutputCaptureError("capture is not in a finishable state")
+        if timeout_seconds <= 0:
+            raise WindowsOutputCaptureError("capture finish timeout must be positive")
+        self._close_child_ends()
+        stdout = self._stdout_reader.finish(timeout_seconds)
+        stderr = self._stderr_reader.finish(timeout_seconds)
+        self._finished = True
+        if len(stdout.captured) + len(stderr.captured) > self.max_output_bytes:
+            raise WindowsOutputCaptureError("capture exceeded its retained-byte budget")
+        return stdout, stderr
+
+    def abort(self) -> None:
+        if self._finished:
+            return
+        try:
+            self._close_child_ends(suppress=True)
+        except Exception:
+            pass
+        if self._started:
+            try:
+                self._stdout_reader.finish(10.0)
+            except Exception:
+                pass
+            try:
+                self._stderr_reader.finish(10.0)
+            except Exception:
+                pass
+        else:
+            for attribute in ("_stdout_read", "_stderr_read"):
+                handle = getattr(self, attribute, 0)
+                setattr(self, attribute, 0)
+                if handle:
+                    try:
+                        self._close_handle(handle)
+                    except Exception:
+                        pass
+        self._finished = True
