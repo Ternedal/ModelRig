@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import ssl
+import struct
 import subprocess
 import sys
 import tempfile
@@ -51,6 +52,28 @@ def git_blob_sha(data: bytes) -> str:
     ).hexdigest()
 
 
+def elf64_with_segment(segment_type: int) -> bytes:
+    ident = b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8
+    header = ident + struct.pack(
+        "<HHIQQQIHHHHHH",
+        2,
+        62,
+        1,
+        0,
+        64,
+        0,
+        0,
+        64,
+        56,
+        1,
+        0,
+        0,
+        0,
+    )
+    program = struct.pack("<IIQQQQQQ", segment_type, 5, 0, 0, 0, 0, 0, 0)
+    return header + program
+
+
 def task(*commands: str) -> DevelopmentTask:
     return DevelopmentTask.from_mapping(
         {
@@ -81,6 +104,7 @@ def task(*commands: str) -> DevelopmentTask:
 def toolchain() -> Toolchain:
     return Toolchain(
         (
+            ToolBinding("sandbox", "/trusted/kaliv-sandbox", "3" * 64),
             ToolBinding("python", "/trusted/python3", "1" * 64),
             ToolBinding("go", "/trusted/go", "2" * 64),
         )
@@ -120,6 +144,7 @@ class MutateToolchainIsolation:
         del proof
         replacement = Toolchain(
             (
+                ToolBinding("sandbox", "/untrusted/sandbox", "7" * 64),
                 ToolBinding("python", "/untrusted/python3", "9" * 64),
                 ToolBinding("go", "/untrusted/go", "8" * 64),
             )
@@ -337,16 +362,39 @@ class CatalogTests(unittest.TestCase):
             ).materialize(t, tc, tampered)
 
     def test_materialization_contains_only_task_grants(self):
-        t, tc, verifier = task("modelrig.devcontrol.tests", "modelrig.version.check"), toolchain(), AcceptExecutable()
+        t = task("modelrig.devcontrol.tests", "modelrig.version.check")
+        tc = toolchain()
+        verifier = AcceptExecutable()
+        proof = attestation(t, tc)
+        self.assertEqual(proof.toolchain_sha256, tc.sha256)
+        self.assertEqual(tc.resolve("sandbox").tool_id, "sandbox")
         registry = CatalogMaterializer(
             modelrig_command_catalog(),
             isolation_verifier=AcceptIsolation(),
             executable_verifier=verifier,
-        ).materialize(t, tc, attestation(t, tc))
-        self.assertEqual(registry.resolve(t, "modelrig.devcontrol.tests").argv[0], "/trusted/python3")
-        self.assertEqual(registry.sandbox_bootstrap_executable(t), "/trusted/python3")
-        self.assertEqual(verifier.seen, ["python"])
+        ).materialize(t, tc, proof)
+        template = registry.resolve(t, "modelrig.devcontrol.tests")
+        self.assertEqual(template.argv[0], "/trusted/python3")
+        self.assertEqual(
+            registry.sandbox_bootstrap_executable(t),
+            "/trusted/kaliv-sandbox",
+        )
+        self.assertEqual(registry.sandbox_bootstrap_mode(t), "static")
+        self.assertEqual(verifier.seen, ["sandbox", "python"])
         self.assertIs(getattr(registry, "_catalog_executable_verifier"), verifier)
+        with patch("kaliv_dev_control.commands.sys.executable", "/attacker/python"):
+            confined = CommandExecutor._confined_argv(
+                Path("/sandbox"),
+                Path("/sandbox/repository"),
+                template.argv,
+                registry.sandbox_bootstrap_executable(t),
+                registry.sandbox_bootstrap_mode(t),
+            )
+        self.assertEqual(confined[0], "/trusted/kaliv-sandbox")
+        self.assertEqual(confined[1:3], ("/sandbox", "/sandbox/repository"))
+        self.assertEqual(confined[3:], template.argv)
+        self.assertNotIn("-I", confined)
+        self.assertNotIn("-c", confined[:3])
 
     def test_materialized_registry_rejects_unattested_task_and_retargeting(self):
         t, tc = task("modelrig.devcontrol.tests"), toolchain()
@@ -370,11 +418,13 @@ class CatalogTests(unittest.TestCase):
                 other.base_sha,
             )
         with self.assertRaisesRegex(CommandPolicyError, "immutable"):
-            registry._bootstrap_executable = "/attacker/python"
+            registry._bootstrap_executable = "/attacker/sandbox"
         with self.assertRaisesRegex(CommandPolicyError, "exact task"):
             registry.resolve(other, "modelrig.devcontrol.tests")
         with self.assertRaisesRegex(CommandPolicyError, "exact task"):
             registry.sandbox_bootstrap_executable(other)
+        with self.assertRaisesRegex(CommandPolicyError, "exact task"):
+            registry.sandbox_bootstrap_mode(other)
 
     def test_go_commands_are_fail_closed_until_helpers_are_attested(self):
         catalog = modelrig_command_catalog()
@@ -387,6 +437,15 @@ class CatalogTests(unittest.TestCase):
                 ("vet", "./..."),
                 "backend",
                 900,
+                {},
+            )
+        with self.assertRaisesRegex(CatalogError, "cannot be used"):
+            ProjectCommandSpec(
+                "modelrig.sandbox.direct",
+                "sandbox",
+                ("noop",),
+                ".",
+                10,
                 {},
             )
         t, tc = task("modelrig.backend.vet"), toolchain()
@@ -410,6 +469,10 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(
             registry.resolve(expected, "modelrig.devcontrol.tests").argv[0],
             "/trusted/python3",
+        )
+        self.assertEqual(
+            registry.sandbox_bootstrap_executable(expected),
+            "/trusted/kaliv-sandbox",
         )
         with self.assertRaisesRegex(CommandPolicyError, "exact task"):
             registry.resolve(original, "modelrig.devcontrol.tests")
@@ -475,7 +538,7 @@ class CatalogTests(unittest.TestCase):
         )
         isolation.materializer = materializer
         registry = materializer.materialize(t, tc, attestation(t, tc))
-        self.assertEqual(original.seen, ["python"])
+        self.assertEqual(original.seen, ["sandbox", "python"])
         self.assertIs(getattr(registry, "_catalog_executable_verifier"), original)
 
     def test_materialization_uses_attested_toolchain_snapshot(self):
@@ -486,8 +549,11 @@ class CatalogTests(unittest.TestCase):
             executable_verifier=verifier,
         ).materialize(t, tc, attestation(t, tc))
         self.assertEqual(registry.resolve(t, "modelrig.devcontrol.tests").argv[0], "/trusted/python3")
-        self.assertEqual(registry.sandbox_bootstrap_executable(t), "/trusted/python3")
-        self.assertEqual(verifier.seen, ["python"])
+        self.assertEqual(
+            registry.sandbox_bootstrap_executable(t),
+            "/trusted/kaliv-sandbox",
+        )
+        self.assertEqual(verifier.seen, ["sandbox", "python"])
 
     def test_materialization_deep_copies_tool_bindings(self):
         t = task("modelrig.devcontrol.tests")
@@ -503,8 +569,38 @@ class CatalogTests(unittest.TestCase):
             registry.resolve(t, "modelrig.devcontrol.tests").argv[0],
             "/trusted/python3",
         )
-        self.assertEqual(registry.sandbox_bootstrap_executable(t), "/trusted/python3")
-        self.assertEqual(verifier.seen, ["python"])
+        self.assertEqual(
+            registry.sandbox_bootstrap_executable(t),
+            "/trusted/kaliv-sandbox",
+        )
+        self.assertEqual(verifier.seen, ["sandbox", "python"])
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux")
+        and hasattr(os, "memfd_create")
+        and hasattr(os, "pread"),
+        "Linux-only static helper verification",
+    )
+    def test_sandbox_helper_requires_static_elf(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dynamic = root / "dynamic-helper"
+            dynamic.write_bytes(elf64_with_segment(3))
+            dynamic.chmod(0o500)
+            dynamic_hash = hashlib.sha256(dynamic.read_bytes()).hexdigest()
+            with self.assertRaisesRegex(CatalogError, "dynamic runtime"):
+                LocalExecutableHashVerifier().verify(
+                    ToolBinding("sandbox", str(dynamic.resolve()), dynamic_hash)
+                )
+
+            static = root / "static-helper"
+            static.write_bytes(elf64_with_segment(1))
+            static.chmod(0o500)
+            static_hash = hashlib.sha256(static.read_bytes()).hexdigest()
+            pinned = LocalExecutableHashVerifier().verify(
+                ToolBinding("sandbox", str(static.resolve()), static_hash)
+            )
+            self.assertTrue(pinned.startswith(f"/proc/{os.getpid()}/fd/"))
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux-only pinning")
     def test_sealed_object_survives_path_replacement_and_verifier_close(self):
