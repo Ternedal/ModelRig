@@ -29,7 +29,7 @@ from kaliv_dev_control.catalog import (
     Toolchain,
     modelrig_command_catalog,
 )
-from kaliv_dev_control.commands import CommandPolicyError
+from kaliv_dev_control.commands import CommandExecutor, CommandPolicyError
 from kaliv_dev_control.contract import DevelopmentTask
 from kaliv_dev_control.github_read import (
     GitHubReadAdapter,
@@ -38,6 +38,7 @@ from kaliv_dev_control.github_read import (
     HttpResponse,
     UrllibReadOnlyTransport,
 )
+from kaliv_dev_control.workspace import SubprocessRunner
 
 BASE_SHA = "a" * 40
 HASH = "c" * 64
@@ -233,14 +234,83 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(spec.cwd, "devcontrol/src")
         self.assertIn("../tests", spec.args)
         self.assertNotIn("PYTHONPATH", spec.env)
+        self.assertEqual(
+            {
+                key: spec.env[key]
+                for key in ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ")
+            },
+            {
+                "PATH": "/usr/bin:/bin",
+                "LANG": "C",
+                "LC_ALL": "C",
+                "LC_CTYPE": "C",
+                "TZ": "UTC",
+            },
+        )
 
     def test_catalog_environment_rejects_authority_variables(self):
         for key in (
             "LD_PRELOAD", "LD_AUDIT", "DYLD_INSERT_LIBRARIES",
             "PYTHONPATH", "PYTHONHOME", "GIT_CONFIG_GLOBAL",
+            "LANG", "LC_ALL", "LC_CTYPE", "TZ",
         ):
             with self.subTest(key=key), self.assertRaisesRegex(CatalogError, "isolation"):
                 ProjectCommandSpec("modelrig.demo", "python", ("-V",), ".", 10, {key: "x"})
+
+    def test_catalog_environment_overrides_ambient_locale_and_timezone(self):
+        spec = ProjectCommandSpec(
+            "modelrig.demo", "python", ("-V",), ".", 10, {}
+        )
+        observed: dict[str, str] = {}
+
+        def fake_bounded(args, **kwargs):
+            del args
+            observed.update(kwargs["env"])
+            stream = SimpleNamespace(truncated=False, prefix=b"")
+            return SimpleNamespace(
+                output_limit_exceeded=False,
+                timed_out=False,
+                stdout=stream,
+                stderr=stream,
+                returncode=0,
+            )
+
+        with patch.dict(
+            os.environ,
+            {
+                "PATH": "/attacker/bin",
+                "LANG": "attacker_LANG",
+                "LC_ALL": "attacker_LC_ALL",
+                "LC_CTYPE": "attacker_LC_CTYPE",
+                "TZ": "attacker/TZ",
+            },
+            clear=False,
+        ), patch(
+            "kaliv_dev_control.workspace.run_bounded_subprocess",
+            side_effect=fake_bounded,
+        ):
+            result = SubprocessRunner().run(
+                ("/bin/true",),
+                cwd=Path.cwd(),
+                timeout_seconds=1,
+                max_output_bytes=100,
+                env=spec.env,
+            )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(
+            {
+                key: observed[key]
+                for key in ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ")
+            },
+            {
+                "PATH": "/usr/bin:/bin",
+                "LANG": "C",
+                "LC_ALL": "C",
+                "LC_CTYPE": "C",
+                "TZ": "UTC",
+            },
+        )
 
     def test_default_isolation_is_fail_closed_and_attestation_is_exact(self):
         t, tc = task(), toolchain()
@@ -265,6 +335,7 @@ class CatalogTests(unittest.TestCase):
             executable_verifier=verifier,
         ).materialize(t, tc, attestation(t, tc))
         self.assertEqual(registry.resolve(t, "modelrig.devcontrol.tests").argv[0], "/trusted/python3")
+        self.assertEqual(registry.sandbox_bootstrap_executable(t), "/trusted/python3")
         self.assertEqual(verifier.seen, ["python"])
         self.assertIs(getattr(registry, "_catalog_executable_verifier"), verifier)
 
@@ -289,8 +360,34 @@ class CatalogTests(unittest.TestCase):
                 other.repository,
                 other.base_sha,
             )
+        with self.assertRaisesRegex(CommandPolicyError, "immutable"):
+            registry._bootstrap_executable = "/attacker/python"
         with self.assertRaisesRegex(CommandPolicyError, "exact task"):
             registry.resolve(other, "modelrig.devcontrol.tests")
+        with self.assertRaisesRegex(CommandPolicyError, "exact task"):
+            registry.sandbox_bootstrap_executable(other)
+
+    def test_materialized_go_command_uses_attested_pinned_bootstrap(self):
+        t, tc, verifier = task("modelrig.backend.vet"), toolchain(), AcceptExecutable()
+        registry = CatalogMaterializer(
+            modelrig_command_catalog(),
+            isolation_verifier=AcceptIsolation(),
+            executable_verifier=verifier,
+        ).materialize(t, tc, attestation(t, tc))
+        template = registry.resolve(t, "modelrig.backend.vet")
+        self.assertEqual(template.argv[0], "/trusted/go")
+        self.assertEqual(verifier.seen, ["python", "go"])
+        bootstrap = registry.sandbox_bootstrap_executable(t)
+        self.assertEqual(bootstrap, "/trusted/python3")
+        with patch("kaliv_dev_control.commands.sys.executable", "/attacker/python"):
+            confined = CommandExecutor._confined_argv(
+                Path("/sandbox"),
+                Path("/sandbox/repository"),
+                template.argv,
+                registry.sandbox_bootstrap_executable(t),
+            )
+        self.assertEqual(confined[0], "/trusted/python3")
+        self.assertEqual(confined[-len(template.argv):], template.argv)
 
     def test_materialization_uses_validated_task_snapshot(self):
         original = task("modelrig.devcontrol.tests")
@@ -381,6 +478,7 @@ class CatalogTests(unittest.TestCase):
             executable_verifier=verifier,
         ).materialize(t, tc, attestation(t, tc))
         self.assertEqual(registry.resolve(t, "modelrig.devcontrol.tests").argv[0], "/trusted/python3")
+        self.assertEqual(registry.sandbox_bootstrap_executable(t), "/trusted/python3")
         self.assertEqual(verifier.seen, ["python"])
 
     def test_materialization_deep_copies_tool_bindings(self):
@@ -397,6 +495,7 @@ class CatalogTests(unittest.TestCase):
             registry.resolve(t, "modelrig.devcontrol.tests").argv[0],
             "/trusted/python3",
         )
+        self.assertEqual(registry.sandbox_bootstrap_executable(t), "/trusted/python3")
         self.assertEqual(verifier.seen, ["python"])
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux-only pinning")
