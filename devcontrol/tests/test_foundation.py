@@ -494,19 +494,25 @@ class FoundationTests(unittest.TestCase):
             "tier_a_authority.py",
             "tier_a_plan.py",
             "tier_a_result.py",
+            "_tier_a_legacy_runner.py",
+            "tier_a_execution.py",
+            "tier_a_execution_v3.py",
+            "tier_a_command_receipt.py",
+            "trusted_git_runtime.py",
+            "trusted_git_runtime_h4.py",
+            "trusted_git_runtime_model.py",
+            "trusted_git_runtime_runner.py",
+            "trusted_git_runtime_staging.py",
         }
         self.assertTrue(landed <= {path.name for path in source.glob("*.py")})
 
         future = (
-            "_tier_a_legacy_runner",
-            "tier_a_execution",
-            "tier_a_execution_v3",
-            "tier_a_command_receipt",
-            "trusted_git_runtime",
-            "trusted_git_runtime_h4",
-            "trusted_git_runtime_model",
-            "trusted_git_runtime_runner",
-            "trusted_git_runtime_staging",
+            "asymmetric_authority",
+            "semantic_review",
+            "draft_pr_readiness",
+            "publisher_dry_run",
+            "publisher_authorization",
+            "local_candidate_materialization",
             "publisher",
         )
         for path in source.glob("*.py"):
