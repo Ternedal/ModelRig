@@ -16,29 +16,35 @@ Independent review history:
    authority and chunk-framing work that could remain inside one `read1()` call.
    Candidate `5eb237398cd4b9867e50bc42656476835ca4a057` closed them.
 5. Review of `3483ac687a267d6ec31aa71eaa4896baa5604d74` found that caller-supplied
-   catalog entries could still omit PATH and that HTTP status/header framing
-   remained outside the response-body supervisor.
+   catalog entries could still omit PATH and HTTP status/header framing remained
+   outside the response-body supervisor. Candidate
+   `ac4eaa44fa501eba797818d8563e82c9b83ce8f0` closed them.
+6. Review of `3a0a99ab987ec22219787a086a97fc7cf13f9998` found that blocked DNS/
+   connection setup could finish after the caller deadline and transmit the
+   authenticated GET, while repeated timeouts could accumulate setup workers.
 
-Current candidate `ac4eaa44fa501eba797818d8563e82c9b83ce8f0`
-closes the latest findings with:
+Current candidate `33b762a9145dedf93365921b359477f81d22eb5f`
+closes the latest finding with:
 
-- automatic `PATH=/usr/bin:/bin` insertion into every accepted
-  `ProjectCommandSpec`, including `env={}`;
-- continued rejection of any explicitly different PATH value;
-- an owned raw `HTTPSConnection` supervised from request start to completion;
-- caller-side cancellation of blocking status/header framing through socket
-  shutdown/close and connection close;
-- continued body/chunk supervision, remaining-time socket timeouts, byte bounds
-  and fail-closed socket checks;
-- executable contract regressions for omitted PATH, blocking `read1()` and
-  blocking `getresponse()`.
+- explicit `connect()` before request construction/sending;
+- cancellation and monotonic-deadline checks immediately after setup and again
+  before `connection.request()`;
+- no authenticated GET when delayed setup completes after caller timeout;
+- a process-global single setup slot, retained until the worker definitively
+  exits, so repeated attempts fail closed instead of accumulating workers;
+- bounded cancellation grace for phases where socket/connection closure can
+  immediately stop the worker;
+- an executable regression that blocks setup, observes deadline return, verifies
+  a second setup is rejected, releases setup and proves `request()` was never
+  called before definitive worker exit.
 
-Direct validation rejects both blocking paths in approximately 0.05 seconds and
-closes the relevant socket, response and connection. Existing public test
-surfaces were preserved. The latest complete focused runtime run remains
-**26/26 passing** from before these final narrowly scoped changes. No final
-independent verdict is claimed until the resulting evidence head is reviewed
-without an actionable finding.
+Direct validation returns the deadline error in approximately 0.10 seconds
+including cancellation grace, records no request send before or after delayed
+setup completion, rejects a concurrent setup and confirms definitive worker
+exit. Existing public test surfaces were preserved. The latest complete focused
+runtime run remains **26/26 passing** from before these final narrowly scoped
+changes. No final independent verdict is claimed until the resulting evidence
+head is reviewed without an actionable finding.
 
 Required review focus:
 
@@ -47,9 +53,11 @@ Required review focus:
 3. fail-closed isolation and executable verification;
 4. POSIX executable link, mutation, FIFO and size handling;
 5. fixed GET-only GitHub host/method/ref authority;
-6. caller-enforced monotonic deadline across request, status, headers, chunk
-   framing and body reads;
-7. cancellation by socket shutdown/close, response close and connection close;
-8. explicit TLS roots independent of environment proxy and CA overrides;
-9. task scope, response bounds, Git blob identity and receipt/schema alignment;
-10. absence of write, remote Git, publication, merge or activation authority.
+6. caller-enforced monotonic deadline across setup, request, status, headers,
+   chunk framing and body reads;
+7. prevention of post-timeout request sends after delayed connection setup;
+8. bounded setup workers and fail-closed concurrent attempts;
+9. cancellation by socket shutdown/close, response close and connection close;
+10. explicit TLS roots independent of environment proxy and CA overrides;
+11. task scope, response bounds, Git blob identity and receipt/schema alignment;
+12. absence of write, remote Git, publication, merge or activation authority.
