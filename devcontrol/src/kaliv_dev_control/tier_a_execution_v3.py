@@ -1,6 +1,7 @@
 """Sole closure-bound Tier-A process execution implementation."""
 from __future__ import annotations
 
+import importlib
 import os
 import subprocess
 import time
@@ -94,27 +95,19 @@ def _run_tier_a_launch_plan(
     _verify_staged_runtime_closure(plan, runtime_closure_receipt, root)
 
     try:
-        from app.windows_capture import WindowsOutputCapture
-        from app.windows_job import (
-            JobLimits,
-            close_attached_job,
-            terminate_attached_job,
-        )
-        from app.windows_restricted import (
-            AppContainerProfile,
-            RestrictedLaunchPolicy,
-            provision_workspace_acl,
-        )
-        from app.windows_runtime_guard import WindowsRuntimeClosureLifetimeGuard
-        from app.windows_tier_a import spawn_tier_a_in_job
+        windows_capture = importlib.import_module("app.windows_capture")
+        windows_job = importlib.import_module("app.windows_job")
+        windows_restricted = importlib.import_module("app.windows_restricted")
+        windows_runtime_guard = importlib.import_module("app.windows_runtime_guard")
+        windows_tier_a = importlib.import_module("app.windows_tier_a")
     except ImportError as exc:
         raise TierAExecutionError(
             "authoritative worker Tier-A modules are unavailable"
         ) from exc
 
-    policy = RestrictedLaunchPolicy(os.fspath(root))
-    profile = AppContainerProfile(policy)
-    capture = WindowsOutputCapture(
+    policy = windows_restricted.RestrictedLaunchPolicy(os.fspath(root))
+    profile = windows_restricted.AppContainerProfile(policy)
+    capture = windows_capture.WindowsOutputCapture(
         profile._api,
         plan.max_output_bytes,
         workspace_root=root,
@@ -126,8 +119,8 @@ def _run_tier_a_launch_plan(
     job_closed = False
     started = time.monotonic()
     try:
-        acl_receipt = provision_workspace_acl(policy, profile)
-        lifetime_guard = WindowsRuntimeClosureLifetimeGuard.acquire(
+        acl_receipt = windows_restricted.provision_workspace_acl(policy, profile)
+        lifetime_guard = windows_runtime_guard.WindowsRuntimeClosureLifetimeGuard.acquire(
             policy,
             profile,
             staged_root_relative_path=(
@@ -138,11 +131,11 @@ def _run_tier_a_launch_plan(
                 for entry in runtime_closure_receipt.files
             ),
         )
-        process = spawn_tier_a_in_job(
+        process = windows_tier_a.spawn_tier_a_in_job(
             plan.argv,
             source_env=os.environ if source_env is None else source_env,
             application_env=plan.env,
-            limits=JobLimits(
+            limits=windows_job.JobLimits(
                 process_memory_bytes=process_memory_bytes,
                 active_process_limit=active_process_limit,
             ),
@@ -157,7 +150,7 @@ def _run_tier_a_launch_plan(
             returncode = process.wait(timeout=plan.max_timeout_seconds)
         except subprocess.TimeoutExpired:
             timed_out = True
-            if not terminate_attached_job(process):
+            if not windows_job.terminate_attached_job(process):
                 raise TierAExecutionError(
                     "timed-out Tier-A process lost its Job Object authority"
                 )
@@ -169,7 +162,7 @@ def _run_tier_a_launch_plan(
                     "timed-out Tier-A process could not be reaped"
                 ) from exc
         else:
-            if not close_attached_job(process):
+            if not windows_job.close_attached_job(process):
                 raise TierAExecutionError(
                     "completed Tier-A process lost its Job Object authority"
                 )
@@ -204,7 +197,7 @@ def _run_tier_a_launch_plan(
         if process is not None:
             if not job_closed:
                 try:
-                    if not terminate_attached_job(process):
+                    if not windows_job.terminate_attached_job(process):
                         raise TierAExecutionError(
                             "Tier-A cleanup found no attached Job Object"
                         )
