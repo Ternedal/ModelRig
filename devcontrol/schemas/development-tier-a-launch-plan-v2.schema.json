@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/kaliv-development-tier-a-launch-plan-v2.json",
+  "title": "Kaliv development Tier-A launch plan v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "task_id",
+    "task_sha256",
+    "base_sha",
+    "command_id",
+    "argv",
+    "cwd",
+    "max_timeout_seconds",
+    "max_output_bytes",
+    "env",
+    "catalog_sha256",
+    "toolchain_sha256",
+    "lease_sha256",
+    "signed_report_sha256",
+    "workspace_root",
+    "workspace_root_sha256",
+    "executable_sha256",
+    "toolhost_sha256",
+    "boundary",
+    "network_mode"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-development-tier-a-launch-plan/v2"},
+    "task_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]{2,63}$"},
+    "task_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "command_id": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,63}$"},
+    "argv": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {"type": "string", "minLength": 1, "maxLength": 32768}
+    },
+    "cwd": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "max_timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 86400},
+    "max_output_bytes": {"type": "integer", "minimum": 1024, "maximum": 100000000},
+    "env": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "CI": {"const": "1"},
+        "MODELRIG_DEVCONTROL": {"const": "1"},
+        "GOTOOLCHAIN": {"const": "local"},
+        "PYTHONDONTWRITEBYTECODE": {"const": "1"}
+      }
+    },
+    "catalog_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "toolchain_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "lease_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "signed_report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "workspace_root": {"type": "string", "minLength": 3, "maxLength": 32768},
+    "workspace_root_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "executable_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "toolhost_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "boundary": {"const": "os_isolated"},
+    "network_mode": {"const": "deny"}
+  }
+}
