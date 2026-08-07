@@ -6,7 +6,7 @@
 
 The independent reviewer must verify:
 
-- the exact 18-path scope and source provenance;
+- the exact 19-path scope and source provenance;
 - no DC-L05 or later-slice implementation/import is present;
 - the physical report and signed report models are canonical and schema-aligned;
 - file/key/evidence reads are finite, regular-file-only and stable against links or
