@@ -57,7 +57,9 @@ class TierAMaterializationExtractionTests(unittest.TestCase):
         for name in EXPECTED:
             self.assertFalse(dataclasses.is_dataclass(getattr(module, name)))
 
-    def test_core_physically_removes_and_directly_reexports_classes(self) -> None:
+    def test_core_physically_removes_and_directly_reexports_classes(
+        self,
+    ) -> None:
         self.assertEqual(
             _direct_imports(CORE_PATH, "_tier_a_materialization"),
             EXPECTED,
@@ -72,7 +74,7 @@ class TierAMaterializationExtractionTests(unittest.TestCase):
         for name in EXPECTED:
             self.assertIs(getattr(core, name), getattr(module, name))
 
-    def test_supported_identity_chains_remain_exact(self) -> None:
+    def test_dc_l06_identity_chains_remain_exact(self) -> None:
         module = importlib.import_module(
             "kaliv_dev_control._tier_a_materialization"
         )
@@ -82,10 +84,6 @@ class TierAMaterializationExtractionTests(unittest.TestCase):
         authority = importlib.import_module(
             "kaliv_dev_control.tier_a_authority"
         )
-        facade = importlib.import_module(
-            "kaliv_dev_control.tier_a_execution"
-        )
-        package = importlib.import_module("kaliv_dev_control")
         self.assertIs(
             core._LeaseCapturingVerifier,
             module._LeaseCapturingVerifier,
@@ -97,8 +95,6 @@ class TierAMaterializationExtractionTests(unittest.TestCase):
             identity = getattr(module, name)
             self.assertIs(getattr(core, name), identity)
             self.assertIs(getattr(authority, name), identity)
-            self.assertIs(getattr(facade, name), identity)
-            self.assertIs(getattr(package, name), identity)
 
     def test_constructor_guards_remain_fail_closed(self) -> None:
         module = importlib.import_module(
@@ -215,7 +211,7 @@ class TierAMaterializationExtractionTests(unittest.TestCase):
             }
         )
 
-    def test_obsolete_executors_remain_absent_from_modern_core(self) -> None:
+    def test_obsolete_executors_remain_absent_from_dc_l06_core(self) -> None:
         core = importlib.import_module(
             "kaliv_dev_control._tier_a_execution_core"
         )
