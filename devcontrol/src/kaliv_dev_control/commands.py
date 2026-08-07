@@ -794,8 +794,13 @@ class CommandExecutor:
     ) -> CommandReceipt:
         execution_task = self.registry.execution_task(task)
         template = self.registry.resolve(execution_task, command_id)
-        bootstrap_executable = self.registry.sandbox_bootstrap_executable(
-            execution_task
+        bootstrap_provider = getattr(
+            self.registry, "sandbox_bootstrap_executable", None
+        )
+        bootstrap_executable = (
+            sys.executable
+            if bootstrap_provider is None
+            else bootstrap_provider(execution_task)
         )
         source = workspace.resolve()
         source_text = str(source)
