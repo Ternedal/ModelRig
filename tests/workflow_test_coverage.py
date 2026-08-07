@@ -254,7 +254,6 @@ native_windows_contracts = (
     "tests/support/windows_restricted_contract.py",
     "tests/support/windows_tier_a_environment_contract.py",
     "tests/worker_toolhost.py",
-    "tests/support/windows_bounded_subprocess_contract.py",
     "tests/support/windows_catalog_tier_a_contract.py",
 )
 check(
@@ -262,8 +261,9 @@ check(
     "CI reaches every landed product-side and DC-L08 native Windows contract",
 )
 check(
-    "tests/support/windows_tier_a_receipt_contract.py" not in workflow,
-    "DC-L08 leaves the command-receipt Windows contract deferred to DC-L09",
+    "tests/support/windows_bounded_subprocess_contract.py" not in workflow
+    and "tests/support/windows_tier_a_receipt_contract.py" not in workflow,
+    "DC-L08 leaves generic bounded-subprocess and command-receipt Windows contracts deferred",
 )
 check(
     "kaliv_dev_control.tier_a_execution_v3" in workflow
