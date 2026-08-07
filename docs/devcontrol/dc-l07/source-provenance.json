@@ -61,6 +61,10 @@
       "reason": "bind the reviewed single-file closure to landed runtime and authority surfaces and prove repeated staging is idempotent"
     },
     {
+      "path": "devcontrol/tests/test_slice9.py",
+      "reason": "replace the DC-L06 prohibition on runtime evidence modules with an exact DC-L07 required-bundle assertion while continuing to forbid all executor and remote-authority modules"
+    },
+    {
       "path": "devcontrol/tests/test_slice9_schemas.py",
       "reason": "preserve v1 lease and plan compatibility while validating the landed v3 plan and execution-result schemas without importing DC-L08 execution authority"
     },
