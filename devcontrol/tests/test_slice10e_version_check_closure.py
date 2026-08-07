@@ -16,21 +16,23 @@ from kaliv_dev_control.catalog import (
 )
 from kaliv_dev_control.commands import CommandRegistry, CommandTemplate
 from kaliv_dev_control.contract import DevelopmentTask
-from kaliv_dev_control.tier_a_execution import (
+from kaliv_dev_control.runtime_closure import (
     HmacRuntimeClosureSigner,
-    LeasedCommandRegistry,
     RuntimeClosureError,
     RuntimeClosureVerifier,
-    TierAExecutionLease,
     TrustedRuntimeClosureStager,
-    tier_a_toolhost_sha256,
-    workspace_root_authority_sha256,
 )
 from kaliv_dev_control.runtime_closure_builder import (
     ModelRigVersionCheckClosureBuilder,
     VERSION_CHECK_COMMAND_ID,
     VERSION_CHECK_TOOL_ID,
     modelrig_version_check_closure_catalog,
+)
+from kaliv_dev_control.tier_a_authority import (
+    LeasedCommandRegistry,
+    TierAExecutionLease,
+    tier_a_toolhost_sha256,
+    workspace_root_authority_sha256,
 )
 from test_slice9 import create_control_plane
 
