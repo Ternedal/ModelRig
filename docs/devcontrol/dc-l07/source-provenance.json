@@ -99,6 +99,10 @@
       "reason": "land v3 plan, cwd and toolhost authority while preserving v1 plan compatibility and explicitly excluding execution"
     },
     {
+      "path": "devcontrol/tests/test_foundation.py",
+      "reason": "advance the import boundary from DC-L04-era blanket exclusions to explicit DC-L07 landed modules and DC-L08+ hard exclusions"
+    },
+    {
       "path": "tests/workflow_test_coverage.py",
       "reason": "extend CI discovery coverage from twenty to twenty-seven DevControl test modules"
     }
