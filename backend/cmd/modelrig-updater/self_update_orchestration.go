@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -30,48 +31,127 @@ type automaticSelfUpdateConfig struct {
 	baseline        []string
 }
 
+type observedFlag struct {
+	name     string
+	value    string
+	hasValue bool
+}
+
+// splitObservedFlag mirrors the spellings accepted by Go's flag package: one
+// or two leading dashes, with an optional =value suffix. A positional argument,
+// a lone dash, --, or three-plus leading dashes is not a flag.
+func splitObservedFlag(raw string) (observedFlag, bool) {
+	if raw == "" || raw == "-" || raw == "--" || raw[0] != '-' {
+		return observedFlag{}, false
+	}
+	trimmed := raw[1:]
+	if strings.HasPrefix(trimmed, "-") {
+		trimmed = trimmed[1:]
+	}
+	if trimmed == "" || strings.HasPrefix(trimmed, "-") {
+		return observedFlag{}, false
+	}
+	name, value, hasValue := strings.Cut(trimmed, "=")
+	if name == "" {
+		return observedFlag{}, false
+	}
+	return observedFlag{name: name, value: value, hasValue: hasValue}, true
+}
+
+func observedStringValue(flag observedFlag, args []string, index *int) (string, error) {
+	if flag.hasValue {
+		return flag.value, nil
+	}
+	if *index+1 >= len(args) {
+		return "", fmt.Errorf("-%s requires a value", flag.name)
+	}
+	*index = *index + 1
+	return args[*index], nil
+}
+
+func observedBoolValue(flag observedFlag) (bool, error) {
+	if !flag.hasValue {
+		return true, nil
+	}
+	value, err := strconv.ParseBool(flag.value)
+	if err != nil {
+		return false, fmt.Errorf("invalid value %q for -%s: %w", flag.value, flag.name, err)
+	}
+	return value, nil
+}
+
 // parseAutomaticSelfUpdateArgs observes only the flags needed to faithfully
-// replay self-update after a normal appliance update. Unknown flags belong to
-// main's ordinary flag set and are deliberately ignored here.
+// replay self-update after a normal appliance update. It also consumes values
+// for every ordinary updater string flag so its scan stays aligned with the
+// same command line parsed by flag.Parse in main.
 func parseAutomaticSelfUpdateArgs(args []string, defaultRoot string) (automaticSelfUpdateConfig, automaticSelfUpdateMode, error) {
 	cfg := automaticSelfUpdateConfig{root: defaultRoot, repo: "Ternedal/ModelRig"}
 	mode := automaticSelfUpdateWatch
 	for i := 0; i < len(args); i++ {
-		a := args[i]
+		raw := args[i]
+		if raw == "--" {
+			break
+		}
+		flag, ok := splitObservedFlag(raw)
+		if !ok {
+			break // flag.Parse stops at the first positional argument.
+		}
+
 		switch {
-		case a == postCommitSelfUpdateArg:
-			mode = automaticSelfUpdatePostCommit
-		case a == "-self-update" || a == "-check" || a == "-recover" || a == "-version" || a == "--version":
-			return cfg, automaticSelfUpdateDisabled, nil
-		case strings.HasPrefix(a, "-test."):
-			return cfg, automaticSelfUpdateDisabled, nil
-		case a == "-dir" || a == "-repo":
-			if i+1 >= len(args) {
-				return cfg, automaticSelfUpdateDisabled, fmt.Errorf("%s requires a value", a)
+		case flag.name == "post-commit-self-update":
+			value, err := observedBoolValue(flag)
+			if err != nil {
+				return cfg, automaticSelfUpdateDisabled, err
 			}
-			i++
-			if a == "-dir" {
-				cfg.root = args[i]
+			if value {
+				mode = automaticSelfUpdatePostCommit
+			}
+		case flag.name == "self-update" || flag.name == "version":
+			return cfg, automaticSelfUpdateDisabled, nil
+		case strings.HasPrefix(flag.name, "test."):
+			return cfg, automaticSelfUpdateDisabled, nil
+		case flag.name == "check" || flag.name == "recover":
+			value, err := observedBoolValue(flag)
+			if err != nil {
+				return cfg, automaticSelfUpdateDisabled, err
+			}
+			if value {
+				return cfg, automaticSelfUpdateDisabled, nil
+			}
+		case flag.name == "insecure-skip-verify" || flag.name == "skip-attestation":
+			value, err := observedBoolValue(flag)
+			if err != nil {
+				return cfg, automaticSelfUpdateDisabled, err
+			}
+			if flag.name == "insecure-skip-verify" {
+				cfg.skipVerify = value
 			} else {
-				cfg.repo = strings.TrimSpace(args[i])
+				cfg.skipAttestation = value
 			}
-		case strings.HasPrefix(a, "-dir="):
-			cfg.root = strings.TrimPrefix(a, "-dir=")
-		case strings.HasPrefix(a, "-repo="):
-			cfg.repo = strings.TrimSpace(strings.TrimPrefix(a, "-repo="))
-		case a == "-insecure-skip-verify":
-			cfg.skipVerify = true
-		case a == "-skip-attestation":
-			cfg.skipAttestation = true
-		case strings.HasPrefix(a, "-baseline-commit="):
-			fingerprint := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(a, "-baseline-commit=")))
-			if len(fingerprint) != sha256.Size*2 {
-				return cfg, automaticSelfUpdateDisabled, fmt.Errorf("invalid committed-journal fingerprint %q", fingerprint)
+		case flag.name == "dir" || flag.name == "repo" ||
+			flag.name == "current" || flag.name == "server-health" ||
+			flag.name == "worker-health" || flag.name == "heartbeat" ||
+			flag.name == "supervisor-interval" || flag.name == "supervisor-task" ||
+			flag.name == "baseline-commit":
+			value, err := observedStringValue(flag, args, &i)
+			if err != nil {
+				return cfg, automaticSelfUpdateDisabled, err
 			}
-			if _, err := hex.DecodeString(fingerprint); err != nil {
-				return cfg, automaticSelfUpdateDisabled, fmt.Errorf("invalid committed-journal fingerprint %q", fingerprint)
+			switch flag.name {
+			case "dir":
+				cfg.root = value
+			case "repo":
+				cfg.repo = strings.TrimSpace(value)
+			case "baseline-commit":
+				fingerprint := strings.ToLower(strings.TrimSpace(value))
+				if len(fingerprint) != sha256.Size*2 {
+					return cfg, automaticSelfUpdateDisabled, fmt.Errorf("invalid committed-journal fingerprint %q", fingerprint)
+				}
+				if _, err := hex.DecodeString(fingerprint); err != nil {
+					return cfg, automaticSelfUpdateDisabled, fmt.Errorf("invalid committed-journal fingerprint %q", fingerprint)
+				}
+				cfg.baseline = append(cfg.baseline, fingerprint)
 			}
-			cfg.baseline = append(cfg.baseline, fingerprint)
 		}
 	}
 	if strings.TrimSpace(cfg.repo) == "" {
@@ -164,8 +244,9 @@ func runPostCommitSelfUpdate(cfg automaticSelfUpdateConfig) error {
 // appliance rollback or change the original command's exit status.
 func init() {
 	found := false
-	for _, arg := range os.Args[1:] {
-		if arg == postCommitSelfUpdateArg {
+	for _, raw := range os.Args[1:] {
+		flag, ok := splitObservedFlag(raw)
+		if ok && flag.name == "post-commit-self-update" {
 			found = true
 			break
 		}
