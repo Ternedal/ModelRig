@@ -40,8 +40,12 @@ def _write_json_atomic(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", dir=path.parent, prefix=path.name + ".",
-        suffix=".tmp", delete=False,
+        mode="w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix=path.name + ".",
+        suffix=".tmp",
+        delete=False,
     ) as handle:
         handle.write(payload)
         temporary = Path(handle.name)
@@ -102,7 +106,12 @@ def _trial(report: Mapping[str, Any], name: str, errors: list[str]) -> dict[str,
     return value
 
 
-def _load_log(root: Path, label: str, trial: Mapping[str, Any], errors: list[str]) -> tuple[dict[str, Any], str]:
+def _load_log(
+    root: Path,
+    label: str,
+    trial: Mapping[str, Any],
+    errors: list[str],
+) -> tuple[dict[str, Any], str]:
     raw = trial.get("evidence_path")
     digest = trial.get("evidence_sha256")
     if not isinstance(raw, str) or not raw:
@@ -141,13 +150,24 @@ def _load_log(root: Path, label: str, trial: Mapping[str, Any], errors: list[str
     return {"path": str(rel), "sha256": actual, "bytes": len(body)}, text
 
 
-def _require_markers(label: str, text: str, markers: tuple[str, ...], errors: list[str]) -> list[str]:
+def _require_markers(
+    label: str,
+    text: str,
+    markers: tuple[str, ...],
+    errors: list[str],
+) -> list[str]:
     missing = [marker for marker in markers if marker.lower() not in text]
     errors.extend(f"{label} log is missing required marker: {marker}" for marker in missing)
     return missing
 
 
-def evaluate(root: Path, lifecycle_path: Path, *, candidate: Mapping[str, Any], now: datetime) -> tuple[dict[str, Any], int]:
+def evaluate(
+    root: Path,
+    lifecycle_path: Path,
+    *,
+    candidate: Mapping[str, Any],
+    now: datetime,
+) -> tuple[dict[str, Any], int]:
     errors: list[str] = []
     lifecycle, raw, path = _load_json(root, lifecycle_path)
     if lifecycle.get("schema") != LIFECYCLE_SCHEMA:
@@ -222,13 +242,19 @@ def evaluate(root: Path, lifecycle_path: Path, *, candidate: Mapping[str, Any], 
 
     interruption = _trial(lifecycle, "appliance_interruption", errors)
     interruption_meta, interruption_text = _load_log(
-        root, "appliance_interruption", interruption, errors
+        root,
+        "appliance_interruption",
+        interruption,
+        errors,
     )
     transaction_id = str(interruption.get("observed_transaction_id") or "")
     revision = interruption.get("observed_revision")
     process_pid = interruption.get("updater_process_pid")
     journal_from = str(interruption.get("observed_journal_from") or "")
     journal_to = str(interruption.get("observed_journal_to") or "")
+    swapped_count = interruption.get("observed_swapped_count")
+    swapped_assets = interruption.get("observed_swapped_assets")
+
     if interruption.get("performed") is not True:
         errors.append("appliance_interruption.performed is not true")
     if interruption.get("source_version") != EXPECTED_SOURCE_VERSION:
@@ -245,9 +271,21 @@ def evaluate(root: Path, lifecycle_path: Path, *, candidate: Mapping[str, Any], 
         errors.append("appliance_interruption journal target mismatch")
     if interruption.get("observed_journal_state") != "swapping":
         errors.append("appliance_interruption did not observe journal state swapping")
-    swapped_count = interruption.get("observed_swapped_count")
     if not isinstance(swapped_count, int) or isinstance(swapped_count, bool) or swapped_count < 1:
         errors.append("appliance_interruption did not observe a completed live swap")
+    if (
+        not isinstance(swapped_assets, list)
+        or not swapped_assets
+        or not all(isinstance(asset, str) and asset for asset in swapped_assets)
+    ):
+        errors.append("appliance_interruption swapped asset list is invalid")
+        normalized_assets: list[str] = []
+    else:
+        normalized_assets = list(swapped_assets)
+    if isinstance(swapped_count, int) and not isinstance(swapped_count, bool):
+        if swapped_count != len(normalized_assets):
+            errors.append("appliance_interruption swap count does not match asset list")
+
     for key in (
         "updater_process_killed",
         "recovery_succeeded",
@@ -263,6 +301,7 @@ def evaluate(root: Path, lifecycle_path: Path, *, candidate: Mapping[str, Any], 
         errors.append("appliance_interruption backend did not recover to source")
     if interruption.get("worker_version") != EXPECTED_SOURCE_VERSION:
         errors.append("appliance_interruption worker did not recover to source")
+
     interruption_missing = _require_markers(
         "appliance_interruption",
         interruption_text,
@@ -272,7 +311,8 @@ def evaluate(root: Path, lifecycle_path: Path, *, candidate: Mapping[str, Any], 
             f"observed_journal_from={EXPECTED_SOURCE_VERSION}",
             f"observed_journal_to={journal_to}",
             "observed_journal_state=swapping",
-            "observed_swapped_count=",
+            f"observed_swapped_count={swapped_count}",
+            f"observed_swapped_assets={','.join(normalized_assets)}",
             f"updater_process_pid={process_pid}",
             "updater_process_killed=true",
             "recovery_exit_code=0",
@@ -283,7 +323,11 @@ def evaluate(root: Path, lifecycle_path: Path, *, candidate: Mapping[str, Any], 
         errors,
     )
 
-    if bootstrap_meta and interruption_meta and bootstrap_meta.get("path") == interruption_meta.get("path"):
+    if (
+        bootstrap_meta
+        and interruption_meta
+        and bootstrap_meta.get("path") == interruption_meta.get("path")
+    ):
         errors.append("bootstrap and interruption evidence must use different logs")
 
     report = {
@@ -297,8 +341,14 @@ def evaluate(root: Path, lifecycle_path: Path, *, candidate: Mapping[str, Any], 
             "schema": lifecycle.get("schema"),
         },
         "evidence": {
-            "updater_bootstrap": {**bootstrap_meta, "missing_markers": bootstrap_missing},
-            "appliance_interruption": {**interruption_meta, "missing_markers": interruption_missing},
+            "updater_bootstrap": {
+                **bootstrap_meta,
+                "missing_markers": bootstrap_missing,
+            },
+            "appliance_interruption": {
+                **interruption_meta,
+                "missing_markers": interruption_missing,
+            },
         },
         "summary": {
             "errors": errors,
@@ -322,13 +372,22 @@ def main(argv: list[str] | None = None) -> int:
     now = datetime.now(timezone.utc)
     try:
         candidate = _candidate_identity(ROOT)
-        report, code = evaluate(ROOT, args.lifecycle_report, candidate=candidate, now=now)
+        report, code = evaluate(
+            ROOT,
+            args.lifecycle_report,
+            candidate=candidate,
+            now=now,
+        )
     except Exception as exc:
         report = {
             "schema": SCHEMA,
             "generated_at": now.isoformat().replace("+00:00", "Z"),
             "summary": {"errors": [str(exc)[:500]]},
-            "gate": {"passed": False, "strict_evidence_complete": False, "production_activation": False},
+            "gate": {
+                "passed": False,
+                "strict_evidence_complete": False,
+                "production_activation": False,
+            },
         }
         code = 2
     destination = _resolve_under(ROOT, args.report)
