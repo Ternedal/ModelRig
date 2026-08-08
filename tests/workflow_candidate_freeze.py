@@ -119,7 +119,7 @@ check(
     "freeze cannot claim release completion or activation",
 )
 freeze.load_receipt(repo, now=now)
-check(True, "strict receipt reader accepts unchanged checkout")
+check(True, "strict receipt reader accepts unchanged checkout and current main")
 
 try:
     freeze.create_receipt(
@@ -173,6 +173,28 @@ try:
     check(False, "post-freeze edit must fail")
 except freeze.CandidateFreezeError:
     check(True, "post-freeze edit is detected")
+
+# A receipt is not a permanent permission slip. Every consumer must refetch
+# origin/main; otherwise a campaign can continue after main advances and the
+# candidate is no longer the current release boundary.
+stale_repo, stale_main_sha, stale_candidate_sha = fixture()
+freeze.create_receipt(
+    stale_candidate_sha,
+    root=stale_repo,
+    token="test-token",
+    api=free_tag_api(),
+    now=now,
+)
+git(stale_repo, "branch", "advanced-main", stale_candidate_sha)
+git(stale_repo, "push", "-q", "origin", "advanced-main:main")
+try:
+    freeze.load_receipt(stale_repo, now=now)
+    check(False, "receipt must fail after origin/main advances")
+except freeze.CandidateFreezeError as exc:
+    check(
+        "origin/main moved" in str(exc) and "rerun candidate freeze" in str(exc),
+        "receipt consumption refetches main and names the required re-freeze",
+    )
 
 print(f"candidate freeze contracts: {passed} passed, {failed} failed")
 if failed:
