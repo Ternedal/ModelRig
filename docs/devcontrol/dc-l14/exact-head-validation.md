@@ -1,6 +1,6 @@
 # DC-L14 exact-head validation
 
-**Status:** integration candidate in progress; final exact-head rerun required.
+**Status:** final freeze criteria defined. The current PR head is eligible only while all required checks attached to that exact head are successful.
 
 The mergeable head must prove:
 
@@ -17,4 +17,4 @@ The mergeable head must prove:
 - zero unresolved review threads; and
 - no claim of live publication, remote mutation, credentials, merge, release, deployment or activation authority.
 
-Any head change invalidates workflow evidence and the review record.
+Validation is not self-attested by this file. GitHub checks attached to the current PR head are authoritative. Any head change invalidates prior workflow evidence and the review record.
