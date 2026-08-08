@@ -188,6 +188,7 @@ func releaseAttestationBody(t *testing.T, repo, ref, workflowPath, digest string
 						"repository": repo,
 						"path":       workflowPath,
 					},
+				},
 			},
 		},
 	}
