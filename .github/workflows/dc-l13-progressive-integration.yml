@@ -1,0 +1,45 @@
+name: dc-l13-progressive-integration
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/dc-l13-progressive-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - name: Apply and validate ordinary-file projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/dc-l13-progressive-integration.py
+          pip install --quiet cryptography==49.0.0
+          python -m py_compile \
+            devcontrol/src/kaliv_dev_control/_local_candidate_materialization_legacy/__init__.py \
+            devcontrol/src/kaliv_dev_control/local_candidate_materialization.py \
+            devcontrol/src/kaliv_dev_control/local_candidate_materialization_h5c.py \
+            devcontrol/tests/test_dc_l13_local_candidate_boundary.py \
+            devcontrol/tests/test_foundation.py \
+            tests/workflow_test_coverage.py
+          PYTHONPATH=devcontrol/src:devcontrol/tests python -m unittest \
+            devcontrol.tests.test_dc_l13_local_candidate_boundary \
+            devcontrol.tests.test_foundation -v
+          rm .github/dc-l13-progressive-integration.py
+          git config user.name "ModelRig DevControl"
+          git config user.email "devcontrol@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "test(devcontrol): project DC-L13 local-only boundary"
+          git push origin "HEAD:${GITHUB_HEAD_REF}"
