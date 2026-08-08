@@ -83,10 +83,15 @@ func observedBoolValue(flag observedFlag) (bool, error) {
 // parseAutomaticSelfUpdateArgs observes only the flags needed to faithfully
 // replay self-update after a normal appliance update. It also consumes values
 // for every ordinary updater string flag so its scan stays aligned with the
-// same command line parsed by flag.Parse in main.
+// same command line parsed by flag.Parse in main. Repeated booleans use their
+// final value, matching flag.Parse rather than short-circuiting on the first
+// true occurrence.
 func parseAutomaticSelfUpdateArgs(args []string, defaultRoot string) (automaticSelfUpdateConfig, automaticSelfUpdateMode, error) {
 	cfg := automaticSelfUpdateConfig{root: defaultRoot, repo: "Ternedal/ModelRig"}
-	mode := automaticSelfUpdateWatch
+	check := false
+	recoverOnly := false
+	selectorSeen := false
+	selector := false
 	for i := 0; i < len(args); i++ {
 		raw := args[i]
 		if raw == "--" {
@@ -103,9 +108,8 @@ func parseAutomaticSelfUpdateArgs(args []string, defaultRoot string) (automaticS
 			if err != nil {
 				return cfg, automaticSelfUpdateDisabled, err
 			}
-			if value {
-				mode = automaticSelfUpdatePostCommit
-			}
+			selectorSeen = true
+			selector = value
 		case flag.name == "self-update" || flag.name == "version":
 			return cfg, automaticSelfUpdateDisabled, nil
 		case strings.HasPrefix(flag.name, "test."):
@@ -115,8 +119,10 @@ func parseAutomaticSelfUpdateArgs(args []string, defaultRoot string) (automaticS
 			if err != nil {
 				return cfg, automaticSelfUpdateDisabled, err
 			}
-			if value {
-				return cfg, automaticSelfUpdateDisabled, nil
+			if flag.name == "check" {
+				check = value
+			} else {
+				recoverOnly = value
 			}
 		case flag.name == "insecure-skip-verify" || flag.name == "skip-attestation":
 			value, err := observedBoolValue(flag)
@@ -163,7 +169,20 @@ func parseAutomaticSelfUpdateArgs(args []string, defaultRoot string) (automaticS
 	}
 	cfg.root = absRoot
 	sort.Strings(cfg.baseline)
-	return cfg, mode, nil
+
+	if check || recoverOnly {
+		return cfg, automaticSelfUpdateDisabled, nil
+	}
+	if selectorSeen {
+		if selector {
+			return cfg, automaticSelfUpdatePostCommit, nil
+		}
+		// The selector is internal, not an ordinary updater flag. A final false
+		// value must disable both the hidden child and normal watcher startup;
+		// main will reject the malformed internal invocation normally.
+		return cfg, automaticSelfUpdateDisabled, nil
+	}
+	return cfg, automaticSelfUpdateWatch, nil
 }
 
 // committedTransactionFingerprints returns content hashes for every journal
@@ -243,30 +262,13 @@ func runPostCommitSelfUpdate(cfg automaticSelfUpdateConfig) error {
 // It runs after the normal updater process has exited and therefore cannot gate
 // appliance rollback or change the original command's exit status.
 func init() {
-	found := false
-	for _, raw := range os.Args[1:] {
-		flag, ok := splitObservedFlag(raw)
-		if ok && flag.name == "post-commit-self-update" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return
-	}
 	root, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "updater automatic self-update:", err)
-		os.Exit(1)
+		return
 	}
 	cfg, mode, err := parseAutomaticSelfUpdateArgs(os.Args[1:], root)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "updater automatic self-update:", err)
-		os.Exit(1)
-	}
-	if mode != automaticSelfUpdatePostCommit {
-		fmt.Fprintln(os.Stderr, "updater automatic self-update: invalid internal invocation")
-		os.Exit(1)
+	if err != nil || mode != automaticSelfUpdatePostCommit {
+		return
 	}
 	log.SetPrefix("updater automatic self-update: ")
 	log.SetFlags(log.LstdFlags)
