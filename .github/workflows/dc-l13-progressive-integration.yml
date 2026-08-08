@@ -24,6 +24,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/dc-l13-progressive-integration.py')
+          text = path.read_text(encoding='utf-8')
+          replacements = {
+              r'tree = ast.parse("\n".join(sources))': r'tree = ast.parse("\\n".join(sources))',
+              r'combined = "\n".join(sources)': r'combined = "\\n".join(sources)',
+          }
+          for old, new in replacements.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f'generator marker mismatch: {old}')
+              text = text.replace(old, new)
+          path.write_text(text, encoding='utf-8')
+          PY
           python .github/dc-l13-progressive-integration.py
           pip install --quiet cryptography==49.0.0
           python -m py_compile \
