@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import stage_b_one_click as legacy
+import stage_b_physical_gate_v2 as final_gate
 
 EXPECTED_SOURCE_VERSION = "1.58.150"
 EXPECTED_TARGET_VERSION = "1.58.151"
@@ -89,6 +90,32 @@ def _load_observations(
     return observations
 
 
+def _invalidate_final_receipt() -> None:
+    # The official latest receipt is an activation input. Block it BEFORE
+    # persisting the false bootstrap tombstone, so no interruption can leave
+    # false state alongside a stale green final receipt. The final-gate writer
+    # uses temp-file + replace; if that fails, remove the old receipt and stop.
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    destination = legacy.ROOT / final_gate.DEFAULT_REPORT
+    report = final_gate._blocked_receipt(
+        now,
+        "bootstrap live re-verification required; no prior green receipt is current",
+        status="bootstrap_reverification_required",
+    )
+    try:
+        final_gate._write(destination, report)
+    except Exception as exc:
+        cleanup_error: Exception | None = None
+        try:
+            destination.unlink(missing_ok=True)
+        except OSError as cleanup_exc:
+            cleanup_error = cleanup_exc
+        detail = f"Final Stage B receipt could not be invalidated: {exc}"
+        if cleanup_error is not None:
+            detail += f"; stale receipt could not be removed: {cleanup_error}"
+        raise legacy.StageBError(detail) from exc
+
+
 def _verify_bootstrap(
     candidate: dict[str, Any],
     observations: dict[str, Any],
@@ -113,6 +140,11 @@ def _verify_bootstrap(
             "Updater-bootstrap checkpoint findes; cached proof "
             "ugyldiggøres og live fil genverificeres."
         )
+
+    # Block the official latest receipt before persisting the false checkpoint.
+    # Interruption after this write leaves the old state/trial but no green
+    # receipt; interruption after save_state leaves false state + blocked receipt.
+    _invalidate_final_receipt()
 
     # Persist the false checkpoint BEFORE deleting the cached trial. Every
     # interruption ordering is then resumable:
