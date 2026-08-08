@@ -2,14 +2,22 @@
 """Stage B one-click must measure lifecycle evidence, never invent it."""
 from __future__ import annotations
 
+import copy
+import hashlib
 import importlib.util
+import json
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WIZARD = ROOT / "scripts" / "stage_b_one_click.py"
+STRICT_WIZARD = ROOT / "scripts" / "stage_b_one_click_v2.py"
+STRICT_GATE = ROOT / "scripts" / "stage_b_strict_evidence.py"
+STRICT_FINAL = ROOT / "scripts" / "stage_b_physical_gate_v2.py"
 LAUNCHER = ROOT / "START_STAGE_B_TEST.cmd"
+VERIFY_LAUNCHER = ROOT / "VERIFY_STAGE_B_EVIDENCE.cmd"
 RUNBOOK = ROOT / "STAGE_B_UPDATER_EVIDENCE.md"
 EXAMPLE = ROOT / "eval" / "appliance_lifecycle_observations.example.json"
 
@@ -26,14 +34,23 @@ def check(condition: bool, message: str) -> None:
         print(f"  FAIL: {message}")
 
 
-check(WIZARD.is_file(), "the Stage B wizard exists")
+check(WIZARD.is_file(), "the Stage B lifecycle wizard exists")
+check(STRICT_WIZARD.is_file(), "the strict Stage B wrapper exists")
+check(STRICT_GATE.is_file(), "the strict semantic gate exists")
+check(STRICT_FINAL.is_file(), "the strict final wrapper exists")
 check(LAUNCHER.is_file(), "the double-click launcher exists")
+check(VERIFY_LAUNCHER.is_file(), "the final verifier launcher exists")
 check(RUNBOOK.is_file(), "the Stage B runbook exists")
 
 source = WIZARD.read_text(encoding="utf-8")
 lower = source.lower()
+strict_source = STRICT_WIZARD.read_text(encoding="utf-8")
+strict_gate_source = STRICT_GATE.read_text(encoding="utf-8")
+strict_final_source = STRICT_FINAL.read_text(encoding="utf-8")
 launcher = LAUNCHER.read_text(encoding="utf-8").lower()
+verify_launcher = VERIFY_LAUNCHER.read_text(encoding="utf-8").lower()
 runbook = RUNBOOK.read_text(encoding="utf-8")
+example_text = EXAMPLE.read_text(encoding="utf-8")
 
 spec = importlib.util.spec_from_file_location("stage_b_one_click_contract", WIZARD)
 assert spec is not None and spec.loader is not None
@@ -78,7 +95,7 @@ check(
     "def remote_release_identity" in source
     and "remote_release_identity(bad_repo)" in source
     and '"attempted_version": attempted_version' in source
-    and '"attempted_git_sha": attempted_git_sha' in source,
+    and '"attempted_git_sha": attempted_sha' in source,
     "bad_update names the release it actually attempted",
 )
 
@@ -118,19 +135,17 @@ check(
     and "store_digest" in source,
     "schedules name the binding that produced them",
 )
-
 check(
     "evidence_sha256" in source and "sha256_file(log)" in source,
-    "each trial stamps its own log digest",
+    "each lifecycle trial stamps its own log digest",
 )
 check(
     '"validation/appliance-lifecycle-evidence/' in source,
     "evidence paths stay under the directory the validator requires",
 )
-
 check(
     "update-transaction.json findes stadig" in source,
-    "an unfinished updater transaction blocks the run",
+    "an unfinished updater transaction blocks the lifecycle run",
 )
 check(
     "Riggen kører allerede" in source,
@@ -141,7 +156,6 @@ check(
     "a bad_update log proving neither refusal nor rollback is rejected",
 )
 check("Working tree er ikke ren" in source, "a dirty checkout blocks Stage B")
-
 check(
     "stage-b-easy-state.json" in source and "def save_state" in source,
     "progress is checkpointed so a safe stop can resume",
@@ -151,38 +165,177 @@ check(
         f'state.get("{k}")' in source
         for k in ("reboot_done", "good_update_done", "bad_update_done")
     ),
-    "completed trials are skipped on resume",
+    "completed lifecycle trials are skipped on resume",
 )
-
 check("KALIV_STAGE_B_BAD_REPO" in source, "the negative fixture repo is configurable")
 check(
     'answer.upper() != "JA"' in source,
     "the invalid update requires an explicit operator approval",
 )
 
-for forbidden in (
-    "git push",
-    "git tag",
-    "gh release",
-    "merge_pull_request",
-    "production_activation=true",
-    "insecure-skip-verify",
-    "skip-attestation",
-    "no-heartbeat-check",
+# The advertised entrypoints must wrap the legacy lifecycle engine in the strict layer.
+check("stage_b_one_click_v2.py" in launcher, "double-click path uses the strict wizard")
+check("stage_b_physical_gate_v2.py" in verify_launcher, "final verifier uses the strict final gate")
+check('EXPECTED_SOURCE_VERSION = "1.58.150"' in strict_source, "strict wizard pins the source release")
+check('EXPECTED_TARGET_VERSION = "1.58.151"' in strict_source, "strict wizard pins the target release")
+check('"gh", "attestation", "verify"' in strict_source, "strict wizard verifies GitHub build provenance")
+check("expected_sha256" in strict_source and "actual_sha256" in strict_source, "strict wizard measures bootstrap checksum identity")
+check('observed_state == "swapping" and observed_swapped' in strict_source, "strict wizard kills only after a recorded live swap")
+check('[str(updater), "-recover"]' in strict_source, "strict wizard performs offline whole-set recovery")
+check("_all_live_executables_present" in strict_source, "strict wizard proves every live executable remains present")
+check("stage_b_strict_evidence.py" in strict_final_source, "final wrapper executes the strict semantic gate")
+check("strict_stage_b" in strict_final_source and "strict_evidence_complete" in strict_final_source, "final receipt hash-binds strict evidence")
+check("good_update.source_version must be" in strict_gate_source, "strict gate rejects a non-1.58.150 source")
+check("updater_bootstrap provenance was not verified" in strict_gate_source, "strict gate requires measured provenance")
+check("did not observe a completed live swap" in strict_gate_source, "strict gate requires a real interrupted swap")
+check('"updater_bootstrap"' in example_text, "observation template carries bootstrap evidence")
+check('"appliance_interruption"' in example_text, "observation template carries interruption evidence")
+
+for text, label in (
+    (lower, "lifecycle wizard"),
+    (launcher, "start launcher"),
+    (verify_launcher, "verify launcher"),
+    (strict_source.lower(), "strict wizard"),
+    (strict_final_source.lower(), "strict final gate"),
 ):
-    check(forbidden not in lower, f"wizard has no forbidden action: {forbidden}")
-    check(forbidden not in launcher, f"launcher has no forbidden action: {forbidden}")
+    for forbidden in (
+        "git push",
+        "git tag",
+        "gh release create",
+        "merge_pull_request",
+        "production_activation=true",
+        "insecure-skip-verify",
+        "skip-attestation",
+        "no-heartbeat-check",
+    ):
+        check(forbidden not in text, f"{label} has no forbidden authority: {forbidden}")
 
 check(
     module.LIFECYCLE_SCHEMA == "kaliv-appliance-lifecycle-observations/v1",
-    "the wizard writes the schema the chain validator reads",
+    "the lifecycle wizard writes the schema the chain validator reads",
 )
 check(
     EXAMPLE.is_file() and module.EXAMPLE == EXAMPLE,
     "observations are seeded from the tracked example",
 )
 
-# The operator runbook must name the live campaign and the honest bootstrap boundary.
+# Mutation-test the strict gate directly.
+strict_spec = importlib.util.spec_from_file_location("stage_b_strict_contract", STRICT_GATE)
+assert strict_spec is not None and strict_spec.loader is not None
+strict_module = importlib.util.module_from_spec(strict_spec)
+strict_spec.loader.exec_module(strict_module)
+
+
+def write_log(root: Path, name: str, text: str) -> tuple[str, str]:
+    path = root / "validation" / "appliance-lifecycle-evidence" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return str(path.relative_to(root)), hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+strict_root = Path(tempfile.mkdtemp(prefix="strict-stage-b-"))
+strict_candidate = {
+    "version": "1.58.151",
+    "git_sha": "a" * 40,
+    "code_sha256": "b" * 64,
+    "identity_source": "git",
+    "working_tree_clean": True,
+    "version_stamps_consistent": True,
+}
+updater_hash = "c" * 64
+bootstrap_path, bootstrap_digest = write_log(
+    strict_root,
+    "updater_binary_check.log",
+    "\n".join((
+        "release_version=1.58.151",
+        "asset_name=modelrig-updater-windows-x64.exe",
+        f"expected_sha256={updater_hash}",
+        f"actual_sha256={updater_hash}",
+        "provenance_verified=true",
+    )) + "\n",
+)
+interruption_path, interruption_digest = write_log(
+    strict_root,
+    "appliance_interruption.log",
+    "\n".join((
+        "observed_journal_state=swapping",
+        "observed_swapped_count=1",
+        "updater_process_killed=true",
+        "recovery_exit_code=0",
+        "recovery_succeeded=true",
+        "live_executables_present=true",
+        "journal_absent=true",
+    )) + "\n",
+)
+strict_lifecycle = {
+    "schema": "kaliv-appliance-lifecycle-observations/v1",
+    "candidate": {
+        "version": strict_candidate["version"],
+        "git_sha": strict_candidate["git_sha"],
+        "code_sha256": strict_candidate["code_sha256"],
+    },
+    "trials": {
+        "good_update": {"source_version": "1.58.150", "target_version": "1.58.151"},
+        "updater_bootstrap": {
+            "performed": True,
+            "release_version": "1.58.151",
+            "release_git_sha": strict_candidate["git_sha"],
+            "asset_name": "modelrig-updater-windows-x64.exe",
+            "expected_sha256": updater_hash,
+            "actual_sha256": updater_hash,
+            "provenance_verified": True,
+            "evidence_path": bootstrap_path,
+            "evidence_sha256": bootstrap_digest,
+        },
+        "appliance_interruption": {
+            "performed": True,
+            "source_version": "1.58.150",
+            "observed_journal_state": "swapping",
+            "observed_swapped_count": 1,
+            "updater_process_killed": True,
+            "recovery_exit_code": 0,
+            "recovery_succeeded": True,
+            "live_executables_present": True,
+            "journal_absent": True,
+            "ready": True,
+            "backend_version": "1.58.150",
+            "worker_version": "1.58.150",
+            "evidence_path": interruption_path,
+            "evidence_sha256": interruption_digest,
+        },
+    },
+}
+strict_path = strict_root / "validation" / "appliance-lifecycle-observations.json"
+strict_path.write_text(json.dumps(strict_lifecycle), encoding="utf-8")
+
+
+def evaluate_strict(value: dict) -> tuple[dict, int]:
+    strict_path.write_text(json.dumps(value), encoding="utf-8")
+    return strict_module.evaluate(
+        strict_root,
+        Path("validation/appliance-lifecycle-observations.json"),
+        candidate=strict_candidate,
+        now=datetime(2026, 8, 8, tzinfo=timezone.utc),
+    )
+
+
+strict_report, strict_code = evaluate_strict(strict_lifecycle)
+check(strict_code == 0 and strict_report["gate"]["strict_evidence_complete"] is True, "valid strict bundle passes")
+check(strict_report["gate"]["production_activation"] is False, "strict gate cannot activate production")
+for label, mutate in (
+    ("source version drift", lambda value: value["trials"]["good_update"].update(source_version="1.58.149")),
+    ("bootstrap provenance absent", lambda value: value["trials"]["updater_bootstrap"].update(provenance_verified=False)),
+    ("bootstrap hash mismatch", lambda value: value["trials"]["updater_bootstrap"].update(actual_sha256="d" * 64)),
+    ("interruption before any swap", lambda value: value["trials"]["appliance_interruption"].update(observed_swapped_count=0)),
+    ("interruption recovery failed", lambda value: value["trials"]["appliance_interruption"].update(recovery_succeeded=False)),
+    ("journal left active", lambda value: value["trials"]["appliance_interruption"].update(journal_absent=False)),
+):
+    changed = copy.deepcopy(strict_lifecycle)
+    mutate(changed)
+    blocked, blocked_code = evaluate_strict(changed)
+    check(blocked_code != 0 and blocked["gate"]["passed"] is False, label + " blocks")
+
+# The operator runbook must name the live campaign and strict boundary.
 check(
     "1.58.151" in runbook
     and "1.58.150" in runbook
@@ -193,18 +346,14 @@ check(
 check(
     "bootstrap" in runbook.lower()
     and "#401" in runbook
-    and "ikke en promotion blocker" in runbook,
+    and "blokerer ikke promotion" in runbook,
     "the runbook separates the one-time bootstrap from deferred signed-to-signed proof",
 )
-check(
-    "ModelRig-updater-negative" in runbook,
-    "the runbook documents how the invalid update is produced",
-)
-check("START_STAGE_B_TEST.cmd" in runbook, "the runbook points at the one-click path")
-check(
-    "VERIFY_STAGE_B_EVIDENCE.cmd" in runbook,
-    "the runbook points at the fail-closed Stage B verifier",
-)
+check("state=swapping" in runbook and "swapped_count>=1" in runbook, "the runbook requires a recorded mid-swap interruption")
+check("ModelRig-updater-negative" in runbook, "the runbook documents how the invalid update is produced")
+check("START_STAGE_B_TEST.cmd" in runbook, "the runbook points at the strict one-click path")
+check("VERIFY_STAGE_B_EVIDENCE.cmd" in runbook, "the runbook points at the strict final verifier")
+check("strict_evidence_complete=true" in runbook, "the runbook requires strict evidence in the final receipt")
 
 print(f"Stage B one-click contracts: {passed} passed, {failed} failed")
 if failed:
