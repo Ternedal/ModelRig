@@ -7,15 +7,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"modelrig/internal/config"
 )
 
 const updaterAssetName = "modelrig-updater-windows-x64.exe"
 
-// updaterVersion may be injected by a release build. When it is left as "dev",
-// the installed VERSION file beside the updater is used instead. The fallback
-// keeps local builds honest while still giving the physical rig a useful
-// `-version` result.
-var updaterVersion = "dev"
+// updaterVersion is compiled into the updater from the same version constant
+// used by the backend. scripts/version_tool.py already proves that constant
+// matches the repository VERSION and release tag, so an old updater cannot
+// impersonate a newer one by reading a mutable file beside itself.
+var updaterVersion = config.Version
 
 type selfUpdateConfig struct {
 	repo            string
@@ -31,12 +33,7 @@ func init() {
 	for _, arg := range os.Args[1:] {
 		switch arg {
 		case "-version", "--version":
-			root, err := executableDir()
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "updater version:", err)
-				os.Exit(1)
-			}
-			fmt.Println(resolveUpdaterVersion(root))
+			fmt.Println(resolveUpdaterVersion())
 			os.Exit(0)
 		case "-self-update":
 			if err := selfUpdateCommand(os.Args[1:]); err != nil {
@@ -117,27 +114,20 @@ func selfUpdateCommand(args []string) error {
 	return runSelfUpdate(cfg)
 }
 
-func resolveUpdaterVersion(root string) string {
+func resolveUpdaterVersion() string {
 	v := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(updaterVersion), "v"))
 	if v != "" && v != "dev" {
 		if _, err := parseSemver(v); err == nil {
 			return v
 		}
 	}
-	b, err := os.ReadFile(filepath.Join(root, "VERSION"))
-	if err == nil {
-		candidate := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(b)), "v"))
-		if _, err := parseSemver(candidate); err == nil {
-			return candidate
-		}
-	}
 	return "dev"
 }
 
 func runSelfUpdate(cfg selfUpdateConfig) error {
-	current := resolveUpdaterVersion(cfg.root)
+	current := resolveUpdaterVersion()
 	if current == "dev" {
-		return fmt.Errorf("current updater version is unknown; keep VERSION beside the updater or build with updaterVersion set")
+		return fmt.Errorf("current updater version is unknown; refusing self-update without a compiled version identity")
 	}
 
 	relBody, err := httpGet(fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", cfg.repo))
