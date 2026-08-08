@@ -290,7 +290,7 @@ jobs:
           assert public.PublisherReplayLedgerV2 is primary.PublisherReplayLedgerV3
           assert callable(recovery.PublisherReplayRecoveryAuthorizationVerifierV1)
           assert callable(receipt.PublisherReplayRecoveryReceiptV3)
-          assert callable(finalizer.finalize_publisher_replay_recovery_receipt_v3)
+          assert callable(finalizer.write_publisher_replay_recovery_receipt_v3)
           assert callable(keyring.RollbackSafeEd25519AuthorityVerifier)
           assert Path(support.__file__).name == "__init__.py"
 
