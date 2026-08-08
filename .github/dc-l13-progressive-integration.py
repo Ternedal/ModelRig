@@ -126,6 +126,23 @@ replace_once(
     '''        future: tuple[str, ...] = ()
 ''',
 )
+replace_once(
+    foundation,
+    '''        self.assertIsNone(
+            importlib.util.find_spec(
+                "kaliv_dev_control.local_candidate_materialization"
+            )
+        )
+''',
+    '''        for landed_module in (
+            "kaliv_dev_control.local_candidate_materialization",
+            "kaliv_dev_control.local_candidate_materialization_h5c",
+        ):
+            self.assertIsNotNone(
+                importlib.util.find_spec(landed_module), landed_module
+            )
+''',
+)
 
 readme = Path("devcontrol/README.md")
 readme_text = readme.read_text(encoding="utf-8")
@@ -263,7 +280,10 @@ class DcL13LocalCandidateBoundaryTests(unittest.TestCase):
         ):
             self.assertNotIn(command, strings, command)
         combined = "\n".join(sources)
-        self.assertIn("file://", combined)
+        self.assertIn("fetch", strings)
+        self.assertIn(".as_uri()", combined)
+        for forbidden_url in ("https://", "http://", "ssh://", "git@"):
+            self.assertNotIn(forbidden_url, combined, forbidden_url)
         for token in (
             "requests.",
             "urllib",
@@ -299,17 +319,31 @@ class DcL13LocalCandidateBoundaryTests(unittest.TestCase):
                 / f"development-local-candidate-materialization-receipt-{version}.schema.json"
             )
             schema = json.loads(path.read_text(encoding="utf-8"))
-            text = json.dumps(schema, sort_keys=True)
+            properties = schema.get("properties", {})
             self.assertFalse(schema.get("additionalProperties", True), version)
+            self.assertIs(properties["bare_repository"]["const"], True)
+            self.assertIs(properties["isolated_index"]["const"], True)
+            self.assertIs(properties["local_source_only"]["const"], True)
+            self.assertEqual(properties["merge_authority"]["const"], "human")
+            for false_claim in (
+                "remote_configured",
+                "network_write_performed",
+                "remote_push_performed",
+                "pull_request_created",
+                "ready_for_review",
+                "reviewers_requested",
+                "merged",
+                "released",
+                "deployed",
+            ):
+                self.assertIs(properties[false_claim]["const"], False, (version, false_claim))
+            text = json.dumps(schema, sort_keys=True)
             for forbidden in (
                 "remote_url",
                 "access_token",
                 "credential_helper",
-                "pushed",
-                "pull_request_created",
-                "merged",
-                "released",
-                "deployed",
+                "signing_key",
+                "github_token",
             ):
                 self.assertNotIn(forbidden, text, (version, forbidden))
 
