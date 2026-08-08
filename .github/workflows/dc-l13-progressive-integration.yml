@@ -39,6 +39,90 @@ jobs:
           path.write_text(text, encoding='utf-8')
           PY
           python .github/dc-l13-progressive-integration.py
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str) -> None:
+              text = path.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: marker count {count}, expected 1\n{old}')
+              path.write_text(text.replace(old, new), encoding='utf-8')
+
+          boundary = Path('devcontrol/tests/test_dc_l13_local_candidate_boundary.py')
+          replace_once(
+              boundary,
+              '        self.assertIn("file://", combined)\n',
+              '        self.assertIn("fetch", strings)\n'
+              '        self.assertIn(".as_uri()", combined)\n'
+              '        for forbidden_url in ("https://", "http://", "ssh://", "git@"):\n'
+              '            self.assertNotIn(forbidden_url, combined, forbidden_url)\n',
+          )
+          replace_once(
+              boundary,
+              '''            text = json.dumps(schema, sort_keys=True)
+            self.assertFalse(schema.get("additionalProperties", True), version)
+            for forbidden in (
+                "remote_url",
+                "access_token",
+                "credential_helper",
+                "pushed",
+                "pull_request_created",
+                "merged",
+                "released",
+                "deployed",
+            ):
+                self.assertNotIn(forbidden, text, (version, forbidden))
+''',
+              '''            properties = schema.get("properties", {})
+            self.assertFalse(schema.get("additionalProperties", True), version)
+            self.assertIs(properties["bare_repository"]["const"], True)
+            self.assertIs(properties["isolated_index"]["const"], True)
+            self.assertIs(properties["local_source_only"]["const"], True)
+            self.assertEqual(properties["merge_authority"]["const"], "human")
+            for false_claim in (
+                "remote_configured",
+                "network_write_performed",
+                "remote_push_performed",
+                "pull_request_created",
+                "ready_for_review",
+                "reviewers_requested",
+                "merged",
+                "released",
+                "deployed",
+            ):
+                self.assertIs(properties[false_claim]["const"], False, (version, false_claim))
+            text = json.dumps(schema, sort_keys=True)
+            for forbidden in (
+                "remote_url",
+                "access_token",
+                "credential_helper",
+                "signing_key",
+                "github_token",
+            ):
+                self.assertNotIn(forbidden, text, (version, forbidden))
+''',
+          )
+
+          foundation = Path('devcontrol/tests/test_foundation.py')
+          replace_once(
+              foundation,
+              '''        self.assertIsNone(
+            importlib.util.find_spec(
+                "kaliv_dev_control.local_candidate_materialization"
+            )
+        )
+''',
+              '''        for landed_module in (
+            "kaliv_dev_control.local_candidate_materialization",
+            "kaliv_dev_control.local_candidate_materialization_h5c",
+        ):
+            self.assertIsNotNone(
+                importlib.util.find_spec(landed_module), landed_module
+            )
+''',
+          )
+          PY
           pip install --quiet cryptography==49.0.0
           python -m py_compile \
             devcontrol/src/kaliv_dev_control/_local_candidate_materialization_legacy/__init__.py \
