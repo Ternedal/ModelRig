@@ -2,8 +2,8 @@
 
 Denne fil er den autoritative rækkefølge for fysisk promotion af ModelRig
 `1.58.151`. Kandidaten ligger på
-`agent/unified-candidate-1.58.151`; den eksakte SHA skal altid læses fra
-freeze-PR #405 og må aldrig gættes eller kopieres fra ældre evidens.
+`agent/unified-candidate-1.58.151-r2`; den eksakte SHA skal altid læses fra
+freeze-PR #412 og må aldrig gættes eller kopieres fra ældre evidens.
 
 ## Ufravigelige grænser
 
@@ -23,15 +23,15 @@ freeze-PR #405 og må aldrig gættes eller kopieres fra ældre evidens.
 ```powershell
 cd C:\Users\Anders\Desktop\ModelRig
 git fetch origin
-git switch agent/unified-candidate-1.58.151
-git pull --ff-only origin agent/unified-candidate-1.58.151
+git switch agent/unified-candidate-1.58.151-r2
+git pull --ff-only origin agent/unified-candidate-1.58.151-r2
 $CandidateSha = (git rev-parse HEAD).Trim()
 if ($CandidateSha.Length -ne 40) { throw "Ugyldig kandidat-SHA" }
 if (git status --short) { throw "Working tree er ikke ren" }
 if ((Get-Content VERSION -Raw).Trim() -ne "1.58.151") { throw "Forkert version" }
 ```
 
-Sammenhold `$CandidateSha` med den eksakte head i freeze-PR #405. Stop ved enhver
+Sammenhold `$CandidateSha` med den eksakte head i freeze-PR #412. Stop ved enhver
 forskel.
 
 ### A1. Opret en frisk freeze-receipt
