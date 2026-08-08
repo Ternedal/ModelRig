@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -146,5 +147,82 @@ func TestParseAutomaticSelfUpdateArgsStopsWhereFlagPackageStops(t *testing.T) {
 	}
 	if cfg.root != wantRoot {
 		t.Fatalf("root = %q, want %q; flags after -- must be ignored", cfg.root, wantRoot)
+	}
+}
+
+func TestParseAutomaticSelfUpdateArgsUsesFinalCommandBooleanValues(t *testing.T) {
+	for _, args := range [][]string{
+		{"-check=true", "--check=false"},
+		{"--recover", "-recover=0"},
+		{"-check", "-check=false", "-recover=true", "-recover=false"},
+	} {
+		cfg, mode, err := parseAutomaticSelfUpdateArgs(args, t.TempDir())
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if mode != automaticSelfUpdateWatch {
+			t.Fatalf("%v mode = %v, want watch; final false must win", args, mode)
+		}
+		if cfg.root == "" {
+			t.Fatalf("%v returned empty root", args)
+		}
+	}
+
+	for _, args := range [][]string{
+		{"-check=false", "--check=true"},
+		{"-recover=0", "--recover"},
+	} {
+		_, mode, err := parseAutomaticSelfUpdateArgs(args, t.TempDir())
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if mode != automaticSelfUpdateDisabled {
+			t.Fatalf("%v mode = %v, want disabled; final true must win", args, mode)
+		}
+	}
+}
+
+func TestParseAutomaticSelfUpdateArgsRespectsSelectorParsingBoundaries(t *testing.T) {
+	defaultRoot := t.TempDir()
+	cases := [][]string{
+		{"--", "--post-commit-self-update"},
+		{"positional", "--post-commit-self-update"},
+		{"-current", "--post-commit-self-update"},
+	}
+	for _, args := range cases {
+		_, mode, err := parseAutomaticSelfUpdateArgs(args, defaultRoot)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if mode != automaticSelfUpdateWatch {
+			t.Fatalf("%v mode = %v, want watch; selector is data outside flag parsing", args, mode)
+		}
+	}
+}
+
+func TestParseAutomaticSelfUpdateArgsUsesFinalSelectorValue(t *testing.T) {
+	fingerprint := "-baseline-commit=" + strings.Repeat("ab", 32)
+	_, mode, err := parseAutomaticSelfUpdateArgs([]string{
+		"--post-commit-self-update=true",
+		"-post-commit-self-update=false",
+		fingerprint,
+	}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != automaticSelfUpdateDisabled {
+		t.Fatalf("mode = %v, want disabled; final selector false must win", mode)
+	}
+
+	_, mode, err = parseAutomaticSelfUpdateArgs([]string{
+		"--post-commit-self-update=false",
+		"-post-commit-self-update=true",
+		fingerprint,
+	}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != automaticSelfUpdatePostCommit {
+		t.Fatalf("mode = %v, want post-commit; final selector true must win", mode)
 	}
 }
