@@ -24,6 +24,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python .github/dc-l13-fix-workflow-projector.py
           python .github/dc-l13-workflow-projection.py
           pip install --quiet cryptography==49.0.0
           python - <<'PY'
@@ -36,6 +37,7 @@ jobs:
           PYTHONPATH=devcontrol/src python -m unittest \
             devcontrol.tests.test_dc_l13_local_candidate_boundary \
             devcontrol.tests.test_foundation -v
+          rm .github/dc-l13-fix-workflow-projector.py
           rm .github/dc-l13-workflow-projection.py
           rm .github/workflows/dc-l13-workflow-projection.yml
           git config user.name "ModelRig DevControl"
