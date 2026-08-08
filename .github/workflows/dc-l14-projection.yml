@@ -1,0 +1,38 @@
+name: dc-l14-projection
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/dc-l14-projection.yml'
+      - 'devcontrol/**'
+      - 'scripts/tier_a_bundle_inventory.py'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install exact runtime test dependency
+        run: pip install --quiet cryptography==49.0.0 pytest==8.4.2
+      - name: Run DC-L14 source contracts
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          PYTHONPATH: devcontrol/src
+        run: |
+          python -m pytest -q --tb=short \
+            devcontrol/tests/test_h10i_tier_a_bundle_inventory.py \
+            devcontrol/tests/test_h10j_tier_a_execution_core_split_contract.py \
+            devcontrol/tests/test_h10p_tier_a_legacy_toolhost_extraction.py \
+            devcontrol/tests/test_publisher_protocol_inventory_h10f.py \
+            devcontrol/tests/test_tier_a_authority_bundle_closure.py
+      - name: Print generated inventory on failure
+        if: failure()
+        run: |
+          python scripts/tier_a_bundle_inventory.py --format lock
+          python scripts/tier_a_bundle_inventory.py --format markdown | head -80
