@@ -193,6 +193,17 @@ _swap_check(
     and _blocked_tombstone["gate"]["passed"] is False,
     "false checkpoint blocks stale lifecycle trial and log proof",
 )
+
+_state_path.write_text(
+    '{"updater_bootstrap_done": false, "updater_bootstrap_done": true}',
+    encoding="utf-8",
+)
+_blocked_duplicate_state, _blocked_duplicate_state_code = _evaluate(_lifecycle)
+_swap_check(
+    _blocked_duplicate_state_code != 0
+    and _blocked_duplicate_state["gate"]["passed"] is False,
+    "duplicate contradictory bootstrap checkpoint key blocks",
+)
 _write_state(True)
 
 _log_zero = copy.deepcopy(_lifecycle)

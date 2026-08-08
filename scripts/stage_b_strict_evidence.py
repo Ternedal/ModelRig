@@ -65,6 +65,17 @@ def _resolve_under(root: Path, raw: Path) -> Path:
     return resolved
 
 
+def _reject_duplicate_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise StrictEvidenceError(
+                f"JSON evidence contains duplicate key: {key}"
+            )
+        value[key] = item
+    return value
+
+
 def _load_json(root: Path, raw: Path) -> tuple[dict[str, Any], bytes, Path]:
     path = _resolve_under(root, raw)
     if not path.is_file() or path.is_symlink():
@@ -73,7 +84,10 @@ def _load_json(root: Path, raw: Path) -> tuple[dict[str, Any], bytes, Path]:
     if not body or len(body) > MAX_BYTES:
         raise StrictEvidenceError(f"JSON evidence size is invalid: {raw}")
     try:
-        value = json.loads(body.decode("utf-8"))
+        value = json.loads(
+            body.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_object,
+        )
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise StrictEvidenceError(f"JSON evidence is invalid: {raw}") from exc
     if not isinstance(value, dict):
