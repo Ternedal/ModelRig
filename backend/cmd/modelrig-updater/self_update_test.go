@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"modelrig/internal/config"
 )
 
 func TestParseSelfUpdateArgs(t *testing.T) {
@@ -36,24 +38,20 @@ func TestParseSelfUpdateArgsRejectsUnknownArgument(t *testing.T) {
 	}
 }
 
-func TestResolveUpdaterVersionPrefersEmbeddedVersion(t *testing.T) {
-	old := updaterVersion
-	defer func() { updaterVersion = old }()
-	updaterVersion = "v9.8.7"
-	if got := resolveUpdaterVersion(t.TempDir()); got != "9.8.7" {
-		t.Fatalf("version = %q", got)
+func TestUpdaterVersionUsesCompiledBackendIdentity(t *testing.T) {
+	if updaterVersion != config.Version {
+		t.Fatalf("updater version %q differs from compiled backend version %q", updaterVersion, config.Version)
+	}
+	if got := resolveUpdaterVersion(); got != config.Version {
+		t.Fatalf("resolved version = %q, want %q", got, config.Version)
 	}
 }
 
-func TestResolveUpdaterVersionFallsBackToVersionFile(t *testing.T) {
+func TestResolveUpdaterVersionNormalizesEmbeddedVersion(t *testing.T) {
 	old := updaterVersion
 	defer func() { updaterVersion = old }()
-	updaterVersion = "dev"
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "VERSION"), []byte("1.58.151\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got := resolveUpdaterVersion(root); got != "1.58.151" {
+	updaterVersion = "v9.8.7"
+	if got := resolveUpdaterVersion(); got != "9.8.7" {
 		t.Fatalf("version = %q", got)
 	}
 }
@@ -62,7 +60,7 @@ func TestResolveUpdaterVersionFailsClosedToDev(t *testing.T) {
 	old := updaterVersion
 	defer func() { updaterVersion = old }()
 	updaterVersion = "not-semver"
-	if got := resolveUpdaterVersion(t.TempDir()); got != "dev" {
+	if got := resolveUpdaterVersion(); got != "dev" {
 		t.Fatalf("version = %q, want dev", got)
 	}
 }
