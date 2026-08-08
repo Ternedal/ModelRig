@@ -20,6 +20,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.12"
+      - name: Install exact asymmetric verifier dependency
+        run: pip install --quiet cryptography==49.0.0
       - name: Project static support and validate imports
         shell: bash
         run: |
