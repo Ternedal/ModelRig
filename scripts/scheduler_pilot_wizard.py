@@ -15,7 +15,7 @@ import re as _re
 from datetime import datetime as _DateTime, timezone as _Timezone
 from pathlib import Path as _Path
 
-BRANCH = "agent/unified-candidate-1.58.151"
+BRANCH = "agent/unified-candidate-1.58.151-r2"
 VERSION = "1.58.151"
 _RETAINED = _Path(__file__).with_name("scheduler_pilot_wizard.retained")
 _source = _RETAINED.read_text(encoding="utf-8")
@@ -25,7 +25,7 @@ _name = __name__
 globals()["__name__"] = "_scheduler_pilot_wizard_retained"
 exec(compile(_source, str(_RETAINED), "exec"), globals(), globals())
 globals()["__name__"] = _name
-BRANCH = "agent/unified-candidate-1.58.151"
+BRANCH = "agent/unified-candidate-1.58.151-r2"
 VERSION = "1.58.151"
 
 _REPORT_SCHEMA = "kaliv-scheduler-pilot/v4"
