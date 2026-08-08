@@ -95,7 +95,7 @@ check(
     "def remote_release_identity" in source
     and "remote_release_identity(bad_repo)" in source
     and '"attempted_version": attempted_version' in source
-    and '"attempted_git_sha": attempted_sha' in source,
+    and '"attempted_git_sha": attempted_git_sha' in source,
     "bad_update names the release it actually attempted",
 )
 
