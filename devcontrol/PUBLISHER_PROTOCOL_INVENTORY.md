@@ -33,4 +33,5 @@ surfaces without granting live publisher, remote Git, GitHub mutation, credentia
 
 - `kaliv_dev_control._compatibility_v1` is physically excluded from wheel and sdist artifacts.
 - `_local_candidate_materialization_legacy` is a static validation/evidence support package, not an executable legacy runner.
+- There is no remote publication authority in the supported package or runtime.
 - Live publication, push, reviewer mutation, merge, release, deployment and activation remain absent.
