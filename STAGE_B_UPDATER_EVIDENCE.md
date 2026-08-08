@@ -15,8 +15,8 @@ Stage B håndhæver denne præcise transition:
 - source appliance: signeret `1.58.150`;
 - target appliance: signeret `1.58.151`;
 - updateren fra `v1.58.151` installeres én gang som bootstrap;
-- bootstrap-binarien verificeres mod samme releases `SHA256SUMS.txt` og GitHub
-  build provenance;
+- bootstrap-binarien verificeres mod samme releases `SHA256SUMS.txt`, target-
+  commit, tagref og release-workflow;
 - server, supervisor og worker flyttes derefter kun gennem updateren.
 
 Det ægte automatiske signed-release-to-signed-release self-update-bevis er
@@ -40,15 +40,19 @@ Strict-wrapperen:
 
 1. kræver backend og worker på præcis `1.58.150`;
 2. måler live-updaterens SHA-256 mod `v1.58.151/SHA256SUMS.txt`;
-3. kører `gh attestation verify ... --repo Ternedal/ModelRig` mod updateren;
-4. hashbinder `updater_binary_check.log` i lifecycle-observationerne;
-5. starter updateren og afbryder den først, når journalen viser
-   `state=swapping` og mindst ét live swap er registreret;
-6. kører updateren med `-recover`;
-7. kræver backend og worker tilbage på 1.58.150, alle fire live executables
-   til stede og ingen aktiv journal;
-8. kører derefter den normale gode update, reboot, supervisor-restarts og den
-   ugyldige update.
+3. kører `gh attestation verify` med repository, target-commit, tagref og
+   signer-workflow bundet til samme release;
+4. genmåler live-updateren og genkører provenance ved hvert resume;
+5. hashbinder `updater_binary_check.log` i lifecycle-observationerne;
+6. kræver både `update-transaction.json` og `.tmp` fraværende før launch;
+7. starter updateren og følger én ny transaction-ID med monotont revisionstal;
+8. afbryder først, når netop den transaktion viser `state=swapping` og mindst ét
+   live swap er registreret;
+9. kører updateren med `-recover`;
+10. kræver backend og worker tilbage på 1.58.150, alle fire live executables
+    til stede og ingen aktiv journal;
+11. kører derefter den normale gode update, reboot, supervisor-restarts og den
+    ugyldige update.
 
 Fremdriften checkpointes i `validation/stage-b-easy-state.json`. Hvis en god
 update allerede er gennemført uden interruption-beviset, stopper wrapperen og
@@ -79,24 +83,47 @@ Den målte fil er:
 validation/appliance-lifecycle-evidence/updater_binary_check.log
 ```
 
+Den faktiske provenance-kontrol svarer til:
+
+```powershell
+gh attestation verify <updater.exe> `
+  --repo Ternedal/ModelRig `
+  --source-digest <v1.58.151-git-sha> `
+  --source-ref refs/tags/v1.58.151 `
+  --signer-workflow Ternedal/ModelRig/.github/workflows/build-and-release.yml
+```
+
 Lifecycle-feltet `trials.updater_bootstrap` skal indeholde:
 
 - `performed=true`;
 - release-version og release-SHA for 1.58.151;
 - assetnavnet `modelrig-updater-windows-x64.exe`;
 - ens forventet og faktisk SHA-256;
+- `source_digest`, `source_ref` og `signer_workflow` som ovenfor;
 - `provenance_verified=true`;
 - repository-relativ logsti og hash over loggens faktiske bytes.
 
+Et tidligere `updater_bootstrap_done`-checkpoint er ikke tillid: den live fil og
+provenance verificeres igen før kampagnen fortsætter.
+
 ### Kontrolleret appliance interruption
 
-Før den normale gode update starter strict-wrapperen updateren og overvåger
-`update-transaction.json` samt `.tmp`. Den må først terminere updater-processen,
-når højeste journalrevision viser:
+Før den normale gode update starter, kræver wrapperen begge aktive journalstier
+fraværende. Derefter starter den updateren og overvåger
+`update-transaction.json` samt `.tmp`. Main og `.tmp` skal beskrive samme
+transaction-ID; højeste revision er autoritativ, og revisionen må aldrig gå
+baglæns.
+
+Wrapperen må først terminere den updaterproces, den selv startede, når samme nye
+transaktion viser:
 
 ```text
+from=1.58.150
+to=v1.58.151
 state=swapping
 swapped_count>=1
+transaction_id=<non-empty>
+revision>=1
 ```
 
 Derefter kører wrapperen `modelrig-updater-windows-x64.exe -recover` og kræver:
@@ -114,6 +141,10 @@ Evidensen ligger i:
 ```text
 validation/appliance-lifecycle-evidence/appliance_interruption.log
 ```
+
+Log og observation binder transaction-ID, revision, journalens source/target,
+den lancerede updater-PID, kill-resultat og recovery-resultat. En gammel eller
+konfliktende `.tmp`, ID-skift eller faldende revision stopper kampagnen.
 
 Det er det gennemførlige appliance-swap-bevis for 1.58.151. Interruption af den
 detached updater-replacement-helper kræver en senere signeret updater-target og
@@ -165,8 +196,13 @@ Dobbeltklik:
 VERIFY_STAGE_B_EVIDENCE.cmd
 ```
 
-Den kalder `scripts/stage_b_physical_gate_v2.py`, som først kører
-`stage_b_strict_evidence.py`. Kun hvis strict-gaten er grøn, køres den
+Den kalder `scripts/stage_b_physical_gate_v2.py`. Før første subprocess
+overskrives den officielle slutkvittering atomisk med
+`status=verification_in_progress` og alle gates false. Et kill, crash eller
+strømsvigt kan derfor ikke efterlade en ældre grøn kvittering som aktuel.
+
+Verifieren fjerner gamle intermediate strict/base-rapporter, kører derefter
+`stage_b_strict_evidence.py`, og kun hvis strict-gaten er grøn, køres den
 eksisterende release-freeze, updater-chain, syv-bevis-kampagne og
 otte-bevis-slutgate. Den endelige kvittering hashbinder strict-rapporten.
 
@@ -174,6 +210,7 @@ Kræv i `validation/stage-b-physical-final-latest.json`:
 
 ```text
 schema=kaliv-stage-b-physical-final/v1
+status=complete
 gate.passed=true
 release_freeze_complete=true
 updater_chain_complete=true
