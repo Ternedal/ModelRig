@@ -236,3 +236,15 @@ credential helper, signer, GitHub mutation, reviewer request, ready conversion,
 merge, release, deployment or activation authority. The historical dynamic
 legacy proxy and `_compatibility_v1` package are not distributed; the modern
 facade uses a static internal validation/evidence support package only.
+
+## DC-L14 final authority closure and packaging
+
+DC-L14 closes the reviewable Tier-A authority inventory and package boundary. The
+50-file authority bundle is generated and cryptographically locked, the historical
+execution core is documented as an import-only identity facade, and wheel/sdist
+artifacts are built through an exact local toolchain with deterministic metadata.
+
+The supported artifacts physically exclude `kaliv_dev_control._compatibility_v1`.
+They retain the static `_local_candidate_materialization_legacy` evidence-support
+package, but add no live publisher, remote Git, GitHub mutation, credential,
+private-key, merge, release, deployment or activation adapter.

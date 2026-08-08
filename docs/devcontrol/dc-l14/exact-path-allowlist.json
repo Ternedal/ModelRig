@@ -1,0 +1,32 @@
+{
+  "path_count": 25,
+  "paths": [
+    ".github/workflows/_tests.yml",
+    "devcontrol/PUBLISHER_PROTOCOL_INVENTORY.md",
+    "devcontrol/README.md",
+    "devcontrol/TIER_A_BUNDLE_INVENTORY.json",
+    "devcontrol/TIER_A_BUNDLE_INVENTORY.md",
+    "devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.json",
+    "devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.md",
+    "devcontrol/pyproject.toml",
+    "devcontrol/tests/test_dc_l14_reproducible_packaging.py",
+    "devcontrol/tests/test_h10i_tier_a_bundle_inventory.py",
+    "devcontrol/tests/test_h10j_tier_a_execution_core_split_contract.py",
+    "devcontrol/tests/test_h10p_tier_a_legacy_toolhost_extraction.py",
+    "devcontrol/tests/test_publisher_protocol_inventory_h10f.py",
+    "devcontrol/tests/test_tier_a_authority_bundle_closure.py",
+    "docs/devcontrol/dc-l14/exact-head-validation.md",
+    "docs/devcontrol/dc-l14/exact-path-allowlist.json",
+    "docs/devcontrol/dc-l14/independent-review-verdict.md",
+    "docs/devcontrol/dc-l14/mutation-results.md",
+    "docs/devcontrol/dc-l14/preflight.md",
+    "docs/devcontrol/dc-l14/source-path-disposition.json",
+    "docs/devcontrol/dc-l14/source-provenance.json",
+    "docs/devcontrol/dc-l14/symbol-ownership.json",
+    "scripts/build_devcontrol_artifacts.py",
+    "scripts/tier_a_bundle_inventory.py",
+    "tests/workflow_test_coverage.py"
+  ],
+  "schema": "modelrig-devcontrol-exact-path-allowlist/v1",
+  "slice": "DC-L14"
+}

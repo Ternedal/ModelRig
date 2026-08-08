@@ -1,0 +1,26 @@
+{
+  "dispositions": {
+    "devcontrol/PUBLISHER_PROTOCOL_INVENTORY.md": "regenerated from the recursively discovered supported protocol tree; rejected compatibility references removed",
+    "devcontrol/TIER_A_BUNDLE_INVENTORY.json": "regenerated cryptographic lock for the landed 50-file bundle",
+    "devcontrol/TIER_A_BUNDLE_INVENTORY.md": "regenerated review report for the landed 50-file bundle",
+    "devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.json": "replaced corrupted source blob with valid v10 import-only physical contract",
+    "devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.md": "regenerated from the v10 physical contract",
+    "devcontrol/tests/test_dc_l14_reproducible_packaging.py": "new byte-reproducibility and artifact-member boundary test",
+    "devcontrol/tests/test_h10i_tier_a_bundle_inventory.py": "retained source-exact",
+    "devcontrol/tests/test_h10j_tier_a_execution_core_split_contract.py": "adapted to the completed import-only core",
+    "devcontrol/tests/test_h10p_tier_a_legacy_toolhost_extraction.py": "adapted from obsolete 12-file/v2 identity to the landed 50-file/v7 identity",
+    "devcontrol/tests/test_publisher_protocol_inventory_h10f.py": "adapted to recursive supported-source inventory and physical compatibility exclusion",
+    "devcontrol/tests/test_tier_a_authority_bundle_closure.py": "retained source-exact",
+    "scripts/build_devcontrol_artifacts.py": "new deterministic local-only build and sdist normalization pipeline",
+    "scripts/tier_a_bundle_inventory.py": "retained source-exact"
+  },
+  "hard_exclusions": [
+    "kaliv_dev_control._compatibility_v1",
+    "live publisher adapter",
+    "remote Git or GitHub mutation",
+    "credential or private-key loader",
+    "merge, release, deployment or activation authority"
+  ],
+  "schema": "modelrig-devcontrol-source-path-disposition/v1",
+  "slice": "DC-L14"
+}

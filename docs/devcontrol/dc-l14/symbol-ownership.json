@@ -1,0 +1,27 @@
+{
+  "not_exported_from_package_root": [
+    "build",
+    "_normalize_sdist",
+    "tier_a_toolhost_sha256"
+  ],
+  "ownership": {
+    "kaliv_dev_control._tier_a_execution_core": "import-only identity facade; owns no class, function or executor",
+    "kaliv_dev_control._tier_a_legacy_toolhost": [
+      "_TIER_A_BUNDLE_FILES",
+      "tier_a_toolhost_sha256"
+    ],
+    "scripts/build_devcontrol_artifacts.py": [
+      "build",
+      "_normalize_sdist"
+    ],
+    "scripts/tier_a_bundle_inventory.py": [
+      "build_inventory",
+      "build_lock",
+      "render_json",
+      "render_markdown",
+      "check"
+    ]
+  },
+  "schema": "modelrig-devcontrol-symbol-ownership/v1",
+  "slice": "DC-L14"
+}
