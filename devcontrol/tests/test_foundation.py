@@ -509,15 +509,22 @@ class FoundationTests(unittest.TestCase):
             "semantic_review.py",
             "draft_pr_readiness.py",
             "publisher_dry_run.py",
+            "publisher_authorization.py",
+            "publisher_authorization_chain_v2.py",
+            "publisher_authorization_v2.py",
+            "publisher_keyring_state.py",
+            "publisher_recovery_authorization.py",
+            "publisher_recovery_authorization_strict.py",
+            "publisher_recovery_primary.py",
+            "publisher_recovery_receipt_finalizer.py",
+            "publisher_recovery_receipt_v3.py",
+            "publisher_replay_h4.py",
         }
         self.assertTrue(landed <= {path.name for path in source.glob("*.py")})
 
         future = (
-            "publisher_authorization",
-            "publisher_replay_h4",
-            "publisher_recovery_authorization",
             "local_candidate_materialization",
-            "publisher",
+            "local_candidate_materialization_h5c",
         )
         for path in source.glob("*.py"):
             text = path.read_text(encoding="utf-8")
