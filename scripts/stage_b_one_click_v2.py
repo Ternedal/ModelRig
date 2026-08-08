@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -21,12 +20,6 @@ import stage_b_one_click as legacy
 EXPECTED_SOURCE_VERSION = "1.58.150"
 EXPECTED_TARGET_VERSION = "1.58.151"
 UPDATER_ASSET = "modelrig-updater-windows-x64.exe"
-MANAGED_ASSETS = (
-    "modelrig-server-windows-x64.exe",
-    "modelrig-supervisor-windows-x64.exe",
-    "modelrig-worker-windows-x64.exe",
-    UPDATER_ASSET,
-)
 _SHA64 = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -76,11 +69,11 @@ def _load_observations(candidate: dict[str, Any]) -> dict[str, Any]:
 
 
 def _verify_bootstrap(candidate: dict[str, Any], observations: dict[str, Any], state: dict[str, Any]) -> None:
-    if state.get("updater_bootstrap_done"):
-        if not isinstance(observations.get("trials", {}).get("updater_bootstrap"), dict):
-            raise legacy.StageBError("Bootstrap-state findes uden bootstrap-evidens")
-        legacy.ok("Updater-bootstrap er allerede verificeret.")
-        return
+    resumed = bool(state.get("updater_bootstrap_done"))
+    if resumed and not isinstance(observations.get("trials", {}).get("updater_bootstrap"), dict):
+        raise legacy.StageBError("Bootstrap-state findes uden bootstrap-evidens")
+    if resumed:
+        legacy.ok("Updater-bootstrap checkpoint findes; live fil og provenance genverificeres.")
     legacy.heading("STRICT 1/2 — verificér updater-bootstrap")
     if candidate.get("version") != EXPECTED_TARGET_VERSION:
         raise legacy.StageBError(
