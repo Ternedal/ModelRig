@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 """Run the retained Agent 3 pilot contract against candidate 1.58.151."""
+from __future__ import annotations
+
+import re
 from pathlib import Path
 
-_source_path = Path(__file__).with_name("workflow_agent3_readonly_pilot_one_click.retained")
+_ROOT = Path(__file__).resolve().parents[1]
+_BRANCH = (_ROOT / "CANDIDATE_BRANCH").read_text(encoding="utf-8").strip()
+_source_path = Path(__file__).with_name(
+    "workflow_agent3_readonly_pilot_one_click.retained"
+)
 _source = _source_path.read_text(encoding="utf-8")
 for _old, _new in (
-    ("agent/unified-candidate-1.58.143", "agent/unified-candidate-1.58.151-r2"),
+    ("agent/unified-candidate-1.58.143", _BRANCH),
     ("1.58.143", "1.58.151"),
     ("1.58.142", "1.58.144"),
     ("#150", "#161"),
@@ -17,18 +24,17 @@ _source = _source.replace(
     "import tempfile\nfrom datetime import datetime, timedelta, timezone\n",
 )
 
-_old_passing_report = """def passing_report(module, sha: str) -> dict:
-    return {
-        "schema": module.SCHEMA,
-        "success": True,
-        "candidate": {"git_sha": sha, "version": module.VERSION},
-        "target": {"production_activation": False},
-        "summary": {"tasks": 20, "successes": 20, "failures": 0, "error_types": {}},
-        "stop_fallback": {"success": True, "fallback_path": "/api/v1/chat"},
-    }
-"""
 
-_new_passing_report = """def passing_report(module, sha: str) -> dict:
+def _replace_once(pattern: str, replacement: str, label: str) -> None:
+    global _source
+    _source, count = re.subn(pattern, replacement, _source, flags=re.DOTALL)
+    if count != 1:
+        raise RuntimeError(
+            f"retained Agent 3 {label} contract drifted; expected 1 match, got {count}"
+        )
+
+
+_passing_report = '''def passing_report(module, sha: str) -> dict:
     now = datetime.now(timezone.utc)
     code_sha256 = "b" * 64
     return {
@@ -82,60 +88,46 @@ _new_passing_report = """def passing_report(module, sha: str) -> dict:
             for index in range(1, 21)
         ],
     }
-"""
 
-if _old_passing_report not in _source:
-    raise RuntimeError("retained Agent 3 passing report fixture changed unexpectedly")
-_source = _source.replace(_old_passing_report, _new_passing_report)
 
-_old_module_setup = """module = load_module()
-check(module.BRANCH == "agent/unified-candidate-1.58.151-r2", "operator is pinned to the combined physical branch")
+check(SCRIPT.is_file(),'''
+_replace_once(
+    r"def passing_report\(module, sha: str\) -> dict:\n.*?\n\n\ncheck\(SCRIPT\.is_file\(\),",
+    _passing_report,
+    "passing-report fixture",
+)
+
+_module_setup = f'''module = load_module()
+check(module.BRANCH == {_BRANCH!r}, "operator is pinned to the tracked physical branch")
 check(module.VERSION == "1.58.151", "operator is pinned to version 1.58.151")
 sha = "a" * 40
-good = passing_report(module, sha)
-check(module.report_passes(good, sha), "exact-SHA 20/20 report passes")
-for label, mutate in (
-    ("wrong SHA", lambda report: report["candidate"].update(git_sha="b" * 40)),
-    ("19/20", lambda report: report["summary"].update(successes=19, failures=1)),
-    ("production activation", lambda report: report["target"].update(production_activation=True)),
-    ("missing fallback", lambda report: report["stop_fallback"].update(success=False)),
-):
-    changed = json.loads(json.dumps(good))
-    mutate(changed)
-    check(not module.report_passes(changed, sha), f"{label} is rejected")
-"""
-
-_new_module_setup = """module = load_module()
-check(module.BRANCH == "agent/unified-candidate-1.58.151-r2", "operator is pinned to the combined physical branch")
-check(module.VERSION == "1.58.151", "operator is pinned to version 1.58.151")
-sha = "a" * 40
-identity = {
+identity = {{
     "version": module.VERSION,
     "git_sha": sha,
     "code_sha256": "b" * 64,
     "branch": module.BRANCH,
     "working_tree_clean": True,
     "version_stamps_consistent": True,
-}
-task_identity = {
+}}
+task_identity = {{
     "schema": "kaliv-agent3-readonly-pilot-task-set/v1",
     "name": "agent3-readonly-developer-pilot-da",
     "version": "2026-07-19.1",
     "task_count": 20,
     "sha256": "d" * 64,
-    "task_ids": [f"{index:02d}" for index in range(1, 21)],
-}
+    "task_ids": [f"{{index:02d}}" for index in range(1, 21)],
+}}
 module._current_candidate_identity = lambda: dict(identity)
 module._expected_task_set_identity = lambda: dict(task_identity)
 
-minimal = {
+minimal = {{
     "schema": module.SCHEMA,
     "success": True,
-    "candidate": {"git_sha": sha, "version": module.VERSION},
-    "target": {"production_activation": False},
-    "summary": {"tasks": 20, "successes": 20, "failures": 0, "error_types": {}},
-    "stop_fallback": {"success": True, "fallback_path": "/api/v1/chat"},
-}
+    "candidate": {{"git_sha": sha, "version": module.VERSION}},
+    "target": {{"production_activation": False}},
+    "summary": {{"tasks": 20, "successes": 20, "failures": 0, "error_types": {{}}}},
+    "stop_fallback": {{"success": True, "fallback_path": "/api/v1/chat"}},
+}}
 check(not module.report_passes(minimal, sha), "minimal hand-written report is rejected")
 
 good = passing_report(module, sha)
@@ -157,15 +149,17 @@ for label, mutate in (
 ):
     changed = json.loads(json.dumps(good))
     mutate(changed)
-    check(not module.report_passes(changed, sha), f"{label} is rejected")
+    check(not module.report_passes(changed, sha), f"{{label}} is rejected")
 
 identity["working_tree_clean"] = False
 check(not module.report_passes(good, sha), "dirty current tree is rejected")
 identity["working_tree_clean"] = True
-"""
 
-if _old_module_setup not in _source:
-    raise RuntimeError("retained Agent 3 report contract changed unexpectedly")
-_source = _source.replace(_old_module_setup, _new_module_setup)
+model_calls:'''
+_replace_once(
+    r"module = load_module\(\)\n.*?\n\nmodel_calls:",
+    _module_setup,
+    "report-verdict fixture",
+)
 
 exec(compile(_source, str(_source_path), "exec"), globals(), globals())

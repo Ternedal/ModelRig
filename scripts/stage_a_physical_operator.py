@@ -6,8 +6,11 @@
 # for i CI-kommandoen, saa den kan laeses sammen med sin aarsag.
 from pathlib import Path as _Path
 
-EXPECTED_BRANCH = "agent/unified-candidate-1.58.151-r2"
+from candidate_branch import load_candidate_branch as _load_candidate_branch
+
 EXPECTED_VERSION = "1.58.151"
+_ROOT = _Path(__file__).resolve().parents[1]
+EXPECTED_BRANCH = _load_candidate_branch(_ROOT, EXPECTED_VERSION)
 _RETAINED = _Path(__file__).with_name("stage_a_physical_operator.retained")
 _source = _RETAINED.read_text(encoding="utf-8")
 _source = _source.replace("agent/unified-candidate-1.58.143", EXPECTED_BRANCH)
@@ -16,7 +19,7 @@ _name = __name__
 globals()["__name__"] = "_stage_a_physical_operator_retained"
 exec(compile(_source, str(_RETAINED), "exec"), globals(), globals())
 globals()["__name__"] = _name
-EXPECTED_BRANCH = "agent/unified-candidate-1.58.151-r2"
+EXPECTED_BRANCH = _load_candidate_branch(_ROOT, EXPECTED_VERSION)
 EXPECTED_VERSION = "1.58.151"
 
 # Static surface markers retained by tests and operator review:
