@@ -7,9 +7,9 @@ står i `STAGE_B_UPDATER_EVIDENCE.md`.
 ## Kandidat
 
 - version: `1.58.151`;
-- branch: `agent/unified-candidate-1.58.151`;
-- freeze-PR: #405;
-- exact SHA: læses fra PR #405 og må aldrig gættes;
+- branch: `agent/unified-candidate-1.58.151-r2`;
+- freeze-PR: #412;
+- exact SHA: læses fra PR #412 og må aldrig gættes;
 - produktion: ikke aktiveret.
 
 Evidens fra 1.58.150 eller fra en tidligere ugyldiggjort 1.58.151-head må ikke
@@ -20,14 +20,14 @@ genbruges.
 ```powershell
 cd C:\Users\Anders\Desktop\ModelRig
 git fetch origin
-git switch agent/unified-candidate-1.58.151
-git pull --ff-only origin agent/unified-candidate-1.58.151
+git switch agent/unified-candidate-1.58.151-r2
+git pull --ff-only origin agent/unified-candidate-1.58.151-r2
 $CandidateSha = (git rev-parse HEAD).Trim()
 if (git status --short) { throw "Working tree er ikke ren" }
 if ((Get-Content VERSION -Raw).Trim() -ne "1.58.151") { throw "Forkert version" }
 ```
 
-Sammenhold `$CandidateSha` med PR #405. Stop ved forskel.
+Sammenhold `$CandidateSha` med PR #412. Stop ved forskel.
 
 Fra første fysiske bevis til promotion eller abandonment må branchen ikke
 pushes, rebases, force-pushes, merges, amendes eller redigeres. Enhver head-
