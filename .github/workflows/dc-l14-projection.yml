@@ -6,6 +6,7 @@ on:
       - '.github/workflows/dc-l14-projection.yml'
       - '.github/dc-l14-project.py'
       - '.github/dc-l14-fix.py'
+      - '.github/dc-l14-final-fix.py'
       - 'devcontrol/**'
       - 'scripts/tier_a_bundle_inventory.py'
       - 'scripts/build_devcontrol_artifacts.py'
@@ -29,6 +30,7 @@ jobs:
         run: |
           python .github/dc-l14-project.py
           python .github/dc-l14-fix.py
+          python .github/dc-l14-final-fix.py
       - name: Validate projected contracts and packages
         env:
           PYTHONDONTWRITEBYTECODE: '1'
@@ -45,7 +47,7 @@ jobs:
           git diff --check
       - name: Commit verified projection
         run: |
-          rm .github/dc-l14-project.py .github/dc-l14-fix.py
+          rm .github/dc-l14-project.py .github/dc-l14-fix.py .github/dc-l14-final-fix.py
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
