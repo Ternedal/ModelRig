@@ -1,7 +1,7 @@
 {
   "schema": "modelrig-devcontrol-exact-path-allowlist/v1",
   "slice": "DC-L12",
-  "expected_path_count": 51,
+  "expected_path_count": 52,
   "paths": [
     ".github/workflows/_tests.yml",
     "devcontrol/PUBLISHER_AUTHORIZATION.md",
@@ -53,6 +53,7 @@
     "docs/devcontrol/dc-l12/source-path-disposition.json",
     "docs/devcontrol/dc-l12/source-provenance.json",
     "docs/devcontrol/dc-l12/symbol-ownership.json",
+    "tests/worker_toolhost.py",
     "tests/workflow_test_coverage.py"
   ]
 }
