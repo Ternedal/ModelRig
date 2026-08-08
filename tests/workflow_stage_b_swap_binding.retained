@@ -153,6 +153,16 @@ _lifecycle = {
     },
 }
 _lifecycle_path = _root / "validation" / "appliance-lifecycle-observations.json"
+_state_path = _root / "validation" / "stage-b-easy-state.json"
+
+
+def _write_state(done: bool) -> None:
+    _state_path.write_text(
+        json.dumps({"updater_bootstrap_done": done}), encoding="utf-8"
+    )
+
+
+_write_state(True)
 
 
 def _evaluate(value: dict) -> tuple[dict, int]:
@@ -168,8 +178,22 @@ def _evaluate(value: dict) -> tuple[dict, int]:
 _valid, _valid_code = _evaluate(_lifecycle)
 _swap_check(
     _valid_code == 0 and _valid["gate"]["passed"] is True,
-    "matching swap count and asset list pass",
+    "matching swap count, asset list and true bootstrap checkpoint pass",
 )
+_swap_check(
+    _valid["source"]["bootstrap_state"]["sha256"] == _sha(_state_path)
+    and _valid["source"]["bootstrap_state"]["updater_bootstrap_done"] is True,
+    "strict report hash-binds the authoritative bootstrap checkpoint",
+)
+
+_write_state(False)
+_blocked_tombstone, _blocked_tombstone_code = _evaluate(_lifecycle)
+_swap_check(
+    _blocked_tombstone_code != 0
+    and _blocked_tombstone["gate"]["passed"] is False,
+    "false checkpoint blocks stale lifecycle trial and log proof",
+)
+_write_state(True)
 
 _log_zero = copy.deepcopy(_lifecycle)
 _log_zero["trials"]["appliance_interruption"]["evidence_sha256"] = _write(
@@ -191,6 +215,33 @@ _blocked_ten, _blocked_ten_code = _evaluate(_log_ten)
 _swap_check(
     _blocked_ten_code != 0 and _blocked_ten["gate"]["passed"] is False,
     "full-line binding rejects JSON count one with log count ten",
+)
+
+_duplicate_count = copy.deepcopy(_lifecycle)
+_duplicate_count["trials"]["appliance_interruption"]["evidence_sha256"] = _write(
+    _interruption,
+    _interruption_text(1, "modelrig-server-windows-x64.exe")
+    + "observed_swapped_count=10\n",
+)
+_blocked_duplicate_count, _blocked_duplicate_count_code = _evaluate(_duplicate_count)
+_swap_check(
+    _blocked_duplicate_count_code != 0
+    and _blocked_duplicate_count["gate"]["passed"] is False,
+    "duplicate contradictory swap-count key blocks",
+)
+
+_duplicate_assets = copy.deepcopy(_lifecycle)
+_duplicate_assets["trials"]["appliance_interruption"]["evidence_sha256"] = _write(
+    _interruption,
+    _interruption_text(1, "modelrig-server-windows-x64.exe")
+    + "observed_swapped_assets="
+    + "modelrig-server-windows-x64.exe,modelrig-worker-windows-x64.exe\n",
+)
+_blocked_duplicate_assets, _blocked_duplicate_assets_code = _evaluate(_duplicate_assets)
+_swap_check(
+    _blocked_duplicate_assets_code != 0
+    and _blocked_duplicate_assets["gate"]["passed"] is False,
+    "duplicate contradictory swapped-assets key blocks",
 )
 
 _log_extra_asset = copy.deepcopy(_lifecycle)

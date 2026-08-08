@@ -291,6 +291,11 @@ def write_log(root: Path, name: str, text: str) -> tuple[str, str]:
 
 
 strict_root = Path(tempfile.mkdtemp(prefix="strict-stage-b-"))
+strict_state = strict_root / "validation" / "stage-b-easy-state.json"
+strict_state.parent.mkdir(parents=True, exist_ok=True)
+strict_state.write_text(
+    json.dumps({"updater_bootstrap_done": True}), encoding="utf-8"
+)
 strict_candidate = {
     "version": "1.58.151",
     "git_sha": "a" * 40,

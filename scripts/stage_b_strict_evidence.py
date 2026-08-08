@@ -26,6 +26,7 @@ UPDATER_ASSET = "modelrig-updater-windows-x64.exe"
 EXPECTED_SOURCE_REF = f"refs/tags/v{EXPECTED_TARGET_VERSION}"
 EXPECTED_SIGNER_WORKFLOW = "Ternedal/ModelRig/.github/workflows/build-and-release.yml"
 DEFAULT_LIFECYCLE = Path("validation/appliance-lifecycle-observations.json")
+DEFAULT_STATE = Path("validation/stage-b-easy-state.json")
 DEFAULT_REPORT = Path("validation/stage-b-strict-evidence-latest.json")
 MAX_BYTES = 32 * 1024 * 1024
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
@@ -162,26 +163,38 @@ def _require_markers(
     markers: tuple[str, ...],
     errors: list[str],
 ) -> list[str]:
-    # Evidence is a line-oriented key/value log. Substring checks are unsafe:
-    # `observed_swapped_count=1` must not match `...=10`, and an expected
-    # `a,b` asset list must not match `a,b,c`. Normalize case and line endings,
-    # then require complete logical lines.
-    lines = {
+    # Every required key is authority-bearing. Exact-line membership alone is
+    # insufficient because a self-hashed log could include both the expected
+    # value and a contradictory duplicate. Require each key exactly once.
+    lines = [
         line.strip().lower()
         for line in text.splitlines()
         if line.strip()
-    }
-    missing = [
-        marker
-        for marker in markers
-        if marker.strip().lower() not in lines
     ]
-    errors.extend(
-        f"{label} log is missing required marker: {marker}"
-        for marker in missing
-    )
+    missing: list[str] = []
+    for marker in markers:
+        expected = marker.strip().lower()
+        if "=" in expected:
+            key = expected.split("=", 1)[0]
+            matches = [
+                line
+                for line in lines
+                if "=" in line and line.split("=", 1)[0] == key
+            ]
+        else:
+            matches = [line for line in lines if line == expected]
+        if len(matches) != 1:
+            errors.append(
+                f"{label} log must contain exactly one required marker key: "
+                f"{marker} (found {len(matches)})"
+            )
+            missing.append(marker)
+        elif matches[0] != expected:
+            errors.append(
+                f"{label} log marker value does not match: {marker}"
+            )
+            missing.append(marker)
     return missing
-
 
 def evaluate(
     root: Path,
@@ -194,6 +207,17 @@ def evaluate(
     lifecycle, raw, path = _load_json(root, lifecycle_path)
     if lifecycle.get("schema") != LIFECYCLE_SCHEMA:
         errors.append("lifecycle schema mismatch")
+
+    state_raw = b""
+    state_path = _resolve_under(root, DEFAULT_STATE)
+    bootstrap_state: dict[str, Any] = {}
+    try:
+        bootstrap_state, state_raw, state_path = _load_json(root, DEFAULT_STATE)
+    except StrictEvidenceError as exc:
+        errors.append(f"bootstrap checkpoint is invalid: {exc}")
+    else:
+        if bootstrap_state.get("updater_bootstrap_done") is not True:
+            errors.append("bootstrap checkpoint is not complete")
 
     version = str(candidate.get("version") or "")
     candidate_sha = str(candidate.get("git_sha") or "")
@@ -410,6 +434,14 @@ def evaluate(
             "sha256": hashlib.sha256(raw).hexdigest(),
             "bytes": len(raw),
             "schema": lifecycle.get("schema"),
+            "bootstrap_state": {
+                "path": str(state_path.relative_to(root.resolve())),
+                "sha256": hashlib.sha256(state_raw).hexdigest() if state_raw else "",
+                "bytes": len(state_raw),
+                "updater_bootstrap_done": bootstrap_state.get(
+                    "updater_bootstrap_done"
+                ),
+            },
         },
         "evidence": {
             "updater_bootstrap": {
