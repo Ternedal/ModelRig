@@ -40,6 +40,16 @@ func windowsAtomicRename(from, to string) error {
 		return replaceFileFn(to, from)
 	case strings.HasSuffix(from, ".old") && from == to+".old":
 		if fileExists(to) {
+			// ReplaceFileW can fail before it mutates either path (for example
+			// because another process still has a sharing-incompatible handle).
+			// In that state the live file is already the original we are trying
+			// to restore. Prove byte identity against .old and accept the rollback
+			// instead of repeating the same failing native replacement and falsely
+			// escalating to manual_recovery.
+			if sameFileContents(to, from) {
+				_ = os.Remove(from)
+				return nil
+			}
 			return replaceFileFn(to, from)
 		}
 		// A prior failure may genuinely have left live absent. The old copy
@@ -48,6 +58,18 @@ func windowsAtomicRename(from, to string) error {
 	default:
 		return os.Rename(from, to)
 	}
+}
+
+func sameFileContents(a, b string) bool {
+	aDigest, err := fileSHA256(a)
+	if err != nil {
+		return false
+	}
+	bDigest, err := fileSHA256(b)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(aDigest, bDigest)
 }
 
 // replaceFileWindows calls ReplaceFileW with no backup path. atomicSwapInto has
