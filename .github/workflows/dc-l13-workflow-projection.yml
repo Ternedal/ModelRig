@@ -1,0 +1,46 @@
+name: dc-l13-workflow-projection
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/dc-l13-workflow-projection.yml
+
+permissions:
+  contents: write
+
+jobs:
+  project:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - name: Project and validate DC-L13 CI boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/dc-l13-workflow-projection.py
+          pip install --quiet cryptography==49.0.0
+          python - <<'PY'
+          import yaml
+          from pathlib import Path
+          path = Path('.github/workflows/_tests.yml')
+          yaml.safe_load(path.read_text(encoding='utf-8'))
+          PY
+          python tests/workflow_test_coverage.py
+          PYTHONPATH=devcontrol/src python -m unittest \
+            devcontrol.tests.test_dc_l13_local_candidate_boundary \
+            devcontrol.tests.test_foundation -v
+          rm .github/dc-l13-workflow-projection.py
+          rm .github/workflows/dc-l13-workflow-projection.yml
+          git config user.name "ModelRig DevControl"
+          git config user.email "devcontrol@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "ci(devcontrol): add DC-L13 local materialization gate"
+          git push origin "HEAD:${GITHUB_HEAD_REF}"
