@@ -71,7 +71,7 @@ jobs:
           done
           exit "$status"
 
-      - name: DevControl DC-L01 through DC-L11 tests
+      - name: DevControl DC-L01 through DC-L12 tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         shell: bash
@@ -121,8 +121,8 @@ jobs:
                   assert not hasattr(module, name), (module.__name__, name)
 
           for future_module in (
-              "kaliv_dev_control.publisher_authorization",
               "kaliv_dev_control.local_candidate_materialization",
+              "kaliv_dev_control.local_candidate_materialization_h5c",
           ):
               assert importlib.util.find_spec(future_module) is None, future_module
 
@@ -180,10 +180,8 @@ jobs:
           )
 
           for future_module in (
-              "kaliv_dev_control.publisher_authorization",
-              "kaliv_dev_control.publisher_authorization_v2",
-              "kaliv_dev_control.publisher_recovery_authorization",
               "kaliv_dev_control.local_candidate_materialization",
+              "kaliv_dev_control.local_candidate_materialization_h5c",
           ):
               assert importlib.util.find_spec(future_module) is None, future_module
           PY
@@ -255,12 +253,100 @@ jobs:
               assert token not in source, token
 
           for future_module in (
-              "kaliv_dev_control.publisher_authorization",
-              "kaliv_dev_control.publisher_authorization_v2",
-              "kaliv_dev_control.publisher_authorization_chain_v2",
-              "kaliv_dev_control.publisher_replay_h4",
-              "kaliv_dev_control.publisher_recovery_authorization",
               "kaliv_dev_control.local_candidate_materialization",
+              "kaliv_dev_control.local_candidate_materialization_h5c",
+          ):
+              assert importlib.util.find_spec(future_module) is None, future_module
+          PY
+
+      - name: DevControl DC-L12 authorization and authenticated recovery boundary
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=devcontrol/src python3 - <<'PY' 2>&1 | tee -a /tmp/modelrig-ci-test.log
+          import importlib
+          import importlib.util
+          import inspect
+          from pathlib import Path
+
+          import kaliv_dev_control
+
+          public = importlib.import_module("kaliv_dev_control.publisher_authorization")
+          chain = importlib.import_module("kaliv_dev_control.publisher_authorization_chain_v2")
+          keyring = importlib.import_module("kaliv_dev_control.publisher_keyring_state")
+          recovery = importlib.import_module("kaliv_dev_control.publisher_recovery_authorization")
+          primary = importlib.import_module("kaliv_dev_control.publisher_recovery_primary")
+          receipt = importlib.import_module("kaliv_dev_control.publisher_recovery_receipt_v3")
+          finalizer = importlib.import_module("kaliv_dev_control.publisher_recovery_receipt_finalizer")
+          support = importlib.import_module("kaliv_dev_control._publisher_authorization_legacy")
+          tier_a_facade = importlib.import_module("kaliv_dev_control.tier_a_execution")
+          toolhost = importlib.import_module("kaliv_dev_control._tier_a_legacy_toolhost")
+
+          assert callable(public.AsymmetricPublisherAuthorizationVerifier)
+          assert callable(public.PublisherAuthorizationVerifierV2)
+          assert callable(public.PublisherReplayLedgerV2)
+          assert public.PublisherReplayLedgerV2 is primary.PublisherReplayLedgerV3
+          assert callable(recovery.PublisherReplayRecoveryAuthorizationVerifierV1)
+          assert callable(receipt.PublisherReplayRecoveryReceiptV3)
+          assert callable(finalizer.finalize_publisher_replay_recovery_receipt_v3)
+          assert callable(keyring.RollbackSafeEd25519AuthorityVerifier)
+          assert Path(support.__file__).name == "__init__.py"
+
+          support_source = inspect.getsource(support)
+          keyring_source = inspect.getsource(keyring)
+          landed_source = "".join(
+              inspect.getsource(module)
+              for module in (public, chain, keyring, recovery, primary, receipt, finalizer)
+          )
+          for token in (
+              "import hmac",
+              "HmacPublisherAuthorizationIssuer",
+              "TrustedAuthorizationIssuerKey",
+              "Ed25519PrivateKey",
+              "private_key",
+              ".sign(",
+              "globals().update",
+              "sys.modules",
+          ):
+              assert token not in support_source + keyring_source, token
+          for token in (
+              "Authorization:",
+              "requests.",
+              "urllib",
+              "http.client",
+              "subprocess",
+              "create_pull_request",
+              "update_pull_request",
+              "merge_pull_request",
+              "git push",
+          ):
+              assert token not in landed_source, token
+          for token in ("Path(", "open(", "read_text", "read_bytes"):
+              assert token not in keyring_source, token
+
+          for name in (
+              "AsymmetricPublisherAuthorizationLease",
+              "PublisherReplayLedgerV2",
+              "PublisherReplayRecoveryReceiptV3",
+              "RollbackSafeEd25519AuthorityVerifier",
+          ):
+              assert not hasattr(kaliv_dev_control, name), name
+              assert not hasattr(tier_a_facade, name), name
+
+          assert all(
+              "publisher_authorization" not in path
+              and "publisher_recovery" not in path
+              and "publisher_keyring_state" not in path
+              for path in toolhost._TIER_A_BUNDLE_FILES
+          )
+          assert importlib.util.find_spec(
+              "kaliv_dev_control._compatibility_v1.publisher_authorization"
+          ) is None
+          for future_module in (
+              "kaliv_dev_control.local_candidate_materialization",
+              "kaliv_dev_control.local_candidate_materialization_h5c",
           ):
               assert importlib.util.find_spec(future_module) is None, future_module
           PY
