@@ -73,6 +73,13 @@ validation/agent3-rig-validation-latest.json
 
 ## T-007 — plan-only model-eval
 
+Den dokumenterede production creation path er `/plans/{id}/start`; evalueringen
+må ikke genindføre eller antage en særskilt `/plan`-autoritet. Før smoke/eval
+skal samme hemmelige `MODELRIG_TOKEN` være konfigureret på både backend og
+worker, og `KALIV_AGENT3_ENABLED=true` skal være sat på både backend og worker.
+Genstart begge services efter konfigurationsændringer og bekræft tokenparitet
+uden at skrive tokenværdien i rapporter eller logs.
+
 ```powershell
 python scripts\agent3_model_eval.py `
   --planner-model <MODEL> `
