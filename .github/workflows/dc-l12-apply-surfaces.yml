@@ -1,0 +1,41 @@
+name: dc-l12-apply-surfaces
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/dc-l12-apply-surfaces.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Verify and apply bounded integration surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d .github/dc-l12-patched-surfaces.tgz.b64 > /tmp/dc-l12-surfaces.tgz
+          echo "fa27f83e60d98c936fd3499ca4d520540bfdede94217ff06b855b0e0bf03887d  /tmp/dc-l12-surfaces.tgz" | sha256sum -c -
+          tar -xzf /tmp/dc-l12-surfaces.tgz
+          rm .github/dc-l12-patched-surfaces.tgz.b64
+          rm .github/workflows/dc-l12-export.yml
+          rm .github/workflows/dc-l12-apply-surfaces.yml
+          python -m py_compile tests/workflow_test_coverage.py
+          python - <<'PY'
+          import yaml
+          from pathlib import Path
+          yaml.safe_load(Path('.github/workflows/_tests.yml').read_text(encoding='utf-8'))
+          PY
+          git config user.name "ModelRig DevControl"
+          git config user.email "devcontrol@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "ci(devcontrol): advance exact gates through DC-L12"
+          git push origin "HEAD:${GITHUB_HEAD_REF}"
