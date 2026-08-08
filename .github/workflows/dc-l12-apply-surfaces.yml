@@ -17,22 +17,18 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
-      - name: Verify and apply bounded integration surfaces
+      - name: Apply bounded integration surfaces
         shell: bash
         run: |
           set -euo pipefail
-          base64 -d .github/dc-l12-patched-surfaces.tgz.b64 > /tmp/dc-l12-surfaces.tgz
-          echo "fa27f83e60d98c936fd3499ca4d520540bfdede94217ff06b855b0e0bf03887d  /tmp/dc-l12-surfaces.tgz" | sha256sum -c -
-          tar -xzf /tmp/dc-l12-surfaces.tgz
-          rm .github/dc-l12-patched-surfaces.tgz.b64
-          rm .github/workflows/dc-l12-export.yml
-          rm .github/workflows/dc-l12-apply-surfaces.yml
+          python .github/dc-l12-patch-surfaces.py
+          echo "a3b741183f8d728d8631af1cd3778e818f9f7974e5b57f592e7a9e4a478f10b4  .github/workflows/_tests.yml" | sha256sum -c -
+          echo "9c00480853cfb1e27027e359aa5b32675726f8f940c94f132a3cd8f71df466cd  tests/workflow_test_coverage.py" | sha256sum -c -
           python -m py_compile tests/workflow_test_coverage.py
-          python - <<'PY'
-          import yaml
-          from pathlib import Path
-          yaml.safe_load(Path('.github/workflows/_tests.yml').read_text(encoding='utf-8'))
-          PY
+          rm -f .github/dc-l12-patched-surfaces.tgz.b64
+          rm -f .github/dc-l12-patch-surfaces.py
+          rm -f .github/workflows/dc-l12-export.yml
+          rm -f .github/workflows/dc-l12-apply-surfaces.yml
           git config user.name "ModelRig DevControl"
           git config user.email "devcontrol@users.noreply.github.com"
           git add -A
