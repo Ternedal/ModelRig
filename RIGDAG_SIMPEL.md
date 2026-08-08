@@ -1,183 +1,115 @@
-# RIGDAG_SIMPEL.md — hele rig-testen, kortest mulige vej
+# RIGDAG_SIMPEL — ModelRig 1.58.151
 
-**Én dag. Fire blokke plus én 30-sekunders beslutning. Ét klik starter hver
-blok — resten er kun de handlinger, et menneske sandfærdigt kan udføre.** Detaljerne bor i `RIGDAG.md` og
-`STAGED_PHYSICAL_PROMOTION.md`; dette dokument er rækkefølgen.
+Dette er den korte operatorindgang. Den autoritative rækkefølge og alle
+fail-closed grænser står i `STAGED_PHYSICAL_PROMOTION.md`; Stage B-detaljerne
+står i `STAGE_B_UPDATER_EVIDENCE.md`.
 
-**Kandidaten er `1.58.147`** på branchen `agent/unified-candidate-1.58.147`.
-Wizard'en finder selv den eksakte SHA og nægter at gætte den.
+## Kandidat
 
-## SHA-invarianten — dagens hårdeste regel
+- version: `1.58.151`;
+- branch: `agent/unified-candidate-1.58.151`;
+- freeze-PR: #405;
+- exact SHA: læses fra PR #405 og må aldrig gættes;
+- produktion: ikke aktiveret.
 
-Stage A binder til kandidatens **eksakte 40-tegns SHA**. Samme SHA bruges til
-fast-forward, tag og release, og **enhver ændring af checkouten efter Stage A
-ugyldiggør hele dagens fysiske evidens** (`STAGED_PHYSICAL_PROMOTION.md`).
-Derfor: fra blok 1 starter, til promoveringen er afgjort, ændres
-kandidat-checkouten **ikke** — ingen commits, ingen omdøbninger, ingen
-git-operationer ud over læsning. Alt, der skal landes, landes **efter**
-dagen som normale PR'er mod `main`. Testlederen håndhæver reglen og afviser
-ethvert trin, der ville flytte SHA'en.
+Evidens fra 1.58.150 eller fra en tidligere ugyldiggjort 1.58.151-head må ikke
+genbruges.
 
-## Testlederen: Claude i desktop-appen
-
-Åbn Claude Desktop på riggen → **Code-fanen** → vælg repomappen
-`C:\Users\Anders\Desktop\ModelRig` → permission mode **Manual** (Claude spørger
-før hver kommando). Giv den denne prompt ordret:
-
-> Du er testleder for rig-dagen. Læs RIGDAG_SIMPEL.md og følg blokkene i
-> rækkefølge. Du kører kommandoerne efter min godkendelse, overvåger output og
-> stopper ved første afvigelse. Bed mig KUN om de fem menneskelige handlinger
-> i blok 1 og de fysiske valg i blok 3 og 4. Alle artefakter samles i
-> `rig-evidence\<dato>\`, og du fører `EVIDENCE.md` løbende: pr. blok — hvad
-> blev kørt, eksakt artefakt-sti, resultat. Du må ikke merge, pushe, tagge,
-> release eller aktivere noget, og du sætter ingen `KALIV_*`-flag permanent —
-> kun i den enkelte session.
-
-Cowork-sessionen i samme app kan tage rapport- og dokumentarbejdet, og hele
-sessionen kan følges og besvares **fra mobilen**, så du kan gå fra maskinen
-mellem de fysiske handlinger. Vigtig sondring: Cowork kører i en sandkasse-VM
-med adgang kun til tilkoblede mapper — blokke, der rører riggens processer og
-vinduer, hører hjemme i **Code-fanen**.
-
-## Automatikgraden — hvad kører selv
-
-- **Blok 0, 2 og 3 er fuldautomatiske:** testlederen kører alle kommandoer;
-  Code-fanen beder om ét ja pr. kommandobatch — sig ja én gang pr. blok.
-- **Blok 1 er automatisk undtagen dine fem handlinger.** Wizard'en kører
-  selv; testlederen overvåger loggen og siger præcis, hvornår og hvad du
-  skal gøre — du rører kun mikrofon, telefon, app-godkendelse og ur.
-- **Blok 4:** valget er dit; udkastet laver testlederen i en separat mappe —
-  ingen commits på dagen (SHA-invarianten).
-- **Rapporten:** Cowork-sessionen kan køre Full Auto i sandkassen på
-  `rig-evidence\` og skrive `EVIDENCE.md` løbende, mens Code-fanen kører
-  blokkene.
-- De hårde grænser gælder uanset mode: intet merges, pushes, tagges,
-  releases eller aktiveres, og ingen `KALIV_*`-flag sættes permanent.
-
-## Blok 0 — fem minutter, én gang
+## Blok 0 — lås checkouten
 
 ```powershell
 cd C:\Users\Anders\Desktop\ModelRig
 git fetch origin
-git switch agent/unified-candidate-1.58.147
-git pull --ff-only origin agent/unified-candidate-1.58.147
-mkdir ..\rig-evidence\<dato>
+git switch agent/unified-candidate-1.58.151
+git pull --ff-only origin agent/unified-candidate-1.58.151
+$CandidateSha = (git rev-parse HEAD).Trim()
+if (git status --short) { throw "Working tree er ikke ren" }
+if ((Get-Content VERSION -Raw).Trim() -ne "1.58.151") { throw "Forkert version" }
 ```
 
-**Evidensmappen ligger UDEN FOR checkouten** — som nabo til repoet. Freeze-
-gaten og attestations-laeseren scanner begge filsystemet direkte og
-sanktionerer kun `.git` og `validation/`; en `rig-evidence\`-mappe inde i
-repoet ville derfor faelde frysningen i blok 1. En lokal `.git/info/exclude`
-loeser det ikke: den skjuler kun mappen for `git status`, ikke for
-attestations-laeserens egen scanning senere paa dagen.
+Sammenhold `$CandidateSha` med PR #405. Stop ved forskel.
 
-Kandidatbranchen holdes på main af Claude frem til dagen. `--ff-only`-pullet
-fejler højlydt, hvis den alligevel er bagud — sig til, så rykkes den, før
-noget andet startes.
+Fra første fysiske bevis til promotion eller abandonment må branchen ikke
+pushes, rebases, force-pushes, merges, amendes eller redigeres. Enhver head-
+ændring ugyldiggør alle receipts og rapporter.
 
-## Blok 1 — Stage A: de syv beviser
+## Blok 1 — Stage A
 
-Dobbeltklik **`START_STAGE_A_TEST.cmd`**. Wizard'en gør alt andet og kan
-genoptages med samme dobbeltklik.
+Dobbeltklik:
 
-**Din liste er fem punkter:** optag de 20 voice-fraser · gennemfør fem
-Pixel-trials · godkend den kanoniske write-plan i appen · tim schedulerens
-pause/crash · bekræft det ene offentlige browserkald.
+```text
+START_STAGE_A_TEST.cmd
+```
 
-Stopper noget: den manuelle vej står i `STAGED_PHYSICAL_PROMOTION.md`.
+Wizard'en samler og genoptager de seks kandidatbeviser samt det interaktive
+browserbevis. De menneskelige handlinger er fortsat de fysiske observationer:
+voice-fraser, Pixel-matrix, den afgrænsede approval, scheduler-timing og det ene
+offentlige browserkald.
 
-## Blok 2 — D7 form (c): henteren rører internettet, beviset fryses
+Kræv til sidst:
 
-Blok 1 har allerede brugt scriptet **uændret** (det syvende bevis) — og der
-røres ikke ved det i dag: `.retained`-frysningen sker **efter promoveringen**
-som en normal PR (se »Efter dagen«), aldrig mellem Stage A og
-exact-SHA-promotion.
+```text
+candidate_ready_for_fast_forward=true
+release_validation_pending=true
+release_complete=false
+all_physical_evidence_complete=false
+production_activation=false
+summary.total=7
+```
 
-1. Ét produktionskald ad den rigtige vej — **fuldautomatisk**: testlederen
-   starter workeren med begge flag kun i den session
-   (`KALIV_TOOLS_ENABLED=1` og `KALIV_WEB_RESEARCH_ENABLED=1`, begge kræver
-   præcis `"1"`), tæller rækkerne i audit-databasen `kaliv-audit.db`, og
-   kalder produktionsstien direkte:
+Stage A merger, tagger, releaser og aktiverer intet.
 
-   ```powershell
-   curl.exe -s -X POST http://127.0.0.1:8099/tools/chat/stream `
-     -H "Content-Type: application/json" `
-     -d '{"message":"Hent https://example.com med web_research og opsummer den kort"}'
-   ```
+## Beslutningspunkt
 
-   (`model`-feltet er valgfrit — workeren bruger sin default.) Det er samme
-   endpoint og samme tool-loop, som appen rammer — appen er UX, ikke beviset.
-2. Testlederen verificerer automatisk: svaret indeholder en gennemført
-   `web_research`-kørsel, og audit-databasen har **præcis én** ny post
-   (rækketælling før/efter via `sqlite3`). Svar + audit-udtræk →
-   `rig-evidence\`.
+Kun efter en særskilt eksplicit beslutning må præcis Stage A-SHA'en
+fast-forwardes til `main`, tagges `v1.58.151` og publiceres som et komplet
+signeret release-sæt.
 
-## Blok 3 — Computer Use I3/I4: første capture + én engangsplan
+## Blok 2 — Stage B
 
-Med `KALIV_COMPUTER_USE=1` kun i sessionen starter testlederen selv Notepad
-(`Start-Process notepad`) som det allowlistede vindue og kører prøven mod
-worker-modulerne
-(`desktop_capture`/`desktop_screenshot_tool` → HMAC-kontrakten i
-`desktop_contract` → én plan via `desktop_action_plan` → én konsumption):
+Kildereleasen er 1.58.150; target er 1.58.151. Fordi den gamle updater er fra
+før self-update-support, installeres 1.58.151-updateren én gang som verificeret
+bootstrap. Server, supervisor og worker må kun flyttes gennem updateren.
 
-- capture af **præcis ét** forgrundsvindue, signatur verificeret;
-- én plan genereret og konsumeret **én gang**;
-- **forsøg nr. 2 på samme plan SKAL afvises** — afvisningen er en del af
-  beviset;
-- ingen input-eksekvering: I5 er ikke bygget, og det skal blive ved med at
-  kunne ses.
+Dobbeltklik:
 
-Screenshot, kontrakt, plan og afvisning → `rig-evidence\`.
+```text
+START_STAGE_B_TEST.cmd
+```
 
-## Blok 4 — Paletten: ét visuelt valg
+Efter evidensindsamlingen køres:
 
-Begge apps åbne side om side (desktop + Android). Vælg med øjnene:
-Androids mørkere `#5A4831` (AAA) eller tokenets `#6F665C` (AA).
+```text
+VERIFY_STAGE_B_EVIDENCE.cmd
+```
 
-**Dagens leverance er valget**, skrevet i `EVIDENCE.md` — intet andet.
-Implementeringen — flip af tokenet *eller* tilpasning af Android-temaet —
-laver testlederen som udkast i en **separat mappe uden for checkouten** og
-lander den **efter dagen** som normal PR med de fire gates grønne:
-`workflow_design_tokens`, `workflow_design_token_contrast`,
-`workflow_android_palette_divergence`, `workflow_brand_no_token_duplicates`.
-Ingen commits på kandidat-checkouten (SHA-invarianten).
+Kræv:
 
-## Én beslutning på 30 sekunder — memory-pilotens politik
+```text
+schema=kaliv-stage-b-physical-final/v1
+gate.passed=true
+release_freeze_complete=true
+updater_chain_complete=true
+physical_campaign_complete=true
+browser_peer_physical_complete=true
+all_physical_evidence_complete=true
+production_activation=false
+summary.total=8
+```
 
-Protect-first-sporet er landet (DPAPI-format, migration, reader, writer,
-leak-gate). Før piloten åbnes, skal politikken bekræftes: **piloten
-begrænses til `public`/`operational` — private/secret holdes ude.** Bekræft
-eller revidér med én sætning i `EVIDENCE.md`; testlederen skriver den ind.
+Det automatiske signed-release-to-signed-release self-update-bevis er deferred
+til #401 og kræver en senere signeret target-version. Det blokerer ikke
+promotion af 1.58.151.
 
-## Dagens slutning
+## Stopregler
 
-Testlederen færdiggør `EVIDENCE.md`. Evidensen gemmes med
-**`SAVE_STAGE_A_RESULTS.cmd`** og ligger i `rig-evidence\` — **kandidat-
-checkouten forlades urørt** (SHA-invarianten). Promovering — fast-forward,
-tag, release, aktivering — er en separat, eksplicit beslutning og sker
-**ikke** i dag (`STAGED_PHYSICAL_PROMOTION.md`).
+Stop ved første afvigelse og gem den rå log. Brug aldrig:
 
-**Dagen aktiverer ikke Agent 4.** Kandidaten bærer nu hele ADR-A4-008-stakken
-i dvale — handoff-kontrakter, durable intents, resource-barriere og en rigtig
-Agent 3-modtageradapter. Dagens beviser gælder Agent 3's Stage A, ikke Agent 4.
-ADR-A4-008's aktiveringsport kræver sit eget fysiske bevis bundet til eksakt
-SHA **og** en separat, eksplicit beslutning; et grønt rig-resultat er derfor
-aldrig i sig selv en godkendelse af Agent 4-orkestrering.
+```text
+-insecure-skip-verify
+-skip-attestation
+-no-heartbeat-check
+```
 
-## Efter dagen — landinger der bevidst IKKE skete på kandidaten
-
-Claude lander som normale PR'er mod `main`, i denne rækkefølge og først
-**efter** at promoveringen er afgjort:
-
-1. `.retained`-frysningen af `scripts\browser_peer_public_validation.py`
-   (rename + loader efter præcedensen, operatør-referencen opdateret i samme
-   commit, fuld suite grøn).
-2. Palettevalgets implementering fra testlederens udkast, med de fire gates
-   grønne.
-3. Evidens-artefakterne fra `rig-evidence\`, hvis de skal ind i repoet.
-
-## Hvis noget stopper
-
-Første afvigelse: testlederen stopper og skriver afvigelsen i `EVIDENCE.md`
-med log-sti. `RIGDAG.md` er den detaljerede kørebog — dette dokument erstatter
-den ikke; det ordner rækkefølgen og fjerner valgene.
+Et grønt fysisk resultat aktiverer ikke Agent 3, DevControl eller andre
+dormante capabilities. Aktivering er altid en separat beslutning.
