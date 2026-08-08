@@ -40,6 +40,9 @@ Stage A samler:
 6. T-019 scheduler-pilot;
 7. det interaktive browser-/peer-bevis.
 
+Den afsluttende gate tæller alle syv fysiske beviser og består kun, når alle syv
+evidence statuses er grønne og bundet til samme kandidatidentitet.
+
 Stage A kan højst give `candidate_ready_for_fast_forward=true`. Den må ikke
 påstå `release_complete=true` eller fysisk updater-lifecycle completion.
 
