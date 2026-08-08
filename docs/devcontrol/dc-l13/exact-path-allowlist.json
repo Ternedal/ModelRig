@@ -1,0 +1,27 @@
+{
+  "schema": "modelrig-devcontrol-exact-path-allowlist/v1",
+  "slice": "DC-L13",
+  "expected_path_count": 20,
+  "paths": [
+    ".github/workflows/_tests.yml",
+    "devcontrol/LOCAL_CANDIDATE_MATERIALIZATION.md",
+    "devcontrol/README.md",
+    "devcontrol/schemas/development-local-candidate-materialization-receipt-v1.schema.json",
+    "devcontrol/schemas/development-local-candidate-materialization-receipt-v2.schema.json",
+    "devcontrol/src/kaliv_dev_control/_local_candidate_materialization_legacy/__init__.py",
+    "devcontrol/src/kaliv_dev_control/local_candidate_materialization.py",
+    "devcontrol/src/kaliv_dev_control/local_candidate_materialization_h5c.py",
+    "devcontrol/tests/test_dc_l13_local_candidate_boundary.py",
+    "devcontrol/tests/test_foundation.py",
+    "devcontrol/tests/test_slice10l_local_candidate_materialization.py",
+    "docs/devcontrol/dc-l13/exact-head-validation.md",
+    "docs/devcontrol/dc-l13/exact-path-allowlist.json",
+    "docs/devcontrol/dc-l13/independent-review-verdict.md",
+    "docs/devcontrol/dc-l13/mutation-results.md",
+    "docs/devcontrol/dc-l13/preflight.md",
+    "docs/devcontrol/dc-l13/source-path-disposition.json",
+    "docs/devcontrol/dc-l13/source-provenance.json",
+    "docs/devcontrol/dc-l13/symbol-ownership.json",
+    "tests/workflow_test_coverage.py"
+  ]
+}

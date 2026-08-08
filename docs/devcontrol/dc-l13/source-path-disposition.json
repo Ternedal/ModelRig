@@ -1,0 +1,63 @@
+{
+  "schema": "modelrig-devcontrol-source-path-disposition/v1",
+  "slice": "DC-L13",
+  "source_exact": [
+    "devcontrol/LOCAL_CANDIDATE_MATERIALIZATION.md",
+    "devcontrol/schemas/development-local-candidate-materialization-receipt-v1.schema.json",
+    "devcontrol/schemas/development-local-candidate-materialization-receipt-v2.schema.json",
+    "devcontrol/src/kaliv_dev_control/local_candidate_materialization.py",
+    "devcontrol/src/kaliv_dev_control/local_candidate_materialization_h5c.py",
+    "devcontrol/tests/test_slice10l_local_candidate_materialization.py"
+  ],
+  "rejected": [
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_local_candidate_materialization_legacy.py",
+      "reason": "Dynamic legacy executable facade is superseded and must not be distributed."
+    },
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_compatibility_v1/local_candidate_materialization.py",
+      "reason": "Retained v1 compatibility namespace is excluded by the decomposition contract."
+    }
+  ],
+  "projected": [
+    {
+      "path": "devcontrol/src/kaliv_dev_control/_local_candidate_materialization_legacy/__init__.py",
+      "reason": "Static validation/evidence support only; process runner and legacy materialize/verify/gate entrypoints removed."
+    },
+    {
+      "path": "devcontrol/tests/test_dc_l13_local_candidate_boundary.py",
+      "reason": "Load-bearing fail-closed boundary proof added."
+    },
+    {
+      "path": ".github/workflows/_tests.yml",
+      "reason": "Prior absence gates updated and explicit DC-L13 local-only boundary added."
+    },
+    {
+      "path": "devcontrol/tests/test_foundation.py",
+      "reason": "L13 modules moved from future inventory to landed inventory without root exports."
+    },
+    {
+      "path": "tests/workflow_test_coverage.py",
+      "reason": "Fifty-one DC-L01–L13 test modules and L13 containment checks registered."
+    },
+    {
+      "path": "devcontrol/README.md",
+      "reason": "Landed boundary and exclusions documented."
+    }
+  ],
+  "excluded_capabilities": [
+    "configured remote",
+    "non-file transport",
+    "network fetch",
+    "push",
+    "credential helper",
+    "private-key signer",
+    "GitHub mutation",
+    "reviewer request",
+    "ready conversion",
+    "merge",
+    "release",
+    "deployment",
+    "activation"
+  ]
+}

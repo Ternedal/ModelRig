@@ -1,0 +1,21 @@
+{
+  "schema": "modelrig-devcontrol-source-provenance/v1",
+  "slice": "DC-L13",
+  "source_pr": 338,
+  "source_head": "07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f",
+  "base_head": "9cd0f909dc72a1ca1a1ee895dacff43b1b51cb78",
+  "raw_import_head": "ae00850f1569b5a6f0bc15d028ba387a069154cf",
+  "workflow_candidate_head": "ea14bd9311a977ddedf64c8c55149a8b9cce7993",
+  "locked_source_blobs": {
+    "devcontrol/LOCAL_CANDIDATE_MATERIALIZATION.md": "2be6a5f7398332caba7f324bca4b1be6dad0cd11",
+    "devcontrol/schemas/development-local-candidate-materialization-receipt-v1.schema.json": "2d654eaec6d06f530624fadae873523c9032ea6d",
+    "devcontrol/schemas/development-local-candidate-materialization-receipt-v2.schema.json": "8162fd2e3c7645d515f70160d2f8a670271b02db",
+    "devcontrol/src/kaliv_dev_control/local_candidate_materialization.py": "761037b9e9c6f37f9d260103c544166d19aa1c13",
+    "devcontrol/src/kaliv_dev_control/local_candidate_materialization_h5c.py": "6779fae7000c9182a08a02ed91e4e78c6a0bb527",
+    "devcontrol/tests/test_slice10l_local_candidate_materialization.py": "c189819b1fca575d3ef938b8b2516936296f5fa9"
+  },
+  "projection_sources": {
+    "historical_static_support_seed": "e8a52f18a3252ad525b887e3058c45286c198958"
+  },
+  "projection_note": "The six locked blobs were imported atomically. The historical support seed was transformed into a static internal package with executable legacy entrypoints removed; no byte-identity claim is made for that projection."
+}

@@ -1,0 +1,38 @@
+{
+  "schema": "modelrig-devcontrol-symbol-ownership/v1",
+  "slice": "DC-L13",
+  "owners": {
+    "kaliv_dev_control.local_candidate_materialization": {
+      "role": "primary local-only materialization facade",
+      "owns": [
+        "LocalCandidateMaterializationGate",
+        "materialize_local_candidate",
+        "verify_local_candidate_materialization"
+      ]
+    },
+    "kaliv_dev_control.local_candidate_materialization_h5c": {
+      "role": "asymmetric authorization adapter",
+      "owns": [
+        "AsymmetricLocalCandidateMaterializationGate",
+        "materialize_asymmetric_local_candidate"
+      ]
+    },
+    "kaliv_dev_control._local_candidate_materialization_legacy": {
+      "role": "static internal validation and evidence support",
+      "forbidden_ownership": [
+        "Git process runner",
+        "materialization entrypoint",
+        "verification entrypoint",
+        "network adapter",
+        "credential helper",
+        "signer"
+      ]
+    }
+  },
+  "non_owners": [
+    "kaliv_dev_control package root",
+    "kaliv_dev_control.tier_a_execution",
+    "kaliv_dev_control._tier_a_legacy_toolhost"
+  ],
+  "authority_note": "DC-L13 owns only isolated local candidate evidence. Human merge authority remains non-delegable."
+}
