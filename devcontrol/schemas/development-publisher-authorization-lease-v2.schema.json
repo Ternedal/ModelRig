@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.invalid/schemas/development-publisher-authorization-lease-v2.schema.json",
+  "title": "Asymmetric publisher authorization lease",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "signed_request",
+    "signed_request_sha256",
+    "request_sha256",
+    "readiness_sha256",
+    "task_sha256",
+    "invocation_nonce",
+    "remote_repository",
+    "remote_repository_sha256",
+    "credential_policy",
+    "credential_policy_sha256",
+    "authorization_policy_sha256",
+    "issued_at_utc",
+    "expires_at_utc",
+    "issuer_actor_id",
+    "issuer_system_id",
+    "issuer_key_id",
+    "algorithm",
+    "one_time",
+    "maximum_uses",
+    "draft_only",
+    "merge_authority",
+    "signature"
+  ],
+  "properties": {
+    "schema": {
+      "const": "kaliv-development-publisher-authorization-lease/v2"
+    },
+    "signed_request": {
+      "type": "object"
+    },
+    "signed_request_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "request_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "readiness_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "task_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "invocation_nonce": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "remote_repository": {
+      "type": "object"
+    },
+    "remote_repository_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "credential_policy": {
+      "type": "object"
+    },
+    "credential_policy_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "authorization_policy_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "issued_at_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "expires_at_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "issuer_actor_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@-]{1,127}$"
+    },
+    "issuer_system_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"
+    },
+    "issuer_key_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"
+    },
+    "algorithm": {
+      "const": "ed25519"
+    },
+    "one_time": {
+      "const": true
+    },
+    "maximum_uses": {
+      "const": 1
+    },
+    "draft_only": {
+      "const": true
+    },
+    "merge_authority": {
+      "const": "human"
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "algorithm",
+        "key_id",
+        "issuer_actor_id",
+        "issuer_system_id",
+        "keyring_epoch",
+        "custody_policy_sha256",
+        "payload_sha256",
+        "signature_hex",
+        "signed_at_utc"
+      ],
+      "properties": {
+        "schema": {
+          "const": "kaliv-asymmetric-authority-signature/v1"
+        },
+        "algorithm": {
+          "const": "ed25519"
+        },
+        "key_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"
+        },
+        "issuer_actor_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@-]{1,127}$"
+        },
+        "issuer_system_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"
+        },
+        "keyring_epoch": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "custody_policy_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "payload_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "signature_hex": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{128}$"
+        },
+        "signed_at_utc": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+        }
+      }
+    }
+  }
+}
