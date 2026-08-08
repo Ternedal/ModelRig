@@ -23,6 +23,8 @@ LIFECYCLE_SCHEMA = "kaliv-appliance-lifecycle-observations/v1"
 EXPECTED_SOURCE_VERSION = "1.58.150"
 EXPECTED_TARGET_VERSION = "1.58.151"
 UPDATER_ASSET = "modelrig-updater-windows-x64.exe"
+EXPECTED_SOURCE_REF = f"refs/tags/v{EXPECTED_TARGET_VERSION}"
+EXPECTED_SIGNER_WORKFLOW = "Ternedal/ModelRig/.github/workflows/build-and-release.yml"
 DEFAULT_LIFECYCLE = Path("validation/appliance-lifecycle-observations.json")
 DEFAULT_REPORT = Path("validation/stage-b-strict-evidence-latest.json")
 MAX_BYTES = 32 * 1024 * 1024
@@ -152,9 +154,10 @@ def evaluate(root: Path, lifecycle_path: Path, *, candidate: Mapping[str, Any], 
         errors.append("lifecycle schema mismatch")
 
     version = str(candidate.get("version") or "")
+    candidate_sha = str(candidate.get("git_sha") or "")
     if version != EXPECTED_TARGET_VERSION:
         errors.append(f"candidate version must be {EXPECTED_TARGET_VERSION}")
-    if _SHA40.fullmatch(str(candidate.get("git_sha") or "")) is None:
+    if _SHA40.fullmatch(candidate_sha) is None:
         errors.append("candidate Git SHA is invalid")
     lifecycle_candidate = lifecycle.get("candidate")
     if not isinstance(lifecycle_candidate, Mapping):
@@ -167,23 +170,37 @@ def evaluate(root: Path, lifecycle_path: Path, *, candidate: Mapping[str, Any], 
     good = _trial(lifecycle, "good_update", errors)
     if good.get("source_version") != EXPECTED_SOURCE_VERSION:
         errors.append(f"good_update.source_version must be {EXPECTED_SOURCE_VERSION}")
+    source_git_sha = str(good.get("source_git_sha") or "")
+    if _SHA40.fullmatch(source_git_sha) is None:
+        errors.append("good_update.source_git_sha is invalid")
     if good.get("target_version") != EXPECTED_TARGET_VERSION:
         errors.append(f"good_update.target_version must be {EXPECTED_TARGET_VERSION}")
+    if good.get("target_git_sha") != candidate_sha:
+        errors.append("good_update.target_git_sha mismatch")
 
     bootstrap = _trial(lifecycle, "updater_bootstrap", errors)
     bootstrap_meta, bootstrap_text = _load_log(root, "updater_bootstrap", bootstrap, errors)
     expected_hash = str(bootstrap.get("expected_sha256") or "")
     actual_hash = str(bootstrap.get("actual_sha256") or "")
+    source_digest = str(bootstrap.get("source_digest") or "")
+    source_ref = str(bootstrap.get("source_ref") or "")
+    signer_workflow = str(bootstrap.get("signer_workflow") or "")
     if bootstrap.get("performed") is not True:
         errors.append("updater_bootstrap.performed is not true")
     if bootstrap.get("release_version") != EXPECTED_TARGET_VERSION:
         errors.append("updater_bootstrap.release_version mismatch")
-    if bootstrap.get("release_git_sha") != candidate.get("git_sha"):
+    if bootstrap.get("release_git_sha") != candidate_sha:
         errors.append("updater_bootstrap.release_git_sha mismatch")
     if bootstrap.get("asset_name") != UPDATER_ASSET:
         errors.append("updater_bootstrap.asset_name mismatch")
     if _SHA64.fullmatch(expected_hash) is None or expected_hash != actual_hash:
         errors.append("updater_bootstrap expected and actual hashes do not match")
+    if source_digest != candidate_sha:
+        errors.append("updater_bootstrap.source_digest mismatch")
+    if source_ref != EXPECTED_SOURCE_REF:
+        errors.append("updater_bootstrap.source_ref mismatch")
+    if signer_workflow != EXPECTED_SIGNER_WORKFLOW:
+        errors.append("updater_bootstrap.signer_workflow mismatch")
     if bootstrap.get("provenance_verified") is not True:
         errors.append("updater_bootstrap provenance was not verified")
     bootstrap_missing = _require_markers(
@@ -191,9 +208,13 @@ def evaluate(root: Path, lifecycle_path: Path, *, candidate: Mapping[str, Any], 
         bootstrap_text,
         (
             f"release_version={EXPECTED_TARGET_VERSION}",
+            f"release_git_sha={candidate_sha}",
             f"asset_name={UPDATER_ASSET}",
             f"expected_sha256={expected_hash}",
             f"actual_sha256={actual_hash}",
+            f"source_digest={candidate_sha}",
+            f"source_ref={EXPECTED_SOURCE_REF}",
+            f"signer_workflow={EXPECTED_SIGNER_WORKFLOW}",
             "provenance_verified=true",
         ),
         errors,
@@ -203,10 +224,25 @@ def evaluate(root: Path, lifecycle_path: Path, *, candidate: Mapping[str, Any], 
     interruption_meta, interruption_text = _load_log(
         root, "appliance_interruption", interruption, errors
     )
+    transaction_id = str(interruption.get("observed_transaction_id") or "")
+    revision = interruption.get("observed_revision")
+    process_pid = interruption.get("updater_process_pid")
+    journal_from = str(interruption.get("observed_journal_from") or "")
+    journal_to = str(interruption.get("observed_journal_to") or "")
     if interruption.get("performed") is not True:
         errors.append("appliance_interruption.performed is not true")
     if interruption.get("source_version") != EXPECTED_SOURCE_VERSION:
         errors.append("appliance_interruption.source_version mismatch")
+    if not transaction_id:
+        errors.append("appliance_interruption transaction id is missing")
+    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
+        errors.append("appliance_interruption revision is invalid")
+    if not isinstance(process_pid, int) or isinstance(process_pid, bool) or process_pid < 1:
+        errors.append("appliance_interruption updater process id is invalid")
+    if journal_from != EXPECTED_SOURCE_VERSION:
+        errors.append("appliance_interruption journal source mismatch")
+    if journal_to.lstrip("v") != EXPECTED_TARGET_VERSION:
+        errors.append("appliance_interruption journal target mismatch")
     if interruption.get("observed_journal_state") != "swapping":
         errors.append("appliance_interruption did not observe journal state swapping")
     swapped_count = interruption.get("observed_swapped_count")
@@ -231,8 +267,13 @@ def evaluate(root: Path, lifecycle_path: Path, *, candidate: Mapping[str, Any], 
         "appliance_interruption",
         interruption_text,
         (
+            f"observed_transaction_id={transaction_id}",
+            f"observed_revision={revision}",
+            f"observed_journal_from={EXPECTED_SOURCE_VERSION}",
+            f"observed_journal_to={journal_to}",
             "observed_journal_state=swapping",
             "observed_swapped_count=",
+            f"updater_process_pid={process_pid}",
             "updater_process_killed=true",
             "recovery_exit_code=0",
             "recovery_succeeded=true",
