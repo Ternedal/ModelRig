@@ -1,6 +1,6 @@
 # Candidate 1.58.151 — physical validation head (r2)
 
-This file marks the exact head that the 1.58.151 physical campaigns are validated against. It is deleted when the release is tagged.
+This file marks the exact head that the 1.58.151 physical campaigns are validated against. It is deleted through the normal release process after the release is tagged.
 
 ## Qualification and immutability
 
@@ -20,13 +20,16 @@ Every campaign and final gate that consumes a freeze receipt refetches `origin/m
 
 - version: `1.58.151`
 - branch: `agent/unified-candidate-1.58.151-r2`
-- inherited main commit: `87334ce8e002dfe5bac7b7746b519f4eaeee6c3a`
+- inherited main commit: `218019fd47ea90b046a334253ab5fd84485f772a`
 - supersedes candidate PR: `#405`
+- supersedes candidate head: `904eba01b2e2bea0c5990a7207d6107e844ab53b`
 - production activation: `false`
+
+The superseded head and every receipt, report or qualification bound to it are invalid and may not be reused.
 
 ## Included completion work
 
-This candidate includes the complete updater series and the executable Stage B authority merged through PR #407:
+This candidate includes the complete updater series, the executable Stage B authority merged through PR #407, and the physical-operator alignment merged through PR #413:
 
 - recovery before appliance startup;
 - release-bound updater self-update support;
@@ -36,17 +39,18 @@ This candidate includes the complete updater series and the executable Stage B a
 - target-release checksum and provenance binding for the bootstrap updater;
 - new-transaction mid-swap interruption plus offline `-recover` proof;
 - strict hash-bound Stage B evidence, duplicate-key rejection, checkpoint binding and stale-receipt invalidation;
-- crash-order and adversarial mutation coverage for the retained operator path.
+- crash-order and adversarial mutation coverage for the retained operator path;
+- Stage A, Agent 3 and scheduler physical operators pinned to this r2 branch;
+- authoritative staged-promotion and rig-day runbooks pinned to this r2 branch and PR #412.
 
 ## Physical evidence required before promoting 1.58.151
 
 Hosted CI proves software contracts and Windows API behavior, not the installed rig, Task Scheduler state, antivirus/file-lock behavior, interruption timing, Tailscale reachability, Ollama behavior or Android interaction.
 
-The campaign must use the final qualified exact head and record candidate-bound evidence for:
+The campaign must use the final qualified exact head and record candidate-bound evidence in two ordered phases:
 
-1. Stage A and the remaining Agent 3/scheduler/device pilots;
-2. the verified one-time updater bootstrap and the normal appliance update, rollback and interruption matrix that can truthfully be exercised for this release;
-3. every other open physical gate that explicitly requires the frozen 1.58.151 release candidate.
+1. **Stage A, before publication:** rig preflight, Agent 3 appliance validation, plan-only model evaluation, voice baseline including the typed Pixel matrix, RAG baselines, scheduler pilot and the interactive browser/peer proof.
+2. **Stage B, only after publication:** the verified one-time updater bootstrap and the normal appliance update, reboot, supervisor restart, invalid-update handling, rollback/interruption recovery and preservation matrix that can truthfully be exercised against the published signed 1.58.151 release.
 
 No old 1.58.150 report and no report bound to #405 or any earlier invalidated 1.58.151 head may satisfy this candidate.
 
@@ -61,8 +65,9 @@ Therefore 1.58.151 cannot truthfully prove automatic signed-release-to-signed-re
 1. Keep this PR open and do not merge it.
 2. Collect no physical evidence until all four exact-head workflows are green and final review has no actionable findings.
 3. Declare that reviewed exact SHA as the freeze point and prohibit every branch mutation listed above.
-4. Create a fresh freeze receipt on the frozen SHA immediately before each campaign or final gate; receipt consumption fails if `main` moves.
-5. Run only the 1.58.151 promotion requirements against the frozen exact SHA.
-6. Promote after those reports are green and independently checked; do not wait for the deferred automatic proof in #401.
-7. Tag `v1.58.151`, then remove the candidate marker through the normal release process.
-8. Use signed 1.58.151 as the source for #401 when a later signed target exists.
+4. Run Stage A against the frozen unpublished candidate. Create a fresh freeze receipt immediately before every Stage A campaign or final gate; receipt consumption fails if `main` moves.
+5. After Stage A is green, require a separate explicit release decision. Fast-forward `main` to the exact frozen candidate SHA, tag that same SHA as `v1.58.151`, and publish the complete signed release set. Any SHA change invalidates Stage A.
+6. Only after the signed release exists, run Stage B against published 1.58.151 and collect the updater/lifecycle evidence.
+7. Verify the final Stage B receipt, including all eight physical proofs, exact release identity, complete cleanup and `production_activation=false`.
+8. Complete the release/promotion decision only after Stage A and Stage B are independently green and checked. Remove this candidate marker through the normal release process; do not merge this freeze PR as an ordinary code PR.
+9. Use signed 1.58.151 as the source for issue #401 when a later signed target exists.
