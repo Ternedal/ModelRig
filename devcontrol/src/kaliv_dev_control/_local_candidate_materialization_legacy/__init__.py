@@ -17,7 +17,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping, TypeVar
+from typing import Any, Callable, Mapping, Protocol, TypeVar
 
 from ..contract import DevelopmentTask, MergeAuthority
 from ..publisher_authorization import PublisherAuthorizationError
@@ -57,6 +57,21 @@ _MAX_GIT_OUTPUT_BYTES = 64 * 1024 * 1024
 _MAX_OBJECT_BYTES = 32 * 1024 * 1024
 
 _MAX_GIT_EXECUTABLE_BYTES = 512 * 1024 * 1024
+
+
+class _GitEvidenceRunner(Protocol):
+    """Minimal structural contract consumed by static Git evidence helpers."""
+
+    _transaction_root: Path
+
+    def run(
+        self,
+        args: tuple[str, ...],
+        *,
+        cwd: Path,
+        maximum: int = _MAX_GIT_OUTPUT_BYTES,
+        expected_codes: tuple[int, ...] = (0,),
+    ) -> bytes: ...
 
 LOCAL_CANDIDATE_MATERIALIZATION_POLICY = ('Accept only one complete Slice 10K preflight receipt that still verifies against the exact task, trusted publisher, trusted authorization issuer, trusted semantic reviewer and current execution authority.', 'Require one absolute link-free local source repository containing the exact authorized base commit without replacement objects or shallow history.', 'Require one absolute regular link-free Git executable whose complete bytes match an operator-supplied SHA-256.', 'Create one new isolated bare SHA-1 repository under an absolute link-free materialization root and never reuse an existing transaction path.', 'Import the exact base only through the local file protocol, apply the exact authenticated binary patch to an isolated index, and reproduce the exact patch bytes from the resulting tree.', 'Use deterministic publisher-bound author and committer metadata plus the exact Slice 10J commit message, then bind the parent, tree, commit object and proposed branch ref.', 'Keep remotes, network writes, pushes, pull-request writes, reviewer requests, ready-for-review, merge, release, settings, deployment and runtime activation absent.', 'Fail closed on any task, authority, signature, lease-time, source-state, Git-tool, patch, object, ref, canonical-byte or local-only-boundary mismatch.')
 
@@ -379,7 +394,7 @@ class LocalCandidateMaterializationReceipt:
     def sha256(self) -> str:
         return _sha256_bytes(self.canonical_json().encode('utf-8'))
 
-def _source_state(runner: _GitRunner, *, source: Path, repository_kind: str) -> bytes:
+def _source_state(runner: _GitEvidenceRunner, *, source: Path, repository_kind: str) -> bytes:
     refs = runner.run(('-C', os.fspath(source), 'for-each-ref', '--format=%(refname)%00%(objectname)%00'), cwd=runner._transaction_root)
     head = runner.run(('-C', os.fspath(source), 'rev-parse', '--verify', 'HEAD'), cwd=runner._transaction_root, maximum=4096)
     symbolic = runner.run(('-C', os.fspath(source), 'symbolic-ref', '-q', 'HEAD'), cwd=runner._transaction_root, maximum=4096, expected_codes=(0, 1))
@@ -391,7 +406,7 @@ def _source_state(runner: _GitRunner, *, source: Path, repository_kind: str) -> 
         raise LocalCandidateMaterializationError('source repository state exceeds its bound')
     return payload
 
-def _inspect_source(runner: _GitRunner, *, source_repository: Path, base_sha: str) -> tuple[Path, LocalSourceRepositoryEvidence]:
+def _inspect_source(runner: _GitEvidenceRunner, *, source_repository: Path, base_sha: str) -> tuple[Path, LocalSourceRepositoryEvidence]:
     source = _existing_link_free_directory(source_repository, name='local source repository')
     bare_text = runner.run(('-C', os.fspath(source), 'rev-parse', '--is-bare-repository'), cwd=runner._transaction_root, maximum=4096).decode('ascii', errors='strict').strip()
     if bare_text not in {'true', 'false'}:
@@ -430,7 +445,7 @@ def _inspect_source(runner: _GitRunner, *, source_repository: Path, base_sha: st
     evidence = LocalSourceRepositoryEvidence(path_sha256=_sha256_bytes(os.fspath(source).encode('utf-8')), repository_kind=repository_kind, state_sha256=_sha256_bytes(state), state_bytes=len(state), base_commit_sha=base_sha, base_commit_object_sha256=_sha256_bytes(commit_payload), base_commit_object_bytes=len(commit_payload), base_tree_sha=tree_sha, base_tree_object_sha256=_sha256_bytes(tree_payload), base_tree_object_bytes=len(tree_payload))
     return (source, evidence)
 
-def _verify_source_unchanged(runner: _GitRunner, *, source: Path, evidence: LocalSourceRepositoryEvidence) -> None:
+def _verify_source_unchanged(runner: _GitEvidenceRunner, *, source: Path, evidence: LocalSourceRepositoryEvidence) -> None:
     state = _source_state(runner, source=source, repository_kind=evidence.repository_kind)
     commit_payload = runner.run(('-C', os.fspath(source), 'cat-file', 'commit', evidence.base_commit_sha), cwd=runner._transaction_root, maximum=_MAX_OBJECT_BYTES)
     tree_payload = runner.run(('-C', os.fspath(source), 'cat-file', 'tree', evidence.base_tree_sha), cwd=runner._transaction_root, maximum=_MAX_OBJECT_BYTES)
@@ -453,7 +468,7 @@ def _verify_transaction_layout(transaction: Path) -> None:
 def _repository_args(repository: Path, *args: str) -> tuple[str, ...]:
     return ('--git-dir', os.fspath(repository), *args)
 
-def _inspect_materialized_repository(runner: _GitRunner, *, repository: Path, receipt: LocalCandidateMaterializationReceipt) -> None:
+def _inspect_materialized_repository(runner: _GitEvidenceRunner, *, repository: Path, receipt: LocalCandidateMaterializationReceipt) -> None:
     if not repository.is_dir() or _has_linkish_component(repository) or (not (repository / 'objects').is_dir()):
         raise LocalCandidateMaterializationError('materialized bare repository is missing or unsafe')
     is_bare = runner.run(_repository_args(repository, 'rev-parse', '--is-bare-repository'), cwd=runner._transaction_root, maximum=4096).decode('ascii', errors='strict').strip()
