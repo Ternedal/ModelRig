@@ -20,6 +20,8 @@ import stage_b_one_click as legacy
 EXPECTED_SOURCE_VERSION = "1.58.150"
 EXPECTED_TARGET_VERSION = "1.58.151"
 UPDATER_ASSET = "modelrig-updater-windows-x64.exe"
+SOURCE_REF = f"refs/tags/v{EXPECTED_TARGET_VERSION}"
+SIGNER_WORKFLOW = f"{legacy.RELEASE_REPO}/.github/workflows/build-and-release.yml"
 _SHA64 = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -79,6 +81,9 @@ def _verify_bootstrap(candidate: dict[str, Any], observations: dict[str, Any], s
         raise legacy.StageBError(
             f"Stage B v2 er bundet til {EXPECTED_TARGET_VERSION}, ikke {candidate.get('version')}"
         )
+    source_digest = str(candidate.get("git_sha") or "")
+    if not re.fullmatch(r"[0-9a-f]{40}", source_digest):
+        raise legacy.StageBError("Kandidatens release Git-SHA er ugyldig")
     updater = legacy.appliance_root() / UPDATER_ASSET
     if not updater.is_file():
         raise legacy.StageBError(f"Updater-bootstrap mangler: {updater}")
@@ -91,6 +96,9 @@ def _verify_bootstrap(candidate: dict[str, Any], observations: dict[str, Any], s
     command = [
         "gh", "attestation", "verify", str(updater),
         "--repo", legacy.RELEASE_REPO,
+        "--source-digest", source_digest,
+        "--source-ref", SOURCE_REF,
+        "--signer-workflow", SIGNER_WORKFLOW,
     ]
     try:
         result = subprocess.run(
@@ -103,7 +111,7 @@ def _verify_bootstrap(candidate: dict[str, Any], observations: dict[str, Any], s
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise legacy.StageBError(
-            "GitHub CLI kunne ikke verificere updaterens build provenance"
+            "GitHub CLI kunne ikke verificere updaterens releasebundne build provenance"
         ) from exc
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
@@ -117,10 +125,13 @@ def _verify_bootstrap(candidate: dict[str, Any], observations: dict[str, Any], s
             (
                 f"verified_at={datetime.now(timezone.utc).isoformat()}",
                 f"release_version={EXPECTED_TARGET_VERSION}",
-                f"release_git_sha={candidate['git_sha']}",
+                f"release_git_sha={source_digest}",
                 f"asset_name={UPDATER_ASSET}",
                 f"expected_sha256={expected}",
                 f"actual_sha256={actual}",
+                f"source_digest={source_digest}",
+                f"source_ref={SOURCE_REF}",
+                f"signer_workflow={SIGNER_WORKFLOW}",
                 "provenance_verified=true",
                 f"provenance_command={' '.join(command)}",
                 f"provenance_output={safe_output[:2000]}",
@@ -131,10 +142,13 @@ def _verify_bootstrap(candidate: dict[str, Any], observations: dict[str, Any], s
     observations["trials"]["updater_bootstrap"] = {
         "performed": True,
         "release_version": EXPECTED_TARGET_VERSION,
-        "release_git_sha": candidate["git_sha"],
+        "release_git_sha": source_digest,
         "asset_name": UPDATER_ASSET,
         "expected_sha256": expected,
         "actual_sha256": actual,
+        "source_digest": source_digest,
+        "source_ref": SOURCE_REF,
+        "signer_workflow": SIGNER_WORKFLOW,
         "provenance_verified": True,
         "evidence_path": "validation/appliance-lifecycle-evidence/updater_binary_check.log",
         "evidence_sha256": legacy.sha256_file(log),
@@ -145,20 +159,76 @@ def _verify_bootstrap(candidate: dict[str, Any], observations: dict[str, Any], s
     legacy.ok(f"Updater-bootstrap bundet til v{EXPECTED_TARGET_VERSION} ({actual[:16]}…)")
 
 
-def _journal_snapshot(root: Path) -> tuple[str, list[str]]:
-    candidates: list[dict[str, Any]] = []
-    for path in (root / "update-transaction.json", root / "update-transaction.json.tmp"):
-        try:
-            value = json.loads(path.read_text(encoding="utf-8-sig"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if isinstance(value, dict):
-            candidates.append(value)
-    if not candidates:
-        return "", []
-    value = max(candidates, key=lambda item: int(item.get("revision") or 0))
+def _read_journal_file(path: Path) -> dict[str, Any] | None:
+    try:
+        body = path.read_text(encoding="utf-8-sig")
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise legacy.StageBError(f"Journalen kan ikke læses: {path}: {exc}") from exc
+    try:
+        value = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise legacy.StageBError(f"Journalen er ugyldig JSON: {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise legacy.StageBError(f"Journalen er ikke et objekt: {path}")
+    tx_id = value.get("id")
+    revision = value.get("revision")
+    state = value.get("state")
     swapped = value.get("swapped")
-    return str(value.get("state") or ""), [str(x) for x in swapped] if isinstance(swapped, list) else []
+    if not isinstance(tx_id, str) or not tx_id.strip():
+        raise legacy.StageBError(f"Journalen mangler transaction id: {path}")
+    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
+        raise legacy.StageBError(f"Journalen har ugyldig revision: {path}")
+    if not isinstance(state, str) or not state:
+        raise legacy.StageBError(f"Journalen har ugyldig state: {path}")
+    if swapped is None:
+        swapped = []
+    if not isinstance(swapped, list) or not all(isinstance(item, str) for item in swapped):
+        raise legacy.StageBError(f"Journalen har ugyldig swapped-liste: {path}")
+    return {
+        "id": tx_id,
+        "revision": revision,
+        "state": state,
+        "swapped": list(swapped),
+        "from": str(value.get("from") or ""),
+        "to": str(value.get("to") or ""),
+    }
+
+
+def _journal_snapshot(root: Path) -> dict[str, Any] | None:
+    main = _read_journal_file(root / "update-transaction.json")
+    temporary = _read_journal_file(root / "update-transaction.json.tmp")
+    if main is None:
+        return temporary
+    if temporary is None:
+        return main
+    if main["id"] != temporary["id"]:
+        raise legacy.StageBError(
+            "Journal main og .tmp beskriver forskellige transaktioner"
+        )
+    if main["revision"] > temporary["revision"]:
+        return main
+    if temporary["revision"] > main["revision"]:
+        return temporary
+    if main != temporary:
+        raise legacy.StageBError(
+            "Journal main og .tmp har samme revision men forskelligt indhold"
+        )
+    return main
+
+
+def _require_no_active_journal(root: Path) -> None:
+    present = [
+        path.name
+        for path in (root / "update-transaction.json", root / "update-transaction.json.tmp")
+        if path.exists()
+    ]
+    if present:
+        raise legacy.StageBError(
+            "Interruption-testen kræver ingen aktiv journal før launch; fundet: "
+            + ", ".join(present)
+        )
 
 
 def _all_live_executables_present(root: Path) -> bool:
@@ -190,35 +260,70 @@ def _run_interruption(candidate: dict[str, Any], observations: dict[str, Any], s
             f"riggen rapporterer {before.get('worker_version') or '(nede)'}"
         )
     root = legacy.appliance_root()
+    _require_no_active_journal(root)
     updater = root / UPDATER_ASSET
     log = legacy.EVIDENCE / "appliance_interruption.log"
     log.parent.mkdir(parents=True, exist_ok=True)
-    with log.open("wb") as handle:
-        process = subprocess.Popen(
-            [str(updater)], cwd=root, stdout=handle, stderr=subprocess.STDOUT
-        )
-        deadline = time.monotonic() + 300.0
-        observed_state = ""
-        observed_swapped: list[str] = []
-        while time.monotonic() < deadline and process.poll() is None:
-            observed_state, observed_swapped = _journal_snapshot(root)
-            if observed_state == "swapping" and observed_swapped:
-                process.kill()
-                process.wait(timeout=30.0)
-                break
-            time.sleep(0.1)
-        else:
-            if process.poll() is None:
-                process.kill()
-                process.wait(timeout=30.0)
-            raise legacy.StageBError(
-                "Updateren nåede ikke journal state=swapping med mindst ét registreret swap"
+    observed: dict[str, Any] | None = None
+    observed_id = ""
+    observed_revision = 0
+    process: subprocess.Popen[bytes] | None = None
+    try:
+        with log.open("wb") as handle:
+            process = subprocess.Popen(
+                [str(updater)], cwd=root, stdout=handle, stderr=subprocess.STDOUT
             )
+            deadline = time.monotonic() + 300.0
+            while time.monotonic() < deadline and process.poll() is None:
+                snapshot = _journal_snapshot(root)
+                if snapshot is not None:
+                    if not observed_id:
+                        observed_id = str(snapshot["id"])
+                        if snapshot.get("from") != EXPECTED_SOURCE_VERSION:
+                            raise legacy.StageBError(
+                                "Den nye journal har forkert source-version"
+                            )
+                        if str(snapshot.get("to") or "").lstrip("v") != EXPECTED_TARGET_VERSION:
+                            raise legacy.StageBError(
+                                "Den nye journal har forkert target-version"
+                            )
+                    elif snapshot["id"] != observed_id:
+                        raise legacy.StageBError(
+                            "Transaction id skiftede under interruption-testen"
+                        )
+                    if snapshot["revision"] < observed_revision:
+                        raise legacy.StageBError(
+                            "Journalrevision gik baglæns under interruption-testen"
+                        )
+                    observed_revision = int(snapshot["revision"])
+                    observed = snapshot
+                    if snapshot["state"] == "swapping" and snapshot["swapped"]:
+                        process.kill()
+                        process.wait(timeout=30.0)
+                        break
+                time.sleep(0.1)
+            else:
+                raise legacy.StageBError(
+                    "Updateren nåede ikke en ny journal i state=swapping med mindst ét registreret swap"
+                )
+    except BaseException:
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.wait(timeout=30.0)
+        raise
+    if process is None or observed is None:
+        raise legacy.StageBError("Interruption-process eller journalobservation mangler")
     killed = process.returncode is not None and process.returncode != 0
+    process_pid = int(getattr(process, "pid", 0) or 0)
     with log.open("a", encoding="utf-8") as handle:
-        handle.write(f"observed_journal_state={observed_state}\n")
-        handle.write(f"observed_swapped_count={len(observed_swapped)}\n")
-        handle.write(f"observed_swapped_assets={','.join(observed_swapped)}\n")
+        handle.write(f"observed_transaction_id={observed_id}\n")
+        handle.write(f"observed_revision={observed_revision}\n")
+        handle.write(f"observed_journal_from={observed.get('from') or ''}\n")
+        handle.write(f"observed_journal_to={observed.get('to') or ''}\n")
+        handle.write(f"observed_journal_state={observed.get('state') or ''}\n")
+        handle.write(f"observed_swapped_count={len(observed.get('swapped') or [])}\n")
+        handle.write(f"observed_swapped_assets={','.join(observed.get('swapped') or [])}\n")
+        handle.write(f"updater_process_pid={process_pid}\n")
         handle.write(f"updater_process_killed={'true' if killed else 'false'}\n")
         recovery = subprocess.run(
             [str(updater), "-recover"],
@@ -258,9 +363,14 @@ def _run_interruption(candidate: dict[str, Any], observations: dict[str, Any], s
     observations["trials"]["appliance_interruption"] = {
         "performed": True,
         "source_version": EXPECTED_SOURCE_VERSION,
-        "observed_journal_state": observed_state,
-        "observed_swapped_count": len(observed_swapped),
-        "observed_swapped_assets": observed_swapped,
+        "observed_transaction_id": observed_id,
+        "observed_revision": observed_revision,
+        "observed_journal_from": observed.get("from"),
+        "observed_journal_to": observed.get("to"),
+        "observed_journal_state": observed.get("state"),
+        "observed_swapped_count": len(observed.get("swapped") or []),
+        "observed_swapped_assets": list(observed.get("swapped") or []),
+        "updater_process_pid": process_pid,
         "updater_process_killed": killed,
         "recovery_exit_code": recovery.returncode,
         "recovery_succeeded": recovered,
