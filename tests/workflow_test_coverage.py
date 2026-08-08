@@ -94,7 +94,9 @@ expected_modules = {
     "test_publisher_recovery_receipt_finalizer_h8.py",
     "test_publisher_recovery_receipt_v3_h7.py",
     "test_publisher_recovery_signature_window_h6.py",
+    "test_dc_l13_local_candidate_boundary.py",
     "test_slice10k_publisher_authorization.py",
+    "test_slice10l_local_candidate_materialization.py",
     "test_physical_isolation_durable_publication_h10b.py",
     "test_proposal_reload.py",
     "test_publisher_dry_run_durable_publication_h10c.py",
@@ -127,7 +129,7 @@ observed_modules = {
 }
 check(
     observed_modules == expected_modules,
-    f"the forty-nine DC-L01–L12 test modules are present: {sorted(observed_modules)}",
+    f"the fifty-one DC-L01–L13 test modules are present: {sorted(observed_modules)}",
 )
 
 worker_requirements = (root / "worker/requirements.txt").read_text(encoding="utf-8")
@@ -222,15 +224,72 @@ check(
     callable(publisher_keyring.RollbackSafeEd25519AuthorityVerifier),
     "DC-L12 requires a rollback-safe external keyring-state verifier",
 )
+local_materialization = importlib.import_module(
+    "kaliv_dev_control.local_candidate_materialization"
+)
+asymmetric_local_materialization = importlib.import_module(
+    "kaliv_dev_control.local_candidate_materialization_h5c"
+)
+local_support = importlib.import_module(
+    "kaliv_dev_control._local_candidate_materialization_legacy"
+)
+check(
+    callable(local_materialization.materialize_local_candidate)
+    and callable(local_materialization.verify_local_candidate_materialization)
+    and callable(
+        asymmetric_local_materialization.materialize_asymmetric_local_candidate
+    ),
+    "DC-L13 exposes verified local-only candidate materialization",
+)
+check(
+    Path(local_support.__file__).name == "__init__.py"
+    and not (
+        root
+        / "devcontrol/src/kaliv_dev_control/_local_candidate_materialization_legacy.py"
+    ).exists()
+    and not (
+        root / "devcontrol/src/kaliv_dev_control/_compatibility_v1"
+    ).exists(),
+    "DC-L13 distributes static support without rejected compatibility files",
+)
+local_support_source = Path(local_support.__file__).read_text(encoding="utf-8")
+local_source = (
+    root / "devcontrol/src/kaliv_dev_control/local_candidate_materialization.py"
+).read_text(encoding="utf-8")
+local_h5c_source = (
+    root / "devcontrol/src/kaliv_dev_control/local_candidate_materialization_h5c.py"
+).read_text(encoding="utf-8")
 check(
     all(
-        importlib.util.find_spec(module) is None
-        for module in (
-            "kaliv_dev_control.local_candidate_materialization",
-            "kaliv_dev_control.local_candidate_materialization_h5c",
+        token not in local_support_source
+        for token in (
+            "import subprocess",
+            "globals().update",
+            "._compatibility_v1",
+            "TrustedLocalGit",
+            "subprocess.run",
+            "Popen(",
         )
     ),
-    "DC-L13 local candidate materialization remains absent",
+    "DC-L13 support contains no legacy executable runner or dynamic proxy",
+)
+check(
+    all(
+        token not in local_source + local_h5c_source
+        for token in (
+            "requests.",
+            "urllib",
+            "http.client",
+            "socket.",
+            "paramiko",
+            "Ed25519PrivateKey",
+            "private_key",
+            ".sign(",
+            "credential.helper",
+            "git push",
+        )
+    ),
+    "DC-L13 contains no network, credential, signer or remote-push adapter",
 )
 support_path = (
     root

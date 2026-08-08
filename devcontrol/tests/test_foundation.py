@@ -519,13 +519,12 @@ class FoundationTests(unittest.TestCase):
             "publisher_recovery_receipt_finalizer.py",
             "publisher_recovery_receipt_v3.py",
             "publisher_replay_h4.py",
+            "local_candidate_materialization.py",
+            "local_candidate_materialization_h5c.py",
         }
         self.assertTrue(landed <= {path.name for path in source.glob("*.py")})
 
-        future = (
-            "local_candidate_materialization",
-            "local_candidate_materialization_h5c",
-        )
+        future: tuple[str, ...] = ()
         for path in source.glob("*.py"):
             text = path.read_text(encoding="utf-8")
             for name in future:
@@ -556,11 +555,13 @@ class FoundationTests(unittest.TestCase):
             "RollbackSafeEd25519AuthorityVerifier",
         ):
             self.assertFalse(hasattr(kaliv_dev_control, name), name)
-        self.assertIsNone(
-            importlib.util.find_spec(
-                "kaliv_dev_control.local_candidate_materialization"
+        for landed_module in (
+            "kaliv_dev_control.local_candidate_materialization",
+            "kaliv_dev_control.local_candidate_materialization_h5c",
+        ):
+            self.assertIsNotNone(
+                importlib.util.find_spec(landed_module), landed_module
             )
-        )
 
 
 

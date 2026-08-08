@@ -222,3 +222,17 @@ DC-L12 adds verification-only Ed25519 authorization for one exact signed publish
 Every authorization verification also reads an injected external monotonic keyring-state provider. Generation rollback, same-generation drift, a signature below the external minimum epoch and external key revocation all fail closed. No local file is accepted as the monotonic anchor.
 
 The landed boundary intentionally excludes the rejected dynamic v1/HMAC compatibility authority, private keys, signers, credentials, Git/HTTP/GitHub adapters, subprocess publishers, remote writes and DC-L13 local candidate materialization. Package-root, Tier-A facade and execution-bundle exports remain unchanged.
+
+## DC-L13 local-only candidate materialization
+
+The landed DC-L13 boundary consumes one exact verified DC-L12 preflight chain
+and may create only a deterministic candidate commit plus proposed branch inside
+a new isolated local bare repository. Every Git command is executed through a
+complete staged `TrustedGitRuntime`, and source, tree, commit, ref and receipt
+bytes are re-verified before evidence is accepted.
+
+The boundary configures no remote and provides no network fetch, push,
+credential helper, signer, GitHub mutation, reviewer request, ready conversion,
+merge, release, deployment or activation authority. The historical dynamic
+legacy proxy and `_compatibility_v1` package are not distributed; the modern
+facade uses a static internal validation/evidence support package only.
