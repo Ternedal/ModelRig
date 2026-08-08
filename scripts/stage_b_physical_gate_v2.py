@@ -75,6 +75,26 @@ def _candidate_matches(left: Any, right: Any) -> bool:
     )
 
 
+def _blocked_receipt(now: str, error: str, *, status: str = "blocked") -> dict[str, Any]:
+    return {
+        "schema": FINAL_SCHEMA,
+        "generated_at": now,
+        "status": status,
+        "steps": [],
+        "summary": {"total": 8, "passed": [], "errors": [error]},
+        "gate": {
+            "passed": False,
+            "release_freeze_complete": False,
+            "updater_chain_complete": False,
+            "strict_evidence_complete": False,
+            "physical_campaign_complete": False,
+            "browser_peer_physical_complete": False,
+            "all_physical_evidence_complete": False,
+            "production_activation": False,
+        },
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lifecycle-report", type=Path, default=Path("validation/appliance-lifecycle-observations.json"))
@@ -90,13 +110,32 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--report must remain under validation/")
 
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    _write(
+        destination,
+        _blocked_receipt(
+            now,
+            "verification in progress; no prior green receipt is current",
+            status="verification_in_progress",
+        ),
+    )
+
+    strict_path = _resolve(args.strict_report)
+    base_temp = Path("validation/.stage-b-physical-base.json")
+    base_temp_path = _resolve(base_temp)
+    for stale in (strict_path, base_temp_path):
+        try:
+            stale.unlink(missing_ok=True)
+        except OSError as exc:
+            report = _blocked_receipt(now, f"stale intermediate report could not be removed: {exc}")
+            _write(destination, report)
+            return 2
+
     strict_command = [
         sys.executable,
         str(ROOT / "scripts" / "stage_b_strict_evidence.py"),
         "--lifecycle-report", str(args.lifecycle_report),
         "--report", str(args.strict_report),
     ]
-    base_temp = Path("validation/.stage-b-physical-base.json")
     base_command = [
         sys.executable,
         str(ROOT / "scripts" / "stage_b_physical_gate.py"),
@@ -131,43 +170,29 @@ def main(argv: list[str] | None = None) -> int:
     if len(steps) < 2 or steps[-1]["exit_code"] != 0:
         errors.append("base Stage B physical gate did not pass")
         base = {}
-        base_raw = b""
     else:
         try:
-            base, base_raw, _ = _load(base_temp)
+            base, _, _ = _load(base_temp)
             if base.get("schema") != FINAL_SCHEMA:
                 errors.append("base final schema mismatch")
             if base.get("gate", {}).get("passed") is not True:
                 errors.append("base final gate did not pass")
         except Exception as exc:
             base = {}
-            base_raw = b""
             errors.append(f"base final report could not be loaded: {exc}")
 
     if strict and base and not _candidate_matches(strict.get("candidate"), base.get("candidate")):
         errors.append("strict and base candidate identities differ")
 
     if errors:
-        report: dict[str, Any] = {
-            "schema": FINAL_SCHEMA,
-            "generated_at": now,
-            "steps": steps,
-            "summary": {"total": 8, "passed": [], "errors": errors},
-            "gate": {
-                "passed": False,
-                "release_freeze_complete": False,
-                "updater_chain_complete": False,
-                "strict_evidence_complete": False,
-                "physical_campaign_complete": False,
-                "browser_peer_physical_complete": False,
-                "all_physical_evidence_complete": False,
-                "production_activation": False,
-            },
-        }
+        report = _blocked_receipt(now, errors[0])
+        report["steps"] = steps
+        report["summary"]["errors"] = errors
         code = 1
     else:
         report = dict(base)
         report["generated_at"] = now
+        report["status"] = "complete"
         report["steps"] = steps + list(base.get("steps") or [])
         evidence = dict(base.get("evidence") or {})
         evidence["strict_stage_b"] = {
@@ -189,7 +214,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _write(destination, report)
     try:
-        _resolve(base_temp).unlink(missing_ok=True)
+        base_temp_path.unlink(missing_ok=True)
     except OSError:
         pass
     print(f"report: {destination.relative_to(ROOT)}")
