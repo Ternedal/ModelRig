@@ -1,0 +1,48 @@
+{
+  "schema": "modelrig-devcontrol-symbol-ownership/v1",
+  "slice": "DC-L12",
+  "public_module": "kaliv_dev_control.publisher_authorization",
+  "owned": {
+    "publisher_authorization_v2": [
+      "AsymmetricPublisherAuthorizationLease",
+      "AsymmetricPublisherAuthorizationVerifier",
+      "build_asymmetric_publisher_authorization_payload"
+    ],
+    "publisher_authorization_chain_v2": [
+      "PublisherAuthorizationVerifierV2",
+      "PublisherReplayLedgerV2",
+      "PublisherPreflightReceiptV2",
+      "PublisherPostconditionReceiptV2"
+    ],
+    "publisher_recovery_authorization": [
+      "PublisherReplayRecoveryAuthorizationVerifierV1"
+    ],
+    "publisher_recovery_primary": [
+      "PublisherReplayLedgerV3"
+    ],
+    "publisher_recovery_receipt_v3": [
+      "PublisherReplayRecoveryReceiptV3"
+    ],
+    "publisher_recovery_receipt_finalizer": [
+      "finalize_publisher_replay_recovery_receipt_v3"
+    ],
+    "publisher_keyring_state": [
+      "PublisherExternalKeyringState",
+      "PublisherExternalKeyringStateProvider",
+      "RollbackSafeEd25519AuthorityVerifier"
+    ]
+  },
+  "not_exported_from_package_root_or_tier_a": true,
+  "not_in_tier_a_bundle": true,
+  "forbidden": [
+    "HmacPublisherAuthorizationIssuer",
+    "TrustedAuthorizationIssuerKey",
+    "Ed25519PrivateKey",
+    "private-key loader",
+    "signer",
+    "credential adapter",
+    "Git/HTTP/GitHub writer",
+    "materialization authority",
+    "merge/release/deployment authority"
+  ]
+}
