@@ -1,0 +1,32 @@
+name: dc-l12-boundary-symbol-projection
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/dc-l12-boundary-symbol-projection.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Apply exact boundary symbol projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/dc-l12-fix-boundary-symbol.py
+          rm .github/dc-l12-fix-boundary-symbol.py
+          rm .github/workflows/dc-l12-boundary-symbol-projection.yml
+          git config user.name "ModelRig DevControl"
+          git config user.email "devcontrol@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "ci(devcontrol): bind DC-L12 gate to landed finalizer symbol"
+          git push origin "HEAD:${GITHUB_HEAD_REF}"
