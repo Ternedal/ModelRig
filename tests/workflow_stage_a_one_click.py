@@ -5,7 +5,7 @@ from pathlib import Path
 _source_path = Path(__file__).with_name("workflow_stage_a_one_click.retained")
 _source = _source_path.read_text(encoding="utf-8")
 for _old, _new in (
-    ("agent/unified-candidate-1.58.143", "agent/unified-candidate-1.58.151"),
+    ("agent/unified-candidate-1.58.143", "agent/unified-candidate-1.58.151-r2"),
     ("1.58.143", "1.58.151"),
     ("1.58.142", "1.58.144"),
     ("#150", "#161"),
