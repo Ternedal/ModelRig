@@ -213,3 +213,12 @@ kernel. DC-L10's asymmetric and semantic-review gates and DC-L11's readiness and
 dry-run gate remain portable and offline. Exact-path, provenance, mutation,
 validation and review evidence for this slice lives under
 `docs/devcontrol/dc-l11/`.
+
+
+## DC-L12 — one-time authorization and authenticated recovery
+
+DC-L12 adds verification-only Ed25519 authorization for one exact signed publisher request, crash-durable one-time nonce consumption, dual-role authenticated replay recovery, a physically primary recovery ledger and deterministic missing-v3-receipt finalization.
+
+Every authorization verification also reads an injected external monotonic keyring-state provider. Generation rollback, same-generation drift, a signature below the external minimum epoch and external key revocation all fail closed. No local file is accepted as the monotonic anchor.
+
+The landed boundary intentionally excludes the rejected dynamic v1/HMAC compatibility authority, private keys, signers, credentials, Git/HTTP/GitHub adapters, subprocess publishers, remote writes and DC-L13 local candidate materialization. Package-root, Tier-A facade and execution-bundle exports remain unchanged.

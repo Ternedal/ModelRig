@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import subprocess
 import sys
@@ -530,6 +531,30 @@ class FoundationTests(unittest.TestCase):
             self.assertNotIn(
                 "from app.windows_job", text, f"product import in {path.name}"
             )
+
+    def test_dc_l12_authority_remains_offline_and_non_root(self) -> None:
+        import kaliv_dev_control
+
+        public = importlib.import_module(
+            "kaliv_dev_control.publisher_authorization"
+        )
+        keyring = importlib.import_module(
+            "kaliv_dev_control.publisher_keyring_state"
+        )
+        self.assertTrue(callable(public.PublisherAuthorizationVerifierV2))
+        self.assertTrue(callable(keyring.RollbackSafeEd25519AuthorityVerifier))
+        for name in (
+            "PublisherAuthorizationVerifierV2",
+            "PublisherReplayLedgerV2",
+            "RollbackSafeEd25519AuthorityVerifier",
+        ):
+            self.assertFalse(hasattr(kaliv_dev_control, name), name)
+        self.assertIsNone(
+            importlib.util.find_spec(
+                "kaliv_dev_control.local_candidate_materialization"
+            )
+        )
+
 
 
 if __name__ == "__main__":

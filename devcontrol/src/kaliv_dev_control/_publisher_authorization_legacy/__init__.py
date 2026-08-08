@@ -2,7 +2,7 @@
 
 This package deliberately replaces the rejected dynamic legacy proxy. It
 contains canonical value objects and validators only: no HMAC issuer, shared
-secret, private key, signer, credential value, transport, subprocess or remote
+secret, private key, signer, credential value, transport, process launch or remote
 write adapter.
 """
 from __future__ import annotations
