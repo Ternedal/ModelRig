@@ -26,7 +26,7 @@ jobs:
           set -euo pipefail
           python .github/dc-l13-fix-workflow-projector.py
           python .github/dc-l13-workflow-projection.py
-          pip install --quiet cryptography==49.0.0
+          pip install --quiet cryptography==49.0.0 PyYAML==6.0.3
           python - <<'PY'
           import yaml
           from pathlib import Path
