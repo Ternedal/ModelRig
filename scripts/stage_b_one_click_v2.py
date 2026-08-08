@@ -21,7 +21,9 @@ EXPECTED_SOURCE_VERSION = "1.58.150"
 EXPECTED_TARGET_VERSION = "1.58.151"
 UPDATER_ASSET = "modelrig-updater-windows-x64.exe"
 SOURCE_REF = f"refs/tags/v{EXPECTED_TARGET_VERSION}"
-SIGNER_WORKFLOW = f"{legacy.RELEASE_REPO}/.github/workflows/build-and-release.yml"
+SIGNER_WORKFLOW = (
+    f"{legacy.RELEASE_REPO}/.github/workflows/build-and-release.yml"
+)
 _SHA64 = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -34,7 +36,10 @@ def _release_asset_sha256(version: str, asset_name: str) -> str:
     assets = release.get("assets") if isinstance(release, dict) else None
     sums_url = ""
     for asset in assets or []:
-        if isinstance(asset, dict) and asset.get("name") == "SHA256SUMS.txt":
+        if (
+            isinstance(asset, dict)
+            and asset.get("name") == "SHA256SUMS.txt"
+        ):
             sums_url = str(asset.get("browser_download_url") or "")
             break
     if not sums_url:
@@ -43,26 +48,40 @@ def _release_asset_sha256(version: str, asset_name: str) -> str:
         with urllib.request.urlopen(sums_url, timeout=30.0) as response:
             text = response.read().decode("utf-8", "replace")
     except (urllib.error.URLError, OSError) as exc:
-        raise legacy.StageBError("Kunne ikke hente release-checksummer") from exc
+        raise legacy.StageBError(
+            "Kunne ikke hente release-checksummer"
+        ) from exc
     for line in text.splitlines():
         fields = line.split()
-        if len(fields) >= 2 and fields[-1].lstrip("*") == asset_name:
+        if (
+            len(fields) >= 2
+            and fields[-1].lstrip("*") == asset_name
+        ):
             digest = fields[0].lower()
             if _SHA64.fullmatch(digest):
                 return digest
-    raise legacy.StageBError(f"SHA256SUMS.txt mangler {asset_name}")
+    raise legacy.StageBError(
+        f"SHA256SUMS.txt mangler {asset_name}"
+    )
 
 
-def _configure(root: Path | None, appliance: Path | None) -> None:
+def _configure(
+    root: Path | None,
+    appliance: Path | None,
+) -> None:
     if root is not None:
         if not (root / "VERSION").is_file():
-            raise legacy.StageBError(f"--root peger ikke på en ModelRig-checkout: {root}")
+            raise legacy.StageBError(
+                f"--root peger ikke på en ModelRig-checkout: {root}"
+            )
         legacy.use_root(root)
     if appliance is not None:
         legacy.APPLIANCE = appliance.resolve()
 
 
-def _load_observations(candidate: dict[str, Any]) -> dict[str, Any]:
+def _load_observations(
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
     observations = legacy.build_observations(candidate)
     trials = observations.setdefault("trials", {})
     if not isinstance(trials, dict):
@@ -70,52 +89,87 @@ def _load_observations(candidate: dict[str, Any]) -> dict[str, Any]:
     return observations
 
 
-def _verify_bootstrap(candidate: dict[str, Any], observations: dict[str, Any], state: dict[str, Any]) -> None:
+def _verify_bootstrap(
+    candidate: dict[str, Any],
+    observations: dict[str, Any],
+    state: dict[str, Any],
+) -> None:
     resumed = bool(state.get("updater_bootstrap_done"))
     trials = observations.get("trials")
     if not isinstance(trials, dict):
         raise legacy.StageBError("Lifecycle trials er ugyldige")
-    if resumed and not isinstance(trials.get("updater_bootstrap"), dict):
-        raise legacy.StageBError("Bootstrap-state findes uden bootstrap-evidens")
-    if resumed:
-        legacy.ok("Updater-bootstrap checkpoint findes; cached proof ugyldiggøres og live fil genverificeres.")
 
-    # A saved checkpoint is not authority. Remove the old proof before any live
-    # network, checksum or provenance operation so a failed resume cannot be
-    # followed by a separate verifier that reuses stale green evidence.
-    trials.pop("updater_bootstrap", None)
+    cached_trial = trials.get("updater_bootstrap")
+    if resumed and not isinstance(cached_trial, dict):
+        # A true checkpoint without its proof is never authority. Recover by
+        # persisting false first, then continue with a full live verification.
+        legacy.ok(
+            "Bootstrap-checkpoint mangler sit proof; "
+            "checkpoint nulstilles og live fil genverificeres."
+        )
+        resumed = False
+    elif resumed:
+        legacy.ok(
+            "Updater-bootstrap checkpoint findes; cached proof "
+            "ugyldiggøres og live fil genverificeres."
+        )
+
+    # Persist the false checkpoint BEFORE deleting the cached trial. Every
+    # interruption ordering is then resumable:
+    # - stop here: false checkpoint + old trial (old trial is ignored);
+    # - stop after trial save: false checkpoint + no trial.
     state["updater_bootstrap_done"] = False
-    legacy.save_observations(observations)
     legacy.save_state(state)
+    trials.pop("updater_bootstrap", None)
+    legacy.save_observations(observations)
+
     log = legacy.EVIDENCE / "updater_binary_check.log"
     try:
         log.unlink(missing_ok=True)
     except OSError as exc:
-        raise legacy.StageBError(f"Gammel bootstrap-log kunne ikke fjernes: {exc}") from exc
+        raise legacy.StageBError(
+            f"Gammel bootstrap-log kunne ikke fjernes: {exc}"
+        ) from exc
 
     legacy.heading("STRICT 1/2 — verificér updater-bootstrap")
     if candidate.get("version") != EXPECTED_TARGET_VERSION:
         raise legacy.StageBError(
-            f"Stage B v2 er bundet til {EXPECTED_TARGET_VERSION}, ikke {candidate.get('version')}"
+            f"Stage B v2 er bundet til {EXPECTED_TARGET_VERSION}, "
+            f"ikke {candidate.get('version')}"
         )
     source_digest = str(candidate.get("git_sha") or "")
     if not re.fullmatch(r"[0-9a-f]{40}", source_digest):
-        raise legacy.StageBError("Kandidatens release Git-SHA er ugyldig")
+        raise legacy.StageBError(
+            "Kandidatens release Git-SHA er ugyldig"
+        )
     updater = legacy.appliance_root() / UPDATER_ASSET
     if not updater.is_file():
-        raise legacy.StageBError(f"Updater-bootstrap mangler: {updater}")
-    expected = _release_asset_sha256(EXPECTED_TARGET_VERSION, UPDATER_ASSET)
+        raise legacy.StageBError(
+            f"Updater-bootstrap mangler: {updater}"
+        )
+    expected = _release_asset_sha256(
+        EXPECTED_TARGET_VERSION,
+        UPDATER_ASSET,
+    )
     actual = legacy.sha256_file(updater)
     if actual != expected:
         raise legacy.StageBError(
-            f"Updater-bootstrap hash mismatch: forventet {expected}, fik {actual}"
+            f"Updater-bootstrap hash mismatch: "
+            f"forventet {expected}, fik {actual}"
         )
     command = [
-        "gh", "attestation", "verify", str(updater),
-        "--repo", legacy.RELEASE_REPO,
-        "--source-digest", source_digest,
-        "--source-ref", SOURCE_REF,
-        "--signer-workflow", SIGNER_WORKFLOW,
+        "gh",
+        "attestation",
+        "verify",
+        str(updater),
+        "--repo",
+        legacy.RELEASE_REPO,
+        "--source-digest",
+        source_digest,
+        "--source-ref",
+        SOURCE_REF,
+        "--signer-workflow",
+        SIGNER_WORKFLOW,
     ]
     try:
         result = subprocess.run(
@@ -128,14 +182,20 @@ def _verify_bootstrap(candidate: dict[str, Any], observations: dict[str, Any], s
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise legacy.StageBError(
-            "GitHub CLI kunne ikke verificere updaterens releasebundne build provenance"
+            "GitHub CLI kunne ikke verificere updaterens "
+            "releasebundne build provenance"
         ) from exc
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
-        raise legacy.StageBError(f"Updater provenance verification fejlede: {detail[-500:]}")
+        raise legacy.StageBError(
+            f"Updater provenance verification fejlede: "
+            f"{detail[-500:]}"
+        )
 
     log.parent.mkdir(parents=True, exist_ok=True)
-    safe_output = (result.stdout or result.stderr or "").replace("\r", " ").strip()
+    safe_output = (
+        result.stdout or result.stderr or ""
+    ).replace("\r", " ").strip()
     log.write_text(
         "\n".join(
             (
@@ -152,7 +212,8 @@ def _verify_bootstrap(candidate: dict[str, Any], observations: dict[str, Any], s
                 f"provenance_command={' '.join(command)}",
                 f"provenance_output={safe_output[:2000]}",
             )
-        ) + "\n",
+        )
+        + "\n",
         encoding="utf-8",
     )
     trials["updater_bootstrap"] = {
@@ -166,42 +227,71 @@ def _verify_bootstrap(candidate: dict[str, Any], observations: dict[str, Any], s
         "source_ref": SOURCE_REF,
         "signer_workflow": SIGNER_WORKFLOW,
         "provenance_verified": True,
-        "evidence_path": "validation/appliance-lifecycle-evidence/updater_binary_check.log",
+        "evidence_path": (
+            "validation/appliance-lifecycle-evidence/"
+            "updater_binary_check.log"
+        ),
         "evidence_sha256": legacy.sha256_file(log),
     }
     legacy.save_observations(observations)
     state["updater_bootstrap_done"] = True
     legacy.save_state(state)
-    legacy.ok(f"Updater-bootstrap bundet til v{EXPECTED_TARGET_VERSION} ({actual[:16]}…)")
+    legacy.ok(
+        f"Updater-bootstrap bundet til v{EXPECTED_TARGET_VERSION} "
+        f"({actual[:16]}…)"
+    )
 
 
-def _read_journal_file(path: Path) -> dict[str, Any] | None:
+def _read_journal_file(
+    path: Path,
+) -> dict[str, Any] | None:
     try:
         body = path.read_text(encoding="utf-8-sig")
     except FileNotFoundError:
         return None
     except OSError as exc:
-        raise legacy.StageBError(f"Journalen kan ikke læses: {path}: {exc}") from exc
+        raise legacy.StageBError(
+            f"Journalen kan ikke læses: {path}: {exc}"
+        ) from exc
     try:
         value = json.loads(body)
     except json.JSONDecodeError as exc:
-        raise legacy.StageBError(f"Journalen er ugyldig JSON: {path}: {exc}") from exc
+        raise legacy.StageBError(
+            f"Journalen er ugyldig JSON: {path}: {exc}"
+        ) from exc
     if not isinstance(value, dict):
-        raise legacy.StageBError(f"Journalen er ikke et objekt: {path}")
+        raise legacy.StageBError(
+            f"Journalen er ikke et objekt: {path}"
+        )
     tx_id = value.get("id")
     revision = value.get("revision")
     state = value.get("state")
     swapped = value.get("swapped")
     if not isinstance(tx_id, str) or not tx_id.strip():
-        raise legacy.StageBError(f"Journalen mangler transaction id: {path}")
-    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
-        raise legacy.StageBError(f"Journalen har ugyldig revision: {path}")
+        raise legacy.StageBError(
+            f"Journalen mangler transaction id: {path}"
+        )
+    if (
+        not isinstance(revision, int)
+        or isinstance(revision, bool)
+        or revision < 1
+    ):
+        raise legacy.StageBError(
+            f"Journalen har ugyldig revision: {path}"
+        )
     if not isinstance(state, str) or not state:
-        raise legacy.StageBError(f"Journalen har ugyldig state: {path}")
+        raise legacy.StageBError(
+            f"Journalen har ugyldig state: {path}"
+        )
     if swapped is None:
         swapped = []
-    if not isinstance(swapped, list) or not all(isinstance(item, str) for item in swapped):
-        raise legacy.StageBError(f"Journalen har ugyldig swapped-liste: {path}")
+    if (
+        not isinstance(swapped, list)
+        or not all(isinstance(item, str) for item in swapped)
+    ):
+        raise legacy.StageBError(
+            f"Journalen har ugyldig swapped-liste: {path}"
+        )
     return {
         "id": tx_id,
         "revision": revision,
@@ -212,9 +302,15 @@ def _read_journal_file(path: Path) -> dict[str, Any] | None:
     }
 
 
-def _journal_snapshot(root: Path) -> dict[str, Any] | None:
-    main = _read_journal_file(root / "update-transaction.json")
-    temporary = _read_journal_file(root / "update-transaction.json.tmp")
+def _journal_snapshot(
+    root: Path,
+) -> dict[str, Any] | None:
+    main = _read_journal_file(
+        root / "update-transaction.json"
+    )
+    temporary = _read_journal_file(
+        root / "update-transaction.json.tmp"
+    )
     if main is None:
         return temporary
     if temporary is None:
@@ -229,7 +325,8 @@ def _journal_snapshot(root: Path) -> dict[str, Any] | None:
         return temporary
     if main != temporary:
         raise legacy.StageBError(
-            "Journal main og .tmp har samme revision men forskelligt indhold"
+            "Journal main og .tmp har samme revision "
+            "men forskelligt indhold"
         )
     return main
 
@@ -237,12 +334,16 @@ def _journal_snapshot(root: Path) -> dict[str, Any] | None:
 def _require_no_active_journal(root: Path) -> None:
     present = [
         path.name
-        for path in (root / "update-transaction.json", root / "update-transaction.json.tmp")
+        for path in (
+            root / "update-transaction.json",
+            root / "update-transaction.json.tmp",
+        )
         if path.exists()
     ]
     if present:
         raise legacy.StageBError(
-            "Interruption-testen kræver ingen aktiv journal før launch; fundet: "
+            "Interruption-testen kræver ingen aktiv journal "
+            "før launch; fundet: "
             + ", ".join(present)
         )
 
@@ -254,26 +355,46 @@ def _all_live_executables_present(root: Path) -> bool:
         root / "worker" / "modelrig-worker-windows-x64.exe",
         root / UPDATER_ASSET,
     )
-    return all(path.is_file() and path.stat().st_size > 0 for path in paths)
+    return all(
+        path.is_file() and path.stat().st_size > 0
+        for path in paths
+    )
 
 
-def _run_interruption(candidate: dict[str, Any], observations: dict[str, Any], state: dict[str, Any]) -> None:
+def _run_interruption(
+    candidate: dict[str, Any],
+    observations: dict[str, Any],
+    state: dict[str, Any],
+) -> None:
     if state.get("appliance_interruption_done"):
-        if not isinstance(observations.get("trials", {}).get("appliance_interruption"), dict):
-            raise legacy.StageBError("Interruption-state findes uden interruption-evidens")
-        legacy.ok("Appliance interruption/recovery er allerede bevist.")
+        if not isinstance(
+            observations.get("trials", {}).get(
+                "appliance_interruption"
+            ),
+            dict,
+        ):
+            raise legacy.StageBError(
+                "Interruption-state findes uden interruption-evidens"
+            )
+        legacy.ok(
+            "Appliance interruption/recovery er allerede bevist."
+        )
         return
-    legacy.heading("STRICT 2/2 — kontrolleret interruption efter første swap")
+    legacy.heading(
+        "STRICT 2/2 — kontrolleret interruption efter første swap"
+    )
     before = legacy.live_versions()
     if before.get("backend_version") != EXPECTED_SOURCE_VERSION:
         raise legacy.StageBError(
-            f"Interruption-testen kræver backend {EXPECTED_SOURCE_VERSION}; "
-            f"riggen rapporterer {before.get('backend_version') or '(nede)'}"
+            f"Interruption-testen kræver backend "
+            f"{EXPECTED_SOURCE_VERSION}; riggen rapporterer "
+            f"{before.get('backend_version') or '(nede)'}"
         )
     if before.get("worker_version") != EXPECTED_SOURCE_VERSION:
         raise legacy.StageBError(
-            f"Interruption-testen kræver worker {EXPECTED_SOURCE_VERSION}; "
-            f"riggen rapporterer {before.get('worker_version') or '(nede)'}"
+            f"Interruption-testen kræver worker "
+            f"{EXPECTED_SOURCE_VERSION}; riggen rapporterer "
+            f"{before.get('worker_version') or '(nede)'}"
         )
     root = legacy.appliance_root()
     _require_no_active_journal(root)
@@ -287,40 +408,60 @@ def _run_interruption(candidate: dict[str, Any], observations: dict[str, Any], s
     try:
         with log.open("wb") as handle:
             process = subprocess.Popen(
-                [str(updater)], cwd=root, stdout=handle, stderr=subprocess.STDOUT
+                [str(updater)],
+                cwd=root,
+                stdout=handle,
+                stderr=subprocess.STDOUT,
             )
             deadline = time.monotonic() + 300.0
-            while time.monotonic() < deadline and process.poll() is None:
+            while (
+                time.monotonic() < deadline
+                and process.poll() is None
+            ):
                 snapshot = _journal_snapshot(root)
                 if snapshot is not None:
                     if not observed_id:
                         observed_id = str(snapshot["id"])
-                        if snapshot.get("from") != EXPECTED_SOURCE_VERSION:
+                        if (
+                            snapshot.get("from")
+                            != EXPECTED_SOURCE_VERSION
+                        ):
                             raise legacy.StageBError(
-                                "Den nye journal har forkert source-version"
+                                "Den nye journal har forkert "
+                                "source-version"
                             )
-                        if str(snapshot.get("to") or "").lstrip("v") != EXPECTED_TARGET_VERSION:
+                        if (
+                            str(snapshot.get("to") or "").lstrip("v")
+                            != EXPECTED_TARGET_VERSION
+                        ):
                             raise legacy.StageBError(
-                                "Den nye journal har forkert target-version"
+                                "Den nye journal har forkert "
+                                "target-version"
                             )
                     elif snapshot["id"] != observed_id:
                         raise legacy.StageBError(
-                            "Transaction id skiftede under interruption-testen"
+                            "Transaction id skiftede under "
+                            "interruption-testen"
                         )
                     if snapshot["revision"] < observed_revision:
                         raise legacy.StageBError(
-                            "Journalrevision gik baglæns under interruption-testen"
+                            "Journalrevision gik baglæns under "
+                            "interruption-testen"
                         )
                     observed_revision = int(snapshot["revision"])
                     observed = snapshot
-                    if snapshot["state"] == "swapping" and snapshot["swapped"]:
+                    if (
+                        snapshot["state"] == "swapping"
+                        and snapshot["swapped"]
+                    ):
                         process.kill()
                         process.wait(timeout=30.0)
                         break
                 time.sleep(0.1)
             else:
                 raise legacy.StageBError(
-                    "Updateren nåede ikke en ny journal i state=swapping med mindst ét registreret swap"
+                    "Updateren nåede ikke en ny journal i "
+                    "state=swapping med mindst ét registreret swap"
                 )
     except BaseException:
         if process is not None and process.poll() is None:
@@ -328,19 +469,48 @@ def _run_interruption(candidate: dict[str, Any], observations: dict[str, Any], s
             process.wait(timeout=30.0)
         raise
     if process is None or observed is None:
-        raise legacy.StageBError("Interruption-process eller journalobservation mangler")
-    killed = process.returncode is not None and process.returncode != 0
+        raise legacy.StageBError(
+            "Interruption-process eller journalobservation mangler"
+        )
+    killed = (
+        process.returncode is not None
+        and process.returncode != 0
+    )
     process_pid = int(getattr(process, "pid", 0) or 0)
     with log.open("a", encoding="utf-8") as handle:
-        handle.write(f"observed_transaction_id={observed_id}\n")
-        handle.write(f"observed_revision={observed_revision}\n")
-        handle.write(f"observed_journal_from={observed.get('from') or ''}\n")
-        handle.write(f"observed_journal_to={observed.get('to') or ''}\n")
-        handle.write(f"observed_journal_state={observed.get('state') or ''}\n")
-        handle.write(f"observed_swapped_count={len(observed.get('swapped') or [])}\n")
-        handle.write(f"observed_swapped_assets={','.join(observed.get('swapped') or [])}\n")
-        handle.write(f"updater_process_pid={process_pid}\n")
-        handle.write(f"updater_process_killed={'true' if killed else 'false'}\n")
+        handle.write(
+            f"observed_transaction_id={observed_id}\n"
+        )
+        handle.write(
+            f"observed_revision={observed_revision}\n"
+        )
+        handle.write(
+            f"observed_journal_from="
+            f"{observed.get('from') or ''}\n"
+        )
+        handle.write(
+            f"observed_journal_to="
+            f"{observed.get('to') or ''}\n"
+        )
+        handle.write(
+            f"observed_journal_state="
+            f"{observed.get('state') or ''}\n"
+        )
+        handle.write(
+            f"observed_swapped_count="
+            f"{len(observed.get('swapped') or [])}\n"
+        )
+        handle.write(
+            f"observed_swapped_assets="
+            f"{','.join(observed.get('swapped') or [])}\n"
+        )
+        handle.write(
+            f"updater_process_pid={process_pid}\n"
+        )
+        handle.write(
+            f"updater_process_killed="
+            f"{'true' if killed else 'false'}\n"
+        )
         recovery = subprocess.run(
             [str(updater), "-recover"],
             cwd=root,
@@ -353,28 +523,48 @@ def _run_interruption(candidate: dict[str, Any], observations: dict[str, Any], s
         handle.write(recovery.stdout or "")
         handle.write("\n--- recovery stderr ---\n")
         handle.write(recovery.stderr or "")
-        handle.write(f"\nrecovery_exit_code={recovery.returncode}\n")
+        handle.write(
+            f"\nrecovery_exit_code={recovery.returncode}\n"
+        )
 
     ready_ms = legacy.wait_ready()
     after = legacy.live_versions()
     live_present = _all_live_executables_present(root)
-    journal_absent = not (root / "update-transaction.json").exists() and not (
-        root / "update-transaction.json.tmp"
-    ).exists()
+    journal_absent = (
+        not (root / "update-transaction.json").exists()
+        and not (root / "update-transaction.json.tmp").exists()
+    )
     recovered = (
         recovery.returncode == 0
         and ready_ms is not None
-        and after.get("backend_version") == EXPECTED_SOURCE_VERSION
-        and after.get("worker_version") == EXPECTED_SOURCE_VERSION
+        and after.get("backend_version")
+        == EXPECTED_SOURCE_VERSION
+        and after.get("worker_version")
+        == EXPECTED_SOURCE_VERSION
         and live_present
         and journal_absent
     )
     with log.open("a", encoding="utf-8") as handle:
-        handle.write(f"recovery_succeeded={'true' if recovered else 'false'}\n")
-        handle.write(f"live_executables_present={'true' if live_present else 'false'}\n")
-        handle.write(f"journal_absent={'true' if journal_absent else 'false'}\n")
-        handle.write(f"backend_version={after.get('backend_version') or ''}\n")
-        handle.write(f"worker_version={after.get('worker_version') or ''}\n")
+        handle.write(
+            f"recovery_succeeded="
+            f"{'true' if recovered else 'false'}\n"
+        )
+        handle.write(
+            f"live_executables_present="
+            f"{'true' if live_present else 'false'}\n"
+        )
+        handle.write(
+            f"journal_absent="
+            f"{'true' if journal_absent else 'false'}\n"
+        )
+        handle.write(
+            f"backend_version="
+            f"{after.get('backend_version') or ''}\n"
+        )
+        handle.write(
+            f"worker_version="
+            f"{after.get('worker_version') or ''}\n"
+        )
 
     observations["trials"]["appliance_interruption"] = {
         "performed": True,
@@ -384,8 +574,12 @@ def _run_interruption(candidate: dict[str, Any], observations: dict[str, Any], s
         "observed_journal_from": observed.get("from"),
         "observed_journal_to": observed.get("to"),
         "observed_journal_state": observed.get("state"),
-        "observed_swapped_count": len(observed.get("swapped") or []),
-        "observed_swapped_assets": list(observed.get("swapped") or []),
+        "observed_swapped_count": len(
+            observed.get("swapped") or []
+        ),
+        "observed_swapped_assets": list(
+            observed.get("swapped") or []
+        ),
         "updater_process_pid": process_pid,
         "updater_process_killed": killed,
         "recovery_exit_code": recovery.returncode,
@@ -395,17 +589,24 @@ def _run_interruption(candidate: dict[str, Any], observations: dict[str, Any], s
         "ready": ready_ms is not None,
         "backend_version": after.get("backend_version"),
         "worker_version": after.get("worker_version"),
-        "evidence_path": "validation/appliance-lifecycle-evidence/appliance_interruption.log",
+        "evidence_path": (
+            "validation/appliance-lifecycle-evidence/"
+            "appliance_interruption.log"
+        ),
         "evidence_sha256": legacy.sha256_file(log),
     }
     legacy.save_observations(observations)
     if not recovered:
         raise legacy.StageBError(
-            "Interruption-recovery blev ikke bevist; behold loggen og stop Stage B"
+            "Interruption-recovery blev ikke bevist; "
+            "behold loggen og stop Stage B"
         )
     state["appliance_interruption_done"] = True
     legacy.save_state(state)
-    legacy.ok("Mid-swap interruption blev recovered til 1.58.150 med alle live exes")
+    legacy.ok(
+        "Mid-swap interruption blev recovered til "
+        "1.58.150 med alle live exes"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -425,8 +626,9 @@ def main(argv: list[str] | None = None) -> int:
         _run_interruption(candidate, observations, state)
     elif not state.get("appliance_interruption_done"):
         raise legacy.StageBError(
-            "Good update er allerede gennemført uden det obligatoriske interruption-bevis; "
-            "gendan source 1.58.150 og start kampagnen forfra."
+            "Good update er allerede gennemført uden det "
+            "obligatoriske interruption-bevis; gendan source "
+            "1.58.150 og start kampagnen forfra."
         )
 
     forwarded: list[str] = []
@@ -441,9 +643,19 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except KeyboardInterrupt:
-        print("\nSIKKERT STOP: afbrudt af operatøren.", file=sys.stderr)
+        print(
+            "\nSIKKERT STOP: afbrudt af operatøren.",
+            file=sys.stderr,
+        )
         raise SystemExit(1)
     except Exception as exc:
-        print(f"\nSIKKERT STOP: {type(exc).__name__}: {str(exc)[:800]}", file=sys.stderr)
-        print("Ingen release eller produktion blev aktiveret.", file=sys.stderr)
+        print(
+            f"\nSIKKERT STOP: {type(exc).__name__}: "
+            f"{str(exc)[:800]}",
+            file=sys.stderr,
+        )
+        print(
+            "Ingen release eller produktion blev aktiveret.",
+            file=sys.stderr,
+        )
         raise SystemExit(1)

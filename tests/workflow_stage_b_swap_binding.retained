@@ -42,7 +42,12 @@ _candidate = {
     "version_stamps_consistent": True,
 }
 _updater_hash = "c" * 64
-_bootstrap = _root / "validation" / "appliance-lifecycle-evidence" / "updater_binary_check.log"
+_bootstrap = (
+    _root
+    / "validation"
+    / "appliance-lifecycle-evidence"
+    / "updater_binary_check.log"
+)
 _bootstrap_digest = _write(
     _bootstrap,
     "\n".join(
@@ -60,27 +65,35 @@ _bootstrap_digest = _write(
     )
     + "\n",
 )
-_interruption = _root / "validation" / "appliance-lifecycle-evidence" / "appliance_interruption.log"
+_interruption = (
+    _root
+    / "validation"
+    / "appliance-lifecycle-evidence"
+    / "appliance_interruption.log"
+)
 
 
 def _interruption_text(count: int, assets: str) -> str:
-    return "\n".join(
-        (
-            "observed_transaction_id=tx-new",
-            "observed_revision=3",
-            "observed_journal_from=1.58.150",
-            "observed_journal_to=v1.58.151",
-            "observed_journal_state=swapping",
-            f"observed_swapped_count={count}",
-            f"observed_swapped_assets={assets}",
-            "updater_process_pid=4321",
-            "updater_process_killed=true",
-            "recovery_exit_code=0",
-            "recovery_succeeded=true",
-            "live_executables_present=true",
-            "journal_absent=true",
+    return (
+        "\n".join(
+            (
+                "observed_transaction_id=tx-new",
+                "observed_revision=3",
+                "observed_journal_from=1.58.150",
+                "observed_journal_to=v1.58.151",
+                "observed_journal_state=swapping",
+                f"observed_swapped_count={count}",
+                f"observed_swapped_assets={assets}",
+                "updater_process_pid=4321",
+                "updater_process_killed=true",
+                "recovery_exit_code=0",
+                "recovery_succeeded=true",
+                "live_executables_present=true",
+                "journal_absent=true",
+            )
         )
-    ) + "\n"
+        + "\n"
+    )
 
 
 _interruption_digest = _write(
@@ -153,7 +166,10 @@ def _evaluate(value: dict) -> tuple[dict, int]:
 
 
 _valid, _valid_code = _evaluate(_lifecycle)
-_swap_check(_valid_code == 0 and _valid["gate"]["passed"] is True, "matching swap count and asset list pass")
+_swap_check(
+    _valid_code == 0 and _valid["gate"]["passed"] is True,
+    "matching swap count and asset list pass",
+)
 
 _log_zero = copy.deepcopy(_lifecycle)
 _log_zero["trials"]["appliance_interruption"]["evidence_sha256"] = _write(
@@ -164,6 +180,31 @@ _blocked_log, _blocked_log_code = _evaluate(_log_zero)
 _swap_check(
     _blocked_log_code != 0 and _blocked_log["gate"]["passed"] is False,
     "self-hashed log count zero cannot accompany JSON count one",
+)
+
+_log_ten = copy.deepcopy(_lifecycle)
+_log_ten["trials"]["appliance_interruption"]["evidence_sha256"] = _write(
+    _interruption,
+    _interruption_text(10, "modelrig-server-windows-x64.exe"),
+)
+_blocked_ten, _blocked_ten_code = _evaluate(_log_ten)
+_swap_check(
+    _blocked_ten_code != 0 and _blocked_ten["gate"]["passed"] is False,
+    "full-line binding rejects JSON count one with log count ten",
+)
+
+_log_extra_asset = copy.deepcopy(_lifecycle)
+_log_extra_asset["trials"]["appliance_interruption"]["evidence_sha256"] = _write(
+    _interruption,
+    _interruption_text(
+        1,
+        "modelrig-server-windows-x64.exe,modelrig-worker-windows-x64.exe",
+    ),
+)
+_blocked_assets, _blocked_assets_code = _evaluate(_log_extra_asset)
+_swap_check(
+    _blocked_assets_code != 0 and _blocked_assets["gate"]["passed"] is False,
+    "full-line binding rejects a logged asset-list extension",
 )
 
 _count_mismatch = copy.deepcopy(_lifecycle)
@@ -178,6 +219,9 @@ _swap_check(
     "JSON swap count must equal asset-list length",
 )
 
-print(f"Stage B swap binding contracts: {_swap_passed} passed, {_swap_failed} failed")
+print(
+    f"Stage B swap binding contracts: {_swap_passed} passed, "
+    f"{_swap_failed} failed"
+)
 if _swap_failed:
     raise SystemExit(1)

@@ -94,7 +94,11 @@ def _candidate_identity(root: Path) -> dict[str, Any]:
     return value
 
 
-def _trial(report: Mapping[str, Any], name: str, errors: list[str]) -> dict[str, Any]:
+def _trial(
+    report: Mapping[str, Any],
+    name: str,
+    errors: list[str],
+) -> dict[str, Any]:
     trials = report.get("trials")
     if not isinstance(trials, Mapping):
         errors.append("lifecycle trials are missing")
@@ -128,7 +132,9 @@ def _load_log(
         errors.append(f"{label}.evidence_path is invalid: {exc}")
         return {}, ""
     if rel.parts[:2] != ("validation", "appliance-lifecycle-evidence"):
-        errors.append(f"{label}.evidence_path is outside the lifecycle evidence directory")
+        errors.append(
+            f"{label}.evidence_path is outside the lifecycle evidence directory"
+        )
         return {}, ""
     if not path.is_file() or path.is_symlink():
         errors.append(f"{label} evidence log is missing or irregular")
@@ -156,8 +162,24 @@ def _require_markers(
     markers: tuple[str, ...],
     errors: list[str],
 ) -> list[str]:
-    missing = [marker for marker in markers if marker.lower() not in text]
-    errors.extend(f"{label} log is missing required marker: {marker}" for marker in missing)
+    # Evidence is a line-oriented key/value log. Substring checks are unsafe:
+    # `observed_swapped_count=1` must not match `...=10`, and an expected
+    # `a,b` asset list must not match `a,b,c`. Normalize case and line endings,
+    # then require complete logical lines.
+    lines = {
+        line.strip().lower()
+        for line in text.splitlines()
+        if line.strip()
+    }
+    missing = [
+        marker
+        for marker in markers
+        if marker.strip().lower() not in lines
+    ]
+    errors.extend(
+        f"{label} log is missing required marker: {marker}"
+        for marker in missing
+    )
     return missing
 
 
@@ -189,17 +211,26 @@ def evaluate(
 
     good = _trial(lifecycle, "good_update", errors)
     if good.get("source_version") != EXPECTED_SOURCE_VERSION:
-        errors.append(f"good_update.source_version must be {EXPECTED_SOURCE_VERSION}")
+        errors.append(
+            f"good_update.source_version must be {EXPECTED_SOURCE_VERSION}"
+        )
     source_git_sha = str(good.get("source_git_sha") or "")
     if _SHA40.fullmatch(source_git_sha) is None:
         errors.append("good_update.source_git_sha is invalid")
     if good.get("target_version") != EXPECTED_TARGET_VERSION:
-        errors.append(f"good_update.target_version must be {EXPECTED_TARGET_VERSION}")
+        errors.append(
+            f"good_update.target_version must be {EXPECTED_TARGET_VERSION}"
+        )
     if good.get("target_git_sha") != candidate_sha:
         errors.append("good_update.target_git_sha mismatch")
 
     bootstrap = _trial(lifecycle, "updater_bootstrap", errors)
-    bootstrap_meta, bootstrap_text = _load_log(root, "updater_bootstrap", bootstrap, errors)
+    bootstrap_meta, bootstrap_text = _load_log(
+        root,
+        "updater_bootstrap",
+        bootstrap,
+        errors,
+    )
     expected_hash = str(bootstrap.get("expected_sha256") or "")
     actual_hash = str(bootstrap.get("actual_sha256") or "")
     source_digest = str(bootstrap.get("source_digest") or "")
@@ -214,7 +245,9 @@ def evaluate(
     if bootstrap.get("asset_name") != UPDATER_ASSET:
         errors.append("updater_bootstrap.asset_name mismatch")
     if _SHA64.fullmatch(expected_hash) is None or expected_hash != actual_hash:
-        errors.append("updater_bootstrap expected and actual hashes do not match")
+        errors.append(
+            "updater_bootstrap expected and actual hashes do not match"
+        )
     if source_digest != candidate_sha:
         errors.append("updater_bootstrap.source_digest mismatch")
     if source_ref != EXPECTED_SOURCE_REF:
@@ -247,7 +280,9 @@ def evaluate(
         interruption,
         errors,
     )
-    transaction_id = str(interruption.get("observed_transaction_id") or "")
+    transaction_id = str(
+        interruption.get("observed_transaction_id") or ""
+    )
     revision = interruption.get("observed_revision")
     process_pid = interruption.get("updater_process_pid")
     journal_from = str(interruption.get("observed_journal_from") or "")
@@ -261,30 +296,58 @@ def evaluate(
         errors.append("appliance_interruption.source_version mismatch")
     if not transaction_id:
         errors.append("appliance_interruption transaction id is missing")
-    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
+    if (
+        not isinstance(revision, int)
+        or isinstance(revision, bool)
+        or revision < 1
+    ):
         errors.append("appliance_interruption revision is invalid")
-    if not isinstance(process_pid, int) or isinstance(process_pid, bool) or process_pid < 1:
-        errors.append("appliance_interruption updater process id is invalid")
+    if (
+        not isinstance(process_pid, int)
+        or isinstance(process_pid, bool)
+        or process_pid < 1
+    ):
+        errors.append(
+            "appliance_interruption updater process id is invalid"
+        )
     if journal_from != EXPECTED_SOURCE_VERSION:
         errors.append("appliance_interruption journal source mismatch")
     if journal_to.lstrip("v") != EXPECTED_TARGET_VERSION:
         errors.append("appliance_interruption journal target mismatch")
     if interruption.get("observed_journal_state") != "swapping":
-        errors.append("appliance_interruption did not observe journal state swapping")
-    if not isinstance(swapped_count, int) or isinstance(swapped_count, bool) or swapped_count < 1:
-        errors.append("appliance_interruption did not observe a completed live swap")
+        errors.append(
+            "appliance_interruption did not observe journal state swapping"
+        )
+    if (
+        not isinstance(swapped_count, int)
+        or isinstance(swapped_count, bool)
+        or swapped_count < 1
+    ):
+        errors.append(
+            "appliance_interruption did not observe a completed live swap"
+        )
     if (
         not isinstance(swapped_assets, list)
         or not swapped_assets
-        or not all(isinstance(asset, str) and asset for asset in swapped_assets)
+        or not all(
+            isinstance(asset, str) and asset
+            for asset in swapped_assets
+        )
     ):
-        errors.append("appliance_interruption swapped asset list is invalid")
+        errors.append(
+            "appliance_interruption swapped asset list is invalid"
+        )
         normalized_assets: list[str] = []
     else:
         normalized_assets = list(swapped_assets)
-    if isinstance(swapped_count, int) and not isinstance(swapped_count, bool):
-        if swapped_count != len(normalized_assets):
-            errors.append("appliance_interruption swap count does not match asset list")
+    if (
+        isinstance(swapped_count, int)
+        and not isinstance(swapped_count, bool)
+        and swapped_count != len(normalized_assets)
+    ):
+        errors.append(
+            "appliance_interruption swap count does not match asset list"
+        )
 
     for key in (
         "updater_process_killed",
@@ -296,11 +359,17 @@ def evaluate(
         if interruption.get(key) is not True:
             errors.append(f"appliance_interruption.{key} is not true")
     if interruption.get("recovery_exit_code") != 0:
-        errors.append("appliance_interruption recovery exit code is not zero")
+        errors.append(
+            "appliance_interruption recovery exit code is not zero"
+        )
     if interruption.get("backend_version") != EXPECTED_SOURCE_VERSION:
-        errors.append("appliance_interruption backend did not recover to source")
+        errors.append(
+            "appliance_interruption backend did not recover to source"
+        )
     if interruption.get("worker_version") != EXPECTED_SOURCE_VERSION:
-        errors.append("appliance_interruption worker did not recover to source")
+        errors.append(
+            "appliance_interruption worker did not recover to source"
+        )
 
     interruption_missing = _require_markers(
         "appliance_interruption",
@@ -328,7 +397,9 @@ def evaluate(
         and interruption_meta
         and bootstrap_meta.get("path") == interruption_meta.get("path")
     ):
-        errors.append("bootstrap and interruption evidence must use different logs")
+        errors.append(
+            "bootstrap and interruption evidence must use different logs"
+        )
 
     report = {
         "schema": SCHEMA,
@@ -366,7 +437,11 @@ def evaluate(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--lifecycle-report", type=Path, default=DEFAULT_LIFECYCLE)
+    parser.add_argument(
+        "--lifecycle-report",
+        type=Path,
+        default=DEFAULT_LIFECYCLE,
+    )
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     args = parser.parse_args(argv)
     now = datetime.now(timezone.utc)
@@ -397,7 +472,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--report must remain under validation/")
     _write_json_atomic(destination, report)
     print(f"report: {destination.relative_to(ROOT)}")
-    print("gate: " + ("PASS" if report.get("gate", {}).get("passed") else "BLOCKED"))
+    print(
+        "gate: "
+        + (
+            "PASS"
+            if report.get("gate", {}).get("passed")
+            else "BLOCKED"
+        )
+    )
     return code
 
 
