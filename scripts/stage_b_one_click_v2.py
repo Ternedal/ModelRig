@@ -72,10 +72,27 @@ def _load_observations(candidate: dict[str, Any]) -> dict[str, Any]:
 
 def _verify_bootstrap(candidate: dict[str, Any], observations: dict[str, Any], state: dict[str, Any]) -> None:
     resumed = bool(state.get("updater_bootstrap_done"))
-    if resumed and not isinstance(observations.get("trials", {}).get("updater_bootstrap"), dict):
+    trials = observations.get("trials")
+    if not isinstance(trials, dict):
+        raise legacy.StageBError("Lifecycle trials er ugyldige")
+    if resumed and not isinstance(trials.get("updater_bootstrap"), dict):
         raise legacy.StageBError("Bootstrap-state findes uden bootstrap-evidens")
     if resumed:
-        legacy.ok("Updater-bootstrap checkpoint findes; live fil og provenance genverificeres.")
+        legacy.ok("Updater-bootstrap checkpoint findes; cached proof ugyldiggøres og live fil genverificeres.")
+
+    # A saved checkpoint is not authority. Remove the old proof before any live
+    # network, checksum or provenance operation so a failed resume cannot be
+    # followed by a separate verifier that reuses stale green evidence.
+    trials.pop("updater_bootstrap", None)
+    state["updater_bootstrap_done"] = False
+    legacy.save_observations(observations)
+    legacy.save_state(state)
+    log = legacy.EVIDENCE / "updater_binary_check.log"
+    try:
+        log.unlink(missing_ok=True)
+    except OSError as exc:
+        raise legacy.StageBError(f"Gammel bootstrap-log kunne ikke fjernes: {exc}") from exc
+
     legacy.heading("STRICT 1/2 — verificér updater-bootstrap")
     if candidate.get("version") != EXPECTED_TARGET_VERSION:
         raise legacy.StageBError(
@@ -117,7 +134,6 @@ def _verify_bootstrap(candidate: dict[str, Any], observations: dict[str, Any], s
         detail = (result.stderr or result.stdout or "").strip()
         raise legacy.StageBError(f"Updater provenance verification fejlede: {detail[-500:]}")
 
-    log = legacy.EVIDENCE / "updater_binary_check.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     safe_output = (result.stdout or result.stderr or "").replace("\r", " ").strip()
     log.write_text(
@@ -139,7 +155,7 @@ def _verify_bootstrap(candidate: dict[str, Any], observations: dict[str, Any], s
         ) + "\n",
         encoding="utf-8",
     )
-    observations["trials"]["updater_bootstrap"] = {
+    trials["updater_bootstrap"] = {
         "performed": True,
         "release_version": EXPECTED_TARGET_VERSION,
         "release_git_sha": source_digest,
