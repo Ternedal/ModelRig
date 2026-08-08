@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+import hashlib
+import importlib
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+
+_resume_passed = _resume_failed = 0
+
+
+def _resume_check(condition: bool, message: str) -> None:
+    global _resume_passed, _resume_failed
+    if condition:
+        _resume_passed += 1
+        print(f"  PASS: {message}")
+    else:
+        _resume_failed += 1
+        print(f"  FAIL: {message}")
+
+
+_collector = importlib.import_module("stage_b_one_click_v2_contract")
+_legacy = _collector.legacy
+_root = Path(tempfile.mkdtemp(prefix="stage-b-resume-invalidation-"))
+_updater = _root / _collector.UPDATER_ASSET
+_updater.write_bytes(b"live updater")
+_evidence = _root / "validation" / "appliance-lifecycle-evidence"
+_evidence.mkdir(parents=True)
+_old_log = _evidence / "updater_binary_check.log"
+_old_log.write_text("old green proof\n", encoding="utf-8")
+_candidate = {
+    "version": "1.58.151",
+    "git_sha": "a" * 40,
+    "code_sha256": "b" * 64,
+}
+_observations = {"trials": {"updater_bootstrap": {"performed": True, "old": True}}}
+_state = {"updater_bootstrap_done": True}
+_events: list[tuple[str, object]] = []
+
+
+def _sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _save_observations(value) -> None:
+    _events.append(("save_observations", "updater_bootstrap" in value.get("trials", {})))
+
+
+def _save_state(value) -> None:
+    _events.append(("save_state", value.get("updater_bootstrap_done")))
+
+
+def _failed_attestation(command, **_kwargs):
+    _events.append(("attestation", list(command)))
+    return SimpleNamespace(returncode=1, stdout="", stderr="wrong release")
+
+
+try:
+    with (
+        mock.patch.object(_collector, "_release_asset_sha256", return_value=_sha(_updater)),
+        mock.patch.object(_legacy, "ROOT", _root),
+        mock.patch.object(_legacy, "EVIDENCE", _evidence),
+        mock.patch.object(_legacy, "appliance_root", return_value=_root),
+        mock.patch.object(_legacy, "sha256_file", side_effect=_sha),
+        mock.patch.object(_legacy, "save_observations", side_effect=_save_observations),
+        mock.patch.object(_legacy, "save_state", side_effect=_save_state),
+        mock.patch.object(_legacy, "heading"),
+        mock.patch.object(_legacy, "ok"),
+        mock.patch.object(_collector.subprocess, "run", side_effect=_failed_attestation),
+    ):
+        _collector._verify_bootstrap(_candidate, _observations, _state)
+except _legacy.StageBError:
+    _resume_check(True, "failed resumed attestation stops the collector")
+else:
+    _resume_check(False, "failed resumed attestation stops the collector")
+
+_resume_check(_state.get("updater_bootstrap_done") is False, "resume failure leaves checkpoint false")
+_resume_check("updater_bootstrap" not in _observations["trials"], "resume failure removes cached trial")
+_resume_check(not _old_log.exists(), "resume failure removes cached bootstrap log")
+_resume_check(
+    _events[:2] == [("save_observations", False), ("save_state", False)],
+    "cached proof is persistently invalidated before live verification",
+)
+_resume_check(
+    len(_events) >= 3 and _events[2][0] == "attestation",
+    "attestation runs only after invalidation is saved",
+)
+
+print(f"Stage B resume invalidation contracts: {_resume_passed} passed, {_resume_failed} failed")
+if _resume_failed:
+    raise SystemExit(1)
