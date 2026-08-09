@@ -60,6 +60,7 @@ class Agent4PhysicalReadRunbookTests(unittest.TestCase):
 
     def test_runbook_preserves_security_and_receipt_boundary(self) -> None:
         source = RUNBOOK.read_text(encoding="utf-8")
+        normalized = " ".join(source.split())
         for required in (
             "127.0.0.1:8099",
             "LocalSubnet",
@@ -69,7 +70,7 @@ class Agent4PhysicalReadRunbookTests(unittest.TestCase):
             "production_activation=false",
             "dræber aldrig en proces",
         ):
-            self.assertIn(required, source)
+            self.assertIn(required, normalized)
         self.assertNotIn("MODELRIG_ADMIN_KEY=", source)
         self.assertNotIn("Authorization: Bearer", source)
 
