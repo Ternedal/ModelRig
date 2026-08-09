@@ -27,6 +27,7 @@ from .handoff import (
 
 _AGENT4_OPERATOR_FLAG = "KALIV_AGENT4_OPERATOR_API"
 _AGENT4_DATA_ROOT = "KALIV_AGENT4_DATA_ROOT"
+_READ_ONLY_RESOURCE = "operator-read"
 
 
 class ReadOnlyAgent4HandoffExecutor:
@@ -93,9 +94,12 @@ def compose_agent4_operator_context_from_environment(
     if os.getenv(_AGENT4_OPERATOR_FLAG, "0") != "1":
         return None
 
+    # The canonical runtime requires a non-empty resource vector. This isolated
+    # synthetic capacity satisfies that structural invariant only; the executor
+    # above still rejects every handoff before an external side effect can occur.
     return compose_agent4_runtime(
         _configured_root(),
         executor=ReadOnlyAgent4HandoffExecutor(),
-        resource_capacities={},
-        resource_resolver=lambda spec: {},
+        resource_capacities={_READ_ONLY_RESOURCE: 1},
+        resource_resolver=lambda _spec: {_READ_ONLY_RESOURCE: 1},
     )
