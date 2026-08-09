@@ -85,7 +85,7 @@ class Agent4ReadProductIntegrationTests(unittest.TestCase):
         self.assertIn('const agent4ReadGrant = "agent4:read"', operator_source)
         self.assertIn('const agent4ReadGrant = "agent4:read"', grant_source)
         self.assertIn('detail == "agent4 read grant required"', android_source)
-        self.assertIn('"agent4:read"', android_source)
+        self.assertIn("agent4:read", android_source)
 
     def test_all_activation_surfaces_are_exact_and_default_off(self) -> None:
         entrypoint = (ROOT / "worker" / "app" / "entrypoint.py").read_text(
