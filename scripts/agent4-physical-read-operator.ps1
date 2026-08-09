@@ -9,4 +9,5 @@ if (-not (Test-Path -LiteralPath $core -PathType Leaf)) {
 # Bevar alle navngivne argumenter ordret. Denne fil er kun den stabile launcher-
 # indgang; al parsing, fasekontrol og credential-håndtering ligger i core-filen.
 & $core @args
-exit $LASTEXITCODE
+if (-not $?) { exit 1 }
+exit 0
