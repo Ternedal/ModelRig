@@ -82,6 +82,15 @@ fun ControlCenterScreen(
     store: TokenStore,
     onClose: () -> Unit,
 ) {
+    var showAgent4 by remember { mutableStateOf(false) }
+    if (showAgent4) {
+        Agent4OperatorScreen(
+            store = store,
+            onClose = { showAgent4 = false },
+        )
+        return
+    }
+
     val baseUrl = store.baseUrl?.trim().orEmpty()
     val token = store.token?.trim().orEmpty()
     var refreshGeneration by remember { mutableIntStateOf(0) }
@@ -152,6 +161,12 @@ fun ControlCenterScreen(
                 ) {
                     Text(if (loading) "Henter…" else "Opdatér")
                 }
+                OutlinedButton(
+                    onClick = { showAgent4 = true },
+                    enabled = baseUrl.isNotBlank() && token.isNotBlank(),
+                ) {
+                    Text("Agent 4 · read-only")
+                }
                 if (loading) {
                     CircularProgressIndicator(
                         modifier = Modifier.height(24.dp),
@@ -159,12 +174,12 @@ fun ControlCenterScreen(
                         color = KalivTheme.colors.signal,
                     )
                 }
-                Text(
-                    "Ingen automatisk polling",
-                    color = KalivTheme.colors.textMuted,
-                    fontSize = 11.sp,
-                )
             }
+            Text(
+                "Ingen automatisk polling",
+                color = KalivTheme.colors.textMuted,
+                fontSize = 11.sp,
+            )
             Spacer(Modifier.height(14.dp))
 
             val current = status
