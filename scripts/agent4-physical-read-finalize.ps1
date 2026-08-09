@@ -56,6 +56,12 @@ function Get-ArtifactReceipts {
     return @($paths | ForEach-Object { Get-FileReceipt -Path $_ } | Where-Object { $null -ne $_ })
 }
 
+function Test-RecordedProcessGone {
+    param([int]$ProcessId)
+    if ($ProcessId -le 0) { return $false }
+    return $null -eq (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
+}
+
 Assert-WindowsAdministrator
 $state = Read-OperatorState
 Assert-ExactCleanHead -RequiredSha ([string]$state.expected_sha)
@@ -93,9 +99,36 @@ $mutations = @(
         }
     }
 )
+$recordedBackendPid = [int]$state.backend_pid
+$recordedWorkerPid = [int]$state.worker_pid
 $cleanup = Stop-RecordedStack
 $portsFree = $null -eq (Get-ListenerPid -Port 8080) -and $null -eq (Get-ListenerPid -Port 8099)
+
+# The mandatory safety wrapper deliberately performs a verified pre-stop before
+# this finalizer hashes artifacts. In that path Stop-RecordedStack is idempotent
+# and may report false because the expected listeners are already gone. Count
+# that as successful only when the original recorded PID is also absent and both
+# ports remain free. A reused or still-running PID therefore fails closed.
+$backendStopped = [bool]$cleanup.backend_stopped
+if (
+    -not $backendStopped -and
+    $portsFree -and
+    (Test-RecordedProcessGone -ProcessId $recordedBackendPid)
+) {
+    $backendStopped = $true
+}
+$workerStopped = [bool]$cleanup.worker_stopped
+if (
+    -not $workerStopped -and
+    $portsFree -and
+    (Test-RecordedProcessGone -ProcessId $recordedWorkerPid)
+) {
+    $workerStopped = $true
+}
+
 $cleanupPassed = (
+    $backendStopped -and
+    $workerStopped -and
     [bool]$cleanup.firewall_removed -and
     -not [bool]$cleanup.unknown_process_preserved -and
     $portsFree -and
@@ -128,8 +161,8 @@ $receipt = [ordered]@{
     trials = $checkpointResults
     artifacts = $artifacts
     cleanup = [ordered]@{
-        backend_stopped = [bool]$cleanup.backend_stopped
-        worker_stopped = [bool]$cleanup.worker_stopped
+        backend_stopped = $backendStopped
+        worker_stopped = $workerStopped
         unknown_process_preserved = [bool]$cleanup.unknown_process_preserved
         firewall_removed = [bool]$cleanup.firewall_removed
         ports_free = $portsFree
