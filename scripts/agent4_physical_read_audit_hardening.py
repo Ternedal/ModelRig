@@ -118,9 +118,11 @@ def require_rfc1918(value: Any, label: str) -> str:
     return value
 
 
-def validate_mutations(receipt: dict[str, Any]) -> None:
+def validate_mutations(repo_root: Path, receipt: dict[str, Any]) -> None:
     mutations = receipt.get("mutations")
+    artifacts = receipt.get("artifacts")
     require(isinstance(mutations, list) and len(mutations) == 2, "præcis to mutation receipts kræves")
+    require(isinstance(artifacts, list), "artifact receipts mangler")
     modes: set[str] = set()
     for mutation in mutations:
         require(isinstance(mutation, dict), "mutation receipt skal være et objekt")
@@ -131,6 +133,27 @@ def validate_mutations(receipt: dict[str, Any]) -> None:
         claimed = require_sha(mutation.get("receipt_sha256"), f"mutation {mode} digest")
         unsigned = {key: value for key, value in mutation.items() if key != "receipt_sha256"}
         require(sha256_value(unsigned) == claimed, f"mutation {mode} digest matcher ikke indholdet")
+
+        prefix = f"mutation-{mode}-"
+        candidates = [
+            artifact
+            for artifact in artifacts
+            if isinstance(artifact, dict)
+            and isinstance(artifact.get("path"), str)
+            and Path(artifact["path"]).name.startswith(prefix)
+            and Path(artifact["path"]).suffix.lower() == ".json"
+        ]
+        require(len(candidates) == 1, f"mutation {mode} skal bindes til præcis én artifact receipt")
+        artifact_path = validate_file_receipt(
+            repo_root,
+            candidates[0],
+            f"mutation {mode} artifact",
+        )
+        artifact_data = json.loads(artifact_path.read_text(encoding="utf-8-sig"))
+        require(
+            artifact_data == mutation,
+            f"mutation {mode} i receipt matcher ikke den hash-listede artifact-fil",
+        )
 
 
 def validate_trial_set(receipt: dict[str, Any]) -> dict[str, Any]:
@@ -266,7 +289,7 @@ def validate(receipt_path: Path, repo_root: Path) -> None:
     receipt = json.loads(receipt_path.read_text(encoding="utf-8-sig"))
     require(isinstance(receipt, dict), "receipt skal være et JSON-objekt")
     trials = validate_trial_set(receipt)
-    validate_mutations(receipt)
+    validate_mutations(repo_root, receipt)
     validate_safety(repo_root, receipt)
     validate_ui_evidence(trials)
     scan_runtime_evidence(repo_root)
