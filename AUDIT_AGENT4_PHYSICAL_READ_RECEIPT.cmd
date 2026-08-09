@@ -11,9 +11,9 @@ set "REPO=%~dp0"
 set "EXPECTED_SHA=%~1"
 set "RECEIPT=%REPO%validation\agent4-physical-read-latest.json"
 set "OUT=%USERPROFILE%\ModelRig-Validation\A4-18-receipt-audit\receipt-audit-latest.json"
-for /f "usebackq delims=" %%H in (`git -C "%REPO%" rev-parse HEAD 2^>nul`) do set "OBSERVED_SHA=%%H"
-if /i not "%OBSERVED_SHA%"=="%EXPECTED_SHA%" (
-  echo A4-18 RECEIPT AUDIT FEJLEDE. Forkert exact HEAD.
+python "%REPO%scripts\agent4_physical_read_exact_head_gate.py" --receipt "%RECEIPT%" --repo-root "%REPO%" --expected-sha "%EXPECTED_SHA%"
+if errorlevel 1 (
+  echo A4-18 EXACT-HEAD GATE FEJLEDE. Issue #421 maa ikke lukkes.
   exit /b 2
 )
 python "%REPO%scripts\agent4_physical_read_audit_hardening.py" --receipt "%RECEIPT%" --repo-root "%REPO%"
