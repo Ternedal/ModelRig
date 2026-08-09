@@ -23,6 +23,7 @@ class Agent4OperatorClient(
         const val MEDIA_TYPE = "application/vnd.modelrig.agent4.operator+json"
         const val CAMPAIGN_CURSOR_SCHEMA = "modelrig-agent4/campaign-list-query-cursor/v1"
         private const val CAMPAIGN_RECORD_SCHEMA = "modelrig-agent4/campaign-record/v1"
+        private const val TIMELINE_ENTRY_SCHEMA = "modelrig-agent4/campaign-timeline-entry/v1"
         private const val EVIDENCE_RECORD_SCHEMA = "modelrig-agent4/campaign-evidence-record/v1"
         private const val TIMELINE_CURSOR_SCHEMA = "modelrig-agent4/campaign-timeline-query-cursor/v1"
         private const val EVIDENCE_CURSOR_SCHEMA = "modelrig-agent4/campaign-evidence-query-cursor/v1"
@@ -67,8 +68,12 @@ class Agent4OperatorClient(
     /** Opaque campaign-list cursor; it can only be returned to listCampaigns. */
     data class CampaignCursor internal constructor(internal val encoded: String)
 
-    /** Opaque campaign-local cursor for timeline/evidence page operations. */
-    data class Cursor internal constructor(internal val encoded: String)
+    /** Opaque campaign-local cursor with validated ordering metadata. */
+    data class Cursor internal constructor(
+        internal val encoded: String,
+        internal val sequence: Int,
+        internal val hash: String?,
+    )
 
     data class CampaignOverview(
         val campaignId: String,
@@ -114,6 +119,12 @@ class Agent4OperatorClient(
         val latestTimelineHeadHash: String?,
     )
 
+    private data class BoundRecord(
+        val sequence: Int,
+        val hash: String,
+        val canonical: CanonicalJson,
+    )
+
     private val base: HttpUrl = baseUrl.trimEnd('/').toHttpUrl()
     private val http = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
@@ -134,9 +145,7 @@ class Agent4OperatorClient(
         val orderedStatuses = statuses.sortedBy { it.wireValue }
         val builder = operatorUrl("campaigns")
             .addQueryParameter("limit", limit.toString())
-        orderedStatuses.forEach {
-            builder.addQueryParameter("status", it.wireValue)
-        }
+        orderedStatuses.forEach { builder.addQueryParameter("status", it.wireValue) }
         after?.let { builder.addQueryParameter("after", it.encoded) }
         snapshotHead?.let { builder.addQueryParameter("snapshot_head", it.encoded) }
         val root = try {
@@ -192,15 +201,21 @@ class Agent4OperatorClient(
         if (returnedId != requestedId) {
             throw protocol("Agent 4 timeline matcher ikke requestet campaign")
         }
+        val records = page.requireArray("entries").objects("entries").map {
+            parseTimelineRecord(it, returnedId)
+        }
+        val start = page.requireCursor("start_cursor", returnedId, TIMELINE_CURSOR_SCHEMA, "entry_hash")
+        val next = page.requireCursor("next_cursor", returnedId, TIMELINE_CURSOR_SCHEMA, "entry_hash")
+        val head = page.requireCursor("head_cursor", returnedId, TIMELINE_CURSOR_SCHEMA, "entry_hash")
+        val hasMore = page.requireBoolean("has_more")
+        validatePageRelationships("timeline", records, start, next, head, hasMore)
         return TimelinePage(
             campaignId = returnedId,
-            entries = page.requireArray("entries").objects("entries").map {
-                CanonicalJson(it.toString())
-            },
-            startCursor = page.requireCursor("start_cursor", returnedId, TIMELINE_CURSOR_SCHEMA, "entry_hash"),
-            nextCursor = page.requireCursor("next_cursor", returnedId, TIMELINE_CURSOR_SCHEMA, "entry_hash"),
-            headCursor = page.requireCursor("head_cursor", returnedId, TIMELINE_CURSOR_SCHEMA, "entry_hash"),
-            hasMore = page.requireBoolean("has_more"),
+            entries = records.map { it.canonical },
+            startCursor = start,
+            nextCursor = next,
+            headCursor = head,
+            hasMore = hasMore,
         )
     }
 
@@ -224,15 +239,21 @@ class Agent4OperatorClient(
         if (returnedId != requestedId) {
             throw protocol("Agent 4 evidence-side matcher ikke requestet campaign")
         }
+        val records = page.requireArray("records").objects("records").map {
+            parseEvidenceRecord(it, returnedId)
+        }
+        val start = page.requireCursor("start_cursor", returnedId, EVIDENCE_CURSOR_SCHEMA, "record_hash")
+        val next = page.requireCursor("next_cursor", returnedId, EVIDENCE_CURSOR_SCHEMA, "record_hash")
+        val head = page.requireCursor("head_cursor", returnedId, EVIDENCE_CURSOR_SCHEMA, "record_hash")
+        val hasMore = page.requireBoolean("has_more")
+        validatePageRelationships("evidence", records, start, next, head, hasMore)
         return EvidencePage(
             campaignId = returnedId,
-            records = page.requireArray("records").objects("records").map {
-                CanonicalJson(it.toString())
-            },
-            startCursor = page.requireCursor("start_cursor", returnedId, EVIDENCE_CURSOR_SCHEMA, "record_hash"),
-            nextCursor = page.requireCursor("next_cursor", returnedId, EVIDENCE_CURSOR_SCHEMA, "record_hash"),
-            headCursor = page.requireCursor("head_cursor", returnedId, EVIDENCE_CURSOR_SCHEMA, "record_hash"),
-            hasMore = page.requireBoolean("has_more"),
+            records = records.map { it.canonical },
+            startCursor = start,
+            nextCursor = next,
+            headCursor = head,
+            hasMore = hasMore,
         )
     }
 
@@ -259,7 +280,7 @@ class Agent4OperatorClient(
         val value = execute(
             operatorUrl("campaigns", requestedCampaignId, "evidence", requestedEvidenceId).build(),
         ).requireObject("evidence")
-        if (value.optString("schema") != EVIDENCE_RECORD_SCHEMA) {
+        if (value.requireText("schema") != EVIDENCE_RECORD_SCHEMA) {
             throw protocol("Ukendt Agent 4 evidence-record-schema")
         }
         if (value.requireText("campaign_id") != requestedCampaignId) {
@@ -269,6 +290,67 @@ class Agent4OperatorClient(
             throw protocol("Agent 4 evidence matcher ikke requestet evidence id")
         }
         return CanonicalJson(value.toString())
+    }
+
+    private fun parseTimelineRecord(value: JSONObject, campaignId: String): BoundRecord {
+        if (value.requireText("schema") != TIMELINE_ENTRY_SCHEMA) {
+            throw protocol("Ukendt Agent 4 timeline-entry-schema")
+        }
+        val event = value.requireObject("event")
+        if (event.requireText("campaign_id") != campaignId) {
+            throw protocol("Agent 4 timeline-entry tilhører en anden campaign")
+        }
+        return BoundRecord(
+            sequence = event.requirePositiveInt("sequence"),
+            hash = value.requireHash("entry_hash"),
+            canonical = CanonicalJson(value.toString()),
+        )
+    }
+
+    private fun parseEvidenceRecord(value: JSONObject, campaignId: String): BoundRecord {
+        if (value.requireText("schema") != EVIDENCE_RECORD_SCHEMA) {
+            throw protocol("Ukendt Agent 4 evidence-record-schema")
+        }
+        if (value.requireText("campaign_id") != campaignId) {
+            throw protocol("Agent 4 evidence-record tilhører en anden campaign")
+        }
+        return BoundRecord(
+            sequence = value.requirePositiveInt("sequence"),
+            hash = value.requireHash("record_hash"),
+            canonical = CanonicalJson(value.toString()),
+        )
+    }
+
+    private fun validatePageRelationships(
+        label: String,
+        records: List<BoundRecord>,
+        start: Cursor,
+        next: Cursor,
+        head: Cursor,
+        hasMore: Boolean,
+    ) {
+        if (start.sequence > next.sequence || next.sequence > head.sequence) {
+            throw protocol("Agent 4 $label-cursors har ugyldig rækkefølge")
+        }
+        if (records.size != next.sequence - start.sequence) {
+            throw protocol("Agent 4 $label-side matcher ikke cursor-intervallet")
+        }
+        records.forEachIndexed { index, record ->
+            val expectedSequence = start.sequence + index + 1
+            if (record.sequence != expectedSequence) {
+                throw protocol("Agent 4 $label-side har sequence-tab eller overlap")
+            }
+        }
+        if (records.isEmpty()) {
+            if (next != start) {
+                throw protocol("Agent 4 tom $label-side må ikke flytte cursor")
+            }
+        } else if (next.hash != records.last().hash) {
+            throw protocol("Agent 4 $label-side matcher ikke next-cursor hash")
+        }
+        if (hasMore != (next.sequence < head.sequence)) {
+            throw protocol("Agent 4 $label-side har modstridende has_more")
+        }
     }
 
     private fun operatorUrl(vararg segments: String): HttpUrl.Builder {
@@ -298,7 +380,7 @@ class Agent4OperatorClient(
                     throw protocol("Ukendt Agent 4-medietype: ${responseType ?: "mangler"}")
                 }
                 val root = parseObject(text, "Agent 4 returnerede ugyldig JSON")
-                val schema = root.optString("schema")
+                val schema = root.requireText("schema")
                 if (schema != SCHEMA) {
                     throw protocol("Ukendt Agent 4-schema: $schema")
                 }
@@ -318,8 +400,8 @@ class Agent4OperatorClient(
     private fun classifyFailure(status: Int, body: String): OperatorException {
         val detail = runCatching {
             val root = JSONObject(body)
-            root.optString("error").ifBlank { root.optString("detail") }
-        }.getOrNull()?.ifBlank { null } ?: "HTTP $status"
+            root.strictOptionalText("error") ?: root.strictOptionalText("detail")
+        }.getOrNull() ?: "HTTP $status"
         return when (status) {
             401 -> OperatorException(ErrorKind.AUTH_REQUIRED, status, "Parringen skal fornyes")
             403 -> if (detail == "agent4 read grant required") {
@@ -336,7 +418,7 @@ class Agent4OperatorClient(
 
     private fun parseOverview(value: JSONObject): CampaignOverview {
         val record = value.requireObject("record")
-        if (record.optString("schema") != CAMPAIGN_RECORD_SCHEMA) {
+        if (record.requireText("schema") != CAMPAIGN_RECORD_SCHEMA) {
             throw protocol("Ukendt Agent 4 campaign-record-schema")
         }
         val spec = record.requireObject("spec")
@@ -380,9 +462,26 @@ class Agent4OperatorClient(
     private fun JSONObject.requireArray(name: String): JSONArray =
         optJSONArray(name) ?: throw protocol("Agent 4-svaret mangler $name")
 
-    private fun JSONObject.requireText(name: String): String =
-        optString(name).takeIf { it.isNotBlank() }
-            ?: throw protocol("Agent 4-svaret mangler $name")
+    private fun JSONObject.requireText(name: String): String {
+        if (!has(name) || isNull(name)) throw protocol("Agent 4-svaret mangler $name")
+        val value = get(name)
+        if (value !is String || value.isBlank()) {
+            throw protocol("Agent 4-svaret har ugyldigt $name")
+        }
+        return value
+    }
+
+    private fun JSONObject.strictOptionalText(name: String): String? {
+        if (!has(name) || isNull(name)) return null
+        val value = get(name)
+        return if (value is String && value.isNotBlank()) value else null
+    }
+
+    private fun JSONObject.requirePositiveInt(name: String): Int {
+        val value = requireNonNegativeInt(name)
+        if (value < 1) throw protocol("Agent 4-svaret har ugyldigt $name")
+        return value
+    }
 
     private fun JSONObject.requireNonNegativeInt(name: String): Int {
         if (!has(name) || isNull(name)) throw protocol("Agent 4-svaret mangler $name")
@@ -444,21 +543,23 @@ class Agent4OperatorClient(
         if ((sequence == 0 && hash != null) || (sequence > 0 && hash == null)) {
             throw protocol("Agent 4-svaret har ugyldig hash-binding i $name")
         }
-        return Cursor(cursor.toString())
+        return Cursor(cursor.toString(), sequence, hash)
     }
 
     private fun JSONObject.optionalText(name: String): String? {
         if (!has(name) || isNull(name)) return null
-        return optString(name).takeIf { it.isNotBlank() }
-            ?: throw protocol("Agent 4-svaret har ugyldigt $name")
+        val value = get(name)
+        if (value !is String || value.isBlank()) {
+            throw protocol("Agent 4-svaret har ugyldigt $name")
+        }
+        return value
     }
 
     private fun JSONObject.requireHash(name: String): String =
         optionalHash(name) ?: throw protocol("Agent 4-svaret mangler $name")
 
     private fun JSONObject.optionalHash(name: String): String? {
-        if (!has(name) || isNull(name)) return null
-        val value = optString(name)
+        val value = optionalText(name) ?: return null
         if (!SHA256.matches(value)) {
             throw protocol("Agent 4-svaret har ugyldigt $name")
         }
@@ -472,9 +573,11 @@ class Agent4OperatorClient(
     }
 
     private fun JSONArray.strings(label: String): List<String> = buildList {
-        for (index in 0 until length()) {
-            val value = optString(index, "")
-            if (value.isBlank()) throw protocol("Agent 4-$label indeholder ugyldig tekst")
+        for (index in 0 until this@strings.length()) {
+            val value = this@strings.get(index)
+            if (value !is String || value.isBlank()) {
+                throw protocol("Agent 4-$label indeholder ugyldig tekst")
+            }
             add(value)
         }
     }
