@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +49,27 @@ UI_OBSERVATION_TRIALS = {
     "malformed_schema_fail_closed",
 }
 SHA_PREFIX = "sha256:"
+RUNTIME_RELATIVE = Path("validation/agent4-physical-runtime")
+RFC1918_NETWORKS = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+)
+TEXT_EVIDENCE_SUFFIXES = {".json", ".log", ".txt"}
+IMAGE_EVIDENCE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+CREDENTIAL_PATTERNS = (
+    re.compile(r"(?i)\bauthorization\s*:\s*(?:bearer\s+)?[A-Za-z0-9._~+/=-]{8,}"),
+    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}"),
+    re.compile(
+        r"(?i)\bMODELRIG_ADMIN_KEY\s*=\s*(?!%|<redacted>|\[redacted\])\S{8,}"
+    ),
+    re.compile(
+        r'(?i)"(?:token|device_token|bearer_token|pairing_code|admin_key|password|secret|client_secret|private_key)"\s*:\s*"(?!sha256:|<redacted>|\[redacted\])[^"\r\n]+"'
+    ),
+    re.compile(
+        r"(?i)\b(?:pairing[_ -]?code|device[_ -]?token|admin[_ -]?key)\s*[:=]\s*(?!<redacted>|\[redacted\]|sha256:)\S{4,}"
+    ),
+)
 
 
 def canonical_json(value: Any) -> bytes:
@@ -84,6 +107,17 @@ def safe_repo_path(repo_root: Path, value: Any, label: str) -> Path:
     return candidate
 
 
+def require_rfc1918(value: Any, label: str) -> str:
+    require(isinstance(value, str), f"{label} mangler")
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError as exc:
+        raise ValueError(f"{label} er ikke en gyldig IPv4-adresse") from exc
+    require(address.version == 4, f"{label} skal være IPv4")
+    require(any(address in network for network in RFC1918_NETWORKS), f"{label} er ikke RFC1918")
+    return value
+
+
 def validate_mutations(receipt: dict[str, Any]) -> None:
     mutations = receipt.get("mutations")
     require(isinstance(mutations, list) and len(mutations) == 2, "præcis to mutation receipts kræves")
@@ -107,33 +141,55 @@ def validate_trial_set(receipt: dict[str, Any]) -> dict[str, Any]:
     return trials
 
 
-def validate_file_receipt(repo_root: Path, value: Any, label: str) -> None:
+def validate_file_receipt(repo_root: Path, value: Any, label: str) -> Path:
     require(isinstance(value, dict), f"{label} mangler")
     path = safe_repo_path(repo_root, value.get("path"), f"{label}.path")
-    require(path.is_file(), f"{label} fil mangler")
+    require(path.is_file() and not path.is_symlink(), f"{label} fil mangler eller er et symlink")
     require(path.stat().st_size == value.get("size_bytes"), f"{label} størrelse afviger")
     claimed = require_sha(value.get("sha256"), f"{label}.sha256")
     actual = SHA_PREFIX + hashlib.sha256(path.read_bytes()).hexdigest()
     require(actual == claimed, f"{label} hash afviger")
+    return path
 
 
-def validate_ui_evidence(repo_root: Path, trials: dict[str, Any]) -> None:
+def validate_ui_evidence(trials: dict[str, Any]) -> None:
     for name in UI_OBSERVATION_TRIALS:
         entry = trials[name]
         require(isinstance(entry, dict), f"{name} skal være et objekt")
         note = entry.get("note")
         screenshot = entry.get("screenshot")
-        if screenshot is not None:
-            validate_file_receipt(repo_root, screenshot, f"{name}.screenshot")
-            path = str(screenshot.get("path", ""))
-            require(
-                path.startswith("validation/agent4-physical-runtime/"),
-                f"{name} screenshot ligger uden for validation runtime",
-            )
         require(
-            screenshot is not None or isinstance(note, str) and note.strip(),
-            f"{name} mangler både screenshot og menneskelig UI-observation",
+            screenshot is None,
+            f"{name} screenshot kan ikke credential-verificeres maskinelt; brug en redigeret tekstobservation",
         )
+        require(
+            isinstance(note, str) and note.strip(),
+            f"{name} mangler en redigeret menneskelig UI-observation",
+        )
+
+
+def scan_runtime_evidence(repo_root: Path) -> None:
+    runtime = (repo_root / RUNTIME_RELATIVE).resolve()
+    require(runtime.is_dir() and not runtime.is_symlink(), "validation runtime mangler eller er et symlink")
+    for path in sorted(runtime.rglob("*")):
+        if path.is_symlink():
+            raise ValueError(f"runtime evidence må ikke indeholde symlink: {path.relative_to(repo_root)}")
+        if not path.is_file():
+            continue
+        suffix = path.suffix.lower()
+        relative = path.relative_to(repo_root).as_posix()
+        if suffix in IMAGE_EVIDENCE_SUFFIXES:
+            raise ValueError(
+                f"billedevidence kan ikke credential-verificeres maskinelt: {relative}; brug redigerede tekstobservationer"
+            )
+        if path.name.lower() == "admin-key.txt":
+            raise ValueError("admin-key.txt må ikke eksistere ved audit")
+        if suffix not in TEXT_EVIDENCE_SUFFIXES:
+            continue
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
+        for pattern in CREDENTIAL_PATTERNS:
+            if pattern.search(text):
+                raise ValueError(f"credential-lignende indhold fundet i runtime evidence: {relative}")
 
 
 def validate_safety(repo_root: Path, receipt: dict[str, Any]) -> None:
@@ -149,22 +205,61 @@ def validate_safety(repo_root: Path, receipt: dict[str, Any]) -> None:
         require(safety.get(key) is False, f"safety_hardening.{key} skal være false")
     require(safety.get("pixel_manufacturer") == "Google", "safety hardware er ikke Google")
     model = safety.get("pixel_model")
-    require(isinstance(model, str) and model.startswith("Pixel"), "safety hardware er ikke Pixel")
-    require(not any(term in model.lower() for term in ("emulator", "qemu", "sdk_gphone", "generic")), "emulator-model afvist")
-    require_sha(safety.get("pixel_serial_sha256"), "pixel serial hash")
-    require(safety.get("backend_bound_address") == safety.get("lan_address"), "backend bind matcher ikke LAN")
+    require(isinstance(model, str) and re.fullmatch(r"Pixel\b.*", model), "safety hardware er ikke Pixel")
+    require(
+        not any(term in model.lower() for term in ("emulator", "qemu", "sdk_gphone", "generic")),
+        "emulator-model afvist",
+    )
+    serial_hash = require_sha(safety.get("pixel_serial_sha256"), "pixel serial hash")
+    lan_address = require_rfc1918(safety.get("lan_address"), "safety LAN-adresse")
+    require(safety.get("backend_bound_address") == lan_address, "backend bind matcher ikke LAN")
+    require(safety.get("firewall_local_address") == lan_address, "firewall local address matcher ikke LAN")
     require(safety.get("worker_bound_address") == "127.0.0.1", "worker er ikke loopback-only")
     require(safety.get("firewall_remote_scope") == "LocalSubnet", "firewall scope er ikke LocalSubnet")
-    require(safety.get("network_profile") != "Public", "Public netværksprofil afvist")
+    require(
+        safety.get("network_profile") in {"Private", "DomainAuthenticated"},
+        "netværksprofil skal være Private eller DomainAuthenticated",
+    )
+
     binding = safety.get("binding_file")
     require(isinstance(binding, dict), "safety binding receipt mangler")
     require(
         binding.get("path") == "validation/agent4-physical-runtime/safety-binding.json",
         "forkert safety binding path",
     )
-    validate_file_receipt(repo_root, binding, "safety binding")
+    binding_path = validate_file_receipt(repo_root, binding, "safety binding")
+    binding_data = json.loads(binding_path.read_text(encoding="utf-8-sig"))
+    require(isinstance(binding_data, dict), "safety binding skal være et JSON-objekt")
+    require(
+        binding_data.get("schema") == "modelrig-agent4/physical-read-safety-binding/v1",
+        "forkert safety binding schema",
+    )
+    require(binding_data.get("expected_sha") == receipt.get("expected_sha"), "safety binding SHA matcher ikke receipt")
+    require(binding_data.get("physical_pixel") is True, "safety binding physical_pixel skal være true")
+    for key in ("wildcard_binding", "public_network", "production_activation"):
+        require(binding_data.get(key) is False, f"safety binding.{key} skal være false")
+
+    comparisons = {
+        "adb_serial_sha256": serial_hash,
+        "pixel_manufacturer": safety.get("pixel_manufacturer"),
+        "pixel_model": model,
+        "lan_address": lan_address,
+        "network_profile": safety.get("network_profile"),
+        "backend_bound_address": safety.get("backend_bound_address"),
+        "worker_bound_address": safety.get("worker_bound_address"),
+        "firewall_local_address": safety.get("firewall_local_address"),
+        "firewall_remote_scope": safety.get("firewall_remote_scope"),
+    }
+    for key, expected in comparisons.items():
+        require(binding_data.get(key) == expected, f"safety binding og receipt er uenige om {key}")
+
     pixel = receipt.get("pixel")
     require(isinstance(pixel, dict) and pixel.get("model") == model, "Pixel-model matcher ikke safety evidence")
+    require(
+        pixel.get("android_release") == binding_data.get("pixel_android_release")
+        and pixel.get("sdk") == binding_data.get("pixel_sdk"),
+        "Pixel OS-identitet matcher ikke safety binding",
+    )
 
 
 def validate(receipt_path: Path, repo_root: Path) -> None:
@@ -173,7 +268,8 @@ def validate(receipt_path: Path, repo_root: Path) -> None:
     trials = validate_trial_set(receipt)
     validate_mutations(receipt)
     validate_safety(repo_root, receipt)
-    validate_ui_evidence(repo_root, trials)
+    validate_ui_evidence(trials)
+    scan_runtime_evidence(repo_root)
 
 
 def main() -> int:
@@ -185,6 +281,7 @@ def main() -> int:
     if args.self_test:
         require(len(REQUIRED_TRIALS) == 21, "checkpoint count self-test fejlede")
         require_sha(SHA_PREFIX + "0" * 64, "self-test hash")
+        require_rfc1918("192.168.1.10", "self-test LAN")
         print("A4-18 receipt hardening self-test: PASS")
         return 0
     repo_root = (args.repo_root or Path(__file__).resolve().parents[1]).resolve()
