@@ -36,4 +36,14 @@ class Agent4ResponseEpochTest {
         assertFalse(guard.accepts(paging, null))
         assertTrue(guard.accepts(paging, first))
     }
+
+    @Test
+    fun explicitInvalidationRejectsPendingSuccessFailureAndFinally() {
+        val guard = Agent4ResponseEpoch()
+        val pending = guard.begin(first)
+
+        guard.invalidate()
+
+        assertFalse(guard.accepts(pending, first))
+    }
 }
