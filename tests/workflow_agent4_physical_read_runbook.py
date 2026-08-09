@@ -27,6 +27,7 @@ class Agent4PhysicalReadRunbookTests(unittest.TestCase):
             "REGRANT_AGENT4_PHYSICAL_READ_TEST.cmd",
             "STATUS_AGENT4_PHYSICAL_READ_TEST.cmd",
             "FINALIZE_AGENT4_PHYSICAL_READ_TEST.cmd",
+            "AUDIT_AGENT4_PHYSICAL_READ_RECEIPT.cmd",
             "STOP_AGENT4_PHYSICAL_READ_TEST.cmd",
         ):
             self.assertIn(launcher, source)
@@ -69,10 +70,15 @@ class Agent4PhysicalReadRunbookTests(unittest.TestCase):
             "public_network=false",
             "production_activation=false",
             "dræber aldrig en proces",
+            "oprindelige registrerede PID'er er væk",
+            "runtime-evidensfiler",
+            "redigerede tekstobservationer",
+            "ScreenshotPath` må ikke bruges",
         ):
             self.assertIn(required, normalized)
         self.assertNotIn("MODELRIG_ADMIN_KEY=", source)
         self.assertNotIn("Authorization: Bearer", source)
+        self.assertNotIn("valgfrit redigeret screenshot", source)
 
 
 if __name__ == "__main__":
