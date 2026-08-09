@@ -39,6 +39,12 @@ signal and outcome lookup raises `CampaignValidationError`. This gives the
 canonical scheduler graph the executor shape it requires without granting any
 external execution authority.
 
+The canonical runtime also requires a non-empty resource vector. Read mode uses
+one synthetic `operator-read` capacity solely to satisfy that structural
+invariant. It is not mapped to GPU, CPU, Agent 3 or any external executor, and
+the fail-closed executor still rejects every attempted handoff before side
+effects.
+
 The bootstrap does not call:
 
 - submit or dispatch;
