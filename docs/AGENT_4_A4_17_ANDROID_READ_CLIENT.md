@@ -58,27 +58,32 @@ fields through a typed mutation API.
 
 Campaign records, timeline entries and evidence records remain server-owned
 canonical JSON. The Android layer wraps them for display and extracts only the
-small identity/status/count fields needed by the list UI. It does not create a
+small identity/status/count fields needed by the UI. It does not create a
 parallel Agent 4 domain model.
+
+Timeline and evidence paging are bounded and snapshot-bound: every subsequent
+page sends both the previous `next_cursor` and the first page's `head_cursor`.
+The UI therefore cannot silently mix entries from different logical snapshots.
 
 ## Stale-data protection
 
-The screen clears previously rendered privileged data before every refresh and
-before evaluating a new auth/network result. A revoke, invalid token, protocol
-failure or network error therefore replaces the campaign list with a locked or
-error state rather than leaving stale data visible.
+The list and detail screens clear previously rendered privileged data before
+every refresh and before evaluating a new auth/network result. A revoke, invalid
+token, protocol failure or network error therefore replaces campaign, timeline
+and evidence data with a locked or error state rather than leaving stale data
+visible.
 
 The OkHttp client uses no-cache/no-store requests and no direct worker address.
 
 ## Current UI
 
-Control Center now exposes:
+Control Center exposes:
 
 ```text
 Agent 4 · read-only
 ```
 
-The first screen shows:
+The campaign list shows:
 
 - campaign name and canonical ID;
 - status;
@@ -87,8 +92,14 @@ The first screen shows:
 - explicit loading, pairing-required, grant-required, empty, unavailable and
   protocol-error states.
 
-The next commits in A4-17 will connect campaign detail, timeline/evidence paging
-and verification views using the already implemented client methods.
+The campaign detail view shows:
+
+- canonical workflow, priority, attempt, revision and timestamps;
+- evidence-chain verification and bound hashes;
+- timeline entries with bounded `Hent næste` paging;
+- evidence records with bounded `Hent næste` paging;
+- immediate locked/error replacement if authorization or protocol validation
+  fails during initial load or later paging.
 
 ## Non-goals
 
@@ -114,3 +125,10 @@ MockWebServer contracts cover:
 - 401/403/404/422/503 classification;
 - unknown media type/schema/status rejection;
 - invalid input rejection before network use.
+
+Presentation contracts additionally cover:
+
+- canonical campaign-record parsing;
+- timeline-entry schema and hash parsing;
+- evidence-record schema and hash parsing;
+- fail-closed rejection of unknown schemas and malformed hashes.
