@@ -22,9 +22,13 @@ class Agent4OperatorClient(
         const val SCHEMA = "modelrig-agent4/operator-api/v1"
         const val MEDIA_TYPE = "application/vnd.modelrig.agent4.operator+json"
         private const val CAMPAIGN_RECORD_SCHEMA = "modelrig-agent4/campaign-record/v1"
+        private const val EVIDENCE_RECORD_SCHEMA = "modelrig-agent4/campaign-evidence-record/v1"
+        private const val TIMELINE_CURSOR_SCHEMA = "modelrig-agent4/campaign-timeline-query-cursor/v1"
+        private const val EVIDENCE_CURSOR_SCHEMA = "modelrig-agent4/campaign-evidence-query-cursor/v1"
         private const val DEFAULT_LIMIT = 100
         private const val MAX_LIMIT = 1_000
         private const val OPERATOR_PATH = "api/v1/experimental/agent4/operator"
+        private val SHA256 = Regex("sha256:[0-9a-f]{64}")
     }
 
     enum class CampaignStatus(val wireValue: String) {
@@ -42,6 +46,7 @@ class Agent4OperatorClient(
     enum class ErrorKind {
         AUTH_REQUIRED,
         GRANT_REQUIRED,
+        FEATURE_DISABLED,
         NOT_FOUND,
         REQUEST_REJECTED,
         UNAVAILABLE,
@@ -118,7 +123,19 @@ class Agent4OperatorClient(
         statuses.sortedBy { it.wireValue }.forEach {
             builder.addQueryParameter("status", it.wireValue)
         }
-        val root = execute(builder.build())
+        val root = try {
+            execute(builder.build())
+        } catch (failure: OperatorException) {
+            if (failure.kind == ErrorKind.NOT_FOUND) {
+                throw OperatorException(
+                    ErrorKind.FEATURE_DISABLED,
+                    failure.statusCode,
+                    "Agent 4-read er ikke slået til på riggen",
+                    failure,
+                )
+            }
+            throw failure
+        }
         val values = root.requireArray("campaigns")
         return CampaignList(
             campaigns = values.objects("campaigns").map(::parseOverview),
@@ -126,8 +143,13 @@ class Agent4OperatorClient(
     }
 
     fun campaign(campaignId: String): CampaignOverview {
-        val root = execute(operatorUrl("campaigns", requireSegment(campaignId, "campaign id")).build())
-        return parseOverview(root.requireObject("campaign"))
+        val requestedId = requireSegment(campaignId, "campaign id")
+        val root = execute(operatorUrl("campaigns", requestedId).build())
+        val overview = parseOverview(root.requireObject("campaign"))
+        if (overview.campaignId != requestedId) {
+            throw protocol("Agent 4 campaign-detail matcher ikke requestet")
+        }
+        return overview
     }
 
     fun timeline(
@@ -137,22 +159,39 @@ class Agent4OperatorClient(
         limit: Int = DEFAULT_LIMIT,
     ): TimelinePage {
         validateLimit(limit)
-        val builder = operatorUrl(
-            "campaigns",
-            requireSegment(campaignId, "campaign id"),
-            "timeline",
-        ).addQueryParameter("limit", limit.toString())
+        val requestedId = requireSegment(campaignId, "campaign id")
+        val builder = operatorUrl("campaigns", requestedId, "timeline")
+            .addQueryParameter("limit", limit.toString())
         after?.let { builder.addQueryParameter("after", it.encoded) }
         snapshotHead?.let { builder.addQueryParameter("snapshot_head", it.encoded) }
         val page = execute(builder.build()).requireObject("page")
+        val returnedId = page.requireText("campaign_id")
+        if (returnedId != requestedId) {
+            throw protocol("Agent 4 timeline matcher ikke requestet campaign")
+        }
         return TimelinePage(
-            campaignId = page.requireText("campaign_id"),
+            campaignId = returnedId,
             entries = page.requireArray("entries").objects("entries").map {
                 CanonicalJson(it.toString())
             },
-            startCursor = page.requireCursor("start_cursor"),
-            nextCursor = page.requireCursor("next_cursor"),
-            headCursor = page.requireCursor("head_cursor"),
+            startCursor = page.requireCursor(
+                "start_cursor",
+                returnedId,
+                TIMELINE_CURSOR_SCHEMA,
+                "entry_hash",
+            ),
+            nextCursor = page.requireCursor(
+                "next_cursor",
+                returnedId,
+                TIMELINE_CURSOR_SCHEMA,
+                "entry_hash",
+            ),
+            headCursor = page.requireCursor(
+                "head_cursor",
+                returnedId,
+                TIMELINE_CURSOR_SCHEMA,
+                "entry_hash",
+            ),
             hasMore = page.requireBoolean("has_more"),
         )
     }
@@ -164,37 +203,54 @@ class Agent4OperatorClient(
         limit: Int = DEFAULT_LIMIT,
     ): EvidencePage {
         validateLimit(limit)
-        val builder = operatorUrl(
-            "campaigns",
-            requireSegment(campaignId, "campaign id"),
-            "evidence",
-        ).addQueryParameter("limit", limit.toString())
+        val requestedId = requireSegment(campaignId, "campaign id")
+        val builder = operatorUrl("campaigns", requestedId, "evidence")
+            .addQueryParameter("limit", limit.toString())
         after?.let { builder.addQueryParameter("after", it.encoded) }
         snapshotHead?.let { builder.addQueryParameter("snapshot_head", it.encoded) }
         val page = execute(builder.build()).requireObject("page")
+        val returnedId = page.requireText("campaign_id")
+        if (returnedId != requestedId) {
+            throw protocol("Agent 4 evidence-side matcher ikke requestet campaign")
+        }
         return EvidencePage(
-            campaignId = page.requireText("campaign_id"),
+            campaignId = returnedId,
             records = page.requireArray("records").objects("records").map {
                 CanonicalJson(it.toString())
             },
-            startCursor = page.requireCursor("start_cursor"),
-            nextCursor = page.requireCursor("next_cursor"),
-            headCursor = page.requireCursor("head_cursor"),
+            startCursor = page.requireCursor(
+                "start_cursor",
+                returnedId,
+                EVIDENCE_CURSOR_SCHEMA,
+                "record_hash",
+            ),
+            nextCursor = page.requireCursor(
+                "next_cursor",
+                returnedId,
+                EVIDENCE_CURSOR_SCHEMA,
+                "record_hash",
+            ),
+            headCursor = page.requireCursor(
+                "head_cursor",
+                returnedId,
+                EVIDENCE_CURSOR_SCHEMA,
+                "record_hash",
+            ),
             hasMore = page.requireBoolean("has_more"),
         )
     }
 
     fun evidenceVerification(campaignId: String): EvidenceVerification {
+        val requestedId = requireSegment(campaignId, "campaign id")
         val verification = execute(
-            operatorUrl(
-                "campaigns",
-                requireSegment(campaignId, "campaign id"),
-                "evidence",
-                "verification",
-            ).build(),
+            operatorUrl("campaigns", requestedId, "evidence", "verification").build(),
         ).requireObject("verification")
+        val returnedId = verification.requireText("campaign_id")
+        if (returnedId != requestedId) {
+            throw protocol("Agent 4 verification matcher ikke requestet campaign")
+        }
         return EvidenceVerification(
-            campaignId = verification.requireText("campaign_id"),
+            campaignId = returnedId,
             recordCount = verification.requireNonNegativeInt("record_count"),
             headHash = verification.optionalHash("head_hash"),
             latestTimelineHeadHash = verification.optionalHash("latest_timeline_head_hash"),
@@ -202,14 +258,25 @@ class Agent4OperatorClient(
     }
 
     fun evidence(campaignId: String, evidenceId: String): CanonicalJson {
+        val requestedCampaignId = requireSegment(campaignId, "campaign id")
+        val requestedEvidenceId = requireSegment(evidenceId, "evidence id")
         val value = execute(
             operatorUrl(
                 "campaigns",
-                requireSegment(campaignId, "campaign id"),
+                requestedCampaignId,
                 "evidence",
-                requireSegment(evidenceId, "evidence id"),
+                requestedEvidenceId,
             ).build(),
         ).requireObject("evidence")
+        if (value.optString("schema") != EVIDENCE_RECORD_SCHEMA) {
+            throw protocol("Ukendt Agent 4 evidence-record-schema")
+        }
+        if (value.requireText("campaign_id") != requestedCampaignId) {
+            throw protocol("Agent 4 evidence matcher ikke requestet campaign")
+        }
+        if (value.requireObject("evidence").requireText("evidence_id") != requestedEvidenceId) {
+            throw protocol("Agent 4 evidence matcher ikke requestet evidence id")
+        }
         return CanonicalJson(value.toString())
     }
 
@@ -328,9 +395,14 @@ class Agent4OperatorClient(
 
     private fun JSONObject.requireNonNegativeInt(name: String): Int {
         if (!has(name) || isNull(name)) throw protocol("Agent 4-svaret mangler $name")
-        val value = optInt(name, -1)
-        if (value < 0) throw protocol("Agent 4-svaret har ugyldigt $name")
-        return value
+        val raw = get(name)
+        if (raw !is Number) throw protocol("Agent 4-svaret har ugyldigt $name")
+        val asDouble = raw.toDouble()
+        val asLong = raw.toLong()
+        if (!asDouble.isFinite() || asDouble != asLong.toDouble() || asLong !in 0..Int.MAX_VALUE.toLong()) {
+            throw protocol("Agent 4-svaret har ugyldigt $name")
+        }
+        return asLong.toInt()
     }
 
     private fun JSONObject.requireBoolean(name: String): Boolean {
@@ -340,13 +412,31 @@ class Agent4OperatorClient(
         return getBoolean(name)
     }
 
-    private fun JSONObject.requireCursor(name: String): Cursor =
-        Cursor(requireObject(name).toString())
+    private fun JSONObject.requireCursor(
+        name: String,
+        campaignId: String,
+        expectedSchema: String,
+        hashField: String,
+    ): Cursor {
+        val cursor = requireObject(name)
+        if (cursor.requireText("schema") != expectedSchema) {
+            throw protocol("Agent 4-svaret har ukendt $name-schema")
+        }
+        if (cursor.requireText("campaign_id") != campaignId) {
+            throw protocol("Agent 4-svaret har cursor for en anden campaign")
+        }
+        val sequence = cursor.requireNonNegativeInt("sequence")
+        val hash = cursor.optionalHash(hashField)
+        if ((sequence == 0 && hash != null) || (sequence > 0 && hash == null)) {
+            throw protocol("Agent 4-svaret har ugyldig hash-binding i $name")
+        }
+        return Cursor(cursor.toString())
+    }
 
     private fun JSONObject.optionalHash(name: String): String? {
         if (!has(name) || isNull(name)) return null
         val value = optString(name)
-        if (!value.startsWith("sha256:") || value.length != 71) {
+        if (!SHA256.matches(value)) {
             throw protocol("Agent 4-svaret har ugyldigt $name")
         }
         return value
