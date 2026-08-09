@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 AUDITOR = ROOT / "scripts" / "agent4-physical-read-audit.ps1"
 HARDENING = ROOT / "scripts" / "agent4_physical_read_audit_hardening.py"
 EXACT_GATE = ROOT / "scripts" / "agent4_physical_read_exact_head_gate.py"
+SDK_GATE = ROOT / "scripts" / "agent4_physical_read_sdk_check.py"
 LAUNCHER = ROOT / "AUDIT_AGENT4_PHYSICAL_READ_RECEIPT.cmd"
 DOC = ROOT / "docs" / "AGENT_4_A4_18_RECEIPT_AUDIT.md"
 
@@ -47,6 +48,14 @@ class Agent4PhysicalReadAuditTests(unittest.TestCase):
             "dc8982b2ecae47566da22b9cde180922ef228e10",
         ):
             self.assertIn(required, source)
+
+    def test_numeric_sdk_gate_is_read_only(self) -> None:
+        source = SDK_GATE.read_text(encoding="utf-8")
+        self.assertIn('pixel.get("sdk")', source)
+        self.assertIn("sdk.isdigit()", source)
+        self.assertIn("Pixel SDK skal være en numerisk streng", source)
+        for forbidden in ("requests", "subprocess", "unlink(", "write_text(", "write_bytes("):
+            self.assertNotIn(forbidden, source)
 
     def test_hardening_requires_exact_known_trial_set(self) -> None:
         source = HARDENING.read_text(encoding="utf-8")
@@ -92,12 +101,14 @@ class Agent4PhysicalReadAuditTests(unittest.TestCase):
         self.assertNotIn("requests", source)
         self.assertNotIn("subprocess.Popen", source)
 
-    def test_launcher_runs_both_python_gates_before_legacy_audit(self) -> None:
+    def test_launcher_runs_all_python_gates_before_legacy_audit(self) -> None:
         launcher = LAUNCHER.read_text(encoding="utf-8")
         exact = launcher.index("agent4_physical_read_exact_head_gate.py")
+        sdk = launcher.index("agent4_physical_read_sdk_check.py")
         hardening = launcher.index("agent4_physical_read_audit_hardening.py")
         legacy = launcher.index("agent4-physical-read-audit.ps1")
-        self.assertLess(exact, hardening)
+        self.assertLess(exact, sdk)
+        self.assertLess(sdk, hardening)
         self.assertLess(hardening, legacy)
         self.assertIn("40-tegns-exact-SHA", launcher)
         self.assertIn("--expected-sha", launcher)
