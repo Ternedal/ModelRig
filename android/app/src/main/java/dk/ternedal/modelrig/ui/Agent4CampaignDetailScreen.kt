@@ -72,11 +72,16 @@ internal fun Agent4CampaignDetailScreen(
     var pagingTimeline by remember { mutableStateOf(false) }
     var pagingEvidence by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val responseEpoch = remember { Agent4ResponseEpoch() }
 
-    fun credentials(): Pair<String, String>? {
+    fun credentials(): Agent4ConnectionIdentity? {
         val base = store.baseUrl?.trim().orEmpty()
         val token = store.token?.trim().orEmpty()
-        return if (base.isBlank() || token.isBlank()) null else base to token
+        return if (base.isBlank() || token.isBlank()) {
+            null
+        } else {
+            Agent4ConnectionIdentity(base, token)
+        }
     }
 
     fun fail(failure: Throwable): Agent4DetailLoadState.Failed = when (failure) {
@@ -108,15 +113,17 @@ internal fun Agent4CampaignDetailScreen(
         pagingEvidence = false
         val connection = credentials()
         if (connection == null) {
+            responseEpoch.invalidate()
             state = Agent4DetailLoadState.Failed(
                 "Rig-adgangen mangler",
                 "Par enheden med ModelRig i indstillingerne.",
             )
             return@LaunchedEffect
         }
-        state = try {
+        val ticket = responseEpoch.begin(connection)
+        try {
             val loaded = withContext(Dispatchers.IO) {
-                val client = Agent4OperatorClient(connection.first, connection.second)
+                val client = Agent4OperatorClient(connection.baseUrl, connection.token)
                 val campaign = client.campaign(campaignId)
                 val timelinePage = client.timeline(campaignId, limit = AGENT4_PAGE_SIZE)
                 val evidencePage = client.evidencePage(campaignId, limit = AGENT4_PAGE_SIZE)
@@ -137,28 +144,35 @@ internal fun Agent4CampaignDetailScreen(
                     evidenceHasMore = evidencePage.hasMore,
                 )
             }
-            Agent4DetailLoadState.Ready(loaded)
+            if (responseEpoch.accepts(ticket, credentials())) {
+                state = Agent4DetailLoadState.Ready(loaded)
+            }
         } catch (failure: Throwable) {
-            fail(failure)
+            if (responseEpoch.accepts(ticket, credentials())) {
+                state = fail(failure)
+            }
         }
     }
 
     fun loadMoreTimeline(current: Agent4DetailData) {
         val connection = credentials() ?: run {
+            responseEpoch.invalidate()
             state = Agent4DetailLoadState.Failed("Rig-adgangen mangler", "Tidligere viste data er ryddet.")
             return
         }
+        val ticket = responseEpoch.capture(connection)
         pagingTimeline = true
         scope.launch {
             try {
                 val page = withContext(Dispatchers.IO) {
-                    Agent4OperatorClient(connection.first, connection.second).timeline(
+                    Agent4OperatorClient(connection.baseUrl, connection.token).timeline(
                         campaignId = campaignId,
                         after = current.timelineNext,
                         snapshotHead = current.timelineHead,
                         limit = AGENT4_PAGE_SIZE,
                     )
                 }
+                if (!responseEpoch.accepts(ticket, credentials())) return@launch
                 val rows = page.entries.map(Agent4OperatorPresentation::timelineRow)
                 val active = (state as? Agent4DetailLoadState.Ready)?.value
                 if (active != null) {
@@ -177,29 +191,36 @@ internal fun Agent4CampaignDetailScreen(
                     )
                 }
             } catch (failure: Throwable) {
-                state = fail(failure)
+                if (responseEpoch.accepts(ticket, credentials())) {
+                    state = fail(failure)
+                }
             } finally {
-                pagingTimeline = false
+                if (responseEpoch.accepts(ticket, credentials())) {
+                    pagingTimeline = false
+                }
             }
         }
     }
 
     fun loadMoreEvidence(current: Agent4DetailData) {
         val connection = credentials() ?: run {
+            responseEpoch.invalidate()
             state = Agent4DetailLoadState.Failed("Rig-adgangen mangler", "Tidligere viste data er ryddet.")
             return
         }
+        val ticket = responseEpoch.capture(connection)
         pagingEvidence = true
         scope.launch {
             try {
                 val page = withContext(Dispatchers.IO) {
-                    Agent4OperatorClient(connection.first, connection.second).evidencePage(
+                    Agent4OperatorClient(connection.baseUrl, connection.token).evidencePage(
                         campaignId = campaignId,
                         after = current.evidenceNext,
                         snapshotHead = current.evidenceHead,
                         limit = AGENT4_PAGE_SIZE,
                     )
                 }
+                if (!responseEpoch.accepts(ticket, credentials())) return@launch
                 val rows = page.records.map(Agent4OperatorPresentation::evidenceRow)
                 val active = (state as? Agent4DetailLoadState.Ready)?.value
                 if (active != null) {
@@ -218,9 +239,13 @@ internal fun Agent4CampaignDetailScreen(
                     )
                 }
             } catch (failure: Throwable) {
-                state = fail(failure)
+                if (responseEpoch.accepts(ticket, credentials())) {
+                    state = fail(failure)
+                }
             } finally {
-                pagingEvidence = false
+                if (responseEpoch.accepts(ticket, credentials())) {
+                    pagingEvidence = false
+                }
             }
         }
     }
