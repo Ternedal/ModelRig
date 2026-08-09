@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 AUDITOR = ROOT / "scripts" / "agent4-physical-read-audit.ps1"
+HARDENING = ROOT / "scripts" / "agent4-physical-read-audit-hardening.ps1"
 LAUNCHER = ROOT / "AUDIT_AGENT4_PHYSICAL_READ_RECEIPT.cmd"
 DOC = ROOT / "docs" / "AGENT_4_A4_18_RECEIPT_AUDIT.md"
 
@@ -54,12 +55,36 @@ class Agent4PhysicalReadAuditTests(unittest.TestCase):
         for checkpoint in checkpoints:
             self.assertIn(f'"{checkpoint}"', source)
 
+    def test_hardening_rejects_ambiguous_receipts(self) -> None:
+        source = HARDENING.read_text(encoding="utf-8")
+        for required in (
+            '$unexpected.Count -ne 0',
+            '$trialNames.Count -ne $requiredTrials.Count',
+            "Pixel SDK skal være numerisk",
+            "Der skal være præcis to mutation receipts",
+            'Get-WithoutReceiptDigest -Object $mutation',
+            'ConvertTo-Json -Depth 30 -Compress',
+            "Mutation receipt digest mismatch",
+        ):
+            self.assertIn(required, source)
+        self.assertNotIn("Invoke-WebRequest", source)
+        self.assertNotIn("Start-Process", source)
+        self.assertNotIn("Remove-Item", source)
+
+    def test_launcher_chains_main_audit_then_hardening(self) -> None:
+        launcher = LAUNCHER.read_text(encoding="utf-8")
+        main_index = launcher.index("agent4-physical-read-audit.ps1")
+        hardening_index = launcher.index("agent4-physical-read-audit-hardening.ps1")
+        self.assertLess(main_index, hardening_index)
+        self.assertIn('if "%RC%"=="0"', launcher)
+        self.assertIn('set "RC=%ERRORLEVEL%"', launcher)
+        self.assertIn("-RequireRemoteRefs", launcher)
+        self.assertIn("Issue #421 maa ikke lukkes", launcher)
+
     def test_launcher_and_doc_require_pass(self) -> None:
         launcher = LAUNCHER.read_text(encoding="utf-8")
         doc = DOC.read_text(encoding="utf-8")
         self.assertIn("agent4-physical-read-audit.ps1", launcher)
-        self.assertIn("-RequireRemoteRefs", launcher)
-        self.assertIn("Issue #421 maa ikke lukkes", launcher)
         self.assertIn("`0`: `PASS`", doc)
         self.assertIn("`2`: `FAIL`", doc)
         self.assertIn("ikke en digital signatur", doc)
