@@ -41,7 +41,6 @@ function Get-ArtifactReceipts {
         $script:fixtureManifest,
         $script:backendLog,
         $script:workerLog,
-        $script:pairingData,
         $script:backendExe,
         $script:grantExe,
         [string]$State.apk,
@@ -126,13 +125,20 @@ if (
     $workerStopped = $true
 }
 
+# The pairing store is operational secret state, not acceptance evidence. It is
+# deleted only after the verified stack stop and is deliberately excluded from
+# artifact receipts so the post-finalize auditor can prove the runtime is clean.
+Remove-Item -LiteralPath $script:pairingData -Force -ErrorAction SilentlyContinue
+$pairingStoreDeleted = -not (Test-Path -LiteralPath $script:pairingData -PathType Leaf)
+
 $cleanupPassed = (
     $backendStopped -and
     $workerStopped -and
     [bool]$cleanup.firewall_removed -and
     -not [bool]$cleanup.unknown_process_preserved -and
     $portsFree -and
-    -not (Test-Path -LiteralPath $script:adminKeyFile -PathType Leaf)
+    -not (Test-Path -LiteralPath $script:adminKeyFile -PathType Leaf) -and
+    $pairingStoreDeleted
 )
 if (-not $cleanupPassed) {
     $Decision = "NO-GO"
@@ -167,6 +173,7 @@ $receipt = [ordered]@{
         firewall_removed = [bool]$cleanup.firewall_removed
         ports_free = $portsFree
         admin_key_deleted = -not (Test-Path -LiteralPath $script:adminKeyFile -PathType Leaf)
+        pairing_store_deleted = $pairingStoreDeleted
         passed = $cleanupPassed
     }
     all_required_observations_passed = $allPassed
