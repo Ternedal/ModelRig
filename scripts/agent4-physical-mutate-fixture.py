@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "worker"))
 
 from app.agent4 import (  # noqa: E402
+    CampaignEventKind,
     CampaignEvidenceReference,
     CampaignSpec,
     compose_agent4_runtime,
@@ -126,9 +127,16 @@ def mutate(data_root: Path, mode: str, receipt_path: Path) -> None:
         artifacts.mkdir(parents=True, exist_ok=True)
         artifact = artifacts / f"{mutation_id}.json"
         artifact.write_bytes(payload_bytes)
-        latest = context.timeline.latest(SELECTED_CAMPAIGN_ID)
-        if latest is None:
-            raise RuntimeError("selected campaign has no timeline event")
+        summary_event = context.event_recorder.record(
+            SELECTED_CAMPAIGN_ID,
+            CampaignEventKind.CHECKPOINTED,
+            occurred_at=now,
+            payload={
+                "fixture": "a4-18-summary-mutation",
+                "ordinal": ordinal,
+                "production_activation": False,
+            },
+        )
         context.evidence_recorder.record(
             SELECTED_CAMPAIGN_ID,
             CampaignEvidenceReference(
@@ -143,7 +151,7 @@ def mutate(data_root: Path, mode: str, receipt_path: Path) -> None:
                 },
             ),
             recorded_at=now,
-            related_event_id=latest.event.event_id,
+            related_event_id=summary_event.event_id,
         )
     else:
         raise ValueError("mode must be campaign-record or summary")
