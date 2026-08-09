@@ -37,7 +37,7 @@ class Agent4OperatorPresentationTest {
     }
 
     @Test
-    fun parsesTimelineAndEvidenceRows() {
+    fun parsesTimelineAndEvidenceRowsIncludingLargeCanonicalSize() {
         val timeline = Agent4OperatorPresentation.timelineRow(
             Agent4OperatorClient.CanonicalJson(
                 """{
@@ -65,7 +65,7 @@ class Agent4OperatorPresentationTest {
                   "evidence":{
                     "evidence_id":"ev-1","media_type":"application/json",
                     "location":"evidence/ev-1.json","sha256":"sha256:${"c".repeat(64)}",
-                    "size_bytes":128,"metadata":{}
+                    "size_bytes":3000000000,"metadata":{}
                   },
                   "timeline_head_hash":"sha256:${"d".repeat(64)}",
                   "related_event_id":"event-1","previous_hash":null,
@@ -75,7 +75,7 @@ class Agent4OperatorPresentationTest {
         )
         assertEquals("ev-1", evidence.evidenceId)
         assertEquals("application/json", evidence.mediaType)
-        assertEquals(128, evidence.sizeBytes)
+        assertEquals(3_000_000_000L, evidence.sizeBytes)
     }
 
     @Test
