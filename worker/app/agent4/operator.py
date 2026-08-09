@@ -1,8 +1,8 @@
 """Dormant, transport-independent operator reads for Agent 4.
 
-The service exposes bounded campaign summaries and delegates timeline paging to
-the verified B-reference query service. It mounts no API, starts no background
-work and performs no lifecycle mutation.
+The service exposes bounded campaign summaries, snapshot-bound campaign-list
+paging and delegates timeline paging to the verified B-reference query service.
+It mounts no API, starts no background work and performs no lifecycle mutation.
 """
 
 from __future__ import annotations
@@ -10,6 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from .campaign_list_query import (
+    MAX_CAMPAIGN_LIST_PAGE_SIZE,
+    CampaignListQueryCursor,
+    CampaignListSnapshotSummary,
+    page_campaign_records,
+)
 from .contracts import CampaignTimelineStore
 from .domain import CampaignRecord, CampaignStatus, CampaignValidationError
 from .service import CampaignSchedulerService
@@ -19,7 +25,7 @@ from .timeline_query import (
     CampaignTimelineQueryService,
 )
 
-MAX_OPERATOR_CAMPAIGNS = 1_000
+MAX_OPERATOR_CAMPAIGNS = MAX_CAMPAIGN_LIST_PAGE_SIZE
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +45,27 @@ class Agent4CampaignOverview:
     @property
     def status(self) -> CampaignStatus:
         return self.record.state.status
+
+    def snapshot_summary(self) -> CampaignListSnapshotSummary:
+        """Return the exact rendered summary fields bound into list cursors."""
+
+        return CampaignListSnapshotSummary(
+            timeline_entries=self.timeline_entries,
+            event_entries=self.event_entries,
+            evidence_entries=self.evidence_entries,
+            latest_timeline_hash=self.latest_timeline_hash,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class Agent4CampaignPage:
+    """One bounded page from a filter- and snapshot-bound campaign list."""
+
+    campaigns: tuple[Agent4CampaignOverview, ...]
+    start_cursor: CampaignListQueryCursor
+    next_cursor: CampaignListQueryCursor
+    head_cursor: CampaignListQueryCursor
+    has_more: bool
 
 
 class Agent4OperatorReadService:
@@ -84,32 +111,52 @@ class Agent4OperatorReadService:
 
         return self._overview(self._scheduler.get(campaign_id))
 
+    def campaign_page(
+        self,
+        *,
+        statuses: CampaignStatus | str | Iterable[CampaignStatus | str] | None = None,
+        after: CampaignListQueryCursor | None = None,
+        limit: int = 100,
+        snapshot_head: CampaignListQueryCursor | None = None,
+    ) -> Agent4CampaignPage:
+        """Return newest campaigns from one stable, hash-bound snapshot."""
+
+        records = tuple(self._scheduler.list())
+        overviews = {
+            record.spec.campaign_id: self._overview(record)
+            for record in records
+        }
+        page = page_campaign_records(
+            records,
+            summaries={
+                campaign_id: overview.snapshot_summary()
+                for campaign_id, overview in overviews.items()
+            },
+            statuses=statuses,
+            after=after,
+            limit=limit,
+            snapshot_head=snapshot_head,
+        )
+        return Agent4CampaignPage(
+            campaigns=tuple(
+                overviews[record.spec.campaign_id]
+                for record in page.records
+            ),
+            start_cursor=page.start_cursor,
+            next_cursor=page.next_cursor,
+            head_cursor=page.head_cursor,
+            has_more=page.has_more,
+        )
+
     def list_campaigns(
         self,
         *,
         statuses: CampaignStatus | str | Iterable[CampaignStatus | str] | None = None,
         limit: int = 100,
     ) -> tuple[Agent4CampaignOverview, ...]:
-        """Return newest campaigns first, optionally filtered by lifecycle status."""
+        """Compatibility wrapper for the first campaign-list page."""
 
-        bounded_limit = self._bounded_limit(limit)
-        accepted = self._statuses(statuses)
-        records = sorted(
-            self._scheduler.list(),
-            key=lambda record: (
-                record.spec.created_at,
-                record.spec.campaign_id,
-            ),
-            reverse=True,
-        )
-        selected: list[Agent4CampaignOverview] = []
-        for record in records:
-            if accepted is not None and record.state.status not in accepted:
-                continue
-            selected.append(self._overview(record))
-            if len(selected) == bounded_limit:
-                break
-        return tuple(selected)
+        return self.campaign_page(statuses=statuses, limit=limit).campaigns
 
     def timeline_page(
         self,
@@ -138,39 +185,3 @@ class Agent4OperatorReadService:
             evidence_entries=verification.evidence_count,
             latest_timeline_hash=verification.head_hash,
         )
-
-    @staticmethod
-    def _statuses(
-        values: CampaignStatus | str | Iterable[CampaignStatus | str] | None,
-    ) -> frozenset[CampaignStatus] | None:
-        if values is None:
-            return None
-        if isinstance(values, (CampaignStatus, str)):
-            candidates: tuple[CampaignStatus | str, ...] = (values,)
-        else:
-            try:
-                candidates = tuple(values)
-            except TypeError as exc:
-                raise CampaignValidationError("statuses must be iterable") from exc
-        normalized: set[CampaignStatus] = set()
-        try:
-            for value in candidates:
-                normalized.add(CampaignStatus(value))
-        except (TypeError, ValueError) as exc:
-            raise CampaignValidationError(
-                "statuses contain an unsupported value"
-            ) from exc
-        return frozenset(normalized)
-
-    @staticmethod
-    def _bounded_limit(value: int) -> int:
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, int)
-            or not 1 <= value <= MAX_OPERATOR_CAMPAIGNS
-        ):
-            raise CampaignValidationError(
-                "limit must be an integer from 1 through "
-                f"{MAX_OPERATOR_CAMPAIGNS}"
-            )
-        return value

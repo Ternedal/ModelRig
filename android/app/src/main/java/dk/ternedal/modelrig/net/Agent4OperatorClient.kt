@@ -21,6 +21,7 @@ class Agent4OperatorClient(
     companion object {
         const val SCHEMA = "modelrig-agent4/operator-api/v1"
         const val MEDIA_TYPE = "application/vnd.modelrig.agent4.operator+json"
+        const val CAMPAIGN_CURSOR_SCHEMA = "modelrig-agent4/campaign-list-query-cursor/v1"
         private const val CAMPAIGN_RECORD_SCHEMA = "modelrig-agent4/campaign-record/v1"
         private const val EVIDENCE_RECORD_SCHEMA = "modelrig-agent4/campaign-evidence-record/v1"
         private const val TIMELINE_CURSOR_SCHEMA = "modelrig-agent4/campaign-timeline-query-cursor/v1"
@@ -63,7 +64,10 @@ class Agent4OperatorClient(
     /** Canonical server-owned JSON. The client displays it but does not own it. */
     data class CanonicalJson(val value: String)
 
-    /** Opaque hash-bound cursor; callers may only pass it back to this client. */
+    /** Opaque campaign-list cursor; it can only be returned to listCampaigns. */
+    data class CampaignCursor internal constructor(internal val encoded: String)
+
+    /** Opaque campaign-local cursor for timeline/evidence page operations. */
     data class Cursor internal constructor(internal val encoded: String)
 
     data class CampaignOverview(
@@ -79,6 +83,10 @@ class Agent4OperatorClient(
 
     data class CampaignList(
         val campaigns: List<CampaignOverview>,
+        val startCursor: CampaignCursor,
+        val nextCursor: CampaignCursor,
+        val headCursor: CampaignCursor,
+        val hasMore: Boolean,
     )
 
     data class TimelinePage(
@@ -115,18 +123,26 @@ class Agent4OperatorClient(
 
     fun listCampaigns(
         statuses: Set<CampaignStatus> = emptySet(),
+        after: CampaignCursor? = null,
+        snapshotHead: CampaignCursor? = null,
         limit: Int = DEFAULT_LIMIT,
     ): CampaignList {
         validateLimit(limit)
+        if ((after == null) != (snapshotHead == null)) {
+            throw protocol("Campaign paging kræver både after og snapshotHead")
+        }
+        val orderedStatuses = statuses.sortedBy { it.wireValue }
         val builder = operatorUrl("campaigns")
             .addQueryParameter("limit", limit.toString())
-        statuses.sortedBy { it.wireValue }.forEach {
+        orderedStatuses.forEach {
             builder.addQueryParameter("status", it.wireValue)
         }
+        after?.let { builder.addQueryParameter("after", it.encoded) }
+        snapshotHead?.let { builder.addQueryParameter("snapshot_head", it.encoded) }
         val root = try {
             execute(builder.build())
         } catch (failure: OperatorException) {
-            if (failure.kind == ErrorKind.NOT_FOUND) {
+            if (failure.kind == ErrorKind.NOT_FOUND && after == null) {
                 throw OperatorException(
                     ErrorKind.FEATURE_DISABLED,
                     failure.statusCode,
@@ -136,9 +152,13 @@ class Agent4OperatorClient(
             }
             throw failure
         }
-        val values = root.requireArray("campaigns")
+        val expectedStatuses = orderedStatuses.map { it.wireValue }
         return CampaignList(
-            campaigns = values.objects("campaigns").map(::parseOverview),
+            campaigns = root.requireArray("campaigns").objects("campaigns").map(::parseOverview),
+            startCursor = root.requireCampaignCursor("start_cursor", expectedStatuses),
+            nextCursor = root.requireCampaignCursor("next_cursor", expectedStatuses),
+            headCursor = root.requireCampaignCursor("head_cursor", expectedStatuses),
+            hasMore = root.requireBoolean("has_more"),
         )
     }
 
@@ -159,6 +179,9 @@ class Agent4OperatorClient(
         limit: Int = DEFAULT_LIMIT,
     ): TimelinePage {
         validateLimit(limit)
+        if ((after == null) != (snapshotHead == null)) {
+            throw protocol("Timeline paging kræver både after og snapshotHead")
+        }
         val requestedId = requireSegment(campaignId, "campaign id")
         val builder = operatorUrl("campaigns", requestedId, "timeline")
             .addQueryParameter("limit", limit.toString())
@@ -174,24 +197,9 @@ class Agent4OperatorClient(
             entries = page.requireArray("entries").objects("entries").map {
                 CanonicalJson(it.toString())
             },
-            startCursor = page.requireCursor(
-                "start_cursor",
-                returnedId,
-                TIMELINE_CURSOR_SCHEMA,
-                "entry_hash",
-            ),
-            nextCursor = page.requireCursor(
-                "next_cursor",
-                returnedId,
-                TIMELINE_CURSOR_SCHEMA,
-                "entry_hash",
-            ),
-            headCursor = page.requireCursor(
-                "head_cursor",
-                returnedId,
-                TIMELINE_CURSOR_SCHEMA,
-                "entry_hash",
-            ),
+            startCursor = page.requireCursor("start_cursor", returnedId, TIMELINE_CURSOR_SCHEMA, "entry_hash"),
+            nextCursor = page.requireCursor("next_cursor", returnedId, TIMELINE_CURSOR_SCHEMA, "entry_hash"),
+            headCursor = page.requireCursor("head_cursor", returnedId, TIMELINE_CURSOR_SCHEMA, "entry_hash"),
             hasMore = page.requireBoolean("has_more"),
         )
     }
@@ -203,6 +211,9 @@ class Agent4OperatorClient(
         limit: Int = DEFAULT_LIMIT,
     ): EvidencePage {
         validateLimit(limit)
+        if ((after == null) != (snapshotHead == null)) {
+            throw protocol("Evidence paging kræver både after og snapshotHead")
+        }
         val requestedId = requireSegment(campaignId, "campaign id")
         val builder = operatorUrl("campaigns", requestedId, "evidence")
             .addQueryParameter("limit", limit.toString())
@@ -218,24 +229,9 @@ class Agent4OperatorClient(
             records = page.requireArray("records").objects("records").map {
                 CanonicalJson(it.toString())
             },
-            startCursor = page.requireCursor(
-                "start_cursor",
-                returnedId,
-                EVIDENCE_CURSOR_SCHEMA,
-                "record_hash",
-            ),
-            nextCursor = page.requireCursor(
-                "next_cursor",
-                returnedId,
-                EVIDENCE_CURSOR_SCHEMA,
-                "record_hash",
-            ),
-            headCursor = page.requireCursor(
-                "head_cursor",
-                returnedId,
-                EVIDENCE_CURSOR_SCHEMA,
-                "record_hash",
-            ),
+            startCursor = page.requireCursor("start_cursor", returnedId, EVIDENCE_CURSOR_SCHEMA, "record_hash"),
+            nextCursor = page.requireCursor("next_cursor", returnedId, EVIDENCE_CURSOR_SCHEMA, "record_hash"),
+            headCursor = page.requireCursor("head_cursor", returnedId, EVIDENCE_CURSOR_SCHEMA, "record_hash"),
             hasMore = page.requireBoolean("has_more"),
         )
     }
@@ -261,12 +257,7 @@ class Agent4OperatorClient(
         val requestedCampaignId = requireSegment(campaignId, "campaign id")
         val requestedEvidenceId = requireSegment(evidenceId, "evidence id")
         val value = execute(
-            operatorUrl(
-                "campaigns",
-                requestedCampaignId,
-                "evidence",
-                requestedEvidenceId,
-            ).build(),
+            operatorUrl("campaigns", requestedCampaignId, "evidence", requestedEvidenceId).build(),
         ).requireObject("evidence")
         if (value.optString("schema") != EVIDENCE_RECORD_SCHEMA) {
             throw protocol("Ukendt Agent 4 evidence-record-schema")
@@ -412,6 +403,29 @@ class Agent4OperatorClient(
         return getBoolean(name)
     }
 
+    private fun JSONObject.requireCampaignCursor(
+        name: String,
+        expectedStatuses: List<String>,
+    ): CampaignCursor {
+        val cursor = requireObject(name)
+        if (cursor.requireText("schema") != CAMPAIGN_CURSOR_SCHEMA) {
+            throw protocol("Agent 4-svaret har ukendt $name-schema")
+        }
+        val statuses = cursor.requireArray("statuses").strings("$name.statuses")
+        if (statuses != expectedStatuses || statuses != statuses.sorted() || statuses.distinct().size != statuses.size) {
+            throw protocol("Agent 4-svaret har cursor med forkert statusfilter")
+        }
+        val position = cursor.requireNonNegativeInt("position")
+        val total = cursor.requireNonNegativeInt("total")
+        if (position > total) throw protocol("Agent 4-svaret har cursor uden for snapshot")
+        val lastId = cursor.optionalText("last_campaign_id")
+        if ((position == 0 && lastId != null) || (position > 0 && lastId == null)) {
+            throw protocol("Agent 4-svaret har ugyldig campaign cursor-identitet")
+        }
+        cursor.requireHash("snapshot_sha256")
+        return CampaignCursor(cursor.toString())
+    }
+
     private fun JSONObject.requireCursor(
         name: String,
         campaignId: String,
@@ -433,6 +447,15 @@ class Agent4OperatorClient(
         return Cursor(cursor.toString())
     }
 
+    private fun JSONObject.optionalText(name: String): String? {
+        if (!has(name) || isNull(name)) return null
+        return optString(name).takeIf { it.isNotBlank() }
+            ?: throw protocol("Agent 4-svaret har ugyldigt $name")
+    }
+
+    private fun JSONObject.requireHash(name: String): String =
+        optionalHash(name) ?: throw protocol("Agent 4-svaret mangler $name")
+
     private fun JSONObject.optionalHash(name: String): String? {
         if (!has(name) || isNull(name)) return null
         val value = optString(name)
@@ -445,6 +468,14 @@ class Agent4OperatorClient(
     private fun JSONArray.objects(label: String): List<JSONObject> = buildList {
         for (index in 0 until length()) {
             add(optJSONObject(index) ?: throw protocol("Agent 4-$label indeholder en ugyldig post"))
+        }
+    }
+
+    private fun JSONArray.strings(label: String): List<String> = buildList {
+        for (index in 0 until length()) {
+            val value = optString(index, "")
+            if (value.isBlank()) throw protocol("Agent 4-$label indeholder ugyldig tekst")
+            add(value)
         }
     }
 

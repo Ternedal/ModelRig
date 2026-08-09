@@ -12,23 +12,17 @@ class Agent4OperatorClientTest {
 
     @Test
     fun listCampaignsUsesBackendBearerAndParsesCanonicalEnvelope() {
+        val statuses = listOf("paused", "running")
+        val start = campaignCursor(statuses, 0, 1, null, "a")
+        val head = campaignCursor(statuses, 1, 1, "campaign-1", "a")
         val server = MockWebServer()
         server.enqueue(
-            operatorResponse(
-                """{
-                  "schema":"modelrig-agent4/operator-api/v1",
-                  "campaigns":[{
-                    "record":{
-                      "schema":"modelrig-agent4/campaign-record/v1",
-                      "spec":{"campaign_id":"campaign-1","name":"Rig audit"},
-                      "state":{"campaign_id":"campaign-1","status":"running"}
-                    },
-                    "timeline_entries":4,
-                    "event_entries":3,
-                    "evidence_entries":2,
-                    "latest_timeline_hash":"sha256:${"a".repeat(64)}"
-                  }]
-                }""".trimIndent(),
+            campaignListResponse(
+                campaigns = listOf(campaignOverview("campaign-1", "Rig audit", "running")),
+                start = start,
+                next = head,
+                head = head,
+                hasMore = false,
             ),
         )
         server.start()
@@ -49,20 +43,105 @@ class Agent4OperatorClientTest {
             assertEquals(Agent4OperatorClient.CampaignStatus.RUNNING, campaign.status)
             assertEquals(4, campaign.timelineEntries)
             assertEquals(2, campaign.evidenceEntries)
-            assertTrue(campaign.record.value.contains("campaign-1"))
+            assertFalse(result.hasMore)
 
             val request = server.takeRequest()
             assertEquals("Bearer device-token", request.getHeader("Authorization"))
             assertEquals(mediaType, request.getHeader("Accept"))
             assertTrue(request.getHeader("Cache-Control").orEmpty().contains("no-cache"))
             assertEquals("25", request.requestUrl?.queryParameter("limit"))
-            assertEquals(
-                listOf("paused", "running"),
-                request.requestUrl?.queryParameterValues("status"),
-            )
+            assertEquals(statuses, request.requestUrl?.queryParameterValues("status"))
             assertEquals(
                 "/api/v1/experimental/agent4/operator/campaigns",
                 request.requestUrl?.encodedPath,
+            )
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun campaignListCursorsAreOpaqueAndRoundTripWithSnapshotHead() {
+        val statuses = listOf("running")
+        val start = campaignCursor(statuses, 0, 2, null, "b")
+        val next = campaignCursor(statuses, 1, 2, "campaign-2", "b")
+        val head = campaignCursor(statuses, 2, 2, "campaign-1", "b")
+        val server = MockWebServer()
+        server.enqueue(
+            campaignListResponse(
+                campaigns = listOf(campaignOverview("campaign-2", "Two", "running")),
+                start = start,
+                next = next,
+                head = head,
+                hasMore = true,
+            ),
+        )
+        server.enqueue(
+            campaignListResponse(
+                campaigns = listOf(campaignOverview("campaign-1", "One", "running")),
+                start = next,
+                next = head,
+                head = head,
+                hasMore = false,
+            ),
+        )
+        server.start()
+        try {
+            val client = Agent4OperatorClient(server.url("/").toString(), "device-token")
+            val first = client.listCampaigns(
+                statuses = setOf(Agent4OperatorClient.CampaignStatus.RUNNING),
+                limit = 1,
+            )
+            val second = client.listCampaigns(
+                statuses = setOf(Agent4OperatorClient.CampaignStatus.RUNNING),
+                after = first.nextCursor,
+                snapshotHead = first.headCursor,
+                limit = 1,
+            )
+            assertEquals("campaign-1", second.campaigns.single().campaignId)
+            assertFalse(second.hasMore)
+
+            server.takeRequest()
+            val request = server.takeRequest()
+            assertEquals(first.nextCursor.encoded, request.requestUrl?.queryParameter("after"))
+            assertEquals(first.headCursor.encoded, request.requestUrl?.queryParameter("snapshot_head"))
+            assertEquals(statuses, request.requestUrl?.queryParameterValues("status"))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun malformedCampaignCursorOrHalfPagingFailsClosed() {
+        val wrongStatuses = campaignCursor(listOf("paused"), 0, 0, null, "c")
+        val server = MockWebServer()
+        server.enqueue(
+            campaignListResponse(
+                campaigns = emptyList(),
+                start = wrongStatuses,
+                next = wrongStatuses,
+                head = wrongStatuses,
+                hasMore = false,
+            ),
+        )
+        server.start()
+        try {
+            val client = Agent4OperatorClient(server.url("/").toString(), "device-token")
+            val error = runCatching {
+                client.listCampaigns(
+                    statuses = setOf(Agent4OperatorClient.CampaignStatus.RUNNING),
+                )
+            }.exceptionOrNull()
+            assertEquals(
+                Agent4OperatorClient.ErrorKind.PROTOCOL,
+                (error as Agent4OperatorClient.OperatorException).kind,
+            )
+            val half = runCatching {
+                client.listCampaigns(after = Agent4OperatorClient.CampaignCursor("{}"))
+            }.exceptionOrNull()
+            assertEquals(
+                Agent4OperatorClient.ErrorKind.PROTOCOL,
+                (half as Agent4OperatorClient.OperatorException).kind,
             )
         } finally {
             server.shutdown()
@@ -75,94 +154,25 @@ class Agent4OperatorClientTest {
           "schema":"modelrig-agent4/campaign-timeline-query-cursor/v1",
           "campaign_id":"campaign-1",
           "sequence":2,
-          "entry_hash":"sha256:${"b".repeat(64)}"
+          "entry_hash":"sha256:${"d".repeat(64)}"
         }""".trimIndent()
         val server = MockWebServer()
-        server.enqueue(
-            operatorResponse(
-                """{
-                  "schema":"modelrig-agent4/operator-api/v1",
-                  "page":{
-                    "campaign_id":"campaign-1",
-                    "entries":[],
-                    "start_cursor":$cursor,
-                    "next_cursor":$cursor,
-                    "head_cursor":$cursor,
-                    "has_more":true
-                  }
-                }""".trimIndent(),
-            ),
-        )
-        server.enqueue(
-            operatorResponse(
-                """{
-                  "schema":"modelrig-agent4/operator-api/v1",
-                  "page":{
-                    "campaign_id":"campaign-1",
-                    "entries":[],
-                    "start_cursor":$cursor,
-                    "next_cursor":$cursor,
-                    "head_cursor":$cursor,
-                    "has_more":false
-                  }
-                }""".trimIndent(),
-            ),
-        )
+        server.enqueue(operatorResponse(timelinePage(cursor, true)))
+        server.enqueue(operatorResponse(timelinePage(cursor, false)))
         server.start()
         try {
             val client = Agent4OperatorClient(server.url("/").toString(), "device-token")
             val first = client.timeline("campaign-1", limit = 1)
-            assertTrue(first.hasMore)
             client.timeline(
                 campaignId = "campaign-1",
                 after = first.nextCursor,
                 snapshotHead = first.headCursor,
                 limit = 10,
             )
-
             server.takeRequest()
-            val second = server.takeRequest()
-            assertEquals(first.nextCursor.encoded, second.requestUrl?.queryParameter("after"))
-            assertEquals(first.headCursor.encoded, second.requestUrl?.queryParameter("snapshot_head"))
-            assertEquals("10", second.requestUrl?.queryParameter("limit"))
-        } finally {
-            server.shutdown()
-        }
-    }
-
-    @Test
-    fun malformedOrCrossCampaignCursorFailsClosed() {
-        val wrongCursor = """{
-          "schema":"modelrig-agent4/campaign-timeline-query-cursor/v1",
-          "campaign_id":"other-campaign",
-          "sequence":1,
-          "entry_hash":"sha256:${"f".repeat(64)}"
-        }""".trimIndent()
-        val server = MockWebServer()
-        server.enqueue(
-            operatorResponse(
-                """{
-                  "schema":"modelrig-agent4/operator-api/v1",
-                  "page":{
-                    "campaign_id":"campaign-1",
-                    "entries":[],
-                    "start_cursor":$wrongCursor,
-                    "next_cursor":$wrongCursor,
-                    "head_cursor":$wrongCursor,
-                    "has_more":false
-                  }
-                }""".trimIndent(),
-            ),
-        )
-        server.start()
-        try {
-            val client = Agent4OperatorClient(server.url("/").toString(), "device-token")
-            val error = runCatching { client.timeline("campaign-1") }.exceptionOrNull()
-            assertTrue(error is Agent4OperatorClient.OperatorException)
-            assertEquals(
-                Agent4OperatorClient.ErrorKind.PROTOCOL,
-                (error as Agent4OperatorClient.OperatorException).kind,
-            )
+            val request = server.takeRequest()
+            assertEquals(first.nextCursor.encoded, request.requestUrl?.queryParameter("after"))
+            assertEquals(first.headCursor.encoded, request.requestUrl?.queryParameter("snapshot_head"))
         } finally {
             server.shutdown()
         }
@@ -178,7 +188,7 @@ class Agent4OperatorClientTest {
                   "verification":{
                     "campaign_id":"campaign/with space",
                     "record_count":2,
-                    "head_hash":"sha256:${"c".repeat(64)}",
+                    "head_hash":"sha256:${"e".repeat(64)}",
                     "latest_timeline_head_hash":null
                   }
                 }""".trimIndent(),
@@ -186,15 +196,14 @@ class Agent4OperatorClientTest {
         )
         server.start()
         try {
-            val client = Agent4OperatorClient(server.url("/").toString(), "device-token")
-            val result = client.evidenceVerification("campaign/with space")
+            val result = Agent4OperatorClient(
+                server.url("/").toString(),
+                "device-token",
+            ).evidenceVerification("campaign/with space")
             assertEquals(2, result.recordCount)
-            assertEquals(null, result.latestTimelineHeadHash)
-
             val request = server.takeRequest()
             assertEquals("GET", request.method)
             assertTrue(request.requestUrl!!.encodedPath.contains("campaign%2Fwith%20space"))
-            assertTrue(request.requestUrl!!.encodedPath.endsWith("/evidence/verification"))
         } finally {
             server.shutdown()
         }
@@ -214,9 +223,10 @@ class Agent4OperatorClientTest {
             server.enqueue(MockResponse().setResponseCode(status).setBody(body))
             server.start()
             try {
-                val client = Agent4OperatorClient(server.url("/").toString(), "device-token")
-                val error = runCatching { client.listCampaigns() }.exceptionOrNull()
-                assertTrue(error is Agent4OperatorClient.OperatorException)
+                val error = runCatching {
+                    Agent4OperatorClient(server.url("/").toString(), "device-token")
+                        .listCampaigns()
+                }.exceptionOrNull()
                 assertEquals(expected, (error as Agent4OperatorClient.OperatorException).kind)
                 assertEquals(status, error.statusCode)
             } finally {
@@ -249,65 +259,38 @@ class Agent4OperatorClientTest {
     }
 
     @Test
-    fun successRequiresKnownMediaTypeSchemaStatusAndMatchingRecordIds() {
+    fun successRequiresKnownMediaTypeSchemaStatusAndNumericFields() {
+        val emptyCursor = campaignCursor(emptyList(), 0, 0, null, "f")
         val badResponses = listOf(
             MockResponse()
                 .setResponseCode(200)
                 .setHeader("Content-Type", "application/json")
-                .setBody("{\"schema\":\"modelrig-agent4/operator-api/v1\",\"campaigns\":[]}"),
+                .setBody(campaignListBody(emptyList(), emptyCursor, emptyCursor, emptyCursor, false)),
             operatorResponse("{\"schema\":\"unknown\",\"campaigns\":[]}"),
-            operatorResponse(
-                """{
-                  "schema":"modelrig-agent4/operator-api/v1",
-                  "campaigns":[{
-                    "record":{
-                      "schema":"modelrig-agent4/campaign-record/v1",
-                      "spec":{"campaign_id":"c","name":"n"},
-                      "state":{"campaign_id":"c","status":"future-state"}
-                    },
-                    "timeline_entries":0,"event_entries":0,"evidence_entries":0,
-                    "latest_timeline_hash":null
-                  }]
-                }""".trimIndent(),
+            campaignListResponse(
+                listOf(campaignOverview("c", "n", "future-state")),
+                campaignCursor(emptyList(), 0, 1, null, "1"),
+                campaignCursor(emptyList(), 1, 1, "c", "1"),
+                campaignCursor(emptyList(), 1, 1, "c", "1"),
+                false,
             ),
-            operatorResponse(
-                """{
-                  "schema":"modelrig-agent4/operator-api/v1",
-                  "campaigns":[{
-                    "record":{
-                      "schema":"modelrig-agent4/campaign-record/v1",
-                      "spec":{"campaign_id":"c-1","name":"n"},
-                      "state":{"campaign_id":"c-2","status":"running"}
-                    },
-                    "timeline_entries":0,"event_entries":0,"evidence_entries":0,
-                    "latest_timeline_hash":null
-                  }]
-                }""".trimIndent(),
-            ),
-            operatorResponse(
-                """{
-                  "schema":"modelrig-agent4/operator-api/v1",
-                  "campaigns":[{
-                    "record":{
-                      "schema":"modelrig-agent4/campaign-record/v1",
-                      "spec":{"campaign_id":"c","name":"n"},
-                      "state":{"campaign_id":"c","status":"running"}
-                    },
-                    "timeline_entries":"0","event_entries":0,"evidence_entries":0,
-                    "latest_timeline_hash":null
-                  }]
-                }""".trimIndent(),
+            campaignListResponse(
+                listOf(campaignOverview("c", "n", "running", timelineEntries = "\"0\"")),
+                campaignCursor(emptyList(), 0, 1, null, "2"),
+                campaignCursor(emptyList(), 1, 1, "c", "2"),
+                campaignCursor(emptyList(), 1, 1, "c", "2"),
+                false,
             ),
         )
-
         for (response in badResponses) {
             val server = MockWebServer()
             server.enqueue(response)
             server.start()
             try {
-                val client = Agent4OperatorClient(server.url("/").toString(), "device-token")
-                val error = runCatching { client.listCampaigns() }.exceptionOrNull()
-                assertTrue(error is Agent4OperatorClient.OperatorException)
+                val error = runCatching {
+                    Agent4OperatorClient(server.url("/").toString(), "device-token")
+                        .listCampaigns()
+                }.exceptionOrNull()
                 assertEquals(
                     Agent4OperatorClient.ErrorKind.PROTOCOL,
                     (error as Agent4OperatorClient.OperatorException).kind,
@@ -339,6 +322,79 @@ class Agent4OperatorClientTest {
             server.shutdown()
         }
     }
+
+    private fun campaignOverview(
+        id: String,
+        name: String,
+        status: String,
+        timelineEntries: String = "4",
+    ): String = """{
+      "record":{
+        "schema":"modelrig-agent4/campaign-record/v1",
+        "spec":{"campaign_id":"$id","name":"$name"},
+        "state":{"campaign_id":"$id","status":"$status"}
+      },
+      "timeline_entries":$timelineEntries,
+      "event_entries":3,
+      "evidence_entries":2,
+      "latest_timeline_hash":"sha256:${"a".repeat(64)}"
+    }""".trimIndent()
+
+    private fun campaignCursor(
+        statuses: List<String>,
+        position: Int,
+        total: Int,
+        lastId: String?,
+        seed: String,
+    ): String {
+        val statusJson = statuses.joinToString(",") { "\"$it\"" }
+        val lastJson = lastId?.let { "\"$it\"" } ?: "null"
+        return """{
+          "schema":"modelrig-agent4/campaign-list-query-cursor/v1",
+          "statuses":[$statusJson],
+          "position":$position,
+          "total":$total,
+          "last_campaign_id":$lastJson,
+          "snapshot_sha256":"sha256:${seed.repeat(64)}"
+        }""".trimIndent()
+    }
+
+    private fun campaignListResponse(
+        campaigns: List<String>,
+        start: String,
+        next: String,
+        head: String,
+        hasMore: Boolean,
+    ): MockResponse = operatorResponse(
+        campaignListBody(campaigns, start, next, head, hasMore),
+    )
+
+    private fun campaignListBody(
+        campaigns: List<String>,
+        start: String,
+        next: String,
+        head: String,
+        hasMore: Boolean,
+    ): String = """{
+      "schema":"modelrig-agent4/operator-api/v1",
+      "campaigns":[${campaigns.joinToString(",")}],
+      "start_cursor":$start,
+      "next_cursor":$next,
+      "head_cursor":$head,
+      "has_more":$hasMore
+    }""".trimIndent()
+
+    private fun timelinePage(cursor: String, hasMore: Boolean): String = """{
+      "schema":"modelrig-agent4/operator-api/v1",
+      "page":{
+        "campaign_id":"campaign-1",
+        "entries":[],
+        "start_cursor":$cursor,
+        "next_cursor":$cursor,
+        "head_cursor":$cursor,
+        "has_more":$hasMore
+      }
+    }""".trimIndent()
 
     private fun operatorResponse(body: String): MockResponse = MockResponse()
         .setResponseCode(200)

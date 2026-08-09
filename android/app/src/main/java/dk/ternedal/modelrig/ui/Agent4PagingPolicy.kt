@@ -1,7 +1,21 @@
 package dk.ternedal.modelrig.ui
 
+import dk.ternedal.modelrig.net.Agent4OperatorClient
+
 /** Fail-closed append rules for server-verified Agent 4 read pages. */
 internal object Agent4PagingPolicy {
+    fun appendCampaigns(
+        current: List<Agent4OperatorClient.CampaignOverview>,
+        next: List<Agent4OperatorClient.CampaignOverview>,
+    ): List<Agent4OperatorClient.CampaignOverview> {
+        if (next.isEmpty()) return current
+        val ids = current.mapTo(mutableSetOf()) { it.campaignId }
+        require(next.all { ids.add(it.campaignId) }) {
+            "Agent 4 campaign-side gentager campaign-id"
+        }
+        return current + next
+    }
+
     fun appendTimeline(
         current: List<Agent4TimelineRow>,
         next: List<Agent4TimelineRow>,

@@ -1,12 +1,19 @@
 package dk.ternedal.modelrig.ui
 
+import dk.ternedal.modelrig.net.Agent4OperatorClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class Agent4PagingPolicyTest {
     @Test
-    fun appendsContiguousTimelineAndEvidencePages() {
+    fun appendsCampaignTimelineAndEvidencePages() {
+        val campaigns = Agent4PagingPolicy.appendCampaigns(
+            listOf(campaign("campaign-2")),
+            listOf(campaign("campaign-1")),
+        )
+        assertEquals(listOf("campaign-2", "campaign-1"), campaigns.map { it.campaignId })
+
         val timeline = Agent4PagingPolicy.appendTimeline(
             listOf(timelineRow(1, "event-1", "a")),
             listOf(
@@ -24,6 +31,22 @@ class Agent4PagingPolicyTest {
             ),
         )
         assertEquals(listOf(1, 2, 3), evidence.map { it.sequence })
+    }
+
+    @Test
+    fun rejectsDuplicateCampaignIdentity() {
+        assertThrows(IllegalArgumentException::class.java) {
+            Agent4PagingPolicy.appendCampaigns(
+                listOf(campaign("campaign-1")),
+                listOf(campaign("campaign-1")),
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            Agent4PagingPolicy.appendCampaigns(
+                emptyList(),
+                listOf(campaign("campaign-1"), campaign("campaign-1")),
+            )
+        }
     }
 
     @Test
@@ -83,6 +106,17 @@ class Agent4PagingPolicyTest {
             )
         }
     }
+
+    private fun campaign(id: String) = Agent4OperatorClient.CampaignOverview(
+        campaignId = id,
+        name = id,
+        status = Agent4OperatorClient.CampaignStatus.RUNNING,
+        timelineEntries = 1,
+        eventEntries = 1,
+        evidenceEntries = 0,
+        latestTimelineHash = null,
+        record = Agent4OperatorClient.CanonicalJson("{}"),
+    )
 
     private fun timelineRow(sequence: Int, eventId: String, hashSeed: String) =
         Agent4TimelineRow(
