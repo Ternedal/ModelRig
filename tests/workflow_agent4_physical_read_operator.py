@@ -72,6 +72,7 @@ class Agent4PhysicalReadOperatorTests(unittest.TestCase):
 
     def test_phase_transitions_require_physical_observations(self) -> None:
         process = PROCESS.read_text(encoding="utf-8")
+        finalize = FINALIZE.read_text(encoding="utf-8")
         self.assertIn(
             'Assert-CheckpointsPassed -Names @("default_off_feature_locked", "default_off_no_worker_fallback")',
             process,
@@ -92,7 +93,7 @@ class Agent4PhysicalReadOperatorTests(unittest.TestCase):
             self.assertIn(required, process)
         self.assertIn('Assert-StatePhase -State $state -Allowed @("granted")', process)
         self.assertIn('Assert-StatePhase -State $state -Allowed @("revoked")', process)
-        self.assertIn('Assert-StatePhase -State $state -Allowed @("regranted")', process)
+        self.assertIn('if ([string]$state.phase -ne "regranted")', finalize)
 
     def test_recording_binds_expected_http_and_redacts_credentials(self) -> None:
         record = RECORD.read_text(encoding="utf-8")
@@ -151,6 +152,12 @@ class Agent4PhysicalReadOperatorTests(unittest.TestCase):
                 for path in ROOT.glob("MUTATE_AGENT4_*_SNAPSHOT.cmd")
             }
         )
+        launchers.update(
+            {
+                path.name: path.read_text(encoding="utf-8")
+                for path in ROOT.glob("RESTART_AGENT4_PHYSICAL_*.cmd")
+            }
+        )
         expected_names = {
             "START_AGENT4_PHYSICAL_READ_TEST.cmd",
             "ENABLE_AGENT4_PHYSICAL_READ_TEST.cmd",
@@ -162,6 +169,8 @@ class Agent4PhysicalReadOperatorTests(unittest.TestCase):
             "STATUS_AGENT4_PHYSICAL_READ_TEST.cmd",
             "MUTATE_AGENT4_CAMPAIGN_SNAPSHOT.cmd",
             "MUTATE_AGENT4_SUMMARY_SNAPSHOT.cmd",
+            "RESTART_AGENT4_PHYSICAL_WORKER.cmd",
+            "RESTART_AGENT4_PHYSICAL_BACKEND.cmd",
         }
         self.assertTrue(expected_names.issubset(launchers))
         for name in expected_names:
