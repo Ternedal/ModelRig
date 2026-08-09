@@ -23,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,7 +34,10 @@ import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.net.Agent4OperatorClient
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private const val AGENT4_CAMPAIGN_PAGE_SIZE = 25
 
 private sealed interface Agent4ScreenState {
     data object Loading : Agent4ScreenState
@@ -42,9 +46,7 @@ private sealed interface Agent4ScreenState {
     data object FeatureDisabled : Agent4ScreenState
     data class Unavailable(val message: String) : Agent4ScreenState
     data class ProtocolFailure(val message: String) : Agent4ScreenState
-    data class Ready(
-        val campaigns: List<Agent4OperatorClient.CampaignOverview>,
-    ) : Agent4ScreenState
+    data class Ready(val page: Agent4OperatorClient.CampaignList) : Agent4ScreenState
 }
 
 /**
@@ -67,46 +69,90 @@ fun Agent4OperatorScreen(
     }
 
     var refresh by remember { mutableIntStateOf(0) }
-    var state: Agent4ScreenState by remember {
-        mutableStateOf(Agent4ScreenState.Loading)
+    var paging by remember { mutableStateOf(false) }
+    var state: Agent4ScreenState by remember { mutableStateOf(Agent4ScreenState.Loading) }
+    val scope = rememberCoroutineScope()
+
+    fun connection(): Pair<String, String>? {
+        val baseUrl = store.baseUrl?.trim().orEmpty()
+        val token = store.token?.trim().orEmpty()
+        return if (baseUrl.isBlank() || token.isBlank()) null else baseUrl to token
+    }
+
+    fun failureState(failure: Throwable): Agent4ScreenState = when (failure) {
+        is Agent4OperatorClient.OperatorException -> when (failure.kind) {
+            Agent4OperatorClient.ErrorKind.AUTH_REQUIRED -> Agent4ScreenState.PairingRequired
+            Agent4OperatorClient.ErrorKind.GRANT_REQUIRED -> Agent4ScreenState.GrantRequired
+            Agent4OperatorClient.ErrorKind.FEATURE_DISABLED -> Agent4ScreenState.FeatureDisabled
+            Agent4OperatorClient.ErrorKind.UNAVAILABLE ->
+                Agent4ScreenState.Unavailable(failure.message.orEmpty())
+            Agent4OperatorClient.ErrorKind.NOT_FOUND,
+            Agent4OperatorClient.ErrorKind.REQUEST_REJECTED,
+            Agent4OperatorClient.ErrorKind.PROTOCOL ->
+                Agent4ScreenState.ProtocolFailure(failure.message.orEmpty())
+        }
+        is IllegalArgumentException ->
+            Agent4ScreenState.ProtocolFailure(failure.message ?: "Campaign paging blev afvist")
+        else -> Agent4ScreenState.Unavailable("Agent 4 kunne ikke indlæses")
     }
 
     LaunchedEffect(refresh, store.baseUrl, store.rigCredentialStatus) {
-        // Clear previously rendered privileged content before every auth/network
-        // transition. A revoke or invalid token must never leave stale data on
-        // screen while the replacement request is in flight.
         state = Agent4ScreenState.Loading
-        val baseUrl = store.baseUrl
-        val token = store.token
-        if (baseUrl.isNullOrBlank() || token.isNullOrBlank()) {
+        paging = false
+        val currentConnection = connection()
+        if (currentConnection == null) {
             state = Agent4ScreenState.PairingRequired
             return@LaunchedEffect
         }
-
         state = try {
-            val campaigns = withContext(Dispatchers.IO) {
-                Agent4OperatorClient(baseUrl, token)
-                    .listCampaigns(limit = 100)
-                    .campaigns
+            val page = withContext(Dispatchers.IO) {
+                Agent4OperatorClient(currentConnection.first, currentConnection.second)
+                    .listCampaigns(limit = AGENT4_CAMPAIGN_PAGE_SIZE)
             }
-            Agent4ScreenState.Ready(campaigns)
-        } catch (failure: Agent4OperatorClient.OperatorException) {
-            when (failure.kind) {
-                Agent4OperatorClient.ErrorKind.AUTH_REQUIRED ->
-                    Agent4ScreenState.PairingRequired
-                Agent4OperatorClient.ErrorKind.GRANT_REQUIRED ->
-                    Agent4ScreenState.GrantRequired
-                Agent4OperatorClient.ErrorKind.FEATURE_DISABLED ->
-                    Agent4ScreenState.FeatureDisabled
-                Agent4OperatorClient.ErrorKind.UNAVAILABLE ->
-                    Agent4ScreenState.Unavailable(failure.message.orEmpty())
-                Agent4OperatorClient.ErrorKind.NOT_FOUND,
-                Agent4OperatorClient.ErrorKind.REQUEST_REJECTED,
-                Agent4OperatorClient.ErrorKind.PROTOCOL ->
-                    Agent4ScreenState.ProtocolFailure(failure.message.orEmpty())
+            val campaigns = Agent4PagingPolicy.appendCampaigns(emptyList(), page.campaigns)
+            Agent4ScreenState.Ready(page.copy(campaigns = campaigns))
+        } catch (failure: Throwable) {
+            failureState(failure)
+        }
+    }
+
+    fun loadMore(current: Agent4OperatorClient.CampaignList) {
+        val currentConnection = connection() ?: run {
+            state = Agent4ScreenState.PairingRequired
+            return
+        }
+        paging = true
+        scope.launch {
+            try {
+                val next = withContext(Dispatchers.IO) {
+                    Agent4OperatorClient(currentConnection.first, currentConnection.second)
+                        .listCampaigns(
+                            after = current.nextCursor,
+                            snapshotHead = current.headCursor,
+                            limit = AGENT4_CAMPAIGN_PAGE_SIZE,
+                        )
+                }
+                require(next.startCursor == current.nextCursor) {
+                    "Agent 4 campaign-side starter ved en anden cursor end requestet"
+                }
+                require(next.headCursor == current.headCursor) {
+                    "Agent 4 campaign-snapshot ændrede head under paging"
+                }
+                state = Agent4ScreenState.Ready(
+                    current.copy(
+                        campaigns = Agent4PagingPolicy.appendCampaigns(
+                            current.campaigns,
+                            next.campaigns,
+                        ),
+                        nextCursor = next.nextCursor,
+                        hasMore = next.hasMore,
+                    ),
+                )
+            } catch (failure: Throwable) {
+                state = failureState(failure)
+            } finally {
+                paging = false
             }
-        } catch (_: Exception) {
-            Agent4ScreenState.Unavailable("Agent 4 kunne ikke indlæses")
         }
     }
 
@@ -177,8 +223,10 @@ fun Agent4OperatorScreen(
                 retry = { refresh++ },
             )
             is Agent4ScreenState.Ready -> CampaignListState(
-                campaigns = current.campaigns,
+                page = current.page,
+                paging = paging,
                 refresh = { refresh++ },
+                loadMore = { loadMore(current.page) },
                 openCampaign = { selectedCampaignId = it },
             )
         }
@@ -221,11 +269,13 @@ private fun MessageState(
 
 @Composable
 private fun CampaignListState(
-    campaigns: List<Agent4OperatorClient.CampaignOverview>,
+    page: Agent4OperatorClient.CampaignList,
+    paging: Boolean,
     refresh: () -> Unit,
+    loadMore: () -> Unit,
     openCampaign: (String) -> Unit,
 ) {
-    if (campaigns.isEmpty()) {
+    if (page.campaigns.isEmpty()) {
         MessageState(
             title = "Ingen kampagner",
             message = "Agent 4-readfladen er tilgængelig, men datarooten indeholder ingen kampagner.",
@@ -239,16 +289,16 @@ private fun CampaignListState(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "${campaigns.size} kampagner",
+            text = "${page.campaigns.size} kampagner indlæst",
             color = KalivTheme.colors.textHigh,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f),
         )
-        OutlinedButton(onClick = refresh) { Text("Opdatér") }
+        OutlinedButton(onClick = refresh, enabled = !paging) { Text("Opdatér") }
     }
     Spacer(Modifier.height(8.dp))
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        items(campaigns, key = { it.campaignId }) { campaign ->
+        items(page.campaigns, key = { it.campaignId }) { campaign ->
             Surface(
                 color = KalivTheme.colors.surface,
                 shape = RoundedCornerShape(14.dp),
@@ -296,5 +346,13 @@ private fun CampaignListState(
                 }
             }
         }
+        if (page.hasMore) {
+            item {
+                OutlinedButton(onClick = loadMore, enabled = !paging) {
+                    Text(if (paging) "Henter…" else "Hent næste kampagneside")
+                }
+            }
+        }
+        item { Spacer(Modifier.height(18.dp)) }
     }
 }
