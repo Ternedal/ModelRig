@@ -38,16 +38,20 @@ install_termination_contract(fastapi_app)
 # production surface; launchers do not add parallel routers.
 mount_agent3(fastapi_app)
 
-# Agent 4 must remain absent from a standard worker boot, including Python's
-# imported-module inventory. Only exact opt-in imports the mount implementation;
-# that implementation then requires the host's already composed A4-09 context
-# and fails closed rather than creating a parallel reader or dataroot.
+# Agent 4 remains absent from a standard worker boot, including Python's imported
+# module inventory. Exact opt-in imports the read-only production bootstrap,
+# composes one canonical A4-09 context from KALIV_AGENT4_DATA_ROOT and injects it
+# into the existing GET-only mount. The bootstrap executor rejects every
+# dispatch/signal/outcome call and performs no recovery or background work.
 if os.getenv("KALIV_AGENT4_OPERATOR_API", "0") == "1":
+    from .agent4.production_bootstrap import (
+        compose_agent4_operator_context_from_environment,
+    )
     from .agent4.production_mount import mount_agent4_operator
 
     mount_agent4_operator(
         fastapi_app,
-        getattr(fastapi_app.state, "agent4_runtime_context", None),
+        compose_agent4_operator_context_from_environment(),
     )
 
 # Web-research selvvagter paa KALIV_WEB_RESEARCH_ENABLED (default off) paa samme
