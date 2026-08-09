@@ -23,11 +23,17 @@ Auditoren kræver blandt andet:
 - kun `validation/`-ændringer efter den fysiske kørsel;
 - bit-for-bit gyldig hovedreceipt-digest;
 - alle 21 checkpoints med forventede HTTP-statusser og hashes;
+- præcis de 21 autoriserede checkpointnavne uden ukendte ekstra felter;
 - fixture-counts over pagegrænserne og begge snapshot-mutationer;
-- fysisk Pixel/app-build, artifact-hashes og fuld cleanup;
+- bit-for-bit gyldig digest for hver af de to mutation receipts;
+- fysisk Pixel/app-build og et numerisk Android SDK-felt;
+- artifact-hashes og fuld cleanup;
 - ingen credential-felter eller credential-lignende værdier;
 - `credential_data_included=false`, `public_network=false` og
   `production_activation=false`.
+
+Launcheren kører først hovedauditoren. Kun ved exit `0` køres det separate,
+read-only hardeninglag. En fejl i et af lagene er NO-GO.
 
 Exit codes:
 
