@@ -79,10 +79,25 @@ class Agent4OperatorPresentationTest {
     }
 
     @Test
-    fun rejectsUnknownSchemaAndMalformedHashes() {
+    fun rejectsUnknownSchemaMalformedHashesAndNonStringText() {
         assertThrows(IllegalArgumentException::class.java) {
             Agent4OperatorPresentation.timelineRow(
                 Agent4OperatorClient.CanonicalJson("{\"schema\":\"unknown\"}"),
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            Agent4OperatorPresentation.timelineRow(
+                Agent4OperatorClient.CanonicalJson(
+                    """{
+                      "schema":"modelrig-agent4/campaign-timeline-entry/v1",
+                      "event":{
+                        "event_id":7,"campaign_id":"c1","kind":"started",
+                        "sequence":1,"occurred_at":"2026-08-09T10:01:00Z","payload":{}
+                      },
+                      "previous_hash":null,"evidence":[],
+                      "entry_hash":"sha256:${"b".repeat(64)}"
+                    }""".trimIndent(),
+                ),
             )
         }
         assertThrows(IllegalArgumentException::class.java) {
