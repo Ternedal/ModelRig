@@ -313,6 +313,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_agent4_physical_read_mutations.py`
 - `tests/workflow_agent4_physical_read_operator.py`
 - `tests/workflow_agent4_physical_read_runbook.py`
+- `tests/workflow_agent4_physical_read_secret_scrub.py`
 - `tests/workflow_agent4_pr_description.py`
 - `tests/workflow_agent4_read_product_integration.py`
 - `tests/workflow_agent4_storage_boundary.py`
