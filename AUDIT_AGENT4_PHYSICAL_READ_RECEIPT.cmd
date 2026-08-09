@@ -11,7 +11,17 @@ set "REPO=%~dp0"
 set "EXPECTED_SHA=%~1"
 set "RECEIPT=%REPO%validation\agent4-physical-read-latest.json"
 set "OUT=%USERPROFILE%\ModelRig-Validation\A4-18-receipt-audit\receipt-audit-latest.json"
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%REPO%scripts\agent4-physical-read-audit-hardening.ps1" -ReceiptPath "%RECEIPT%" -RepoRoot "%REPO%" -OutputPath "%OUT%" -ExpectedSha "%EXPECTED_SHA%" -RequireRemoteRefs
+for /f "usebackq delims=" %%H in (`git -C "%REPO%" rev-parse HEAD 2^>nul`) do set "OBSERVED_SHA=%%H"
+if /i not "%OBSERVED_SHA%"=="%EXPECTED_SHA%" (
+  echo A4-18 RECEIPT AUDIT FEJLEDE. Forkert exact HEAD.
+  exit /b 2
+)
+python "%REPO%scripts\agent4_physical_read_audit_hardening.py" --receipt "%RECEIPT%" --repo-root "%REPO%"
+if errorlevel 1 (
+  echo A4-18 RECEIPT HARDENING FEJLEDE. Issue #421 maa ikke lukkes.
+  exit /b 2
+)
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%REPO%scripts\agent4-physical-read-audit.ps1" -ReceiptPath "%RECEIPT%" -RepoRoot "%REPO%" -OutputPath "%OUT%" -RequireRemoteRefs
 set "RC=%ERRORLEVEL%"
 echo.
 if "%RC%"=="0" (
