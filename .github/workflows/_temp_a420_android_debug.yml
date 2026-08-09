@@ -1,22 +1,17 @@
 name: Temporary A4-20 Android debug
 
 on:
-  push:
-    branches:
-      - agent/a4-20-android-response-epoch
+  pull_request:
 
 permissions:
   contents: read
 
 jobs:
   debug-agent4-operator-tests:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     steps:
-      - name: Check out A4-20 branch
+      - name: Check out pull-request merge
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: agent/a4-20-android-response-epoch
 
       - name: Set up Java
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
