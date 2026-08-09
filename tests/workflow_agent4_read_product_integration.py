@@ -177,10 +177,16 @@ class Agent4ReadProductIntegrationTests(unittest.TestCase):
             ".delete(",
             "localhost:8099",
             "127.0.0.1:8099",
-            "/experimental/agent4/operator",
         ):
             self.assertNotIn(forbidden, android_source)
-        self.assertIn("/api/v1/experimental/agent4/operator", android_source)
+        self.assertIn(
+            'private const val OPERATOR_PATH = "api/v1/experimental/agent4/operator"',
+            android_source,
+        )
+        self.assertNotIn(
+            'private const val OPERATOR_PATH = "experimental/agent4/operator"',
+            android_source,
+        )
 
         ui_text = screen_source + detail_source
         for forbidden_label in (
