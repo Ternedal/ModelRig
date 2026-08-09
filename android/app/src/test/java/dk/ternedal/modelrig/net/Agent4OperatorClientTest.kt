@@ -70,8 +70,13 @@ class Agent4OperatorClientTest {
     }
 
     @Test
-    fun hashBoundCursorsAreReturnedOpaqueAndSentBackByTheClient() {
-        val cursor = """{"campaign_id":"campaign-1","sequence":2,"hash":"${"b".repeat(64)}"}"""
+    fun hashBoundTimelineCursorsAreReturnedOpaqueAndSentBack() {
+        val cursor = """{
+          "schema":"modelrig-agent4/campaign-timeline-query-cursor/v1",
+          "campaign_id":"campaign-1",
+          "sequence":2,
+          "entry_hash":"sha256:${"b".repeat(64)}"
+        }""".trimIndent()
         val server = MockWebServer()
         server.enqueue(
             operatorResponse(
@@ -126,6 +131,44 @@ class Agent4OperatorClientTest {
     }
 
     @Test
+    fun malformedOrCrossCampaignCursorFailsClosed() {
+        val wrongCursor = """{
+          "schema":"modelrig-agent4/campaign-timeline-query-cursor/v1",
+          "campaign_id":"other-campaign",
+          "sequence":1,
+          "entry_hash":"sha256:${"f".repeat(64)}"
+        }""".trimIndent()
+        val server = MockWebServer()
+        server.enqueue(
+            operatorResponse(
+                """{
+                  "schema":"modelrig-agent4/operator-api/v1",
+                  "page":{
+                    "campaign_id":"campaign-1",
+                    "entries":[],
+                    "start_cursor":$wrongCursor,
+                    "next_cursor":$wrongCursor,
+                    "head_cursor":$wrongCursor,
+                    "has_more":false
+                  }
+                }""".trimIndent(),
+            ),
+        )
+        server.start()
+        try {
+            val client = Agent4OperatorClient(server.url("/").toString(), "device-token")
+            val error = runCatching { client.timeline("campaign-1") }.exceptionOrNull()
+            assertTrue(error is Agent4OperatorClient.OperatorException)
+            assertEquals(
+                Agent4OperatorClient.ErrorKind.PROTOCOL,
+                (error as Agent4OperatorClient.OperatorException).kind,
+            )
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
     fun verificationAndDynamicPathSegmentsStayReadOnlyAndEncoded() {
         val server = MockWebServer()
         server.enqueue(
@@ -158,11 +201,11 @@ class Agent4OperatorClientTest {
     }
 
     @Test
-    fun authGrantAndProtocolFailuresAreDistinct() {
+    fun authGrantRejectedAndUnavailableFailuresAreDistinct() {
         val cases = listOf(
             Triple(401, "{\"error\":\"invalid token\"}", Agent4OperatorClient.ErrorKind.AUTH_REQUIRED),
             Triple(403, "{\"error\":\"agent4 read grant required\"}", Agent4OperatorClient.ErrorKind.GRANT_REQUIRED),
-            Triple(404, "{\"detail\":\"agent4 operator resource not found\"}", Agent4OperatorClient.ErrorKind.NOT_FOUND),
+            Triple(405, "{\"detail\":\"method not allowed\"}", Agent4OperatorClient.ErrorKind.REQUEST_REJECTED),
             Triple(422, "{\"detail\":\"agent4 operator request rejected\"}", Agent4OperatorClient.ErrorKind.REQUEST_REJECTED),
             Triple(503, "{\"detail\":\"agent4 operator read unavailable\"}", Agent4OperatorClient.ErrorKind.UNAVAILABLE),
         )
@@ -179,6 +222,29 @@ class Agent4OperatorClientTest {
             } finally {
                 server.shutdown()
             }
+        }
+    }
+
+    @Test
+    fun missingListRouteIsFeatureDisabledButMissingCampaignIsNotFound() {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setResponseCode(404).setBody("404 page not found"))
+        server.enqueue(MockResponse().setResponseCode(404).setBody("{\"detail\":\"agent4 operator resource not found\"}"))
+        server.start()
+        try {
+            val client = Agent4OperatorClient(server.url("/").toString(), "device-token")
+            val disabled = runCatching { client.listCampaigns() }.exceptionOrNull()
+            assertEquals(
+                Agent4OperatorClient.ErrorKind.FEATURE_DISABLED,
+                (disabled as Agent4OperatorClient.OperatorException).kind,
+            )
+            val missing = runCatching { client.campaign("missing") }.exceptionOrNull()
+            assertEquals(
+                Agent4OperatorClient.ErrorKind.NOT_FOUND,
+                (missing as Agent4OperatorClient.OperatorException).kind,
+            )
+        } finally {
+            server.shutdown()
         }
     }
 
@@ -214,6 +280,20 @@ class Agent4OperatorClientTest {
                       "state":{"campaign_id":"c-2","status":"running"}
                     },
                     "timeline_entries":0,"event_entries":0,"evidence_entries":0,
+                    "latest_timeline_hash":null
+                  }]
+                }""".trimIndent(),
+            ),
+            operatorResponse(
+                """{
+                  "schema":"modelrig-agent4/operator-api/v1",
+                  "campaigns":[{
+                    "record":{
+                      "schema":"modelrig-agent4/campaign-record/v1",
+                      "spec":{"campaign_id":"c","name":"n"},
+                      "state":{"campaign_id":"c","status":"running"}
+                    },
+                    "timeline_entries":"0","event_entries":0,"evidence_entries":0,
                     "latest_timeline_hash":null
                   }]
                 }""".trimIndent(),
