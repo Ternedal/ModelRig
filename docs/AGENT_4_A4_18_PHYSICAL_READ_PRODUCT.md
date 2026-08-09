@@ -31,7 +31,9 @@ frosne 1.58.151-kandidat, tags eller releases.
 - Præcis én autoriseret Pixel i `adb devices`.
 - Pixel og rig på samme betroede lokale netværk.
 - Port 8080 og 8099 ledige.
-- Ingen credentials må indsættes i noter, screenshots eller receipts.
+- Ingen credentials må indsættes i noter eller receipts.
+- Screenshots og andre billedfiler må ikke bruges som acceptance-evidens, fordi
+  synlige credentials i pixels ikke kan credential-verificeres maskinelt.
 
 Operatoren stopper, hvis SHA, working tree, procesidentitet, portejerskab,
 faseorden eller checkpointbevis ikke passer.
@@ -156,16 +158,17 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\scripts\agent4
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\scripts\agent4-physical-read-operator.ps1 `
   -Action Record -Checkpoint detail_verification_matches -Result Pass `
   -HttpStatus 200 -Route /api/v1/agent4/campaigns/a4-18-physical-primary `
-  -PayloadSha256 'sha256:<64-hex>'
+  -PayloadSha256 'sha256:<64-hex>' `
+  -Note "Detail og verification-status matcher canonical read-model"
 
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\scripts\agent4-physical-read-operator.ps1 `
   -Action Record -Checkpoint no_write_controls -Result Pass `
   -Note "Ingen write-, lifecycle- eller grant-kontrol i Android"
 ```
 
-Brug hash af den redigerede payload/cursor, ikke rå følsomme payloads. Et
-valgfrit redigeret screenshot kan bindes med `-ScreenshotPath`; filen skal ligge
-under `validation/agent4-physical-runtime`.
+Brug hash af den redigerede payload/cursor, ikke rå følsomme payloads. Alle
+UI-beviser skal registreres som korte, redigerede `-Note`-observationer.
+`-ScreenshotPath` må ikke bruges i en acceptance-kampagne.
 
 ## 5. Bevis stale campaign-record snapshot
 
@@ -285,12 +288,24 @@ Finalizeren:
 - kræver fase `regranted`;
 - nedgraderer automatisk GO til NO-GO, hvis ét checkpoint mangler/fejler;
 - stopper kun de registrerede og identitetsverificerede processer;
+- accepterer safety-gatens verificerede pre-stop som cleanup-bevis, men kun når
+  de oprindelige registrerede PID'er er væk og begge porte fortsat er frie;
 - fjerner firewall-reglen og den ACL-beskyttede admin-nøgle;
 - kræver port 8080 og 8099 fri;
 - skriver `validation/agent4-physical-read-latest.json` med exact SHA, Pixel/build-
-  identitet, redigerede observationer, fil-hashes og cleanup-resultat;
+  identitet, redigerede tekstobservationer, fil-hashes og cleanup-resultat;
 - inkluderer ingen pairing-kode, Bearer-token eller admin-nøgle;
 - skriver `public_network=false` og `production_activation=false`.
+
+Kør derefter den obligatoriske receipt-audit med den samme exact SHA:
+
+```powershell
+.\AUDIT_AGENT4_PHYSICAL_READ_RECEIPT.cmd $ExpectedSha
+```
+
+Auditoren scanner runtime-evidensfiler (`.json`, `.log`, `.txt`) for
+credential-lignende indhold og afviser billedfiler, symlinks, manglende
+safety-binding, ændrede digests, superseded heads og ufuldstændig cleanup.
 
 Et manuelt NO-GO kan altid udstedes:
 
@@ -319,5 +334,7 @@ A4-18 er kun GO, når:
 5. campaign-record- og rendered-summary-ændringer begge afviser gamle cursors;
 6. restart/netværks-/schema-/not-found-fejl aldrig vises som success;
 7. Android har ingen write/lifecycle/grant-kontrol;
-8. receipt er credential-fri og cleanup er grøn;
-9. `public_network=false` og `production_activation=false`.
+8. receipt og alle runtime-evidensfiler er credential-fri, kun redigerede
+   tekstobservationer bruges, og cleanup er grøn;
+9. exact-head-, SDK-, hardening- og basisauditoren returnerer `PASS`;
+10. `public_network=false` og `production_activation=false`.
