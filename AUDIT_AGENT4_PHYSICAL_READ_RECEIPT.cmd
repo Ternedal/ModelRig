@@ -16,6 +16,11 @@ if errorlevel 1 (
   echo A4-18 EXACT-HEAD GATE FEJLEDE. Issue #421 maa ikke lukkes.
   exit /b 2
 )
+python "%REPO%scripts\agent4_physical_read_sdk_check.py" --receipt "%RECEIPT%"
+if errorlevel 1 (
+  echo A4-18 PIXEL SDK CHECK FEJLEDE. Issue #421 maa ikke lukkes.
+  exit /b 2
+)
 python "%REPO%scripts\agent4_physical_read_audit_hardening.py" --receipt "%RECEIPT%" --repo-root "%REPO%"
 if errorlevel 1 (
   echo A4-18 RECEIPT HARDENING FEJLEDE. Issue #421 maa ikke lukkes.
