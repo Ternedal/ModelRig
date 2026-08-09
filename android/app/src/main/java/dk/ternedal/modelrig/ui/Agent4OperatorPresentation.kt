@@ -29,7 +29,7 @@ internal data class Agent4EvidenceRow(
     val evidenceId: String,
     val mediaType: String,
     val location: String,
-    val sizeBytes: Int,
+    val sizeBytes: Long,
     val recordHash: String,
 )
 
@@ -75,7 +75,7 @@ internal object Agent4OperatorPresentation {
             evidenceId = evidence.requireText("evidence_id"),
             mediaType = evidence.requireText("media_type"),
             location = evidence.requireText("location"),
-            sizeBytes = evidence.requireNonNegativeInt("size_bytes"),
+            sizeBytes = evidence.requireNonNegativeLong("size_bytes"),
             recordHash = record.requireSha256("record_hash"),
         )
     }
@@ -85,7 +85,7 @@ internal object Agent4OperatorPresentation {
             .getOrElse { throw IllegalArgumentException("Agent 4-data er ikke gyldig JSON", it) }
 
     private fun requireSchema(value: JSONObject, expected: String) {
-        if (value.optString("schema") != expected) {
+        if (value.requireText("schema") != expected) {
             throw IllegalArgumentException("Agent 4-data har ukendt schema")
         }
     }
@@ -93,13 +93,22 @@ internal object Agent4OperatorPresentation {
     private fun JSONObject.requireObject(name: String): JSONObject =
         optJSONObject(name) ?: throw IllegalArgumentException("Agent 4-data mangler $name")
 
-    private fun JSONObject.requireText(name: String): String =
-        optString(name).takeIf { it.isNotBlank() }
-            ?: throw IllegalArgumentException("Agent 4-data mangler $name")
+    private fun JSONObject.requireText(name: String): String {
+        if (!has(name) || isNull(name)) throw IllegalArgumentException("Agent 4-data mangler $name")
+        val value = get(name)
+        if (value !is String || value.isBlank()) {
+            throw IllegalArgumentException("Agent 4-data har ugyldigt $name")
+        }
+        return value
+    }
 
     private fun JSONObject.optionalText(name: String): String? {
         if (!has(name) || isNull(name)) return null
-        return optString(name).takeIf { it.isNotBlank() }
+        val value = get(name)
+        if (value !is String || value.isBlank()) {
+            throw IllegalArgumentException("Agent 4-data har ugyldigt $name")
+        }
+        return value
     }
 
     private fun JSONObject.requirePositiveInt(name: String): Int {
@@ -109,14 +118,20 @@ internal object Agent4OperatorPresentation {
     }
 
     private fun JSONObject.requireNonNegativeInt(name: String): Int {
+        val value = requireNonNegativeLong(name)
+        if (value > Int.MAX_VALUE) throw IllegalArgumentException("Agent 4-data har ugyldigt $name")
+        return value.toInt()
+    }
+
+    private fun JSONObject.requireNonNegativeLong(name: String): Long {
         if (!has(name) || isNull(name)) throw IllegalArgumentException("Agent 4-data mangler $name")
         val raw = get(name)
         if (raw !is Number) throw IllegalArgumentException("Agent 4-data har ugyldigt $name")
         val value = raw.toLong()
-        if (value < 0 || value > Int.MAX_VALUE || raw.toDouble() != value.toDouble()) {
+        if (value < 0 || raw.toDouble() != value.toDouble()) {
             throw IllegalArgumentException("Agent 4-data har ugyldigt $name")
         }
-        return value.toInt()
+        return value
     }
 
     private fun JSONObject.requireSha256(name: String): String {

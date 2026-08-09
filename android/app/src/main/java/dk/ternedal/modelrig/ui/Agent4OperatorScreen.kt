@@ -72,11 +72,16 @@ fun Agent4OperatorScreen(
     var paging by remember { mutableStateOf(false) }
     var state: Agent4ScreenState by remember { mutableStateOf(Agent4ScreenState.Loading) }
     val scope = rememberCoroutineScope()
+    val responseEpoch = remember { Agent4ResponseEpoch() }
 
-    fun connection(): Pair<String, String>? {
+    fun connection(): Agent4ConnectionIdentity? {
         val baseUrl = store.baseUrl?.trim().orEmpty()
         val token = store.token?.trim().orEmpty()
-        return if (baseUrl.isBlank() || token.isBlank()) null else baseUrl to token
+        return if (baseUrl.isBlank() || token.isBlank()) {
+            null
+        } else {
+            Agent4ConnectionIdentity(baseUrl, token)
+        }
     }
 
     fun failureState(failure: Throwable): Agent4ScreenState = when (failure) {
@@ -101,37 +106,46 @@ fun Agent4OperatorScreen(
         paging = false
         val currentConnection = connection()
         if (currentConnection == null) {
+            responseEpoch.invalidate()
             state = Agent4ScreenState.PairingRequired
             return@LaunchedEffect
         }
-        state = try {
+        val ticket = responseEpoch.begin(currentConnection)
+        try {
             val page = withContext(Dispatchers.IO) {
-                Agent4OperatorClient(currentConnection.first, currentConnection.second)
+                Agent4OperatorClient(currentConnection.baseUrl, currentConnection.token)
                     .listCampaigns(limit = AGENT4_CAMPAIGN_PAGE_SIZE)
             }
-            val campaigns = Agent4PagingPolicy.appendCampaigns(emptyList(), page.campaigns)
-            Agent4ScreenState.Ready(page.copy(campaigns = campaigns))
+            if (responseEpoch.accepts(ticket, connection())) {
+                val campaigns = Agent4PagingPolicy.appendCampaigns(emptyList(), page.campaigns)
+                state = Agent4ScreenState.Ready(page.copy(campaigns = campaigns))
+            }
         } catch (failure: Throwable) {
-            failureState(failure)
+            if (responseEpoch.accepts(ticket, connection())) {
+                state = failureState(failure)
+            }
         }
     }
 
     fun loadMore(current: Agent4OperatorClient.CampaignList) {
         val currentConnection = connection() ?: run {
+            responseEpoch.invalidate()
             state = Agent4ScreenState.PairingRequired
             return
         }
+        val ticket = responseEpoch.capture(currentConnection)
         paging = true
         scope.launch {
             try {
                 val next = withContext(Dispatchers.IO) {
-                    Agent4OperatorClient(currentConnection.first, currentConnection.second)
+                    Agent4OperatorClient(currentConnection.baseUrl, currentConnection.token)
                         .listCampaigns(
                             after = current.nextCursor,
                             snapshotHead = current.headCursor,
                             limit = AGENT4_CAMPAIGN_PAGE_SIZE,
                         )
                 }
+                if (!responseEpoch.accepts(ticket, connection())) return@launch
                 require(next.startCursor == current.nextCursor) {
                     "Agent 4 campaign-side starter ved en anden cursor end requestet"
                 }
@@ -149,9 +163,13 @@ fun Agent4OperatorScreen(
                     ),
                 )
             } catch (failure: Throwable) {
-                state = failureState(failure)
+                if (responseEpoch.accepts(ticket, connection())) {
+                    state = failureState(failure)
+                }
             } finally {
-                paging = false
+                if (responseEpoch.accepts(ticket, connection())) {
+                    paging = false
+                }
             }
         }
     }

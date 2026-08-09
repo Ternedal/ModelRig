@@ -150,15 +150,10 @@ class Agent4OperatorClientTest {
 
     @Test
     fun hashBoundTimelineCursorsAreReturnedOpaqueAndSentBack() {
-        val cursor = """{
-          "schema":"modelrig-agent4/campaign-timeline-query-cursor/v1",
-          "campaign_id":"campaign-1",
-          "sequence":2,
-          "entry_hash":"sha256:${"d".repeat(64)}"
-        }""".trimIndent()
+        val head = timelineCursor(2, "d")
         val server = MockWebServer()
-        server.enqueue(operatorResponse(timelinePage(cursor, true)))
-        server.enqueue(operatorResponse(timelinePage(cursor, false)))
+        server.enqueue(operatorResponse(timelinePage(head, true)))
+        server.enqueue(operatorResponse(timelinePage(head, false)))
         server.start()
         try {
             val client = Agent4OperatorClient(server.url("/").toString(), "device-token")
@@ -175,6 +170,116 @@ class Agent4OperatorClientTest {
             assertEquals(first.headCursor.encoded, request.requestUrl?.queryParameter("snapshot_head"))
         } finally {
             server.shutdown()
+        }
+    }
+
+    @Test
+    fun timelineAndEvidenceRejectLyingCursorRelationships() {
+        val timelineServer = MockWebServer()
+        timelineServer.enqueue(
+            operatorResponse(
+                timelineBody(
+                    entries = emptyList(),
+                    start = timelineCursor(0, null),
+                    next = timelineCursor(0, null),
+                    head = timelineCursor(1, "b"),
+                    hasMore = false,
+                ),
+            ),
+        )
+        timelineServer.start()
+        try {
+            val error = runCatching {
+                Agent4OperatorClient(timelineServer.url("/").toString(), "device-token")
+                    .timeline("campaign-1")
+            }.exceptionOrNull()
+            assertEquals(
+                Agent4OperatorClient.ErrorKind.PROTOCOL,
+                (error as Agent4OperatorClient.OperatorException).kind,
+            )
+        } finally {
+            timelineServer.shutdown()
+        }
+
+        val evidenceServer = MockWebServer()
+        evidenceServer.enqueue(
+            operatorResponse(
+                evidenceBody(
+                    records = emptyList(),
+                    start = evidenceCursor(0, null),
+                    next = evidenceCursor(0, null),
+                    head = evidenceCursor(1, "c"),
+                    hasMore = false,
+                ),
+            ),
+        )
+        evidenceServer.start()
+        try {
+            val error = runCatching {
+                Agent4OperatorClient(evidenceServer.url("/").toString(), "device-token")
+                    .evidencePage("campaign-1")
+            }.exceptionOrNull()
+            assertEquals(
+                Agent4OperatorClient.ErrorKind.PROTOCOL,
+                (error as Agent4OperatorClient.OperatorException).kind,
+            )
+        } finally {
+            evidenceServer.shutdown()
+        }
+    }
+
+    @Test
+    fun nestedTimelineAndEvidenceRecordsMustMatchRequestedCampaign() {
+        val timelineServer = MockWebServer()
+        timelineServer.enqueue(
+            operatorResponse(
+                timelineBody(
+                    entries = listOf(timelineEntry("other-campaign", 1, "d")),
+                    start = timelineCursor(0, null),
+                    next = timelineCursor(1, "d"),
+                    head = timelineCursor(1, "d"),
+                    hasMore = false,
+                ),
+            ),
+        )
+        timelineServer.start()
+        try {
+            val error = runCatching {
+                Agent4OperatorClient(timelineServer.url("/").toString(), "device-token")
+                    .timeline("campaign-1")
+            }.exceptionOrNull()
+            assertEquals(
+                Agent4OperatorClient.ErrorKind.PROTOCOL,
+                (error as Agent4OperatorClient.OperatorException).kind,
+            )
+        } finally {
+            timelineServer.shutdown()
+        }
+
+        val evidenceServer = MockWebServer()
+        evidenceServer.enqueue(
+            operatorResponse(
+                evidenceBody(
+                    records = listOf(evidenceRecord("other-campaign", 1, "e")),
+                    start = evidenceCursor(0, null),
+                    next = evidenceCursor(1, "e"),
+                    head = evidenceCursor(1, "e"),
+                    hasMore = false,
+                ),
+            ),
+        )
+        evidenceServer.start()
+        try {
+            val error = runCatching {
+                Agent4OperatorClient(evidenceServer.url("/").toString(), "device-token")
+                    .evidencePage("campaign-1")
+            }.exceptionOrNull()
+            assertEquals(
+                Agent4OperatorClient.ErrorKind.PROTOCOL,
+                (error as Agent4OperatorClient.OperatorException).kind,
+            )
+        } finally {
+            evidenceServer.shutdown()
         }
     }
 
@@ -259,7 +364,7 @@ class Agent4OperatorClientTest {
     }
 
     @Test
-    fun successRequiresKnownMediaTypeSchemaStatusAndNumericFields() {
+    fun successRequiresKnownMediaTypeSchemaStatusAndCanonicalTypes() {
         val emptyCursor = campaignCursor(emptyList(), 0, 0, null, "f")
         val badResponses = listOf(
             MockResponse()
@@ -279,6 +384,13 @@ class Agent4OperatorClientTest {
                 campaignCursor(emptyList(), 0, 1, null, "2"),
                 campaignCursor(emptyList(), 1, 1, "c", "2"),
                 campaignCursor(emptyList(), 1, 1, "c", "2"),
+                false,
+            ),
+            campaignListResponse(
+                listOf(campaignOverview("c", "7", "running", nameIsRawJson = true)),
+                campaignCursor(emptyList(), 0, 1, null, "3"),
+                campaignCursor(emptyList(), 1, 1, "c", "3"),
+                campaignCursor(emptyList(), 1, 1, "c", "3"),
                 false,
             ),
         )
@@ -328,17 +440,21 @@ class Agent4OperatorClientTest {
         name: String,
         status: String,
         timelineEntries: String = "4",
-    ): String = """{
-      "record":{
-        "schema":"modelrig-agent4/campaign-record/v1",
-        "spec":{"campaign_id":"$id","name":"$name"},
-        "state":{"campaign_id":"$id","status":"$status"}
-      },
-      "timeline_entries":$timelineEntries,
-      "event_entries":3,
-      "evidence_entries":2,
-      "latest_timeline_hash":"sha256:${"a".repeat(64)}"
-    }""".trimIndent()
+        nameIsRawJson: Boolean = false,
+    ): String {
+        val nameJson = if (nameIsRawJson) name else "\"$name\""
+        return """{
+          "record":{
+            "schema":"modelrig-agent4/campaign-record/v1",
+            "spec":{"campaign_id":"$id","name":$nameJson},
+            "state":{"campaign_id":"$id","status":"$status"}
+          },
+          "timeline_entries":$timelineEntries,
+          "event_entries":3,
+          "evidence_entries":2,
+          "latest_timeline_hash":"sha256:${"a".repeat(64)}"
+        }""".trimIndent()
+    }
 
     private fun campaignCursor(
         statuses: List<String>,
@@ -358,6 +474,33 @@ class Agent4OperatorClientTest {
           "snapshot_sha256":"sha256:${seed.repeat(64)}"
         }""".trimIndent()
     }
+
+    private fun timelineCursor(sequence: Int, seed: String?): String = """{
+      "schema":"modelrig-agent4/campaign-timeline-query-cursor/v1",
+      "campaign_id":"campaign-1",
+      "sequence":$sequence,
+      "entry_hash":${seed?.let { "\"sha256:${it.repeat(64)}\"" } ?: "null"}
+    }""".trimIndent()
+
+    private fun evidenceCursor(sequence: Int, seed: String?): String = """{
+      "schema":"modelrig-agent4/campaign-evidence-query-cursor/v1",
+      "campaign_id":"campaign-1",
+      "sequence":$sequence,
+      "record_hash":${seed?.let { "\"sha256:${it.repeat(64)}\"" } ?: "null"}
+    }""".trimIndent()
+
+    private fun timelineEntry(campaignId: String, sequence: Int, seed: String): String = """{
+      "schema":"modelrig-agent4/campaign-timeline-entry/v1",
+      "event":{"campaign_id":"$campaignId","sequence":$sequence},
+      "entry_hash":"sha256:${seed.repeat(64)}"
+    }""".trimIndent()
+
+    private fun evidenceRecord(campaignId: String, sequence: Int, seed: String): String = """{
+      "schema":"modelrig-agent4/campaign-evidence-record/v1",
+      "campaign_id":"$campaignId",
+      "sequence":$sequence,
+      "record_hash":"sha256:${seed.repeat(64)}"
+    }""".trimIndent()
 
     private fun campaignListResponse(
         campaigns: List<String>,
@@ -384,14 +527,56 @@ class Agent4OperatorClientTest {
       "has_more":$hasMore
     }""".trimIndent()
 
-    private fun timelinePage(cursor: String, hasMore: Boolean): String = """{
+    private fun timelinePage(head: String, hasMore: Boolean): String = if (hasMore) {
+        timelineBody(
+            entries = listOf(timelineEntry("campaign-1", 1, "c")),
+            start = timelineCursor(0, null),
+            next = timelineCursor(1, "c"),
+            head = head,
+            hasMore = true,
+        )
+    } else {
+        timelineBody(
+            entries = emptyList(),
+            start = head,
+            next = head,
+            head = head,
+            hasMore = false,
+        )
+    }
+
+    private fun timelineBody(
+        entries: List<String>,
+        start: String,
+        next: String,
+        head: String,
+        hasMore: Boolean,
+    ): String = """{
       "schema":"modelrig-agent4/operator-api/v1",
       "page":{
         "campaign_id":"campaign-1",
-        "entries":[],
-        "start_cursor":$cursor,
-        "next_cursor":$cursor,
-        "head_cursor":$cursor,
+        "entries":[${entries.joinToString(",")}],
+        "start_cursor":$start,
+        "next_cursor":$next,
+        "head_cursor":$head,
+        "has_more":$hasMore
+      }
+    }""".trimIndent()
+
+    private fun evidenceBody(
+        records: List<String>,
+        start: String,
+        next: String,
+        head: String,
+        hasMore: Boolean,
+    ): String = """{
+      "schema":"modelrig-agent4/operator-api/v1",
+      "page":{
+        "campaign_id":"campaign-1",
+        "records":[${records.joinToString(",")}],
+        "start_cursor":$start,
+        "next_cursor":$next,
+        "head_cursor":$head,
         "has_more":$hasMore
       }
     }""".trimIndent()
