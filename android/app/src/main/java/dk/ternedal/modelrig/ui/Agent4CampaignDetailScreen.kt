@@ -85,6 +85,8 @@ internal fun Agent4CampaignDetailScreen(
                 Agent4DetailLoadState.Failed("Rig-adgangen skal fornyes", "Par enheden igen i Kaliv-indstillingerne.")
             Agent4OperatorClient.ErrorKind.GRANT_REQUIRED ->
                 Agent4DetailLoadState.Failed("Agent 4 er låst", "Denne enhed mangler agent4:read. Tidligere viste data er ryddet.")
+            Agent4OperatorClient.ErrorKind.FEATURE_DISABLED ->
+                Agent4DetailLoadState.Failed("Agent 4 er ikke slået til", "Read-fladen er deaktiveret på riggen. Tidligere viste data er ryddet.")
             Agent4OperatorClient.ErrorKind.NOT_FOUND ->
                 Agent4DetailLoadState.Failed("Kampagnen findes ikke", failure.message.orEmpty())
             Agent4OperatorClient.ErrorKind.REQUEST_REJECTED,
@@ -93,6 +95,10 @@ internal fun Agent4CampaignDetailScreen(
             Agent4OperatorClient.ErrorKind.UNAVAILABLE ->
                 Agent4DetailLoadState.Failed("Agent 4 er ikke tilgængelig", failure.message.orEmpty())
         }
+        is IllegalArgumentException -> Agent4DetailLoadState.Failed(
+            "Agent 4-svaret blev afvist",
+            failure.message ?: "Paging-kontrakten blev brudt",
+        )
         else -> Agent4DetailLoadState.Failed("Agent 4 kunne ikke indlæses", failure.message.orEmpty())
     }
 
@@ -115,15 +121,17 @@ internal fun Agent4CampaignDetailScreen(
                 val timelinePage = client.timeline(campaignId, limit = AGENT4_PAGE_SIZE)
                 val evidencePage = client.evidencePage(campaignId, limit = AGENT4_PAGE_SIZE)
                 val verification = client.evidenceVerification(campaignId)
+                val timelineRows = timelinePage.entries.map(Agent4OperatorPresentation::timelineRow)
+                val evidenceRows = evidencePage.records.map(Agent4OperatorPresentation::evidenceRow)
                 Agent4DetailData(
                     campaign = campaign,
                     detail = Agent4OperatorPresentation.campaignDetail(campaign.record),
                     verification = verification,
-                    timeline = timelinePage.entries.map(Agent4OperatorPresentation::timelineRow),
+                    timeline = Agent4PagingPolicy.appendTimeline(emptyList(), timelineRows),
                     timelineNext = timelinePage.nextCursor,
                     timelineHead = timelinePage.headCursor,
                     timelineHasMore = timelinePage.hasMore,
-                    evidence = evidencePage.records.map(Agent4OperatorPresentation::evidenceRow),
+                    evidence = Agent4PagingPolicy.appendEvidence(emptyList(), evidenceRows),
                     evidenceNext = evidencePage.nextCursor,
                     evidenceHead = evidencePage.headCursor,
                     evidenceHasMore = evidencePage.hasMore,
@@ -154,9 +162,15 @@ internal fun Agent4CampaignDetailScreen(
                 val rows = page.entries.map(Agent4OperatorPresentation::timelineRow)
                 val active = (state as? Agent4DetailLoadState.Ready)?.value
                 if (active != null) {
+                    require(page.startCursor == active.timelineNext) {
+                        "Agent 4 timeline-side starter ved en anden cursor end requestet"
+                    }
+                    require(page.headCursor == active.timelineHead) {
+                        "Agent 4 timeline-snapshot ændrede head under paging"
+                    }
                     state = Agent4DetailLoadState.Ready(
                         active.copy(
-                            timeline = active.timeline + rows,
+                            timeline = Agent4PagingPolicy.appendTimeline(active.timeline, rows),
                             timelineNext = page.nextCursor,
                             timelineHasMore = page.hasMore,
                         ),
@@ -189,9 +203,15 @@ internal fun Agent4CampaignDetailScreen(
                 val rows = page.records.map(Agent4OperatorPresentation::evidenceRow)
                 val active = (state as? Agent4DetailLoadState.Ready)?.value
                 if (active != null) {
+                    require(page.startCursor == active.evidenceNext) {
+                        "Agent 4 evidence-side starter ved en anden cursor end requestet"
+                    }
+                    require(page.headCursor == active.evidenceHead) {
+                        "Agent 4 evidence-snapshot ændrede head under paging"
+                    }
                     state = Agent4DetailLoadState.Ready(
                         active.copy(
-                            evidence = active.evidence + rows,
+                            evidence = Agent4PagingPolicy.appendEvidence(active.evidence, rows),
                             evidenceNext = page.nextCursor,
                             evidenceHasMore = page.hasMore,
                         ),
