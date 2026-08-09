@@ -13,6 +13,7 @@ from typing import Iterable
 from .campaign_list_query import (
     MAX_CAMPAIGN_LIST_PAGE_SIZE,
     CampaignListQueryCursor,
+    CampaignListSnapshotSummary,
     page_campaign_records,
 )
 from .contracts import CampaignTimelineStore
@@ -44,6 +45,16 @@ class Agent4CampaignOverview:
     @property
     def status(self) -> CampaignStatus:
         return self.record.state.status
+
+    def snapshot_summary(self) -> CampaignListSnapshotSummary:
+        """Return the exact rendered summary fields bound into list cursors."""
+
+        return CampaignListSnapshotSummary(
+            timeline_entries=self.timeline_entries,
+            event_entries=self.event_entries,
+            evidence_entries=self.evidence_entries,
+            latest_timeline_hash=self.latest_timeline_hash,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,15 +121,27 @@ class Agent4OperatorReadService:
     ) -> Agent4CampaignPage:
         """Return newest campaigns from one stable, hash-bound snapshot."""
 
+        records = tuple(self._scheduler.list())
+        overviews = {
+            record.spec.campaign_id: self._overview(record)
+            for record in records
+        }
         page = page_campaign_records(
-            self._scheduler.list(),
+            records,
+            summaries={
+                campaign_id: overview.snapshot_summary()
+                for campaign_id, overview in overviews.items()
+            },
             statuses=statuses,
             after=after,
             limit=limit,
             snapshot_head=snapshot_head,
         )
         return Agent4CampaignPage(
-            campaigns=tuple(self._overview(record) for record in page.records),
+            campaigns=tuple(
+                overviews[record.spec.campaign_id]
+                for record in page.records
+            ),
             start_cursor=page.start_cursor,
             next_cursor=page.next_cursor,
             head_cursor=page.head_cursor,
