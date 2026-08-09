@@ -164,7 +164,10 @@ def build_fixture(data_root: Path, manifest_path: Path, *, replace: bool) -> Non
         )
     )
     dispatched = context.scheduler.dispatch_ready()
-    if dispatched is None or dispatched.spec.campaign_id != SELECTED_CAMPAIGN_ID:
+    if (
+        dispatched is None
+        or dispatched.record.spec.campaign_id != SELECTED_CAMPAIGN_ID
+    ):
         raise RuntimeError("selected physical fixture campaign was not dispatched")
 
     artifacts = data_root / "physical-artifacts"
