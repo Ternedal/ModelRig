@@ -19,8 +19,9 @@ class Agent4OperatorClientTest {
                   "schema":"modelrig-agent4/operator-api/v1",
                   "campaigns":[{
                     "record":{
+                      "schema":"modelrig-agent4/campaign-record/v1",
                       "spec":{"campaign_id":"campaign-1","name":"Rig audit"},
-                      "status":"running"
+                      "state":{"campaign_id":"campaign-1","status":"running"}
                     },
                     "timeline_entries":4,
                     "event_entries":3,
@@ -182,7 +183,7 @@ class Agent4OperatorClientTest {
     }
 
     @Test
-    fun successRequiresKnownMediaTypeSchemaStatusAndFields() {
+    fun successRequiresKnownMediaTypeSchemaStatusAndMatchingRecordIds() {
         val badResponses = listOf(
             MockResponse()
                 .setResponseCode(200)
@@ -193,7 +194,25 @@ class Agent4OperatorClientTest {
                 """{
                   "schema":"modelrig-agent4/operator-api/v1",
                   "campaigns":[{
-                    "record":{"spec":{"campaign_id":"c","name":"n"},"status":"future-state"},
+                    "record":{
+                      "schema":"modelrig-agent4/campaign-record/v1",
+                      "spec":{"campaign_id":"c","name":"n"},
+                      "state":{"campaign_id":"c","status":"future-state"}
+                    },
+                    "timeline_entries":0,"event_entries":0,"evidence_entries":0,
+                    "latest_timeline_hash":null
+                  }]
+                }""".trimIndent(),
+            ),
+            operatorResponse(
+                """{
+                  "schema":"modelrig-agent4/operator-api/v1",
+                  "campaigns":[{
+                    "record":{
+                      "schema":"modelrig-agent4/campaign-record/v1",
+                      "spec":{"campaign_id":"c-1","name":"n"},
+                      "state":{"campaign_id":"c-2","status":"running"}
+                    },
                     "timeline_entries":0,"event_entries":0,"evidence_entries":0,
                     "latest_timeline_hash":null
                   }]
