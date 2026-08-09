@@ -92,7 +92,7 @@ class Agent4PhysicalReadFixtureTests(unittest.TestCase):
             "httpx.",
         ):
             self.assertNotIn(forbidden, source)
-        self.assertIn("validation/agent4-physical-runtime", source)
+        self.assertIn('ROOT / "validation" / "agent4-physical-runtime"', source)
         self.assertIn('"production_activation": False', source)
         self.assertIn('"external_dispatch": False', source)
 
