@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "worker"))
 
 from app.agent4 import (  # noqa: E402
+    CampaignEventKind,
     CampaignEvidenceReference,
     CampaignSpec,
     compose_agent4_runtime,
@@ -170,11 +171,22 @@ def build_fixture(data_root: Path, manifest_path: Path, *, replace: bool) -> Non
     ):
         raise RuntimeError("selected physical fixture campaign was not dispatched")
 
+    fixture_events = [
+        context.event_recorder.record(
+            SELECTED_CAMPAIGN_ID,
+            CampaignEventKind.CHECKPOINTED,
+            occurred_at=base_time + timedelta(seconds=index),
+            payload={
+                "fixture": "a4-18",
+                "ordinal": index,
+                "production_activation": False,
+            },
+        )
+        for index in range(1, EVIDENCE_COUNT + 1)
+    ]
+
     artifacts = data_root / "physical-artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
-    latest = context.timeline.latest(SELECTED_CAMPAIGN_ID)
-    if latest is None:
-        raise RuntimeError("selected fixture campaign has no timeline event")
 
     evidence_ids: list[str] = []
     payload_hashes: list[str] = []
@@ -206,7 +218,7 @@ def build_fixture(data_root: Path, manifest_path: Path, *, replace: bool) -> Non
                 },
             ),
             recorded_at=base_time + timedelta(seconds=index),
-            related_event_id=(latest.event.event_id if index == 1 else None),
+            related_event_id=fixture_events[index - 1].event_id,
         )
         evidence_ids.append(evidence_id)
         payload_hashes.append(payload_hash)
