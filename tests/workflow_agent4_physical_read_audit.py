@@ -78,12 +78,19 @@ class Agent4PhysicalReadAuditTests(unittest.TestCase):
         self.assertIn("actual == REQUIRED_TRIALS", source)
         self.assertIn("præcis de 21 kendte checkpoints", source)
 
-    def test_hardening_recomputes_nested_mutation_digests(self) -> None:
+    def test_hardening_binds_mutations_to_hashed_artifacts(self) -> None:
         source = HARDENING.read_text(encoding="utf-8")
-        self.assertIn("validate_mutations", source)
-        self.assertIn('if key != "receipt_sha256"', source)
-        self.assertIn("sha256_value(unsigned) == claimed", source)
-        self.assertIn("digest matcher ikke indholdet", source)
+        for required in (
+            "validate_mutations(repo_root, receipt)",
+            'if key != "receipt_sha256"',
+            "sha256_value(unsigned) == claimed",
+            'prefix = f"mutation-{mode}-"',
+            "len(candidates) == 1",
+            "validate_file_receipt(",
+            "artifact_data == mutation",
+            "matcher ikke den hash-listede artifact-fil",
+        ):
+            self.assertIn(required, source)
 
     def test_hardening_validates_complete_safety_binding(self) -> None:
         source = HARDENING.read_text(encoding="utf-8")
