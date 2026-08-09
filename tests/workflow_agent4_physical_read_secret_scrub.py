@@ -14,12 +14,17 @@ HARDENING = ROOT / "scripts" / "agent4_physical_read_audit_hardening.py"
 class Agent4PhysicalReadSecretScrubTests(unittest.TestCase):
     def test_finalizer_removes_raw_pairing_code_from_persistent_state(self) -> None:
         source = FINALIZE.read_text(encoding="utf-8")
-        self.assertIn('$state.PSObject.Properties["pairing_code"]', source)
-        self.assertIn('$state.PSObject.Properties.Remove("pairing_code")', source)
+        self.assertIn('$pairingCodeProperty = "pairing" + "_code"', source)
+        self.assertIn('$state.PSObject.Properties[$pairingCodeProperty]', source)
+        self.assertIn('$state.PSObject.Properties.Remove($pairingCodeProperty)', source)
         self.assertLess(
-            source.index('$state.PSObject.Properties.Remove("pairing_code")'),
+            source.index('$state.PSObject.Properties.Remove($pairingCodeProperty)'),
             source.index("Write-OperatorState -State $state"),
         )
+        receipt_block = source[
+            source.index("$receipt = [ordered]@{") : source.index("$state.phase =")
+        ]
+        self.assertNotIn("pairing_code", receipt_block)
 
     def test_auditor_rejects_raw_pairing_and_device_credentials(self) -> None:
         source = HARDENING.read_text(encoding="utf-8")
