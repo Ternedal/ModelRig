@@ -1,9 +1,10 @@
 """Stable, bounded and hash-bound paging for Agent 4 campaign lists.
 
 The query owns no storage and keeps no server-side session. Every page is derived
-from the caller-supplied canonical records. A cursor binds status filters,
-position, last identity, total count and the SHA-256 of the complete ordered
-snapshot. If any campaign changes between pages, the next read fails closed.
+from caller-supplied canonical records and their verified display summaries. A
+cursor binds status filters, position, last identity, total count and the
+SHA-256 of the complete ordered snapshot. If a campaign record or any displayed
+timeline/evidence summary changes between pages, the next read fails closed.
 """
 
 from __future__ import annotations
@@ -71,6 +72,46 @@ def _require_limit(value: int) -> int:
 
 
 @dataclass(frozen=True, slots=True)
+class CampaignListSnapshotSummary:
+    """Canonical campaign-list fields rendered beside one campaign record."""
+
+    timeline_entries: int
+    event_entries: int
+    evidence_entries: int
+    latest_timeline_hash: str | None
+
+    def __post_init__(self) -> None:
+        for name in ("timeline_entries", "event_entries", "evidence_entries"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise CampaignValidationError(
+                    f"campaign-list summary {name} must be a non-negative integer"
+                )
+        digest = self.latest_timeline_hash
+        if digest is None:
+            return
+        if digest.startswith("sha256:"):
+            digest = digest[7:]
+        if not _SHA256.fullmatch(digest):
+            raise CampaignValidationError(
+                "campaign-list summary latest_timeline_hash must be lowercase SHA-256"
+            )
+        object.__setattr__(self, "latest_timeline_hash", digest)
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        return {
+            "timeline_entries": self.timeline_entries,
+            "event_entries": self.event_entries,
+            "evidence_entries": self.evidence_entries,
+            "latest_timeline_hash": (
+                f"sha256:{self.latest_timeline_hash}"
+                if self.latest_timeline_hash is not None
+                else None
+            ),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class CampaignListQueryCursor:
     statuses: tuple[CampaignStatus, ...]
     position: int
@@ -99,11 +140,10 @@ class CampaignListQueryCursor:
                 raise CampaignValidationError(
                     "campaign-list genesis cursor must not declare last_campaign_id"
                 )
-        else:
-            if not isinstance(last, str) or not last.strip() or last != last.strip():
-                raise CampaignValidationError(
-                    "campaign-list cursor requires last_campaign_id after position zero"
-                )
+        elif not isinstance(last, str) or not last.strip() or last != last.strip():
+            raise CampaignValidationError(
+                "campaign-list cursor requires last_campaign_id after position zero"
+            )
         digest = self.snapshot_sha256
         if digest.startswith("sha256:"):
             digest = digest[7:]
@@ -190,11 +230,26 @@ def _ordered_records(
 def _snapshot_digest(
     records: tuple[CampaignRecord, ...],
     statuses: tuple[CampaignStatus, ...],
+    summaries: Mapping[str, CampaignListSnapshotSummary],
 ) -> str:
+    snapshot: list[dict[str, JsonValue]] = []
+    for record in records:
+        campaign_id = record.spec.campaign_id
+        summary = summaries.get(campaign_id)
+        if not isinstance(summary, CampaignListSnapshotSummary):
+            raise CampaignValidationError(
+                f"campaign-list summary is missing for {campaign_id!r}"
+            )
+        snapshot.append(
+            {
+                "record": record.to_dict(),
+                "summary": summary.to_dict(),
+            }
+        )
     payload = {
-        "schema": "modelrig-agent4/campaign-list-snapshot/v1",
+        "schema": "modelrig-agent4/campaign-list-snapshot/v2",
         "statuses": [status.value for status in statuses],
-        "records": [record.to_dict() for record in records],
+        "campaigns": snapshot,
     }
     return hashlib.sha256(_canonical_json(payload)).hexdigest()
 
@@ -219,17 +274,20 @@ def _cursor_at(
 def page_campaign_records(
     records: Sequence[CampaignRecord],
     *,
+    summaries: Mapping[str, CampaignListSnapshotSummary],
     statuses: CampaignStatus | str | Iterable[CampaignStatus | str] | None = None,
     after: CampaignListQueryCursor | None = None,
     snapshot_head: CampaignListQueryCursor | None = None,
     limit: int = 100,
 ) -> CampaignListRecordPage:
-    """Return one page or reject any filter/snapshot/cursor drift."""
+    """Return one page or reject any record, summary, filter or cursor drift."""
 
+    if not isinstance(summaries, Mapping):
+        raise CampaignValidationError("campaign-list summaries must be a mapping")
     bounded_limit = _require_limit(limit)
     normalized_statuses = normalize_statuses(statuses)
     ordered = _ordered_records(records, normalized_statuses)
-    digest = _snapshot_digest(ordered, normalized_statuses)
+    digest = _snapshot_digest(ordered, normalized_statuses, summaries)
     current_head = _cursor_at(
         ordered,
         normalized_statuses,
