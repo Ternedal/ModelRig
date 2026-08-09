@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 AUDITOR = ROOT / "scripts" / "agent4-physical-read-audit.ps1"
 HARDENING = ROOT / "scripts" / "agent4-physical-read-audit-hardening.ps1"
+SDK_AUDIT = ROOT / "scripts" / "agent4-physical-read-audit-sdk.ps1"
 LAUNCHER = ROOT / "AUDIT_AGENT4_PHYSICAL_READ_RECEIPT.cmd"
 DOC = ROOT / "docs" / "AGENT_4_A4_18_RECEIPT_AUDIT.md"
 
@@ -89,10 +90,21 @@ class Agent4PhysicalReadAuditTests(unittest.TestCase):
         self.assertNotIn("Invoke-WebRequest", source)
         self.assertNotIn("Start-Process", source)
 
-    def test_launcher_routes_through_mandatory_hardening(self) -> None:
+    def test_sdk_gate_is_numeric_and_read_only(self) -> None:
+        source = SDK_AUDIT.read_text(encoding="utf-8")
+        self.assertIn("$receipt.pixel.sdk", source)
+        self.assertIn("'^[0-9]+$'", source)
+        self.assertIn("Pixel SDK skal være numerisk", source)
+        for forbidden in ("Invoke-WebRequest", "Start-Process", "Remove-Item", "Set-Content"):
+            self.assertNotIn(forbidden, source)
+
+    def test_launcher_routes_sdk_gate_before_mandatory_hardening(self) -> None:
         launcher = LAUNCHER.read_text(encoding="utf-8")
         doc = DOC.read_text(encoding="utf-8")
-        self.assertIn("agent4-physical-read-audit-hardening.ps1", launcher)
+        sdk_index = launcher.index("agent4-physical-read-audit-sdk.ps1")
+        hardening_index = launcher.index("agent4-physical-read-audit-hardening.ps1")
+        self.assertLess(sdk_index, hardening_index)
+        self.assertIn('if "%RC%"=="0"', launcher)
         self.assertNotIn('scripts\\agent4-physical-read-audit.ps1"', launcher)
         self.assertIn("-RequireRemoteRefs", launcher)
         self.assertIn("Issue #421 maa ikke lukkes", launcher)
