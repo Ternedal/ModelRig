@@ -85,7 +85,7 @@ internal object Agent4OperatorPresentation {
             .getOrElse { throw IllegalArgumentException("Agent 4-data er ikke gyldig JSON", it) }
 
     private fun requireSchema(value: JSONObject, expected: String) {
-        if (value.optString("schema") != expected) {
+        if (value.requireText("schema") != expected) {
             throw IllegalArgumentException("Agent 4-data har ukendt schema")
         }
     }
@@ -93,13 +93,22 @@ internal object Agent4OperatorPresentation {
     private fun JSONObject.requireObject(name: String): JSONObject =
         optJSONObject(name) ?: throw IllegalArgumentException("Agent 4-data mangler $name")
 
-    private fun JSONObject.requireText(name: String): String =
-        optString(name).takeIf { it.isNotBlank() }
-            ?: throw IllegalArgumentException("Agent 4-data mangler $name")
+    private fun JSONObject.requireText(name: String): String {
+        if (!has(name) || isNull(name)) throw IllegalArgumentException("Agent 4-data mangler $name")
+        val value = get(name)
+        if (value !is String || value.isBlank()) {
+            throw IllegalArgumentException("Agent 4-data har ugyldigt $name")
+        }
+        return value
+    }
 
     private fun JSONObject.optionalText(name: String): String? {
         if (!has(name) || isNull(name)) return null
-        return optString(name).takeIf { it.isNotBlank() }
+        val value = get(name)
+        if (value !is String || value.isBlank()) {
+            throw IllegalArgumentException("Agent 4-data har ugyldigt $name")
+        }
+        return value
     }
 
     private fun JSONObject.requirePositiveInt(name: String): Int {
