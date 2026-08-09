@@ -16,6 +16,7 @@ from app.agent4.campaign_list_query import (  # noqa: E402
     CAMPAIGN_LIST_CURSOR_SCHEMA,
     CampaignListQueryCursor,
     CampaignListQueryError,
+    CampaignListSnapshotSummary,
     page_campaign_records,
 )
 from app.agent4.domain import (  # noqa: E402
@@ -48,10 +49,25 @@ def _record(index: int, status: CampaignStatus = CampaignStatus.QUEUED) -> Campa
     )
 
 
+def _summaries(
+    records: tuple[CampaignRecord, ...],
+) -> dict[str, CampaignListSnapshotSummary]:
+    return {
+        record.spec.campaign_id: CampaignListSnapshotSummary(
+            timeline_entries=index,
+            event_entries=index,
+            evidence_entries=max(0, index - 1),
+            latest_timeline_hash=f"{index:x}" * 64,
+        )
+        for index, record in enumerate(records, start=1)
+    }
+
+
 class CampaignListQueryTests(unittest.TestCase):
     def test_pages_newest_first_without_duplicates_or_loss(self) -> None:
         records = tuple(_record(index) for index in range(1, 6))
-        first = page_campaign_records(records, limit=2)
+        summaries = _summaries(records)
+        first = page_campaign_records(records, summaries=summaries, limit=2)
         self.assertEqual(
             [record.spec.campaign_id for record in first.records],
             ["campaign-5", "campaign-4"],
@@ -63,12 +79,14 @@ class CampaignListQueryTests(unittest.TestCase):
 
         second = page_campaign_records(
             records,
+            summaries=summaries,
             after=first.next_cursor,
             snapshot_head=first.head_cursor,
             limit=2,
         )
         third = page_campaign_records(
             records,
+            summaries=summaries,
             after=second.next_cursor,
             snapshot_head=first.head_cursor,
             limit=2,
@@ -95,8 +113,10 @@ class CampaignListQueryTests(unittest.TestCase):
             _record(3, CampaignStatus.RUNNING),
             _record(4, CampaignStatus.FAILED),
         )
+        summaries = _summaries(records)
         first = page_campaign_records(
             records,
+            summaries=summaries,
             statuses=(CampaignStatus.PAUSED, CampaignStatus.RUNNING),
             limit=1,
         )
@@ -109,6 +129,7 @@ class CampaignListQueryTests(unittest.TestCase):
         with self.assertRaisesRegex(CampaignListQueryError, "status filter"):
             page_campaign_records(
                 records,
+                summaries=summaries,
                 statuses=(CampaignStatus.RUNNING,),
                 after=first.next_cursor,
                 snapshot_head=first.head_cursor,
@@ -117,7 +138,8 @@ class CampaignListQueryTests(unittest.TestCase):
 
     def test_campaign_change_between_pages_is_rejected_as_stale(self) -> None:
         records = tuple(_record(index) for index in range(1, 4))
-        first = page_campaign_records(records, limit=1)
+        summaries = _summaries(records)
+        first = page_campaign_records(records, summaries=summaries, limit=1)
         changed = list(records)
         changed[1] = replace(
             changed[1],
@@ -130,6 +152,26 @@ class CampaignListQueryTests(unittest.TestCase):
         with self.assertRaisesRegex(CampaignListQueryError, "stale snapshot"):
             page_campaign_records(
                 tuple(changed),
+                summaries=summaries,
+                after=first.next_cursor,
+                snapshot_head=first.head_cursor,
+                limit=1,
+            )
+
+    def test_summary_change_between_pages_is_rejected_as_stale(self) -> None:
+        records = tuple(_record(index) for index in range(1, 4))
+        summaries = _summaries(records)
+        first = page_campaign_records(records, summaries=summaries, limit=1)
+        changed = dict(summaries)
+        changed["campaign-2"] = replace(
+            changed["campaign-2"],
+            evidence_entries=changed["campaign-2"].evidence_entries + 1,
+            latest_timeline_hash="f" * 64,
+        )
+        with self.assertRaisesRegex(CampaignListQueryError, "stale snapshot"):
+            page_campaign_records(
+                records,
+                summaries=changed,
                 after=first.next_cursor,
                 snapshot_head=first.head_cursor,
                 limit=1,
@@ -137,7 +179,8 @@ class CampaignListQueryTests(unittest.TestCase):
 
     def test_cursor_round_trip_and_tamper_detection(self) -> None:
         records = tuple(_record(index) for index in range(1, 4))
-        first = page_campaign_records(records, limit=1)
+        summaries = _summaries(records)
+        first = page_campaign_records(records, summaries=summaries, limit=1)
         restored = CampaignListQueryCursor.from_dict(first.next_cursor.to_dict())
         self.assertEqual(restored, first.next_cursor)
         self.assertEqual(
@@ -149,6 +192,7 @@ class CampaignListQueryTests(unittest.TestCase):
         with self.assertRaisesRegex(CampaignListQueryError, "identity"):
             page_campaign_records(
                 records,
+                summaries=summaries,
                 after=tampered_position,
                 snapshot_head=first.head_cursor,
                 limit=1,
@@ -158,6 +202,7 @@ class CampaignListQueryTests(unittest.TestCase):
         with self.assertRaisesRegex(CampaignListQueryError, "identity"):
             page_campaign_records(
                 records,
+                summaries=summaries,
                 after=tampered_last,
                 snapshot_head=first.head_cursor,
                 limit=1,
@@ -167,23 +212,32 @@ class CampaignListQueryTests(unittest.TestCase):
         with self.assertRaisesRegex(CampaignListQueryError, "stale snapshot"):
             page_campaign_records(
                 records,
+                summaries=summaries,
                 after=tampered_hash,
                 snapshot_head=first.head_cursor,
                 limit=1,
             )
 
-    def test_cursor_schema_and_limit_fail_closed(self) -> None:
-        page = page_campaign_records((_record(1),), limit=1)
+    def test_summary_and_limit_validation_fail_closed(self) -> None:
+        records = (_record(1),)
+        summaries = _summaries(records)
+        page = page_campaign_records(records, summaries=summaries, limit=1)
         raw = page.next_cursor.to_dict()
         raw["schema"] = "unknown"
         with self.assertRaisesRegex(CampaignValidationError, "schema"):
             CampaignListQueryCursor.from_dict(raw)
+        with self.assertRaisesRegex(CampaignValidationError, "summary is missing"):
+            page_campaign_records(records, summaries={}, limit=1)
         for invalid in (0, 1001, True, "1"):
             with self.assertRaises(CampaignValidationError):
-                page_campaign_records((_record(1),), limit=invalid)  # type: ignore[arg-type]
+                page_campaign_records(
+                    records,
+                    summaries=summaries,
+                    limit=invalid,  # type: ignore[arg-type]
+                )
 
     def test_empty_snapshot_has_valid_genesis_head(self) -> None:
-        page = page_campaign_records((), limit=10)
+        page = page_campaign_records((), summaries={}, limit=10)
         self.assertEqual(page.records, ())
         self.assertEqual(page.start_cursor.position, 0)
         self.assertEqual(page.head_cursor.position, 0)
