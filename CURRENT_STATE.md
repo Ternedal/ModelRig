@@ -184,6 +184,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent4_handoff_runtime.py`
 - `tests/worker_agent4_operator_api.py`
 - `tests/worker_agent4_operator_api_review.py`
+- `tests/worker_agent4_production_bootstrap.py`
 - `tests/worker_agent4_recovery.py`
 - `tests/worker_agent4_resources.py`
 - `tests/worker_agent4_scheduler_service.py`
