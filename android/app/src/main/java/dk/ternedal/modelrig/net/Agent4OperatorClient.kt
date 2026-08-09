@@ -21,6 +21,7 @@ class Agent4OperatorClient(
     companion object {
         const val SCHEMA = "modelrig-agent4/operator-api/v1"
         const val MEDIA_TYPE = "application/vnd.modelrig.agent4.operator+json"
+        private const val CAMPAIGN_RECORD_SCHEMA = "modelrig-agent4/campaign-record/v1"
         private const val DEFAULT_LIMIT = 100
         private const val MAX_LIMIT = 1_000
         private const val OPERATOR_PATH = "api/v1/experimental/agent4/operator"
@@ -277,12 +278,20 @@ class Agent4OperatorClient(
 
     private fun parseOverview(value: JSONObject): CampaignOverview {
         val record = value.requireObject("record")
+        if (record.optString("schema") != CAMPAIGN_RECORD_SCHEMA) {
+            throw protocol("Ukendt Agent 4 campaign-record-schema")
+        }
         val spec = record.requireObject("spec")
-        val statusText = record.requireText("status")
+        val state = record.requireObject("state")
+        val campaignId = spec.requireText("campaign_id")
+        if (state.requireText("campaign_id") != campaignId) {
+            throw protocol("Agent 4 campaign-record har modstridende id'er")
+        }
+        val statusText = state.requireText("status")
         val status = CampaignStatus.entries.firstOrNull { it.wireValue == statusText }
             ?: throw protocol("Ukendt Agent 4-status: $statusText")
         return CampaignOverview(
-            campaignId = spec.requireText("campaign_id"),
+            campaignId = campaignId,
             name = spec.requireText("name"),
             status = status,
             timelineEntries = value.requireNonNegativeInt("timeline_entries"),
