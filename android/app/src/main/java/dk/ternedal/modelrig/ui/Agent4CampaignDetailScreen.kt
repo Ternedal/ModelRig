@@ -66,9 +66,7 @@ internal fun Agent4CampaignDetailScreen(
     onBack: () -> Unit,
 ) {
     var generation by remember { mutableIntStateOf(0) }
-    var state: Agent4DetailLoadState by remember {
-        mutableStateOf(Agent4DetailLoadState.Loading)
-    }
+    var state: Agent4DetailLoadState by remember { mutableStateOf(Agent4DetailLoadState.Loading) }
     var pagingTimeline by remember { mutableStateOf(false) }
     var pagingEvidence by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -77,11 +75,7 @@ internal fun Agent4CampaignDetailScreen(
     fun credentials(): Agent4ConnectionIdentity? {
         val base = store.baseUrl?.trim().orEmpty()
         val token = store.token?.trim().orEmpty()
-        return if (base.isBlank() || token.isBlank()) {
-            null
-        } else {
-            Agent4ConnectionIdentity(base, token)
-        }
+        return if (base.isBlank() || token.isBlank()) null else Agent4ConnectionIdentity(base, token)
     }
 
     fun fail(failure: Throwable): Agent4DetailLoadState.Failed = when (failure) {
@@ -144,13 +138,9 @@ internal fun Agent4CampaignDetailScreen(
                     evidenceHasMore = evidencePage.hasMore,
                 )
             }
-            if (responseEpoch.accepts(ticket, credentials())) {
-                state = Agent4DetailLoadState.Ready(loaded)
-            }
+            if (responseEpoch.accepts(ticket, credentials())) state = Agent4DetailLoadState.Ready(loaded)
         } catch (failure: Throwable) {
-            if (responseEpoch.accepts(ticket, credentials())) {
-                state = fail(failure)
-            }
+            if (responseEpoch.accepts(ticket, credentials())) state = fail(failure)
         }
     }
 
@@ -191,13 +181,9 @@ internal fun Agent4CampaignDetailScreen(
                     )
                 }
             } catch (failure: Throwable) {
-                if (responseEpoch.accepts(ticket, credentials())) {
-                    state = fail(failure)
-                }
+                if (responseEpoch.accepts(ticket, credentials())) state = fail(failure)
             } finally {
-                if (responseEpoch.accepts(ticket, credentials())) {
-                    pagingTimeline = false
-                }
+                if (responseEpoch.accepts(ticket, credentials())) pagingTimeline = false
             }
         }
     }
@@ -239,16 +225,14 @@ internal fun Agent4CampaignDetailScreen(
                     )
                 }
             } catch (failure: Throwable) {
-                if (responseEpoch.accepts(ticket, credentials())) {
-                    state = fail(failure)
-                }
+                if (responseEpoch.accepts(ticket, credentials())) state = fail(failure)
             } finally {
-                if (responseEpoch.accepts(ticket, credentials())) {
-                    pagingEvidence = false
-                }
+                if (responseEpoch.accepts(ticket, credentials())) pagingEvidence = false
             }
         }
     }
+
+    val visibleCampaignId = (state as? Agent4DetailLoadState.Ready)?.value?.campaign?.campaignId
 
     Column(
         modifier = Modifier
@@ -261,7 +245,9 @@ internal fun Agent4CampaignDetailScreen(
         ) {
             Column(Modifier.weight(1f)) {
                 Text("Agent 4-kampagne", color = KalivTheme.colors.textHigh, fontSize = 23.sp, fontWeight = FontWeight.Bold)
-                Text(campaignId, color = KalivTheme.colors.textMuted, fontSize = 11.sp)
+                visibleCampaignId?.let {
+                    Text(it, color = KalivTheme.colors.textMuted, fontSize = 11.sp)
+                }
             }
             OutlinedButton(onClick = onBack) { Text("Tilbage") }
         }
@@ -330,9 +316,7 @@ private fun Agent4DetailContent(
                 Text("Timeline-head: ${data.verification.latestTimelineHeadHash ?: "ingen"}", color = KalivTheme.colors.textMuted, fontSize = 10.sp)
             }
         }
-        item {
-            Text("Tidslinje", color = KalivTheme.colors.textHigh, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        }
+        item { Text("Tidslinje", color = KalivTheme.colors.textHigh, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
         items(data.timeline, key = { "timeline-${it.sequence}-${it.eventId}" }) { row ->
             Agent4DetailCard("#${row.sequence} · ${row.kind}") {
                 Text(row.occurredAt, color = KalivTheme.colors.textMuted, fontSize = 12.sp)
