@@ -21,8 +21,12 @@ internal class Agent4ResponseEpoch {
 
     private var epoch: Long = 0
 
-    fun begin(connection: Agent4ConnectionIdentity): Ticket {
+    fun invalidate() {
         epoch += 1
+    }
+
+    fun begin(connection: Agent4ConnectionIdentity): Ticket {
+        invalidate()
         return Ticket(epoch, connection)
     }
 
