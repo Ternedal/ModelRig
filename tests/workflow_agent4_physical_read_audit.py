@@ -85,21 +85,45 @@ class Agent4PhysicalReadAuditTests(unittest.TestCase):
         self.assertIn("sha256_value(unsigned) == claimed", source)
         self.assertIn("digest matcher ikke indholdet", source)
 
-    def test_hardening_validates_safety_and_ui_evidence(self) -> None:
+    def test_hardening_validates_complete_safety_binding(self) -> None:
         source = HARDENING.read_text(encoding="utf-8")
         for required in (
             "modelrig-agent4/physical-read-safety-evidence/v1",
+            "modelrig-agent4/physical-read-safety-binding/v1",
             "artifacts_hashed_after_prestop",
             "wildcard_binding",
             "worker_bound_address",
+            "firewall_local_address",
             "firewall_remote_scope",
+            "DomainAuthenticated",
             "validation/agent4-physical-runtime/safety-binding.json",
-            "validate_file_receipt",
-            "screenshot og menneskelig UI-observation",
+            "binding_data",
+            "pixel_android_release",
+            "pixel_sdk",
+            "require_rfc1918",
         ):
             self.assertIn(required, source)
         self.assertNotIn("requests", source)
         self.assertNotIn("subprocess.Popen", source)
+
+    def test_hardening_scans_runtime_and_rejects_screenshots(self) -> None:
+        source = HARDENING.read_text(encoding="utf-8")
+        for required in (
+            "scan_runtime_evidence",
+            "CREDENTIAL_PATTERNS",
+            "authorization",
+            "bearer",
+            "MODELRIG_ADMIN_KEY",
+            "pairing_code",
+            "device_token",
+            "admin-key.txt",
+            "credential-lignende indhold fundet",
+            "billedevidence kan ikke credential-verificeres maskinelt",
+            "screenshot kan ikke credential-verificeres maskinelt",
+            "brug en redigeret tekstobservation",
+        ):
+            self.assertIn(required, source)
+        self.assertIn("scan_runtime_evidence(repo_root)", source)
 
     def test_launcher_runs_all_python_gates_before_legacy_audit(self) -> None:
         launcher = LAUNCHER.read_text(encoding="utf-8")
@@ -121,6 +145,8 @@ class Agent4PhysicalReadAuditTests(unittest.TestCase):
         self.assertIn("`0`: `PASS`", doc)
         self.assertIn("`2`: `FAIL`", doc)
         self.assertIn("ikke en digital signatur", doc)
+        self.assertIn("redigerede tekstobservationer", doc)
+        self.assertIn("runtime-evidensfiler", doc)
 
 
 if __name__ == "__main__":
