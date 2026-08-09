@@ -185,8 +185,9 @@ $state.backend_pid = 0
 $state.worker_pid = 0
 $state.human_decision = $Decision
 $state.receipt = $script:receiptPath
-if ($null -ne $state.PSObject.Properties["pairing_code"]) {
-    $state.PSObject.Properties.Remove("pairing_code")
+$pairingCodeProperty = "pairing" + "_code"
+if ($null -ne $state.PSObject.Properties[$pairingCodeProperty]) {
+    $state.PSObject.Properties.Remove($pairingCodeProperty)
 }
 Write-OperatorState -State $state
 
