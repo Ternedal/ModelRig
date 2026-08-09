@@ -59,6 +59,26 @@ class Agent4PhysicalReadAuditTests(unittest.TestCase):
         self.assertIn("Trials skal indeholde præcis 21 checkpoints", hardening)
         self.assertIn("manglende eller ukendte checkpoints", hardening)
 
+    def test_hardening_requires_explicit_exact_sha_authority(self) -> None:
+        source = HARDENING.read_text(encoding="utf-8")
+        for required in (
+            '[string]$ExpectedSha',
+            '$SupersededHeads',
+            'Auditoren kræver en eksplicit -ExpectedSha.',
+            'Local HEAD matcher ikke den eksplicit forventede SHA.',
+            'Receiptens expected_sha/observed_head matcher ikke',
+            'modelrig-agent4/physical-read-audit-hardening/v1',
+            'hardening.rejected',
+            'exit 2',
+        ):
+            self.assertIn(required, source)
+        for superseded in (
+            'ce6cbbbd02003f6e35cf2986c7b24b326add5fee',
+            'ab7448280135f7be575a2050123ce020639aab61',
+            '42f1d9b915aa8fa5233f5cc4d8a8a881773ac3b0',
+        ):
+            self.assertIn(superseded, source)
+
     def test_hardening_recomputes_nested_digests_and_safety_evidence(self) -> None:
         source = HARDENING.read_text(encoding="utf-8")
         for required in (
@@ -76,6 +96,20 @@ class Agent4PhysicalReadAuditTests(unittest.TestCase):
         ):
             self.assertIn(required, source)
 
+    def test_hardening_rechecks_binding_and_private_network(self) -> None:
+        source = HARDENING.read_text(encoding="utf-8")
+        for required in (
+            "Test-PrivateIpv4Strict",
+            'Private", "DomainAuthenticated',
+            "modelrig-agent4/physical-read-safety-binding/v1",
+            "bindingData",
+            "firewall_local_address",
+            "pixel_android_release",
+            "pixel_sdk",
+            "Get-FileHash -LiteralPath $bindingFile -Algorithm SHA256",
+        ):
+            self.assertIn(required, source)
+
     def test_hardening_validates_ui_observations_and_screenshot_bytes(self) -> None:
         source = HARDENING.read_text(encoding="utf-8")
         for required in (
@@ -89,16 +123,21 @@ class Agent4PhysicalReadAuditTests(unittest.TestCase):
         self.assertNotIn("Invoke-WebRequest", source)
         self.assertNotIn("Start-Process", source)
 
-    def test_launcher_routes_through_mandatory_hardening(self) -> None:
+    def test_launcher_routes_through_pinned_mandatory_hardening(self) -> None:
         launcher = LAUNCHER.read_text(encoding="utf-8")
         doc = DOC.read_text(encoding="utf-8")
         self.assertIn("agent4-physical-read-audit-hardening.ps1", launcher)
         self.assertNotIn('scripts\\agent4-physical-read-audit.ps1"', launcher)
+        self.assertIn("40-tegns-exact-SHA", launcher)
+        self.assertIn('-ExpectedSha "%EXPECTED_SHA%"', launcher)
         self.assertIn("-RequireRemoteRefs", launcher)
+        self.assertIn("exit /b 2", launcher)
         self.assertIn("Issue #421 maa ikke lukkes", launcher)
+        self.assertIn("AUDIT_AGENT4_PHYSICAL_READ_RECEIPT.cmd <40-tegns-exact-SHA>", doc)
         self.assertIn("`0`: `PASS`", doc)
         self.assertIn("`2`: `FAIL`", doc)
         self.assertIn("ikke en digital signatur", doc)
+        self.assertIn("-SelfTest", doc)
 
 
 if __name__ == "__main__":
