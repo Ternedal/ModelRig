@@ -13,7 +13,7 @@ AUDIT_AGENT4_PHYSICAL_READ_RECEIPT.cmd <40-tegns-exact-SHA>
 Launcheren afviser manglende, malformed eller kendte superseded A4-18-heads. Den
 angivne SHA skal samtidig matche lokal `HEAD`, receiptens `expected_sha` og
 `observed_head`, safety-bindingen samt de remote refs, som basisauditoren
-verificerer.
+verificerer. Pixel-SDK skal være en numerisk streng.
 
 Rapporten skrives credential-frit til:
 
@@ -32,19 +32,27 @@ Auditoren kræver blandt andet:
 - bit-for-bit gyldig hovedreceipt-digest og begge mutationsdigests;
 - alle og kun de 21 checkpoints med forventede HTTP-statusser og hashes;
 - fixture-counts over pagegrænserne og begge snapshot-mutationer;
-- fysisk Google Pixel, app-build og redigeret UI-evidens;
+- fysisk Google Pixel og app-build;
+- redigerede tekstobservationer for alle UI-checkpoints;
+- ingen screenshots eller andre billedfiler i acceptance-evidensen, fordi synlige
+  credentials i pixels ikke kan verificeres sikkert uden OCR;
 - eksakt privat RFC1918-backendbinding, loopback-worker, `LocalSubnet`-firewall
   og netværksprofil `Private` eller `DomainAuthenticated`;
 - hash- og feltkonsistens mellem receiptens safety-evidence og den faktiske
   `validation/agent4-physical-runtime/safety-binding.json`;
-- artifact-hashes og fuld cleanup;
-- ingen credential-felter eller credential-lignende værdier;
+- artifact-hashes og fuld cleanup, inklusive verificeret allerede-stoppet
+  pre-stop uden levende eller genbrugte registrerede PID'er;
+- scanning af alle `.json`, `.log` og `.txt` runtime-evidensfiler for Bearer-
+  værdier, authorization headers, pairing codes, device tokens, admin keys og
+  andre credential-lignende felter;
+- at `admin-key.txt` er slettet;
 - `credential_data_included=false`, `public_network=false` og
   `production_activation=false`.
 
-Et hardening-afslag skriver også en maskinlæsbar, redigeret `FAIL`-rapport. Rå
-receipt-observationer, tokens, pairing codes eller admin keys kopieres ikke ind i
-rapporten.
+Hardening-gates er read-only. De ændrer ikke receipt, runtime-evidens, Git refs,
+release-state eller produktionsruntime. Et hardening-afslag stopper launcheren
+med `FAIL`; basisauditorens credential-frie JSON-rapport er kun autoritativ, når
+alle forudgående gates er passeret.
 
 Exit codes:
 
@@ -56,5 +64,8 @@ Rapportens `audit_sha256` er content-addressing, ikke en digital signatur.
 Hardening-lagets egen basistest kan køres uden hardware:
 
 ```powershell
-powershell.exe -NoProfile -File .\scripts\agent4-physical-read-audit-hardening.ps1 -SelfTest
+python .\scripts\agent4_physical_read_audit_hardening.py --self-test
 ```
+
+Exact-head- og SDK-gates dækkes desuden af repository-kontrakttestene i
+`tests/workflow_agent4_physical_read_audit.py`.
