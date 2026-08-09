@@ -573,8 +573,8 @@ class Agent4OperatorClient(
     }
 
     private fun JSONArray.strings(label: String): List<String> = buildList {
-        for (index in 0 until length()) {
-            val value = get(index)
+        for (index in 0 until this@strings.length()) {
+            val value = this@strings.get(index)
             if (value !is String || value.isBlank()) {
                 throw protocol("Agent 4-$label indeholder ugyldig tekst")
             }

@@ -182,7 +182,7 @@ class Agent4OperatorClientTest {
                     entries = emptyList(),
                     start = timelineCursor(0, null),
                     next = timelineCursor(0, null),
-                    head = timelineCursor(1, "h"),
+                    head = timelineCursor(1, "b"),
                     hasMore = false,
                 ),
             ),
@@ -208,7 +208,7 @@ class Agent4OperatorClientTest {
                     records = emptyList(),
                     start = evidenceCursor(0, null),
                     next = evidenceCursor(0, null),
-                    head = evidenceCursor(1, "i"),
+                    head = evidenceCursor(1, "c"),
                     hasMore = false,
                 ),
             ),
@@ -234,10 +234,10 @@ class Agent4OperatorClientTest {
         timelineServer.enqueue(
             operatorResponse(
                 timelineBody(
-                    entries = listOf(timelineEntry("other-campaign", 1, "j")),
+                    entries = listOf(timelineEntry("other-campaign", 1, "d")),
                     start = timelineCursor(0, null),
-                    next = timelineCursor(1, "j"),
-                    head = timelineCursor(1, "j"),
+                    next = timelineCursor(1, "d"),
+                    head = timelineCursor(1, "d"),
                     hasMore = false,
                 ),
             ),
@@ -260,10 +260,10 @@ class Agent4OperatorClientTest {
         evidenceServer.enqueue(
             operatorResponse(
                 evidenceBody(
-                    records = listOf(evidenceRecord("other-campaign", 1, "k")),
+                    records = listOf(evidenceRecord("other-campaign", 1, "e")),
                     start = evidenceCursor(0, null),
-                    next = evidenceCursor(1, "k"),
-                    head = evidenceCursor(1, "k"),
+                    next = evidenceCursor(1, "e"),
+                    head = evidenceCursor(1, "e"),
                     hasMore = false,
                 ),
             ),
@@ -529,9 +529,9 @@ class Agent4OperatorClientTest {
 
     private fun timelinePage(head: String, hasMore: Boolean): String = if (hasMore) {
         timelineBody(
-            entries = listOf(timelineEntry("campaign-1", 1, "g")),
+            entries = listOf(timelineEntry("campaign-1", 1, "c")),
             start = timelineCursor(0, null),
-            next = timelineCursor(1, "g"),
+            next = timelineCursor(1, "c"),
             head = head,
             hasMore = true,
         )
