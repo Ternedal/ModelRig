@@ -131,6 +131,8 @@ class Agent4PhysicalReadOperatorTests(unittest.TestCase):
         self.assertIn('if ($Decision -eq "GO" -and -not $allPassed)', finalize)
         self.assertIn('if ([string]$state.phase -ne "regranted")', finalize)
         self.assertIn("Stop-RecordedStack", finalize)
+        self.assertIn("$backendStopped -and", finalize)
+        self.assertIn("$workerStopped -and", finalize)
         self.assertIn("ports_free = $portsFree", finalize)
         self.assertIn("admin_key_deleted", finalize)
         self.assertIn("credential_data_included = $false", finalize)
@@ -139,6 +141,22 @@ class Agent4PhysicalReadOperatorTests(unittest.TestCase):
         self.assertIn('$receipt["receipt_sha256"]', finalize)
         self.assertNotIn("pairing_code", finalize)
         self.assertNotIn("MODELRIG_ADMIN_KEY", finalize)
+
+    def test_finalize_accepts_only_verified_already_stopped_recorded_processes(self) -> None:
+        finalize = FINALIZE.read_text(encoding="utf-8")
+        for required in (
+            "Test-RecordedProcessGone",
+            "$recordedBackendPid = [int]$state.backend_pid",
+            "$recordedWorkerPid = [int]$state.worker_pid",
+            "Get-Process -Id $ProcessId -ErrorAction SilentlyContinue",
+            "-not $backendStopped",
+            "-not $workerStopped",
+            "$portsFree -and",
+            "backend_stopped = $backendStopped",
+            "worker_stopped = $workerStopped",
+        ):
+            self.assertIn(required, finalize)
+        self.assertIn("A reused or still-running PID therefore fails closed", finalize)
 
     def test_wrapper_routes_responsibilities_to_single_entrypoints(self) -> None:
         wrapper = WRAPPER.read_text(encoding="utf-8")
