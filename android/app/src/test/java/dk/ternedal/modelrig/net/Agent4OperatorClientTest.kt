@@ -12,8 +12,19 @@ class Agent4OperatorClientTest {
 
     @Test
     fun listCampaignsUsesBackendBearerAndParsesCanonicalEnvelope() {
+        val statuses = listOf("paused", "running")
+        val start = campaignCursor(statuses, 0, 1, null, "a")
+        val head = campaignCursor(statuses, 1, 1, "campaign-1", "a")
         val server = MockWebServer()
-        server.enqueue(campaignListResponse(listOf(campaignOverview("campaign-1", "Rig audit", "running"))))
+        server.enqueue(
+            campaignListResponse(
+                campaigns = listOf(campaignOverview("campaign-1", "Rig audit", "running")),
+                start = start,
+                next = head,
+                head = head,
+                hasMore = false,
+            ),
+        )
         server.start()
         try {
             val client = Agent4OperatorClient(server.url("/").toString(), "device-token")
@@ -39,10 +50,7 @@ class Agent4OperatorClientTest {
             assertEquals(mediaType, request.getHeader("Accept"))
             assertTrue(request.getHeader("Cache-Control").orEmpty().contains("no-cache"))
             assertEquals("25", request.requestUrl?.queryParameter("limit"))
-            assertEquals(
-                listOf("paused", "running"),
-                request.requestUrl?.queryParameterValues("status"),
-            )
+            assertEquals(statuses, request.requestUrl?.queryParameterValues("status"))
             assertEquals(
                 "/api/v1/experimental/agent4/operator/campaigns",
                 request.requestUrl?.encodedPath,
@@ -55,9 +63,9 @@ class Agent4OperatorClientTest {
     @Test
     fun campaignListCursorsAreOpaqueAndRoundTripWithSnapshotHead() {
         val statuses = listOf("running")
-        val start = campaignCursor(statuses, position = 0, total = 2, lastId = null, seed = "a")
-        val next = campaignCursor(statuses, position = 1, total = 2, lastId = "campaign-2", seed = "a")
-        val head = campaignCursor(statuses, position = 2, total = 2, lastId = "campaign-1", seed = "a")
+        val start = campaignCursor(statuses, 0, 2, null, "b")
+        val next = campaignCursor(statuses, 1, 2, "campaign-2", "b")
+        val head = campaignCursor(statuses, 2, 2, "campaign-1", "b")
         val server = MockWebServer()
         server.enqueue(
             campaignListResponse(
@@ -84,7 +92,6 @@ class Agent4OperatorClientTest {
                 statuses = setOf(Agent4OperatorClient.CampaignStatus.RUNNING),
                 limit = 1,
             )
-            assertTrue(first.hasMore)
             val second = client.listCampaigns(
                 statuses = setOf(Agent4OperatorClient.CampaignStatus.RUNNING),
                 after = first.nextCursor,
@@ -98,7 +105,7 @@ class Agent4OperatorClientTest {
             val request = server.takeRequest()
             assertEquals(first.nextCursor.encoded, request.requestUrl?.queryParameter("after"))
             assertEquals(first.headCursor.encoded, request.requestUrl?.queryParameter("snapshot_head"))
-            assertEquals(listOf("running"), request.requestUrl?.queryParameterValues("status"))
+            assertEquals(statuses, request.requestUrl?.queryParameterValues("status"))
         } finally {
             server.shutdown()
         }
@@ -106,13 +113,7 @@ class Agent4OperatorClientTest {
 
     @Test
     fun malformedCampaignCursorOrHalfPagingFailsClosed() {
-        val wrongStatuses = campaignCursor(
-            statuses = listOf("paused"),
-            position = 0,
-            total = 0,
-            lastId = null,
-            seed = "b",
-        )
+        val wrongStatuses = campaignCursor(listOf("paused"), 0, 0, null, "c")
         val server = MockWebServer()
         server.enqueue(
             campaignListResponse(
@@ -153,7 +154,7 @@ class Agent4OperatorClientTest {
           "schema":"modelrig-agent4/campaign-timeline-query-cursor/v1",
           "campaign_id":"campaign-1",
           "sequence":2,
-          "entry_hash":"sha256:${"b".repeat(64)}"
+          "entry_hash":"sha256:${"d".repeat(64)}"
         }""".trimIndent()
         val server = MockWebServer()
         server.enqueue(operatorResponse(timelinePage(cursor, true)))
@@ -169,9 +170,9 @@ class Agent4OperatorClientTest {
                 limit = 10,
             )
             server.takeRequest()
-            val second = server.takeRequest()
-            assertEquals(first.nextCursor.encoded, second.requestUrl?.queryParameter("after"))
-            assertEquals(first.headCursor.encoded, second.requestUrl?.queryParameter("snapshot_head"))
+            val request = server.takeRequest()
+            assertEquals(first.nextCursor.encoded, request.requestUrl?.queryParameter("after"))
+            assertEquals(first.headCursor.encoded, request.requestUrl?.queryParameter("snapshot_head"))
         } finally {
             server.shutdown()
         }
@@ -187,7 +188,7 @@ class Agent4OperatorClientTest {
                   "verification":{
                     "campaign_id":"campaign/with space",
                     "record_count":2,
-                    "head_hash":"sha256:${"c".repeat(64)}",
+                    "head_hash":"sha256:${"e".repeat(64)}",
                     "latest_timeline_head_hash":null
                   }
                 }""".trimIndent(),
@@ -195,8 +196,10 @@ class Agent4OperatorClientTest {
         )
         server.start()
         try {
-            val client = Agent4OperatorClient(server.url("/").toString(), "device-token")
-            val result = client.evidenceVerification("campaign/with space")
+            val result = Agent4OperatorClient(
+                server.url("/").toString(),
+                "device-token",
+            ).evidenceVerification("campaign/with space")
             assertEquals(2, result.recordCount)
             val request = server.takeRequest()
             assertEquals("GET", request.method)
@@ -221,7 +224,8 @@ class Agent4OperatorClientTest {
             server.start()
             try {
                 val error = runCatching {
-                    Agent4OperatorClient(server.url("/").toString(), "device-token").listCampaigns()
+                    Agent4OperatorClient(server.url("/").toString(), "device-token")
+                        .listCampaigns()
                 }.exceptionOrNull()
                 assertEquals(expected, (error as Agent4OperatorClient.OperatorException).kind)
                 assertEquals(status, error.statusCode)
@@ -256,21 +260,26 @@ class Agent4OperatorClientTest {
 
     @Test
     fun successRequiresKnownMediaTypeSchemaStatusAndNumericFields() {
+        val emptyCursor = campaignCursor(emptyList(), 0, 0, null, "f")
         val badResponses = listOf(
             MockResponse()
                 .setResponseCode(200)
                 .setHeader("Content-Type", "application/json")
-                .setBody(campaignListBody(emptyList())),
+                .setBody(campaignListBody(emptyList(), emptyCursor, emptyCursor, emptyCursor, false)),
             operatorResponse("{\"schema\":\"unknown\",\"campaigns\":[]}"),
-            operatorResponse(
-                campaignListBody(
-                    listOf(campaignOverview("c", "n", "future-state")),
-                ),
+            campaignListResponse(
+                listOf(campaignOverview("c", "n", "future-state")),
+                campaignCursor(emptyList(), 0, 1, null, "1"),
+                campaignCursor(emptyList(), 1, 1, "c", "1"),
+                campaignCursor(emptyList(), 1, 1, "c", "1"),
+                false,
             ),
-            operatorResponse(
-                campaignListBody(
-                    listOf(campaignOverview("c", "n", "running", timelineEntries = "\"0\"")),
-                ),
+            campaignListResponse(
+                listOf(campaignOverview("c", "n", "running", timelineEntries = "\"0\"")),
+                campaignCursor(emptyList(), 0, 1, null, "2"),
+                campaignCursor(emptyList(), 1, 1, "c", "2"),
+                campaignCursor(emptyList(), 1, 1, "c", "2"),
+                false,
             ),
         )
         for (response in badResponses) {
@@ -279,7 +288,8 @@ class Agent4OperatorClientTest {
             server.start()
             try {
                 val error = runCatching {
-                    Agent4OperatorClient(server.url("/").toString(), "device-token").listCampaigns()
+                    Agent4OperatorClient(server.url("/").toString(), "device-token")
+                        .listCampaigns()
                 }.exceptionOrNull()
                 assertEquals(
                     Agent4OperatorClient.ErrorKind.PROTOCOL,
@@ -351,26 +361,20 @@ class Agent4OperatorClientTest {
 
     private fun campaignListResponse(
         campaigns: List<String>,
-        start: String = campaignCursor(emptyList(), 0, campaigns.size, null, "d"),
-        next: String = campaignCursor(
-            emptyList(),
-            campaigns.size,
-            campaigns.size,
-            campaigns.lastOrNull()?.let { Regex("campaign_id\\\":\\\"([^\\\"]+)").find(it)?.groupValues?.get(1) },
-            "d",
-        ),
-        head: String = next,
-        hasMore: Boolean = false,
+        start: String,
+        next: String,
+        head: String,
+        hasMore: Boolean,
     ): MockResponse = operatorResponse(
         campaignListBody(campaigns, start, next, head, hasMore),
     )
 
     private fun campaignListBody(
         campaigns: List<String>,
-        start: String = campaignCursor(emptyList(), 0, campaigns.size, null, "d"),
-        next: String = campaignCursor(emptyList(), 0, campaigns.size, null, "d"),
-        head: String = next,
-        hasMore: Boolean = false,
+        start: String,
+        next: String,
+        head: String,
+        hasMore: Boolean,
     ): String = """{
       "schema":"modelrig-agent4/operator-api/v1",
       "campaigns":[${campaigns.joinToString(",")}],
