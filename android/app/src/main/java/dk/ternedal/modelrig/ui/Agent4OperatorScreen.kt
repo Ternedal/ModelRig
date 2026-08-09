@@ -39,6 +39,7 @@ private sealed interface Agent4ScreenState {
     data object Loading : Agent4ScreenState
     data object PairingRequired : Agent4ScreenState
     data object GrantRequired : Agent4ScreenState
+    data object FeatureDisabled : Agent4ScreenState
     data class Unavailable(val message: String) : Agent4ScreenState
     data class ProtocolFailure(val message: String) : Agent4ScreenState
     data class Ready(
@@ -95,6 +96,8 @@ fun Agent4OperatorScreen(
                     Agent4ScreenState.PairingRequired
                 Agent4OperatorClient.ErrorKind.GRANT_REQUIRED ->
                     Agent4ScreenState.GrantRequired
+                Agent4OperatorClient.ErrorKind.FEATURE_DISABLED ->
+                    Agent4ScreenState.FeatureDisabled
                 Agent4OperatorClient.ErrorKind.UNAVAILABLE ->
                     Agent4ScreenState.Unavailable(failure.message.orEmpty())
                 Agent4OperatorClient.ErrorKind.NOT_FOUND,
@@ -156,6 +159,11 @@ fun Agent4OperatorScreen(
             Agent4ScreenState.GrantRequired -> MessageState(
                 title = "Agent 4 er låst",
                 message = "Denne enhed mangler den særskilte agent4:read-tilladelse. Tilladelsen kan kun gives lokalt på riggen.",
+                retry = { refresh++ },
+            )
+            Agent4ScreenState.FeatureDisabled -> MessageState(
+                title = "Agent 4 er ikke slået til",
+                message = "Read-fladen er ikke aktiveret på riggen. Appen åbner ingen fallback eller direkte worker-forbindelse.",
                 retry = { refresh++ },
             )
             is Agent4ScreenState.Unavailable -> MessageState(
