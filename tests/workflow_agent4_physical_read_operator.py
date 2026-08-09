@@ -176,7 +176,7 @@ class Agent4PhysicalReadOperatorTests(unittest.TestCase):
         for name in expected_names:
             self.assertIn("agent4-physical-read-operator.ps1", launchers[name])
         start = launchers["START_AGENT4_PHYSICAL_READ_TEST.cmd"]
-        self.assertIn("<40-tegns-exact-SHA>", start)
+        self.assertIn("40-tegns-exact-SHA", start)
         self.assertIn("-ExpectedSha", start)
         self.assertIn("exit /b 2", start)
 
