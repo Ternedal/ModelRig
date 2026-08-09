@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -13,7 +12,16 @@ import (
 
 const agent4GrantAdminFlag = "KALIV_AGENT4_GRANT_ADMIN"
 
-func (s *server) handleAgent4ReadGrantAdmin(w http.ResponseWriter, r *http.Request) {
+// handleAgent4ReadGrantAdmin is the single A4-16 grant mutation surface.
+//
+// It is intentionally not Bearer-authenticated: a paired device is the subject
+// of the grant and must never be able to promote itself. The route is available
+// only after exact feature opt-in, accepts loopback callers only and requires a
+// separately configured operator admin key.
+func (s *server) handleAgent4ReadGrantAdmin(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
 	deviceID := strings.TrimSpace(r.PathValue("id"))
 	action := "grant"
 	enabled := true
@@ -70,15 +78,6 @@ func constantTimeSecretEqual(provided, configured string) bool {
 	providedHash := sha256.Sum256([]byte(provided))
 	configuredHash := sha256.Sum256([]byte(configured))
 	return subtle.ConstantTimeCompare(providedHash[:], configuredHash[:]) == 1
-}
-
-func isLoopbackRemote(r *http.Request) bool {
-	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
-	if err != nil {
-		host = strings.TrimSpace(r.RemoteAddr)
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 func (s *server) auditAgent4Grant(deviceID, action, result string) {
