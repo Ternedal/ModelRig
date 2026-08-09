@@ -85,7 +85,7 @@ function Assert-PortsFree {
         }
     }
     if ($occupied.Count -gt 0) {
-        throw "$Context: portene er ikke frie: $($occupied -join ', '). Ukendte processer bevares."
+        throw "${Context}: portene er ikke frie: $($occupied -join ', '). Ukendte processer bevares."
     }
 }
 
@@ -123,7 +123,7 @@ function Get-PhysicalPixel {
         throw "Præcis én autoriseret fysisk Google Pixel kræves; fandt $($rows.Count)."
     }
     $serial = (($rows[0] -split "\s+")[0]).Trim()
-    if ($serial -match "^(?i)emulator-") {
+    if ($serial -match "^emulator-") {
         throw "A4-18 accepterer ikke en Android-emulator."
     }
     if (-not [string]::IsNullOrWhiteSpace($ExpectedSerial) -and $serial -ne $ExpectedSerial) {
@@ -212,7 +212,7 @@ function Stop-StackBeforeTransition {
             [bool]$cleanup.unknown_process_preserved -or
             -not [bool]$cleanup.firewall_removed
         ) {
-            throw "$Context: den tidligere stack kunne ikke ryddes sikkert."
+            throw "${Context}: den tidligere stack kunne ikke ryddes sikkert."
         }
     }
     else {
