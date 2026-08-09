@@ -43,6 +43,7 @@ def _record(index: int, status: CampaignStatus = CampaignStatus.QUEUED) -> Campa
             status=status,
             revision=index,
             updated_at=BASE_TIME + timedelta(minutes=index),
+            last_error=("fixture failure" if status is CampaignStatus.FAILED else None),
         ),
     )
 
