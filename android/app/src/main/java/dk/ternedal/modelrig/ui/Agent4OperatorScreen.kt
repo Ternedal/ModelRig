@@ -55,6 +55,16 @@ fun Agent4OperatorScreen(
     store: TokenStore,
     onClose: () -> Unit,
 ) {
+    var selectedCampaignId by remember { mutableStateOf<String?>(null) }
+    selectedCampaignId?.let { campaignId ->
+        Agent4CampaignDetailScreen(
+            store = store,
+            campaignId = campaignId,
+            onBack = { selectedCampaignId = null },
+        )
+        return
+    }
+
     var refresh by remember { mutableIntStateOf(0) }
     var state: Agent4ScreenState by remember {
         mutableStateOf(Agent4ScreenState.Loading)
@@ -161,6 +171,7 @@ fun Agent4OperatorScreen(
             is Agent4ScreenState.Ready -> CampaignListState(
                 campaigns = current.campaigns,
                 refresh = { refresh++ },
+                openCampaign = { selectedCampaignId = it },
             )
         }
     }
@@ -204,6 +215,7 @@ private fun MessageState(
 private fun CampaignListState(
     campaigns: List<Agent4OperatorClient.CampaignOverview>,
     refresh: () -> Unit,
+    openCampaign: (String) -> Unit,
 ) {
     if (campaigns.isEmpty()) {
         MessageState(
@@ -268,6 +280,10 @@ private fun CampaignListState(
                             fontSize = 10.sp,
                             maxLines = 1,
                         )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(onClick = { openCampaign(campaign.campaignId) }) {
+                        Text("Se detail, tidslinje og evidens")
                     }
                 }
             }
