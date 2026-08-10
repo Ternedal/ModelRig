@@ -1,0 +1,54 @@
+name: Temporary A4-20 offline receipt verifier validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-regenerate:
+    if: github.event.pull_request.head.ref == 'agent/a4-20-offline-physical-receipt-verifier' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact verifier branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/a4-20-offline-physical-receipt-verifier
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+
+      - name: Install worker dependencies
+        run: python -m pip install -r worker/requirements.txt
+
+      - name: Run offline verifier adversarial contract
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py
+
+      - name: Run existing physical auditor contracts
+        run: |
+          python tests/workflow_agent4_physical_read_receipt_auditor.py
+          python tests/workflow_agent4_physical_read_audit_hardening.py
+          python tests/workflow_agent4_physical_read_secret_scrub.py
+
+      - name: Regenerate authoritative current state
+        run: |
+          python scripts/current_state.py
+          python scripts/current_state.py --check
+
+      - name: Commit generated state when changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- CURRENT_STATE.md; then
+            echo "CURRENT_STATE.md already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CURRENT_STATE.md
+          git commit -m "docs: regenerate current state for offline receipt verifier"
+          git push origin HEAD:agent/a4-20-offline-physical-receipt-verifier
