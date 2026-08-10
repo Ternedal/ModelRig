@@ -99,20 +99,21 @@ UI_OBSERVATION_TRIALS = {
     "malformed_schema_fail_closed",
 }
 
-FORBIDDEN_CREDENTIAL_KEYS = {
+# Receipt extensions are untrusted too. Normalize key spellings before testing
+# sensitivity so camelCase, kebab-case and attacker-chosen aliases cannot hide
+# credentials merely by bypassing the canonical snake_case names.
+FORBIDDEN_CREDENTIAL_KEY_TERMS = (
     "authorization",
     "bearer",
-    "bearer_token",
-    "device_token",
     "token",
-    "pairing_code",
-    "admin_key",
-    "modelrig_admin_key",
+    "pairingcode",
+    "adminkey",
+    "modelrigadminkey",
     "password",
     "secret",
-    "client_secret",
-    "private_key",
-}
+    "clientsecret",
+    "privatekey",
+)
 CREDENTIAL_VALUE_PATTERNS = (
     re.compile(r"(?i)\bauthorization\s*:\s*(?:bearer\s+)?[A-Za-z0-9._~+/=-]{8,}"),
     re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}"),
@@ -120,6 +121,7 @@ CREDENTIAL_VALUE_PATTERNS = (
     re.compile(r"(?i)\bpairing[_ -]?code\s*[:=]\s*\S+"),
     re.compile(r"(?i)\bdevice[_ -]?token\s*[:=]\s*\S+"),
     re.compile(r"(?i)\badmin[_ -]?key\s*[:=]\s*\S+"),
+    re.compile(r"(?i)\b[A-Z0-9]{4}-[A-Z0-9]{4}\b"),
 )
 RFC1918 = (
     ipaddress.ip_network("10.0.0.0/8"),
@@ -200,11 +202,16 @@ def _validate_generated_at(value: Any) -> None:
     _require(parsed.astimezone(timezone.utc).utcoffset().total_seconds() == 0, "generated_at must be convertible to UTC")
 
 
+def _credential_key_is_forbidden(name: str) -> bool:
+    compact = re.sub(r"[^a-z0-9]", "", name.lower())
+    return any(term in compact for term in FORBIDDEN_CREDENTIAL_KEY_TERMS)
+
+
 def _scan_credentials(value: Any, path: str = "root") -> None:
     if isinstance(value, Mapping):
         for key, child in value.items():
             name = str(key)
-            _require(name.lower() not in FORBIDDEN_CREDENTIAL_KEYS, f"forbidden credential field at {path}.{name}")
+            _require(not _credential_key_is_forbidden(name), f"forbidden credential field at {path}.{name}")
             _scan_credentials(child, f"{path}.{name}")
         return
     if isinstance(value, list):
