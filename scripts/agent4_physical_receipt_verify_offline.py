@@ -29,6 +29,7 @@ EXPECTED_APP_PACKAGE = "dk.ternedal.modelrig"
 SHA_PREFIX = "sha256:"
 SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+RAW_DEVICE_TOKEN_RE = re.compile(r"\b[0-9a-f]{64}\b")
 
 REQUIRED_TRIALS = (
     "default_off_feature_locked",
@@ -122,11 +123,6 @@ CREDENTIAL_VALUE_PATTERNS = (
     re.compile(r"(?i)\bdevice[_ -]?token\s*[:=]\s*\S+"),
     re.compile(r"(?i)\badmin[_ -]?key\s*[:=]\s*\S+"),
     re.compile(r"(?i)\b[A-Z0-9]{4}-[A-Z0-9]{4}\b"),
-    # auth.NewToken() emits exactly 32 random bytes as 64 lowercase hex
-    # characters. A raw token must be rejected even when an extension/note
-    # omits a credential label. Canonical SHA-256 claims remain safe because
-    # they are explicitly prefixed with "sha256:".
-    re.compile(r"(?<!sha256:)\b[0-9a-f]{64}\b"),
 )
 RFC1918 = (
     ipaddress.ip_network("10.0.0.0/8"),
@@ -235,6 +231,45 @@ def _known_credential_evidence_marker(path: str, name: str, value: Any) -> bool:
     )
 
 
+def _canonical_hash_slot(path: str, name: str, value: Any) -> bool:
+    """Allow digest-shaped strings only where the receipt schema owns a hash."""
+
+    if not isinstance(value, str) or SHA256_RE.fullmatch(value) is None:
+        return False
+    if path == "root" and name == "receipt_sha256":
+        return True
+    if path == "root.fixture" and name in {
+        "latest_timeline_hash",
+        "evidence_head_hash",
+        "first_payload_sha256",
+        "last_payload_sha256",
+    }:
+        return True
+    if re.fullmatch(r"root\.mutations\[\d+\]", path) and name in {
+        "receipt_sha256",
+        "timeline_head_before",
+        "timeline_head_after",
+        "evidence_head_before",
+        "evidence_head_after",
+    }:
+        return True
+    if path.startswith("root.trials."):
+        trial_name = path.removeprefix("root.trials.")
+        if trial_name in REQUIRED_TRIALS and name in {
+            "payload_sha256",
+            "cursor_sha256",
+            "screenshot",
+        }:
+            return True
+    if re.fullmatch(r"root\.artifacts\[\d+\]", path) and name == "sha256":
+        return True
+    if path == "root.safety_hardening" and name == "pixel_serial_sha256":
+        return True
+    if path == "root.safety_hardening.binding_file" and name == "sha256":
+        return True
+    return False
+
+
 def _scan_credentials(value: Any, path: str = "root") -> None:
     if isinstance(value, Mapping):
         for key, child in value.items():
@@ -244,6 +279,8 @@ def _scan_credentials(value: Any, path: str = "root") -> None:
                 allowed_evidence or not _credential_key_is_forbidden(name),
                 f"forbidden credential field at {path}.{name}",
             )
+            if _canonical_hash_slot(path, name, child):
+                continue
             _scan_credentials(child, f"{path}.{name}")
         return
     if isinstance(value, list):
@@ -253,6 +290,7 @@ def _scan_credentials(value: Any, path: str = "root") -> None:
     if isinstance(value, str):
         for pattern in CREDENTIAL_VALUE_PATTERNS:
             _require(pattern.search(value) is None, f"credential-like value at {path}")
+        _require(RAW_DEVICE_TOKEN_RE.search(value) is None, f"credential-like value at {path}")
 
 
 def _validate_all_named_hashes(value: Any, path: str = "root") -> None:
