@@ -122,6 +122,12 @@ internal fun Agent4CampaignDetailScreen(
                 val timelinePage = client.timeline(campaignId, limit = AGENT4_PAGE_SIZE)
                 val evidencePage = client.evidencePage(campaignId, limit = AGENT4_PAGE_SIZE)
                 val verification = client.evidenceVerification(campaignId)
+                Agent4DetailSnapshotPolicy.requireConsistent(
+                    campaign = campaign,
+                    timelineHead = timelinePage.headCursor,
+                    evidenceHead = evidencePage.headCursor,
+                    verification = verification,
+                )
                 val timelineRows = timelinePage.entries.map(Agent4OperatorPresentation::timelineRow)
                 val evidenceRows = evidencePage.records.map(Agent4OperatorPresentation::evidenceRow)
                 Agent4DetailData(
