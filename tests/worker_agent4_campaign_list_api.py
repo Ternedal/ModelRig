@@ -4,13 +4,11 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -27,7 +25,7 @@ from app.agent4.handoff import (  # noqa: E402
     CampaignSignalRequest,
     DispatchOutcomeKind,
 )
-from app.agent4.production_mount import mount_agent4_operator  # noqa: E402
+from app.agent4.operator_api import build_agent4_operator_router  # noqa: E402
 
 BASE_TIME = datetime(2026, 8, 9, 11, 0, tzinfo=timezone.utc)
 PREFIX = "/experimental/agent4/operator/campaigns"
@@ -92,12 +90,15 @@ class CampaignListApiTests(unittest.TestCase):
                 )
             )
         app = FastAPI()
-        with patch.dict(
-            os.environ,
-            {"KALIV_AGENT4_OPERATOR_API": "1"},
-            clear=False,
-        ):
-            mount_agent4_operator(app, context)
+        # This test deliberately needs a mutable full runtime so it can change
+        # campaign state between requests. Mount the transport adapter directly;
+        # the production mount is reserved for Agent4OperatorReadContext only.
+        app.include_router(
+            build_agent4_operator_router(
+                context.operator,
+                context.evidence_operator,
+            )
+        )
         return context, TestClient(app)
 
     def test_envelope_is_backward_compatible_and_pages_stably(self) -> None:
