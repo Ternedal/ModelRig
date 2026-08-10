@@ -2,7 +2,7 @@
 
 A4-25f is the isolated physical qualification campaign for the immutable Agent 4 snapshot authority prepared by A4-25a through A4-25e.
 
-This runbook **does not authorize production activation**. A successful run only proves that the repository-qualified A4-25f harness produced internally consistent physical evidence on one Windows rig + Pixel execution.
+This runbook **does not authorize production activation**. A successful run only proves that the repository-qualified A4-25f harness produced complete physical evidence on one Windows rig + Pixel execution and that a human explicitly accepted or rejected that physical campaign.
 
 ## Hard boundaries
 
@@ -61,6 +61,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\agent4_a4_25f_physical_operat
 - start the loopback worker and isolated dual-listener backend;
 - print a one-time pairing code without persisting it.
 
+The physical backend records only redacted Agent 4 HTTP evidence to `<output>\backend-device-store.json.agent4-evidence.jsonl`: safe route-kind, HTTP status, query-key names, SHA-256 of the raw query/body, media type and body size. It never records Authorization, query values, raw roots/cursors or campaign ids.
+
 Pair **only the isolated A425f app** using the displayed server URL and pairing code. Do not record the pairing code.
 
 ## 2. Bind the paired Pixel identity
@@ -73,7 +75,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\agent4_a4_25f_physical_operat
   -Serial $serial
 ```
 
-The device-info receipt may contain the non-secret device id/name and backend URL hash, but never the bearer token.
+The device-info receipt records only non-secret physical/build identity:
+
+- device id/name;
+- Pixel manufacturer/model;
+- Android release + SDK level;
+- isolated package name, versionName/versionCode and debuggable identity;
+- backend URL hash;
+- expected/actual HTTP 200 from the authenticated status call.
+
+It never records the bearer token.
 
 ## 3. Grant isolated Agent 4 read permission
 
@@ -114,6 +125,8 @@ The main matrix must physically cover:
 - retained-root expiry 410 using the bounded test-host clock offset;
 - a fresh unbound read observing the later current root.
 
+Exactly 14 physical Agent 4 HTTP requests are expected. The redacted backend trace is the actual-status authority for those trials. The repository-qualified proxy contract `TestAgent4OperatorPreservesSnapshotQueryStatusBodyAndMediaType` separately proves that snapshot query bytes and worker status/body/media type are forwarded without rewrite.
+
 The matrix receipt must keep `production_activation=false`.
 
 ## 5. Run the four local cursor rejection probes
@@ -134,6 +147,8 @@ All four stages must pass locally as protocol rejection before a network request
 - list-status filter mismatch;
 - campaign mismatch.
 
+The CursorMatrix must not add Agent 4 requests to the backend trace; these are local client rejections.
+
 ## 6. Stop and remove the isolated stack
 
 ```powershell
@@ -144,7 +159,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\agent4_a4_25f_physical_operat
   -Serial $serial
 ```
 
-`Stop` must remove the isolated A425f APK, firewall rule, harness processes and isolated backend device-store while preserving evidence files.
+`Stop` must remove the isolated A425f APK, firewall rule, harness processes and isolated backend device-store while preserving evidence files, including the redacted HTTP trace.
 
 ## 7. Verify cleanup
 
@@ -165,17 +180,17 @@ Cleanup verification must prove:
 - the same Pixel serial hash as the physical campaign;
 - `production_activation=false`.
 
-## 8. Audit the complete evidence chain
+## 8. Finalize the complete physical evidence
 
-Run only after successful cleanup verification:
+Run only after successful cleanup verification, on the same physical Windows rig and exact clean checkout:
 
 ```powershell
-py -3 .\scripts\agent4_a4_25f_audit.py `
+py -3 .\scripts\agent4_a4_25f_finalize_evidence.py `
   --output-root $output `
   --expected-sha $sha
 ```
 
-The auditor fails closed unless it can verify all of the following:
+The finalizer first runs the fail-closed integrity auditor and then adds the issue-required physical evidence. It fails unless it can verify all of the following:
 
 - exact clean repository head;
 - valid A4-25f output marker and fixture self-digest;
@@ -187,39 +202,77 @@ The auditor fails closed unless it can verify all of the following:
 - same Pixel serial hash across operator/cursor/cleanup evidence;
 - no credential-bearing evidence fields;
 - complete cleanup evidence;
+- exactly 14 redacted backend HTTP trace entries in expected order;
+- expected versus actual HTTP status for every physical Agent 4 trial;
+- expected v2 response media type plus hashed query/body evidence;
+- Pixel model, Android version and isolated Android build identity;
+- Windows release/build, CPU architecture, Python version/implementation + executable hash and Go version;
 - no public-network or production-activation claim.
 
-A successful audit writes:
+The finalizer writes both:
 
 ```text
 <output>\a4-25f-physical-audit.json
+<output>\a4-25f-qualification-evidence.json
 ```
 
-The success receipt must contain:
+The qualification receipt must contain:
 
 ```json
 {
-  "physical_qualification_evidence_valid": true,
+  "physical_qualification_evidence_complete": true,
+  "all_expected_http_trials_verified": true,
+  "human_go_recorded": false,
   "human_go_authorized": false,
   "production_activation": false
 }
 ```
 
-`physical_qualification_evidence_valid=true` means only that this physical campaign's evidence is internally complete and cryptographically bound. It is **not** a human GO decision and is **not** permission to activate production.
+This proves evidence completeness only. It is **not** a human GO decision and is **not** permission to activate production.
+
+## 9. Human review and immutable GO/NO-GO
+
+Only a human reviewer may perform this step after reviewing the non-secret evidence. Record the physical-campaign decision explicitly:
+
+```powershell
+py -3 .\scripts\agent4_a4_25f_record_decision.py `
+  --output-root $output `
+  --expected-sha $sha `
+  --decision GO `
+  --reviewer "<human reviewer>" `
+  --reason "<why this physical campaign is accepted>"
+```
+
+Use `--decision NO-GO` when the reviewed campaign should not be accepted.
+
+The decision receipt is immutable and binds the exact `a4-25f-qualification-evidence.json` file + canonical digest. An existing decision cannot be overwritten. A human `GO` means **A4-25f physical qualification accepted only**; the receipt always keeps:
+
+```json
+{
+  "production_activation_authorized": false,
+  "production_activation": false
+}
+```
+
+The human decision is written to:
+
+```text
+<output>\a4-25f-human-decision.json
+```
 
 ## Failure handling
 
-If any physical step fails:
+If any physical/evidence step fails:
 
-1. Do not edit or manufacture receipts.
+1. Do not edit, delete or manufacture receipts/traces to make the attempt pass.
 2. Run `Stop` when possible.
 3. Run cleanup verification when possible.
 4. Preserve the failed output directory as failed evidence.
 5. Record only non-secret failure context in #474.
 6. Fix the repository on a new commit, re-run repository qualification, and use a new output directory for the next physical attempt.
 
-Never convert a failed physical run into a pass by rebinding hashes, deleting failing receipts or reusing #421 evidence.
+Never convert a failed physical run into a pass by rebinding hashes, dropping unexpected HTTP trace entries, deleting failing receipts or reusing #421 evidence.
 
-## After a successful physical audit
+## After a human physical GO
 
-A human may review the audit receipt and associated non-secret evidence and update #474 / ADR-A4-005. Any later production activation must be a **separate, explicit change** with its own authority, review and qualification. A4-25f itself never performs that activation.
+A human may update #474 / ADR-A4-005 with the immutable decision and non-secret evidence digests. Any later production activation must be a **separate, explicit change** with its own authority, review and qualification. A4-25f itself never performs or authorizes that activation.
