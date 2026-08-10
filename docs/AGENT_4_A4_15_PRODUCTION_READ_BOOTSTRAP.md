@@ -21,6 +21,23 @@ KALIV_AGENT4_DATA_ROOT=<absolute path>
 
 Missing, relative or file-valued roots fail startup before the worker is ready.
 
+## ADR-A4-005 traceability
+
+**Implemented ADR:** ADR-A4-007. A4-21 preserves the established worker-hosted,
+backend-proxied and paired-device read boundary while removing mutation-capable
+lifecycle authority from the production read composition.
+
+**Reference architecture:** Agent 4 B-reference architecture plus the A4-09
+canonical composition and single-dataroot ownership model. The canonical
+campaign/timeline/evidence stores remain the source of truth; only the authority
+of the production adapter is narrowed.
+
+**Dependencies:** ADR-A4-005 documentation/stop rule, ADR-A4-006 ownership
+boundary, ADR-A4-007 host/transport/auth boundary, the A4-09 canonical runtime,
+#422/A4-15 at exact base `275bc509bc1cc6e6f06eb03d053f077ae63d5a94`,
+and issue #443. Downstream integration preserves #428/A4-19 snapshot-bound
+campaign paging and #442/A4-20 stale-response invalidation.
+
 ## Ownership
 
 `worker/app/agent4/production_bootstrap.py` is the single production composition
