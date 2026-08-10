@@ -28,6 +28,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install worker dependencies
+        run: python -m pip install -r worker/requirements.txt
+
       - name: Run focused backend pairing tests
         working-directory: backend
         run: go test ./cmd/modelrig-server -count=1
