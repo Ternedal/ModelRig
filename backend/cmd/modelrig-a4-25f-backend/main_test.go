@@ -115,9 +115,6 @@ func TestAgent4EvidenceTraceRedactsRequestAndRecordsActualOutcome(t *testing.T) 
 		t.Fatalf("read trace: %v", err)
 	}
 	text := string(raw)
-	for _, forbidden := range []string{token, "secret-cursor", rawCursor, r.URL.RawQuery} {
-		_ = forbidden
-	}
 	if strings.Contains(text, token) || strings.Contains(text, "secret-cursor") || strings.Contains(text, rawCursor) {
 		t.Fatalf("trace leaked credential/cursor material: %s", text)
 	}
