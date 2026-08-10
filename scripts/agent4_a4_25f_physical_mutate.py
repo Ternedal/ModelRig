@@ -33,7 +33,10 @@ from app.agent4.timeline import CampaignEvidenceReference  # noqa: E402
 MARKER_SCHEMA = "modelrig-agent4/a4-25f-output-root/v1"
 RECEIPT_SCHEMA = "modelrig-agent4/a4-25f-physical-mutation/v1"
 SELECTED_CAMPAIGN_ID = "a4-25f-physical-primary"
-DELETE_CAMPAIGN_ID = "a4-25f-physical-001"
+# Created 30 minutes before the baseline root. With the 31-campaign fixture and
+# 25-item Android page size this campaign is deterministically on page 2, so the
+# add+delete race cannot accidentally exercise only first-page membership.
+DELETE_CAMPAIGN_ID = "a4-25f-physical-030"
 MODES = (
     "campaign-transition",
     "evidence-append",
