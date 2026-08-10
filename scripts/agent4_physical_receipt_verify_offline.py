@@ -207,11 +207,29 @@ def _credential_key_is_forbidden(name: str) -> bool:
     return any(term in compact for term in FORBIDDEN_CREDENTIAL_KEY_TERMS)
 
 
+def _known_credential_evidence_marker(path: str, name: str, value: Any) -> bool:
+    if (
+        path == "root.cleanup"
+        and name == "admin_key_deleted"
+        and type(value) is bool
+    ):
+        return True
+    return (
+        path == "root.trials"
+        and name in REQUIRED_TRIALS
+        and isinstance(value, Mapping)
+    )
+
+
 def _scan_credentials(value: Any, path: str = "root") -> None:
     if isinstance(value, Mapping):
         for key, child in value.items():
             name = str(key)
-            _require(not _credential_key_is_forbidden(name), f"forbidden credential field at {path}.{name}")
+            allowed_evidence = _known_credential_evidence_marker(path, name, child)
+            _require(
+                allowed_evidence or not _credential_key_is_forbidden(name),
+                f"forbidden credential field at {path}.{name}",
+            )
             _scan_credentials(child, f"{path}.{name}")
         return
     if isinstance(value, list):
