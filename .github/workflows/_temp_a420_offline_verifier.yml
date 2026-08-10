@@ -28,11 +28,14 @@ jobs:
       - name: Run offline verifier adversarial contract
         run: python tests/workflow_agent4_physical_receipt_offline_verifier.py
 
-      - name: Run existing physical auditor contracts
+      - name: Run every existing physical read repository contract
+        shell: bash
         run: |
-          python tests/workflow_agent4_physical_read_receipt_auditor.py
-          python tests/workflow_agent4_physical_read_audit_hardening.py
-          python tests/workflow_agent4_physical_read_secret_scrub.py
+          set -euo pipefail
+          for test_file in tests/workflow_agent4_physical_read_*.py; do
+            echo "==> $test_file"
+            python "$test_file"
+          done
 
       - name: Regenerate authoritative current state
         run: |
