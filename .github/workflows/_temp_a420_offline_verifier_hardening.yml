@@ -25,10 +25,29 @@ jobs:
       - name: Install worker dependencies
         run: python -m pip install -r worker/requirements.txt
 
-      - name: Run offline verifier adversarial contracts
-        run: |
-          python tests/workflow_agent4_physical_receipt_offline_verifier.py
-          python tests/workflow_agent4_physical_receipt_credential_aliases.py
+      - name: Run original offline verifier adversarial contract
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py
+
+      - name: Reject camelCase deviceToken
+        run: python tests/workflow_agent4_physical_receipt_credential_aliases.py CredentialAliasHardeningTests.test_camel_case_device_token_key_is_rejected
+
+      - name: Reject camelCase pairingCode
+        run: python tests/workflow_agent4_physical_receipt_credential_aliases.py CredentialAliasHardeningTests.test_camel_case_pairing_code_key_is_rejected
+
+      - name: Reject kebab admin-key
+        run: python tests/workflow_agent4_physical_receipt_credential_aliases.py CredentialAliasHardeningTests.test_kebab_case_admin_key_is_rejected
+
+      - name: Reject AuthorizationHeader alias
+        run: python tests/workflow_agent4_physical_receipt_credential_aliases.py CredentialAliasHardeningTests.test_authorization_header_alias_is_rejected
+
+      - name: Reject nested clientSecretValue alias
+        run: python tests/workflow_agent4_physical_receipt_credential_aliases.py CredentialAliasHardeningTests.test_nested_client_secret_alias_is_rejected
+
+      - name: Reject unlabeled raw pairing code
+        run: python tests/workflow_agent4_physical_receipt_credential_aliases.py CredentialAliasHardeningTests.test_unlabelled_raw_pairing_code_in_note_is_rejected
+
+      - name: Allow noncredential metadata aliases
+        run: python tests/workflow_agent4_physical_receipt_credential_aliases.py CredentialAliasHardeningTests.test_noncredential_metadata_names_remain_allowed
 
       - name: Run every existing physical read repository contract
         shell: bash
