@@ -42,6 +42,16 @@ android {
         debug {
             signingConfig = signingConfigs.getByName("modelrig")
         }
+        create("a425f") {
+            // Dedicated physical-test app identity. It installs next to normal
+            // Kaliv and therefore owns a separate app sandbox, SharedPreferences
+            // and AndroidKeyStore namespace. No product pairing state is reused.
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".a425f"
+            versionNameSuffix = "-a425f"
+            isDebuggable = true
+            matchingFallbacks += listOf("debug")
+        }
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("modelrig")
