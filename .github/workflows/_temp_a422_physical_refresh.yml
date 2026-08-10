@@ -38,11 +38,18 @@ jobs:
           expected_physical="11276410c78ef5809f24c7e6fca87c3b6efce9a0"
           expected_integration="2f4849b7621b71651e61e7a6f54488fda37f7762"
           expected_merge_base="f1b20d125d8ac72cae2a888d21486aab15578b98"
-          actual_parent="$(git rev-parse HEAD^)"
-          test "$actual_parent" = "$expected_physical" || {
-            echo "physical parent moved: expected $expected_physical, got $actual_parent" >&2
+
+          git merge-base --is-ancestor "$expected_physical" HEAD || {
+            echo "qualified physical head is no longer an ancestor of the refresh branch" >&2
             exit 1
           }
+          temp_changes="$(git diff --name-only "$expected_physical"..HEAD)"
+          if [ "$temp_changes" != ".github/workflows/_temp_a422_physical_refresh.yml" ]; then
+            echo "unexpected changes above qualified physical head:" >&2
+            printf '%s\n' "$temp_changes" >&2
+            exit 1
+          fi
+
           git fetch origin agent/a4-read-product-integration
           actual_integration="$(git rev-parse origin/agent/a4-read-product-integration)"
           test "$actual_integration" = "$expected_integration" || {
@@ -59,6 +66,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           set +e
           git merge --no-ff --no-commit 2f4849b7621b71651e61e7a6f54488fda37f7762
           rc=$?
