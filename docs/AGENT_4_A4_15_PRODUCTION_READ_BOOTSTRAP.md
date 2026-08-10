@@ -4,8 +4,8 @@
 
 A4-15 makes the already-landed Agent 4 operator read surface startable through
 the normal worker entrypoint. A4-21 hardens that composition so production read
-mode never constructs a mutation-capable lifecycle scheduler in the first
-place. Neither slice activates Agent 4 orchestration.
+mode never constructs or exposes a mutation-capable lifecycle scheduler. Neither
+slice activates Agent 4 orchestration.
 
 The production entrypoint imports Agent 4 only when:
 
@@ -27,14 +27,14 @@ Missing, relative or file-valued roots fail startup before the worker is ready.
 adapter for read mode. It delegates to
 `worker/app/agent4/operator_read_context.py`, which composes only:
 
-- the canonical campaign repository behind a read-only campaign facade;
+- the canonical campaign repository behind a two-method campaign reader;
 - a verified timeline read facade and timeline query service;
 - a verified evidence-record read facade and evidence query service;
 - the existing campaign and evidence operator services.
 
 The read context deliberately does **not** construct or retain:
 
-- `ResourceAwareCampaignHandoffSchedulerService`;
+- `CampaignSchedulerService` or `ResourceAwareCampaignHandoffSchedulerService`;
 - campaign queue or resource-lease manager;
 - checkpoint, retry, failure or health mutation services;
 - projection reconciliation;
@@ -48,39 +48,48 @@ a later production read context.
 
 `worker/app/entrypoint.py` remains the only production mount caller.
 
-## Read-only authority boundary
+## Structural campaign-read contract
 
-The operator services historically type their campaign dependency as
-`CampaignSchedulerService`, while their implementation uses only `get()` and
-`list()`. A4-21 supplies `ReadOnlyCampaignSchedulerFacade`, which retains only
-the repository needed for those reads. It does not initialize the superclass'
-executor, queue, events, clock or projection collaborators.
+A4-21 changes the operator layer itself from a concrete scheduler dependency to
+`Agent4CampaignReadSource`, a runtime-checkable structural protocol containing
+only:
 
-Every public lifecycle method fails immediately with `CampaignValidationError`:
+```text
+get(campaign_id)
+list()
+```
 
-- recovery;
-- submit and dispatch;
-- pause and paused transition;
-- resume;
-- cancel and cancelled transition;
-- completion.
+The full canonical scheduler satisfies that protocol for existing dormant/test
+compositions, so no parallel domain model is introduced. Production read mode
+instead supplies `ReadOnlyCampaignReader`, which does **not** inherit the
+scheduler and therefore has no submit, dispatch, pause, resume, cancel,
+completion, recovery, queue, resource or handoff entrypoint to call.
 
-Timeline and evidence stores are likewise exposed through facades whose append
-methods fail before touching the underlying canonical stores.
+This also makes the boundary forward-safe: adding a future public lifecycle
+method to `CampaignSchedulerService` cannot silently add authority to the
+production reader through inheritance.
 
-This is materially stronger than the original A4-15 design. The superseded
-design constructed the full runtime with a synthetic `operator-read` resource
-and relied on a rejecting handoff executor. An in-process caller could therefore
-reach scheduler persistence before the executor rejection. A4-21 removes that
-admission path entirely instead of trying to stop it after lifecycle mutation.
+Timeline and evidence stores must still satisfy their existing structural store
+protocols, so their public `append` members are explicit rejecting facades. Each
+raises `CampaignValidationError` before touching the underlying canonical store.
+
+## Why A4-21 is required
+
+The superseded A4-15 composition constructed the full runtime with a synthetic
+`operator-read` capacity and relied on a rejecting handoff executor. An
+in-process caller could therefore execute scheduler admission and persistence
+before the executor rejected the external handoff.
+
+A4-21 removes that admission path entirely. The production composition has no
+scheduler object, queue, lease manager or handoff executor, rather than trying
+to make those mutation-capable components safe after construction.
 
 ## Filesystem behavior
 
 Composition validates paths and wires read objects only. It does not create the
-configured root or any child directory. Mutation attempts through the public
-production read context fail before persistence, resource acquisition or
-handoff creation. Existing operator reads decide how an empty/nonexistent store
-is represented when a request is made; startup itself performs no persistence.
+configured root or any child directory. Campaign reads over an empty root and
+all rejected timeline/evidence append attempts leave the dataroot byte-identical.
+Startup itself performs no persistence.
 
 ## Network and API boundary
 
@@ -116,12 +125,13 @@ lifecycle writes or operator mutations. `production_activation` remains
 coverage proving:
 
 - production composition returns the narrow read context, not the full runtime;
+- the campaign reader is not a scheduler and exposes no lifecycle method;
 - mutation-oriented runtime services are absent from the context;
-- scheduler lifecycle methods fail before any filesystem change;
+- campaign reads leave an existing dataroot byte-identical;
 - timeline/evidence append attempts fail before any filesystem change;
-- recovery/reconciliation is unavailable;
 - the synthetic resource-admission workaround is absent from production
   bootstrap source;
+- the narrow context constructs no scheduler or resource manager;
 - the canonical-root owner guard is shared with the full runtime.
 
 Existing A4-14 worker and backend tests continue to cover route inventory,
