@@ -177,6 +177,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent4_a4_25_snapshot_authority_guard.py`
 - `tests/worker_agent4_a4_25b_snapshot_store.py`
 - `tests/worker_agent4_a4_25c_snapshot_publisher.py`
+- `tests/worker_agent4_a4_25c_snapshot_recovery.py`
 - `tests/worker_agent4_campaign_list_api.py`
 - `tests/worker_agent4_campaign_list_query.py`
 - `tests/worker_agent4_checkpoints.py`
