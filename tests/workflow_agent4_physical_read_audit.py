@@ -3,16 +3,24 @@
 
 from __future__ import annotations
 
+import importlib.util
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 AUDITOR = ROOT / "scripts" / "agent4-physical-read-audit.ps1"
 HARDENING = ROOT / "scripts" / "agent4_physical_read_audit_hardening.py"
+CREDENTIAL_GUARD = ROOT / "scripts" / "agent4_physical_read_credential_guard.py"
 EXACT_GATE = ROOT / "scripts" / "agent4_physical_read_exact_head_gate.py"
 SDK_GATE = ROOT / "scripts" / "agent4_physical_read_sdk_check.py"
 LAUNCHER = ROOT / "AUDIT_AGENT4_PHYSICAL_READ_RECEIPT.cmd"
 DOC = ROOT / "docs" / "AGENT_4_A4_18_RECEIPT_AUDIT.md"
+
+spec = importlib.util.spec_from_file_location("agent4_physical_read_credential_guard", CREDENTIAL_GUARD)
+if spec is None or spec.loader is None:
+    raise RuntimeError("could not load A4-25 credential guard")
+credential_guard = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(credential_guard)
 
 
 class Agent4PhysicalReadAuditTests(unittest.TestCase):
@@ -132,14 +140,53 @@ class Agent4PhysicalReadAuditTests(unittest.TestCase):
             self.assertIn(required, source)
         self.assertIn("scan_runtime_evidence(repo_root)", source)
 
+    def test_a4_25_guard_rejects_raw_device_token_shape(self) -> None:
+        with self.assertRaisesRegex(ValueError, "credential-lignende"):
+            credential_guard.scan_value_credentials({"note": "a" * 64})
+
+    def test_a4_25_guard_rejects_unlabelled_pairing_code_shape(self) -> None:
+        with self.assertRaisesRegex(ValueError, "credential-lignende"):
+            credential_guard.scan_value_credentials({"note": "ABCD" + "-" + "EFGH"})
+
+    def test_a4_25_guard_rejects_normalized_alias_keys(self) -> None:
+        for key in ("deviceToken", "pairing-code", "AuthorizationHeader", "clientSecretValue"):
+            with self.subTest(key=key):
+                with self.assertRaisesRegex(ValueError, "forbudt credential-felt"):
+                    credential_guard.scan_value_credentials({"debug": {key: "redacted-value"}})
+
+    def test_a4_25_guard_preserves_schema_markers_and_prefixed_hashes(self) -> None:
+        credential_guard.scan_value_credentials(
+            {
+                "digest": "sha256:" + "0" * 64,
+                "cleanup": {"admin_key_deleted": True},
+                "trials": {"grant_same_token_200": {"status": "pass"}},
+            }
+        )
+
+    def test_a4_25_guard_is_read_only_and_covers_runtime_text(self) -> None:
+        source = CREDENTIAL_GUARD.read_text(encoding="utf-8")
+        for required in (
+            "RAW_DEVICE_TOKEN_RE",
+            "RAW_PAIRING_CODE_RE",
+            "FORBIDDEN_CREDENTIAL_KEY_TERMS",
+            "scan_value_credentials",
+            "scan_runtime_evidence",
+            "object_pairs_hook=reject_duplicate_object_pairs",
+        ):
+            self.assertIn(required, source)
+        for forbidden in ("requests", "socket", "subprocess", "unlink(", "write_text(", "write_bytes("):
+            self.assertNotIn(forbidden, source)
+
     def test_launcher_runs_all_python_gates_before_legacy_audit(self) -> None:
         launcher = LAUNCHER.read_text(encoding="utf-8")
         exact = launcher.index("agent4_physical_read_exact_head_gate.py")
         sdk = launcher.index("agent4_physical_read_sdk_check.py")
+        credential = launcher.index("agent4_physical_read_credential_guard.py")
         hardening = launcher.index("agent4_physical_read_audit_hardening.py")
         legacy = launcher.index("agent4-physical-read-audit.ps1")
         self.assertLess(exact, sdk)
-        self.assertLess(sdk, hardening)
+        self.assertLess(sdk, credential)
+        self.assertLess(credential, hardening)
         self.assertLess(hardening, legacy)
         self.assertIn("40-tegns-exact-SHA", launcher)
         self.assertIn("--expected-sha", launcher)
