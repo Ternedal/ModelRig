@@ -115,6 +115,12 @@ class Agent4OperatorSnapshotPublisher:
             for snapshot in campaign_snapshots:
                 self._snapshots.write_campaign_snapshot(snapshot)
 
+            # Campaign blob writes can take long enough for the mutable writer
+            # stores to advance. Re-check immediately before selecting the parent
+            # and publishing the immutable root so no change inside the complete
+            # capture/publication preparation window can be silently omitted.
+            self._assert_capture_still_stable(records, captures)
+
             current = self._snapshots.load_current()
             if current is not None and dict(current.campaigns) == mapping:
                 return current
@@ -140,13 +146,26 @@ class Agent4OperatorSnapshotPublisher:
         timeline_entries = self._timeline.list(campaign_id)
         evidence_records = self._evidence.list(campaign_id)
 
-        timeline_hashes = {entry.entry_hash for entry in timeline_entries}
+        timeline_heads = {
+            entry.entry_hash: entry.event.sequence for entry in timeline_entries
+        }
+        timeline_events = {
+            entry.event.event_id: entry.event.sequence for entry in timeline_entries
+        }
         for evidence_record in evidence_records:
-            if evidence_record.timeline_head_hash not in timeline_hashes:
+            bound_sequence = timeline_heads.get(evidence_record.timeline_head_hash)
+            if bound_sequence is None:
                 raise OperatorSnapshotPublicationIntegrityError(
                     "evidence record references a timeline head outside the "
                     f"captured campaign timeline: {campaign_id!r}"
                 )
+            if evidence_record.related_event_id is not None:
+                related_sequence = timeline_events.get(evidence_record.related_event_id)
+                if related_sequence is None or related_sequence > bound_sequence:
+                    raise OperatorSnapshotPublicationIntegrityError(
+                        "evidence record relates to an event outside its captured "
+                        f"timeline head: {campaign_id!r}"
+                    )
 
         # Re-read the replaceable campaign envelope after the append-only stores.
         # If it changed during capture, mixing those values would create exactly
