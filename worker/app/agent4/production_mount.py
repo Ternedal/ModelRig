@@ -7,7 +7,6 @@ from typing import Any
 
 from fastapi import FastAPI
 
-from .composition import Agent4RuntimeContext
 from .domain import CampaignValidationError
 from .operator_api import build_agent4_operator_router
 from .operator_read_context import Agent4OperatorReadContext
@@ -21,15 +20,15 @@ def _rollback_routes(app: FastAPI, route_count: int) -> None:
 
 def mount_agent4_operator(
     app: FastAPI,
-    context: Agent4RuntimeContext | Agent4OperatorReadContext | None,
+    context: Agent4OperatorReadContext | None,
 ) -> bool:
     """Mount the read-only operator API exactly once after explicit opt-in.
 
     ``KALIV_AGENT4_OPERATOR_API`` is default-off and only exact ``"1"``
-    enables the surface. Tests and explicit dormant compositions may still
-    inject the full canonical ``Agent4RuntimeContext``; normal production read
-    bootstrap injects the narrower ``Agent4OperatorReadContext`` that contains
-    no lifecycle scheduler, resource admission or recovery authority.
+    enables the surface. Production mounting accepts only the narrow
+    ``Agent4OperatorReadContext`` composed by A4-21. A full writer runtime must
+    remain unmountable here until A4-25's server-side snapshot authority is
+    implemented and qualified for concurrent lifecycle mutation + reads.
     """
 
     if not isinstance(app, FastAPI):
@@ -38,9 +37,9 @@ def mount_agent4_operator(
         return True
     if os.getenv("KALIV_AGENT4_OPERATOR_API", "0") != "1":
         return False
-    if not isinstance(context, (Agent4RuntimeContext, Agent4OperatorReadContext)):
+    if not isinstance(context, Agent4OperatorReadContext):
         raise CampaignValidationError(
-            "Agent 4 operator API requires an injected canonical read context"
+            "Agent 4 production operator API requires the narrow read-only context"
         )
 
     required = (
