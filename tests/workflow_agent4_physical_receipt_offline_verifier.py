@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import ast
-import copy
 import hashlib
 import json
 import subprocess
@@ -341,7 +340,6 @@ class OfflineReceiptVerifierTests(unittest.TestCase):
             "write_bytes",
             "unlink",
             "rename",
-            "replace",
             "mkdir",
             "touch",
             "remove",
@@ -349,12 +347,25 @@ class OfflineReceiptVerifierTests(unittest.TestCase):
             "system",
             "popen",
         }
-        called_attrs = {
-            node.func.attr
+        attribute_calls = [
+            node
             for node in ast.walk(tree)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-        }
+        ]
+        called_attrs = {node.func.attr for node in attribute_calls}
         self.assertTrue(called_attrs.isdisjoint(forbidden_calls), called_attrs & forbidden_calls)
+
+        # `.replace()` is ambiguous in AST because both strings and pathlib paths
+        # expose that name. The verifier intentionally has exactly one approved
+        # string normalization call for ISO-8601 `Z`; any second `.replace()`
+        # would regain an unreviewed possible filesystem mutation surface.
+        replace_calls = [node for node in attribute_calls if node.func.attr == "replace"]
+        self.assertEqual(len(replace_calls), 1)
+        replace_call = replace_calls[0]
+        self.assertIsInstance(replace_call.func.value, ast.Name)
+        self.assertEqual(replace_call.func.value.id, "text")
+        self.assertEqual(len(replace_call.args), 2)
+        self.assertEqual([ast.literal_eval(arg) for arg in replace_call.args], ["Z", "+00:00"])
         self.assertNotIn("open(", source)
 
 
