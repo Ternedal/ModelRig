@@ -22,6 +22,7 @@ from app.agent4.production_bootstrap import (  # noqa: E402
     ReadOnlyAgent4HandoffExecutor,
     compose_agent4_operator_context_from_environment,
 )
+from app.agent4.service import CampaignNotFoundError, CampaignSchedulerService  # noqa: E402
 
 
 def _snapshot(root: Path) -> tuple[tuple[str, str], ...]:
@@ -36,6 +37,19 @@ def _snapshot(root: Path) -> tuple[tuple[str, str], ...]:
             )
         )
     return tuple(values)
+
+
+_LIFECYCLE_NAMES = (
+    "recover",
+    "submit",
+    "dispatch_ready",
+    "request_pause",
+    "mark_paused",
+    "resume",
+    "request_cancel",
+    "mark_cancelled",
+    "complete",
+)
 
 
 class Agent4ProductionReadMutationBoundaryTests(unittest.TestCase):
@@ -58,6 +72,7 @@ class Agent4ProductionReadMutationBoundaryTests(unittest.TestCase):
             context = self._context(Path(directory) / "agent4")
 
             self.assertNotIsInstance(context, Agent4RuntimeContext)
+            self.assertNotIsInstance(context.scheduler, CampaignSchedulerService)
             for forbidden in (
                 "repository",
                 "checkpoint_store",
@@ -76,14 +91,20 @@ class Agent4ProductionReadMutationBoundaryTests(unittest.TestCase):
                 "delivery",
                 "guarded_delivery",
                 "batches",
+                "recover",
+                "reconcile_projections",
             ):
                 self.assertFalse(
                     hasattr(context, forbidden),
                     f"production read context unexpectedly exposes {forbidden}",
                 )
-            self.assertEqual(context.scheduler.queued_count, 0)
+            for forbidden in _LIFECYCLE_NAMES:
+                self.assertFalse(
+                    hasattr(context.scheduler, forbidden),
+                    f"campaign reader unexpectedly exposes {forbidden}",
+                )
 
-    def test_every_scheduler_mutation_fails_before_filesystem_change(self) -> None:
+    def test_campaign_reader_has_only_reads_and_does_not_change_filesystem(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "agent4"
             root.mkdir()
@@ -92,41 +113,26 @@ class Agent4ProductionReadMutationBoundaryTests(unittest.TestCase):
             context = self._context(root)
             before = _snapshot(root)
 
-            mutations = (
-                lambda: context.scheduler.recover(),
-                lambda: context.scheduler.submit(object()),
-                lambda: context.scheduler.dispatch_ready(),
-                lambda: context.scheduler.request_pause("campaign-1"),
-                lambda: context.scheduler.mark_paused("campaign-1"),
-                lambda: context.scheduler.resume("campaign-1"),
-                lambda: context.scheduler.request_cancel("campaign-1"),
-                lambda: context.scheduler.mark_cancelled("campaign-1"),
-                lambda: context.scheduler.complete(
-                    "campaign-1",
-                    succeeded=True,
-                ),
-            )
-            for mutate in mutations:
-                with self.assertRaisesRegex(
-                    CampaignValidationError,
-                    "read-only production context forbids",
-                ):
-                    mutate()
+            self.assertEqual(context.scheduler.list(), ())
+            with self.assertRaises(CampaignNotFoundError):
+                context.scheduler.get("campaign-1")
+            self.assertEqual(_snapshot(root), before)
+
+            for forbidden in _LIFECYCLE_NAMES:
+                with self.assertRaises(AttributeError):
+                    getattr(context.scheduler, forbidden)
                 self.assertEqual(_snapshot(root), before)
 
-    def test_store_and_context_mutation_helpers_fail_before_filesystem_change(self) -> None:
+    def test_store_mutation_helpers_fail_before_filesystem_change(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "agent4"
             context = self._context(root)
             self.assertFalse(root.exists())
 
-            mutations = (
+            for mutate in (
                 lambda: context.timeline.append(object()),
                 lambda: context.evidence_records.append(object()),
-                lambda: context.recover(),
-                lambda: context.reconcile_projections(),
-            )
-            for mutate in mutations:
+            ):
                 with self.assertRaisesRegex(
                     CampaignValidationError,
                     "read-only production context forbids",
@@ -170,7 +176,7 @@ class Agent4ProductionReadMutationBoundaryTests(unittest.TestCase):
         self.assertNotIn("ReadOnlyAgent4HandoffExecutor", called_names)
         self.assertIn("compose_agent4_operator_read_context", called_names)
 
-    def test_narrow_context_module_constructs_no_scheduler_or_resource_manager(self) -> None:
+    def test_narrow_context_constructs_no_scheduler_or_resource_manager(self) -> None:
         source = (
             ROOT / "worker" / "app" / "agent4" / "operator_read_context.py"
         ).read_text(encoding="utf-8")
@@ -180,6 +186,7 @@ class Agent4ProductionReadMutationBoundaryTests(unittest.TestCase):
             for node in ast.walk(tree)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
         }
+        self.assertNotIn("CampaignSchedulerService", source)
         for forbidden in (
             "ResourceAwareCampaignHandoffSchedulerService",
             "CampaignQueue",
