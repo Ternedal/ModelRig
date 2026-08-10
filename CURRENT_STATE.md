@@ -301,6 +301,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_agent3_write_pilot_preflight.py`
 - `tests/workflow_agent3_write_pilot_recorder.py`
 - `tests/workflow_agent3_write_pilot_report.py`
+- `tests/workflow_agent4_a4_22_single_writer_pairing.py`
 - `tests/workflow_agent4_dormant_runtime.py`
 - `tests/workflow_agent4_evidence_records.py`
 - `tests/workflow_agent4_foundation.py`
