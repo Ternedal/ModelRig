@@ -1,9 +1,9 @@
 """Default-off production composition for the Agent 4 operator read surface.
 
 This module is imported only after exact opt-in from ``app.entrypoint``. It
-composes the canonical A4-09 object graph around a fail-closed executor so the
-already-landed operator API can read persisted campaigns, timeline and evidence
-without gaining dispatch, signal, recovery or background-work authority.
+composes the narrow canonical read context used by the already-landed operator
+API without constructing a lifecycle scheduler, resource admission, queue,
+checkpoint/failure services, recovery path or background work.
 
 Composition is deliberately side-effect free: it creates no directory or file,
 performs no recovery and starts no thread, timer or polling loop.
@@ -15,7 +15,6 @@ import os
 from pathlib import Path
 from typing import NoReturn
 
-from .composition import Agent4RuntimeContext, compose_agent4_runtime
 from .domain import CampaignValidationError
 from .handoff import (
     CampaignDispatchAcknowledgement,
@@ -24,18 +23,21 @@ from .handoff import (
     CampaignSignalAcknowledgement,
     CampaignSignalRequest,
 )
+from .operator_read_context import (
+    Agent4OperatorReadContext,
+    compose_agent4_operator_read_context,
+)
 
 _AGENT4_OPERATOR_FLAG = "KALIV_AGENT4_OPERATOR_API"
 _AGENT4_DATA_ROOT = "KALIV_AGENT4_DATA_ROOT"
-_READ_ONLY_RESOURCE = "operator-read"
 
 
 class ReadOnlyAgent4HandoffExecutor:
-    """Fail-closed executor used by the production read-only host mode.
+    """Legacy fail-closed handoff guard retained for compatibility tests.
 
-    The operator API never calls this boundary. Keeping a concrete executor in
-    the canonical runtime context avoids a parallel read model while making any
-    accidental lifecycle call fail before an external side effect can occur.
+    Production read composition no longer constructs any handoff scheduler or
+    executor. Keeping this small guard avoids weakening callers that imported
+    it directly while making it non-authoritative for the production context.
     """
 
     @staticmethod
@@ -83,23 +85,16 @@ def _configured_root() -> Path:
 
 
 def compose_agent4_operator_context_from_environment(
-) -> Agent4RuntimeContext | None:
+) -> Agent4OperatorReadContext | None:
     """Compose the canonical dormant read context after exact opt-in.
 
     Returns ``None`` when the operator surface is off. With exact opt-in, a
     missing or invalid dataroot fails startup closed. The returned context owns
-    the normal canonical stores but has no executable handoff authority.
+    only read facades; lifecycle, handoff and resource-admission services are
+    never constructed for this production mode.
     """
 
     if os.getenv(_AGENT4_OPERATOR_FLAG, "0") != "1":
         return None
 
-    # The canonical runtime requires a non-empty resource vector. This isolated
-    # synthetic capacity satisfies that structural invariant only; the executor
-    # above still rejects every handoff before an external side effect can occur.
-    return compose_agent4_runtime(
-        _configured_root(),
-        executor=ReadOnlyAgent4HandoffExecutor(),
-        resource_capacities={_READ_ONLY_RESOURCE: 1},
-        resource_resolver=lambda _spec: {_READ_ONLY_RESOURCE: 1},
-    )
+    return compose_agent4_operator_read_context(_configured_root())
