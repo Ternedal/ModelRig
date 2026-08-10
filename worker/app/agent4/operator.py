@@ -8,11 +8,10 @@ work and performs no lifecycle mutation.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Protocol, runtime_checkable
 
 from .contracts import CampaignTimelineStore
 from .domain import CampaignRecord, CampaignStatus, CampaignValidationError
-from .service import CampaignSchedulerService
 from .timeline_query import (
     CampaignTimelineQueryCursor,
     CampaignTimelineQueryPage,
@@ -20,6 +19,17 @@ from .timeline_query import (
 )
 
 MAX_OPERATOR_CAMPAIGNS = 1_000
+
+
+@runtime_checkable
+class Agent4CampaignReadSource(Protocol):
+    """Minimum campaign authority required by the GET-only operator surface."""
+
+    def get(self, campaign_id: str) -> CampaignRecord:
+        """Return one campaign or raise when it does not exist."""
+
+    def list(self) -> tuple[CampaignRecord, ...]:
+        """Return the canonical campaign-record snapshot."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,13 +57,13 @@ class Agent4OperatorReadService:
     def __init__(
         self,
         *,
-        scheduler: CampaignSchedulerService,
+        scheduler: Agent4CampaignReadSource,
         timeline: CampaignTimelineStore,
         query: CampaignTimelineQueryService,
     ) -> None:
-        if not isinstance(scheduler, CampaignSchedulerService):
+        if not isinstance(scheduler, Agent4CampaignReadSource):
             raise CampaignValidationError(
-                "scheduler must implement CampaignSchedulerService"
+                "scheduler must implement the Agent 4 campaign read source"
             )
         if not isinstance(timeline, CampaignTimelineStore):
             raise CampaignValidationError(
@@ -68,7 +78,9 @@ class Agent4OperatorReadService:
         self._query = query
 
     @property
-    def scheduler(self) -> CampaignSchedulerService:
+    def scheduler(self) -> Agent4CampaignReadSource:
+        # Retain the established property name for wire/composition compatibility;
+        # the dependency contract itself is now read-only get/list authority.
         return self._scheduler
 
     @property
