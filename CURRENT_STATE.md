@@ -314,6 +314,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_brand_no_token_duplicates.py`
 - `tests/workflow_browser_peer_public_validation.py`
 - `tests/workflow_browser_peer_public_validation_operator.py`
+- `tests/workflow_candidate_branch_pointer.py`
 - `tests/workflow_candidate_campaign.py`
 - `tests/workflow_candidate_freeze.py`
 - `tests/workflow_candidate_gate.py`
