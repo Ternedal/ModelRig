@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!--
+          A4-25f physical probe only. This source set is absent from release
+          builds. The activity reads the already-paired rig credential from
+          AndroidKeyStore-backed TokenStore; no credential is accepted through
+          adb extras or written to the physical receipt.
+        -->
+        <activity
+            android:name=".debug.Agent4SnapshotPhysicalProbeActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true" />
+    </application>
+</manifest>
