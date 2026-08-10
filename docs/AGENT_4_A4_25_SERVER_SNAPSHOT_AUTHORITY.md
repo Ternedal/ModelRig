@@ -1,6 +1,6 @@
 # Agent 4 A4-25 — server-side snapshot authority
 
-Status: **A4-25a activation guard + A4-25b immutable store + A4-25c caller-driven writer publication implemented on stacked draft slices; A4-25d/e read-wire/client activation remains deferred**.
+Status: **A4-25a activation guard + A4-25b immutable store + A4-25c caller-driven writer publication exact-head qualified on stacked draft slices; A4-25d snapshot-bound server read/wire layer implemented as a dormant draft; A4-25e client/race activation remains deferred**.
 
 Issue: #458.
 
@@ -92,7 +92,7 @@ The stacked A4-25c implementation keeps publication explicitly caller-driven. `A
 
 A publication captures the complete campaign set, validates each append-only timeline/evidence chain, rejects pending projections, verifies evidence bindings against timeline heads in the same capture, and performs optimistic revalidation before the immutable root commit. Unchanged content-addressed campaign blobs are reused; an unchanged complete mapping reuses the current root rather than manufacturing a new sequence. Retention/GC remains a separate caller action after the commit path.
 
-This is still insufficient to relax the production mount: A4-25d must first move operator reads onto immutable roots and bind the wire protocol/cursors to `snapshot_id`; A4-25e must then qualify the client/race behavior.
+A4-25c is exact-head qualified as a dormant stacked slice. This does not relax the production mount: A4-25d must qualify the immutable server read/wire path, and A4-25e must then qualify client/race behaviour before any concurrent production activation can be considered.
 
 ## Read protocol
 
@@ -114,6 +114,18 @@ A directly addressed detail request without an incoming snapshot id may acquire 
 
 The Android A4-24 contradiction detector remains useful defence-in-depth, but it is not the server's global atomicity mechanism.
 
+### A4-25d implementation discipline
+
+The stacked A4-25d implementation adds a **parallel dormant v2** read path rather than changing the already-qualified v1 product contract in place.
+
+`Agent4SnapshotOperatorReadService` selects exactly one retained immutable root. Campaign records are loaded only from immutable campaign snapshot blobs referenced by that root. The live timeline and evidence stores are treated only as append-only history sources: reads are truncated at the sequence captured by the immutable campaign snapshot and the resulting prefix head hash must equal the captured hash before data is returned.
+
+Existing v1 hash/content cursors are retained as inner cursor contracts and wrapped in a small root-bound envelope carrying the immutable `snapshot_id`. An explicit root and a bound cursor must agree. Campaign-list paging also retains its existing list-head cursor as a separately root-bound value because a mid-page cursor cannot reconstruct the final campaign identity. Timeline/evidence heads are derived server-side from the immutable campaign snapshot and cannot be widened by the caller.
+
+The dormant v2 FastAPI adapter uses the existing experimental operator route shape and returns schema `modelrig-agent4/operator-api/v2`. Every successful response carries the authoritative `snapshot_id`. A syntactically valid but unavailable/expired root is wire-distinct as HTTP **410**; a resource absent from the selected retained root is **404**; malformed/mismatched cursor requests are **422**; integrity/storage/no-current failures are **503**.
+
+The router is not mounted by production bootstrap in A4-25d. The backend runtime is unchanged; its existing authenticated GET forwarder is covered by a pass-through contract proving snapshot query bytes, worker status/body and v2 media type are not rewritten.
+
 ## No server-side session
 
 `snapshot_id` is a content-addressed immutable manifest identity, not an in-memory paging session. Restart does not change the meaning of a retained snapshot id.
@@ -122,25 +134,25 @@ The server may keep an in-memory cache of verified immutable manifests as an opt
 
 ## Retention
 
-The first implementation must use a hard bounded retention policy:
+The first implementation uses a hard bounded retention policy:
 
 - retain at most the newest **256** root snapshots;
 - a root snapshot may additionally expire after **15 minutes**;
-- once either bound evicts a root, requests using its id fail closed with an explicit stale/expired-snapshot response and the client must refresh;
+- once either bound evicts a root, requests using its id fail closed with HTTP **410** from the dormant v2 adapter and the client must refresh;
 - garbage collection may delete a campaign snapshot blob only when no retained root manifest references it;
 - garbage collection is never part of the commit point.
 
-The exact API status/detail is decided with the wire-contract implementation, but it must be distinguishable from success and must never be converted into offset/local continuation behaviour.
+The snapshot-unavailable response is distinguishable from success, 404 resources and malformed requests, and is never converted into offset/local continuation behaviour.
 
 ## Production activation guard
 
-Until the immutable snapshot authority above is implemented **and wired into the operator API**, the production operator mount **must not mount `Agent4RuntimeContext`**.
+Until the immutable snapshot authority is qualified **and the snapshot-bound read path is deliberately wired into the production operator API**, the production operator mount **must not mount `Agent4RuntimeContext`**.
 
 `Agent4RuntimeContext` contains lifecycle mutation authority and live operator services over mutable stores. The production mount may accept only the narrow `Agent4OperatorReadContext` used by A4-21.
 
 Tests that need a full dormant runtime must exercise its operator services directly or build the transport router explicitly; they must not use the production mount as a shortcut.
 
-This guard is intentionally stronger than relying on the current entrypoint to "usually" pass a read-only context. It makes concurrent writer + read activation an explicit future code change that must first implement this decision.
+This guard is intentionally stronger than relying on the current entrypoint to "usually" pass a read-only context. It makes concurrent writer + read activation an explicit future code change that must first complete the remaining A4-25 qualification.
 
 ## Planned implementation sequence
 
@@ -171,7 +183,7 @@ This guard is intentionally stronger than relying on the current entrypoint to "
 - pending projection rejection;
 - deterministic restart/recovery tests.
 
-**Stacked status:** implemented in draft PR #468; exact-head qualification remains mandatory before this slice is considered complete.
+**Stacked status:** implemented and exact-head qualified in draft PR #468; current qualified parent head for A4-25d is `3a16651ec6d6b1731484d977a174dc30a4094f6a`.
 
 ### A4-25d — snapshot-bound operator API
 
@@ -181,7 +193,7 @@ This guard is intentionally stronger than relying on the current entrypoint to "
 - stale/expired ids fail closed;
 - backend remains a transparent authenticated proxy.
 
-**Status:** deferred.
+**Stacked status:** implemented as dormant v2 draft in PR #470; exact-head qualification remains mandatory before this slice is considered complete.
 
 ### A4-25e — Android and race qualification
 
@@ -196,14 +208,14 @@ This guard is intentionally stronger than relying on the current entrypoint to "
 
 ## Explicit non-goals of A4-25a
 
-The original A4-25a guard slice deliberately made none of the runtime changes later implemented on stacked A4-25b/c branches:
+The original A4-25a guard slice deliberately made none of the runtime changes later implemented on stacked A4-25b/c/d branches:
 
 - no snapshot files were written by A4-25a;
-- no API schema changes;
+- no API schema changes were made by A4-25a;
 - no Android changes;
 - no lifecycle activation;
 - no background publisher or GC loop;
 - no merge to `main` during the 1.58.151 freeze;
 - no modification or invalidation of the independently qualified A4-18 physical chain.
 
-Those historical A4-25a boundaries do not authorize A4-25d/e or production activation. `production_activation=false` remains mandatory.
+Those historical A4-25a boundaries do not authorize A4-25e or production activation. `production_activation=false` remains mandatory.
