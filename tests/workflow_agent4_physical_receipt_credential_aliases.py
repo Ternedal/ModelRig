@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A4-20 credential-alias hardening for the offline physical receipt verifier."""
+"""Credential and path-bound digest hardening for the offline physical receipt verifier."""
 
 from __future__ import annotations
 
@@ -64,12 +64,33 @@ class CredentialAliasHardeningTests(unittest.TestCase):
         with self.assertRaisesRegex(verifier.VerificationError, "credential-like value"):
             verifier.verify_receipt(receipt, expected_sha=cases.EXPECTED_SHA)
 
-    def test_prefixed_sha256_claim_is_not_mistaken_for_raw_device_token(self) -> None:
+    def test_sha256_prefixed_raw_token_in_note_is_rejected(self) -> None:
+        receipt = cases.valid_receipt()
+        raw_token = "0123456789abcdef" * 4
+        receipt["trials"]["network_recovery"]["note"] = f"temporary digest sha256:{raw_token} was redacted too late"
+        cases.resign(receipt)
+        with self.assertRaisesRegex(verifier.VerificationError, "credential-like value"):
+            verifier.verify_receipt(receipt, expected_sha=cases.EXPECTED_SHA)
+
+    def test_unknown_digest_extension_cannot_create_hash_authority(self) -> None:
         receipt = cases.valid_receipt()
         receipt["debug"] = {
-            "artifactDigest": "sha256:" + ("0123456789abcdef" * 4),
+            "sha256": "sha256:" + ("0123456789abcdef" * 4),
+            "artifactDigest": "sha256:" + ("fedcba9876543210" * 4),
         }
         cases.resign(receipt)
+        with self.assertRaisesRegex(verifier.VerificationError, "credential-like value"):
+            verifier.verify_receipt(receipt, expected_sha=cases.EXPECTED_SHA)
+
+    def test_canonical_receipt_hash_slots_remain_allowed(self) -> None:
+        receipt = cases.valid_receipt()
+        self.assertRegex(receipt["receipt_sha256"], verifier.SHA256_RE)
+        self.assertRegex(receipt["fixture"]["latest_timeline_hash"], verifier.SHA256_RE)
+        self.assertRegex(receipt["mutations"][0]["receipt_sha256"], verifier.SHA256_RE)
+        self.assertRegex(receipt["trials"]["grant_same_token_200"]["payload_sha256"], verifier.SHA256_RE)
+        self.assertRegex(receipt["artifacts"][0]["sha256"], verifier.SHA256_RE)
+        self.assertRegex(receipt["safety_hardening"]["pixel_serial_sha256"], verifier.SHA256_RE)
+        self.assertRegex(receipt["safety_hardening"]["binding_file"]["sha256"], verifier.SHA256_RE)
         verifier.verify_receipt(receipt, expected_sha=cases.EXPECTED_SHA)
 
     def test_noncredential_metadata_names_remain_allowed(self) -> None:
