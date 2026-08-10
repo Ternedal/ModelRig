@@ -271,8 +271,6 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_scheduler.py`
 - `tests/worker_scheduler_pilot_barrier.py`
 - `tests/worker_scheduler_pilot_manifest.py`
-- `tests/worker_scheduler_pilot_operator.py`
-- `tests/worker_scheduler_pilot_wizard.py`
 - `tests/worker_scheduler_single_flight.py`
 - `tests/worker_scheduler_single_flight_lease.py`
 - `tests/worker_scheduler_time.py`
