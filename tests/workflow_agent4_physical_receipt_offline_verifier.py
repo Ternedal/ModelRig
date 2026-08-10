@@ -184,6 +184,11 @@ def resign(receipt: dict[str, object]) -> None:
     receipt["receipt_sha256"] = canonical_digest(receipt)
 
 
+def resign_mutation(item: dict[str, object]) -> None:
+    item.pop("receipt_sha256", None)
+    item["receipt_sha256"] = canonical_digest(item)
+
+
 class OfflineReceiptVerifierTests(unittest.TestCase):
     def assertRejected(self, receipt: dict[str, object], pattern: str) -> None:
         with self.assertRaisesRegex(verifier.VerificationError, pattern):
@@ -241,6 +246,30 @@ class OfflineReceiptVerifierTests(unittest.TestCase):
         resign(receipt)
         self.assertRejected(receipt, "mutation campaign-record digest")
 
+    def test_resigned_mutation_order_swap_is_rejected(self) -> None:
+        receipt = valid_receipt()
+        receipt["mutations"] = list(reversed(receipt["mutations"]))
+        resign(receipt)
+        self.assertRejected(receipt, "preserve campaign-record -> summary order")
+
+    def test_resigned_campaign_mutation_detached_from_fixture_is_rejected(self) -> None:
+        receipt = valid_receipt()
+        campaign = receipt["mutations"][0]
+        campaign["campaign_count_before"] = 40
+        campaign["campaign_count_after"] = 41
+        resign_mutation(campaign)
+        resign(receipt)
+        self.assertRejected(receipt, "campaign-record mutation is not bound to the fixture snapshot")
+
+    def test_resigned_summary_mutation_detached_from_campaign_chain_is_rejected(self) -> None:
+        receipt = valid_receipt()
+        summary = receipt["mutations"][1]
+        summary["campaign_count_before"] = 40
+        summary["campaign_count_after"] = 40
+        resign_mutation(summary)
+        resign(receipt)
+        self.assertRejected(receipt, "summary mutation is not chained to the campaign-record mutation")
+
     def test_cleanup_failure_is_rejected_after_resigning(self) -> None:
         receipt = valid_receipt()
         receipt["cleanup"]["ports_free"] = False
@@ -277,6 +306,50 @@ class OfflineReceiptVerifierTests(unittest.TestCase):
         receipt["artifacts"][0]["path"] = "../secret.txt"
         resign(receipt)
         self.assertRejected(receipt, "traverse")
+
+    def test_cli_rejects_duplicate_top_level_json_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "receipt.json"
+            body = json.dumps(valid_receipt(), ensure_ascii=False, separators=(",", ":"))
+            needle = '"human_decision":"GO"'
+            self.assertIn(needle, body)
+            body = body.replace(
+                needle,
+                '"human_decision":"NO-GO","human_decision":"GO"',
+                1,
+            )
+            path.write_text(body, encoding="utf-8")
+            failed = subprocess.run(
+                [sys.executable, str(SCRIPT), "--receipt", str(path), "--expected-sha", EXPECTED_SHA],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(failed.returncode, 2, failed.stdout + failed.stderr)
+            machine = json.loads(failed.stdout.splitlines()[0])
+            self.assertEqual(machine["result"], "FAIL")
+            self.assertIn("duplicate JSON key: human_decision", machine["finding"])
+
+    def test_cli_rejects_duplicate_nested_json_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "receipt.json"
+            body = json.dumps(valid_receipt(), ensure_ascii=False, separators=(",", ":"))
+            needle = '"status":"pass"'
+            self.assertIn(needle, body)
+            body = body.replace(needle, '"status":"fail","status":"pass"', 1)
+            path.write_text(body, encoding="utf-8")
+            failed = subprocess.run(
+                [sys.executable, str(SCRIPT), "--receipt", str(path), "--expected-sha", EXPECTED_SHA],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(failed.returncode, 2, failed.stdout + failed.stderr)
+            machine = json.loads(failed.stdout.splitlines()[0])
+            self.assertEqual(machine["result"], "FAIL")
+            self.assertIn("duplicate JSON key: status", machine["finding"])
 
     def test_cli_emits_machine_and_human_pass_fail_without_mutating_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

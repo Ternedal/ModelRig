@@ -139,6 +139,15 @@ def _require(condition: bool, message: str) -> None:
         raise VerificationError(message)
 
 
+def _reject_duplicate_object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise VerificationError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
 def _canonical_json(value: Any) -> bytes:
     # PowerShell creates the receipt from ordered objects and hashes the compact
     # JSON before adding receipt_sha256. json.load preserves object order, so no
@@ -297,8 +306,15 @@ def _validate_fixture(fixture: Any) -> None:
         _require_bool(fixture.get(name), False, f"fixture.{name}")
 
 
-def _validate_mutations(mutations: Any) -> None:
+def _validate_mutations(mutations: Any, fixture: Any) -> None:
     _require(isinstance(mutations, list) and len(mutations) == 2, "exactly two mutation receipts are required")
+    _require(isinstance(fixture, dict), "fixture is required for mutation binding")
+    _require(
+        [mutation.get("mode") if isinstance(mutation, dict) else None for mutation in mutations]
+        == ["campaign-record", "summary"],
+        "mutation receipts must preserve campaign-record -> summary order",
+    )
+    by_mode: dict[str, dict[str, Any]] = {}
     seen: set[str] = set()
     for mutation in mutations:
         _require(isinstance(mutation, dict), "mutation receipt must be an object")
@@ -306,6 +322,7 @@ def _validate_mutations(mutations: Any) -> None:
         mode = mutation.get("mode")
         _require(mode in {"campaign-record", "summary"} and mode not in seen, "mutation modes must be unique campaign-record and summary")
         seen.add(mode)
+        by_mode[mode] = mutation
         claimed = _require_sha256(mutation.get("receipt_sha256"), f"mutation.{mode}.receipt_sha256")
         unsigned = {key: value for key, value in mutation.items() if key != "receipt_sha256"}
         _require(_sha256_json(unsigned) == claimed, f"mutation {mode} digest does not match content")
@@ -329,6 +346,23 @@ def _validate_mutations(mutations: Any) -> None:
         else:
             _require(ca == cb and ea == eb + 1 and ta != tb and ha != hb, "summary mutation effect is inconsistent")
     _require(seen == {"campaign-record", "summary"}, "both mutation modes are required")
+
+    campaign = by_mode["campaign-record"]
+    summary = by_mode["summary"]
+    _require(
+        campaign.get("campaign_count_before") == fixture.get("campaign_count")
+        and campaign.get("evidence_count_before") == fixture.get("evidence_count")
+        and campaign.get("timeline_head_before") == fixture.get("latest_timeline_hash")
+        and campaign.get("evidence_head_before") == fixture.get("evidence_head_hash"),
+        "campaign-record mutation is not bound to the fixture snapshot",
+    )
+    _require(
+        summary.get("campaign_count_before") == campaign.get("campaign_count_after")
+        and summary.get("evidence_count_before") == campaign.get("evidence_count_after")
+        and summary.get("timeline_head_before") == campaign.get("timeline_head_after")
+        and summary.get("evidence_head_before") == campaign.get("evidence_head_after"),
+        "summary mutation is not chained to the campaign-record mutation",
+    )
 
 
 def _validate_trials(trials: Any) -> None:
@@ -408,8 +442,9 @@ def verify_receipt(receipt: Any, *, expected_sha: str) -> None:
     _validate_main_digest(receipt)
     _validate_all_named_hashes(receipt)
     _scan_credentials(receipt)
-    _validate_fixture(receipt.get("fixture"))
-    _validate_mutations(receipt.get("mutations"))
+    fixture = receipt.get("fixture")
+    _validate_fixture(fixture)
+    _validate_mutations(receipt.get("mutations"), fixture)
     _validate_trials(receipt.get("trials"))
     _validate_artifacts(receipt.get("artifacts"))
     _validate_cleanup(receipt.get("cleanup"))
@@ -445,7 +480,7 @@ def main() -> int:
     try:
         expected_sha = _require_git_sha(args.expected_sha, "--expected-sha")
         raw = receipt_path.read_text(encoding="utf-8-sig")
-        receipt = json.loads(raw)
+        receipt = json.loads(raw, object_pairs_hook=_reject_duplicate_object_pairs)
         verify_receipt(receipt, expected_sha=expected_sha)
     except (OSError, json.JSONDecodeError, VerificationError, ValueError) as exc:
         expected = args.expected_sha if isinstance(args.expected_sha, str) else ""
