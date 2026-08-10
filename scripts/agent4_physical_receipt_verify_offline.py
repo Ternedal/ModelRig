@@ -122,6 +122,11 @@ CREDENTIAL_VALUE_PATTERNS = (
     re.compile(r"(?i)\bdevice[_ -]?token\s*[:=]\s*\S+"),
     re.compile(r"(?i)\badmin[_ -]?key\s*[:=]\s*\S+"),
     re.compile(r"(?i)\b[A-Z0-9]{4}-[A-Z0-9]{4}\b"),
+    # auth.NewToken() emits exactly 32 random bytes as 64 lowercase hex
+    # characters. A raw token must be rejected even when an extension/note
+    # omits a credential label. Canonical SHA-256 claims remain safe because
+    # they are explicitly prefixed with "sha256:".
+    re.compile(r"(?<!sha256:)\b[0-9a-f]{64}\b"),
 )
 RFC1918 = (
     ipaddress.ip_network("10.0.0.0/8"),

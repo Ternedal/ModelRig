@@ -56,6 +56,22 @@ class CredentialAliasHardeningTests(unittest.TestCase):
         with self.assertRaisesRegex(verifier.VerificationError, "credential-like value"):
             verifier.verify_receipt(receipt, expected_sha=cases.EXPECTED_SHA)
 
+    def test_unlabelled_raw_device_token_in_note_is_rejected(self) -> None:
+        receipt = cases.valid_receipt()
+        raw_token = "0123456789abcdef" * 4
+        receipt["trials"]["network_recovery"]["note"] = f"temporary value {raw_token} was redacted too late"
+        cases.resign(receipt)
+        with self.assertRaisesRegex(verifier.VerificationError, "credential-like value"):
+            verifier.verify_receipt(receipt, expected_sha=cases.EXPECTED_SHA)
+
+    def test_prefixed_sha256_claim_is_not_mistaken_for_raw_device_token(self) -> None:
+        receipt = cases.valid_receipt()
+        receipt["debug"] = {
+            "artifactDigest": "sha256:" + ("0123456789abcdef" * 4),
+        }
+        cases.resign(receipt)
+        verifier.verify_receipt(receipt, expected_sha=cases.EXPECTED_SHA)
+
     def test_noncredential_metadata_names_remain_allowed(self) -> None:
         receipt = cases.valid_receipt()
         receipt["debug"] = {
