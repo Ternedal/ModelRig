@@ -13,6 +13,7 @@ import argparse
 import json
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -30,6 +31,7 @@ from app.agent4.timeline_evidence import JsonCampaignEvidenceRecordStore  # noqa
 MARKER_SCHEMA = "modelrig-agent4/a4-25f-output-root/v1"
 HEALTH_SCHEMA = "modelrig-agent4/a4-25f-physical-host-health/v1"
 LOOPBACK = "127.0.0.1"
+MAX_CLOCK_OFFSET_MINUTES = 120
 
 
 def _git_head() -> str:
@@ -71,10 +73,29 @@ def _require_data_root(data_root: Path) -> Path:
     return resolved
 
 
-def build_app(data_root: Path, *, expected_sha: str) -> FastAPI:
+def _require_clock_offset(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("clock offset must be an integer number of minutes")
+    if value < 0 or value > MAX_CLOCK_OFFSET_MINUTES:
+        raise ValueError(
+            f"clock offset must be between 0 and {MAX_CLOCK_OFFSET_MINUTES} minutes"
+        )
+    return value
+
+
+def build_app(
+    data_root: Path,
+    *,
+    expected_sha: str,
+    clock_offset_minutes: int = 0,
+) -> FastAPI:
     repository_sha = _require_exact_head(expected_sha)
     data_root = _require_data_root(data_root)
-    snapshots = JsonOperatorSnapshotStore(data_root / "operator-snapshots")
+    offset = _require_clock_offset(clock_offset_minutes)
+    snapshots = JsonOperatorSnapshotStore(
+        data_root / "operator-snapshots",
+        clock=lambda: datetime.now(timezone.utc) + timedelta(minutes=offset),
+    )
     current = snapshots.load_current()
     if current is None:
         raise RuntimeError("A4-25f immutable current root is missing")
@@ -101,6 +122,7 @@ def build_app(data_root: Path, *, expected_sha: str) -> FastAPI:
             "repository_sha": repository_sha,
             "current_snapshot_id": selected.snapshot_id,
             "root_sequence": selected.root_sequence,
+            "retention_clock_offset_minutes": offset,
             "writer_authority": False,
             "publication_authority": False,
             "background_runtime": False,
@@ -117,12 +139,17 @@ def main() -> int:
     parser.add_argument("--expected-sha", required=True)
     parser.add_argument("--host", default=LOOPBACK)
     parser.add_argument("--port", type=int, default=8099)
+    parser.add_argument("--clock-offset-minutes", type=int, default=0)
     args = parser.parse_args()
     if args.host != LOOPBACK:
         raise ValueError("A4-25f worker host is hard-limited to 127.0.0.1")
     if not 1024 <= args.port <= 65535:
         raise ValueError("A4-25f host port must be between 1024 and 65535")
-    app = build_app(args.data_root, expected_sha=args.expected_sha)
+    app = build_app(
+        args.data_root,
+        expected_sha=args.expected_sha,
+        clock_offset_minutes=args.clock_offset_minutes,
+    )
     uvicorn.run(
         app,
         host=LOOPBACK,
