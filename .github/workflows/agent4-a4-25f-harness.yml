@@ -5,9 +5,12 @@ on:
     paths:
       - "android/app/build.gradle.kts"
       - "android/app/src/a425f/**"
+      - "backend/cmd/modelrig-a4-25f-backend/**"
       - "scripts/agent4_a4_25f_*.py"
+      - "scripts/agent4_a4_25f_*.ps1"
       - "tests/workflow_agent4_a4_25f_*.py"
       - "docs/AGENT_4_A4_25_SERVER_SNAPSHOT_AUTHORITY.md"
+      - "docs/agent4/A4-25F_PHYSICAL_QUALIFICATION_RUNBOOK.md"
       - "CURRENT_STATE.md"
       - ".github/workflows/agent4-a4-25f-harness.yml"
   workflow_dispatch:
@@ -26,7 +29,12 @@ jobs:
         shell: bash
         env:
           EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain)"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.23"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -37,6 +45,29 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
           PYTHONPATH: worker
         run: python tests/workflow_agent4_a4_25f_physical_snapshot_harness.py
+      - name: Run A4-25f operator safety contracts
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python tests/workflow_agent4_a4_25f_operator_contract.py
+      - name: Run A4-25f fail-closed audit contracts
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python tests/workflow_agent4_a4_25f_audit.py
+      - name: Test isolated A4-25f dual-listener backend boundary
+        working-directory: backend
+        run: go test ./cmd/modelrig-a4-25f-backend
+      - name: Parse A4-25f PowerShell harness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          @(
+            "scripts/agent4_a4_25f_physical_operator.ps1",
+            "scripts/agent4_a4_25f_cursor_matrix.ps1",
+            "scripts/agent4_a4_25f_cleanup_verify.ps1"
+          ) | ForEach-Object {
+            [void][scriptblock]::Create((Get-Content -LiteralPath $_ -Raw))
+            Write-Host "parsed $_"
+          }
 
   android-physical-variant:
     runs-on: ubuntu-latest
@@ -48,7 +79,9 @@ jobs:
         shell: bash
         env:
           EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain)"
       - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
           distribution: temurin
