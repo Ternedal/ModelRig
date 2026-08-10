@@ -23,7 +23,7 @@ spec.loader.exec_module(cases)
 
 
 class CredentialAliasHardeningTests(unittest.TestCase):
-    def assertAliasRejected(self, key: str, value: str) -> None:
+    def assertAliasRejected(self, key: str, value: object) -> None:
         receipt = cases.valid_receipt()
         receipt["debug"] = {key: value}
         cases.resign(receipt)
@@ -65,6 +65,14 @@ class CredentialAliasHardeningTests(unittest.TestCase):
         }
         cases.resign(receipt)
         verifier.verify_receipt(receipt, expected_sha=cases.EXPECTED_SHA)
+
+    def test_schema_cleanup_admin_key_deleted_marker_remains_allowed(self) -> None:
+        receipt = cases.valid_receipt()
+        self.assertIs(receipt["cleanup"]["admin_key_deleted"], True)
+        verifier.verify_receipt(receipt, expected_sha=cases.EXPECTED_SHA)
+
+    def test_admin_key_deleted_alias_outside_cleanup_is_still_rejected(self) -> None:
+        self.assertAliasRejected("admin_key_deleted", True)
 
 
 if __name__ == "__main__":
