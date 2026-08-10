@@ -1,6 +1,6 @@
 # Agent 4 A4-25 — server-side snapshot authority
 
-Status: **A4-25a activation guard + A4-25b immutable store + A4-25c caller-driven writer publication + A4-25d snapshot-bound server read/wire layer exact-head qualified on stacked dormant draft slices; A4-25e client/race activation remains deferred**.
+Status: **A4-25a activation guard + A4-25b immutable store + A4-25c caller-driven writer publication + A4-25d snapshot-bound server read/wire layer + A4-25e Android snapshot/race layer implemented and exact-head qualified on stacked dormant draft slices; physical acceptance and production activation remain separate and deferred**.
 
 Issue: #458.
 
@@ -92,7 +92,7 @@ The stacked A4-25c implementation keeps publication explicitly caller-driven. `A
 
 A publication captures the complete campaign set, validates each append-only timeline/evidence chain, rejects pending projections, verifies evidence bindings against timeline heads in the same capture, and performs optimistic revalidation before the immutable root commit. Unchanged content-addressed campaign blobs are reused; an unchanged complete mapping reuses the current root rather than manufacturing a new sequence. Retention/GC remains a separate caller action after the commit path.
 
-A4-25c and the dormant A4-25d server read/wire slice are exact-head qualified. This still does not relax the production mount: A4-25e must qualify client/race behaviour, and production wiring remains a separate deliberate activation decision.
+A4-25c, the dormant A4-25d server read/wire slice and the dormant A4-25e Android consumer/race slice are repository-qualified. This still does not relax the production mount: production wiring and any physical acceptance remain separate deliberate activation work.
 
 ## Read protocol
 
@@ -126,6 +126,26 @@ The dormant v2 FastAPI adapter uses the existing experimental operator route sha
 
 The router is not mounted by production bootstrap in A4-25d. The backend runtime is unchanged; its existing authenticated GET forwarder is covered by a pass-through contract proving snapshot query bytes, worker status/body and v2 media type are not rewritten.
 
+### A4-25e implementation discipline
+
+The stacked A4-25e implementation adds a **parallel dormant Android v2 client** rather than changing the qualified v1 Android production path.
+
+`Agent4SnapshotOperatorClient` treats the server-provided root as authority:
+
+- a new detail or list flow may acquire one current `snapshot_id`;
+- every related detail/timeline/evidence/verification request carries that same root explicitly;
+- campaign-list continuation carries the root plus both server-provided root-bound `after` and list-head cursors;
+- timeline/evidence continuation carries the root plus only the server-provided root-bound continuation cursor; Android never manufactures or widens the immutable server head;
+- a successful response with a different root fails closed before visible state can be composed;
+- HTTP **410** becomes a distinct refresh-required result and is never silently retried against the new current root;
+- client recreation between pages does not change correctness because retained root identity and opaque server cursors carry the continuation state.
+
+Android also validates the complete server cursor envelope before reuse. The outer root id, inner resource schema, campaign identity or list-status filter, position/total/last-campaign binding and hash/digest format must satisfy the same fail-closed invariants as the server-side cursor types. A cursor for another root, campaign, resource type or filter is rejected locally rather than being reinterpreted.
+
+The A4-24 overlap checks remain defence-in-depth. Even when every response carries the same root, Android rejects contradictory campaign/timeline counts or hashes and contradictory evidence verification/head values.
+
+A4-25e race qualification covers response-root changes, retained-root continuation after client recreation, expired roots, malformed/mismatched cursor envelopes and server-owned continuation semantics. This is repository/unit-contract qualification only; no physical acceptance is inferred.
+
 ## No server-side session
 
 `snapshot_id` is a content-addressed immutable manifest identity, not an in-memory paging session. Restart does not change the meaning of a retained snapshot id.
@@ -146,13 +166,13 @@ The snapshot-unavailable response is distinguishable from success, 404 resources
 
 ## Production activation guard
 
-Until the immutable snapshot authority is qualified **and the snapshot-bound read path is deliberately wired into the production operator API**, the production operator mount **must not mount `Agent4RuntimeContext`**.
+Even with A4-25a-e repository-qualified, the production operator mount **must not mount `Agent4RuntimeContext`** or switch to the dormant v2 snapshot path without a separate explicit production-wiring decision and qualification.
 
-`Agent4RuntimeContext` contains lifecycle mutation authority and live operator services over mutable stores. The production mount may accept only the narrow `Agent4OperatorReadContext` used by A4-21.
+`Agent4RuntimeContext` contains lifecycle mutation authority and live operator services over mutable stores. The current production mount continues to accept only the narrow `Agent4OperatorReadContext` used by A4-21.
 
 Tests that need a full dormant runtime must exercise its operator services directly or build the transport router explicitly; they must not use the production mount as a shortcut.
 
-This guard is intentionally stronger than relying on the current entrypoint to "usually" pass a read-only context. It makes concurrent writer + read activation an explicit future code change that must first complete the remaining A4-25 qualification.
+This guard is intentionally stronger than relying on the current entrypoint to "usually" pass a read-only context. Repository qualification proves the snapshot authority and consumer contracts; it does not itself authorize concurrent writer + read activation.
 
 ## Planned implementation sequence
 
@@ -183,7 +203,7 @@ This guard is intentionally stronger than relying on the current entrypoint to "
 - pending projection rejection;
 - deterministic restart/recovery tests.
 
-**Stacked status:** implemented and exact-head qualified in draft PR #468; current qualified parent head for A4-25d is `3a16651ec6d6b1731484d977a174dc30a4094f6a`.
+**Stacked status:** implemented and exact-head qualified in draft PR #468; qualified parent lineage is retained by the later A4-25 slices.
 
 ### A4-25d — snapshot-bound operator API
 
@@ -193,29 +213,30 @@ This guard is intentionally stronger than relying on the current entrypoint to "
 - stale/expired ids fail closed;
 - backend remains a transparent authenticated proxy.
 
-**Stacked status:** implemented and exact-head qualified as a dormant v2 slice in draft PR #470. This qualification does not authorize production wiring or A4-25e client activation.
+**Stacked status:** implemented and exact-head qualified as a dormant v2 server slice in draft PR #470. This qualification does not authorize production wiring.
 
 ### A4-25e — Android and race qualification
 
 - Android carries one server snapshot id across each logical detail/list flow;
-- transition a campaign between every pair of related reads;
-- mutate evidence between every pair of related reads;
-- prove no mixed successful view;
-- restart writer/reader between pages and verify deterministic retained/expired behaviour;
-- exact-head CI and later physical validation before concurrent activation.
+- response root mismatch fails closed;
+- timeline/evidence continuation cannot widen server heads;
+- root-bound cursor envelopes mirror server cursor invariants;
+- expired roots require explicit refresh rather than silent fallback;
+- client recreation between pages preserves deterministic retained-root continuation;
+- A4-24 overlap checks remain active as defence-in-depth.
 
-**Status:** deferred.
+**Stacked status:** implemented and exact-head qualified as a dormant Android v2/race slice in draft PR #473. Qualification is repository/unit-contract evidence only; physical acceptance and production wiring remain separate.
 
 ## Explicit non-goals of A4-25a
 
-The original A4-25a guard slice deliberately made none of the runtime changes later implemented on stacked A4-25b/c/d branches:
+The original A4-25a guard slice deliberately made none of the runtime changes later implemented on stacked A4-25b/c/d/e branches:
 
 - no snapshot files were written by A4-25a;
 - no API schema changes were made by A4-25a;
-- no Android changes;
+- no Android changes were made by A4-25a;
 - no lifecycle activation;
 - no background publisher or GC loop;
 - no merge to `main` during the 1.58.151 freeze;
 - no modification or invalidation of the independently qualified A4-18 physical chain.
 
-Those historical A4-25a boundaries do not authorize A4-25e or production activation. `production_activation=false` remains mandatory.
+Those historical A4-25a boundaries do not authorize production activation. `production_activation=false` remains mandatory.
