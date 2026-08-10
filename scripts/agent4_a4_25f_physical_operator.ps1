@@ -17,7 +17,6 @@ Set-StrictMode -Version Latest
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $packageName = "dk.ternedal.modelrig.a425f"
-$mainActivity = "dk.ternedal.modelrig.MainActivity"
 $deviceInfoActivity = "dk.ternedal.modelrig.debug.Agent4PhysicalDeviceInfoActivity"
 $snapshotProbeActivity = "dk.ternedal.modelrig.debug.Agent4SnapshotPhysicalProbeActivity"
 $failureProbeActivity = "dk.ternedal.modelrig.debug.Agent4PhysicalFailureProbeActivity"
@@ -127,9 +126,9 @@ function Assert-PrivateLocalLanAddress {
     if (-not (Test-PrivateIPv4 -Address $Address)) { throw "LanAddress skal være én konkret RFC1918 IPv4-adresse." }
     $ip = Get-NetIPAddress -AddressFamily IPv4 -IPAddress $Address -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -eq $ip) { throw "LanAddress $Address findes ikke på riggen." }
-    $profile = Get-NetConnectionProfile -InterfaceIndex ([int]$ip.InterfaceIndex) -ErrorAction Stop
-    if ([string]$profile.NetworkCategory -ne "Private") {
-        throw "A4-25f kræver Windows-netværksprofil Private; '$($profile.NetworkCategory)' blev fundet."
+    $profile = Get-NetConnectionProfile -InterfaceIndex ([int]$ip.InterfaceIndex) -ErrorAction Stop | Select-Object -First 1
+    if ($null -eq $profile -or [string]$profile.NetworkCategory -ne "Private") {
+        throw "A4-25f kræver Windows-netværksprofil Private."
     }
 }
 
@@ -174,16 +173,18 @@ function Remove-A4FirewallRule {
 function Install-A4FirewallRule {
     param([Parameter(Mandatory = $true)][string]$Address, [Parameter(Mandatory = $true)][string]$PixelIp)
     Remove-A4FirewallRule
-    New-NetFirewallRule \
-        -DisplayName $firewallRule \
-        -Direction Inbound \
-        -Action Allow \
-        -Program $backendExe \
-        -Protocol TCP \
-        -LocalAddress $Address \
-        -LocalPort $lanPort \
-        -RemoteAddress $PixelIp \
-        -Profile Private | Out-Null
+    $rule = @{
+        DisplayName = $firewallRule
+        Direction = "Inbound"
+        Action = "Allow"
+        Program = $backendExe
+        Protocol = "TCP"
+        LocalAddress = $Address
+        LocalPort = $lanPort
+        RemoteAddress = $PixelIp
+        Profile = "Private"
+    }
+    New-NetFirewallRule @rule | Out-Null
 }
 
 function Wait-Http200 {
@@ -579,6 +580,10 @@ switch ($Action) {
 
         $mutationFiles = @(Get-ChildItem -LiteralPath (Join-Path $output "mutations") -Filter "*.json" -File | Sort-Object Name)
         $phoneFiles = @(Get-ChildItem -LiteralPath $phoneReceipts -Filter "*.json" -File | Sort-Object Name)
+        $shaAlgorithm = [Security.Cryptography.SHA256]::Create()
+        try {
+            $lanHashBytes = $shaAlgorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes([string]$state.lan_url))
+        } finally { $shaAlgorithm.Dispose() }
         $matrix = [ordered]@{
             schema = "modelrig-agent4/a4-25f-physical-matrix/v1"
             recorded_at = (Get-Date).ToUniversalTime().ToString("o")
@@ -586,7 +591,7 @@ switch ($Action) {
             apk_sha256 = [string]$state.apk_sha256
             package_name = $packageName
             pixel_ip = [string]$state.pixel_ip
-            lan_url_sha256 = "sha256:$(([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes([string]$state.lan_url)) | ForEach-Object { $_.ToString('x2') }) -join '')"
+            lan_url_sha256 = "sha256:$(([BitConverter]::ToString($lanHashBytes)).Replace('-', '').ToLowerInvariant())"
             baseline_root = [string]$baseline.root_snapshot_id
             retained_detail_root = $detailRoot
             final_current_root = [string]$fresh.snapshot_id
