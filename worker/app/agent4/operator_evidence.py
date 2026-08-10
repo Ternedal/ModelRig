@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .domain import CampaignValidationError, _require_text
-from .service import CampaignSchedulerService
+from .operator import Agent4CampaignReadSource
 from .timeline_evidence import (
     CampaignEvidenceRecord,
     CampaignEvidenceRecordStore,
@@ -26,13 +26,13 @@ class Agent4OperatorEvidenceReadService:
     def __init__(
         self,
         *,
-        scheduler: CampaignSchedulerService,
+        scheduler: Agent4CampaignReadSource,
         records: CampaignEvidenceRecordStore,
         query: CampaignEvidenceQueryService,
     ) -> None:
-        if not isinstance(scheduler, CampaignSchedulerService):
+        if not isinstance(scheduler, Agent4CampaignReadSource):
             raise CampaignValidationError(
-                "scheduler must implement CampaignSchedulerService"
+                "scheduler must implement the Agent 4 campaign read source"
             )
         if not isinstance(records, CampaignEvidenceRecordStore):
             raise CampaignValidationError(
@@ -51,7 +51,7 @@ class Agent4OperatorEvidenceReadService:
         self._query = query
 
     @property
-    def scheduler(self) -> CampaignSchedulerService:
+    def scheduler(self) -> Agent4CampaignReadSource:
         return self._scheduler
 
     @property
