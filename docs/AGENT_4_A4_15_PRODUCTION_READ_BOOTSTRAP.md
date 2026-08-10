@@ -27,10 +27,10 @@ Missing, relative or file-valued roots fail startup before the worker is ready.
 backend-proxied and paired-device read boundary while removing mutation-capable
 lifecycle authority from the production read composition.
 
-**Reference architecture:** Agent 4 B-reference architecture plus the A4-09
-canonical composition and single-dataroot ownership model. The canonical
-campaign/timeline/evidence stores remain the source of truth; only the authority
-of the production adapter is narrowed.
+**Reference architecture:** ADR-A4-005 / Agent 4 B-reference architecture plus
+the A4-09 canonical composition and single-dataroot ownership model. The
+canonical campaign/timeline/evidence stores remain the source of truth; only the
+authority of the production adapter is narrowed.
 
 **Dependencies:** ADR-A4-005 documentation/stop rule, ADR-A4-006 ownership
 boundary, ADR-A4-007 host/transport/auth boundary, the A4-09 canonical runtime,
@@ -119,6 +119,23 @@ API remains:
 - backend-proxied;
 - protected by paired-device Bearer plus `agent4:read`;
 - free of submit, dispatch, signal, recovery or grant administration routes.
+
+## Qualification lineage
+
+The standalone A4-21 slice is qualified at
+`15ebbf2dbdedc3f6b35a14f050f507063df767c9` with CI #3560,
+agent3-diagnostics #1697 and agent3-full-diagnostics #2779.
+
+The A4-19/A4-20-preserving integration candidate was qualified before merge at
+`1b11e95340c689fc566ae2bae3d3b73697896d28` with CI #3562,
+agent3-diagnostics #1699 and agent3-full-diagnostics #2781, including focused
+A4-21, campaign-list query/API, snapshot paging and full read-product contracts.
+
+The validation-only merge to `agent/a4-read-product-integration` created
+`6e57a6854a818b56f3e47a48272bdc8d83be277a`. Its first full diagnostic run
+proved the code path but exposed stale ADR metadata on long-lived PR #426. The
+PR metadata and this traceability section were then updated; only a subsequent
+clean exact head may authorize downstream physical-candidate refresh.
 
 ## Activation statement
 
