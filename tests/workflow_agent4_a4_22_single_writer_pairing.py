@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / "backend" / "cmd" / "modelrig-server" / "main.go"
 TEST = ROOT / "backend" / "cmd" / "modelrig-server" / "main_test.go"
+GRANT_CLI = ROOT / "backend" / "cmd" / "modelrig-agent4-grants" / "main.go"
 
 
 def function_body(source: str, name: str, next_name: str) -> str:
@@ -24,6 +25,7 @@ def require(condition: bool, message: str) -> None:
 def main() -> None:
     source = MAIN.read_text(encoding="utf-8")
     tests = TEST.read_text(encoding="utf-8")
+    grant_cli = GRANT_CLI.read_text(encoding="utf-8")
     pair_cli = function_body(source, "pairCLI", "pairServerBaseURL")
 
     for forbidden in (
@@ -58,6 +60,28 @@ def main() -> None:
         "pairing client must not follow redirects to another authority",
     )
 
+    # A4-16 grant administration is the other supported security-state CLI.
+    # Keep it on the live backend too: no future refactor may make it a second
+    # JSON writer while pairing has been hardened.
+    for forbidden in (
+        '"modelrig/internal/store"',
+        "store.Open",
+        "SetAgent4ReadGrant",
+        "os.WriteFile",
+    ):
+        require(
+            forbidden not in grant_cli,
+            f"agent4 grant CLI regained direct device-store mutation via {forbidden}",
+        )
+    require(
+        "client.Do(request)" in grant_cli,
+        "agent4 grant CLI must continue delegating mutation to the backend API",
+    )
+    require(
+        'request.Header.Set("X-Admin-Key", adminKey)' in grant_cli,
+        "agent4 grant CLI must retain authenticated backend mutation",
+    )
+
     for required_test in (
         "TestPairCLIOfflineFailsClosedWithoutTouchingStore",
         "TestPairCLIReachableFailureNeverFallsBackToStore",
@@ -67,7 +91,7 @@ def main() -> None:
     ):
         require(required_test in tests, f"missing adversarial A4-22 test {required_test}")
 
-    print("PASS: A4-22 pairing remains API-only and the backend remains sole store writer")
+    print("PASS: A4-22 pairing/grant CLIs remain API-only and the backend remains sole store writer")
 
 
 if __name__ == "__main__":
