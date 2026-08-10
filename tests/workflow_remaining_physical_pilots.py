@@ -20,6 +20,37 @@ _source = _source.replace(
     'GATE = ROOT / "scripts" / "physical_validation_candidate_gate.py"\n'
     'EXPECTED_BRANCH',
 )
+
+_old_branch_contract = '''check(
+    f'BRANCH = "{EXPECTED_BRANCH}"' in agent_source,
+    "Agent 3 operator is bound to the unified candidate branch",
+)
+check(
+    f'BRANCH = "{EXPECTED_BRANCH}"' in scheduler_source,
+    "scheduler operator is bound to the unified candidate branch",
+)
+'''
+_new_branch_contract = '''check(
+    'BRANCH = _load_candidate_branch(_ROOT, VERSION)' in agent_source,
+    "Agent 3 operator consumes the tracked candidate branch loader",
+)
+check(
+    'BRANCH = _load_candidate_branch(_ROOT, VERSION)' in scheduler_source,
+    "scheduler operator consumes the tracked candidate branch loader",
+)
+check(
+    EXPECTED_BRANCH not in agent_source,
+    "Agent 3 operator does not hardcode the candidate branch",
+)
+check(
+    EXPECTED_BRANCH not in scheduler_source,
+    "scheduler operator does not hardcode the candidate branch",
+)
+'''
+if _old_branch_contract not in _source:
+    raise RuntimeError("retained remaining-pilots branch contract changed unexpectedly")
+_source = _source.replace(_old_branch_contract, _new_branch_contract)
+
 _source = _source.replace(
     'check(calls == [str(AGENT), str(SCHEDULER)], "both pilots run once in the safe order")',
     'check(\n'

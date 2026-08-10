@@ -5,8 +5,13 @@
 # ved koersel og er usynlige for statisk analyse. Undtagelsen staar her frem
 # for i CI-kommandoen, saa den kan laeses sammen med sin aarsag.
 from pathlib import Path as _Path
+from runpy import run_path as _run_path
 
-from candidate_branch import load_candidate_branch as _load_candidate_branch
+_candidate_branch_namespace = _run_path(
+    str(_Path(__file__).with_name("candidate_branch.py"))
+)
+_load_candidate_branch = _candidate_branch_namespace["load_candidate_branch"]
+del _candidate_branch_namespace
 
 VERSION = "1.58.151"
 _ROOT = _Path(__file__).resolve().parents[1]
