@@ -25,7 +25,7 @@ jobs:
       - name: Install worker dependencies
         run: python -m pip install -r worker/requirements.txt
 
-      - name: Apply path-scoped cleanup evidence exception
+      - name: Apply path-scoped credential evidence exceptions
         shell: bash
         run: |
           python - <<'PY'
@@ -58,10 +58,16 @@ jobs:
 
 
           def _known_credential_evidence_marker(path: str, name: str, value: Any) -> bool:
-              return (
+              if (
                   path == "root.cleanup"
                   and name == "admin_key_deleted"
                   and type(value) is bool
+              ):
+                  return True
+              return (
+                  path == "root.trials"
+                  and name in REQUIRED_TRIALS
+                  and isinstance(value, Mapping)
               )
 
 
@@ -152,5 +158,5 @@ jobs:
             echo "validated hardening already present"
             exit 0
           fi
-          git commit -m "fix(agent4): scope cleanup credential evidence exception"
+          git commit -m "fix(agent4): scope credential evidence aliases to schema paths"
           git push origin HEAD:agent/a4-20-offline-physical-receipt-verifier
