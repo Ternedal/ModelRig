@@ -39,10 +39,11 @@ install_termination_contract(fastapi_app)
 mount_agent3(fastapi_app)
 
 # Agent 4 remains absent from a standard worker boot, including Python's imported
-# module inventory. Exact opt-in imports the read-only production bootstrap,
-# composes one canonical A4-09 context from KALIV_AGENT4_DATA_ROOT and injects it
-# into the existing GET-only mount. The bootstrap executor rejects every
-# dispatch/signal/outcome call and performs no recovery or background work.
+# module inventory. Exact opt-in imports the production read bootstrap, composes
+# only canonical campaign/timeline/evidence read facades from
+# KALIV_AGENT4_DATA_ROOT and injects them into the existing GET-only mount. The
+# read context constructs no lifecycle scheduler, resource admission, handoff,
+# recovery or background-work authority.
 if os.getenv("KALIV_AGENT4_OPERATOR_API", "0") == "1":
     from .agent4.production_bootstrap import (
         compose_agent4_operator_context_from_environment,
