@@ -25,55 +25,76 @@ jobs:
       - name: Install worker dependencies
         run: python -m pip install -r worker/requirements.txt
 
-      - name: Legacy valid receipt passes
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_valid_receipt_passes
-      - name: Legacy main digest tamper rejects
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_main_digest_tamper_is_rejected_without_resigning
-      - name: Legacy resigned NO-GO rejects
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_resigned_no_go_receipt_is_still_rejected_semantically
-      - name: Legacy wrong expected head rejects
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_wrong_expected_head_is_rejected_even_after_resigning
-      - name: Legacy checkpoint set rejects drift
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_missing_or_unknown_checkpoint_is_rejected
-      - name: Legacy wrong HTTP status rejects
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_resigned_wrong_http_status_is_rejected
-      - name: Legacy invalid payload hash rejects
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_invalid_payload_hash_is_rejected
-      - name: Legacy raw screenshot path rejects
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_raw_screenshot_path_is_rejected
-      - name: Legacy mutation partial resign rejects
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_mutation_edit_with_only_main_resign_is_rejected
-      - name: Legacy cleanup failure rejects
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_cleanup_failure_is_rejected_after_resigning
-      - name: Legacy public network rejects
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_public_network_is_rejected_after_resigning
-      - name: Legacy emulator identity rejects
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_non_pixel_or_emulator_identity_is_rejected
-      - name: Legacy credential key rejects
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_credential_key_is_rejected_even_when_main_digest_is_valid
-      - name: Legacy credential-like value rejects
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_credential_like_value_is_rejected
-      - name: Legacy artifact traversal rejects
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_bad_artifact_path_is_rejected
-      - name: Legacy CLI is read-only and reports PASS FAIL
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_cli_emits_machine_and_human_pass_fail_without_mutating_receipt
-      - name: Legacy verifier source authority remains narrow
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_verifier_source_has_no_network_process_or_write_authority
+      - name: Apply path-scoped cleanup evidence exception
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
 
-      - name: Reject camelCase deviceToken
-        run: python tests/workflow_agent4_physical_receipt_credential_aliases.py CredentialAliasHardeningTests.test_camel_case_device_token_key_is_rejected
-      - name: Reject camelCase pairingCode
-        run: python tests/workflow_agent4_physical_receipt_credential_aliases.py CredentialAliasHardeningTests.test_camel_case_pairing_code_key_is_rejected
-      - name: Reject kebab admin-key
-        run: python tests/workflow_agent4_physical_receipt_credential_aliases.py CredentialAliasHardeningTests.test_kebab_case_admin_key_is_rejected
-      - name: Reject AuthorizationHeader alias
-        run: python tests/workflow_agent4_physical_receipt_credential_aliases.py CredentialAliasHardeningTests.test_authorization_header_alias_is_rejected
-      - name: Reject nested clientSecretValue alias
-        run: python tests/workflow_agent4_physical_receipt_credential_aliases.py CredentialAliasHardeningTests.test_nested_client_secret_alias_is_rejected
-      - name: Reject unlabeled raw pairing code
-        run: python tests/workflow_agent4_physical_receipt_credential_aliases.py CredentialAliasHardeningTests.test_unlabelled_raw_pairing_code_in_note_is_rejected
-      - name: Allow noncredential metadata aliases
-        run: python tests/workflow_agent4_physical_receipt_credential_aliases.py CredentialAliasHardeningTests.test_noncredential_metadata_names_remain_allowed
+          path = Path("scripts/agent4_physical_receipt_verify_offline.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''def _credential_key_is_forbidden(name: str) -> bool:
+              compact = re.sub(r"[^a-z0-9]", "", name.lower())
+              return any(term in compact for term in FORBIDDEN_CREDENTIAL_KEY_TERMS)
+
+
+          def _scan_credentials(value: Any, path: str = "root") -> None:
+              if isinstance(value, Mapping):
+                  for key, child in value.items():
+                      name = str(key)
+                      _require(not _credential_key_is_forbidden(name), f"forbidden credential field at {path}.{name}")
+                      _scan_credentials(child, f"{path}.{name}")
+                  return
+              if isinstance(value, list):
+                  for index, child in enumerate(value):
+                      _scan_credentials(child, f"{path}[{index}]")
+                  return
+              if isinstance(value, str):
+                  for pattern in CREDENTIAL_VALUE_PATTERNS:
+                      _require(pattern.search(value) is None, f"credential-like value at {path}")
+          '''
+          new = '''def _credential_key_is_forbidden(name: str) -> bool:
+              compact = re.sub(r"[^a-z0-9]", "", name.lower())
+              return any(term in compact for term in FORBIDDEN_CREDENTIAL_KEY_TERMS)
+
+
+          def _known_credential_evidence_marker(path: str, name: str, value: Any) -> bool:
+              return (
+                  path == "root.cleanup"
+                  and name == "admin_key_deleted"
+                  and type(value) is bool
+              )
+
+
+          def _scan_credentials(value: Any, path: str = "root") -> None:
+              if isinstance(value, Mapping):
+                  for key, child in value.items():
+                      name = str(key)
+                      allowed_evidence = _known_credential_evidence_marker(path, name, child)
+                      _require(
+                          allowed_evidence or not _credential_key_is_forbidden(name),
+                          f"forbidden credential field at {path}.{name}",
+                      )
+                      _scan_credentials(child, f"{path}.{name}")
+                  return
+              if isinstance(value, list):
+                  for index, child in enumerate(value):
+                      _scan_credentials(child, f"{path}[{index}]")
+                  return
+              if isinstance(value, str):
+                  for pattern in CREDENTIAL_VALUE_PATTERNS:
+                      _require(pattern.search(value) is None, f"credential-like value at {path}")
+          '''
+          if text.count(old) != 1:
+              raise SystemExit("credential scanner source no longer matches the reviewed hardening input")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+
+      - name: Run original offline verifier adversarial contract
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py
+
+      - name: Run credential alias hardening contract
+        run: python tests/workflow_agent4_physical_receipt_credential_aliases.py
 
       - name: Run every existing physical read repository contract
         shell: bash
@@ -89,16 +110,16 @@ jobs:
           python scripts/current_state.py
           python scripts/current_state.py --check
 
-      - name: Commit generated state when changed
+      - name: Commit validated verifier hardening and generated state
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- CURRENT_STATE.md; then
-            echo "CURRENT_STATE.md already current"
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add CURRENT_STATE.md
-          git commit -m "docs: regenerate current state for verifier credential hardening"
+          git add scripts/agent4_physical_receipt_verify_offline.py CURRENT_STATE.md
+          if git diff --cached --quiet; then
+            echo "validated hardening already present"
+            exit 0
+          fi
+          git commit -m "fix(agent4): scope cleanup credential evidence exception"
           git push origin HEAD:agent/a4-20-offline-physical-receipt-verifier
