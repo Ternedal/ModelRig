@@ -39,7 +39,7 @@ class OperatorSnapshotNotFoundError(OperatorSnapshotError):
     """Requested snapshot is unknown, uncommitted, stale, or expired."""
 
 
-def _require_id(value: str, field: str = "snapshot_id") -> str:
+def _require_id(value: object, field: str = "snapshot_id") -> str:
     if (
         not isinstance(value, str)
         or len(value) != 64
@@ -165,8 +165,14 @@ class OperatorCampaignSnapshot:
             "state_revision": campaign.state.revision,
             "campaign_record_sha256": _record_digest(campaign),
             "campaign": campaign.to_dict(),
-            "timeline_head": {"sequence": timeline_sequence, "sha256": timeline_hash},
-            "evidence_head": {"sequence": evidence_sequence, "sha256": evidence_hash},
+            "timeline_head": {
+                "sequence": timeline_sequence,
+                "sha256": timeline_hash,
+            },
+            "evidence_head": {
+                "sequence": evidence_sequence,
+                "sha256": evidence_hash,
+            },
             "latest_evidence_timeline_head_sha256": evidence_timeline_hash,
         }
         return cls(
@@ -225,28 +231,35 @@ class OperatorCampaignSnapshot:
             raise CampaignValidationError("campaign snapshot must contain both heads")
         campaign = CampaignRecord.from_dict(raw_campaign)
         if value.get("campaign_id") != campaign.spec.campaign_id:
-            raise CampaignValidationError("campaign snapshot identity does not match record")
+            raise CampaignValidationError(
+                "campaign snapshot identity does not match record"
+            )
         if value.get("state_revision") != campaign.state.revision:
-            raise CampaignValidationError("campaign snapshot revision does not match record")
+            raise CampaignValidationError(
+                "campaign snapshot revision does not match record"
+            )
         if value.get("campaign_record_sha256") != _record_digest(campaign):
             raise CampaignValidationError("campaign record hash does not match content")
-        timeline_sequence = _require_uint(
-            timeline.get("sequence"), "timeline_head_sequence"
-        )
-        evidence_sequence = _require_uint(
-            evidence.get("sequence"), "evidence_head_sequence"
-        )
         snapshot = cls.create(
             campaign,
-            timeline_head_sequence=timeline_sequence,
-            timeline_head_sha256=str(timeline.get("sha256", "")),
-            evidence_head_sequence=evidence_sequence,
-            evidence_head_sha256=str(evidence.get("sha256", "")),
-            latest_evidence_timeline_head_sha256=str(
-                value.get("latest_evidence_timeline_head_sha256", "")
+            timeline_head_sequence=_require_uint(
+                timeline.get("sequence"), "timeline_head_sequence"
+            ),
+            timeline_head_sha256=_require_id(
+                timeline.get("sha256"), "timeline_head_sha256"
+            ),
+            evidence_head_sequence=_require_uint(
+                evidence.get("sequence"), "evidence_head_sequence"
+            ),
+            evidence_head_sha256=_require_id(
+                evidence.get("sha256"), "evidence_head_sha256"
+            ),
+            latest_evidence_timeline_head_sha256=_require_id(
+                value.get("latest_evidence_timeline_head_sha256"),
+                "latest_evidence_timeline_head_sha256",
             ),
         )
-        claimed = _require_id(str(value.get("snapshot_id", "")))
+        claimed = _require_id(value.get("snapshot_id"))
         if claimed != snapshot.snapshot_id:
             raise CampaignValidationError("campaign snapshot_id does not match content")
         return snapshot
@@ -314,20 +327,26 @@ class OperatorRootSnapshot:
         if not isinstance(raw_campaigns, Mapping):
             raise CampaignValidationError("root snapshot campaigns must be an object")
         parent_raw = value.get("parent_snapshot_id")
+        if parent_raw is not None and not isinstance(parent_raw, str):
+            raise CampaignValidationError("parent_snapshot_id must be a string or null")
+        campaign_map: dict[str, str] = {}
+        for campaign_id, campaign_snapshot_id in raw_campaigns.items():
+            if not isinstance(campaign_id, str) or not isinstance(
+                campaign_snapshot_id, str
+            ):
+                raise CampaignValidationError(
+                    "root snapshot campaign mapping must contain string ids"
+                )
+            campaign_map[campaign_id] = campaign_snapshot_id
         snapshot = cls.create(
             root_sequence=_require_uint(
                 value.get("root_sequence"), "root_sequence", minimum=1
             ),
-            parent_snapshot_id=(
-                str(parent_raw) if parent_raw is not None else None
-            ),
+            parent_snapshot_id=parent_raw,
             published_at=_parse_time(value.get("published_at"), "published_at"),
-            campaigns={
-                str(campaign_id): str(campaign_snapshot_id)
-                for campaign_id, campaign_snapshot_id in raw_campaigns.items()
-            },
+            campaigns=campaign_map,
         )
-        claimed = _require_id(str(value.get("snapshot_id", "")))
+        claimed = _require_id(value.get("snapshot_id"))
         if claimed != snapshot.snapshot_id:
             raise CampaignValidationError("root snapshot_id does not match content")
         return snapshot
@@ -384,6 +403,13 @@ class JsonOperatorSnapshotStore:
         *,
         expected_parent: str | None,
     ) -> OperatorRootSnapshot:
+        """Commit one root; current-pointer replacement is the only commit point.
+
+        Retention/GC is deliberately separate. Once ``current.json`` is replaced,
+        this publication is committed and cleanup must not be able to turn that
+        committed result into an apparent publication failure.
+        """
+
         if not isinstance(snapshot, OperatorRootSnapshot):
             raise CampaignValidationError("snapshot must be an OperatorRootSnapshot")
         if expected_parent is not None:
@@ -418,7 +444,6 @@ class JsonOperatorSnapshotStore:
             self._inject("before_current_replace")
             self._write_current(snapshot.snapshot_id)
             self._inject("after_current_replace")
-            self.prune()
             return snapshot
 
     def current_snapshot_id(self) -> str | None:
@@ -468,6 +493,8 @@ class JsonOperatorSnapshotStore:
                 ) from exc
 
     def prune(self, *, now: datetime | None = None) -> tuple[str, ...]:
+        """Apply retention/GC after publication; never part of the commit point."""
+
         with self._lock:
             self._ensure_layout()
             instant = _require_aware(now or self._clock(), "now")
@@ -502,7 +529,9 @@ class JsonOperatorSnapshotStore:
         next_id: str | None = current_id
         while next_id is not None and len(chain) < self._max_roots:
             if next_id in seen:
-                raise OperatorSnapshotIntegrityError("root snapshot chain contains a cycle")
+                raise OperatorSnapshotIntegrityError(
+                    "root snapshot chain contains a cycle"
+                )
             seen.add(next_id)
             try:
                 snapshot = self._load_root_file(next_id)
@@ -548,7 +577,7 @@ class JsonOperatorSnapshotStore:
                 "current pointer schema is not supported"
             )
         try:
-            snapshot_id = _require_id(str(value["snapshot_id"]))
+            snapshot_id = _require_id(value["snapshot_id"])
         except (CampaignValidationError, KeyError) as exc:
             raise OperatorSnapshotIntegrityError(
                 "current pointer failed validation"
@@ -574,14 +603,46 @@ class JsonOperatorSnapshotStore:
         value: Mapping[str, JsonValue],
         label: str,
     ) -> None:
-        if path.exists():
+        """Create an immutable blob without ever replacing an existing path."""
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        canonical = _canonical(value)
+        payload = json.dumps(
+            value,
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=2,
+            sort_keys=True,
+        ).encode("utf-8") + b"\n"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        try:
+            descriptor = os.open(path, flags, 0o600)
+        except FileExistsError:
             existing = self._read_json(path, label)
-            if _canonical(existing) != _canonical(value):
+            if _canonical(existing) != canonical:
                 raise OperatorSnapshotIntegrityError(
                     f"{label} conflicts with existing immutable blob"
                 )
             return
-        self._write_replace(path, value)
+        except OSError as exc:
+            raise OperatorSnapshotError(
+                f"unable to create immutable {label}"
+            ) from exc
+
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            self._fsync_directory(path.parent)
+        except OSError as exc:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            raise OperatorSnapshotError(
+                f"unable to persist immutable {label}"
+            ) from exc
 
     def _write_replace(self, path: Path, value: Mapping[str, JsonValue]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -608,23 +669,14 @@ class JsonOperatorSnapshotStore:
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            if path != self._current_path and path.exists():
-                existing = self._read_json(path, "immutable snapshot")
-                if _canonical(existing) != _canonical(value):
-                    raise OperatorSnapshotIntegrityError(
-                        "immutable snapshot appeared with conflicting content"
-                    )
-                temporary.unlink(missing_ok=True)
-                return
             os.replace(temporary, path)
             self._fsync_directory(path.parent)
-        except OperatorSnapshotIntegrityError:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
-            raise
         except OSError as exc:
             if temporary is not None:
-                temporary.unlink(missing_ok=True)
+                try:
+                    temporary.unlink()
+                except OSError:
+                    pass
             raise OperatorSnapshotError(
                 f"unable to persist snapshot path {path.name!r}"
             ) from exc
