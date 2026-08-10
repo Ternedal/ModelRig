@@ -22,8 +22,12 @@ class Agent4PhysicalFailureProbeActivity : ComponentActivity() {
         const val EXTRA_STAGE = "stage"
         private const val SCHEMA = "modelrig-agent4/a4-25f-failure-probe/v1"
         private const val PREFS = "modelrig-a4-25f-probe"
-        private const val CAMPAIGN_ID = "a4-25f-physical-primary"
-        private val STAGES = setOf("selected-root-404", "server-422", "current-unavailable-503")
+        private val STAGES = setOf(
+            "selected-root-404",
+            "server-422",
+            "current-unavailable-503",
+            "expired-retained-410",
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -67,6 +71,7 @@ class Agent4PhysicalFailureProbeActivity : ComponentActivity() {
             "selected-root-404" -> selectedRoot404(baseUrl, token, root)
             "server-422" -> server422(baseUrl, token, root)
             "current-unavailable-503" -> currentUnavailable503(baseUrl, token)
+            "expired-retained-410" -> expiredRetained410(baseUrl, token, root)
             else -> error("unreachable")
         }
         return JSONObject()
@@ -138,6 +143,21 @@ class Agent4PhysicalFailureProbeActivity : ComponentActivity() {
             ?: error("missing current pointer unexpectedly succeeded")
         require(failure.kind == Agent4SnapshotOperatorClient.ErrorKind.UNAVAILABLE)
         require(failure.statusCode == 503)
+        return FailureResult(failure.kind, failure.statusCode)
+    }
+
+    private fun expiredRetained410(
+        baseUrl: String,
+        token: String,
+        root: Agent4SnapshotOperatorClient.SnapshotId,
+    ): FailureResult {
+        val client = Agent4SnapshotOperatorClient(baseUrl, token)
+        val failure = runCatching {
+            client.campaign("a4-25f-physical-primary", root)
+        }.exceptionOrNull() as? Agent4SnapshotOperatorClient.OperatorException
+            ?: error("expired retained root unexpectedly succeeded")
+        require(failure.kind == Agent4SnapshotOperatorClient.ErrorKind.REFRESH_REQUIRED)
+        require(failure.statusCode == 410)
         return FailureResult(failure.kind, failure.statusCode)
     }
 
