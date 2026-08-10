@@ -188,12 +188,28 @@ class Agent4ProductionReadMutationBoundaryTests(unittest.TestCase):
             ROOT / "worker" / "app" / "agent4" / "operator_read_context.py"
         ).read_text(encoding="utf-8")
         tree = ast.parse(source)
+        imported_names = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+        }
+        base_names = {
+            base.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ClassDef)
+            for base in node.bases
+            if isinstance(base, ast.Name)
+        }
         called_names = {
             node.func.id
             for node in ast.walk(tree)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
         }
-        self.assertNotIn("CampaignSchedulerService", source)
+
+        self.assertNotIn("CampaignSchedulerService", imported_names)
+        self.assertNotIn("CampaignSchedulerService", base_names)
+        self.assertNotIn("CampaignSchedulerService", called_names)
         for forbidden in (
             "ResourceAwareCampaignHandoffSchedulerService",
             "CampaignQueue",
@@ -201,6 +217,8 @@ class Agent4ProductionReadMutationBoundaryTests(unittest.TestCase):
             "CampaignCheckpointService",
             "CampaignFailureHandlingService",
         ):
+            self.assertNotIn(forbidden, imported_names)
+            self.assertNotIn(forbidden, base_names)
             self.assertNotIn(forbidden, called_names)
 
 
