@@ -3,7 +3,7 @@
 Unlike the full caller-driven Agent 4 runtime, this module never constructs a
 queue, resource lease manager, checkpoint/failure service or handoff scheduler.
 It opens the canonical persisted read stores behind facades whose mutation
-methods fail before touching storage.  The resulting context is sufficient for
+methods fail before touching storage. The resulting context is sufficient for
 the existing operator router and intentionally insufficient for lifecycle work.
 """
 
@@ -23,7 +23,7 @@ from .domain import CampaignRecord, CampaignValidationError
 from .operator import Agent4OperatorReadService
 from .operator_evidence import Agent4OperatorEvidenceReadService
 from .repository import JsonCampaignRepository
-from .service import CampaignNotFoundError, CampaignSchedulerService
+from .service import CampaignNotFoundError
 from .timeline import JsonCampaignTimelineStore
 from .timeline_evidence import JsonCampaignEvidenceRecordStore
 from .timeline_evidence_query import CampaignEvidenceQueryService
@@ -38,68 +38,20 @@ class _ReadOnlyBoundary:
         )
 
 
-class ReadOnlyCampaignSchedulerFacade(CampaignSchedulerService, _ReadOnlyBoundary):
-    """Campaign lookup facade with every lifecycle entrypoint denied.
+class ReadOnlyCampaignReader:
+    """Exactly the campaign get/list authority required by operator reads.
 
-    ``Agent4OperatorReadService`` historically accepts ``CampaignSchedulerService``
-    because the full canonical runtime supplies one.  Production read mode keeps
-    that compatibility without constructing or retaining a mutation-capable
-    scheduler: only ``get`` and ``list`` delegate to the persisted repository.
+    This class deliberately does not inherit ``CampaignSchedulerService`` and
+    therefore cannot accidentally acquire future lifecycle methods added to the
+    scheduler. The repository is retained only to implement the two read calls.
     """
 
     def __init__(self, repository: JsonCampaignRepository) -> None:
         if not isinstance(repository, JsonCampaignRepository):
             raise CampaignValidationError(
-                "read-only campaign facade requires JsonCampaignRepository"
+                "read-only campaign reader requires JsonCampaignRepository"
             )
-        # Deliberately do not call CampaignSchedulerService.__init__.  None of
-        # its lifecycle collaborators (executor, queue, events, projections) are
-        # constructed or retained by this facade.
         self.__repository = repository
-
-    @property
-    def queued_count(self) -> int:
-        return 0
-
-    def recover(self) -> NoReturn:
-        self._reject("recovery")
-
-    def submit(self, spec: Any) -> NoReturn:
-        del spec
-        self._reject("campaign submit")
-
-    def dispatch_ready(self) -> NoReturn:
-        self._reject("campaign dispatch")
-
-    def request_pause(self, campaign_id: str) -> NoReturn:
-        del campaign_id
-        self._reject("campaign pause")
-
-    def mark_paused(self, campaign_id: str) -> NoReturn:
-        del campaign_id
-        self._reject("campaign pause transition")
-
-    def resume(self, campaign_id: str) -> NoReturn:
-        del campaign_id
-        self._reject("campaign resume")
-
-    def request_cancel(self, campaign_id: str) -> NoReturn:
-        del campaign_id
-        self._reject("campaign cancel")
-
-    def mark_cancelled(self, campaign_id: str) -> NoReturn:
-        del campaign_id
-        self._reject("campaign cancel transition")
-
-    def complete(
-        self,
-        campaign_id: str,
-        *,
-        succeeded: bool,
-        error: str | None = None,
-    ) -> NoReturn:
-        del campaign_id, succeeded, error
-        self._reject("campaign completion")
 
     def get(self, campaign_id: str) -> CampaignRecord:
         record = self.__repository.get(campaign_id)
@@ -158,11 +110,11 @@ class ReadOnlyCampaignEvidenceRecordStore(_ReadOnlyBoundary):
 
 
 @dataclass(frozen=True, slots=True)
-class Agent4OperatorReadContext(_ReadOnlyBoundary):
+class Agent4OperatorReadContext:
     """The complete authority intentionally exposed by production read mode."""
 
     paths: Agent4RuntimePaths
-    scheduler: ReadOnlyCampaignSchedulerFacade
+    scheduler: ReadOnlyCampaignReader
     timeline: ReadOnlyCampaignTimelineStore
     evidence_records: ReadOnlyCampaignEvidenceRecordStore
     query: CampaignTimelineQueryService
@@ -170,21 +122,15 @@ class Agent4OperatorReadContext(_ReadOnlyBoundary):
     operator: Agent4OperatorReadService
     evidence_operator: Agent4OperatorEvidenceReadService
 
-    def recover(self) -> NoReturn:
-        self._reject("recovery")
 
-    def reconcile_projections(self) -> NoReturn:
-        self._reject("projection reconciliation")
-
-
-def _claim_canonical_root(root: Path, owner: ReadOnlyCampaignSchedulerFacade) -> None:
+def _claim_canonical_root(root: Path, owner: ReadOnlyCampaignReader) -> None:
     """Share the full-runtime single-owner registry without creating a writer runtime."""
 
     canonical_root = _canonical_root(root)
     with _WRITER_ROOTS_LOCK:
         if _WRITER_ROOTS.get(canonical_root) is not None:
             raise CampaignValidationError(
-                "an Agent 4 writer context already owns this canonical dataroot"
+                "an Agent 4 context already owns this canonical dataroot"
             )
         _WRITER_ROOTS[canonical_root] = owner
 
@@ -194,7 +140,7 @@ def compose_agent4_operator_read_context(root: Path | str) -> Agent4OperatorRead
 
     paths = Agent4RuntimePaths.under(root)
     repository = JsonCampaignRepository(paths.campaigns)
-    scheduler = ReadOnlyCampaignSchedulerFacade(repository)
+    scheduler = ReadOnlyCampaignReader(repository)
 
     timeline = ReadOnlyCampaignTimelineStore(JsonCampaignTimelineStore(paths.timeline))
     evidence_records = ReadOnlyCampaignEvidenceRecordStore(
@@ -213,9 +159,9 @@ def compose_agent4_operator_read_context(root: Path | str) -> Agent4OperatorRead
         query=evidence_query,
     )
 
-    # Claim only after every side-effect-free collaborator has validated.  The
-    # shared weak registry also makes a later full writer composition for this
-    # root fail closed in the same process, and vice versa.
+    # Claim only after every side-effect-free collaborator has validated. The
+    # shared weak registry makes a later full writer composition for this root
+    # fail closed in the same process, and vice versa.
     _claim_canonical_root(paths.root, scheduler)
 
     return Agent4OperatorReadContext(
