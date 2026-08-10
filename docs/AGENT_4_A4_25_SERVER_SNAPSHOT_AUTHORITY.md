@@ -1,6 +1,6 @@
 # Agent 4 A4-25 — server-side snapshot authority
 
-Status: **A4-25a activation guard + A4-25b immutable store + A4-25c caller-driven writer publication exact-head qualified on stacked draft slices; A4-25d snapshot-bound server read/wire layer implemented as a dormant draft; A4-25e client/race activation remains deferred**.
+Status: **A4-25a activation guard + A4-25b immutable store + A4-25c caller-driven writer publication + A4-25d snapshot-bound server read/wire layer exact-head qualified on stacked dormant draft slices; A4-25e client/race activation remains deferred**.
 
 Issue: #458.
 
@@ -92,7 +92,7 @@ The stacked A4-25c implementation keeps publication explicitly caller-driven. `A
 
 A publication captures the complete campaign set, validates each append-only timeline/evidence chain, rejects pending projections, verifies evidence bindings against timeline heads in the same capture, and performs optimistic revalidation before the immutable root commit. Unchanged content-addressed campaign blobs are reused; an unchanged complete mapping reuses the current root rather than manufacturing a new sequence. Retention/GC remains a separate caller action after the commit path.
 
-A4-25c is exact-head qualified as a dormant stacked slice. This does not relax the production mount: A4-25d must qualify the immutable server read/wire path, and A4-25e must then qualify client/race behaviour before any concurrent production activation can be considered.
+A4-25c and the dormant A4-25d server read/wire slice are exact-head qualified. This still does not relax the production mount: A4-25e must qualify client/race behaviour, and production wiring remains a separate deliberate activation decision.
 
 ## Read protocol
 
@@ -193,7 +193,7 @@ This guard is intentionally stronger than relying on the current entrypoint to "
 - stale/expired ids fail closed;
 - backend remains a transparent authenticated proxy.
 
-**Stacked status:** implemented as dormant v2 draft in PR #470; exact-head qualification remains mandatory before this slice is considered complete.
+**Stacked status:** implemented and exact-head qualified as a dormant v2 slice in draft PR #470. This qualification does not authorize production wiring or A4-25e client activation.
 
 ### A4-25e — Android and race qualification
 
