@@ -5,6 +5,7 @@ import android.content.pm.ApplicationInfo
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import dk.ternedal.modelrig.data.TokenStore
+import dk.ternedal.modelrig.net.Agent4OperatorClient
 import dk.ternedal.modelrig.net.Agent4SnapshotOperatorClient
 import dk.ternedal.modelrig.ui.Agent4SnapshotDetailPolicy
 import org.json.JSONArray
@@ -18,7 +19,8 @@ import java.time.Instant
  *
  * Invoke explicitly with adb using only the safe `stage` extra. The probe reads
  * the already-paired backend URL/token from private TokenStore and never accepts
- * credentials, roots or cursors through adb. Continuation state is app-private.
+ * credentials, roots or cursors through adb. Continuation state is app-private,
+ * so the app/process may be restarted between stages without weakening the test.
  */
 class Agent4SnapshotPhysicalProbeActivity : ComponentActivity() {
     companion object {
@@ -30,8 +32,12 @@ class Agent4SnapshotPhysicalProbeActivity : ComponentActivity() {
         private val ALLOWED_STAGES = setOf(
             "list-start",
             "list-continue",
-            "detail-start",
-            "detail-continue",
+            "detail-capture",
+            "timeline-start",
+            "timeline-continue",
+            "evidence-start",
+            "evidence-continue",
+            "verification",
             "fresh-root",
             "unknown-root",
         )
@@ -66,18 +72,19 @@ class Agent4SnapshotPhysicalProbeActivity : ComponentActivity() {
         return when (stage) {
             "list-start" -> listStart(client, baseUrl)
             "list-continue" -> listContinue(client, baseUrl)
-            "detail-start" -> detailStart(client, baseUrl)
-            "detail-continue" -> detailContinue(client, baseUrl)
+            "detail-capture" -> detailCapture(client, baseUrl)
+            "timeline-start" -> timelineStart(client, baseUrl)
+            "timeline-continue" -> timelineContinue(client, baseUrl)
+            "evidence-start" -> evidenceStart(client, baseUrl)
+            "evidence-continue" -> evidenceContinue(client, baseUrl)
+            "verification" -> verification(client, baseUrl)
             "fresh-root" -> freshRoot(client, baseUrl)
             "unknown-root" -> unknownRoot(client, baseUrl)
             else -> error("unreachable A4-25f probe stage")
         }
     }
 
-    private fun listStart(
-        client: Agent4SnapshotOperatorClient,
-        baseUrl: String,
-    ): JSONObject {
+    private fun listStart(client: Agent4SnapshotOperatorClient, baseUrl: String): JSONObject {
         clearPrefix("list.")
         val page = client.listCampaigns(limit = PAGE_LIMIT)
         require(page.hasMore) { "physical list fixture did not cross page boundary" }
@@ -87,24 +94,23 @@ class Agent4SnapshotPhysicalProbeActivity : ComponentActivity() {
         saveSnapshot("list.root", page.snapshotId)
         saveCursor("list.next", page.nextCursor)
         saveCursor("list.head", page.headCursor)
-        prefs().edit().putString("list.ids", JSONArray(ids).toString()).commit().also {
-            require(it) { "unable to persist A4-25f list ids" }
+        require(prefs().edit().putString("list.ids", JSONArray(ids).toString()).commit()) {
+            "unable to persist A4-25f list ids"
         }
-        return success(stage = "list-start", baseUrl = baseUrl, snapshot = page.snapshotId)
-            .put("page_count", page.campaigns.size)
+        return success("list-start", baseUrl, page.snapshotId)
+            .put("page_count", ids.size)
             .put("has_more", page.hasMore)
             .put("next_cursor_sha256", sha256(page.nextCursor.encoded))
             .put("head_cursor_sha256", sha256(page.headCursor.encoded))
     }
 
-    private fun listContinue(
-        client: Agent4SnapshotOperatorClient,
-        baseUrl: String,
-    ): JSONObject {
+    private fun listContinue(client: Agent4SnapshotOperatorClient, baseUrl: String): JSONObject {
         val root = loadSnapshot("list.root")
         val next = loadCursor("list.next")
         val head = loadCursor("list.head")
-        val firstIds = jsonStringList(prefs().getString("list.ids", null) ?: error("list baseline ids missing"))
+        val firstIds = jsonStringList(
+            prefs().getString("list.ids", null) ?: error("list baseline ids missing"),
+        )
         val page = client.listCampaigns(
             snapshotId = root,
             after = next,
@@ -121,7 +127,7 @@ class Agent4SnapshotPhysicalProbeActivity : ComponentActivity() {
         require((firstIds + secondIds).distinct().size == firstIds.size + secondIds.size) {
             "physical list continuation contains duplicate campaign ids"
         }
-        return success(stage = "list-continue", baseUrl = baseUrl, snapshot = page.snapshotId)
+        return success("list-continue", baseUrl, page.snapshotId)
             .put("first_page_count", firstIds.size)
             .put("second_page_count", secondIds.size)
             .put("combined_count", firstIds.size + secondIds.size)
@@ -130,115 +136,192 @@ class Agent4SnapshotPhysicalProbeActivity : ComponentActivity() {
             .put("head_cursor_sha256", sha256(page.headCursor.encoded))
     }
 
-    private fun detailStart(
-        client: Agent4SnapshotOperatorClient,
-        baseUrl: String,
-    ): JSONObject {
+    private fun detailCapture(client: Agent4SnapshotOperatorClient, baseUrl: String): JSONObject {
         clearPrefix("detail.")
         val detail = client.campaign(SELECTED_CAMPAIGN_ID)
         val root = detail.snapshotId
-        val timeline = client.timeline(SELECTED_CAMPAIGN_ID, root, limit = PAGE_LIMIT)
-        val evidence = client.evidencePage(SELECTED_CAMPAIGN_ID, root, limit = PAGE_LIMIT)
-        val verification = client.evidenceVerification(SELECTED_CAMPAIGN_ID, root)
-        Agent4SnapshotDetailPolicy.requireConsistent(detail, timeline, evidence, verification)
-        require(timeline.hasMore) { "physical timeline fixture did not cross page boundary" }
-        require(evidence.hasMore) { "physical evidence fixture did not cross page boundary" }
-        require(timeline.entries.size == PAGE_LIMIT) { "physical timeline first page size drifted" }
-        require(evidence.records.size == PAGE_LIMIT) { "physical evidence first page size drifted" }
         saveSnapshot("detail.root", root)
-        saveCursor("detail.timeline.next", timeline.nextCursor)
-        saveCursor("detail.evidence.next", evidence.nextCursor)
-        prefs().edit()
-            .putInt("detail.timeline.first_count", timeline.entries.size)
-            .putInt("detail.evidence.first_count", evidence.records.size)
-            .commit().also { require(it) { "unable to persist A4-25f detail counts" } }
-        return success(stage = "detail-start", baseUrl = baseUrl, snapshot = root)
-            .put("campaign_revision_record_sha256", sha256(detail.campaign.record.json))
-            .put("timeline_first_count", timeline.entries.size)
-            .put("timeline_head_sequence", timeline.headCursor.sequence)
-            .put("timeline_head_hash", timeline.headCursor.hash)
-            .put("evidence_first_count", evidence.records.size)
-            .put("evidence_head_sequence", evidence.headCursor.sequence)
-            .put("evidence_head_hash", evidence.headCursor.hash)
-            .put("verification_count", verification.recordCount)
-            .put("verification_head_hash", verification.headHash)
+        val editor = prefs().edit()
+            .putInt("detail.timeline.count", detail.campaign.timelineEntries)
+            .putString("detail.timeline.hash", detail.campaign.latestTimelineHash)
+            .putString("detail.status", detail.campaign.status.name)
+            .putString("detail.record.sha256", sha256(detail.campaign.record.value))
+        require(editor.commit()) { "unable to persist A4-25f detail baseline" }
+        return success("detail-capture", baseUrl, root)
+            .put("timeline_count", detail.campaign.timelineEntries)
+            .put("timeline_head_hash", detail.campaign.latestTimelineHash)
+            .put("campaign_status", detail.campaign.status.name)
+            .put("campaign_record_sha256", sha256(detail.campaign.record.value))
     }
 
-    private fun detailContinue(
-        client: Agent4SnapshotOperatorClient,
-        baseUrl: String,
-    ): JSONObject {
+    private fun timelineStart(client: Agent4SnapshotOperatorClient, baseUrl: String): JSONObject {
         val root = loadSnapshot("detail.root")
-        val timelineNext = loadCursor("detail.timeline.next")
-        val evidenceNext = loadCursor("detail.evidence.next")
-        val timeline = client.timeline(
-            SELECTED_CAMPAIGN_ID,
-            root,
-            after = timelineNext,
-            limit = PAGE_LIMIT,
-        )
-        val evidence = client.evidencePage(
-            SELECTED_CAMPAIGN_ID,
-            root,
-            after = evidenceNext,
-            limit = PAGE_LIMIT,
-        )
-        val verification = client.evidenceVerification(SELECTED_CAMPAIGN_ID, root)
-        require(timeline.snapshotId == root && evidence.snapshotId == root && verification.snapshotId == root) {
-            "detail continuation changed retained root"
+        val page = client.timeline(SELECTED_CAMPAIGN_ID, root, limit = PAGE_LIMIT)
+        require(page.snapshotId == root) { "timeline changed retained root" }
+        require(page.hasMore) { "physical timeline fixture did not cross page boundary" }
+        require(page.entries.size == PAGE_LIMIT) { "physical timeline first page size drifted" }
+        require(page.headCursor.sequence == prefs().getInt("detail.timeline.count", -1)) {
+            "A4-24 campaign/timeline count overlap changed under retained root"
         }
-        require(!timeline.hasMore) { "physical timeline unexpectedly needs a third page" }
-        require(!evidence.hasMore) { "physical evidence unexpectedly needs a third page" }
-        val firstTimeline = prefs().getInt("detail.timeline.first_count", -1)
-        val firstEvidence = prefs().getInt("detail.evidence.first_count", -1)
-        require(firstTimeline == PAGE_LIMIT && firstEvidence == PAGE_LIMIT) { "detail baseline counts missing" }
-        require(firstTimeline + timeline.entries.size == timeline.headCursor.sequence) {
-            "timeline continuation does not close exactly at retained head"
+        require(page.headCursor.hash == prefs().getString("detail.timeline.hash", null)) {
+            "A4-24 campaign/timeline hash overlap changed under retained root"
         }
-        require(firstEvidence + evidence.records.size == evidence.headCursor.sequence) {
-            "evidence continuation does not close exactly at retained head"
+        saveCursor("detail.timeline.next", page.nextCursor)
+        saveCursor("detail.timeline.head", page.headCursor)
+        require(prefs().edit().putInt("detail.timeline.first_count", page.entries.size).commit()) {
+            "unable to persist A4-25f timeline baseline"
         }
-        require(verification.recordCount == evidence.headCursor.sequence) {
-            "verification no longer matches retained evidence head"
-        }
-        require(verification.headHash == evidence.headCursor.hash) {
-            "verification hash no longer matches retained evidence head"
-        }
-        return success(stage = "detail-continue", baseUrl = baseUrl, snapshot = root)
-            .put("timeline_second_count", timeline.entries.size)
-            .put("timeline_combined_count", firstTimeline + timeline.entries.size)
-            .put("timeline_head_sequence", timeline.headCursor.sequence)
-            .put("timeline_head_hash", timeline.headCursor.hash)
-            .put("evidence_second_count", evidence.records.size)
-            .put("evidence_combined_count", firstEvidence + evidence.records.size)
-            .put("evidence_head_sequence", evidence.headCursor.sequence)
-            .put("evidence_head_hash", evidence.headCursor.hash)
-            .put("verification_count", verification.recordCount)
-            .put("verification_head_hash", verification.headHash)
+        return success("timeline-start", baseUrl, page.snapshotId)
+            .put("page_count", page.entries.size)
+            .put("has_more", page.hasMore)
+            .put("head_sequence", page.headCursor.sequence)
+            .put("head_hash", page.headCursor.hash)
+            .put("next_cursor_sha256", sha256(page.nextCursor.encoded))
     }
 
-    private fun freshRoot(
-        client: Agent4SnapshotOperatorClient,
-        baseUrl: String,
-    ): JSONObject {
+    private fun timelineContinue(client: Agent4SnapshotOperatorClient, baseUrl: String): JSONObject {
+        val root = loadSnapshot("detail.root")
+        val next = loadCursor("detail.timeline.next")
+        val page = client.timeline(SELECTED_CAMPAIGN_ID, root, after = next, limit = PAGE_LIMIT)
+        require(page.snapshotId == root) { "timeline continuation changed retained root" }
+        require(!page.hasMore) { "physical timeline unexpectedly needs a third page" }
+        val first = prefs().getInt("detail.timeline.first_count", -1)
+        require(first == PAGE_LIMIT) { "timeline baseline count missing" }
+        require(first + page.entries.size == page.headCursor.sequence) {
+            "timeline continuation does not close at retained head"
+        }
+        require(page.headCursor.hash == prefs().getString("detail.timeline.hash", null)) {
+            "timeline continuation head hash changed under retained root"
+        }
+        return success("timeline-continue", baseUrl, page.snapshotId)
+            .put("second_page_count", page.entries.size)
+            .put("combined_count", first + page.entries.size)
+            .put("head_sequence", page.headCursor.sequence)
+            .put("head_hash", page.headCursor.hash)
+    }
+
+    private fun evidenceStart(client: Agent4SnapshotOperatorClient, baseUrl: String): JSONObject {
+        val root = loadSnapshot("detail.root")
+        val page = client.evidencePage(SELECTED_CAMPAIGN_ID, root, limit = PAGE_LIMIT)
+        require(page.snapshotId == root) { "evidence changed retained root" }
+        require(page.hasMore) { "physical evidence fixture did not cross page boundary" }
+        require(page.records.size == PAGE_LIMIT) { "physical evidence first page size drifted" }
+        saveCursor("detail.evidence.next", page.nextCursor)
+        saveCursor("detail.evidence.head", page.headCursor)
+        require(
+            prefs().edit()
+                .putInt("detail.evidence.first_count", page.records.size)
+                .putInt("detail.evidence.head.sequence", page.headCursor.sequence ?: -1)
+                .putString("detail.evidence.head.hash", page.headCursor.hash)
+                .commit(),
+        ) { "unable to persist A4-25f evidence baseline" }
+        return success("evidence-start", baseUrl, page.snapshotId)
+            .put("page_count", page.records.size)
+            .put("has_more", page.hasMore)
+            .put("head_sequence", page.headCursor.sequence)
+            .put("head_hash", page.headCursor.hash)
+            .put("next_cursor_sha256", sha256(page.nextCursor.encoded))
+    }
+
+    private fun evidenceContinue(client: Agent4SnapshotOperatorClient, baseUrl: String): JSONObject {
+        val root = loadSnapshot("detail.root")
+        val next = loadCursor("detail.evidence.next")
+        val page = client.evidencePage(SELECTED_CAMPAIGN_ID, root, after = next, limit = PAGE_LIMIT)
+        require(page.snapshotId == root) { "evidence continuation changed retained root" }
+        require(!page.hasMore) { "physical evidence unexpectedly needs a third page" }
+        val first = prefs().getInt("detail.evidence.first_count", -1)
+        require(first == PAGE_LIMIT) { "evidence baseline count missing" }
+        require(first + page.records.size == page.headCursor.sequence) {
+            "evidence continuation does not close at retained head"
+        }
+        require(page.headCursor.hash == prefs().getString("detail.evidence.head.hash", null)) {
+            "evidence continuation head hash changed under retained root"
+        }
+        return success("evidence-continue", baseUrl, page.snapshotId)
+            .put("second_page_count", page.records.size)
+            .put("combined_count", first + page.records.size)
+            .put("head_sequence", page.headCursor.sequence)
+            .put("head_hash", page.headCursor.hash)
+    }
+
+    private fun verification(client: Agent4SnapshotOperatorClient, baseUrl: String): JSONObject {
+        val root = loadSnapshot("detail.root")
+        val result = client.evidenceVerification(SELECTED_CAMPAIGN_ID, root)
+        require(result.snapshotId == root) { "verification changed retained root" }
+        val evidenceHead = loadCursor("detail.evidence.head")
+        require(result.recordCount == evidenceHead.sequence) {
+            "A4-24 evidence count overlap changed under retained root"
+        }
+        require(result.headHash == evidenceHead.hash) {
+            "A4-24 evidence hash overlap changed under retained root"
+        }
+        runFullA424Policy(root, result)
+        return success("verification", baseUrl, result.snapshotId)
+            .put("record_count", result.recordCount)
+            .put("head_hash", result.headHash)
+            .put("latest_timeline_head_hash", result.latestTimelineHeadHash)
+            .put("a4_24_policy", "passed")
+    }
+
+    private fun runFullA424Policy(
+        root: Agent4SnapshotOperatorClient.SnapshotId,
+        verification: Agent4SnapshotOperatorClient.EvidenceVerification,
+    ) {
+        val timelineHead = loadCursor("detail.timeline.head")
+        val evidenceHead = loadCursor("detail.evidence.head")
+        val status = Agent4OperatorClient.CampaignStatus.valueOf(
+            prefs().getString("detail.status", null) ?: error("detail status missing"),
+        )
+        val overview = Agent4OperatorClient.CampaignOverview(
+            campaignId = SELECTED_CAMPAIGN_ID,
+            name = "A4-25f physical snapshot primary",
+            status = status,
+            timelineEntries = prefs().getInt("detail.timeline.count", -1),
+            eventEntries = prefs().getInt("detail.timeline.count", -1),
+            evidenceEntries = verification.recordCount,
+            latestTimelineHash = prefs().getString("detail.timeline.hash", null),
+            record = Agent4OperatorClient.CanonicalJson("{}"),
+        )
+        val detail = Agent4SnapshotOperatorClient.CampaignDetail(root, overview)
+        val timeline = Agent4SnapshotOperatorClient.TimelinePage(
+            snapshotId = root,
+            campaignId = SELECTED_CAMPAIGN_ID,
+            entries = emptyList(),
+            startCursor = timelineHead,
+            nextCursor = timelineHead,
+            headCursor = timelineHead,
+            hasMore = false,
+        )
+        val evidence = Agent4SnapshotOperatorClient.EvidencePage(
+            snapshotId = root,
+            campaignId = SELECTED_CAMPAIGN_ID,
+            records = emptyList(),
+            startCursor = evidenceHead,
+            nextCursor = evidenceHead,
+            headCursor = evidenceHead,
+            hasMore = false,
+        )
+        Agent4SnapshotDetailPolicy.requireConsistent(detail, timeline, evidence, verification)
+    }
+
+    private fun freshRoot(client: Agent4SnapshotOperatorClient, baseUrl: String): JSONObject {
         val previous = prefs().getString("detail.root.value", null)
             ?: prefs().getString("list.root.value", null)
             ?: error("no retained baseline root is available")
         val fresh = client.campaign(SELECTED_CAMPAIGN_ID)
-        require(fresh.snapshotId.value != previous) {
-            "fresh flow did not observe a newer published root"
-        }
-        return success(stage = "fresh-root", baseUrl = baseUrl, snapshot = fresh.snapshotId)
+        require(fresh.snapshotId.value != previous) { "fresh flow did not observe a newer published root" }
+        return success("fresh-root", baseUrl, fresh.snapshotId)
             .put("previous_snapshot_id", previous)
             .put("root_changed", true)
-            .put("campaign_record_sha256", sha256(fresh.campaign.record.json))
+            .put("campaign_record_sha256", sha256(fresh.campaign.record.value))
     }
 
-    private fun unknownRoot(
-        client: Agent4SnapshotOperatorClient,
-        baseUrl: String,
-    ): JSONObject {
-        val unknown = Agent4SnapshotOperatorClient.SnapshotId("f".repeat(64))
+    private fun unknownRoot(client: Agent4SnapshotOperatorClient, baseUrl: String): JSONObject {
+        val retained = prefs().getString("detail.root.value", null)
+            ?: prefs().getString("list.root.value", null)
+            ?: error("no retained baseline root is available")
+        val replacement = if (retained[0] == '0') '1' else '0'
+        val unknown = Agent4SnapshotOperatorClient.SnapshotId(replacement + retained.substring(1))
         val failure = runCatching {
             client.campaign(SELECTED_CAMPAIGN_ID, unknown)
         }.exceptionOrNull() as? Agent4SnapshotOperatorClient.OperatorException
@@ -249,6 +332,7 @@ class Agent4SnapshotPhysicalProbeActivity : ComponentActivity() {
         require(failure.statusCode == 410) { "unknown root did not return HTTP 410" }
         return baseReceipt("unknown-root", baseUrl)
             .put("success", true)
+            .put("unknown_snapshot_id", unknown.value)
             .put("expected_error_kind", failure.kind.name)
             .put("http_status", failure.statusCode)
             .put("request_count_semantics", "single_no_fallback")
@@ -270,8 +354,7 @@ class Agent4SnapshotPhysicalProbeActivity : ComponentActivity() {
             base.put("error_kind", failure.kind.name)
             failure.statusCode?.let { base.put("http_status", it) }
         }
-        // Intentionally omit throwable.message: transport/server errors can carry
-        // remote detail strings. Physical evidence only needs typed fail-closed state.
+        // Deliberately omit failure.message: remote details are not physical evidence.
         return base
     }
 
@@ -349,7 +432,8 @@ class Agent4SnapshotPhysicalProbeActivity : ComponentActivity() {
     }
 
     private fun sha256(value: String): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(Charsets.UTF_8))
         return "sha256:" + digest.joinToString("") { "%02x".format(it) }
     }
 }
