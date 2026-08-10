@@ -54,13 +54,16 @@ def _campaign_snapshot(
     revision: int = 0,
     marker: str = "1",
 ) -> OperatorCampaignSnapshot:
+    evidence_sequence = revision
     return OperatorCampaignSnapshot.create(
         _record(campaign_id, revision),
         timeline_head_sequence=revision + 1,
         timeline_head_sha256=marker * 64,
-        evidence_head_sequence=revision,
-        evidence_head_sha256="2" * 64,
-        latest_evidence_timeline_head_sha256="3" * 64,
+        evidence_head_sequence=evidence_sequence,
+        evidence_head_sha256=("2" * 64 if evidence_sequence else None),
+        latest_evidence_timeline_head_sha256=(
+            "3" * 64 if evidence_sequence else None
+        ),
     )
 
 
@@ -100,6 +103,33 @@ class OperatorSnapshotDomainTests(unittest.TestCase):
         ):
             OperatorCampaignSnapshot.from_dict(mutated)
 
+    def test_empty_evidence_chain_uses_null_heads_not_synthetic_hashes(self) -> None:
+        snapshot = _campaign_snapshot("campaign-a", revision=0)
+        value = snapshot.to_dict()
+
+        self.assertEqual(value["evidence_head"], {"sequence": 0, "sha256": None})
+        self.assertIsNone(value["latest_evidence_timeline_head_sha256"])
+        with self.assertRaisesRegex(ValueError, "must be null when sequence is 0"):
+            OperatorCampaignSnapshot.create(
+                _record("campaign-a"),
+                timeline_head_sequence=1,
+                timeline_head_sha256="1" * 64,
+                evidence_head_sequence=0,
+                evidence_head_sha256="2" * 64,
+                latest_evidence_timeline_head_sha256=None,
+            )
+
+    def test_nonempty_head_requires_real_sha256(self) -> None:
+        with self.assertRaisesRegex(ValueError, "evidence_head_sha256"):
+            OperatorCampaignSnapshot.create(
+                _record("campaign-a", 1),
+                timeline_head_sequence=2,
+                timeline_head_sha256="1" * 64,
+                evidence_head_sequence=1,
+                evidence_head_sha256=None,
+                latest_evidence_timeline_head_sha256="3" * 64,
+            )
+
     def test_root_id_is_independent_of_campaign_mapping_insertion_order(self) -> None:
         left = _campaign_snapshot("campaign-a", marker="a")
         right = _campaign_snapshot("campaign-b", marker="b")
@@ -124,6 +154,22 @@ class OperatorSnapshotDomainTests(unittest.TestCase):
 
         self.assertEqual(first.snapshot_id, second.snapshot_id)
         self.assertEqual(OperatorRootSnapshot.from_dict(first.to_dict()), first)
+
+    def test_root_lineage_shape_fails_closed(self) -> None:
+        with self.assertRaisesRegex(ValueError, "genesis root"):
+            OperatorRootSnapshot.create(
+                root_sequence=1,
+                parent_snapshot_id="a" * 64,
+                published_at=BASE_TIME,
+                campaigns={},
+            )
+        with self.assertRaisesRegex(ValueError, "non-genesis root"):
+            OperatorRootSnapshot.create(
+                root_sequence=2,
+                parent_snapshot_id=None,
+                published_at=BASE_TIME,
+                campaigns={},
+            )
 
 
 class JsonOperatorSnapshotStoreTests(unittest.TestCase):
@@ -304,7 +350,7 @@ class JsonOperatorSnapshotStoreTests(unittest.TestCase):
             )
             self.assertEqual(base.current_snapshot_id(), second_root.snapshot_id)
 
-    def test_stale_parent_and_noncontiguous_sequence_fail_before_commit(self) -> None:
+    def test_stale_parent_sequence_and_backwards_time_fail_before_commit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = JsonOperatorSnapshotStore(directory)
             campaign = store.write_campaign_snapshot(
@@ -327,6 +373,21 @@ class JsonOperatorSnapshotStoreTests(unittest.TestCase):
             with self.assertRaisesRegex(OperatorSnapshotConflictError, "sequence"):
                 store.publish_root(
                     wrong_sequence,
+                    expected_parent=first_root.snapshot_id,
+                )
+
+            backwards = _root_snapshot(
+                sequence=2,
+                parent=first_root.snapshot_id,
+                published_at=BASE_TIME - timedelta(seconds=1),
+                snapshots=(campaign,),
+            )
+            with self.assertRaisesRegex(
+                OperatorSnapshotConflictError,
+                "published_at",
+            ):
+                store.publish_root(
+                    backwards,
                     expected_parent=first_root.snapshot_id,
                 )
 
