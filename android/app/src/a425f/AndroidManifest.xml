@@ -2,12 +2,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <!--
-          A4-25f physical probe only. This source set exists only in the
-          dedicated applicationId-suffixed physical-test variant. The activity
-          reads that variant's separately paired rig credential from its private
+          A4-25f physical probes only. This source set exists only in the
+          dedicated applicationId-suffixed physical-test variant. The activities
+          read that variant's separately paired rig credential from its private
           AndroidKeyStore-backed TokenStore; no credential is accepted through
-          adb extras or written to the physical receipt.
+          adb extras or written to physical receipts.
         -->
+        <activity
+            android:name=".debug.Agent4PhysicalDeviceInfoActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true" />
         <activity
             android:name=".debug.Agent4SnapshotPhysicalProbeActivity"
             android:exported="true"
