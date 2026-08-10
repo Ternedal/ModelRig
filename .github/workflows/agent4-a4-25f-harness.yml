@@ -53,6 +53,10 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python tests/workflow_agent4_a4_25f_audit.py
+      - name: Run A4-25f evidence-completion and human-decision contracts
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python tests/workflow_agent4_a4_25f_evidence_completion.py
       - name: Test isolated A4-25f dual-listener backend boundary
         working-directory: backend
         run: go test ./cmd/modelrig-a4-25f-backend
