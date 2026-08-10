@@ -25,17 +25,24 @@ from app.agent4.production_bootstrap import (  # noqa: E402
 from app.agent4.service import CampaignNotFoundError, CampaignSchedulerService  # noqa: E402
 
 
-def _snapshot(root: Path) -> tuple[tuple[str, str], ...]:
+def _snapshot(root: Path) -> tuple[tuple[str, str, str], ...]:
     if not root.exists():
         return ()
-    values: list[tuple[str, str]] = []
-    for path in sorted(item for item in root.rglob("*") if item.is_file()):
-        values.append(
-            (
-                path.relative_to(root).as_posix(),
-                hashlib.sha256(path.read_bytes()).hexdigest(),
+    values: list[tuple[str, str, str]] = []
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        if path.is_dir():
+            values.append((relative, "directory", ""))
+        elif path.is_file():
+            values.append(
+                (
+                    relative,
+                    "file",
+                    hashlib.sha256(path.read_bytes()).hexdigest(),
+                )
             )
-        )
+        else:
+            values.append((relative, "other", ""))
     return tuple(values)
 
 
