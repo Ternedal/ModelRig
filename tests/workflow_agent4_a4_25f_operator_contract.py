@@ -79,7 +79,8 @@ class A425fPhysicalOperatorContractTests(unittest.TestCase):
         self.assertIn('Remove-Item Env:MODELRIG_ADMIN_KEY', self.operator)
         self.assertNotRegex(self.operator, re.compile(r'(?i)putString\([^\n]*token'))
         self.assertNotIn('pairing_code', self.operator.lower())
-        self.assertNotIn('admin_key =', self.operator.lower())
+        self.assertNotRegex(self.operator, re.compile(r'(?im)^\s*admin_key\s*='))
+        self.assertNotIn('"admin_key"', self.operator.lower())
         for text in (self.operator, self.cursor):
             self.assertIn('credential_in_receipt = $false', text)
             self.assertIn('raw_cursor_in_receipt = $false', text)
