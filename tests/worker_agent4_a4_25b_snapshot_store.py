@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "worker"))
@@ -74,7 +75,9 @@ def _root_snapshot(
         root_sequence=sequence,
         parent_snapshot_id=parent,
         published_at=published_at,
-        campaigns={snapshot.campaign_id: snapshot.snapshot_id for snapshot in snapshots},
+        campaigns={
+            snapshot.campaign_id: snapshot.snapshot_id for snapshot in snapshots
+        },
     )
 
 
@@ -84,10 +87,8 @@ class OperatorSnapshotDomainTests(unittest.TestCase):
         second = _campaign_snapshot("campaign-a")
 
         self.assertEqual(first.snapshot_id, second.snapshot_id)
-        self.assertEqual(
-            OperatorCampaignSnapshot.from_dict(first.to_dict()),
-            first,
-        )
+        self.assertEqual(OperatorCampaignSnapshot.from_dict(first.to_dict()), first)
+
         mutated = dict(first.to_dict())
         mutated["timeline_head"] = {
             "sequence": 1,
@@ -145,10 +146,7 @@ class JsonOperatorSnapshotStoreTests(unittest.TestCase):
             self.assertEqual(store.current_snapshot_id(), root.snapshot_id)
             self.assertEqual(store.load_current(), root)
             self.assertEqual(store.load_root(root.snapshot_id), root)
-            self.assertEqual(
-                store.load_campaign(campaign.snapshot_id),
-                campaign,
-            )
+            self.assertEqual(store.load_campaign(campaign.snapshot_id), campaign)
 
     def test_crash_before_pointer_replace_keeps_old_root_and_hides_new_root(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -165,11 +163,7 @@ class JsonOperatorSnapshotStoreTests(unittest.TestCase):
             store.publish_root(first_root, expected_parent=None)
 
             second_campaign = store.write_campaign_snapshot(
-                _campaign_snapshot(
-                    "campaign-a",
-                    revision=1,
-                    marker="b",
-                )
+                _campaign_snapshot("campaign-a", revision=1, marker="b")
             )
             second_root = _root_snapshot(
                 sequence=2,
@@ -180,13 +174,13 @@ class JsonOperatorSnapshotStoreTests(unittest.TestCase):
 
             def fail(point: str) -> None:
                 if point == "before_current_replace":
-                    raise RuntimeError("injected crash")
+                    raise RuntimeError("injected pre-commit crash")
 
             crashing = JsonOperatorSnapshotStore(
                 directory,
                 failure_injector=fail,
             )
-            with self.assertRaisesRegex(RuntimeError, "injected crash"):
+            with self.assertRaisesRegex(RuntimeError, "pre-commit"):
                 crashing.publish_root(
                     second_root,
                     expected_parent=first_root.snapshot_id,
@@ -201,6 +195,71 @@ class JsonOperatorSnapshotStoreTests(unittest.TestCase):
             self.assertIn(second_root.snapshot_id, removed)
             with self.assertRaises(OperatorSnapshotNotFoundError):
                 store.load_campaign(second_campaign.snapshot_id)
+
+    def test_crash_after_pointer_replace_means_new_root_is_already_committed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = JsonOperatorSnapshotStore(directory)
+            first_campaign = store.write_campaign_snapshot(
+                _campaign_snapshot("campaign-a", marker="a")
+            )
+            first_root = _root_snapshot(
+                sequence=1,
+                parent=None,
+                published_at=BASE_TIME,
+                snapshots=(first_campaign,),
+            )
+            store.publish_root(first_root, expected_parent=None)
+
+            second_campaign = store.write_campaign_snapshot(
+                _campaign_snapshot("campaign-a", revision=1, marker="b")
+            )
+            second_root = _root_snapshot(
+                sequence=2,
+                parent=first_root.snapshot_id,
+                published_at=BASE_TIME + timedelta(minutes=1),
+                snapshots=(second_campaign,),
+            )
+
+            def fail(point: str) -> None:
+                if point == "after_current_replace":
+                    raise RuntimeError("injected post-commit crash")
+
+            crashing = JsonOperatorSnapshotStore(
+                directory,
+                failure_injector=fail,
+            )
+            with self.assertRaisesRegex(RuntimeError, "post-commit"):
+                crashing.publish_root(
+                    second_root,
+                    expected_parent=first_root.snapshot_id,
+                )
+
+            self.assertEqual(store.current_snapshot_id(), second_root.snapshot_id)
+            self.assertEqual(store.load_current(), second_root)
+            self.assertEqual(store.load_root(second_root.snapshot_id), second_root)
+
+    def test_publish_never_runs_retention_cleanup_inside_commit_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = JsonOperatorSnapshotStore(directory)
+            campaign = store.write_campaign_snapshot(
+                _campaign_snapshot("campaign-a", marker="a")
+            )
+            root = _root_snapshot(
+                sequence=1,
+                parent=None,
+                published_at=BASE_TIME,
+                snapshots=(campaign,),
+            )
+
+            with patch.object(
+                store,
+                "prune",
+                side_effect=AssertionError("cleanup entered commit path"),
+            ) as prune:
+                store.publish_root(root, expected_parent=None)
+
+            prune.assert_not_called()
+            self.assertEqual(store.current_snapshot_id(), root.snapshot_id)
 
     def test_retry_after_precommit_crash_can_publish_same_content_addressed_root(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -248,14 +307,14 @@ class JsonOperatorSnapshotStoreTests(unittest.TestCase):
     def test_stale_parent_and_noncontiguous_sequence_fail_before_commit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = JsonOperatorSnapshotStore(directory)
-            first_campaign = store.write_campaign_snapshot(
+            campaign = store.write_campaign_snapshot(
                 _campaign_snapshot("campaign-a", marker="a")
             )
             first_root = _root_snapshot(
                 sequence=1,
                 parent=None,
                 published_at=BASE_TIME,
-                snapshots=(first_campaign,),
+                snapshots=(campaign,),
             )
             store.publish_root(first_root, expected_parent=None)
 
@@ -263,12 +322,9 @@ class JsonOperatorSnapshotStoreTests(unittest.TestCase):
                 sequence=3,
                 parent=first_root.snapshot_id,
                 published_at=BASE_TIME + timedelta(minutes=1),
-                snapshots=(first_campaign,),
+                snapshots=(campaign,),
             )
-            with self.assertRaisesRegex(
-                OperatorSnapshotConflictError,
-                "sequence",
-            ):
+            with self.assertRaisesRegex(OperatorSnapshotConflictError, "sequence"):
                 store.publish_root(
                     wrong_sequence,
                     expected_parent=first_root.snapshot_id,
@@ -278,7 +334,7 @@ class JsonOperatorSnapshotStoreTests(unittest.TestCase):
                 sequence=2,
                 parent=first_root.snapshot_id,
                 published_at=BASE_TIME + timedelta(minutes=1),
-                snapshots=(first_campaign,),
+                snapshots=(campaign,),
             )
             store.publish_root(
                 second_root,
@@ -289,7 +345,7 @@ class JsonOperatorSnapshotStoreTests(unittest.TestCase):
                 sequence=2,
                 parent=first_root.snapshot_id,
                 published_at=BASE_TIME + timedelta(minutes=2),
-                snapshots=(first_campaign,),
+                snapshots=(campaign,),
             )
             with self.assertRaisesRegex(
                 OperatorSnapshotConflictError,
@@ -300,6 +356,25 @@ class JsonOperatorSnapshotStoreTests(unittest.TestCase):
                     expected_parent=first_root.snapshot_id,
                 )
             self.assertEqual(store.current_snapshot_id(), second_root.snapshot_id)
+
+    def test_root_cannot_reference_snapshot_owned_by_another_campaign(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = JsonOperatorSnapshotStore(directory)
+            campaign = store.write_campaign_snapshot(
+                _campaign_snapshot("campaign-a", marker="a")
+            )
+            root = OperatorRootSnapshot.create(
+                root_sequence=1,
+                parent_snapshot_id=None,
+                published_at=BASE_TIME,
+                campaigns={"campaign-b": campaign.snapshot_id},
+            )
+            with self.assertRaisesRegex(
+                OperatorSnapshotIntegrityError,
+                "identity",
+            ):
+                store.publish_root(root, expected_parent=None)
+            self.assertIsNone(store.current_snapshot_id())
 
     def test_retention_is_bounded_and_campaign_gc_is_reference_safe(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -354,6 +429,14 @@ class JsonOperatorSnapshotStoreTests(unittest.TestCase):
             self.assertEqual(store.load_root(second_root.snapshot_id), second_root)
             with self.assertRaises(OperatorSnapshotNotFoundError):
                 store.load_root(first_root.snapshot_id)
+
+            # Retention visibility and physical cleanup are deliberately separate.
+            self.assertEqual(
+                store.load_campaign(first_campaign.snapshot_id),
+                first_campaign,
+            )
+            removed = store.prune()
+            self.assertIn(first_root.snapshot_id, removed)
             with self.assertRaises(OperatorSnapshotNotFoundError):
                 store.load_campaign(first_campaign.snapshot_id)
             self.assertEqual(
@@ -385,6 +468,7 @@ class JsonOperatorSnapshotStoreTests(unittest.TestCase):
             )
             store.publish_root(first_root, expected_parent=None)
 
+            # An idle system must not lose its current authoritative snapshot.
             self.assertEqual(store.load_root(first_root.snapshot_id), first_root)
 
             second_root = _root_snapshot(
