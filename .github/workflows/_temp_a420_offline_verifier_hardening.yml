@@ -30,7 +30,6 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-
           path = Path("scripts/agent4_physical_receipt_verify_offline.py")
           text = path.read_text(encoding="utf-8")
           old = '''def _credential_key_is_forbidden(name: str) -> bool:
@@ -90,10 +89,42 @@ jobs:
           path.write_text(text.replace(old, new), encoding="utf-8")
           PY
 
-      - name: Run original offline verifier adversarial contract
-        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py
+      - name: Legacy valid receipt passes
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_valid_receipt_passes
+      - name: Legacy main digest tamper rejects
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_main_digest_tamper_is_rejected_without_resigning
+      - name: Legacy resigned NO-GO rejects
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_resigned_no_go_receipt_is_still_rejected_semantically
+      - name: Legacy wrong expected head rejects
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_wrong_expected_head_is_rejected_even_after_resigning
+      - name: Legacy checkpoint set rejects drift
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_missing_or_unknown_checkpoint_is_rejected
+      - name: Legacy wrong HTTP status rejects
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_resigned_wrong_http_status_is_rejected
+      - name: Legacy invalid payload hash rejects
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_invalid_payload_hash_is_rejected
+      - name: Legacy raw screenshot path rejects
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_raw_screenshot_path_is_rejected
+      - name: Legacy mutation partial resign rejects
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_mutation_edit_with_only_main_resign_is_rejected
+      - name: Legacy cleanup failure rejects
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_cleanup_failure_is_rejected_after_resigning
+      - name: Legacy public network rejects
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_public_network_is_rejected_after_resigning
+      - name: Legacy emulator identity rejects
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_non_pixel_or_emulator_identity_is_rejected
+      - name: Legacy credential key rejects
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_credential_key_is_rejected_even_when_main_digest_is_valid
+      - name: Legacy credential-like value rejects
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_credential_like_value_is_rejected
+      - name: Legacy artifact traversal rejects
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_bad_artifact_path_is_rejected
+      - name: Legacy CLI read-only PASS FAIL
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_cli_emits_machine_and_human_pass_fail_without_mutating_receipt
+      - name: Legacy verifier source authority remains narrow
+        run: python tests/workflow_agent4_physical_receipt_offline_verifier.py OfflineReceiptVerifierTests.test_verifier_source_has_no_network_process_or_write_authority
 
-      - name: Run credential alias hardening contract
+      - name: Run all credential alias hardening cases
         run: python tests/workflow_agent4_physical_receipt_credential_aliases.py
 
       - name: Run every existing physical read repository contract
