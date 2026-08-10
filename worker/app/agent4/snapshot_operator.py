@@ -146,9 +146,10 @@ class Agent4SnapshotOperatorReadService:
         snapshot_id: str | None = None,
         statuses: CampaignStatus | str | Iterable[CampaignStatus | str] | None = None,
         after: OperatorSnapshotCursor | None = None,
+        snapshot_head: OperatorSnapshotCursor | None = None,
         limit: int = 100,
     ) -> SnapshotCampaignPage:
-        root = self._root(snapshot_id, after)
+        root = self._root(snapshot_id, after, snapshot_head)
         campaign_snapshots = tuple(
             self._load_campaign(root, campaign_id)
             for campaign_id in root.campaigns
@@ -172,6 +173,11 @@ class Agent4SnapshotOperatorReadService:
             root.snapshot_id,
             CampaignListQueryCursor,
         )
+        inner_head = self._inner_cursor(
+            snapshot_head,
+            root.snapshot_id,
+            CampaignListQueryCursor,
+        )
         page = page_campaign_records(
             selected_records,
             summaries={
@@ -181,11 +187,7 @@ class Agent4SnapshotOperatorReadService:
             statuses=normalized_statuses,
             after=inner_after,
             limit=limit,
-            snapshot_head=(
-                self._campaign_list_head(inner_after, after, root.snapshot_id)
-                if inner_after is not None
-                else None
-            ),
+            snapshot_head=inner_head,
         )
         return SnapshotCampaignPage(
             snapshot_id=root.snapshot_id,
@@ -204,7 +206,7 @@ class Agent4SnapshotOperatorReadService:
         *,
         snapshot_id: str | None = None,
     ) -> SnapshotCampaignRead:
-        root = self._root(snapshot_id, None)
+        root = self._root(snapshot_id)
         snapshot = self._load_campaign(root, campaign_id)
         return SnapshotCampaignRead(
             snapshot_id=root.snapshot_id,
@@ -290,7 +292,7 @@ class Agent4SnapshotOperatorReadService:
     ) -> SnapshotEvidenceRead:
         campaign_id = _require_text(campaign_id, "campaign_id")
         evidence_id = _require_text(evidence_id, "evidence_id")
-        root = self._root(snapshot_id, None)
+        root = self._root(snapshot_id)
         snapshot = self._load_campaign(root, campaign_id)
         records = self._evidence_prefix(snapshot)
         record = next(
@@ -313,7 +315,7 @@ class Agent4SnapshotOperatorReadService:
         *,
         snapshot_id: str | None = None,
     ) -> SnapshotEvidenceVerificationRead:
-        root = self._root(snapshot_id, None)
+        root = self._root(snapshot_id)
         snapshot = self._load_campaign(root, campaign_id)
         records = self._evidence_prefix(snapshot)
         verification = CampaignEvidenceVerification(
@@ -332,20 +334,31 @@ class Agent4SnapshotOperatorReadService:
     def _root(
         self,
         snapshot_id: str | None,
-        cursor: OperatorSnapshotCursor | None,
+        *cursors: OperatorSnapshotCursor | None,
     ) -> OperatorRootSnapshot:
-        if cursor is not None and not isinstance(cursor, OperatorSnapshotCursor):
-            raise CampaignValidationError(
-                "after must be an OperatorSnapshotCursor or None"
-            )
+        for cursor in cursors:
+            if cursor is not None and not isinstance(cursor, OperatorSnapshotCursor):
+                raise CampaignValidationError(
+                    "snapshot cursor must be an OperatorSnapshotCursor or None"
+                )
         explicit = (
             require_operator_snapshot_id(snapshot_id)
             if snapshot_id is not None
             else None
         )
-        if cursor is not None and explicit is not None:
-            cursor.require_snapshot(explicit)
-        selected = explicit or (cursor.snapshot_id if cursor is not None else None)
+        cursor_ids = {
+            cursor.snapshot_id for cursor in cursors if cursor is not None
+        }
+        if len(cursor_ids) > 1:
+            raise OperatorSnapshotCursorError(
+                "snapshot-bound cursors refer to different immutable roots"
+            )
+        cursor_id = next(iter(cursor_ids), None)
+        if explicit is not None and cursor_id is not None and explicit != cursor_id:
+            raise OperatorSnapshotCursorError(
+                "explicit snapshot_id differs from snapshot-bound cursor"
+            )
+        selected = explicit or cursor_id
         if selected is not None:
             return self._snapshots.load_root(selected)
         current = self._snapshots.load_current()
@@ -448,29 +461,3 @@ class Agent4SnapshotOperatorReadService:
                 "snapshot-bound cursor type does not match requested resource"
             )
         return inner
-
-    @staticmethod
-    def _campaign_list_head(
-        inner_after: CampaignListQueryCursor,
-        envelope: OperatorSnapshotCursor | None,
-        snapshot_id: str,
-    ) -> CampaignListQueryCursor:
-        # The existing campaign-list v1 contract requires callers to supply the
-        # full snapshot head alongside an `after` cursor. In v2 the immutable
-        # root is the global authority, but the inner v1 query still needs its
-        # derived content head. The envelope deliberately carries only one inner
-        # position, so reconstruct a head with the same immutable digest/filter.
-        if envelope is None:
-            raise OperatorSnapshotCursorError("campaign-list continuation is missing")
-        envelope.require_snapshot(snapshot_id)
-        return CampaignListQueryCursor(
-            statuses=inner_after.statuses,
-            position=inner_after.total,
-            total=inner_after.total,
-            last_campaign_id=(
-                inner_after.last_campaign_id
-                if inner_after.position == inner_after.total
-                else None
-            ),
-            snapshot_sha256=inner_after.snapshot_sha256,
-        )
