@@ -2,16 +2,22 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"hash"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -22,8 +28,9 @@ import (
 )
 
 const (
-	operatorFlag = "KALIV_AGENT4_OPERATOR_API"
-	grantFlag    = "KALIV_AGENT4_GRANT_ADMIN"
+	operatorFlag        = "KALIV_AGENT4_OPERATOR_API"
+	grantFlag           = "KALIV_AGENT4_GRANT_ADMIN"
+	evidenceTraceSchema = "modelrig-agent4/a4-25f-http-trial/v1"
 )
 
 func main() {
@@ -106,8 +113,9 @@ func run(lanHost string, lanPort, adminPort int, workerURL, dataPath string) err
 	}
 	defer adminListener.Close()
 
+	trace := &agent4EvidenceTrace{path: dataPath + ".agent4-evidence.jsonl"}
 	lanServer := &http.Server{
-		Handler:           lanOnlyHandler(shared),
+		Handler:           trace.wrap(lanOnlyHandler(shared)),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	adminServer := &http.Server{
@@ -154,6 +162,152 @@ func lanOnlyHandler(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+type agent4EvidenceTrace struct {
+	path string
+	mu   sync.Mutex
+}
+
+type evidenceResponseWriter struct {
+	http.ResponseWriter
+	status    int
+	bodyHash  hash.Hash
+	bodyBytes int64
+}
+
+type evidenceTraceEntry struct {
+	Schema                 string   `json:"schema"`
+	RecordedAt             string   `json:"recorded_at"`
+	Method                 string   `json:"method"`
+	RouteKind              string   `json:"route_kind"`
+	QueryKeys              []string `json:"query_keys"`
+	RawQuerySHA256         string   `json:"raw_query_sha256"`
+	HTTPStatus             int      `json:"http_status"`
+	ResponseMediaType      string   `json:"response_media_type"`
+	ResponseBodySHA256     string   `json:"response_body_sha256"`
+	ResponseBodySize       int64    `json:"response_body_size"`
+	CredentialInReceipt    bool     `json:"credential_in_receipt"`
+	RawCursorInReceipt     bool     `json:"raw_cursor_in_receipt"`
+	PublicNetwork          bool     `json:"public_network"`
+	ProductionActivation   bool     `json:"production_activation"`
+}
+
+func (w *evidenceResponseWriter) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *evidenceResponseWriter) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	n, err := w.ResponseWriter.Write(body)
+	if n > 0 {
+		_, _ = w.bodyHash.Write(body[:n])
+		w.bodyBytes += int64(n)
+	}
+	return n, err
+}
+
+func (w *evidenceResponseWriter) Flush() {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (w *evidenceResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+func (t *agent4EvidenceTrace) wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		routeKind := agent4RouteKind(r.URL.Path)
+		if routeKind == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		recorder := &evidenceResponseWriter{
+			ResponseWriter: w,
+			bodyHash:       sha256.New(),
+		}
+		next.ServeHTTP(recorder, r)
+		if recorder.status == 0 {
+			recorder.status = http.StatusOK
+		}
+		keys := make([]string, 0, len(r.URL.Query()))
+		for key := range r.URL.Query() {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		entry := evidenceTraceEntry{
+			Schema:               evidenceTraceSchema,
+			RecordedAt:           time.Now().UTC().Format(time.RFC3339Nano),
+			Method:               r.Method,
+			RouteKind:            routeKind,
+			QueryKeys:            keys,
+			RawQuerySHA256:       sha256String(r.URL.RawQuery),
+			HTTPStatus:           recorder.status,
+			ResponseMediaType:    strings.TrimSpace(strings.Split(w.Header().Get("Content-Type"), ";")[0]),
+			ResponseBodySHA256:   "sha256:" + hex.EncodeToString(recorder.bodyHash.Sum(nil)),
+			ResponseBodySize:     recorder.bodyBytes,
+			CredentialInReceipt:  false,
+			RawCursorInReceipt:   false,
+			PublicNetwork:        false,
+			ProductionActivation: false,
+		}
+		if err := t.append(entry); err != nil {
+			log.Printf("A4-25f evidence trace append failed: %v", err)
+		}
+	})
+}
+
+func (t *agent4EvidenceTrace) append(entry evidenceTraceEntry) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	file, err := os.OpenFile(t.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return json.NewEncoder(file).Encode(entry)
+}
+
+func agent4RouteKind(path string) string {
+	const prefix = "/api/v1/experimental/agent4/operator/"
+	if !strings.HasPrefix(path, prefix) {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(path, prefix), "/"), "/")
+	if len(parts) == 0 || parts[0] != "campaigns" {
+		return "other-agent4-read"
+	}
+	switch {
+	case len(parts) == 1:
+		return "campaign-list"
+	case len(parts) == 2:
+		return "campaign-detail"
+	case len(parts) == 3 && parts[2] == "timeline":
+		return "timeline-list"
+	case len(parts) == 3 && parts[2] == "evidence":
+		return "evidence-list"
+	case len(parts) == 4 && parts[2] == "evidence" && parts[3] == "verification":
+		return "evidence-verification"
+	case len(parts) == 4 && parts[2] == "evidence":
+		return "evidence-detail"
+	default:
+		return "other-agent4-read"
+	}
+}
+
+func sha256String(value string) string {
+	digest := sha256.Sum256([]byte(value))
+	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
 func requirePrivateIPv4(raw string) (string, error) {
