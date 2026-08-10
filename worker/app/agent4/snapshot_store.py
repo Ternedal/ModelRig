@@ -80,6 +80,16 @@ def _parse_time(value: object, field: str) -> datetime:
     return _require_aware(parsed, field)
 
 
+def _head_hash(sequence: int, value: object, field: str) -> str | None:
+    """Bind an append-only head hash to its sequence without synthetic sentinels."""
+
+    if sequence == 0:
+        if value is not None:
+            raise CampaignValidationError(f"{field} must be null when sequence is 0")
+        return None
+    return _require_id(value, field)
+
+
 def _canonical(value: Mapping[str, JsonValue]) -> bytes:
     try:
         return json.dumps(
@@ -128,10 +138,10 @@ def _campaign_map(value: Mapping[str, str]) -> Mapping[str, str]:
 class OperatorCampaignSnapshot:
     campaign: CampaignRecord
     timeline_head_sequence: int
-    timeline_head_sha256: str
+    timeline_head_sha256: str | None
     evidence_head_sequence: int
-    evidence_head_sha256: str
-    latest_evidence_timeline_head_sha256: str
+    evidence_head_sha256: str | None
+    latest_evidence_timeline_head_sha256: str | None
     snapshot_id: str
 
     @classmethod
@@ -140,10 +150,10 @@ class OperatorCampaignSnapshot:
         campaign: CampaignRecord,
         *,
         timeline_head_sequence: int,
-        timeline_head_sha256: str,
+        timeline_head_sha256: str | None,
         evidence_head_sequence: int,
-        evidence_head_sha256: str,
-        latest_evidence_timeline_head_sha256: str,
+        evidence_head_sha256: str | None,
+        latest_evidence_timeline_head_sha256: str | None,
     ) -> "OperatorCampaignSnapshot":
         if not isinstance(campaign, CampaignRecord):
             raise CampaignValidationError("campaign must be a CampaignRecord")
@@ -153,9 +163,18 @@ class OperatorCampaignSnapshot:
         evidence_sequence = _require_uint(
             evidence_head_sequence, "evidence_head_sequence"
         )
-        timeline_hash = _require_id(timeline_head_sha256, "timeline_head_sha256")
-        evidence_hash = _require_id(evidence_head_sha256, "evidence_head_sha256")
-        evidence_timeline_hash = _require_id(
+        timeline_hash = _head_hash(
+            timeline_sequence,
+            timeline_head_sha256,
+            "timeline_head_sha256",
+        )
+        evidence_hash = _head_hash(
+            evidence_sequence,
+            evidence_head_sha256,
+            "evidence_head_sha256",
+        )
+        evidence_timeline_hash = _head_hash(
+            evidence_sequence,
             latest_evidence_timeline_head_sha256,
             "latest_evidence_timeline_head_sha256",
         )
@@ -245,18 +264,13 @@ class OperatorCampaignSnapshot:
             timeline_head_sequence=_require_uint(
                 timeline.get("sequence"), "timeline_head_sequence"
             ),
-            timeline_head_sha256=_require_id(
-                timeline.get("sha256"), "timeline_head_sha256"
-            ),
+            timeline_head_sha256=timeline.get("sha256"),
             evidence_head_sequence=_require_uint(
                 evidence.get("sequence"), "evidence_head_sequence"
             ),
-            evidence_head_sha256=_require_id(
-                evidence.get("sha256"), "evidence_head_sha256"
-            ),
-            latest_evidence_timeline_head_sha256=_require_id(
-                value.get("latest_evidence_timeline_head_sha256"),
-                "latest_evidence_timeline_head_sha256",
+            evidence_head_sha256=evidence.get("sha256"),
+            latest_evidence_timeline_head_sha256=value.get(
+                "latest_evidence_timeline_head_sha256"
             ),
         )
         claimed = _require_id(value.get("snapshot_id"))
@@ -288,6 +302,10 @@ class OperatorRootSnapshot:
             if parent_snapshot_id is not None
             else None
         )
+        if sequence == 1 and parent is not None:
+            raise CampaignValidationError("genesis root must not declare a parent")
+        if sequence > 1 and parent is None:
+            raise CampaignValidationError("non-genesis root must declare a parent")
         timestamp = _require_aware(published_at, "published_at")
         frozen_campaigns = _campaign_map(campaigns)
         unsigned: dict[str, JsonValue] = {
@@ -423,7 +441,12 @@ class JsonOperatorSnapshotStore:
                 )
             expected_sequence = 1
             if current is not None:
-                expected_sequence = self._load_root_file(current).root_sequence + 1
+                parent = self._load_root_file(current)
+                expected_sequence = parent.root_sequence + 1
+                if snapshot.published_at < parent.published_at:
+                    raise OperatorSnapshotConflictError(
+                        "root snapshot published_at precedes its parent"
+                    )
             if snapshot.root_sequence != expected_sequence:
                 raise OperatorSnapshotConflictError(
                     "root snapshot sequence does not extend current authority"
@@ -546,6 +569,10 @@ class JsonOperatorSnapshotStore:
                 if snapshot.root_sequence != child.root_sequence - 1:
                     raise OperatorSnapshotIntegrityError(
                         "root snapshot chain sequence is not contiguous"
+                    )
+                if snapshot.published_at > child.published_at:
+                    raise OperatorSnapshotIntegrityError(
+                        "root snapshot chain published_at is not monotonic"
                     )
             if next_id != current_id and now - snapshot.published_at > self._max_age:
                 break
