@@ -73,6 +73,8 @@ class Agent4SnapshotOperatorClient(
         val kind: CursorKind,
         val sequence: Int? = null,
         val hash: String? = null,
+        val campaignId: String? = null,
+        val statusValues: List<String>? = null,
     )
 
     data class CampaignList(
@@ -146,11 +148,22 @@ class Agent4SnapshotOperatorClient(
         if ((after == null) != (snapshotHead == null)) {
             throw protocol("Campaign paging kræver både after og snapshotHead")
         }
-        if (after != null) {
-            requireContinuation(snapshotId, after, CursorKind.CAMPAIGN_LIST)
-            requireContinuation(snapshotId, snapshotHead!!, CursorKind.CAMPAIGN_LIST)
-        }
         val orderedStatuses = statuses.sortedBy { it.wireValue }
+        val expectedStatuses = orderedStatuses.map { it.wireValue }
+        if (after != null) {
+            requireContinuation(
+                snapshotId,
+                after,
+                CursorKind.CAMPAIGN_LIST,
+                expectedStatuses = expectedStatuses,
+            )
+            requireContinuation(
+                snapshotId,
+                snapshotHead!!,
+                CursorKind.CAMPAIGN_LIST,
+                expectedStatuses = expectedStatuses,
+            )
+        }
         val builder = operatorUrl("campaigns").addQueryParameter("limit", limit.toString())
         orderedStatuses.forEach { builder.addQueryParameter("status", it.wireValue) }
         snapshotId?.let { builder.addQueryParameter("snapshot_id", it.value) }
@@ -161,9 +174,24 @@ class Agent4SnapshotOperatorClient(
         return CampaignList(
             snapshotId = actual,
             campaigns = root.requireArray("campaigns").objects("campaigns").map(::parseOverview),
-            startCursor = root.requireSnapshotCursor("start_cursor", actual, CursorKind.CAMPAIGN_LIST),
-            nextCursor = root.requireSnapshotCursor("next_cursor", actual, CursorKind.CAMPAIGN_LIST),
-            headCursor = root.requireSnapshotCursor("head_cursor", actual, CursorKind.CAMPAIGN_LIST),
+            startCursor = root.requireSnapshotCursor(
+                "start_cursor",
+                actual,
+                CursorKind.CAMPAIGN_LIST,
+                expectedStatuses = expectedStatuses,
+            ),
+            nextCursor = root.requireSnapshotCursor(
+                "next_cursor",
+                actual,
+                CursorKind.CAMPAIGN_LIST,
+                expectedStatuses = expectedStatuses,
+            ),
+            headCursor = root.requireSnapshotCursor(
+                "head_cursor",
+                actual,
+                CursorKind.CAMPAIGN_LIST,
+                expectedStatuses = expectedStatuses,
+            ),
             hasMore = root.requireBoolean("has_more"),
         )
     }
@@ -186,8 +214,15 @@ class Agent4SnapshotOperatorClient(
         limit: Int = DEFAULT_LIMIT,
     ): TimelinePage {
         validateLimit(limit)
-        after?.let { requireContinuation(snapshotId, it, CursorKind.TIMELINE) }
         val requested = requireSegment(campaignId, "campaign id")
+        after?.let {
+            requireContinuation(
+                snapshotId,
+                it,
+                CursorKind.TIMELINE,
+                expectedCampaignId = requested,
+            )
+        }
         val builder = operatorUrl("campaigns", requested, "timeline")
             .addQueryParameter("snapshot_id", snapshotId.value)
             .addQueryParameter("limit", limit.toString())
@@ -198,9 +233,24 @@ class Agent4SnapshotOperatorClient(
         val returned = page.requireText("campaign_id")
         if (returned != requested) throw protocol("Timeline matcher ikke requestet campaign")
         val records = page.requireArray("entries").objects("entries").map { parseTimeline(it, returned) }
-        val start = page.requireSnapshotCursor("start_cursor", actual, CursorKind.TIMELINE)
-        val next = page.requireSnapshotCursor("next_cursor", actual, CursorKind.TIMELINE)
-        val head = page.requireSnapshotCursor("head_cursor", actual, CursorKind.TIMELINE)
+        val start = page.requireSnapshotCursor(
+            "start_cursor",
+            actual,
+            CursorKind.TIMELINE,
+            expectedCampaignId = returned,
+        )
+        val next = page.requireSnapshotCursor(
+            "next_cursor",
+            actual,
+            CursorKind.TIMELINE,
+            expectedCampaignId = returned,
+        )
+        val head = page.requireSnapshotCursor(
+            "head_cursor",
+            actual,
+            CursorKind.TIMELINE,
+            expectedCampaignId = returned,
+        )
         val hasMore = page.requireBoolean("has_more")
         validatePage("timeline", records, start, next, head, hasMore)
         return TimelinePage(actual, returned, records.map { it.canonical }, start, next, head, hasMore)
@@ -213,8 +263,15 @@ class Agent4SnapshotOperatorClient(
         limit: Int = DEFAULT_LIMIT,
     ): EvidencePage {
         validateLimit(limit)
-        after?.let { requireContinuation(snapshotId, it, CursorKind.EVIDENCE) }
         val requested = requireSegment(campaignId, "campaign id")
+        after?.let {
+            requireContinuation(
+                snapshotId,
+                it,
+                CursorKind.EVIDENCE,
+                expectedCampaignId = requested,
+            )
+        }
         val builder = operatorUrl("campaigns", requested, "evidence")
             .addQueryParameter("snapshot_id", snapshotId.value)
             .addQueryParameter("limit", limit.toString())
@@ -225,9 +282,24 @@ class Agent4SnapshotOperatorClient(
         val returned = page.requireText("campaign_id")
         if (returned != requested) throw protocol("Evidence matcher ikke requestet campaign")
         val records = page.requireArray("records").objects("records").map { parseEvidence(it, returned) }
-        val start = page.requireSnapshotCursor("start_cursor", actual, CursorKind.EVIDENCE)
-        val next = page.requireSnapshotCursor("next_cursor", actual, CursorKind.EVIDENCE)
-        val head = page.requireSnapshotCursor("head_cursor", actual, CursorKind.EVIDENCE)
+        val start = page.requireSnapshotCursor(
+            "start_cursor",
+            actual,
+            CursorKind.EVIDENCE,
+            expectedCampaignId = returned,
+        )
+        val next = page.requireSnapshotCursor(
+            "next_cursor",
+            actual,
+            CursorKind.EVIDENCE,
+            expectedCampaignId = returned,
+        )
+        val head = page.requireSnapshotCursor(
+            "head_cursor",
+            actual,
+            CursorKind.EVIDENCE,
+            expectedCampaignId = returned,
+        )
         val hasMore = page.requireBoolean("has_more")
         validatePage("evidence", records, start, next, head, hasMore)
         return EvidencePage(actual, returned, records.map { it.canonical }, start, next, head, hasMore)
@@ -316,13 +388,31 @@ class Agent4SnapshotOperatorClient(
         }
     }
 
-    private fun requireContinuation(snapshotId: SnapshotId?, cursor: SnapshotCursor, kind: CursorKind) {
+    private fun requireContinuation(
+        snapshotId: SnapshotId?,
+        cursor: SnapshotCursor,
+        kind: CursorKind,
+        expectedCampaignId: String? = null,
+        expectedStatuses: List<String>? = null,
+    ) {
         if (snapshotId == null) throw protocol("Paging kræver eksplicit snapshot_id")
         if (cursor.snapshotId != snapshotId) throw protocol("Cursor tilhører et andet snapshot")
         if (cursor.kind != kind) throw protocol("Cursor har forkert ressource-type")
+        if (expectedCampaignId != null && cursor.campaignId != expectedCampaignId) {
+            throw protocol("Cursor tilhører en anden campaign")
+        }
+        if (expectedStatuses != null && cursor.statusValues != expectedStatuses) {
+            throw protocol("Cursor tilhører et andet statusfilter")
+        }
     }
 
-    private fun JSONObject.requireSnapshotCursor(name: String, snapshotId: SnapshotId, kind: CursorKind): SnapshotCursor {
+    private fun JSONObject.requireSnapshotCursor(
+        name: String,
+        snapshotId: SnapshotId,
+        kind: CursorKind,
+        expectedCampaignId: String? = null,
+        expectedStatuses: List<String>? = null,
+    ): SnapshotCursor {
         val envelope = requireObject(name)
         if (envelope.requireText("schema") != SNAPSHOT_CURSOR_SCHEMA) throw protocol("Ukendt snapshot-cursor-schema")
         val cursorSnapshot = SnapshotId(envelope.requireSnapshotId("snapshot_id"))
@@ -334,14 +424,38 @@ class Agent4SnapshotOperatorClient(
             CursorKind.EVIDENCE -> EVIDENCE_CURSOR_SCHEMA
         }
         if (inner.requireText("schema") != expectedSchema) throw protocol("Snapshot-cursor har forkert inner schema")
-        val sequence: Int?
-        val hash: String?
+
+        var sequence: Int? = null
+        var hash: String? = null
+        var campaignId: String? = null
+        var statusValues: List<String>? = null
         if (kind == CursorKind.CAMPAIGN_LIST) {
-            inner.requireNonNegativeInt("position")
-            inner.requireNonNegativeInt("total")
-            sequence = null
-            hash = null
+            val statuses = inner.requireTextList("statuses")
+            if (statuses.distinct().size != statuses.size) {
+                throw protocol("Campaign-cursor har dublerede statusfiltre")
+            }
+            val normalized = statuses.map { status ->
+                Agent4OperatorClient.CampaignStatus.entries.firstOrNull { it.wireValue == status }
+                    ?: throw protocol("Campaign-cursor har ukendt statusfilter")
+            }.sortedBy { it.wireValue }.map { it.wireValue }
+            if (statuses != normalized) throw protocol("Campaign-cursor statusfiltre er ikke canonical")
+            if (expectedStatuses != null && statuses != expectedStatuses) {
+                throw protocol("Campaign-cursor matcher ikke requestet statusfilter")
+            }
+            val position = inner.requireNonNegativeInt("position")
+            val total = inner.requireNonNegativeInt("total")
+            if (position > total) throw protocol("Campaign-cursor position overstiger total")
+            val lastCampaignId = inner.optionalCursorText("last_campaign_id")
+            if ((position == 0 && lastCampaignId != null) || (position > 0 && lastCampaignId == null)) {
+                throw protocol("Campaign-cursor har ugyldig last_campaign_id-binding")
+            }
+            inner.requireHash("snapshot_sha256")
+            statusValues = statuses
         } else {
+            campaignId = inner.requireText("campaign_id")
+            if (expectedCampaignId != null && campaignId != expectedCampaignId) {
+                throw protocol("Snapshot-cursor tilhører en anden campaign")
+            }
             sequence = inner.requireNonNegativeInt("sequence")
             val field = if (kind == CursorKind.TIMELINE) "entry_hash" else "record_hash"
             hash = inner.optionalHash(field)
@@ -349,7 +463,15 @@ class Agent4SnapshotOperatorClient(
                 throw protocol("Snapshot-cursor har ugyldig hash-binding")
             }
         }
-        return SnapshotCursor(envelope.toString(), cursorSnapshot, kind, sequence, hash)
+        return SnapshotCursor(
+            encoded = envelope.toString(),
+            snapshotId = cursorSnapshot,
+            kind = kind,
+            sequence = sequence,
+            hash = hash,
+            campaignId = campaignId,
+            statusValues = statusValues,
+        )
     }
 
     private fun validatePage(
@@ -467,11 +589,31 @@ class Agent4SnapshotOperatorClient(
         if (value !is String || value.isBlank()) throw protocol("Agent 4-svaret har ugyldigt $name")
         return value
     }
+    private fun JSONObject.optionalCursorText(name: String): String? {
+        if (!has(name) || isNull(name)) return null
+        val value = get(name)
+        if (value !is String || value.isBlank() || value != value.trim()) {
+            throw protocol("Agent 4-svaret har ugyldigt $name")
+        }
+        return value
+    }
     private fun JSONObject.requireHash(name: String): String = optionalHash(name) ?: throw protocol("Agent 4-svaret mangler $name")
     private fun JSONObject.optionalHash(name: String): String? {
         val value = optionalText(name) ?: return null
         if (!HASH.matches(value)) throw protocol("Agent 4-svaret har ugyldigt $name")
         return value
+    }
+    private fun JSONObject.requireTextList(name: String): List<String> {
+        val array = requireArray(name)
+        return buildList {
+            for (index in 0 until array.length()) {
+                val value = array.get(index)
+                if (value !is String || value.isBlank() || value != value.trim()) {
+                    throw protocol("Agent 4-svaret har ugyldig $name-post")
+                }
+                add(value)
+            }
+        }
     }
     private fun JSONArray.objects(label: String): List<JSONObject> = buildList {
         for (index in 0 until length()) add(optJSONObject(index) ?: throw protocol("Agent 4-$label indeholder ugyldig post"))
