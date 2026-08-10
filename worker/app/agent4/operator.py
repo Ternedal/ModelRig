@@ -15,6 +15,7 @@ from .campaign_list_query import (
     CampaignListQueryCursor,
     CampaignListSnapshotSummary,
     page_campaign_records,
+    select_campaign_records,
 )
 from .contracts import CampaignTimelineStore
 from .domain import CampaignRecord, CampaignStatus, CampaignValidationError
@@ -131,20 +132,31 @@ class Agent4OperatorReadService:
         limit: int = 100,
         snapshot_head: CampaignListQueryCursor | None = None,
     ) -> Agent4CampaignPage:
-        """Return newest campaigns from one stable, hash-bound snapshot."""
+        """Return newest campaigns from one stable, hash-bound snapshot.
+
+        Status selection is performed on canonical campaign records before any
+        timeline/evidence verification. An excluded campaign therefore cannot
+        widen the failure or verification scope of the requested snapshot, while
+        every included record remains verified exactly once and hash-bound into
+        the cursor digest.
+        """
 
         records = tuple(self._scheduler.list())
+        normalized_statuses, selected_records = select_campaign_records(
+            records,
+            statuses,
+        )
         overviews = {
             record.spec.campaign_id: self._overview(record)
-            for record in records
+            for record in selected_records
         }
         page = page_campaign_records(
-            records,
+            selected_records,
             summaries={
                 campaign_id: overview.snapshot_summary()
                 for campaign_id, overview in overviews.items()
             },
-            statuses=statuses,
+            statuses=normalized_statuses,
             after=after,
             limit=limit,
             snapshot_head=snapshot_head,
