@@ -208,23 +208,33 @@ class CampaignListRecordPage:
     has_more: bool
 
 
-def _ordered_records(
+def select_campaign_records(
     records: Sequence[CampaignRecord],
-    statuses: tuple[CampaignStatus, ...],
-) -> tuple[CampaignRecord, ...]:
-    accepted = frozenset(statuses)
+    statuses: CampaignStatus | str | Iterable[CampaignStatus | str] | None = None,
+) -> tuple[tuple[CampaignStatus, ...], tuple[CampaignRecord, ...]]:
+    """Return the canonical status filter and newest-first selected snapshot.
+
+    This is deliberately reusable by the operator layer so expensive timeline /
+    evidence verification can be limited to records that actually participate in
+    the requested snapshot. Keeping filtering and ordering here prevents the
+    operator and cursor layers from drifting apart.
+    """
+
+    normalized_statuses = normalize_statuses(statuses)
+    accepted = frozenset(normalized_statuses)
     selected = (
         record
         for record in records
         if not accepted or record.state.status in accepted
     )
-    return tuple(
+    ordered = tuple(
         sorted(
             selected,
             key=lambda record: (record.spec.created_at, record.spec.campaign_id),
             reverse=True,
         )
     )
+    return normalized_statuses, ordered
 
 
 def _snapshot_digest(
@@ -280,13 +290,12 @@ def page_campaign_records(
     snapshot_head: CampaignListQueryCursor | None = None,
     limit: int = 100,
 ) -> CampaignListRecordPage:
-    """Return one page or reject any record, summary, filter or cursor drift."""
+    """Return one page or reject any selected record, summary, filter or cursor drift."""
 
     if not isinstance(summaries, Mapping):
         raise CampaignValidationError("campaign-list summaries must be a mapping")
     bounded_limit = _require_limit(limit)
-    normalized_statuses = normalize_statuses(statuses)
-    ordered = _ordered_records(records, normalized_statuses)
+    normalized_statuses, ordered = select_campaign_records(records, statuses)
     digest = _snapshot_digest(ordered, normalized_statuses, summaries)
     current_head = _cursor_at(
         ordered,
