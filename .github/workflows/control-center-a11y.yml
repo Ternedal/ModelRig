@@ -55,8 +55,9 @@ jobs:
         shell: bash
         run: |
           emulator_log="$RUNNER_TEMP/modelrig-control-center-emulator.log"
+          emulator_bin="${ANDROID_SDK_ROOT:-$ANDROID_HOME}/emulator/emulator"
 
-          nohup emulator \
+          nohup "$emulator_bin" \
             -avd modelrig-control-center \
             -no-window \
             -no-audio \
