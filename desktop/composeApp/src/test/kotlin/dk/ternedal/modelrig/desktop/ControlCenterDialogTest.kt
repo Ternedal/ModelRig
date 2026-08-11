@@ -39,4 +39,16 @@ class ControlCenterDialogTest {
         assertNull(desktopControlCenterAge(Double.NaN))
         assertNull(desktopControlCenterAge(Double.POSITIVE_INFINITY))
     }
+
+    @Test
+    fun capabilityLabelsDescribeAuthorityWithoutInventingHealth() {
+        assertEquals("læse", desktopControlCenterAccessLabel("read"))
+        assertEquals("skrive", desktopControlCenterAccessLabel("write"))
+        assertEquals("desktop", desktopControlCenterAccessLabel("desktop"))
+        assertEquals("future-access", desktopControlCenterAccessLabel("future-access"))
+        assertEquals("ikke direkte afbrydelig", desktopControlCenterTerminationLabel("none"))
+        assertEquals("kooperativ stop", desktopControlCenterTerminationLabel("cooperative"))
+        assertEquals("runtime-stop", desktopControlCenterTerminationLabel("forceable"))
+        assertEquals("future-stop", desktopControlCenterTerminationLabel("future-stop"))
+    }
 }
