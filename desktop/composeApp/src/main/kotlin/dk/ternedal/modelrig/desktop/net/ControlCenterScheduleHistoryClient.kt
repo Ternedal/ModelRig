@@ -5,6 +5,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.doubleOrNull
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -29,8 +31,8 @@ private data class ScheduleHistoryJobWire(
     val kind: String,
     @SerialName("progress_completed") val progressCompleted: JsonElement,
     @SerialName("progress_total") val progressTotal: JsonElement,
-    @SerialName("created_at") val createdAt: Double,
-    @SerialName("updated_at") val updatedAt: Double,
+    @SerialName("created_at") val createdAt: JsonElement,
+    @SerialName("updated_at") val updatedAt: JsonElement,
 )
 
 @Serializable
@@ -38,12 +40,12 @@ private data class ScheduleHistoryOccurrenceWire(
     @SerialName("occurrence_id") val occurrenceId: String,
     @SerialName("schedule_id") val scheduleId: String,
     val tool: String?,
-    @SerialName("due_at") val dueAt: Double,
+    @SerialName("due_at") val dueAt: JsonElement,
     @SerialName("occurrence_status") val occurrenceStatus: String,
-    @SerialName("in_flight") val inFlight: Boolean?,
+    @SerialName("in_flight") val inFlight: JsonElement?,
     @SerialName("terminal_outcome") val terminalOutcome: String?,
-    @SerialName("created_at") val createdAt: Double,
-    @SerialName("resolved_at") val resolvedAt: Double?,
+    @SerialName("created_at") val createdAt: JsonElement,
+    @SerialName("resolved_at") val resolvedAt: JsonElement?,
     @SerialName("job_id") val jobId: String?,
     val job: ScheduleHistoryJobWire?,
 )
@@ -51,10 +53,10 @@ private data class ScheduleHistoryOccurrenceWire(
 @Serializable
 private data class ScheduleHistoryWire(
     val schema: String,
-    @SerialName("generated_at") val generatedAt: Double,
+    @SerialName("generated_at") val generatedAt: JsonElement,
     val sources: ScheduleHistorySourcesWire,
     val items: List<ScheduleHistoryOccurrenceWire>,
-    @SerialName("production_activation") val productionActivation: Boolean,
+    @SerialName("production_activation") val productionActivation: JsonElement,
 )
 
 /**
@@ -126,8 +128,9 @@ class ControlCenterScheduleHistoryClient(baseUrl: String, private val bearer: St
             fail("invalid payload: ${exc::class.simpleName}")
         }
         if (wire.schema != SCHEMA) fail("unsupported schema ${wire.schema}")
-        requireFinite("generated_at", wire.generatedAt)
-        if (wire.productionActivation) fail("production_activation must remain false")
+        val generatedAt = requireFiniteNumber("generated_at", wire.generatedAt)
+        val productionActivation = requireBoolean("production_activation", wire.productionActivation)
+        if (productionActivation) fail("production_activation must remain false")
 
         val occurrenceSource = parseSource(
             "occurrence_ledger",
@@ -150,11 +153,11 @@ class ControlCenterScheduleHistoryClient(baseUrl: String, private val bearer: St
 
         return ControlCenterScheduleHistory(
             schema = wire.schema,
-            generatedAt = wire.generatedAt,
+            generatedAt = generatedAt,
             occurrenceSource = occurrenceSource,
             jobsSource = jobsSource,
             items = items,
-            productionActivation = wire.productionActivation,
+            productionActivation = productionActivation,
         )
     }
 
@@ -177,16 +180,21 @@ class ControlCenterScheduleHistoryClient(baseUrl: String, private val bearer: St
         val occurrenceId = requireText("items[$index].occurrence_id", wire.occurrenceId)
         val scheduleId = requireText("items[$index].schedule_id", wire.scheduleId)
         val tool = wire.tool?.trim()?.takeIf { it.isNotEmpty() }
-        requireFinite("items[$index].due_at", wire.dueAt)
-        requireFinite("items[$index].created_at", wire.createdAt)
-        wire.resolvedAt?.let { requireFinite("items[$index].resolved_at", it) }
+        val dueAt = requireFiniteNumber("items[$index].due_at", wire.dueAt)
+        val createdAt = requireFiniteNumber("items[$index].created_at", wire.createdAt)
+        val resolvedAt = wire.resolvedAt?.let {
+            requireFiniteNumber("items[$index].resolved_at", it)
+        }
+        val inFlight = wire.inFlight?.let {
+            requireBoolean("items[$index].in_flight", it)
+        }
         if (wire.occurrenceStatus !in OCCURRENCE_STATES) {
             fail("unsupported occurrence status ${wire.occurrenceStatus}")
         }
         val outcome = wire.terminalOutcome?.also {
             if (it !in TERMINAL_OUTCOMES) fail("unsupported terminal outcome $it")
         }
-        validateOccurrenceState(wire.occurrenceStatus, wire.inFlight, outcome)
+        validateOccurrenceState(wire.occurrenceStatus, inFlight, outcome)
 
         val jobId = wire.jobId?.trim()?.takeIf { it.isNotEmpty() }
         val job = wire.job?.let { parseJob(index, it) }
@@ -196,12 +204,12 @@ class ControlCenterScheduleHistoryClient(baseUrl: String, private val bearer: St
             occurrenceId = occurrenceId,
             scheduleId = scheduleId,
             tool = tool,
-            dueAt = wire.dueAt,
+            dueAt = dueAt,
             occurrenceStatus = wire.occurrenceStatus,
-            inFlight = wire.inFlight,
+            inFlight = inFlight,
             terminalOutcome = outcome,
-            createdAt = wire.createdAt,
-            resolvedAt = wire.resolvedAt,
+            createdAt = createdAt,
+            resolvedAt = resolvedAt,
             jobId = jobId,
             job = job,
         )
@@ -245,16 +253,22 @@ class ControlCenterScheduleHistoryClient(baseUrl: String, private val bearer: St
         if (progressTotal > 0 && progressCompleted > progressTotal) {
             fail("job progress exceeds total")
         }
-        requireFinite("items[$index].job.created_at", wire.createdAt)
-        requireFinite("items[$index].job.updated_at", wire.updatedAt)
+        val createdAt = requireFiniteNumber("items[$index].job.created_at", wire.createdAt)
+        val updatedAt = requireFiniteNumber("items[$index].job.updated_at", wire.updatedAt)
         return ControlCenterObservedJob(
             status = wire.status,
             kind = kind,
             progressCompleted = progressCompleted,
             progressTotal = progressTotal,
-            createdAt = wire.createdAt,
-            updatedAt = wire.updatedAt,
+            createdAt = createdAt,
+            updatedAt = updatedAt,
         )
+    }
+
+    private fun requireBoolean(field: String, value: JsonElement): Boolean {
+        val primitive = value as? JsonPrimitive ?: fail("$field must be boolean")
+        if (primitive.isString) fail("$field must be boolean")
+        return primitive.booleanOrNull ?: fail("$field must be boolean")
     }
 
     private fun requireInteger(field: String, value: JsonElement): Long {
@@ -265,12 +279,16 @@ class ControlCenterScheduleHistoryClient(baseUrl: String, private val bearer: St
         return primitive.content.toLongOrNull() ?: fail("$field must be an integer")
     }
 
+    private fun requireFiniteNumber(field: String, value: JsonElement): Double {
+        val primitive = value as? JsonPrimitive ?: fail("$field must be numeric")
+        if (primitive.isString) fail("$field must be numeric")
+        val parsed = primitive.doubleOrNull ?: fail("$field must be numeric")
+        if (!parsed.isFinite()) fail("$field must be finite")
+        return parsed
+    }
+
     private fun requireText(field: String, value: String): String =
         value.trim().takeIf { it.isNotEmpty() } ?: fail("blank $field")
-
-    private fun requireFinite(field: String, value: Double) {
-        if (!value.isFinite()) fail("$field must be finite")
-    }
 
     private fun fail(message: String): Nothing =
         throw ControlCenterException("Invalid Control Center schedule history: $message")
