@@ -1,0 +1,145 @@
+{
+  "schema": "kaliv-github-summary-eval-set/v1",
+  "cases": [
+    {
+      "id": "issue-summary",
+      "operation": "issue",
+      "tool_result": {
+        "schema": "kaliv-github-tool-result/v1",
+        "connector": "github",
+        "repository": "ternedal/modelrig",
+        "operation": "issue",
+        "object_id": "83",
+        "source": {
+          "schema": "kaliv-github-source-receipt/v1",
+          "connector": "github",
+          "grant_id": "ghg_11111111111111111111111111111111",
+          "scope_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "repository": "ternedal/modelrig",
+          "repository_id": 1287914122,
+          "object_type": "issue",
+          "object_id": "83",
+          "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "retrieved_at": "2026-08-11T16:34:00Z",
+          "production_activation": false
+        },
+        "revalidated_cache": false,
+        "document": {
+          "id": 830083,
+          "number": 83,
+          "title": "T-036 — GitHub read-only connector pilot (restricted)",
+          "state": "open",
+          "state_reason": null,
+          "locked": false,
+          "comments": 4,
+          "created_at": "2026-08-05T12:00:00Z",
+          "updated_at": "2026-08-11T16:33:21Z",
+          "closed_at": null,
+          "author": "Ternedal",
+          "labels": ["agent3", "connector"]
+        }
+      },
+      "required_claims": ["number", "title", "state"]
+    },
+    {
+      "id": "pr-summary",
+      "operation": "pull_request",
+      "tool_result": {
+        "schema": "kaliv-github-tool-result/v1",
+        "connector": "github",
+        "repository": "ternedal/modelrig",
+        "operation": "pull_request",
+        "object_id": "501",
+        "source": {
+          "schema": "kaliv-github-source-receipt/v1",
+          "connector": "github",
+          "grant_id": "ghg_22222222222222222222222222222222",
+          "scope_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "repository": "ternedal/modelrig",
+          "repository_id": 1287914122,
+          "object_type": "pull_request",
+          "object_id": "501",
+          "revision": "7e9e847b757757690ae768262800c5c022327eb6",
+          "retrieved_at": "2026-08-11T16:34:00Z",
+          "production_activation": false
+        },
+        "revalidated_cache": false,
+        "document": {
+          "id": 501501,
+          "number": 501,
+          "title": "feat(github): add loopback grant preview create and revoke",
+          "state": "open",
+          "draft": true,
+          "merged": false,
+          "mergeable": true,
+          "mergeable_state": "clean",
+          "comments": 0,
+          "review_comments": 0,
+          "commits": 3,
+          "additions": 435,
+          "deletions": 10,
+          "changed_files": 3,
+          "created_at": "2026-08-11T16:29:03Z",
+          "updated_at": "2026-08-11T16:33:21Z",
+          "closed_at": null,
+          "merged_at": null,
+          "author": "Ternedal",
+          "base": {
+            "ref": "agent/t036-github-toolgate-pilot",
+            "sha": "697bee9e1ea58a3d6966c28aa6e93dd1a0b611e3",
+            "repository": "Ternedal/ModelRig"
+          },
+          "head": {
+            "ref": "agent/t036-github-grant-admin",
+            "sha": "7e9e847b757757690ae768262800c5c022327eb6",
+            "repository": "Ternedal/ModelRig"
+          }
+        }
+      },
+      "required_claims": ["number", "title", "state", "draft", "head.sha"]
+    },
+    {
+      "id": "ci-summary",
+      "operation": "workflow_run",
+      "tool_result": {
+        "schema": "kaliv-github-tool-result/v1",
+        "connector": "github",
+        "repository": "ternedal/modelrig",
+        "operation": "workflow_run",
+        "object_id": "31512632706",
+        "source": {
+          "schema": "kaliv-github-source-receipt/v1",
+          "connector": "github",
+          "grant_id": "ghg_33333333333333333333333333333333",
+          "scope_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "repository": "ternedal/modelrig",
+          "repository_id": 1287914122,
+          "object_type": "workflow_run",
+          "object_id": "31512632706",
+          "revision": "7e9e847b757757690ae768262800c5c022327eb6",
+          "retrieved_at": "2026-08-11T16:34:00Z",
+          "production_activation": false
+        },
+        "revalidated_cache": false,
+        "document": {
+          "id": 31512632706,
+          "name": "ci",
+          "display_title": "feat(github): add loopback grant preview create and revoke",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "success",
+          "run_number": 3750,
+          "run_attempt": 1,
+          "head_branch": "agent/t036-github-grant-admin",
+          "head_sha": "7e9e847b757757690ae768262800c5c022327eb6",
+          "created_at": "2026-08-11T16:29:04Z",
+          "updated_at": "2026-08-11T16:33:20Z",
+          "run_started_at": "2026-08-11T16:29:04Z",
+          "actor": "Ternedal",
+          "triggering_actor": "Ternedal"
+        }
+      },
+      "required_claims": ["id", "name", "status", "conclusion", "run_number", "head_sha"]
+    }
+  ]
+}
