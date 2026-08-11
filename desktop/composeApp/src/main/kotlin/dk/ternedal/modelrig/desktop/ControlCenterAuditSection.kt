@@ -25,6 +25,8 @@ import dk.ternedal.modelrig.desktop.net.ControlCenterAuditClient
 import dk.ternedal.modelrig.desktop.net.ControlCenterAuditEntry
 import dk.ternedal.modelrig.desktop.net.ControlCenterAuditFilter
 import dk.ternedal.modelrig.desktop.net.ControlCenterAuditSnapshot
+import dk.ternedal.modelrig.desktop.net.ControlCenterPrivacy
+import dk.ternedal.modelrig.desktop.net.ControlCenterPrivacyClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -86,6 +88,7 @@ internal fun DesktopControlCenterAuditSection(
     var loading by remember { mutableStateOf(false) }
     var snapshot by remember { mutableStateOf<ControlCenterAuditSnapshot?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var privacy by remember { mutableStateOf(ControlCenterPrivacy.unreported()) }
     var taskFilter by remember { mutableStateOf("") }
     var capabilityFilter by remember { mutableStateOf("") }
     var approvalFilter by remember { mutableStateOf("") }
@@ -95,22 +98,34 @@ internal fun DesktopControlCenterAuditSection(
             loading = false
             snapshot = null
             error = null
+            privacy = ControlCenterPrivacy.unreported()
             return@LaunchedEffect
         }
         loading = true
         error = null
-        val result = withContext(Dispatchers.IO) {
-            runCatching { ControlCenterAuditClient(baseUrl, token).snapshot() }
+        privacy = ControlCenterPrivacy.unreported().copy(reason = "privacy_refresh_in_progress")
+        val results = withContext(Dispatchers.IO) {
+            Pair(
+                runCatching { ControlCenterAuditClient(baseUrl, token).snapshot() },
+                runCatching { ControlCenterPrivacyClient(baseUrl, token).privacy() },
+            )
         }
-        result.onSuccess {
+        results.first.onSuccess {
             snapshot = it
             error = null
         }.onFailure {
             snapshot = null
             error = desktopControlCenterAuditError(it.message)
         }
+        results.second.onSuccess {
+            privacy = it
+        }.onFailure {
+            privacy = ControlCenterPrivacy.unreported().copy(reason = "privacy_status_unavailable")
+        }
         loading = false
     }
+
+    DesktopControlCenterPrivacySection(privacy)
 
     Column(
         modifier = Modifier.padding(top = 8.dp),
