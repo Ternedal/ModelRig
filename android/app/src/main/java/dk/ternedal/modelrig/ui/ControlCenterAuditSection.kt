@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
@@ -130,26 +129,23 @@ internal fun ControlCenterAuditSection(
         modifier = Modifier.padding(top = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "Audit",
-                    color = KalivTheme.colors.textHigh,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    "ToolGate-evidens · indholdsfri Control Center-projektion · kun læsning",
-                    color = KalivTheme.colors.textMuted,
-                    fontSize = 11.sp,
-                )
-            }
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                "Audit",
+                color = KalivTheme.colors.textHigh,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                "ToolGate-evidens · indholdsfri Control Center-projektion · kun læsning",
+                color = KalivTheme.colors.textMuted,
+                fontSize = 11.sp,
+            )
             if (loading) {
                 CircularProgressIndicator(
-                    modifier = Modifier.height(20.dp),
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .height(20.dp),
                     strokeWidth = 2.dp,
                     color = KalivTheme.colors.signal,
                 )
@@ -253,21 +249,17 @@ internal fun ControlCenterAuditSection(
 @Composable
 private fun AuditEntryCard(entry: ControlCenterAuditEntry) {
     AuditNeutralCard {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    entry.tool,
-                    color = KalivTheme.colors.textHigh,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(entry.capabilityId, color = KalivTheme.colors.textMuted, fontSize = 10.sp)
-            }
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                entry.tool,
+                color = KalivTheme.colors.textHigh,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(entry.capabilityId, color = KalivTheme.colors.textMuted, fontSize = 10.sp)
             Text(
                 controlCenterAuditOutcomeLabel(entry.outcome),
+                modifier = Modifier.padding(top = 4.dp),
                 color = KalivTheme.colors.textHigh,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
