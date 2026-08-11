@@ -39,6 +39,11 @@ jobs:
       - name: Install API 35 emulator image
         shell: bash
         run: |
+          avd_home="$RUNNER_TEMP/android-avd"
+          mkdir -p "$avd_home"
+          export ANDROID_AVD_HOME="$avd_home"
+          echo "ANDROID_AVD_HOME=$avd_home" >> "$GITHUB_ENV"
+
           sdkmanager \
             "platforms;android-36" \
             "build-tools;35.0.0" \
@@ -51,11 +56,20 @@ jobs:
             --package "system-images;android-35;google_apis;x86_64" \
             --device "pixel_6"
 
+          emulator_bin="${ANDROID_SDK_ROOT:-$ANDROID_HOME}/emulator/emulator"
+          echo "Created AVDs:"
+          "$emulator_bin" -list-avds
+          test -f "$ANDROID_AVD_HOME/modelrig-control-center.ini"
+
       - name: Boot headless emulator
         shell: bash
         run: |
           emulator_log="$RUNNER_TEMP/modelrig-control-center-emulator.log"
           emulator_bin="${ANDROID_SDK_ROOT:-$ANDROID_HOME}/emulator/emulator"
+
+          echo "AVD home: $ANDROID_AVD_HOME"
+          echo "Available AVDs:"
+          "$emulator_bin" -list-avds
 
           nohup "$emulator_bin" \
             -avd modelrig-control-center \
