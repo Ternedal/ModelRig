@@ -303,20 +303,13 @@ fun ControlCenterScreen(
                     items(currentSchedules.schedules, key = { it.id }) { grant ->
                         ScheduleGrantCard(grant)
                     }
-                    item {
-                        NeutralCard {
-                            Text(
-                                "Execution-outcomes kommer fra occurrence/job-ledgeren — ikke fra grant-listen.",
-                                color = KalivTheme.colors.textMuted,
-                                fontSize = 11.sp,
-                            )
-                            Text(
-                                "Denne slice viser derfor ikke et terminalt resultat, før den separate ledger-read authority er koblet på.",
-                                color = KalivTheme.colors.textMuted,
-                                fontSize = 11.sp,
-                            )
-                        }
-                    }
+                }
+                item {
+                    ControlCenterScheduleHistoryLoader(
+                        baseUrl = baseUrl,
+                        token = token,
+                        refreshGeneration = refreshGeneration,
+                    )
                 }
                 item { Spacer(Modifier.height(16.dp)) }
             }
@@ -617,12 +610,4 @@ private fun StatusCard(
             content()
         }
     }
-}
-
-@Composable
-private fun stateColor(state: String): Color = when (state) {
-    "healthy" -> KalivTheme.colors.signal
-    "unavailable" -> KalivTheme.colors.danger
-    "attention", "fallback" -> KalivTheme.colors.textHigh
-    else -> KalivTheme.colors.textMuted
 }
