@@ -172,8 +172,8 @@ class ControlCenterScheduleHistoryClientTest {
                 ).history()
             }.exceptionOrNull()
             assertTrue(error is ControlCenterException)
-            assertTrue(error.message.contains("(502)"))
-            assertTrue(error.message.contains("schedule history unavailable"))
+            assertTrue(error.message.orEmpty().contains("(502)"))
+            assertTrue(error.message.orEmpty().contains("schedule history unavailable"))
         } finally {
             server.stop(0)
         }
@@ -189,7 +189,7 @@ class ControlCenterScheduleHistoryClientTest {
     private fun assertInvalid(body: String, text: String) {
         val error = runCatching { client().parse(body) }.exceptionOrNull()
         assertTrue(error is ControlCenterException, "unexpected error: $error")
-        assertTrue(error.message.contains(text), "${error.message} should contain $text")
+        assertTrue(error.message.orEmpty().contains(text), "${error.message} should contain $text")
     }
 
     private fun server(handler: (com.sun.net.httpserver.HttpExchange) -> Unit): HttpServer {
