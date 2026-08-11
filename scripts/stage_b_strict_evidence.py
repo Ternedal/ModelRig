@@ -492,12 +492,33 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_LIFECYCLE,
     )
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=None,
+        help=(
+            "checkout hvis evidens skal vurderes (default: dette repo). "
+            "Brug den udcheckede release, naar gaten koeres fra en nyere "
+            "worktree."
+        ),
+    )
     args = parser.parse_args(argv)
+    # A candidate is frozen before this gate can be corrected, so the contract
+    # a release is judged by is not always the copy shipped inside it. That is
+    # not hypothetical: 1.58.151 was frozen while this file still required
+    # source 1.58.150 -- a release that was never published -- so the released
+    # copy could not judge its own evidence. stage_b_one_click_v2 and the
+    # campaign already take --root for exactly this reason.
+    #
+    # Candidate identity still comes from the checkout under test, never from
+    # this repo, so what is measured does not change -- only which contract it
+    # is measured against.
+    root = (args.root.resolve() if args.root is not None else ROOT)
     now = datetime.now(timezone.utc)
     try:
-        candidate = _candidate_identity(ROOT)
+        candidate = _candidate_identity(root)
         report, code = evaluate(
-            ROOT,
+            root,
             args.lifecycle_report,
             candidate=candidate,
             now=now,
@@ -514,13 +535,13 @@ def main(argv: list[str] | None = None) -> int:
             },
         }
         code = 2
-    destination = _resolve_under(ROOT, args.report)
+    destination = _resolve_under(root, args.report)
     try:
-        destination.relative_to((ROOT / "validation").resolve())
+        destination.relative_to((root / "validation").resolve())
     except ValueError:
         parser.error("--report must remain under validation/")
     _write_json_atomic(destination, report)
-    print(f"report: {destination.relative_to(ROOT)}")
+    print(f"report: {destination.relative_to(root)}")
     print(
         "gate: "
         + (
