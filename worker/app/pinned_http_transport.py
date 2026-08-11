@@ -7,8 +7,8 @@ never follows redirects, and enforces a wire-byte ceiling.
 
 Normal callers still cannot supply credentials in ``headers``.  T-036 adds one
 explicit trusted bearer seam for connector adapters whose credential is loaded
-outside model/tool arguments.  The bearer is validated separately and is never
-accepted through the ordinary header map.
+outside model/tool arguments.  The bearer is validated separately, requires
+HTTPS, and is never accepted through the ordinary header map.
 """
 from __future__ import annotations
 
@@ -176,9 +176,9 @@ class PinnedHttpTransport:
     ) -> TransportResponse:
         """Connector-only seam for a credential already isolated from tool args.
 
-        This method does not make ``authorization`` legal in ``headers``.  A
+        This method does not make ``authorization`` legal in ``headers``. A
         caller attempting to pass an auth/cookie header is still rejected by
-        the same normal validator before the trusted bearer is appended.
+        the normal validator. Trusted bearers are additionally HTTPS-only.
         """
         bearer = _validated_bearer_token(bearer_token)
         return self._request(
@@ -206,6 +206,8 @@ class PinnedHttpTransport:
             raise WebFetchError("transport max_wire_bytes must be positive")
 
         scheme, host, port, target, host_header = _request_target(url)
+        if trusted_bearer is not None and scheme != "https":
+            raise WebFetchError("trusted bearer requires HTTPS")
         try:
             numeric = ipaddress.ip_address(connect_address)
         except ValueError as exc:
