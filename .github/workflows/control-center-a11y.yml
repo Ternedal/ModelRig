@@ -54,6 +54,8 @@ jobs:
       - name: Boot headless emulator
         shell: bash
         run: |
+          emulator_log="$RUNNER_TEMP/modelrig-control-center-emulator.log"
+
           nohup emulator \
             -avd modelrig-control-center \
             -no-window \
@@ -62,14 +64,27 @@ jobs:
             -no-snapshot-load \
             -no-snapshot-save \
             -gpu swiftshader_indirect \
-            >"$RUNNER_TEMP/modelrig-control-center-emulator.log" 2>&1 &
+            >"$emulator_log" 2>&1 &
+          emulator_pid=$!
 
-          adb wait-for-device
-          timeout 300 bash -c '
+          if ! timeout 120 adb wait-for-device; then
+            echo "Emulator never became visible to ADB" >&2
+            cat "$emulator_log" >&2 || true
+            ps -p "$emulator_pid" -f >&2 || true
+            exit 1
+          fi
+
+          if ! timeout 180 bash -c '
             until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do
               sleep 2
             done
-          '
+          '; then
+            echo "Emulator did not complete Android boot" >&2
+            cat "$emulator_log" >&2 || true
+            adb devices -l >&2 || true
+            exit 1
+          fi
+
           adb shell settings put global window_animation_scale 0
           adb shell settings put global transition_animation_scale 0
           adb shell settings put global animator_duration_scale 0
