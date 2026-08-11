@@ -8,11 +8,11 @@ aktiverer produktion.
 ## Ærlig releasegrænse
 
 `1.58.151` er den første release med updater self-update-support. Den tidligere
-`1.58.150`-updater kan derfor ikke automatisk erstatte sig selv.
+`1.58.149`-updater kan derfor ikke automatisk erstatte sig selv.
 
 Stage B håndhæver denne præcise transition:
 
-- source appliance: signeret `1.58.150`;
+- source appliance: signeret `1.58.149`;
 - target appliance: signeret `1.58.151`;
 - updateren fra `v1.58.151` installeres én gang som bootstrap;
 - bootstrap-binarien verificeres mod samme releases `SHA256SUMS.txt`, target-
@@ -38,7 +38,7 @@ alene certificere Stage B.
 
 Strict-wrapperen:
 
-1. kræver backend og worker på præcis `1.58.150`;
+1. kræver backend og worker på præcis `1.58.149`;
 2. måler live-updaterens SHA-256 mod `v1.58.151/SHA256SUMS.txt`;
 3. kører `gh attestation verify` med repository, target-commit, tagref og
    signer-workflow bundet til samme release;
@@ -49,14 +49,14 @@ Strict-wrapperen:
 8. afbryder først, når netop den transaktion viser `state=swapping` og mindst ét
    live swap er registreret;
 9. kører updateren med `-recover`;
-10. kræver backend og worker tilbage på 1.58.150, alle fire live executables
+10. kræver backend og worker tilbage på 1.58.149, alle fire live executables
     til stede og ingen aktiv journal;
 11. kører derefter den normale gode update, reboot, supervisor-restarts og den
     ugyldige update.
 
 Fremdriften checkpointes i `validation/stage-b-easy-state.json`. Hvis en god
 update allerede er gennemført uden interruption-beviset, stopper wrapperen og
-kræver source 1.58.150 gendannet før en ny kampagne.
+kræver source 1.58.149 gendannet før en ny kampagne.
 
 ## Release-checkout
 
@@ -118,7 +118,7 @@ Wrapperen må først terminere den updaterproces, den selv startede, når samme 
 transaktion viser:
 
 ```text
-from=1.58.150
+from=1.58.149
 to=v1.58.151
 state=swapping
 swapped_count>=1
@@ -130,8 +130,8 @@ Derefter kører wrapperen `modelrig-updater-windows-x64.exe -recover` og kræver
 
 ```text
 recovery_exit_code=0
-backend_version=1.58.150
-worker_version=1.58.150
+backend_version=1.58.149
+worker_version=1.58.149
 live_executables_present=true
 journal_absent=true
 ```
@@ -154,7 +154,7 @@ er derfor en del af #401, ikke en promotion blocker for 1.58.151.
 
 Når interruption-recovery er grøn, gennemføres:
 
-1. god appliance-update 1.58.150 → 1.58.151;
+1. god appliance-update 1.58.149 → 1.58.151;
 2. reboot til ready på 1.58.151;
 3. backend supervisor-restart;
 4. worker supervisor-restart;
@@ -164,7 +164,7 @@ Når interruption-recovery er grøn, gennemføres:
 Den gode updater-log skal blandt andet indeholde:
 
 ```text
-update available: 1.58.150 -> v1.58.151
+update available: 1.58.149 -> v1.58.151
 downloading modelrig-server-windows-x64.exe
 downloading modelrig-supervisor-windows-x64.exe
 downloading modelrig-worker-windows-x64.exe

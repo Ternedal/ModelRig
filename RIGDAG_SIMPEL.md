@@ -67,7 +67,7 @@ signeret release-sæt.
 
 ## Blok 2 — Stage B
 
-Kildereleasen er 1.58.150; target er 1.58.151. Fordi den gamle updater er fra
+Kildereleasen er 1.58.149; target er 1.58.151. Fordi den gamle updater er fra
 før self-update-support, installeres 1.58.151-updateren én gang som verificeret
 bootstrap. Server, supervisor og worker må kun flyttes gennem updateren.
 

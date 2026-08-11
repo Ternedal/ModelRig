@@ -18,7 +18,21 @@ from typing import Any
 import stage_b_one_click as legacy
 import stage_b_physical_gate_v2 as final_gate
 
-EXPECTED_SOURCE_VERSION = "1.58.150"
+# The released predecessor of the target, which is 1.58.149 -- not 1.58.150.
+#
+# 1.58.150 was bumped but never validated or published: GitHub Actions was down
+# for the whole evening its candidate was prepared, so it never got four green
+# workflows and was never promoted. The version moved on to 1.58.151, and this
+# constant was written against a predecessor that does not exist. There is no
+# v1.58.150 release, tag or draft to install a source appliance from, so Stage B
+# could not start at all: the wrapper demands backend and worker on exactly the
+# source version, and no such build was ever produced.
+#
+# Nothing about the proof changes. 1.58.149's updater also predates self-update,
+# so the manual bootstrap of the 1.58.151 updater is required for the same
+# reason, and 1.58.149 -> 1.58.151 is a genuine transition between two signed
+# releases.
+EXPECTED_SOURCE_VERSION = "1.58.149"
 EXPECTED_TARGET_VERSION = "1.58.151"
 UPDATER_ASSET = "modelrig-updater-windows-x64.exe"
 SOURCE_REF = f"refs/tags/v{EXPECTED_TARGET_VERSION}"
@@ -637,7 +651,7 @@ def _run_interruption(
     legacy.save_state(state)
     legacy.ok(
         "Mid-swap interruption blev recovered til "
-        "1.58.150 med alle live exes"
+        f"{EXPECTED_SOURCE_VERSION} med alle live exes"
     )
 
 
@@ -660,7 +674,7 @@ def main(argv: list[str] | None = None) -> int:
         raise legacy.StageBError(
             "Good update er allerede gennemført uden det "
             "obligatoriske interruption-bevis; gendan source "
-            "1.58.150 og start kampagnen forfra."
+            f"{EXPECTED_SOURCE_VERSION} og start kampagnen forfra."
         )
 
     forwarded: list[str] = []

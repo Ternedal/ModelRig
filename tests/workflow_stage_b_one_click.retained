@@ -98,7 +98,7 @@ check(
 )
 check("stage_b_one_click_v2.py" in launcher_source, "advertised launcher uses strict collector")
 check("stage_b_physical_gate_v2.py" in verify_source, "advertised verifier uses strict final gate")
-check('EXPECTED_SOURCE_VERSION = "1.58.150"' in collector_source, "collector pins source 1.58.150")
+check('EXPECTED_SOURCE_VERSION = "1.58.149"' in collector_source, "collector pins source 1.58.149")
 check('EXPECTED_TARGET_VERSION = "1.58.151"' in collector_source, "collector pins target 1.58.151")
 check('"--source-digest"' in collector_source, "collector constrains provenance source digest")
 check('"--source-ref"' in collector_source, "collector constrains provenance source ref")
@@ -120,7 +120,7 @@ for text, label in (
     for forbidden in ("git push", "git tag", "gh release create", "merge_pull_request", "production_activation=true"):
         check(forbidden not in text, f"{label} has no forbidden authority: {forbidden}")
 
-check("1.58.150" in runbook and "1.58.151" in runbook, "runbook names exact source and target")
+check("1.58.149" in runbook and "1.58.151" in runbook, "runbook names exact source and target")
 check("#401" in runbook and "blokerer ikke promotion" in runbook, "runbook defers signed-to-signed proof")
 check("strict_evidence_complete=true" in runbook, "runbook requires strict final evidence")
 
@@ -217,7 +217,7 @@ class FakeProcess:
 
 
 def source_versions() -> dict[str, str]:
-    return {"backend_version": "1.58.150", "worker_version": "1.58.150"}
+    return {"backend_version": "1.58.149", "worker_version": "1.58.149"}
 
 
 def run_interruption(snapshots: list[dict], *, stale_tmp: bool = False):
@@ -255,8 +255,8 @@ def run_interruption(snapshots: list[dict], *, stale_tmp: bool = False):
 
 
 valid_snapshots = [
-    {"id": "tx-new", "revision": 1, "state": "prepared", "swapped": [], "from": "1.58.150", "to": "v1.58.151"},
-    {"id": "tx-new", "revision": 3, "state": "swapping", "swapped": ["modelrig-server-windows-x64.exe"], "from": "1.58.150", "to": "v1.58.151"},
+    {"id": "tx-new", "revision": 1, "state": "prepared", "swapped": [], "from": "1.58.149", "to": "v1.58.151"},
+    {"id": "tx-new", "revision": 3, "state": "swapping", "swapped": ["modelrig-server-windows-x64.exe"], "from": "1.58.149", "to": "v1.58.151"},
 ]
 observations, state, process, _ = run_interruption(valid_snapshots)
 trial = observations["trials"]["appliance_interruption"]
@@ -274,8 +274,8 @@ expect_raises(legacy.StageBError, stale_tmp_failure, "collector rejects a pre-ex
 
 def transaction_drift_failure() -> None:
     run_interruption([
-        {"id": "tx-one", "revision": 1, "state": "prepared", "swapped": [], "from": "1.58.150", "to": "v1.58.151"},
-        {"id": "tx-two", "revision": 2, "state": "swapping", "swapped": ["x"], "from": "1.58.150", "to": "v1.58.151"},
+        {"id": "tx-one", "revision": 1, "state": "prepared", "swapped": [], "from": "1.58.149", "to": "v1.58.151"},
+        {"id": "tx-two", "revision": 2, "state": "swapping", "swapped": ["x"], "from": "1.58.149", "to": "v1.58.151"},
     ])
 
 
@@ -326,7 +326,7 @@ interruption_path, interruption_digest = write_log(
     "\n".join((
         "observed_transaction_id=tx-new",
         "observed_revision=3",
-        "observed_journal_from=1.58.150",
+        "observed_journal_from=1.58.149",
         "observed_journal_to=v1.58.151",
         "observed_journal_state=swapping",
         "observed_swapped_count=1",
@@ -347,7 +347,7 @@ strict_lifecycle = {
     },
     "trials": {
         "good_update": {
-            "source_version": "1.58.150",
+            "source_version": "1.58.149",
             "source_git_sha": "d" * 40,
             "target_version": "1.58.151",
             "target_git_sha": strict_candidate["git_sha"],
@@ -368,10 +368,10 @@ strict_lifecycle = {
         },
         "appliance_interruption": {
             "performed": True,
-            "source_version": "1.58.150",
+            "source_version": "1.58.149",
             "observed_transaction_id": "tx-new",
             "observed_revision": 3,
-            "observed_journal_from": "1.58.150",
+            "observed_journal_from": "1.58.149",
             "observed_journal_to": "v1.58.151",
             "observed_journal_state": "swapping",
             "observed_swapped_count": 1,
@@ -382,8 +382,8 @@ strict_lifecycle = {
             "live_executables_present": True,
             "journal_absent": True,
             "ready": True,
-            "backend_version": "1.58.150",
-            "worker_version": "1.58.150",
+            "backend_version": "1.58.149",
+            "worker_version": "1.58.149",
             "evidence_path": interruption_path,
             "evidence_sha256": interruption_digest,
         },
@@ -406,9 +406,13 @@ strict_report, strict_code = evaluate_strict(strict_lifecycle)
 check(strict_code == 0 and strict_report["gate"]["strict_evidence_complete"] is True, "valid strict bundle passes")
 check(strict_report["gate"]["production_activation"] is False, "strict gate cannot activate production")
 for label, mutate in (
-    ("source version drift", lambda value: value["trials"]["good_update"].update(source_version="1.58.149")),
+    # Must be a version that is NOT the expected source. This case used to say
+    # 1.58.149 back when the source was 1.58.150; once the source became
+    # 1.58.149 the "drift" it injected was the correct value, and the test
+    # passed while proving nothing.
+    ("source version drift", lambda value: value["trials"]["good_update"].update(source_version="1.58.148")),
     ("provenance digest drift", lambda value: value["trials"]["updater_bootstrap"].update(source_digest="e" * 40)),
-    ("provenance ref drift", lambda value: value["trials"]["updater_bootstrap"].update(source_ref="refs/tags/v1.58.150")),
+    ("provenance ref drift", lambda value: value["trials"]["updater_bootstrap"].update(source_ref="refs/tags/v1.58.149")),
     ("signer workflow drift", lambda value: value["trials"]["updater_bootstrap"].update(signer_workflow="other/repo/.github/workflows/release.yml")),
     ("bootstrap hash mismatch", lambda value: value["trials"]["updater_bootstrap"].update(actual_sha256="d" * 64)),
     ("missing transaction identity", lambda value: value["trials"]["appliance_interruption"].update(observed_transaction_id="")),

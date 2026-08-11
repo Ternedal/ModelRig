@@ -79,7 +79,7 @@ def _interruption_text(count: int, assets: str) -> str:
             (
                 "observed_transaction_id=tx-new",
                 "observed_revision=3",
-                "observed_journal_from=1.58.150",
+                "observed_journal_from=1.58.149",
                 "observed_journal_to=v1.58.151",
                 "observed_journal_state=swapping",
                 f"observed_swapped_count={count}",
@@ -109,7 +109,7 @@ _lifecycle = {
     },
     "trials": {
         "good_update": {
-            "source_version": "1.58.150",
+            "source_version": "1.58.149",
             "source_git_sha": "d" * 40,
             "target_version": "1.58.151",
             "target_git_sha": _candidate["git_sha"],
@@ -130,10 +130,10 @@ _lifecycle = {
         },
         "appliance_interruption": {
             "performed": True,
-            "source_version": "1.58.150",
+            "source_version": "1.58.149",
             "observed_transaction_id": "tx-new",
             "observed_revision": 3,
-            "observed_journal_from": "1.58.150",
+            "observed_journal_from": "1.58.149",
             "observed_journal_to": "v1.58.151",
             "observed_journal_state": "swapping",
             "observed_swapped_count": 1,
@@ -145,8 +145,8 @@ _lifecycle = {
             "live_executables_present": True,
             "journal_absent": True,
             "ready": True,
-            "backend_version": "1.58.150",
-            "worker_version": "1.58.150",
+            "backend_version": "1.58.149",
+            "worker_version": "1.58.149",
             "evidence_path": str(_interruption.relative_to(_root)),
             "evidence_sha256": _interruption_digest,
         },
