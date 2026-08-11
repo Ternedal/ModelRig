@@ -195,15 +195,25 @@ func TestGitHubConnectorGrantIDValidationFailsBeforeWorker(t *testing.T) {
 	}))
 	defer worker.Close()
 	h := githubConnectorHandler(t, worker.URL, "1")
-	for _, id := range []string{"", "ghg_short", "GHG_0123456789abcdef0123456789abcdef", "ghg_0123456789ABCDEF0123456789abcdef", "ghg_0123456789abcdef0123456789abcdeg"} {
+
+	// Go's ServeMux canonicalizes a double-slash path before route matching.
+	// Empty ids therefore redirect rather than entering our revoke handler; the
+	// security invariant is the same and is pinned explicitly: zero worker hits.
+	empty := doGitHubConnectorRequest(
+		h,
+		http.MethodPost,
+		"/api/v1/github-connector/grants//revoke",
+		githubConnectorTestToken,
+		`{}`,
+	)
+	if empty.Code != http.StatusMovedPermanently {
+		t.Fatalf("empty id canonicalization: got %d, want 301", empty.Code)
+	}
+
+	for _, id := range []string{"ghg_short", "GHG_0123456789abcdef0123456789abcdef", "ghg_0123456789ABCDEF0123456789abcdef", "ghg_0123456789abcdef0123456789abcdeg"} {
 		path := "/api/v1/github-connector/grants/" + id + "/revoke"
 		rec := doGitHubConnectorRequest(h, http.MethodPost, path, githubConnectorTestToken, `{}`)
-		if id == "" {
-			// Empty id does not match the registered route at all.
-			if rec.Code != http.StatusNotFound {
-				t.Fatalf("empty id: got %d", rec.Code)
-			}
-		} else if rec.Code != http.StatusBadRequest {
+		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("id=%q: got %d body=%s", id, rec.Code, rec.Body.String())
 		}
 	}
