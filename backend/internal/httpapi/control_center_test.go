@@ -20,6 +20,10 @@ func validControlCenterPayload() string {
 	return `{"schema":"kaliv-control-center-status/v1","overall":"healthy","green":true}`
 }
 
+func validControlCenterSchedulePayload() string {
+	return `{"schema":"kaliv-control-center-schedule-history/v1","generated_at":123.5,"sources":{"occurrence_ledger":{"state":"ready","reason":null},"jobs":{"state":"not_required","reason":null}},"items":[],"production_activation":false}`
+}
+
 func TestControlCenterStatusProxyStampsAndValidates(t *testing.T) {
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -166,5 +170,170 @@ func TestControlCenterRouteRequiresBearerToken(t *testing.T) {
 	}
 	if workerCalls.Load() != 1 {
 		t.Fatalf("worker calls after auth = %d, want 1", workerCalls.Load())
+	}
+}
+
+func TestControlCenterSchedulesProxyIsReadOnlyAndBounded(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/control-center/schedules" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if r.URL.RawQuery != "" {
+			t.Errorf("client query leaked upstream: %q", r.URL.RawQuery)
+		}
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("client bearer leaked upstream: %q", got)
+		}
+		if got := r.Header.Get("X-Kaliv-Scheduler-Approval"); got != "" {
+			t.Errorf("scheduler admin header leaked upstream: %q", got)
+		}
+		if got := r.Header.Get("X-Request-ID"); got != "req-control-center-schedules" {
+			t.Errorf("request id = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(validControlCenterSchedulePayload()))
+	}))
+	defer upstream.Close()
+
+	s := &server{Deps: Deps{Worker: proxy.New(upstream.URL, time.Second)}}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/control-center/schedules?limit=999&secret=leak", nil)
+	req.Header.Set("Authorization", "Bearer must-not-reach-worker")
+	req.Header.Set("X-Kaliv-Scheduler-Approval", "must-not-reach-worker")
+	req.Header.Set("X-Request-ID", "req-control-center-schedules")
+	rec := httptest.NewRecorder()
+
+	s.handleControlCenterSchedules(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("worker calls = %d, want 1", calls.Load())
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid response JSON: %v", err)
+	}
+	if payload["schema"] != controlCenterScheduleHistorySchema || payload["production_activation"] != false {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
+func TestControlCenterSchedulesProxyFailsClosed(t *testing.T) {
+	valid := validControlCenterSchedulePayload()
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		worker bool
+	}{
+		{name: "missing worker", worker: false},
+		{name: "upstream error", worker: true, status: http.StatusServiceUnavailable, body: `secret scheduler failure`},
+		{name: "malformed json", worker: true, status: http.StatusOK, body: `{not-json`},
+		{name: "wrong schema", worker: true, status: http.StatusOK, body: strings.Replace(valid, controlCenterScheduleHistorySchema, "evil/v9", 1)},
+		{name: "production true", worker: true, status: http.StatusOK, body: strings.Replace(valid, `"production_activation":false`, `"production_activation":true`, 1)},
+		{name: "production wrong type", worker: true, status: http.StatusOK, body: strings.Replace(valid, `"production_activation":false`, `"production_activation":"false"`, 1)},
+		{name: "generated_at wrong type", worker: true, status: http.StatusOK, body: strings.Replace(valid, `"generated_at":123.5`, `"generated_at":"123.5"`, 1)},
+		{name: "sources wrong type", worker: true, status: http.StatusOK, body: strings.Replace(valid, `"sources":{"occurrence_ledger":{"state":"ready","reason":null},"jobs":{"state":"not_required","reason":null}}`, `"sources":[]`, 1)},
+		{name: "items wrong type", worker: true, status: http.StatusOK, body: strings.Replace(valid, `"items":[]`, `"items":{}`, 1)},
+		{name: "oversized", worker: true, status: http.StatusOK, body: strings.Repeat("x", maxControlCenterScheduleBytes+1)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var upstream *httptest.Server
+			s := &server{}
+			if tc.worker {
+				upstream = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(tc.status)
+					_, _ = w.Write([]byte(tc.body))
+				}))
+				defer upstream.Close()
+				s.Worker = proxy.New(upstream.URL, time.Second)
+			}
+
+			rec := httptest.NewRecorder()
+			s.handleControlCenterSchedules(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+			if rec.Code != http.StatusBadGateway {
+				t.Fatalf("status = %d, want 502; body=%s", rec.Code, rec.Body.String())
+			}
+			if got := rec.Body.String(); !strings.Contains(got, "control center schedule history unavailable") {
+				t.Fatalf("generic error missing: %s", got)
+			} else if strings.Contains(got, "secret") || strings.Contains(got, "evil/v9") {
+				t.Fatalf("upstream detail leaked: %s", got)
+			}
+		})
+	}
+}
+
+func TestControlCenterSchedulesRouteRequiresBearerButNotAdminFlag(t *testing.T) {
+	t.Setenv("KALIV_SCHEDULER_API", "0")
+	var workerCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		workerCalls.Add(1)
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("backend forwarded paired bearer: %q", got)
+		}
+		_, _ = w.Write([]byte(validControlCenterSchedulePayload()))
+	}))
+	defer upstream.Close()
+
+	st, err := store.Open(t.TempDir() + "/devices.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const token = "paired-control-center-schedules-token"
+	if err := st.AddDevice(store.Device{
+		ID:        "control-center-schedules-device",
+		Name:      "test phone",
+		TokenHash: auth.Hash(token),
+		CreatedAt: time.Now(),
+		LastSeen:  time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := New(Deps{
+		Cfg:    config.Default(),
+		Store:  st,
+		Worker: proxy.New(upstream.URL, time.Second),
+	})
+
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/control-center/schedules", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d", unauthorized.Code)
+	}
+	if workerCalls.Load() != 0 {
+		t.Fatalf("worker contacted before auth: %d calls", workerCalls.Load())
+	}
+
+	authorizedReq := httptest.NewRequest(http.MethodGet, "/api/v1/control-center/schedules", nil)
+	authorizedReq.Header.Set("Authorization", "Bearer "+token)
+	authorized := httptest.NewRecorder()
+	handler.ServeHTTP(authorized, authorizedReq)
+	if authorized.Code != http.StatusOK {
+		t.Fatalf("authorized status = %d, body=%s", authorized.Code, authorized.Body.String())
+	}
+	if workerCalls.Load() != 1 {
+		t.Fatalf("worker calls after auth = %d, want 1", workerCalls.Load())
+	}
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v1/control-center/schedules", nil)
+	postReq.Header.Set("Authorization", "Bearer "+token)
+	post := httptest.NewRecorder()
+	handler.ServeHTTP(post, postReq)
+	if post.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST status = %d, want 405", post.Code)
+	}
+	if workerCalls.Load() != 1 {
+		t.Fatalf("POST reached worker: %d calls", workerCalls.Load())
 	}
 }
