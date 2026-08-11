@@ -36,6 +36,10 @@ import dk.ternedal.modelrig.net.ControlCenterCapabilityInventory
 import dk.ternedal.modelrig.net.ControlCenterClient
 import dk.ternedal.modelrig.net.ControlCenterComponent
 import dk.ternedal.modelrig.net.ControlCenterRouting
+import dk.ternedal.modelrig.net.ControlCenterScheduleGrant
+import dk.ternedal.modelrig.net.ControlCenterScheduleRuntime
+import dk.ternedal.modelrig.net.ControlCenterScheduleSnapshot
+import dk.ternedal.modelrig.net.ControlCenterSchedulesClient
 import dk.ternedal.modelrig.net.ControlCenterStatus
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
@@ -94,6 +98,21 @@ internal fun controlCenterTerminationLabel(mode: String): String = when (mode) {
     else -> mode
 }
 
+internal fun controlCenterSchedulerRuntimeLabel(runtime: ControlCenterScheduleRuntime): String = when {
+    runtime.running -> "Kører"
+    runtime.configured && runtime.resourcesOpen -> "Stoppet · ressourcer åbne"
+    runtime.configured -> "Konfigureret · ikke startet"
+    else -> "Slået fra"
+}
+
+internal fun controlCenterScheduleGrantLabel(grant: ControlCenterScheduleGrant): String = when {
+    !grant.enabled -> "Pauset"
+    grant.expired -> "Udløbet"
+    grant.budgetExhausted -> "Budget brugt"
+    grant.structurallyEligible -> "Grant gyldig"
+    else -> "Blokeret"
+}
+
 @Composable
 fun ControlCenterScreen(
     store: TokenStore,
@@ -107,25 +126,30 @@ fun ControlCenterScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var capabilityInventory by remember { mutableStateOf<ControlCenterCapabilityInventory?>(null) }
     var capabilityError by remember { mutableStateOf<String?>(null) }
+    var scheduleSnapshot by remember { mutableStateOf<ControlCenterScheduleSnapshot?>(null) }
+    var scheduleError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(baseUrl, token, refreshGeneration) {
         if (baseUrl.isBlank() || token.isBlank()) {
             status = null
             capabilityInventory = null
+            scheduleSnapshot = null
             error = "Rig-adgangen mangler. Par appen med ModelRig i Indstillinger først."
             capabilityError = null
+            scheduleError = null
             loading = false
             return@LaunchedEffect
         }
         loading = true
         error = null
         capabilityError = null
+        scheduleError = null
         val results = withContext(Dispatchers.IO) {
-            val statusResult = runCatching { ControlCenterClient(baseUrl, token).status() }
-            val capabilityResult = runCatching {
-                ControlCenterCapabilitiesClient(baseUrl, token).inventory()
-            }
-            statusResult to capabilityResult
+            Triple(
+                runCatching { ControlCenterClient(baseUrl, token).status() },
+                runCatching { ControlCenterCapabilitiesClient(baseUrl, token).inventory() },
+                runCatching { ControlCenterSchedulesClient(baseUrl, token).snapshot() },
+            )
         }
         results.first.onSuccess {
             status = it
@@ -140,6 +164,13 @@ fun ControlCenterScreen(
         }.onFailure {
             capabilityInventory = null
             capabilityError = it.message ?: "Capability-listen kunne ikke hentes."
+        }
+        results.third.onSuccess {
+            scheduleSnapshot = it
+            scheduleError = null
+        }.onFailure {
+            scheduleSnapshot = null
+            scheduleError = it.message ?: "Planstatus kunne ikke hentes."
         }
         loading = false
     }
@@ -202,6 +233,7 @@ fun ControlCenterScreen(
 
             val current = status
             val currentCapabilities = capabilityInventory
+            val currentSchedules = scheduleSnapshot
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -253,6 +285,37 @@ fun ControlCenterScreen(
                         key = { it.capabilityId },
                     ) { capability ->
                         CapabilityCard(capability)
+                    }
+                }
+
+                item { SectionHeading("Planer", "Scheduler-runtime + standing grants · kun læsning") }
+                if (scheduleError != null) {
+                    item {
+                        MessageCard(
+                            title = "Planstatus ikke tilgængelig",
+                            body = scheduleError.orEmpty(),
+                            state = "unknown",
+                        )
+                    }
+                }
+                if (currentSchedules != null) {
+                    item { SchedulerRuntimeCard(currentSchedules.runtime, currentSchedules.schedules.size) }
+                    items(currentSchedules.schedules, key = { it.id }) { grant ->
+                        ScheduleGrantCard(grant)
+                    }
+                    item {
+                        NeutralCard {
+                            Text(
+                                "Execution-outcomes kommer fra occurrence/job-ledgeren — ikke fra grant-listen.",
+                                color = KalivTheme.colors.textMuted,
+                                fontSize = 11.sp,
+                            )
+                            Text(
+                                "Denne slice viser derfor ikke et terminalt resultat, før den separate ledger-read authority er koblet på.",
+                                color = KalivTheme.colors.textMuted,
+                                fontSize = 11.sp,
+                            )
+                        }
                     }
                 }
                 item { Spacer(Modifier.height(16.dp)) }
@@ -426,9 +489,77 @@ private fun CapabilityCard(capability: ControlCenterCapability) {
         )
         Text(
             "Netværk: ${capability.networkMode}" +
-                (if (capability.networkDestinations.isEmpty()) "" else " · ${capability.networkDestinations.joinToString() }"),
+                (if (capability.networkDestinations.isEmpty()) "" else " · ${capability.networkDestinations.joinToString()}"),
             color = KalivTheme.colors.textMuted,
             fontSize = 11.sp,
+        )
+    }
+}
+
+@Composable
+private fun SchedulerRuntimeCard(runtime: ControlCenterScheduleRuntime, scheduleCount: Int) {
+    NeutralCard {
+        Text(
+            "Scheduler: ${controlCenterSchedulerRuntimeLabel(runtime)}",
+            color = KalivTheme.colors.textHigh,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            "$scheduleCount grants · aktive executions: ${runtime.activeExecutions}/${runtime.maxConcurrency} · køkapacitet: ${runtime.queueCapacity}",
+            color = KalivTheme.colors.textMuted,
+            fontSize = 11.sp,
+        )
+        Text(
+            "Accepterede ticks: ${runtime.acceptedTicks} · overlap-afvisninger: ${runtime.overlapRejections}",
+            color = KalivTheme.colors.textMuted,
+            fontSize = 11.sp,
+        )
+        runtime.lastError?.let {
+            Text("Runtime-fejl: $it", color = KalivTheme.colors.danger, fontSize = 11.sp)
+        }
+    }
+}
+
+@Composable
+private fun ScheduleGrantCard(grant: ControlCenterScheduleGrant) {
+    NeutralCard {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(grant.tool, color = KalivTheme.colors.textHigh, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(grant.id, color = KalivTheme.colors.textMuted, fontSize = 10.sp)
+            }
+            Text(
+                controlCenterScheduleGrantLabel(grant),
+                color = KalivTheme.colors.textMuted,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        Text("Næste forfald: ${grant.dueAtLocal}", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
+        Text(
+            "Kadence: ${grant.cadence} · zone: ${grant.timezone} · misfire: ${grant.misfirePolicy}",
+            color = KalivTheme.colors.textMuted,
+            fontSize = 11.sp,
+        )
+        Text(
+            if (grant.maxRuns == 0) "Budget: ${grant.runsUsed} brugt · kun TTL begrænser"
+            else "Budget: ${grant.runsUsed}/${grant.maxRuns} brugt",
+            color = KalivTheme.colors.textMuted,
+            fontSize = 11.sp,
+        )
+        Text(
+            "Missed: ${grant.missed} · risk: ${grant.risk} · data: ${grant.sensitivity}",
+            color = KalivTheme.colors.textMuted,
+            fontSize = 11.sp,
+        )
+        grant.blockedReason?.let {
+            Text("Blokeret: $it", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
+        }
+        Text(
+            "Live ToolGate og execution-outcome er ikke afgjort af denne grant-liste.",
+            color = KalivTheme.colors.textMuted,
+            fontSize = 10.sp,
         )
     }
 }
