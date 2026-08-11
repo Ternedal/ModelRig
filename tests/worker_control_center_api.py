@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T-044 loopback worker route contract.
+"""T-044 loopback worker route contracts.
 
 Run: PYTHONPATH=worker python3 tests/worker_control_center_api.py
 """
@@ -55,6 +55,40 @@ def v2_route():
     }
 
 
+def schedule_history():
+    return {
+        "schema": "kaliv-control-center-schedule-history/v1",
+        "generated_at": NOW,
+        "sources": {
+            "occurrence_ledger": {"state": "ready", "reason": None},
+            "jobs": {"state": "ready", "reason": None},
+        },
+        "items": [
+            {
+                "occurrence_id": "0123456789abcdef0123456789abcdef",
+                "schedule_id": "0a1b2c3d4e5f",
+                "tool": "note_append",
+                "due_at": NOW - 20,
+                "occurrence_status": "executed",
+                "in_flight": False,
+                "terminal_outcome": "executed",
+                "created_at": NOW - 19,
+                "resolved_at": NOW - 18,
+                "job_id": "job000000001",
+                "job": {
+                    "status": "completed",
+                    "kind": "schedule",
+                    "progress_completed": 1,
+                    "progress_total": 1,
+                    "created_at": NOW - 19,
+                    "updated_at": NOW - 18,
+                },
+            }
+        ],
+        "production_activation": False,
+    }
+
+
 def app_for(**kwargs):
     app = FastAPI()
     app.include_router(
@@ -62,6 +96,7 @@ def app_for(**kwargs):
             health_provider=kwargs.get("health_provider", healthy_health),
             agent3_provider=kwargs.get("agent3_provider", disabled_agent3),
             routing_provider=kwargs.get("routing_provider", v2_route),
+            schedule_history_provider=kwargs.get("schedule_history_provider", schedule_history),
             loopback_allowed=kwargs.get("loopback_allowed", lambda _request: True),
             clock=lambda: NOW,
         )
@@ -76,9 +111,9 @@ headers = {
     "X-Kaliv-Backend-Status": "ok",
 }
 response = client.get("/control-center/status", headers=headers)
-check(response.status_code == 200, "loopback route succeeds")
+check(response.status_code == 200, "loopback status route succeeds")
 payload = response.json()
-check(payload["schema"] == "kaliv-control-center-status/v1", "route returns v1 contract")
+check(payload["schema"] == "kaliv-control-center-status/v1", "status route returns v1 contract")
 check(payload["overall"] == "healthy" and payload["green"], "fresh local stack is green")
 check(payload["components"]["backend"]["detail"] == "modelrig-server 1.58.141", "backend stamp is visible")
 check(payload["components"]["worker"]["state"] == "healthy", "worker health is mapped")
@@ -93,12 +128,21 @@ direct_payload = direct.json()
 check(direct_payload["components"]["backend"]["state"] == "unknown", "missing backend stamp fails closed")
 check(direct_payload["overall"] == "unknown" and not direct_payload["green"], "direct call cannot render green")
 
-# The route remains loopback-only even if the wider worker is intentionally LAN-enabled.
-denied = app_for(loopback_allowed=lambda _request: False).get(
-    "/control-center/status",
-    headers=headers,
-)
-check(denied.status_code == 403, "non-loopback caller is rejected")
+# The schedule-history route is independent of backend health stamping: it is
+# durable worker-owned truth, but still loopback-only.
+history = client.get("/control-center/schedules")
+check(history.status_code == 200, "loopback schedule-history route succeeds")
+history_payload = history.json()
+check(history_payload["schema"] == "kaliv-control-center-schedule-history/v1", "history route returns its versioned contract")
+check(history_payload["items"][0]["terminal_outcome"] == "executed", "history returns durable outcome")
+check(history_payload["production_activation"] is False, "history route cannot authorize production")
+
+# Both routes remain loopback-only even if the wider worker is intentionally LAN-enabled.
+denied_client = app_for(loopback_allowed=lambda _request: False)
+denied = denied_client.get("/control-center/status", headers=headers)
+check(denied.status_code == 403, "non-loopback status caller is rejected")
+denied_history = denied_client.get("/control-center/schedules")
+check(denied_history.status_code == 403, "non-loopback history caller is rejected")
 
 # Provider failures reveal type only and keep both affected components unknown.
 async def broken_health():
@@ -115,6 +159,24 @@ check(broken_payload["components"]["models"]["state"] == "unknown", "model provi
 serialized = str(broken_payload)
 check("provider_error:RuntimeError" in serialized, "provider failure type is retained")
 check("secret upstream" not in serialized and "token" not in serialized, "provider message is not leaked")
+
+# Schedule-history provider exceptions are a transport failure; only type escapes.
+def broken_history():
+    raise RuntimeError("secret schedule args and token")
+
+broken_history = app_for(schedule_history_provider=broken_history).get(
+    "/control-center/schedules"
+)
+check(broken_history.status_code == 503, "history provider exception fails closed")
+history_detail = broken_history.json().get("detail", "")
+check("RuntimeError" in history_detail, "history exception type is retained")
+check("secret schedule" not in history_detail and "token" not in history_detail, "history exception message is redacted")
+
+# Non-object providers cannot smuggle arbitrary response shapes.
+bad_history_type = app_for(schedule_history_provider=lambda: ["wrong"]).get(
+    "/control-center/schedules"
+)
+check(bad_history_type.status_code == 503, "non-object history provider fails closed")
 
 # Enabled but unready Agent 3 remains attention without corrupting normal routing.
 def unready_agent3():
