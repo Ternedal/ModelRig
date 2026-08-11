@@ -121,6 +121,13 @@ internal fun DesktopControlCenterScheduleHistorySection(
     }
 
     Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        DesktopControlCenterSchedulesSection(
+            baseUrl = baseUrl,
+            token = token,
+            refreshGeneration = refreshGeneration,
+        )
+        Spacer(Modifier.height(4.dp))
+
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
