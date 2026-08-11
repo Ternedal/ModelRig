@@ -187,6 +187,13 @@ internal fun DesktopControlCenterScheduleHistorySection(
                 }
             }
         }
+
+        Spacer(Modifier.height(4.dp))
+        DesktopControlCenterAuditSection(
+            baseUrl = baseUrl,
+            token = token,
+            refreshGeneration = refreshGeneration,
+        )
     }
 }
 
