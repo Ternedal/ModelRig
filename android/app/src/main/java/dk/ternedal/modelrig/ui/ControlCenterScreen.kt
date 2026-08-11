@@ -311,6 +311,13 @@ fun ControlCenterScreen(
                         refreshGeneration = refreshGeneration,
                     )
                 }
+                item {
+                    ControlCenterAuditLoader(
+                        baseUrl = baseUrl,
+                        token = token,
+                        refreshGeneration = refreshGeneration,
+                    )
+                }
                 item { Spacer(Modifier.height(16.dp)) }
             }
         }
