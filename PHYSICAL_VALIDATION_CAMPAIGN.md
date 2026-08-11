@@ -126,15 +126,15 @@ Pausens bevis skal være en konkret `released` occurrence bundet til et
 ## Stage B — publiceret release og T-006
 
 Stage B starter først efter exact-SHA fast-forward, tag `v1.58.151` og komplet
-signeret release. Kildereleasen er 1.58.150; målreleasen er 1.58.151.
+signeret release. Kildereleasen er 1.58.149; målreleasen er 1.58.151.
 
 Følg `STAGE_B_UPDATER_EVIDENCE.md`. 1.58.151-updateren installeres én gang som
-verificeret bootstrap, fordi 1.58.150-updateren ikke indeholder self-update.
+verificeret bootstrap, fordi 1.58.149-updateren ikke indeholder self-update.
 Server, supervisor og worker må kun flyttes gennem updateren.
 
 Gennemfør og dokumentér:
 
-1. god appliance-update 1.58.150 → 1.58.151;
+1. god appliance-update 1.58.149 → 1.58.151;
 2. reboot til ready på 1.58.151;
 3. backend supervisor-restart;
 4. worker supervisor-restart;

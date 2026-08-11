@@ -20,7 +20,10 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "kaliv-stage-b-strict-evidence/v1"
 LIFECYCLE_SCHEMA = "kaliv-appliance-lifecycle-observations/v1"
-EXPECTED_SOURCE_VERSION = "1.58.150"
+# The released predecessor of the target. See stage_b_one_click_v2 for the full
+# reason: 1.58.150 was bumped but never published -- no release, tag or draft
+# exists -- so a source appliance could never be installed from it.
+EXPECTED_SOURCE_VERSION = "1.58.149"
 EXPECTED_TARGET_VERSION = "1.58.151"
 UPDATER_ASSET = "modelrig-updater-windows-x64.exe"
 EXPECTED_SOURCE_REF = f"refs/tags/v{EXPECTED_TARGET_VERSION}"

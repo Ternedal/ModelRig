@@ -35,7 +35,7 @@ This candidate includes the complete updater series, the executable Stage B auth
 - release-bound updater self-update support;
 - atomic Windows replacement and committed-update orchestration;
 - Go-compatible watcher flag parsing;
-- exact 1.58.150 → 1.58.151 source/target enforcement;
+- exact 1.58.149 → 1.58.151 source/target enforcement;
 - target-release checksum and provenance binding for the bootstrap updater;
 - new-transaction mid-swap interruption plus offline `-recover` proof;
 - strict hash-bound Stage B evidence, duplicate-key rejection, checkpoint binding and stale-receipt invalidation;

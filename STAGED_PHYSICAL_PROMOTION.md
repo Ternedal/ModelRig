@@ -127,8 +127,8 @@ release-sæt publiceres. Ændres SHA'en, er Stage A ugyldig.
 
 Følg den operative autoritet i `STAGE_B_UPDATER_EVIDENCE.md`.
 
-Kildereleasen for appliance-transitionen er `1.58.150`, og målet er
-`1.58.151`. Fordi 1.58.150-updateren er fra før self-update-support, må
+Kildereleasen for appliance-transitionen er `1.58.149`, og målet er
+`1.58.151`. Fordi 1.58.149-updateren er fra før self-update-support, må
 1.58.151-updateren installeres én gang manuelt som bootstrap, verificeret mod
 `v1.58.151`-releasens `SHA256SUMS.txt` og provenance. Server, supervisor og
 worker må ikke kopieres manuelt; deres transition skal ske gennem updateren.
@@ -140,7 +140,7 @@ signeret 1.58.151 som kilde samt en senere signeret target-version større end
 
 Stage B skal dokumentere:
 
-1. normal update fra 1.58.150 til 1.58.151;
+1. normal update fra 1.58.149 til 1.58.151;
 2. reboot på 1.58.151;
 3. backend supervisor-restart;
 4. worker supervisor-restart;

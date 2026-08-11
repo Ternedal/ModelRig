@@ -7,7 +7,7 @@ _source = _source_path.read_text(encoding="utf-8")
 for _old, _new in (
     ("agent/unified-candidate-1.58.143", "agent/unified-candidate-1.58.151-r2"),
     ("1.58.143", "1.58.151"),
-    ("1.58.142", "1.58.150"),
+    ("1.58.142", "1.58.149"),
     ("draft-PR #150", "freeze-PR #412"),
 ):
     _source = _source.replace(_old, _new)
