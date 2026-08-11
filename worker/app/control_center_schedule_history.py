@@ -13,6 +13,7 @@ server inventing atomicity that does not exist.
 """
 from __future__ import annotations
 
+import math
 import os
 import sqlite3
 import time
@@ -47,7 +48,7 @@ _TERMINAL_OUTCOME = {
 
 
 def _db_uri(path: str) -> str:
-    # Path.as_uri quotes spaces/#/? correctly.  abspath preserves the historical
+    # Path.as_uri quotes spaces/#/? correctly. abspath preserves the historical
     # meaning of an explicitly configured relative DB path without creating it.
     return Path(os.path.abspath(path)).as_uri() + "?mode=ro"
 
@@ -65,6 +66,21 @@ def _columns(connection: sqlite3.Connection, table: str) -> set[str]:
 
 def _source(state: str, reason: str | None = None) -> dict[str, Any]:
     return {"state": state, "reason": reason}
+
+
+def _strict_nonnegative_int(value: Any) -> int:
+    if type(value) is not int or value < 0:  # bool and SQLite REAL both fail.
+        raise ValueError("not a non-negative integer")
+    return value
+
+
+def _strict_finite_number(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("not numeric")
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError("not finite")
+    return result
 
 
 def _schedule_path() -> str:
@@ -113,34 +129,39 @@ def _read_occurrences(path: str, limit: int) -> tuple[dict[str, Any], list[dict[
         connection.close()
 
     result: list[dict[str, Any]] = []
-    for row in rows:
-        status = str(row["status"])
-        if status not in _OCCURRENCE_STATUSES:
-            # Unknown persisted state must never be rendered as a successful or
-            # terminal known outcome. Keep the row visible, but fail it closed.
-            normalized_status = "unknown_schema_value"
-            terminal_outcome = "unknown"
-            in_flight = False
-        else:
-            normalized_status = status
-            terminal_outcome = _TERMINAL_OUTCOME.get(status)
-            in_flight = status in {"reserved", "reserved_noslot"}
-        result.append(
-            {
-                "occurrence_id": str(row["claim_id"]),
-                "schedule_id": str(row["schedule_id"]),
-                "tool": str(row["tool"]) if row["tool"] is not None else None,
-                "due_at": float(row["occurrence_due_at"]),
-                "occurrence_status": normalized_status,
-                "in_flight": in_flight,
-                "terminal_outcome": terminal_outcome,
-                "created_at": float(row["created"]),
-                "resolved_at": (
-                    float(row["resolved"]) if row["resolved"] is not None else None
-                ),
-                "job_id": str(row["job_id"]) if row["job_id"] is not None else None,
-            }
-        )
+    try:
+        for row in rows:
+            status = str(row["status"])
+            if status not in _OCCURRENCE_STATUSES:
+                # An unknown future enum could be either pending or terminal.
+                # Do not lie in either direction: in_flight is explicitly unknown.
+                normalized_status = "unknown_schema_value"
+                terminal_outcome = "unknown"
+                in_flight = None
+            else:
+                normalized_status = status
+                terminal_outcome = _TERMINAL_OUTCOME.get(status)
+                in_flight = status in {"reserved", "reserved_noslot"}
+            result.append(
+                {
+                    "occurrence_id": str(row["claim_id"]),
+                    "schedule_id": str(row["schedule_id"]),
+                    "tool": str(row["tool"]) if row["tool"] is not None else None,
+                    "due_at": _strict_finite_number(row["occurrence_due_at"]),
+                    "occurrence_status": normalized_status,
+                    "in_flight": in_flight,
+                    "terminal_outcome": terminal_outcome,
+                    "created_at": _strict_finite_number(row["created"]),
+                    "resolved_at": (
+                        _strict_finite_number(row["resolved"])
+                        if row["resolved"] is not None
+                        else None
+                    ),
+                    "job_id": str(row["job_id"]) if row["job_id"] is not None else None,
+                }
+            )
+    except (TypeError, ValueError):
+        return _source("unavailable", "occurrence_value_invalid"), []
     return _source("ready"), result
 
 
@@ -179,16 +200,19 @@ def _read_jobs(path: str, job_ids: list[str]) -> tuple[dict[str, Any], dict[str,
         connection.close()
 
     jobs: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        status = str(row["status"])
-        jobs[str(row["id"])] = {
-            "status": status if status in _JOB_STATUSES else "unknown_schema_value",
-            "kind": str(row["kind"]),
-            "progress_completed": max(0, int(row["progress_completed"])),
-            "progress_total": max(0, int(row["progress_total"])),
-            "created_at": float(row["created"]),
-            "updated_at": float(row["updated"]),
-        }
+    try:
+        for row in rows:
+            status = str(row["status"])
+            jobs[str(row["id"])] = {
+                "status": status if status in _JOB_STATUSES else "unknown_schema_value",
+                "kind": str(row["kind"]),
+                "progress_completed": _strict_nonnegative_int(row["progress_completed"]),
+                "progress_total": _strict_nonnegative_int(row["progress_total"]),
+                "created_at": _strict_finite_number(row["created"]),
+                "updated_at": _strict_finite_number(row["updated"]),
+            }
+    except (TypeError, ValueError):
+        return _source("unavailable", "job_value_invalid"), {}
     return _source("ready"), jobs
 
 
@@ -217,7 +241,7 @@ def build_control_center_schedule_history(
 
     return {
         "schema": SCHEMA,
-        "generated_at": float(clock()),
+        "generated_at": _strict_finite_number(clock()),
         "sources": {
             "occurrence_ledger": schedule_source,
             "jobs": jobs_source,
