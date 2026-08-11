@@ -84,7 +84,7 @@ func (s *server) handleControlCenterStatus(w http.ResponseWriter, r *http.Reques
 // and scheduler-admin headers are never forwarded to the worker.
 func (s *server) handleControlCenterSchedules(w http.ResponseWriter, r *http.Request) {
 	const unavailable = "control center schedule history unavailable"
-	if s.Worker == nil || strings.TrimSpace(s.Worker.BaseURL) == "" {
+	if s.Worker == nil || !scheduleWorkerIsLoopback(s.Worker.BaseURL) {
 		writeErr(w, http.StatusBadGateway, unavailable)
 		return
 	}
@@ -99,7 +99,12 @@ func (s *server) handleControlCenterSchedules(w http.ResponseWriter, r *http.Req
 		req.Header.Set("X-Request-ID", requestID)
 	}
 
-	client := &http.Client{Timeout: controlCenterScheduleTimeout}
+	client := &http.Client{
+		Timeout: controlCenterScheduleTimeout,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, unavailable)
