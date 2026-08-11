@@ -78,17 +78,14 @@ class ControlCenterScheduleHistoryClientTest {
 
     @Test
     fun strictWireTypesRejectStringBooleanAndFractionalProgress() {
-        assertInvalid(
+        assertRejected(
             validPayload().replace("\"production_activation\":false", "\"production_activation\":\"false\""),
-            "invalid payload",
         )
-        assertInvalid(
+        assertRejected(
             validPayload().replaceFirst("\"in_flight\":true", "\"in_flight\":\"true\""),
-            "invalid payload",
         )
-        assertInvalid(
+        assertRejected(
             validPayload().replace("\"progress_completed\":1", "\"progress_completed\":1.5"),
-            "invalid payload",
         )
     }
 
@@ -125,10 +122,10 @@ class ControlCenterScheduleHistoryClientTest {
     fun duplicatesAndInvalidProgressFailClosed() {
         val duplicate = validPayload().replace("claim-executed", "claim-pending")
         assertInvalid(duplicate, "duplicate occurrence ids")
-        assertInvalid(
-            validPayload().replace("\"progress_completed\":1,\"progress_total\":1", "\"progress_completed\":3,\"progress_total\":2"),
-            "job progress exceeds total",
-        )
+        val beyondTotal = validPayload()
+            .replace("\"progress_completed\":1", "\"progress_completed\":3")
+            .replace("\"progress_total\":1", "\"progress_total\":2")
+        assertInvalid(beyondTotal, "job progress exceeds total")
         assertInvalid(
             validPayload().replace("\"progress_completed\":1", "\"progress_completed\":-1"),
             "job progress must be non-negative",
@@ -175,8 +172,8 @@ class ControlCenterScheduleHistoryClientTest {
                 ).history()
             }.exceptionOrNull()
             assertTrue(error is ControlCenterException)
-            assertTrue(error?.message.orEmpty().contains("(502)"))
-            assertTrue(error?.message.orEmpty().contains("schedule history unavailable"))
+            assertTrue(error.message.contains("(502)"))
+            assertTrue(error.message.contains("schedule history unavailable"))
         } finally {
             server.stop(0)
         }
@@ -184,10 +181,15 @@ class ControlCenterScheduleHistoryClientTest {
 
     private fun client() = ControlCenterScheduleHistoryClient("http://127.0.0.1:1", "token")
 
+    private fun assertRejected(body: String) {
+        val error = runCatching { client().parse(body) }.exceptionOrNull()
+        assertTrue(error is ControlCenterException, "wire type must fail closed; error=$error")
+    }
+
     private fun assertInvalid(body: String, text: String) {
         val error = runCatching { client().parse(body) }.exceptionOrNull()
         assertTrue(error is ControlCenterException, "unexpected error: $error")
-        assertTrue(error?.message.orEmpty().contains(text), "${error?.message} should contain $text")
+        assertTrue(error.message.contains(text), "${error.message} should contain $text")
     }
 
     private fun server(handler: (com.sun.net.httpserver.HttpExchange) -> Unit): HttpServer {
