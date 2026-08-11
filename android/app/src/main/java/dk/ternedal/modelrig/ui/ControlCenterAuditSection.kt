@@ -2,7 +2,6 @@ package dk.ternedal.modelrig.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,7 +17,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -27,6 +25,8 @@ import dk.ternedal.modelrig.net.ControlCenterAuditClient
 import dk.ternedal.modelrig.net.ControlCenterAuditEntry
 import dk.ternedal.modelrig.net.ControlCenterAuditFilter
 import dk.ternedal.modelrig.net.ControlCenterAuditSnapshot
+import dk.ternedal.modelrig.net.ControlCenterClient
+import dk.ternedal.modelrig.net.ControlCenterPrivacy
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -85,29 +85,41 @@ internal fun ControlCenterAuditLoader(
     var loading by remember { mutableStateOf(false) }
     var snapshot by remember { mutableStateOf<ControlCenterAuditSnapshot?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var privacy by remember { mutableStateOf(ControlCenterPrivacy.unreported()) }
 
     LaunchedEffect(baseUrl, token, refreshGeneration) {
         if (baseUrl.isBlank() || token.isBlank()) {
             loading = false
             snapshot = null
             error = null
+            privacy = ControlCenterPrivacy.unreported()
             return@LaunchedEffect
         }
         loading = true
         error = null
-        val result = withContext(Dispatchers.IO) {
-            runCatching { ControlCenterAuditClient(baseUrl, token).snapshot() }
+        privacy = ControlCenterPrivacy.unreported().copy(reason = "privacy_refresh_in_progress")
+        val results = withContext(Dispatchers.IO) {
+            Pair(
+                runCatching { ControlCenterAuditClient(baseUrl, token).snapshot() },
+                runCatching { ControlCenterClient(baseUrl, token).status().privacy },
+            )
         }
-        result.onSuccess {
+        results.first.onSuccess {
             snapshot = it
             error = null
         }.onFailure {
             snapshot = null
             error = controlCenterAuditError(it.message)
         }
+        results.second.onSuccess {
+            privacy = it
+        }.onFailure {
+            privacy = ControlCenterPrivacy.unreported().copy(reason = "privacy_status_unavailable")
+        }
         loading = false
     }
 
+    ControlCenterPrivacySection(privacy)
     ControlCenterAuditSection(
         snapshot = snapshot,
         error = error,
