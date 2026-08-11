@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 
 from app.control_center_api import build_control_center_router  # noqa: E402
+from app.control_center_privacy import build_control_center_privacy  # noqa: E402
 
 passed = failed = 0
 NOW = 2_100_000_000.0
@@ -97,6 +98,7 @@ def app_for(**kwargs):
             agent3_provider=kwargs.get("agent3_provider", disabled_agent3),
             routing_provider=kwargs.get("routing_provider", v2_route),
             schedule_history_provider=kwargs.get("schedule_history_provider", schedule_history),
+            privacy_provider=kwargs.get("privacy_provider", build_control_center_privacy),
             loopback_allowed=kwargs.get("loopback_allowed", lambda _request: True),
             clock=lambda: NOW,
         )
@@ -120,6 +122,50 @@ check(payload["components"]["worker"]["state"] == "healthy", "worker health is m
 check(payload["components"]["models"]["state"] == "healthy", "model health is mapped")
 check(payload["components"]["agent3"]["state"] == "disabled", "Agent 3 disablement stays explicit")
 check(payload["routing"]["active_surface"] == "agent_v2", "normal route remains Agent v2")
+
+# Privacy is additive to the existing status authority. It reports the active
+# ToolGate egress rule and must not promote the dormant common data-sharing DB
+# to runtime authority.
+privacy = payload["privacy"]
+check(privacy["schema"] == "kaliv-control-center-privacy/v1", "privacy projection is versioned")
+check(privacy["evidence_state"] == "ready", "privacy evidence is explicit")
+check(privacy["tool_result_egress"]["rules"]["secret"] == "forbidden", "secret egress stays forbidden")
+check(
+    privacy["common_data_sharing"]["state"] == "dormant"
+    and privacy["common_data_sharing"]["runtime_integrated"] is False,
+    "dormant data-sharing is never presented as active authority",
+)
+check(
+    privacy["scoped_permissions"]["state"] == "unavailable"
+    and privacy["scoped_permissions"]["revocation_supported"] is False,
+    "no scoped revoke control is invented before runtime integration",
+)
+check(privacy["production_activation"] is False, "privacy status cannot activate production")
+
+# Verify the ToolGate gate spelling contract deterministically without mutating
+# the process environment used by the rest of the suite.
+def env(values):
+    return lambda key, default="": values.get(key, default)
+
+
+privacy_off = build_control_center_privacy(env_get=env({}))
+check(
+    privacy_off["tool_result_egress"]["rules"]["private"] == "allowed_legacy_mode",
+    "gate-off mode exposes legacy private-cloud behaviour without painting it green",
+)
+for gate_value in ("1", "true", "TRUE", "on", " On "):
+    privacy_on = build_control_center_privacy(
+        env_get=env({"KALIV_EGRESS_GATE": gate_value})
+    )
+    check(
+        privacy_on["tool_result_egress"]["private_gate_enabled"] is True,
+        f"{gate_value!r} enables private egress gate",
+    )
+    check(
+        privacy_on["tool_result_egress"]["rules"]["private"]
+        == "blocked_requires_explicit_consent",
+        f"{gate_value!r} reports private data as blocked pending consent",
+    )
 
 # A direct local caller has no authority to claim backend health.
 direct = client.get("/control-center/status")
@@ -148,6 +194,7 @@ check(denied_history.status_code == 403, "non-loopback history caller is rejecte
 async def broken_health():
     raise RuntimeError("secret upstream URL and token")
 
+
 broken = app_for(health_provider=broken_health).get(
     "/control-center/status",
     headers=headers,
@@ -160,9 +207,41 @@ serialized = str(broken_payload)
 check("provider_error:RuntimeError" in serialized, "provider failure type is retained")
 check("secret upstream" not in serialized and "token" not in serialized, "provider message is not leaked")
 
+# Privacy is its own evidence domain: a privacy-provider failure must not erase
+# operational status, leak the exception message, or manufacture permissions.
+def broken_privacy():
+    raise RuntimeError("secret privacy path and token")
+
+
+privacy_failure_response = app_for(privacy_provider=broken_privacy).get(
+    "/control-center/status",
+    headers=headers,
+)
+check(privacy_failure_response.status_code == 200, "privacy failure preserves operational status route")
+privacy_failure = privacy_failure_response.json()["privacy"]
+check(privacy_failure["evidence_state"] == "unknown", "privacy provider failure fails closed")
+check(
+    privacy_failure["scoped_permissions"]["revocation_supported"] is False,
+    "unknown privacy evidence cannot manufacture revoke authority",
+)
+privacy_serialized = str(privacy_failure)
+check("provider_error:RuntimeError" in privacy_serialized, "privacy failure keeps exception type")
+check(
+    "secret privacy" not in privacy_serialized and "token" not in privacy_serialized,
+    "privacy provider exception message is redacted",
+)
+
+bad_privacy = app_for(privacy_provider=lambda: ["wrong"]).get(
+    "/control-center/status",
+    headers=headers,
+).json()["privacy"]
+check(bad_privacy["evidence_state"] == "unknown", "non-object privacy provider fails closed")
+check("provider_error:TypeError" in str(bad_privacy), "non-object privacy provider is typed")
+
 # Schedule-history provider exceptions are a transport failure; only type escapes.
 def broken_history():
     raise RuntimeError("secret schedule args and token")
+
 
 broken_history = app_for(schedule_history_provider=broken_history).get(
     "/control-center/schedules"
@@ -186,6 +265,7 @@ def unready_agent3():
         "observed_at": NOW,
         "detail": "pilot evidence missing",
     }
+
 
 unready = app_for(agent3_provider=unready_agent3).get(
     "/control-center/status",
