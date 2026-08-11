@@ -65,8 +65,10 @@ def _write(path: Path, value: Mapping[str, Any]) -> None:
     temporary.replace(path)
 
 
-def _run(args: list[str]) -> int:
-    return subprocess.run(args, cwd=ROOT, env=os.environ.copy(), check=False).returncode
+def _run(args: list[str], cwd: Path | None = None) -> int:
+    return subprocess.run(
+        args, cwd=cwd or ROOT, env=os.environ.copy(), check=False
+    ).returncode
 
 
 def _candidate_matches(left: Any, right: Any) -> bool:
@@ -102,6 +104,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     parser.add_argument("--max-age-hours", type=float, default=168.0)
     parser.add_argument("--min-model-exact", type=float, default=1.0)
+    # A candidate is frozen before a gate can be corrected, so the contract a
+    # release is judged by is not always the copy shipped inside it. The
+    # wizard, the campaign and the strict gate all take --root for this; this
+    # one did not, which is why it could not judge 1.58.151's evidence.
+    parser.add_argument("--root", type=Path, default=None)
     args = parser.parse_args(argv)
     destination = _resolve(args.report)
     try:
@@ -130,12 +137,15 @@ def main(argv: list[str] | None = None) -> int:
             _write(destination, report)
             return 2
 
+    target_root = args.root.resolve() if args.root is not None else ROOT
     strict_command = [
         sys.executable,
         str(ROOT / "scripts" / "stage_b_strict_evidence.py"),
         "--lifecycle-report", str(args.lifecycle_report),
         "--report", str(args.strict_report),
     ]
+    if args.root is not None:
+        strict_command.extend(["--root", str(target_root)])
     base_command = [
         sys.executable,
         str(ROOT / "scripts" / "stage_b_physical_gate.py"),
@@ -144,11 +154,13 @@ def main(argv: list[str] | None = None) -> int:
         "--max-age-hours", str(args.max_age_hours),
         "--min-model-exact", str(args.min_model_exact),
     ]
+    if args.root is not None:
+        base_command.extend(["--root", str(target_root)])
     steps = [
-        {"label": "strict source/bootstrap/interruption gate", "command": strict_command, "exit_code": _run(strict_command)}
+        {"label": "strict source/bootstrap/interruption gate", "command": strict_command, "exit_code": _run(strict_command, target_root)}
     ]
     if steps[-1]["exit_code"] == 0:
-        steps.append({"label": "base Stage B physical gate", "command": base_command, "exit_code": _run(base_command)})
+        steps.append({"label": "base Stage B physical gate", "command": base_command, "exit_code": _run(base_command, target_root)})
 
     errors: list[str] = []
     try:

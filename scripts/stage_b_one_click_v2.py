@@ -350,10 +350,35 @@ def _read_journal_file(
 
 def _journal_snapshot(
     root: Path,
+    *,
+    include_tmp: bool = True,
 ) -> dict[str, Any] | None:
+    """Read the updater's journal.
+
+    include_tmp=False while the updater is RUNNING, and here is why.
+
+    The updater writes its journal atomically: write update-transaction.json.tmp,
+    then rename it over update-transaction.json. On Windows a rename fails if any
+    process holds the source open -- and this function opened the .tmp file every
+    100 ms during the interruption poll. Sooner or later the read landed inside
+    the rename window and the updater died on
+
+        FATAL: rename ...json.tmp ...json: Processen kan ikke faa adgang til
+        filen, da den bruges af en anden proces.
+
+    before it ever reached state=swapping. The interruption test then failed with
+    "naaede ikke en ny journal i state=swapping" -- reporting the updater as at
+    fault for something the observer caused. Observed on the rig; the updater had
+    already completed download, checksums and provenance.
+
+    The main/.tmp consistency check is still worth having, so it stays for the
+    before-and-after calls where nothing is writing.
+    """
     main = _read_journal_file(
         root / "update-transaction.json"
     )
+    if not include_tmp:
+        return main
     temporary = _read_journal_file(
         root / "update-transaction.json.tmp"
     )
@@ -464,7 +489,9 @@ def _run_interruption(
                 time.monotonic() < deadline
                 and process.poll() is None
             ):
-                snapshot = _journal_snapshot(root)
+                # Never touch the .tmp file while the updater is writing it:
+                # an open handle makes its atomic rename fail on Windows.
+                snapshot = _journal_snapshot(root, include_tmp=False)
                 if snapshot is not None:
                     if not observed_id:
                         observed_id = str(snapshot["id"])
@@ -557,6 +584,32 @@ def _run_interruption(
             f"updater_process_killed="
             f"{'true' if killed else 'false'}\n"
         )
+        # Clear the lock the killed updater stranded, exactly as an operator
+        # would after a crash.
+        #
+        # The single-instance lock is created with O_EXCL and released on a
+        # clean exit. Killing the process mid-swap -- which this test does on
+        # purpose -- leaves it behind, and the next run refuses to start:
+        #
+        #     another updater appears to be running (pid N started ...) --
+        #     lock ...updater.lock exists. If it crashed, delete the lock file
+        #     and rerun
+        #
+        # That refusal is deliberate (see lock.go: failing closed beats guessing
+        # staleness), and it is also the documented remedy. So the test performs
+        # the documented remedy and records that it did, rather than pretending
+        # recovery is automatic. Only the lock is removed -- never the journal,
+        # which is the thing recovery has to act on.
+        lock_path = root / "updater.lock"
+        lock_body = ""
+        if lock_path.exists():
+            lock_body = lock_path.read_text(encoding="utf-8", errors="replace").strip()
+            lock_path.unlink()
+        handle.write(
+            f"stranded_lock_cleared={'true' if lock_body else 'false'}\n"
+        )
+        if lock_body:
+            handle.write(f"stranded_lock_contents={lock_body}\n")
         recovery = subprocess.run(
             [str(updater), "-recover"],
             cwd=root,
