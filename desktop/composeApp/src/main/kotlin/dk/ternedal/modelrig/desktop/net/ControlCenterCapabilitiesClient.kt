@@ -5,11 +5,10 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -211,13 +210,18 @@ class ControlCenterCapabilitiesClient(baseUrl: String, private val bearer: Strin
     }
 
     private fun JsonObject.strictString(key: String): String {
-        val value = this[key]?.jsonPrimitive?.contentOrNull ?: fail("$key must be a string")
+        val primitive = this[key] as? JsonPrimitive ?: fail("$key must be a string")
+        if (!primitive.isString) fail("$key must be a string")
+        val value = primitive.content.trim()
         if (value.isBlank()) fail("blank $key")
-        return value.trim()
+        return value
     }
 
-    private fun JsonObject.strictBoolean(key: String): Boolean =
-        this[key]?.jsonPrimitive?.booleanOrNull ?: fail("$key must be boolean")
+    private fun JsonObject.strictBoolean(key: String): Boolean {
+        val primitive = this[key] as? JsonPrimitive ?: fail("$key must be boolean")
+        if (primitive.isString) fail("$key must be boolean")
+        return primitive.booleanOrNull ?: fail("$key must be boolean")
+    }
 
     private fun fail(message: String): Nothing =
         throw ControlCenterException("Invalid Control Center capabilities: $message")
