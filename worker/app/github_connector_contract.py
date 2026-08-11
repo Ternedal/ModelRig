@@ -101,7 +101,7 @@ def normalize_repository(value: str) -> str:
     if not _REPOSITORY.fullmatch(value):
         raise GitHubConnectorContractError("repository must be exact owner/name")
     owner, name = value.split("/", 1)
-    if name in {".", ".."} or name.endswith(".git"):
+    if name in {".", ".."} or name.lower().endswith(".git"):
         raise GitHubConnectorContractError("repository must be canonical owner/name")
     return f"{owner.lower()}/{name.lower()}"
 
