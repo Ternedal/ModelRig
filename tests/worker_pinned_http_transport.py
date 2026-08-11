@@ -157,7 +157,7 @@ check(b"Connection: close\r\n" in sock.sent, "connection is single-use")
 check(b"authorization:" not in sock.sent.lower() and b"cookie:" not in sock.sent.lower(), "no credentials are imported")
 check(sock.closed, "socket is closed after success")
 
-plain = FakeSocket(wire("302 Found", (("Location", "/next"),), b""), peer="8.8.8.8")
+plain = FakeSocket(wire("302 Found", (("Location", "/next"),), peer="8.8.8.8")
 plain_transport, _, plain_tls = make_transport(plain)
 redirect = plain_transport.request(
     "http://example.com:8080/start",
@@ -432,7 +432,8 @@ with tempfile.TemporaryDirectory() as temp:
 
     # Account-bound facade proves a grant for another credential account cannot
     # reach DNS, credential loading or transport.
-    grants = GitHubConnectorGrantStore(":memory:", uuid_factory=lambda: uuid.UUID(int=99))
+    grant_ids = iter((uuid.UUID(int=99), uuid.UUID(int=100)))
+    grants = GitHubConnectorGrantStore(":memory:", uuid_factory=lambda: next(grant_ids))
     matching = grants.create(
         GitHubConnectorScope(
             account="Ternedal",
