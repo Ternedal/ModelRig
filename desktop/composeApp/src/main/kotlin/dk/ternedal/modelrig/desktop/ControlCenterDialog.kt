@@ -284,6 +284,12 @@ fun DesktopControlCenterDialog(
                         DesktopCapabilityCard(capability)
                     }
                 }
+
+                DesktopControlCenterScheduleHistorySection(
+                    baseUrl = baseUrl,
+                    token = token,
+                    refreshGeneration = refreshGeneration,
+                )
             }
         },
         confirmButton = {
