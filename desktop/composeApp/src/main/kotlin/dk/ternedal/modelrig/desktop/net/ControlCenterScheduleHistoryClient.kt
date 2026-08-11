@@ -3,6 +3,8 @@ package dk.ternedal.modelrig.desktop.net
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -25,8 +27,8 @@ private data class ScheduleHistorySourcesWire(
 private data class ScheduleHistoryJobWire(
     val status: String,
     val kind: String,
-    @SerialName("progress_completed") val progressCompleted: Long,
-    @SerialName("progress_total") val progressTotal: Long,
+    @SerialName("progress_completed") val progressCompleted: JsonElement,
+    @SerialName("progress_total") val progressTotal: JsonElement,
     @SerialName("created_at") val createdAt: Double,
     @SerialName("updated_at") val updatedAt: Double,
 )
@@ -85,6 +87,7 @@ class ControlCenterScheduleHistoryClient(baseUrl: String, private val bearer: St
             "unknown_schema_value",
         )
         private val TERMINAL_OUTCOMES = setOf("executed", "not_run", "abandoned", "unknown")
+        private val INTEGER_TEXT = Regex("^-?(0|[1-9][0-9]*)$")
     }
 
     private val base = baseUrl.trimEnd('/')
@@ -230,8 +233,16 @@ class ControlCenterScheduleHistoryClient(baseUrl: String, private val bearer: St
     private fun parseJob(index: Int, wire: ScheduleHistoryJobWire): ControlCenterObservedJob {
         if (wire.status !in JOB_STATES) fail("unsupported job status ${wire.status}")
         val kind = requireText("items[$index].job.kind", wire.kind)
-        if (wire.progressCompleted < 0 || wire.progressTotal < 0) fail("job progress must be non-negative")
-        if (wire.progressTotal > 0 && wire.progressCompleted > wire.progressTotal) {
+        val progressCompleted = requireInteger(
+            "items[$index].job.progress_completed",
+            wire.progressCompleted,
+        )
+        val progressTotal = requireInteger(
+            "items[$index].job.progress_total",
+            wire.progressTotal,
+        )
+        if (progressCompleted < 0 || progressTotal < 0) fail("job progress must be non-negative")
+        if (progressTotal > 0 && progressCompleted > progressTotal) {
             fail("job progress exceeds total")
         }
         requireFinite("items[$index].job.created_at", wire.createdAt)
@@ -239,11 +250,19 @@ class ControlCenterScheduleHistoryClient(baseUrl: String, private val bearer: St
         return ControlCenterObservedJob(
             status = wire.status,
             kind = kind,
-            progressCompleted = wire.progressCompleted,
-            progressTotal = wire.progressTotal,
+            progressCompleted = progressCompleted,
+            progressTotal = progressTotal,
             createdAt = wire.createdAt,
             updatedAt = wire.updatedAt,
         )
+    }
+
+    private fun requireInteger(field: String, value: JsonElement): Long {
+        val primitive = value as? JsonPrimitive ?: fail("$field must be an integer")
+        if (primitive.isString || !INTEGER_TEXT.matches(primitive.content)) {
+            fail("$field must be an integer")
+        }
+        return primitive.content.toLongOrNull() ?: fail("$field must be an integer")
     }
 
     private fun requireText(field: String, value: String): String =
