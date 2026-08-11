@@ -101,7 +101,6 @@ class ControlCenterScheduleHistoryClient(baseUrl: String, private val token: Str
 
     private fun parseSource(
         raw: JSONObject,
-        *,
         allowedStates: Set<String>,
         label: String,
     ): ControlCenterHistorySource {
@@ -211,7 +210,7 @@ class ControlCenterScheduleHistoryClient(baseUrl: String, private val token: Str
     private fun JSONObject.requireFiniteNumber(key: String): Double {
         if (!has(key) || isNull(key)) fail("$key must be numeric")
         val raw = get(key)
-        if (raw !is Number || raw is Boolean) fail("$key must be numeric")
+        if (raw !is Number) fail("$key must be numeric")
         val value = raw.toDouble()
         if (!value.isFinite()) fail("$key must be finite")
         return value
