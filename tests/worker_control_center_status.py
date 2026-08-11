@@ -237,10 +237,21 @@ def create_jobs_fixture(path: Path, *, status_value: str = "completed"):
                created REAL NOT NULL,
                updated REAL NOT NULL)"""
     )
+    values = (
+        "job000000001",
+        "schedule",
+        status_value,
+        "PRIVATE ARGUMENT MUST NOT LEAK",
+        1,
+        1,
+        NOW - 54,
+        NOW - 50,
+    )
+    placeholders = ",".join("?" for _ in values)
     connection.execute(
         "INSERT INTO jobs (id,kind,status,detail,progress_completed,progress_total,created,updated) "
-        "VALUES (?,?,?,?,?,?,?,?)",
-        ("job000000001", "schedule", status_value, "PRIVATE ARGUMENT MUST NOT LEAK", 1, 1, NOW - 54, NOW - 50),
+        f"VALUES ({placeholders})",
+        values,
     )
     connection.commit()
     connection.close()
@@ -285,7 +296,7 @@ with tempfile.TemporaryDirectory() as temp:
     check(history["sources"]["jobs"]["state"] == "ready", "job source is ready")
     item = history["items"][0]
     check(item["occurrence_status"] == "executed", "durable executed status is preserved")
-    check(item["terminal_outcome"] == "executed" and not item["in_flight"], "ledger owns terminal outcome")
+    check(item["terminal_outcome"] == "executed" and item["in_flight"] is False, "ledger owns terminal outcome")
     check(item["tool"] == "note_append" and item["schedule_id"] == "0a1b2c3d4e5f", "safe schedule identity is joined")
     check(item["job"]["status"] == "completed", "job state is independently visible")
     serialized = str(history)
@@ -317,7 +328,7 @@ with tempfile.TemporaryDirectory() as temp:
     )
     item = history["items"][0]
     check(item["occurrence_status"] == "unknown_schema_value", "unknown occurrence enum is not trusted")
-    check(item["terminal_outcome"] == "unknown" and not item["in_flight"], "unknown enum never becomes success")
+    check(item["terminal_outcome"] == "unknown" and item["in_flight"] is None, "unknown enum keeps in-flight unknown")
 
 # An older DB that lacks job_id is not migrated by a read; it is unavailable.
 with tempfile.TemporaryDirectory() as temp:
