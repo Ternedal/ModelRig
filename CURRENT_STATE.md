@@ -76,7 +76,7 @@ are the same versioned values validated by worker, backend and clients.
 | `CLIENT_STATE_DESIGN.md` | DELVIST · trin 1-2 leveret (1.58.44/45) · trin 3-5 kræver device-test · **Ejer:** Anders |
 | `ISOLATION_DESIGN.md` | LIVE · I0a+I0c leveret (dormant) · I0b afventer rig · **Ejer:** Anders (gates) — se CURRENT_STATE.md for switches |
 | `RAG_DESIGN.md` | LIVE · replace-by-source leveret (1.58.40) · atomisk ingest + corpus-kontrakt leveret (1.58.148) · T-043 benchmark-harness leveret · måling/kalibrering kræver rig · **Ejer:** Anders |
-| `UPDATER_DESIGN.md` | LIVE · §4a self-update UDESTÅR (manuel udskiftning indtil da) · **Ejer:** Anders (rig) |
+| `UPDATER_DESIGN.md` | LIVE · implementation complete + CI-verificeret · fysisk signed-release→signed-release acceptance afventer #401 · **Ejer:** Anders (rig) |
 | `VALIDATION-1.58.49.md` | AFVENTER KØRSEL · resultatfelter tomme · gælder 1.58.49+ · **Ejer:** Anders (rig + telefon) |
 
 ## Test suites in CI
@@ -359,5 +359,6 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_stale_check.py`
 - `tests/workflow_success_harness.py`
 - `tests/workflow_test_coverage.py`
+- `tests/workflow_updater_status_consistency.py`
 - `tests/workflow_web_research_parity.py`
 - `tests/workflow_worker_entrypoints.py`
