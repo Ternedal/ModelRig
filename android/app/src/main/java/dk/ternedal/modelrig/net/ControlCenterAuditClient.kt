@@ -8,10 +8,10 @@ import java.util.concurrent.TimeUnit
 /**
  * Read-only, privacy-minimised view of the existing ToolGate audit route.
  *
- * `/api/v1/tools/audit` predates T-044 and includes `args_json`. Control Center
- * deliberately does not model that field: task/capability/approval/outcome
- * evidence is enough for operator audit, and copying arguments into another UI
- * would widen the exposure of potentially private tool inputs.
+ * `/api/v1/tools/audit` predates T-044 and includes `args_json` and a result
+ * summary. Control Center deliberately models neither field: task/capability/
+ * approval/outcome evidence is enough for operator audit, and copying payload
+ * content into another UI would widen exposure of potentially private data.
  *
  * The current durable audit schema has no connector identifier. Connector is
  * therefore explicit missing evidence, never inferred from `origin`.
@@ -79,7 +79,6 @@ class ControlCenterAuditClient(baseUrl: String, private val token: String) {
             risk = item.optionalNullableString("risk", index),
             outcome = outcome,
             origin = origin,
-            resultSummary = item.optionalNullableString("result_summary", index),
             durationMs = durationMs,
         )
     }
@@ -152,6 +151,5 @@ data class ControlCenterAuditEntry(
     val risk: String?,
     val outcome: String,
     val origin: String,
-    val resultSummary: String?,
     val durationMs: Long?,
 )
