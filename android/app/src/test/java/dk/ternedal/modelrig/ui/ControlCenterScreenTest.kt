@@ -44,4 +44,16 @@ class ControlCenterScreenTest {
         assertNull(controlCenterAgeLabel(Double.NaN))
         assertNull(controlCenterAgeLabel(Double.POSITIVE_INFINITY))
     }
+
+    @Test
+    fun capabilityLabelsDescribeAuthorityWithoutInventingHealth() {
+        assertEquals("læse", controlCenterAccessLabel("read"))
+        assertEquals("skrive", controlCenterAccessLabel("write"))
+        assertEquals("desktop", controlCenterAccessLabel("desktop"))
+        assertEquals("future-access", controlCenterAccessLabel("future-access"))
+        assertEquals("ikke direkte afbrydelig", controlCenterTerminationLabel("none"))
+        assertEquals("kooperativ stop", controlCenterTerminationLabel("cooperative"))
+        assertEquals("runtime-stop", controlCenterTerminationLabel("forceable"))
+        assertEquals("future-stop", controlCenterTerminationLabel("future-stop"))
+    }
 }
