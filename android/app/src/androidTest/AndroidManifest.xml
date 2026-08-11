@@ -4,7 +4,6 @@
         <!-- Test-only host for isolated Compose Control Center instrumentation. -->
         <activity
             android:name="androidx.activity.ComponentActivity"
-            android:exported="false"
-            android:theme="@style/Theme.AppCompat.Empty" />
+            android:exported="false" />
     </application>
 </manifest>
