@@ -42,9 +42,8 @@ class ControlCenterPrivacyClientTest {
 
     @Test
     fun olderStatusWithoutPrivacyFailsClosedToUnknown() {
-        val client = client()
-        val privacy = client.parse(
-            validStatus().replace(Regex(",\\s*\"privacy\":\\s*\\{.*\\}\\s*$", RegexOption.DOT_MATCHES_ALL), ""),
+        val privacy = client().parse(
+            """{"schema":"kaliv-control-center-status/v1"}""",
         )
 
         assertEquals("unknown", privacy.evidenceState)
