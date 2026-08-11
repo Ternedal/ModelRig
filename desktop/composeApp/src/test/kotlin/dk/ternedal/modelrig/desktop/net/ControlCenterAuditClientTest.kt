@@ -136,7 +136,7 @@ class ControlCenterAuditClientTest {
               "ts":"2026-08-11T11:00:00",
               "conversation_id":"task-123",
               "tool":"note_append",
-              "args_json":"{\\\"text\\\":\\\"TOP SECRET ARGUMENT\\\"}",
+              "args_json":"TOP SECRET ARGUMENT",
               "risk":"write",
               "outcome":"executed",
               "confirmation_id":"confirm-123",
