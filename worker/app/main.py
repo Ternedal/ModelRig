@@ -58,11 +58,18 @@ if _os.getenv("KALIV_COMPUTER_USE", "0").strip().lower() in {"1", "true", "on"}:
 # function repeats the same guard, so importing/calling it through another path
 # still cannot silently activate the pilot.
 if _os.getenv("KALIV_GITHUB_CONNECTOR_PILOT", "0").strip().lower() in {"1", "true", "on"}:
+    from .github_connector_admin import (
+        build_github_connector_admin_router as _build_github_connector_admin_router,
+    )
     from .github_connector_tool import (
         register_github_connector_pilot as _register_github_connector_pilot,
     )
 
     _register_github_connector_pilot(_impl.app)
+    # Grant administration is never model-visible. It is mounted only beside
+    # the explicitly enabled pilot and rechecks loopback admission on every
+    # request; the authenticated Go backend remains the remote operator edge.
+    _impl.app.include_router(_build_github_connector_admin_router())
 
 # Return the implementation module for every import of app.main. This preserves
 # module-global monkeypatching and private helper access instead of copying names
