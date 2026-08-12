@@ -236,6 +236,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_rag_cloud.py`
 - `tests/worker_rag_corpus_contract.py`
 - `tests/worker_rag_pdf_lifecycle.py`
+- `tests/worker_read_connector_data_sharing_identity.py`
+- `tests/worker_read_connector_package_contract.py`
 - `tests/worker_read_scope.py`
 - `tests/worker_read_scope_windows_aliases.py`
 - `tests/worker_research_claim_evidence.py`
@@ -359,6 +361,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_staged_promotion_runbook.py`
 - `tests/workflow_stale_check.py`
 - `tests/workflow_success_harness.py`
+- `tests/workflow_t037_read_connector_boundary.py`
 - `tests/workflow_test_coverage.py`
 - `tests/workflow_web_research_parity.py`
 - `tests/workflow_worker_entrypoints.py`
