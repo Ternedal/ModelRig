@@ -13,6 +13,13 @@ import (
 // worker endpoint that is reachable only over loopback. The worker independently
 // re-checks loopback for both observability and grant mutations.
 func githubConnectorPilotEnabled() bool {
+	// Keep the canonical off-by-default decision syntactically explicit. The
+	// readiness generator deliberately recognises only unambiguous Go switches;
+	// the normalized fallback preserves the worker-compatible aliases and
+	// whitespace handling without making readiness infer semantics from a parser.
+	if os.Getenv("KALIV_GITHUB_CONNECTOR_PILOT") == "1" {
+		return true
+	}
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("KALIV_GITHUB_CONNECTOR_PILOT"))) {
 	case "1", "true", "on":
 		return true
