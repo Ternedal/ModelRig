@@ -126,6 +126,11 @@ internal fun DesktopControlCenterAuditSection(
     }
 
     DesktopControlCenterPrivacySection(privacy)
+    DesktopControlCenterGitHubConnectorSection(
+        baseUrl = baseUrl,
+        token = token,
+        refreshGeneration = refreshGeneration,
+    )
 
     Column(
         modifier = Modifier.padding(top = 8.dp),
