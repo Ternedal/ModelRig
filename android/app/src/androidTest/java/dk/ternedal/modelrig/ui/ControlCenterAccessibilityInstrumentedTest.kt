@@ -20,6 +20,9 @@ import dk.ternedal.modelrig.net.ControlCenterAuditEntry
 import dk.ternedal.modelrig.net.ControlCenterAuditEvidence
 import dk.ternedal.modelrig.net.ControlCenterAuditSnapshot
 import dk.ternedal.modelrig.net.ControlCenterCommonDataSharing
+import dk.ternedal.modelrig.net.ControlCenterGitHubAuditEntry
+import dk.ternedal.modelrig.net.ControlCenterGitHubConnectorSnapshot
+import dk.ternedal.modelrig.net.ControlCenterGitHubGrant
 import dk.ternedal.modelrig.net.ControlCenterPrivacy
 import dk.ternedal.modelrig.net.ControlCenterScopedPermissions
 import dk.ternedal.modelrig.net.ControlCenterToolResultEgress
@@ -112,6 +115,77 @@ class ControlCenterAccessibilityInstrumentedTest {
         composeTestRule.onNodeWithText("Task / conversation-ref").assertIsDisplayed()
         composeTestRule.onNodeWithText("Capability").assertIsDisplayed()
         composeTestRule.onNodeWithText("Approval").assertIsDisplayed()
+
+        composeTestRule.enableAccessibilityChecks()
+        composeTestRule.onRoot().tryPerformAccessibilityChecks()
+    }
+
+    @Test
+    fun githubConnectorGrantsFiltersAndRevokeControlPassAccessibilityChecks() {
+        val snapshot = ControlCenterGitHubConnectorSnapshot(
+            grants = listOf(
+                ControlCenterGitHubGrant(
+                    grantId = "ghg_0123456789abcdef0123456789abcdef",
+                    account = "ternedal",
+                    repositories = listOf("ternedal/modelrig"),
+                    operations = listOf("issue", "pull_request"),
+                    scopeSha256 = "a".repeat(64),
+                    createdAt = "2026-08-12T09:00:00Z",
+                    createdBy = "loopback-operator",
+                    status = "active",
+                    revokedAt = null,
+                    revokedBy = null,
+                ),
+            ),
+            audit = listOf(
+                ControlCenterGitHubAuditEntry(
+                    timestamp = "2026-08-12T09:15:00Z",
+                    account = "ternedal",
+                    repository = "ternedal/modelrig",
+                    operation = "issue",
+                    objectId = "88",
+                    outcome = "executed",
+                    grantId = "ghg_0123456789abcdef0123456789abcdef",
+                    scopeSha256 = "a".repeat(64),
+                    revision = "abc123",
+                    durationMs = 12,
+                    detail = "fresh_remote_read",
+                ),
+            ),
+        )
+
+        composeTestRule.setContent {
+            ModelRigTheme(dark = true) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = KalivTheme.colors.background,
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .verticalScroll(rememberScrollState())
+                            .padding(24.dp),
+                    ) {
+                        ControlCenterGitHubConnectorSection(
+                            snapshot = snapshot,
+                            loading = false,
+                            error = null,
+                            mutationError = null,
+                            revokingId = null,
+                            onRevoke = {},
+                        )
+                    }
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithText("GitHub connector").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Ekstern konto: GitHub · ternedal").assertIsDisplayed()
+        composeTestRule.onNodeWithText(controlCenterGitHubOutboundDataLabel()).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Tilbagekald tilladelse").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Connector").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Repository").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Operation").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Udfald").assertIsDisplayed()
 
         composeTestRule.enableAccessibilityChecks()
         composeTestRule.onRoot().tryPerformAccessibilityChecks()

@@ -120,6 +120,11 @@ internal fun ControlCenterAuditLoader(
     }
 
     ControlCenterPrivacySection(privacy)
+    ControlCenterGitHubConnectorLoader(
+        baseUrl = baseUrl,
+        token = token,
+        refreshGeneration = refreshGeneration,
+    )
     ControlCenterAuditSection(
         snapshot = snapshot,
         error = error,
