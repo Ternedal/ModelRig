@@ -1,10 +1,10 @@
 # ModelRig updater — implementation status
 
-**Status:** code-complete after the post-commit orchestration change; physical rig acceptance remains required before claiming end-to-end production proof.
+**Status:** code-complete after the post-commit orchestration change; physical signed-release→signed-release acceptance remains tracked in #401 before claiming end-to-end production proof.
 
-This status addendum supersedes the outdated implementation-status labels in
-`UPDATER_DESIGN.md`. The design's transaction and failure model remains
-authoritative.
+This status addendum records the detailed implementation evidence behind the
+summary status in `UPDATER_DESIGN.md`. The design's transaction/failure model
+and its implementation-vs-physical-acceptance boundary are authoritative.
 
 ## Implemented
 
@@ -59,7 +59,8 @@ from a pre-self-updating binary to a self-updating one.
 
 CI proves logic and Windows API behaviour, but it cannot honestly prove the
 specific installed rig, Task Scheduler configuration, antivirus/file-locking
-behaviour or power-loss timing. Production acceptance still requires:
+behaviour or power-loss timing. Physical end-to-end acceptance remains #401 and
+requires:
 
 1. start from a known older self-update-capable updater;
 2. run a normal update to a newer signed release;

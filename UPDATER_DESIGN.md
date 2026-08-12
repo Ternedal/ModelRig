@@ -1,12 +1,12 @@
 # UPDATER_DESIGN.md — transaktionel updater for ModelRig/Kaliv
 
-**Status:** LIVE · §4a self-update UDESTÅR (manuel udskiftning indtil da) · **Ejer:** Anders (rig)
+**Status:** LIVE · implementation complete + CI-verificeret · fysisk signed-release→signed-release acceptance afventer #401 · **Ejer:** Anders (rig)
 
 > Autoritativt design for updaterens fejl- og recovery-model. Afløser den
 > inkrementelle patch-tilgang: syv audits fandt hver ét nyt edge case, fordi
 > swappet ikke var én transaktion. Dette dokument samler modellen ét sted og
-> skelner præcist mellem **Implementeret (1.58.29, unit-testet + Windows-CI)**
-> og **Handoff (kræver Windows-procestest)**.
+> skelner præcist mellem **implementeret/CI-verificeret software** og den
+> **fysiske rig-accept**, som fortsat kræver en rigtig Windows-procestest.
 
 ## 1. Fejlmodel (hvad der skal overleves)
 
@@ -59,7 +59,7 @@ gendanne fra — der findes ingen tilstand hvor et target aldrig blev fanget.
 **Backups:** immutable per forsøg (`backups/<ts>-<fra>-to-<til>`), claimes
 atomisk med `os.Mkdir` (fejler hvis den findes) — ingen check-then-act-race.
 
-## 3. Implementeret i 1.58.29–1.58.30 (verificeret)
+## 3. Implementeret og verificeret
 
 **1.58.36 (fail-closed efter 1.58.35-audit):**
 - **Rollback bevises før den erklæres:** `rolled_back` arkiveres først når den
@@ -103,7 +103,6 @@ atomisk med `os.Mkdir` (fejler hvis den findes) — ingen check-then-act-race.
 - **Journal-durabilitet:** tmp-filen fsync'es før rename; journal-skrivefejl
   efter første mutation ruller tilbage i stedet for at fortsætte.
 
-
 - Journal + whole-set-recovery (`journal.go`) — unit-testet inkl. crash-midt-i-
   transaktion-scenariet (A swappet, B afbrudt → begge gendannet, journal arkiveret).
 - To-faset `backupAndSwap` — testet at target 2's backup findes selv når dens
@@ -114,49 +113,79 @@ atomisk med `os.Mkdir` (fejler hvis den findes) — ingen check-then-act-race.
 - Succes arkiverer journalen som `committed` (advarer hvis arkivering fejler —
   ellers ville næste kørsel rulle en god update tilbage).
 - **Windows-CI:** `test-windows-appliance` kører updater/supervisor/heartbeat-
-  testene på `windows-latest` ved hvert push/PR — rename-semantikken valideres
-  nu på den platform hvor den afviger.
+  testene på `windows-latest` ved hvert push/PR.
+- **Windows-native replace:** live-targets erstattes via `ReplaceFileW` under den
+  eksisterende journal/rollback-kontrakt; Windows-CI dækker replacement,
+  rollback, missing-live recovery og failure-before-mutation.
+- **Recovery ved boot:** bootstrap-entrypointet kører updaterens offline recovery
+  før appliance/supervisor-start, så en efterladt transaktion håndteres før normal
+  drift.
+- **Updater self-update:** `-version` og verificeret `-self-update` er implementeret;
+  updater-asset bindes til checksum + DSSE/SLSA provenance, `.pending` claimes
+  eksklusivt, og en detached helper erstatter først updateren efter proces-exit.
+- **Post-commit orchestration:** en detached watcher sammenligner committed-
+  transaction fingerprints og starter kun self-update efter en ny successfuld
+  appliance-commit. Check/recover/version, already-current, rollback og
+  `manual_recovery` trigger ikke automatisk self-update.
 
-**Ærlige grænser (uændret, dokumenteret i koden):** `os.Rename` er ikke
-crash-atomisk på Windows (vinduet mellem de to renames — C2 — *repareres* nu af
-recovery, men *forhindres* først af ReplaceFileW); lock-filen er ikke
-crash-selvhelende (manuel sletning efter hårdt crash, journalen står der også).
+**Ærlige grænser:** den Windows-native live-replacement lukker det tidligere
+rename-vindue for Windows-pathen, men fuld power-loss-durability og den konkrete
+installerede rigs Task Scheduler/AV/file-locking/timing kan ikke bevises af CI.
+Lock-filen er fortsat ikke crash-selvhelende; hårdt crash kan kræve manuel
+lock-oprydning, mens journalen bevarer recovery-authority.
 
-## 4. Handoff — kræver Windows-procestest (implementér i denne rækkefølge)
+## 4. Fysisk acceptance — software er implementeret, rig-bevis afventer #401
 
-### 4a. Updater-self-update (vigtigst — ellers når intet af ovenstående eksisterende rigs)
-En kørende exe kan ikke erstatte sig selv på Windows. Design:
-1. Updateren downloader + SHA-verificerer `modelrig-updater-windows-x64.exe`
-   til `modelrig-updater-windows-x64.exe.pending` som **sidste** trin i en
-   committet update (efter health/heartbeat — self-update må aldrig gate rollback).
-2. Den spawner en detached helper — enklest PowerShell:
-   `Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-Command',
-   "Wait-Process -Id <pid> -ErrorAction SilentlyContinue; Move-Item -Force '<pending>' '<live>'"`
-   — og afslutter. Helperen venter på exit og swapper.
-3. Næste kørsel logger sin egen version (tilføj `-version`-flag) så det kan ses
-   at swappet skete.
-**Accepttest (på riggen):** kør gammel updater → efter committet update ligger ny
-updater-exe; kør igen → `-version` viser den nye; afbryd helperen → `.pending`
-ligger urørt, live-updateren intakt.
+Repository-implementeringen af de tidligere §4a/§4b/§4d handoff-punkter er
+færdig og CI-verificeret. Det åbne arbejde er ikke endnu en updater-runtime-
+feature; det er kandidatbundet fysisk end-to-end bevis på den rigtige Windows-
+rig. #401 er den autoritative acceptance-issue.
 
-### 4b. Windows-native replace (`ReplaceFileW`)
-Erstat de to renames i `atomicSwapInto` med ét `windows.ReplaceFile`-kald
-(`golang.org/x/sys/windows`, build-tag `//go:build windows`; behold nuværende
-implementering som `!windows`-fallback og til tests). Lukker C2-vinduet helt.
-**Accepttest:** kill -9 af updateren i en loop under swap på riggen → live-navnet
-findes altid.
+### 4a. Updater self-update — IMPLEMENTERET; fysisk signed-release→signed-release proof afventer
 
-### 4c. Proces-integrationstest på windows-latest
-Unit/fault-testene kører nu på Windows (gjort). Tilbage: et release-job-step der
-kører updater + supervisor som **rigtige processer** (fx mod en lokal fil-server
-med et fabrikeret release): normal update → committed; defekt worker → rollback;
-kill midt i swap → næste kørsel whole-set-recovery. Kør på `windows-latest` i
-release-workflowet.
+Implementeret software:
+1. `-version` eksponerer updaterens compiled release identity.
+2. `-self-update` downloader kun updater-assetet og verificerer checksum samt
+   release-bundet DSSE/SLSA provenance.
+3. `.pending` oprettes eksklusivt; detached helper venter på den kørende updater
+   og erstatter derefter live-exe uden at gøre self-update til rollback-gate.
+4. En post-commit watcher starter automatisk self-update **kun** efter en ny
+   committed appliance transaction og logger separat.
 
-### 4d. Recovery ved boot
-`modelrig-updater -recover` findes (offline). Wire den ind som første action i
-autostart-scriptet/Task'en, før supervisoren startes — så heler en crashet rig
-ved hvert logon, ikke kun når en update køres.
+Fysisk acceptance i #401 skal bevise en ægte nyere signeret target-release:
+source-updater → successfuld appliance commit → automatisk follow-up → ændret
+live updater-hash/version. En pre-self-update updater kræver naturligt én manuel
+bootstrap-erstatning før denne kæde kan eksistere.
+
+### 4b. Windows-native replace (`ReplaceFileW`) — IMPLEMENTERET + Windows-CI
+
+Windows-pathen bruger `ReplaceFileW` under journalens eksisterende rollback-
+model; non-Windows beholder test/fallback-semantik. CI på `windows-latest`
+dækker replacement og rollback-fejlklasser. Den fysiske #401-matrix skal stadig
+interrupte processen omkring swap og bevise, at live-navnene forbliver intakte
+på den konkrete rig.
+
+### 4c. Proces-level acceptance matrix — FYSISK UDESTÅR i #401
+
+Det tilbageværende bevis køres som rigtige processer på den konkrete Windows-rig
+med kandidatbundne releases/evidence:
+
+- normal update → `committed`;
+- defekt worker → verificeret rollback til source-version;
+- kill updater midt i swap → næste start laver whole-set recovery;
+- helper-interruption efter `.pending` → gammel live-updater forbliver runnable,
+  og retry kan færdiggøre target-versionen;
+- Task Scheduler/bootstrap/supervisor/log/journal-evidence bindes til source- og
+  target-release.
+
+Dette må ikke beskrives som bestået ud fra unit tests eller Windows-CI alene.
+
+### 4d. Recovery ved boot — IMPLEMENTERET; fysisk rig-konfiguration indgår i #401
+
+Offline `modelrig-updater -recover` køres af bootstrap-flowet før normal
+appliance/supervisor-start. Repository/Windows-CI beviser wiring og recovery-
+semantik; #401 skal stadig bevise den faktisk installerede Task Scheduler-
+konfiguration og procesadfærd på riggen.
 
 ## 5. Ikke-mål (accepterede grænser)
 Versionerede installations-mapper med `current`-symlink (over-engineering for én
