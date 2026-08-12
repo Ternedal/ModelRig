@@ -1,0 +1,29 @@
+name: current-state-materialize
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install worker deps
+        run: pip install -r worker/requirements.txt --break-system-packages
+      - name: Generate canonical CURRENT_STATE.md
+        run: python3 scripts/current_state.py
+      - name: Emit generated state
+        shell: bash
+        run: |
+          echo 'CURRENT_STATE_BASE64_BEGIN'
+          base64 -w0 CURRENT_STATE.md
+          echo
+          echo 'CURRENT_STATE_BASE64_END'
