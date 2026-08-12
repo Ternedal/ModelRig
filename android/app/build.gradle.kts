@@ -27,6 +27,7 @@ android {
         targetSdk = 35
         versionCode = 278          // monotonic, bumped every release (not tied to semver)
         versionName = "1.58.151"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -86,4 +87,14 @@ dependencies {
     // the system splash overrides on 12+ -- so on a Pixel there was effectively
     // no branded splash. This API is the supported way to theme it.
     implementation("androidx.core:core-splashscreen:1.0.1")
+
+    // T-044 Control Center UI/accessibility gate. These tests run on a real
+    // API-35 emulator in CI because Compose's Accessibility Test Framework
+    // integration requires API 34+ and is not supported by Robolectric.
+    androidTestImplementation(composeBom)
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4-accessibility")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
