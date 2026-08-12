@@ -52,6 +52,25 @@ if _os.getenv("KALIV_COMPUTER_USE", "0").strip().lower() in {"1", "true", "on"}:
     # samtale.
     _register_desktop_action_preview_tool()
 
+# T-036 GitHub pilot: separate, default-off operator decision.  Keeping the
+# literal getenv here makes activation_readiness see the new network-capable
+# surface instead of hiding it inside the connector module.  The registration
+# function repeats the same guard, so importing/calling it through another path
+# still cannot silently activate the pilot.
+if _os.getenv("KALIV_GITHUB_CONNECTOR_PILOT", "0").strip().lower() in {"1", "true", "on"}:
+    from .github_connector_admin import (
+        build_github_connector_admin_router as _build_github_connector_admin_router,
+    )
+    from .github_connector_tool import (
+        register_github_connector_pilot as _register_github_connector_pilot,
+    )
+
+    _register_github_connector_pilot(_impl.app)
+    # Grant administration is never model-visible. It is mounted only beside
+    # the explicitly enabled pilot and rechecks loopback admission on every
+    # request; the authenticated Go backend remains the remote operator edge.
+    _impl.app.include_router(_build_github_connector_admin_router())
+
 # Return the implementation module for every import of app.main. This preserves
 # module-global monkeypatching and private helper access instead of copying names
 # into a wrapper namespace whose functions would still close over main_impl.

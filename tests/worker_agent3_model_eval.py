@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Regression checks for scripts/agent3_model_eval.py."""
+"""Regression checks for model/eval harnesses."""
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import sys
@@ -16,6 +17,15 @@ assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
+
+GITHUB_SUMMARY_SCRIPT = ROOT / "scripts" / "github_connector_summary_eval.py"
+GITHUB_SUMMARY_SPEC = importlib.util.spec_from_file_location(
+    "github_connector_summary_eval_test", GITHUB_SUMMARY_SCRIPT
+)
+assert GITHUB_SUMMARY_SPEC is not None and GITHUB_SUMMARY_SPEC.loader is not None
+GITHUB_SUMMARY = importlib.util.module_from_spec(GITHUB_SUMMARY_SPEC)
+sys.modules[GITHUB_SUMMARY_SPEC.name] = GITHUB_SUMMARY
+GITHUB_SUMMARY_SPEC.loader.exec_module(GITHUB_SUMMARY)
 
 
 class FakeClient:
@@ -254,6 +264,145 @@ def test_deep_health_timeout_handles_a_cold_timeout_without_crashing() -> None:
     checks = module.check_substrate(timeout_get, Check, "http://127.0.0.1:8080", "token", "qwen3:14b")
     assert checks[0]["status"] == "fail"
     assert "timed out" in checks[0]["detail"]
+
+
+def _claim_value(document: dict[str, Any], path: str) -> Any:
+    value: Any = document
+    for segment in path.split("."):
+        value = value[segment]
+    return value
+
+
+def _grounded_candidate(case: dict[str, Any]) -> dict[str, Any]:
+    result = case["tool_result"]
+    return {
+        "schema": GITHUB_SUMMARY.CANDIDATE_SCHEMA,
+        "object": GITHUB_SUMMARY.source_identity(result),
+        "claims": [
+            {"path": path, "value": _claim_value(result["document"], path)}
+            for path in case["required_claims"]
+        ],
+    }
+
+
+def _must_fail(case: dict[str, Any], candidate: dict[str, Any], contains: str) -> None:
+    try:
+        GITHUB_SUMMARY.evaluate_candidate(case, candidate)
+    except GITHUB_SUMMARY.GitHubSummaryEvalError as exc:
+        assert contains in str(exc), str(exc)
+    else:
+        raise AssertionError("invented GitHub summary candidate unexpectedly passed")
+
+
+def test_github_summary_eval_frozen_set_covers_issue_pr_and_ci() -> None:
+    cases = GITHUB_SUMMARY.load_cases(ROOT / "eval" / "github_connector_summary_cases.json")
+    assert set(cases) == {"issue-summary", "pr-summary", "ci-summary"}
+    assert {case["operation"] for case in cases.values()} == {
+        "issue",
+        "pull_request",
+        "workflow_run",
+    }
+    assert all(case["tool_result"]["source"]["production_activation"] is False for case in cases.values())
+
+
+def test_github_summary_eval_accepts_only_source_exact_claims_then_renders() -> None:
+    cases = GITHUB_SUMMARY.load_cases(ROOT / "eval" / "github_connector_summary_cases.json")
+    candidates = {case_id: _grounded_candidate(case) for case_id, case in cases.items()}
+    report = GITHUB_SUMMARY.run_eval(cases, candidates)
+    assert report["cases"] == 3
+    assert report["passed"] == 3
+    assert report["failed"] == 0
+    assert report["pass_rate"] == 1.0
+    assert report["production_activation"] is False
+    summaries = {row["case_id"]: row["summary"] for row in report["results"]}
+    assert "Issue #83" in summaries["issue-summary"]
+    assert "PR #501" in summaries["pr-summary"]
+    assert "CI-run #3750" in summaries["ci-summary"]
+    assert "7e9e847b757757690ae768262800c5c022327eb6" in summaries["pr-summary"]
+    assert "7e9e847b757757690ae768262800c5c022327eb6" in summaries["ci-summary"]
+
+
+def test_github_summary_eval_rejects_invented_issue_object_and_revision() -> None:
+    case = GITHUB_SUMMARY.load_cases(ROOT / "eval" / "github_connector_summary_cases.json")["issue-summary"]
+    candidate = _grounded_candidate(case)
+    candidate["object"]["object_id"] = "999"
+    _must_fail(case, candidate, "source identity: object_id")
+
+    candidate = _grounded_candidate(case)
+    candidate["object"]["revision"] = "sha256:" + "f" * 64
+    _must_fail(case, candidate, "source identity: revision")
+
+
+def test_github_summary_eval_rejects_invented_issue_claim() -> None:
+    case = GITHUB_SUMMARY.load_cases(ROOT / "eval" / "github_connector_summary_cases.json")["issue-summary"]
+    candidate = _grounded_candidate(case)
+    number = next(claim for claim in candidate["claims"] if claim["path"] == "number")
+    number["value"] = 999
+    _must_fail(case, candidate, "mismatched claim: number")
+
+
+def test_github_summary_eval_rejects_invented_pr_head_sha_and_state() -> None:
+    case = GITHUB_SUMMARY.load_cases(ROOT / "eval" / "github_connector_summary_cases.json")["pr-summary"]
+    candidate = _grounded_candidate(case)
+    head = next(claim for claim in candidate["claims"] if claim["path"] == "head.sha")
+    head["value"] = "f" * 40
+    _must_fail(case, candidate, "mismatched claim: head.sha")
+
+    candidate = _grounded_candidate(case)
+    state = next(claim for claim in candidate["claims"] if claim["path"] == "state")
+    state["value"] = "merged"
+    _must_fail(case, candidate, "mismatched claim: state")
+
+
+def test_github_summary_eval_rejects_invented_ci_run_and_conclusion() -> None:
+    case = GITHUB_SUMMARY.load_cases(ROOT / "eval" / "github_connector_summary_cases.json")["ci-summary"]
+    candidate = _grounded_candidate(case)
+    run_number = next(claim for claim in candidate["claims"] if claim["path"] == "run_number")
+    run_number["value"] = 9999
+    _must_fail(case, candidate, "mismatched claim: run_number")
+
+    candidate = _grounded_candidate(case)
+    conclusion = next(claim for claim in candidate["claims"] if claim["path"] == "conclusion")
+    conclusion["value"] = "failure"
+    _must_fail(case, candidate, "mismatched claim: conclusion")
+
+
+def test_github_summary_eval_rejects_missing_or_unverified_free_text() -> None:
+    case = GITHUB_SUMMARY.load_cases(ROOT / "eval" / "github_connector_summary_cases.json")["pr-summary"]
+    candidate = _grounded_candidate(case)
+    candidate["claims"] = [claim for claim in candidate["claims"] if claim["path"] != "head.sha"]
+    _must_fail(case, candidate, "omitted required grounded claims")
+
+    candidate = _grounded_candidate(case)
+    candidate["summary"] = "PR #999 er merged"  # free prose is not part of the accepted model contract
+    _must_fail(case, candidate, "candidate keys")
+
+
+def test_github_summary_eval_rejects_contradictory_source_fixture() -> None:
+    cases = GITHUB_SUMMARY.load_cases(ROOT / "eval" / "github_connector_summary_cases.json")
+    case = copy.deepcopy(cases["ci-summary"])
+    case["tool_result"]["source"]["object_id"] = "999"
+    try:
+        GITHUB_SUMMARY.evaluate_candidate(case, _grounded_candidate(cases["ci-summary"]))
+    except GITHUB_SUMMARY.GitHubSummaryEvalError as exc:
+        assert "source object_id contradicts tool_result" in str(exc)
+    else:
+        raise AssertionError("contradictory source receipt unexpectedly passed")
+
+
+def test_github_summary_eval_report_counts_bad_candidate_against_gate() -> None:
+    cases = GITHUB_SUMMARY.load_cases(ROOT / "eval" / "github_connector_summary_cases.json")
+    candidates = {case_id: _grounded_candidate(case) for case_id, case in cases.items()}
+    bad = copy.deepcopy(candidates["ci-summary"])
+    next(claim for claim in bad["claims"] if claim["path"] == "conclusion")["value"] = "failure"
+    candidates["ci-summary"] = bad
+    report = GITHUB_SUMMARY.run_eval(cases, candidates)
+    assert report["passed"] == 2
+    assert report["failed"] == 1
+    assert report["pass_rate"] == 2 / 3
+    failed = next(row for row in report["results"] if row["case_id"] == "ci-summary")
+    assert failed["passed"] is False
+    assert "mismatched claim: conclusion" in failed["error"]
 
 
 TESTS = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
