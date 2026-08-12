@@ -1,9 +1,14 @@
-"""Pinned stdlib HTTP transport for the dormant deterministic web fetcher.
+"""Pinned stdlib HTTP transport for deterministic outbound reads.
 
 The transport bypasses proxy/environment discovery and never resolves the URL
-host itself. It opens one socket to the exact IP selected by the fetch engine,
+host itself. It opens one socket to the exact IP selected by the caller,
 preserves the original host for HTTP Host and TLS SNI/certificate verification,
 never follows redirects, and enforces a wire-byte ceiling.
+
+Normal callers still cannot supply credentials in ``headers``.  T-036 adds one
+explicit trusted bearer seam for connector adapters whose credential is loaded
+outside model/tool arguments.  The bearer is validated separately, requires
+HTTPS, and is never accepted through the ordinary header map.
 """
 from __future__ import annotations
 
@@ -29,6 +34,7 @@ _SINGLETON_RESPONSE_HEADERS = frozenset({
 })
 _MAX_HEADER_BYTES = 64 * 1024
 _READ_CHUNK = 64 * 1024
+_MAX_BEARER_BYTES = 4_096
 
 SocketFactory = Callable[[int, int], socket.socket]
 SSLContextFactory = Callable[[], ssl.SSLContext]
@@ -79,6 +85,19 @@ def _validated_headers(headers: Mapping[str, str]) -> tuple[tuple[str, str], ...
         clean.append((name, value))
     clean.sort()
     return tuple(clean)
+
+
+def _validated_bearer_token(token: str) -> str:
+    """Validate a trusted in-memory bearer without ever echoing it in errors."""
+    if not isinstance(token, str):
+        raise WebFetchError("trusted bearer token must be a string")
+    if not 20 <= len(token) <= _MAX_BEARER_BYTES:
+        raise WebFetchError("trusted bearer token length is invalid")
+    if token != token.strip() or not token.isascii():
+        raise WebFetchError("trusted bearer token format is invalid")
+    if any(ord(ch) < 0x21 or ord(ch) > 0x7E for ch in token):
+        raise WebFetchError("trusted bearer token format is invalid")
+    return token
 
 
 def _normalize_response_headers(pairs: list[tuple[str, str]]) -> dict[str, str]:
@@ -135,12 +154,60 @@ class PinnedHttpTransport:
         timeout_seconds: float,
         max_wire_bytes: int,
     ) -> TransportResponse:
-        if not isinstance(timeout_seconds, (int, float)) or timeout_seconds <= 0:
+        """Credential-free public request; auth/cookie remain forbidden."""
+        return self._request(
+            url,
+            connect_address=connect_address,
+            headers=headers,
+            timeout_seconds=timeout_seconds,
+            max_wire_bytes=max_wire_bytes,
+            trusted_bearer=None,
+        )
+
+    def request_with_trusted_bearer(
+        self,
+        url: str,
+        *,
+        connect_address: str,
+        headers: Mapping[str, str],
+        bearer_token: str,
+        timeout_seconds: float,
+        max_wire_bytes: int,
+    ) -> TransportResponse:
+        """Connector-only seam for a credential already isolated from tool args.
+
+        This method does not make ``authorization`` legal in ``headers``. A
+        caller attempting to pass an auth/cookie header is still rejected by
+        the normal validator. Trusted bearers are additionally HTTPS-only.
+        """
+        bearer = _validated_bearer_token(bearer_token)
+        return self._request(
+            url,
+            connect_address=connect_address,
+            headers=headers,
+            timeout_seconds=timeout_seconds,
+            max_wire_bytes=max_wire_bytes,
+            trusted_bearer=bearer,
+        )
+
+    def _request(
+        self,
+        url: str,
+        *,
+        connect_address: str,
+        headers: Mapping[str, str],
+        timeout_seconds: float,
+        max_wire_bytes: int,
+        trusted_bearer: str | None,
+    ) -> TransportResponse:
+        if not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool) or timeout_seconds <= 0:
             raise WebFetchError("transport timeout must be positive")
-        if not isinstance(max_wire_bytes, int) or max_wire_bytes < 1:
+        if isinstance(max_wire_bytes, bool) or not isinstance(max_wire_bytes, int) or max_wire_bytes < 1:
             raise WebFetchError("transport max_wire_bytes must be positive")
 
         scheme, host, port, target, host_header = _request_target(url)
+        if trusted_bearer is not None and scheme != "https":
+            raise WebFetchError("trusted bearer requires HTTPS")
         try:
             numeric = ipaddress.ip_address(connect_address)
         except ValueError as exc:
@@ -171,6 +238,8 @@ class PinnedHttpTransport:
                 "Connection: close",
             ]
             request_lines.extend(f"{name}: {value}" for name, value in clean_headers)
+            if trusted_bearer is not None:
+                request_lines.append(f"Authorization: Bearer {trusted_bearer}")
             active_socket.sendall(("\r\n".join(request_lines) + "\r\n\r\n").encode("ascii"))
 
             response = self._response_factory(active_socket, method="GET")

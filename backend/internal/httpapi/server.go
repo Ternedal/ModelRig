@@ -82,6 +82,18 @@ func (s *server) routes() {
 	s.mux.Handle("GET /api/v1/tools/audit", s.authMW(http.HandlerFunc(s.handleToolsAudit)))
 	s.mux.Handle("POST /api/v1/tools/enabled", s.authMW(http.HandlerFunc(s.handleToolsEnabled)))
 
+	// T-036/T-044 GitHub connector pilot. One default-off switch mounts both
+	// worker + backend surfaces. Every backend route remains Bearer-authenticated,
+	// while github_connector.go additionally refuses a non-loopback worker before
+	// forwarding either an observability read or a standing-grant mutation.
+	if githubConnectorPilotEnabled() {
+		s.mux.Handle("GET /api/v1/github-connector/grants", s.authMW(http.HandlerFunc(s.handleGitHubConnectorGrants)))
+		s.mux.Handle("POST /api/v1/github-connector/grants/preview", s.authMW(http.HandlerFunc(s.handleGitHubConnectorGrantPreview)))
+		s.mux.Handle("POST /api/v1/github-connector/grants", s.authMW(http.HandlerFunc(s.handleGitHubConnectorGrants)))
+		s.mux.Handle("POST /api/v1/github-connector/grants/{id}/revoke", s.authMW(http.HandlerFunc(s.handleGitHubConnectorGrantRevoke)))
+		s.mux.Handle("GET /api/v1/github-connector/audit", s.authMW(http.HandlerFunc(s.handleGitHubConnectorAudit)))
+	}
+
 	// Standing grants are a stronger capability than one-shot tool calls. Starting
 	// the local scheduler therefore does not automatically expose administration
 	// to every paired device; the backend boundary has its own explicit opt-in.
