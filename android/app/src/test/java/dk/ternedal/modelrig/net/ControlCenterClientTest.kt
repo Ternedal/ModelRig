@@ -29,6 +29,12 @@ class ControlCenterClientTest {
             assertEquals("fallback", status.routing.state)
             assertEquals("readiness report expired", status.routing.fallbackReason)
             assertEquals(listOf("models"), status.requiredFailures)
+            assertEquals("ready", status.privacy.evidenceState)
+            assertFalse(status.privacy.toolResultEgress!!.privateGateEnabled)
+            assertEquals("allowed_legacy_mode", status.privacy.toolResultEgress!!.privateRule)
+            assertEquals("dormant", status.privacy.commonDataSharing.state)
+            assertFalse(status.privacy.scopedPermissions.revocationSupported)
+            assertFalse(status.privacy.productionActivation)
 
             val request = server.takeRequest()
             assertEquals("GET", request.method)
@@ -81,6 +87,90 @@ class ControlCenterClientTest {
         fallbackWithoutReason.getJSONObject("routing")
             .put("fallback_reason", JSONObject.NULL)
         assertInvalid(client, fallbackWithoutReason, "lacks server reason")
+    }
+
+    @Test
+    fun privacyMissingFromOlderStatusFailsClosedToUnknownWithoutBreakingHealth() {
+        val client = ControlCenterClient("http://127.0.0.1:1", "token")
+        val payload = validStatus().apply { remove("privacy") }
+
+        val status = client.parse(payload)
+
+        assertEquals("unknown", status.privacy.evidenceState)
+        assertEquals("privacy_not_reported", status.privacy.reason)
+        assertEquals(null, status.privacy.toolResultEgress)
+        assertFalse(status.privacy.scopedPermissions.revocationSupported)
+        assertFalse(status.privacy.productionActivation)
+    }
+
+    @Test
+    fun privacyRejectsContradictionsAndSyntheticAuthority() {
+        val client = ControlCenterClient("http://127.0.0.1:1", "token")
+
+        val production = validStatus()
+        production.getJSONObject("privacy").put("production_activation", true)
+        assertInvalid(client, production, "production activation must be false")
+
+        val gateContradiction = validStatus()
+        gateContradiction.getJSONObject("privacy")
+            .getJSONObject("tool_result_egress")
+            .put("private_gate_enabled", true)
+        assertInvalid(client, gateContradiction, "private gate/rule contradiction")
+
+        val revokeAuthority = validStatus()
+        revokeAuthority.getJSONObject("privacy")
+            .getJSONObject("scoped_permissions")
+            .put("revocation_supported", true)
+        assertInvalid(client, revokeAuthority, "no active authority")
+
+        val dormantButIntegrated = validStatus()
+        dormantButIntegrated.getJSONObject("privacy")
+            .getJSONObject("common_data_sharing")
+            .put("runtime_integrated", true)
+        assertInvalid(client, dormantButIntegrated, "dormant data-sharing cannot be runtime integrated")
+    }
+
+    @Test
+    fun privacyParserUsesStrictWireTypesAndPreservesUnknownEvidence() {
+        val client = ControlCenterClient("http://127.0.0.1:1", "token")
+
+        val quotedGate = validStatus()
+        quotedGate.getJSONObject("privacy")
+            .getJSONObject("tool_result_egress")
+            .put("private_gate_enabled", "false")
+        assertInvalid(client, quotedGate, "private_gate_enabled must be boolean")
+
+        val unknown = validStatus()
+        unknown.put(
+            "privacy",
+            JSONObject()
+                .put("schema", ControlCenterClient.PRIVACY_SCHEMA)
+                .put("evidence_state", "unknown")
+                .put("reason", "provider_error:RuntimeError")
+                .put("tool_result_egress", JSONObject.NULL)
+                .put(
+                    "common_data_sharing",
+                    JSONObject()
+                        .put("state", "unknown")
+                        .put("runtime_integrated", false)
+                        .put("reason", "privacy_provider_unavailable"),
+                )
+                .put(
+                    "scoped_permissions",
+                    JSONObject()
+                        .put("state", "unknown")
+                        .put("count", JSONObject.NULL)
+                        .put("revocation_supported", false)
+                        .put("reason", "privacy_provider_unavailable"),
+                )
+                .put("production_activation", false),
+        )
+
+        val parsed = client.parse(unknown).privacy
+        assertEquals("unknown", parsed.evidenceState)
+        assertEquals("provider_error:RuntimeError", parsed.reason)
+        assertEquals(null, parsed.toolResultEgress)
+        assertFalse(parsed.scopedPermissions.revocationSupported)
     }
 
     @Test
@@ -146,6 +236,41 @@ class ControlCenterClientTest {
             .put("age_s", 1.0)
             .put("reason", "server_selected_fallback")
 
+        val privacy = JSONObject()
+            .put("schema", ControlCenterClient.PRIVACY_SCHEMA)
+            .put("evidence_state", "ready")
+            .put(
+                "tool_result_egress",
+                JSONObject()
+                    .put("source", "toolgate")
+                    .put("private_gate_enabled", false)
+                    .put(
+                        "rules",
+                        JSONObject()
+                            .put("public", "allowed")
+                            .put("operational", "allowed")
+                            .put("private", "allowed_legacy_mode")
+                            .put("secret", "forbidden"),
+                    ),
+            )
+            .put(
+                "common_data_sharing",
+                JSONObject()
+                    .put("schema", ControlCenterClient.DATA_SHARING_SCHEMA)
+                    .put("state", "dormant")
+                    .put("runtime_integrated", false)
+                    .put("reason", "common_data_sharing_not_runtime_integrated"),
+            )
+            .put(
+                "scoped_permissions",
+                JSONObject()
+                    .put("state", "unavailable")
+                    .put("count", JSONObject.NULL)
+                    .put("revocation_supported", false)
+                    .put("reason", "no_active_scoped_permission_authority"),
+            )
+            .put("production_activation", false)
+
         return JSONObject()
             .put("schema", ControlCenterClient.SCHEMA)
             .put("generated_at", 2_000_000_001.0)
@@ -154,6 +279,7 @@ class ControlCenterClientTest {
             .put("green", false)
             .put("components", components)
             .put("routing", routing)
+            .put("privacy", privacy)
             .put(
                 "summary",
                 JSONObject()
