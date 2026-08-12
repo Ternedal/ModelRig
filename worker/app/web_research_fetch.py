@@ -1,11 +1,19 @@
-"""Een hentning, med livscyklussen lukket paa alle stier (T-034, D7).
+"""One ToolGate web fetch with a verified source receipt (T-034, D7 step 2).
 
-**Dvalende.** Intet kalder dette modul; `/research/fetch` svarer stadig 501, og
-`web_research` er ikke i REGISTRY. Aktivering er D7 nr. 1 og en beslutning for
-sig.
+The production caller is ``web_research_tool.py`` behind the existing
+``KALIV_WEB_RESEARCH_ENABLED`` + ToolGate confirmation boundary. This module
+owns one direct, pinned GET after that confirmation; it does not create a
+second route, retry, browser session or background worker.
 
-Modulet opfinder ingen sikkerhed. Det saetter graenser der allerede findes i
-raekkefoelge, og sikrer at afslutningen sker uanset hvordan turen ender:
+D7 step 2 closes the old evidence asymmetry without pretending the direct tool
+has a Chromium/CDP commit point. The pinned network response is re-verified
+*in memory* through the same ``DeterministicWebFetcher`` / ``SourceReceipt``
+contract used by citation-producing research. That verifier opens no second
+socket: its transport is the response already returned by the exact selected
+peer. Redirects are fail-closed here (``max_redirects=0``), so one human
+confirmation still authorizes exactly one outbound request.
+
+Lifecycle order remains:
 
     intent   = build_intent(url, purpose)
     lease    = boundary.prepare(intent)
@@ -15,22 +23,13 @@ raekkefoelge, og sikrer at afslutningen sker uanset hvordan turen ender:
     pin      = transport.pin(binding, ...)
     prepared = transport.prepare(pin, url, "GET", (), max_response_bytes)
     response = transport.execute(pin, prepared, timeout)
-    ...
+    receipt  = deterministic in-memory verification of that SAME response
     boundary.complete(lease, intent, outcome=..., bytes_sent=...)
 
-`complete()` staar i en ``finally``, og udfaldet foeres i en variabel der starter
-paa ``failed``. En fremtidig ``return`` eller ``raise`` et vilkaarligt sted kan
-derfor ikke slippe uden om afslutningen, og glemmer nogen at saette udfaldet,
-bliver det registreret som en fejl -- ikke som en succes. Det er strukturelt
-frem for disciplinaert, fordi disciplin ikke overlever en refaktorering.
-
-D7 nr. 3: vores egne graenser giver ``blocked``, modpartens fejl giver
-``failed``. Uden den skelnen kan en kvittering ikke svare paa om VI naegtede
-eller om DET gik i stykker, og det er netop den forskel der goer en audit
-brugbar bagefter.
-
-D7 nr. 5: eet ja raekker til eet kald. Der er ingen genforsoeg her. Et
-genforsoeg efter en timeout er et nyt udgaaende kald og skal have sit eget ja.
+``complete()`` is in ``finally``. Unknown failures remain ``failed``; our own
+contract/policy denials are ``blocked``. The direct tool never follows a
+redirect or silently retries because either would be a second external request
+under one approval.
 """
 from __future__ import annotations
 
@@ -38,16 +37,23 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .browser_peer_fulfillment import BrowserPinnedTransportError
+from .research_contract import ReadOnlyBrowserPolicy, SourceReceipt, canonicalize_url
 from .research_data_sharing import ResearchSharingIntent
+from .web_fetch import DeterministicWebFetcher, TransportResponse, WebFetchError
 from .web_research_intent import WebResearchIntentError, build_intent
 
-#: Et loft, ikke en forventning. Rammer en offentlig side det, er noget galt.
+#: An upper bound, not an expectation. The intent owns the response byte cap.
 DEFAULT_TIMEOUT_SECONDS = 20.0
 
 
 @dataclass(frozen=True)
 class WebResearchResult:
-    """Hvad kalderen faar. Bindingens id er med, saa svaret kan spores."""
+    """Verified result returned to the ToolGate caller.
+
+    ``body`` is retained for compatibility/debugging inside this process, but
+    callers should expose ``source_receipt`` / its verified excerpt rather than
+    treating undecoded wire bytes as citation text.
+    """
 
     url: str
     status: int
@@ -55,35 +61,80 @@ class WebResearchResult:
     bytes_received: int
     binding_id: str
     selected_address: str
+    resolved_addresses: tuple[str, ...]
+    source_receipt: SourceReceipt
+
+
+class _CommittedPinnedResponseTransport:
+    """Replay exactly one already-fetched response into the source verifier.
+
+    This object has no socket/resolver capability. It exists to reuse the
+    deterministic content/media/receipt checks without performing a second
+    network request just to make a citation.
+    """
+
+    def __init__(self, *, url: str, selected_address: str, response: Any) -> None:
+        self._url = canonicalize_url(url)
+        self._selected = selected_address
+        self._response = response
+        self.calls = 0
+
+    def request(
+        self,
+        url: str,
+        *,
+        connect_address: str,
+        headers,
+        timeout_seconds: float,
+        max_wire_bytes: int,
+    ) -> TransportResponse:
+        del headers, timeout_seconds
+        self.calls += 1
+        canonical = canonicalize_url(url)
+        if self.calls != 1:
+            raise WebFetchError("committed response is one-use")
+        if canonical != self._url:
+            raise WebFetchError("committed response URL changed")
+        if connect_address != self._selected:
+            raise WebFetchError("committed response peer changed")
+        body = getattr(self._response, "body", None)
+        if not isinstance(body, bytes):
+            raise WebFetchError("committed response body is invalid")
+        if len(body) > max_wire_bytes:
+            raise WebFetchError("committed response exceeds verifier wire budget")
+        connected = getattr(self._response, "connected_address", None)
+        if connected != self._selected:
+            raise WebFetchError("committed response connected peer changed")
+        raw_headers = getattr(self._response, "headers", ())
+        try:
+            response_headers = dict(raw_headers)
+        except (TypeError, ValueError) as exc:
+            raise WebFetchError("committed response headers are invalid") from exc
+        return TransportResponse(
+            status=int(getattr(self._response, "status", 0)),
+            headers=response_headers,
+            body=body,
+            connected_address=connected,
+        )
 
 
 def _outcome_for(exc: BaseException) -> tuple[str, str]:
-    """Oversaet en undtagelse til (outcome, error_code) efter D7 nr. 3.
-
-    Vores egne moduler kaster ``*Denied`` og ``*ContractError``: det er os der
-    naegter, og det er ``blocked``. ``BrowserPinnedTransportError`` og OS-fejl
-    kommer fra modparten eller nettet og er ``failed``.
-    """
+    """Translate an exception to ``(outcome, error_code)`` after D7 no. 3."""
     name = type(exc).__name__
-    # VORES egne foerst, og paa NAVN -- ikke paa type. BrowserPeerAdapterDenied
-    # arver fra PermissionError og dermed OSError, hvilket er semantisk rigtigt
-    # (en afvisning ER en tilladelsesfejl) og fatalt for en naiv
-    # isinstance-raekkefoelge: et OSError-tjek foerst ville stemple vores egen
-    # SSRF-afvisning som modpartens fejl. Maalt 27/07 -- foerste udkast gjorde
-    # praecis det.
-    if isinstance(exc, WebResearchIntentError):
+    # Our own denials first, by name. BrowserPeerAdapterDenied inherits from
+    # PermissionError/OSError; type-first classification would stamp our SSRF
+    # refusal as a peer failure.
+    if isinstance(exc, (WebResearchIntentError, WebFetchError)):
         return "blocked", name
     if name.endswith("Denied") or name.endswith("ContractError"):
         return "blocked", name
     if isinstance(exc, (BrowserPinnedTransportError, OSError, TimeoutError)):
         return "failed", name
-    # Ukendt: antag at det er OS der gik i stykker, ikke at vi naegtede. At
-    # kalde noget ukendt "blocked" ville paastaa en beslutning vi ikke traf.
     return "failed", name
 
 
 class WebResearchFetcher:
-    """Orkestrerer een hentning gennem de graenser der allerede findes."""
+    """Orchestrate one pinned GET and emit one verified source receipt."""
 
     def __init__(
         self,
@@ -106,6 +157,46 @@ class WebResearchFetcher:
         self._receipt_ttl = int(receipt_ttl_seconds)
         self._binding_ttl = int(binding_ttl_seconds)
 
+    def _verify_source(
+        self,
+        *,
+        target: str,
+        intent: ResearchSharingIntent,
+        binding: Any,
+        response: Any,
+    ) -> SourceReceipt:
+        addresses = tuple(getattr(binding, "addresses", ()) or ())
+        selected = getattr(binding, "selected_address", None)
+        if not isinstance(selected, str) or not selected:
+            raise WebFetchError("peer binding has no selected address")
+        if selected not in addresses:
+            raise WebFetchError("selected peer is absent from DNS binding")
+
+        # Direct ToolGate v1 is exactly one approved outbound request. We use
+        # the deterministic verifier with max_redirects=0 over an in-memory
+        # replay of that response: content/status/media/peer/source receipt are
+        # checked without a second socket.
+        policy = ReadOnlyBrowserPolicy(
+            allowed_domains=tuple(intent.plan.allowed_domains),
+            max_steps=1,
+            max_pages=1,
+            timeout_seconds=max(1, min(300, int(self._timeout))),
+            max_source_bytes=int(intent.plan.max_bytes),
+        )
+        replay = _CommittedPinnedResponseTransport(
+            url=target,
+            selected_address=selected,
+            response=response,
+        )
+        trace = DeterministicWebFetcher(
+            replay,
+            resolver=lambda _host, _port: (selected,),
+            max_redirects=0,
+        ).fetch(target, policy)
+        if replay.calls != 1:
+            raise WebFetchError("source verification did not use exactly one in-memory response")
+        return trace.receipt
+
     def fetch(
         self,
         url: str,
@@ -114,8 +205,8 @@ class WebResearchFetcher:
         max_bytes: int | None = None,
         now: int | None = None,
     ) -> WebResearchResult:
-        # Intent'en bygges FOER lease'en. Er URL'en ulovlig, findes der endnu
-        # ingen lease at afslutte -- og saa er der heller intet at laekke.
+        # Intent is built before a lease. An illegal URL therefore creates no
+        # authorization state and nothing needs cleanup.
         kwargs = {} if max_bytes is None else {"max_bytes": max_bytes}
         intent: ResearchSharingIntent = build_intent(url, purpose=purpose, **kwargs)
         target = intent.plan.destination_url if hasattr(intent.plan, "destination_url") else None
@@ -143,20 +234,28 @@ class WebResearchFetcher:
             )
             pin = self._transport.pin(
                 binding,
-                cdp_request_id=self._ids("cdp"),
+                cdp_request_id=self._ids("direct"),
                 network_request_id=self._ids("net"),
             )
             prepared = self._transport.prepare(
                 pin,
                 url=target,
-                method="GET",          # v1 er GET-only; ingen krop ud
+                method="GET",
                 headers=(),
                 max_response_bytes=intent.plan.max_bytes,
             )
             response = self._transport.execute(
                 pin, prepared, timeout_seconds=self._timeout
             )
+            # Bytes have already left the machine even if verification below
+            # rejects the response. Audit must record that truth.
             bytes_sent = int(response.bytes_sent)
+            receipt = self._verify_source(
+                target=target,
+                intent=intent,
+                binding=binding,
+                response=response,
+            )
             outcome, error_code = "completed", None
             return WebResearchResult(
                 url=target,
@@ -165,15 +264,14 @@ class WebResearchFetcher:
                 bytes_received=len(response.body),
                 binding_id=binding.binding_id,
                 selected_address=binding.selected_address,
+                resolved_addresses=tuple(binding.addresses),
+                source_receipt=receipt,
             )
-        except BaseException as exc:  # noqa: BLE001 - udfaldet skal saettes for ALLE
+        except BaseException as exc:  # noqa: BLE001 - outcome must cover every path
             outcome, error_code = _outcome_for(exc)
             raise
         finally:
             if pin is not None:
-                # Pin'en er engangs. Frigives den ikke, kan naeste hentning ikke
-                # pinne -- en laekage der viser sig som en uforklarlig afvisning
-                # langt senere, og aldrig som en fejl her.
                 try:
                     self._transport.release(pin)
                 except Exception:  # noqa: BLE001
@@ -189,7 +287,7 @@ class WebResearchFetcher:
 
 
 def _target_from(intent: ResearchSharingIntent, fallback: str) -> str:
-    """Den kanoniske URL, laest fra intent'ens summary hvis planen ikke baerer den."""
+    """Read the canonical URL from the intent summary if the plan lacks it."""
     summary = getattr(intent, "summary", "") or ""
     for token in summary.split():
         if token.startswith("https://"):

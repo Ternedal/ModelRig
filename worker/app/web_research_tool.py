@@ -1,44 +1,22 @@
-"""D7 trin 1: WebResearchFetchers produktionskaldested -- som ToolGate-vaerktoej.
+"""Web research as the single ToolGate production caller (T-034, D7).
 
-Beslutning 30/07-2026 (Anders): kaldestedet er et vaerktoej i REGISTRY, ikke et
-nyt endpoint og ikke en RAG-sidevej. Tools-sporet baerer allerede fase-signalet
-(`tool_run`), bekraeftelseskortet og den todelte adgangsmodel; en offentlig
-hentning er `network="public"` per definition, saa kortet foelger af de akser
-der allerede findes (requires_confirmation: write/desktop ELLER public), og
-D4-graensen kan pinnes strukturelt i stedet for at bevogtes med disciplin.
+Decision 30/07-2026 (Anders): the caller is one REGISTRY tool, not a separate
+endpoint or RAG side path. It remains behind the existing
+``KALIV_WEB_RESEARCH_ENABLED`` surface gate and ordinary ToolGate confirmation.
 
-Vaerktoejet OPFINDER ikke sin egen deklaration. `web_research_capability.py`
-landede kontrakten foer featuren (dvalende, `run=None`, nul kaldere), og
-registreringen her arver den med `dataclasses.replace` -- eksekvering paa, og
-adgang til sit eget flag i et isoleret barn. Kontrakten bliver liggende
-dvalende: den er stadig kilden til hvad vaerktoejet ER, saa der er eet sted at
-rette, ikke to naesten ens.
+D7 step 2 now makes the direct pinned fetch citation-ready: the fetcher returns
+a canonical ``SourceReceipt`` produced by the shared deterministic verifier,
+and this tool exposes that receipt plus its verified excerpt. Raw undecoded
+wire bytes are no longer treated as model-visible citation text. The direct
+ToolGate path deliberately does not fake Chromium/CDP commit semantics; it has
+its own correct commit point (successful pinned GET + in-memory source
+verification), while Browser Use keeps its stricter ``Fetch.fulfillRequest``
+commit before evidence becomes citeable.
 
-Kompositionen er henterens egen konvolut med produktionsklasserne paa samme
-niveau -- IKKE valideringsscriptets evidenslag. Den asymmetri er pinnet i
-tests/workflow_web_research_parity.py del C+D og flippes bevidst ved trin 2,
-ikke her ved et uheld.
-
-Gaten er den EKSISTERENDE flade-gate, ikke et nyt flag:
-`KALIV_WEB_RESEARCH_ENABLED` (kun praecis "1" taender; se
-web_research_mount.web_research_enabled, som ejer semantikken). Eet navn for
-een beslutning -- ruten og vaerktoejet er samme flade, og to naesten ens flag
-er en forvekslingsfaelde. `os.getenv` staar literalt HER, fordi
-scripts/activation_readiness.py laeser switches fra kildekoden med et
-regex-krav om literal streng; mount-modulet bruger en konstant, saa dette
-kaldested er det, der goer flaget synligt paa readiness-siden.
-
-Ovenpaa gaelder ToolGates almindelige lag: `KALIV_TOOLS_ENABLED` skal vaere
-sat, og kortet kraeves per kald. Et timeout er et nej.
-
-D4 holdes strukturelt: run() modtager KUN `url` og `purpose` og afviser alt
-andet foer noget som helst konstrueres. Der findes ingen parameter,
-RAG-kontekst kan rejse i, og tests/worker_web_research_tool.py pinner det
-behavioralt.
-
-D7 nr. 5 gaelder ogsaa i scheduler-sporet: eet ja raekker til eet kald.
-Kontrakten er ikke schedulable, og `requires_confirmation` giver kortet per
-kald -- ingen "husk mit valg".
+The tool inherits ``WEB_RESEARCH_SPEC`` with ``dataclasses.replace``. D4 remains
+structural: run receives only ``url`` and ``purpose``; unknown keys are rejected
+before composition. One confirmation authorizes exactly one outbound GET: no
+redirect following and no retry.
 """
 from __future__ import annotations
 
@@ -61,49 +39,27 @@ from .web_research_capability import (
 from .web_research_fetch import (
     WebResearchFetcher,
     WebResearchResult,
-    _outcome_for,  # bevidst: D7 nr. 3-skelnen har EEN kilde, og det er den
+    _outcome_for,
 )
 
 TOOL_NAME = WEB_RESEARCH_CAPABILITY_ID
-
-#: Samme navn som fladens rute-gate. Konstanten bruges til `env_allow`; selve
-#: opslaget nedenfor staar literalt af hensyn til activation_readiness.
 WEB_RESEARCH_FLAG = "KALIV_WEB_RESEARCH_ENABLED"
-
-#: Saa meget af kroppen der foelger med tilbage som tekst. Loftet er for
-#: samtalen, ikke for transporten -- intent.plan.max_bytes ejer selve
-#: hentningens graense. Svaret skal kunne laeses og citeres, ikke genudgives.
-MAX_BODY_TEXT_CHARS = 20_000
-
 _ALLOWED_ARGS = frozenset({"url", "purpose"})
 
 
 def _enabled() -> bool:
-    """Samme semantik som web_research_mount.web_research_enabled: kun "1".
-
-    Duplikeret i to linjer frem for importeret, fordi mount-modulet skal kunne
-    importere DETTE modul uden en cyklus -- og fordi netop dette kald skal
-    staa med literal flagstreng af hensyn til activation_readiness' scanning.
-    """
+    """Same semantics as the route surface: only exact ``1`` opts in."""
     return os.getenv("KALIV_WEB_RESEARCH_ENABLED", "").strip() == "1"
 
 
 def _resolve(host: str, port: int) -> tuple[str, ...]:
-    """Produktionsresolver: getaddrinfo, dedupleret, raekkefoelgen bevaret.
-
-    Ingen filtrering her. is_global-vagten bor i binding-laget, og en resolver
-    der ogsaa filtrerede ville skjule praecis de afvisninger auditten skal se.
-    """
+    """Production DNS lookup; public-address enforcement lives downstream."""
     infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     return tuple(dict.fromkeys(str(info[4][0]) for info in infos))
 
 
 def build_production_fetcher() -> WebResearchFetcher:
-    """Een hentnings komposition, samlet af produktionsklasserne.
-
-    Frisk ledger per kald: leases deles ikke paa tvaers af hentninger, og et
-    vaeltet kald efterlader ingen tilstand som det naeste skal arve.
-    """
+    """Build one isolated direct-fetch composition for one approved call."""
     ledger = VerifiableDataSharingLedger()
     boundary = VerifiableResearchSharingBoundary(ledger, mode="enforce")
     bridge = ResearchPeerAuthorizationBridge(boundary)
@@ -118,39 +74,39 @@ def build_production_fetcher() -> WebResearchFetcher:
 
 
 def _render(result: WebResearchResult) -> str:
-    body_text = result.body.decode("utf-8", errors="replace")
-    clipped = len(body_text) > MAX_BODY_TEXT_CHARS
-    if clipped:
-        body_text = body_text[:MAX_BODY_TEXT_CHARS]
+    """Return model-visible text only from the verified source receipt.
+
+    ``SourceReceipt.excerpt`` is bounded by the research contract. The full raw
+    response remains internal to the fetch result; callers cannot accidentally
+    cite unverified/undecoded wire bytes.
+    """
+    receipt = result.source_receipt
     return json.dumps(
         {
-            "url": result.url,
+            "url": receipt.url,
             "status": result.status,
             "bytes_received": result.bytes_received,
             "binding_id": result.binding_id,
             "selected_address": result.selected_address,
-            "body_text": body_text,
-            "body_clipped": clipped,
+            "resolved_addresses": list(result.resolved_addresses),
+            "source": receipt.to_dict(),
+            # Kept under the historical key for client/model compatibility, but
+            # its authority is now explicitly the verified bounded excerpt.
+            "body_text": receipt.excerpt,
+            "body_clipped": receipt.bytes_read > len(receipt.excerpt.encode("utf-8")),
         },
         ensure_ascii=False,
     )
 
 
 def _run_web_research(args: dict, *, fetcher_factory=None) -> str:
-    """Een hentning. Argumenterne valideres FOER noget konstrueres.
-
-    Fejl oversaettes efter D7 nr. 3 med fetch-modulets egen tabel: vores nej
-    (`blocked`) bliver ToolDenied, modpartens eller nettets fejl (`failed`)
-    bliver ToolError. Skelnen genopfindes ikke her.
-    """
+    """Execute one fetch; validate the entire argument surface first."""
     from . import tools as _tools
 
     if not isinstance(args, dict):
         raise _tools.ToolDenied("web_research: args skal vaere et objekt")
     unknown = set(args) - _ALLOWED_ARGS
     if unknown:
-        # D4 strukturelt: der findes ingen loedig kanal for ekstra kontekst,
-        # saa en ekstra noegle er ikke "ignoreret" -- den er afvist.
         raise _tools.ToolDenied(
             "web_research: ukendte argumenter afvises: "
             + ", ".join(sorted(unknown))
@@ -175,20 +131,7 @@ def _run_web_research(args: dict, *, fetcher_factory=None) -> str:
 
 
 def register_web_research_tool() -> bool:
-    """Registrer vaerktoejet -- hvis og kun hvis fladen er taendt.
-
-    Vaerktoejet ARVER `WEB_RESEARCH_CAPABILITY`-kontrakten og tilfoejer praecis
-    to ting: eksekveringen, og adgang til sit eget flag inde i et isoleret
-    barn. Kontrakten landede foer featuren og bliver liggende dvalende med
-    `run=None` -- den er stadig kilden til hvad vaerktoejet ER, og der er
-    dermed kun eet sted at rette hvis fx destinationen aendrer sig. En anden,
-    naesten ens deklaration her ville vaere den fjerde udgave af samme
-    sandhed (HANDOFF lektie 29).
-
-    Funktionen gentager sit eget gatetjek, saa den forbliver fail-closed fra
-    enhver import-sti -- ogsaa fra `tool_child`, der bootstrapper den i en
-    frisk proces -- og naegter at overtage et navn en anden komponent har.
-    """
+    """Register the inherited capability iff the existing surface gate is on."""
     if not _enabled():
         return False
     from . import tools as _tools
@@ -203,10 +146,6 @@ def register_web_research_tool() -> bool:
     _tools.REGISTRY[TOOL_NAME] = dataclasses.replace(
         WEB_RESEARCH_CAPABILITY,
         run=_run_web_research,
-        # Barnet ser kun det vaerktoejet navngiver (toolhost.child_env). Uden
-        # flaget her ville et isoleret kald starte i en proces hvor fladen er
-        # slukket, og svare "unknown tool" paa noget forael deren netop har
-        # faaet et ja til. Flaget er en kontakt, ikke en hemmelighed.
         env_allow=(WEB_RESEARCH_FLAG,),
     )
     return True

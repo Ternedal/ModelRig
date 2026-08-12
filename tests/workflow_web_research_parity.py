@@ -1,29 +1,28 @@
-"""D7 vej 3 — paritetsgaten mellem valideringsscriptet og WebResearchFetcher.
+"""D7 parity gate between validation/browser evidence and direct ToolGate fetch.
 
-Gaten pinner den MAALTE forskel (ROADMAP D7, maalingen 29/7), ikke en paastaaet
-lighed. Den fryser tre kendsgerninger, som HVER ISAER er et bevidst flip-punkt:
+Step 1 was flipped 30/07-2026: WebResearchFetcher has exactly one production
+caller, ``worker/app/web_research_tool.py``.
 
-  FLIPPET VED TRIN 1 (30/07-2026): del E maalte, at WebResearchFetcher ikke
-  blev konstrueret nogen steder uden for sin egen test. Kaldestedet er landet
-  som ToolGate-vaerktoejet, og pinnen peger nu paa praecis den ene sti.
-  Dukker der en anden op, er det en ny udgaaende sti -- og en ny beslutning.
+Step 2 is flipped here. The old measured asymmetry intentionally required the
+direct fetcher to have *none* of the Browser/CDP evidence classes. That was a
+useful pre-convergence pin, but copying those classes into the direct path would
+be wrong: Chromium has a ``Fetch.fulfillRequest`` commit point and the direct
+ToolGate GET does not.
 
-  FLIP VED TRIN 2 (evidens-konvergens, mulighed (b)): del C+D maaler, at
-  scriptet baerer evidenslaget (fulfillment-controller, claim-bundet evidens,
-  read-only policy, dns-blok af pending.permit.binding) og at henteren INTET
-  af det har. Konvergerer de to veje, skal asymmetri-pinnen flippes bevidst,
-  ikke slettes (HANDOFF lektie 29: asymmetrien skal have en test der siger
-  det).
+The shared authority after convergence is instead behavioral and transport-
+correct:
+- both paths end in the canonical ``SourceReceipt`` / deterministic-web-fetch
+  verification contract;
+- the direct path replays the already-fetched response in memory, so citation
+  verification opens no second destination socket;
+- direct ToolGate v1 has ``max_redirects=0`` because one confirmation authorizes
+  exactly one outbound request;
+- Browser/CDP evidence remains citeable only after its stricter CDP commit.
 
-  STABILT: del A+B beviser behavioralt -- ved at kalde fetch(), ikke ved at
-  taelle navne (lektie 32) -- at henterens boundary-konvolut har den
-  raekkefoelge D7 beskriver, og at complete() afslutter lease'en praecis een
-  gang, sidst, ogsaa naar transporten fejler. Udfalds-tabellen ejes af
-  tests/worker_web_research_fetch.py; her ejes RAEKKEFOELGEN.
+Stable lifecycle ordering and exact-one production caller remain pinned.
 """
 from __future__ import annotations
 
-import importlib.util
 import pathlib
 import sys
 
@@ -46,8 +45,7 @@ def check(condition: bool, label: str) -> None:
         print(f"  FAIL: {label}")
 
 
-# --- Del A+B: konvoluttens raekkefoelge, bevist ved kald --------------------
-
+# --- Stable lifecycle ordering ---------------------------------------------
 class _Order:
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -56,6 +54,7 @@ class _Order:
 class _Plan:
     destination_url = "https://example.com/side"
     max_bytes = 4096
+    allowed_domains = ("example.com",)
 
 
 class _Intent:
@@ -90,7 +89,8 @@ class _Bridge:
 
 class _Binding:
     binding_id = "bind-1"
-    selected_address = "203.0.113.7"
+    addresses = ("93.184.216.34",)
+    selected_address = "93.184.216.34"
 
 
 class _Peer:
@@ -104,8 +104,10 @@ class _Peer:
 
 class _Response:
     status = 200
-    body = b"x" * 64
+    body = b"<html><title>x</title><body>verified</body></html>"
     bytes_sent = 64
+    headers = (("content-type", "text/html; charset=utf-8"),)
+    connected_address = "93.184.216.34"
 
 
 class _Transport:
@@ -139,15 +141,13 @@ def _run(*, execute_error: BaseException | None = None):
         peer_ledger=_Peer(order),
         transport=_Transport(order, execute_error=execute_error),
     )
-    # build_intent koeres via monkeypatch, saa gaten pinner KONVOLUTTEN og ikke
-    # research-kontraktens URL-regler (de har deres egne tests).
     import app.web_research_fetch as module
 
     original = module.build_intent
     module.build_intent = lambda url, *, purpose, **kw: _Intent()
     try:
         try:
-            fetcher.fetch("https://example.com/side", purpose="paritet")
+            fetcher.fetch("https://example.com/side", purpose="parity")
         except BaseException:
             pass
     finally:
@@ -169,62 +169,53 @@ EXPECTED = [
 
 calls = _run()
 check(calls == EXPECTED,
-      f"konvolutten har D7-raekkefoelgen, og complete er sidst ({calls})")
+      f"direct fetch keeps D7 lifecycle ordering and completes last ({calls})")
 check(sum(c.startswith("boundary.complete") for c in calls) == 1,
-      "lease'en afsluttes praecis een gang")
+      "lease completes exactly once")
 
 calls = _run(execute_error=TimeoutError("timeout"))
 check(calls[-1] == "boundary.complete:failed" and calls[-2] == "transport.release",
-      f"ved transportfejl frigives pin og lease'en afsluttes SIDST ({calls[-2:]})")
+      f"transport failure releases pin and completes last ({calls[-2:]})")
 check(sum(c.startswith("boundary.complete") for c in calls) == 1,
-      "ogsaa ved fejl afsluttes lease'en praecis een gang")
+      "failure also completes exactly once")
 
-# --- Del C: scriptets evidenslag, bevist ved import -------------------------
+# --- Step 2 flipped: semantic source-evidence convergence ------------------
+fetch_source = (ROOT / "worker" / "app" / "web_research_fetch.py").read_text(encoding="utf-8")
+tool_source = (ROOT / "worker" / "app" / "web_research_tool.py").read_text(encoding="utf-8")
+runtime_source = (ROOT / "worker" / "app" / "browser_peer_runtime.py").read_text(encoding="utf-8")
 
-SCRIPT = ROOT / "scripts" / "browser_peer_public_validation.py"
-source = SCRIPT.read_text(encoding="utf-8")
-check('if __name__ == "__main__":' in source,
-      "scriptet er main-guarded og kan importeres af gaten")
-
-spec = importlib.util.spec_from_file_location("browser_peer_public_validation", SCRIPT)
-script = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(script)
-
-for name in (
-    "BrowserPeerFulfillmentController",
-    "ClaimBoundBrowserEvidence",
-    "PinnedBrowserPeerTransport",
-):
-    check(hasattr(script, name),
-          f"scriptet baerer evidenslaget: {name} resolver ved import")
-check("pending.permit.binding" in source,
-      "scriptets dns-blok bygges af pending.permit.binding")
-
-# --- Del D: den maalte asymmetri (FLIP VED TRIN 2) ---------------------------
-
-fetch_source = (ROOT / "worker" / "app" / "web_research_fetch.py").read_text(
-    encoding="utf-8"
-)
-for name in (
-    "ClaimBoundBrowserEvidence",
-    "BrowserPeerFulfillmentController",
+for marker in (
+    "SourceReceipt",
+    "DeterministicWebFetcher",
     "ReadOnlyBrowserPolicy",
+    "_CommittedPinnedResponseTransport",
+    "max_redirects=0",
 ):
-    check(name not in fetch_source,
-          f"MAALT ASYMMETRI (flip bevidst ved D7 trin 2): henteren har ikke {name}")
+    check(marker in fetch_source,
+          f"STEP 2 FLIPPED: direct fetch carries shared verified-source contract: {marker}")
 
-# --- Del E: intet produktionskaldested endnu (FLIP VED TRIN 1) ---------------
+check("source_receipt=receipt" in fetch_source,
+      "successful direct result cannot be built without verified source receipt")
+check('"source": receipt.to_dict()' in tool_source,
+      "ToolGate output exposes canonical source receipt")
+check('"body_text": receipt.excerpt' in tool_source,
+      "ToolGate model text comes from verified receipt excerpt, not raw wire body")
+check("ClaimBoundBrowserEvidence" in runtime_source
+      and "self.pending.commit" in runtime_source,
+      "Browser path retains stricter commit-before-evidence semantics")
+check("ClaimBoundBrowserEvidence" not in fetch_source,
+      "direct path does not fake a Chromium/CDP commit point")
 
+# --- Step 1 remains exact-one production caller ----------------------------
 constructions: list[str] = []
 for base in (ROOT / "worker", ROOT / "scripts"):
     for path in base.rglob("*.py"):
         if "WebResearchFetcher(" in path.read_text(encoding="utf-8"):
             constructions.append(str(path.relative_to(ROOT)).replace("\\", "/"))
 check(sorted(constructions) == ["worker/app/web_research_tool.py"],
-      "MAALT (flippet ved D7 trin 1, 30/07-2026): henteren konstrueres PRAECIS "
-      "eet sted i produktion -- ToolGate-vaerktoejet. Dukker der flere op, er "
-      f"det en ny udgaaende sti og en ny beslutning ({constructions})")
+      "WebResearchFetcher still has exactly one production caller "
+      f"({constructions})")
 
-print(f"\n===== WEB RESEARCH PARITY (D7 vej 3): {PASSED} passed, {FAILED} failed =====")
+print(f"\n===== WEB RESEARCH PARITY (D7 step 2): {PASSED} passed, {FAILED} failed =====")
 if FAILED:
     raise SystemExit(1)
