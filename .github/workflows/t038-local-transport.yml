@@ -1,0 +1,33 @@
+name: t038-local-transport
+
+on:
+  pull_request:
+    paths:
+      - "worker/app/home_assistant_local_transport.py"
+      - "scripts/t038_local_transport_contract.py"
+      - ".github/workflows/t038-local-transport.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Qualify pinned loopback fixture and endpoint policy
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 scripts/t038_local_transport_contract.py
