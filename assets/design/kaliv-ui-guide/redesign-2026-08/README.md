@@ -10,7 +10,8 @@ Filerne i denne pakke er **designreferencer bygget i HTML** (`Kaliv Redesign.dc.
 **High-fidelity.** Farver, typografi, spacing, radier og copy er endelige og skal genskabes præcist med værdierne nedenfor. Skærme mærket **"designforslag"** i mockup-filens billedtekster har ingen API-flade endnu — implementér dem kun efter separat beslutning.
 
 ## Kilde-sandhed i repoet
-- Tokens: `assets/design/kaliv-ui-guide/kaliv-ui-tokens.json` (+ `.css`)
+- Autoritative tokens: `assets/design/kaliv-ui-guide/kaliv-ui-tokens.json` (skema v2; eneste komplette tokenautoritet)
+- CSS-farvemirror: `assets/design/kaliv-ui-guide/kaliv-ui-tokens.css` (web/design-reference; må ikke divergere fra JSON-farverne)
 - Target-mockup (desktop): `assets/design/kaliv-ui-guide/Kaliv_UI_Target_Mockup.png`
 - Mærke: `android/app/src/main/res/drawable-nodpi/ic_launcher_monochrome.png` (ankh — genfarves til guld, se Assets)
 - API: `backend/internal/httpapi/server.go` · Agent 3: `AGENT3_READ_REVIEW.md`, `AGENT3_CANCELLATION_CONTRACT.md` · Agent 4: `docs/AGENT_4_A4_10_OPERATOR_READ.md` · KalivDev: `devcontrol/`
@@ -27,12 +28,12 @@ Filerne i denne pakke er **designreferencer bygget i HTML** (`Kaliv Redesign.dc.
 | userBubble | #211D18, kant #2F2A24 |
 | hairline | #2A2521 · #2A2119 · listedeler #1C1611 |
 | tekst primær | #F3EFE6 · #E9DFCA · brød #EEE6D8 |
-| tekst sekundær | #A89D90 · svag #776D62 · svagest #6A6156 |
+| tekst sekundær | #A89D90 · svag **#8A8073** · caps **#857A6C** |
 | **guld fyld** (primærknap, aktiv toggle, valgt kant, KALIV-capslinje) | **#B08A3E** |
 | **guld accent** (tekst/ikon, links) | **#D4AB52** |
 | guld tint-bg (badges) | rgba(212,171,82,.16) |
 | status ok | #77836D · advarsel #A08050 · destruktiv #C96B5D |
-| tekst på guld fyld | #F6EFE2 |
+| tekst på guld fyld | **#2B1C05** |
 
 ### Farver — lyst tema
 | Rolle | Værdi |
@@ -41,21 +42,21 @@ Filerne i denne pakke er **designreferencer bygget i HTML** (`Kaliv Redesign.dc.
 | surface | #FFFDF9 · surfaceDim #F1EADC/#EFE8DB · elevated #EDE5D8 |
 | userBubble | #EDE5D8, kant #DCD2C2 |
 | hairline | #D7C9B4 · deler #E3DACB |
-| tekst primær | #231E19 · sekundær #776D62 · svag #9A9084 |
-| guld fyld | #B08A3E (samme som mørk) · guld accent-tekst **#9C7A28** |
+| tekst primær | #231E19 · sekundær **#6F665C** · svag **#776D62** |
+| guld fyld | #B08A3E (samme som mørk) · guld accent-tekst **#7E621C** |
 | status ok #5F6B52 · advarsel #957620 · destruktiv #A8503F |
 | toggle-knop | #FFFDF9 i begge temaer |
 
 ### Typografi
 - **EB Garamond** (Google Fonts) weight 500: wordmark (caps, tracking .22em; splash .42em) og skærmtitler 21px (sheets 19–20px), tracking .01em
-- **Inter** alt andet: brød 13.5px/1.6 · rækketitel 600 13–13.5px · sekundær 11–11.5px · sub 10.5px · caps-labels 700 9.5px tracking .18em farve #6A6156
+- **Inter** alt andet: brød 13.5px/1.6 · rækketitel 600 13–13.5px · sekundær 11–11.5px · sub 10.5px · caps-labels 700 9.5px tracking .18em farve #857A6C i mørkt tema
 - Assistent-svar: **flad tekst på canvas** (ingen boks), KALIV-capslinje 700 10px tracking .2em i #B08A3E ovenover + tid i svag
 - Minimum interaktiv højde 44dp-ækvivalent (mockup bruger 322px-bredde ~ 393dp reference)
 
 ### Form
 - Radier: kort/rækker 12 · popovers 13 · komposer 16 · bottom-sheets 18 18 0 0 · brugerboble 14 14 5 14 · chips/piller 999
 - Kontakter: 42×24, spor guld-fyld (til) / elevated (fra), knop 20px hvid
-- Primærknap: fyldt #B08A3E, tekst #F6EFE2, radius 12–14. Sekundær: transparent + hairline-kant. Ingen gradients, ingen glød, ingen skygger på statusdots.
+- Primærknap: fyldt #B08A3E, tekst **#2B1C05**, radius 12–14. Sekundær: transparent + hairline-kant. Ingen gradients, ingen glød, ingen skygger på statusdots.
 - Bezel/mockup-ramme er kun til præsentation — implementeres ikke.
 
 ## Screens (struktur + nøglekomponenter)
