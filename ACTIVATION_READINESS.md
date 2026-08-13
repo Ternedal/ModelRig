@@ -4,7 +4,7 @@
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
 **Version på main:** `1.58.152`
-**Genereret:** 2026-08-13 11:04 UTC
+**Genereret:** 2026-08-13 11:05 UTC
 
 ---
 
@@ -13,7 +13,7 @@
 Blokerende:
 
 - **Fysisk rig-validering:** ingen rapport på disken — fysisk validering er ikke kørt
-- kunne ikke læse plan-autoriteten: No module named 'pydantic'
+- kunne ikke læse plan-autoriteten: No module named 'httpx'
 
 Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet uden evidens. Koden kan være korrekt i tests og fejle på Windows, Ollama, Tailscale eller en Pixel 6a — det er dét fysisk validering er til for, og det er ikke noget CI kan gøre for dig.
 
@@ -21,7 +21,7 @@ Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet
 
 ## Kan scheduleren aktiveres nu? **NEJ**
 
-kunne ikke læse schedule-godkendelsen: No module named 'fastapi'
+**Kunne ikke afprøve godkendelsen.** Gaten nægter at gætte: den spurgte tidligere kildekoden om der stod "Bearer" et sted, og en kommentar kunne svare ja
 
 - **Beviser en godkendelse et menneske:** NEJ
 - **Leveringsmodellen består alle durability-prober:** ja
@@ -48,7 +48,7 @@ Hver probe bygger de RIGTIGE komponenter mod engangs-databaser og injicerer fejl
 ## Planautoritet (Agent 3)
 
 - **Serverbygget plan:** NEJ
-- **Detalje:** kunne ikke læse plan-autoriteten: No module named 'pydantic'
+- **Detalje:** kunne ikke læse plan-autoriteten: No module named 'httpx'
 
 ---
 
