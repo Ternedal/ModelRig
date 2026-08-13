@@ -53,6 +53,7 @@ fun ChatTopBar(
     onToggleDark: () -> Unit,
     onOverflow: () -> Unit,
     modifier: Modifier = Modifier,
+    overflowContent: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = modifier
@@ -93,13 +94,16 @@ fun ChatTopBar(
                 modifier = Modifier.size(22.dp),
             )
         }
-        IconButton(onClick = onOverflow) {
-            Icon(
-                painterResource(R.drawable.ic_kaliv_more_vert),
-                contentDescription = "Mere",
-                tint = KalivTheme.colors.textMuted,
-                modifier = Modifier.size(24.dp),
-            )
+        Box {
+            IconButton(onClick = onOverflow) {
+                Icon(
+                    painterResource(R.drawable.ic_kaliv_more_vert),
+                    contentDescription = "Mere",
+                    tint = KalivTheme.colors.textMuted,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+            overflowContent?.invoke()
         }
     }
 }
@@ -275,11 +279,14 @@ fun ChatEmptyState(
 fun ChatComposer(
     text: String,
     placeholder: String,
-    onAttach: () -> Unit,
+    onAttach: (() -> Unit)?,
     onMic: (() -> Unit)?,
     onSend: () -> Unit,
     sendEnabled: Boolean,
     modifier: Modifier = Modifier,
+    busy: Boolean = false,
+    onStop: (() -> Unit)? = null,
+    micSlot: (@Composable () -> Unit)? = null,
     inputField: (@Composable () -> Unit)? = null,
 ) {
     Column(
@@ -308,16 +315,21 @@ fun ChatComposer(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onAttach, modifier = Modifier.size(37.dp)) {
-                Icon(
-                    painterResource(R.drawable.ic_kaliv_attach),
-                    contentDescription = "Vedh\u00e6ft",
-                    tint = KalivTheme.colors.textMuted,
-                    modifier = Modifier.size(23.dp),
-                )
+            if (onAttach != null) {
+                IconButton(onClick = onAttach, modifier = Modifier.size(37.dp)) {
+                    Icon(
+                        painterResource(R.drawable.ic_kaliv_attach),
+                        contentDescription = "Vedh\u00e6ft",
+                        tint = KalivTheme.colors.textMuted,
+                        modifier = Modifier.size(23.dp),
+                    )
+                }
             }
             Spacer(Modifier.weight(1f))
-            if (onMic != null) {
+            if (micSlot != null) {
+                micSlot()
+                Spacer(Modifier.width(7.dp))
+            } else if (onMic != null) {
                 IconButton(onClick = onMic, modifier = Modifier.size(37.dp)) {
                     Icon(
                         painterResource(R.drawable.ic_kaliv_mic),
@@ -329,8 +341,8 @@ fun ChatComposer(
                 Spacer(Modifier.width(7.dp))
             }
             Surface(
-                onClick = onSend,
-                enabled = sendEnabled,
+                onClick = { if (busy) onStop?.invoke() else onSend() },
+                enabled = sendEnabled || busy,
                 modifier = Modifier.size(KalivTokens.Layout.fabSend),
                 shape = CircleShape,
                 // Mockup: FAB'en er guld ogsaa i hvilende tom-tilstand; enabled
@@ -339,11 +351,20 @@ fun ChatComposer(
                 contentColor = KalivTheme.colors.onSignal,
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        painterResource(R.drawable.ic_kaliv_send),
-                        contentDescription = "Send",
-                        modifier = Modifier.size(21.dp),
-                    )
+                    if (busy) {
+                        // Stop-tilstand: kvadrat i ink paa guldet (afbryder svaret).
+                        Box(
+                            Modifier
+                                .size(15.dp)
+                                .background(KalivTheme.colors.onSignal, RoundedCornerShape(3.dp)),
+                        )
+                    } else {
+                        Icon(
+                            painterResource(R.drawable.ic_kaliv_send),
+                            contentDescription = "Send",
+                            modifier = Modifier.size(21.dp),
+                        )
+                    }
                 }
             }
         }

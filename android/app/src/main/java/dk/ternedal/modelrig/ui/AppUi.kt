@@ -58,6 +58,15 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import dk.ternedal.modelrig.ui.chat.ChatComposer
+import dk.ternedal.modelrig.ui.chat.ChatContextChip
+import dk.ternedal.modelrig.ui.chat.ChatEmptyState
+import dk.ternedal.modelrig.ui.chat.ChatTopBar
+import dk.ternedal.modelrig.ui.components.ChipRow
+import dk.ternedal.modelrig.ui.theme.KalivType
 
 private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, ControlCenter, CloudPicker, VoiceCloudPicker }
 
@@ -1433,39 +1442,101 @@ private fun ChatScreen(
 
     Column(Modifier.fillMaxSize()) {
         // top bar
-        Surface(color = KalivTheme.colors.surface, tonalElevation = 2.dp) {
+        Surface(color = KalivTheme.colors.background) {
             Column {
-            Row(
-                Modifier.fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            // Redesignets topbar (DDR-001 fase 2): ankh-brik + wordmark +
+            // tema-toggle + overflow. Menuen ankres ved prik-knappen via slottet.
+            ChatTopBar(
+                dark = darkMode,
+                onToggleDark = { onToggleDark(!darkMode) },
+                onOverflow = { overflow = true },
+                modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
+                overflowContent = {
+                    DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
+                        DropdownMenuItem(text = { Text("Ny samtale") }, onClick = {
+                            overflow = false; messages.clear(); convId = null; onConvChanged(null)
+                        })
+                        DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
+                        DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
+                        DropdownMenuItem(text = { Text("Viden") }, onClick = { overflow = false; onOpenKnowledge() })
+                        DropdownMenuItem(text = { Text("Planer") }, onClick = { overflow = false; onOpenSchedules() })
+                        if (hasRig && hasCloud) {
+                            DropdownMenuItem(
+                                text = { Text(if (mode == "cloud") "Skift til rig" else "Skift til cloud") },
+                                onClick = {
+                                    overflow = false
+                                    val m = if (mode == "cloud") "rig" else "cloud"
+                                    mode = m; store.chatMode = m
+                                    if (m == "cloud") ragMode = false
+                                },
+                            )
+                        }
+                        DropdownMenuItem(text = { Text("Indstillinger") }, onClick = { overflow = false; onOpenSettings() })
+                        HorizontalDivider(color = KalivTheme.colors.hairline)
+                        // Light / dark. A manual choice (TokenStore.darkMode), so it
+                        // stays put when Android auto-switches at sunset. Lives in the
+                        // overflow menu next to Settings -- reachable in every mode,
+                        // unlike the model-picker dropdown it was wrongly placed in.
+                        DropdownMenuItem(
+                            text = {
+                                Text(if (darkMode) "☀  Lyst tema" else "☾  Mørkt tema")
+                            },
+                            onClick = { overflow = false; onToggleDark(!darkMode) },
+                        )
+                        // 2a trin 1: the consents become REAL -- persisted in
+                        // TokenStore, toggleable here next to the theme toggle
+                        // (the app's only other toggle). Before this,
+                        // allowRagCloud was a dead remember{false}: the D4
+                        // consent literally could not be given by a user.
+                        DropdownMenuItem(
+                            text = {
+                                Text(if (allowRagCloud) "✓  Dokumentviden → cloud: TIL" else "Dokumentviden → cloud: FRA")
+                            },
+                            onClick = {
+                                overflow = false
+                                allowRagCloud = !allowRagCloud
+                                store.allowRagCloud = allowRagCloud
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(if (autoFallback) "✓  Auto cloud-fallback: TIL" else "Auto cloud-fallback: FRA")
+                            },
+                            onClick = {
+                                overflow = false
+                                autoFallback = !autoFallback
+                                store.autoCloudFallback = autoFallback
+                            },
+                        )
+                    }
+                },
+            )
+            // Kontekst-chips: model (+menuen som er appens capability-hub),
+            // RAG- og Tools-tilstand. Kilde-badge/Skift-knappen er afloest af
+            // routing-strippen nedenfor + Skift-punktet i overflow-menuen.
+            ChipRow(
+                background = KalivTheme.colors.background,
+                modifier = Modifier.fillMaxWidth().padding(start = 20.dp, bottom = 10.dp),
             ) {
-                // Kaliv wordmark in the header (design guide). Art swaps with the
-                // palette so it reads on both backgrounds.
-                Image(
-                    painter = painterResource(
-                        if (KalivTheme.colors.isDark) R.drawable.kaliv_wordmark_dark
-                        else R.drawable.kaliv_wordmark_light,
-                    ),
-                    contentDescription = "Kaliv",
-                    modifier = Modifier.height(26.dp).padding(end = 10.dp),
-                )
-                // The model + mode controls live in a weighted, horizontally
-                // scrollable strip. Non-weighted siblings (source badge, Skift,
-                // the overflow menu) are measured first, so this strip only gets
-                // the LEFTOVER width and shrinks/scrolls -- it can never push the
-                // overflow button (which holds Settings) off the right edge, the
-                // way a plain Row of six items did on a phone-width screen.
-                Row(
-                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
                 if (mode == "cloud") {
-                    ModelChip("☁  $cloudModel  ▾", onClick = { onOpenCloudPicker() })
+                    ChatContextChip(
+                        text = cloudModel,
+                        emphasized = true,
+                        leadingIcon = painterResource(R.drawable.ic_kaliv_model),
+                        leadingTint = KalivTheme.colors.accent,
+                        trailingIcon = painterResource(R.drawable.ic_kaliv_chevron_down),
+                        onClick = { onOpenCloudPicker() },
+                    )
                 } else {
                     Box {
-                        ModelChip("$currentModel  ▾", onClick = { modelMenu = true })
+                        ChatContextChip(
+                            text = currentModel,
+                            emphasized = true,
+                            leadingIcon = painterResource(R.drawable.ic_kaliv_model),
+                            leadingTint = KalivTheme.colors.accent,
+                            trailingIcon = painterResource(R.drawable.ic_kaliv_chevron_down),
+                            onClick = { modelMenu = true },
+                        )
                         // Auto-load the installed rig models the first time the menu
                         // opens (and whenever it reopens empty), so there's an actual
                         // list to pick from -- previously the list only appeared after
@@ -1728,67 +1799,35 @@ private fun ChatScreen(
                         )
                     }
                 }
-                }  // end scrollable model/mode strip
-                Spacer(Modifier.width(8.dp))
-                SourceBadge(mode)
-                if (hasRig && hasCloud) {
-                    TextButton(
-                        onClick = { val m = if (mode == "cloud") "rig" else "cloud"; mode = m; store.chatMode = m; if (m == "cloud") ragMode = false },
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                    ) { Text("Skift", color = KalivTheme.colors.signal, fontSize = 13.sp) }
+                if (mode == "rig") {
+                    ChatContextChip(
+                        text = "RAG",
+                        emphasized = ragMode,
+                        leadingIcon = painterResource(R.drawable.ic_kaliv_search),
+                        onClick = {
+                            val on = !ragMode
+                            ragMode = on
+                            if (on) scope.launch {
+                                val res = withContext(Dispatchers.IO) {
+                                    runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRagSources() }
+                                }
+                                res.onSuccess { ragSources = it }
+                            }
+                        },
+                    )
                 }
-                Box {
-                    TextButton(onClick = { overflow = true }, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                        Text("⋮", color = KalivTheme.colors.textHigh, fontSize = 20.sp)
-                    }
-                    DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
-                        DropdownMenuItem(text = { Text("Ny samtale") }, onClick = {
-                            overflow = false; messages.clear(); convId = null; onConvChanged(null)
-                        })
-                        DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
-                        DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
-                        DropdownMenuItem(text = { Text("Viden") }, onClick = { overflow = false; onOpenKnowledge() })
-                        DropdownMenuItem(text = { Text("Planer") }, onClick = { overflow = false; onOpenSchedules() })
-                        DropdownMenuItem(text = { Text("Indstillinger") }, onClick = { overflow = false; onOpenSettings() })
-                        HorizontalDivider(color = KalivTheme.colors.hairline)
-                        // Light / dark. A manual choice (TokenStore.darkMode), so it
-                        // stays put when Android auto-switches at sunset. Lives in the
-                        // overflow menu next to Settings -- reachable in every mode,
-                        // unlike the model-picker dropdown it was wrongly placed in.
-                        DropdownMenuItem(
-                            text = {
-                                Text(if (darkMode) "☀  Lyst tema" else "☾  Mørkt tema")
-                            },
-                            onClick = { overflow = false; onToggleDark(!darkMode) },
-                        )
-                        // 2a trin 1: the consents become REAL -- persisted in
-                        // TokenStore, toggleable here next to the theme toggle
-                        // (the app's only other toggle). Before this,
-                        // allowRagCloud was a dead remember{false}: the D4
-                        // consent literally could not be given by a user.
-                        DropdownMenuItem(
-                            text = {
-                                Text(if (allowRagCloud) "✓  Dokumentviden → cloud: TIL" else "Dokumentviden → cloud: FRA")
-                            },
-                            onClick = {
-                                overflow = false
-                                allowRagCloud = !allowRagCloud
-                                store.allowRagCloud = allowRagCloud
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Text(if (autoFallback) "✓  Auto cloud-fallback: TIL" else "Auto cloud-fallback: FRA")
-                            },
-                            onClick = {
-                                overflow = false
-                                autoFallback = !autoFallback
-                                store.autoCloudFallback = autoFallback
-                            },
-                        )
-                    }
-                }
+                ChatContextChip(
+                    text = "Tools",
+                    emphasized = toolsMode,
+                    leadingIcon = painterResource(R.drawable.ic_kaliv_tools),
+                    onClick = {
+                        toolsMode = !toolsMode
+                        store.toolsMode = toolsMode
+                        if (!toolsMode) pendingTool = null
+                    },
+                )
             }
+
             // Persistent routing strip: always shows, at a glance, WHICH model
             // answers text and WHICH answers voice (and whether voice uses cloud).
             // Before this, the voice-cloud state was buried in the model menu and
@@ -1827,46 +1866,19 @@ private fun ChatScreen(
         // messages
         if (messages.isEmpty()) {
             Column(
-                Modifier.weight(1f).fillMaxWidth().padding(32.dp),
+                Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                // The empty state is the welcome screen: the mark, the wordmark,
-                // then the mode. The ankh is the launcher foreground -- one
-                // asset, one identity, no second copy to drift out of sync.
-                Image(
-                    painter = painterResource(R.drawable.ic_launcher_foreground),
-                    contentDescription = null,
-                    modifier = Modifier.size(140.dp),
-                )
-                Text(
-                    "KALIV",
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
-                    fontSize = 30.sp, fontWeight = FontWeight.Bold,
-                    color = KalivTheme.colors.textHigh, letterSpacing = 8.sp,
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "Lokal intelligens. Privat.",
-                    color = KalivTheme.colors.textMuted, fontSize = 13.sp, letterSpacing = 1.sp,
-                )
-                Spacer(Modifier.height(28.dp))
-                // KalivTheme.colors.hairline divider: the branded-seal feel is quiet structure,
-                // not more colour.
-                androidx.compose.foundation.layout.Box(
-                    Modifier.width(48.dp).height(1.dp)
-                        .background(KalivTheme.colors.hairline),
-                )
-                Spacer(Modifier.height(20.dp))
-                Text(
-                    when { mode == "cloud" -> "Cloud-tilstand"; ragMode -> "RAG-tilstand"; else -> "Rig-tilstand" },
-                    color = if (mode == "cloud") KalivTheme.colors.amber else KalivTheme.colors.signal,
-                    fontSize = 14.sp, fontWeight = FontWeight.Medium, letterSpacing = 1.sp,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    if (ragMode) "Spørg om dine ingesterede dokumenter" else "Skriv en besked for at starte",
-                    color = KalivTheme.colors.textMuted, fontSize = 13.sp,
+                // Tom-tilstanden 1:1 (skaerm 1). Tilstandsteksterne fra den gamle
+                // velkomst baeres nu af routing-strippen + RAG-/Tools-chipsene.
+                ChatEmptyState(
+                    suggestions = listOf(
+                        "Opsummér et dokument",
+                        "Forklar en fejl i min kode",
+                        "Udkast til en e-mail",
+                    ),
+                    onSuggestion = { input = it },
                 )
             }
         } else {
@@ -2226,94 +2238,87 @@ private fun ChatScreen(
                         modifier = Modifier.padding(bottom = 6.dp),
                     )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Vision is chat-only (cloud/rig), not RAG. Requires a
-                    // vision-capable model; the button just attaches — the
-                    // model choice is the user's.
-                    if (mode != "rig" || !ragMode) {
+                val canSendNow = input.isNotBlank() || pendingImageB64 != null
+                ChatComposer(
+                    text = input,
+                    placeholder = "Skriv til Kaliv …",
+                    onAttach = if (mode != "rig" || !ragMode) ({
+                        if (!busy) {
+                            pendingImageError = null
+                            pickImage.launch(arrayOf("image/*"))
+                        }
+                    }) else null,
+                    onMic = null,
+                    micSlot = if (mode == "rig") ({
                         Box(
-                            Modifier.size(48.dp).clickable(
-                                enabled = !busy,
-                                onClickLabel = "Vedhæft fil", role = Role.Button,
-                                onClick = {
-                                pendingImageError = null
-                                pickImage.launch(arrayOf("image/*"))
-                            }),
-                            contentAlignment = Alignment.Center,
-                        ) { Text("📎", fontSize = 20.sp) }
-                        Spacer(Modifier.width(2.dp))
-                    }
-                    // Kaliv Voice mic button: rig mode only (voice runs on the
-                    // rig). Tap to start recording, tap again to send. Disabled
-                    // while a voice turn is in flight.
-                    if (mode == "rig") {
-                        // One button, three jobs. While a turn is in flight it
-                        // becomes ⏹: the mic is busy anyway, so a separate stop
-                        // button would just be another thing to aim at.
-                        Box(
-                            Modifier.size(48.dp).clickable(
+                            Modifier.size(37.dp).clickable(
                                 enabled = !busy || voiceBusy,
-                                // Labelet foelger tilstanden: en skaermlaeser skal
-                                // kunne hoere FORSKEL paa at starte og stoppe.
                                 onClickLabel = if (recording) "Stop optagelse" else "Optag tale",
                                 role = Role.Button,
                                 onClick = {
-                                voiceError = null
-                                if (voiceBusy) {
-                                    stopVoiceTurn()
-                                } else if (!hasMicPermission) {
-                                    micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                                } else if (recording) {
-                                    recording = false
-                                    val wav = voiceCapture.stopToWav()
-                                    if (wav != null) runVoiceTurn(wav) else voiceError = "ingen lyd optaget"
-                                } else {
-                                    wasInterrupted = false
-                                    try { voiceCapture.start(); recording = true }
-                                    catch (e: Exception) { voiceError = e.message ?: "kunne ikke optage" }
-                                }
-                            }),
+                                    voiceError = null
+                                    if (voiceBusy) {
+                                        stopVoiceTurn()
+                                    } else if (!hasMicPermission) {
+                                        micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                    } else if (recording) {
+                                        recording = false
+                                        val wav = voiceCapture.stopToWav()
+                                        if (wav != null) runVoiceTurn(wav) else voiceError = "ingen lyd optaget"
+                                    } else {
+                                        wasInterrupted = false
+                                        try { voiceCapture.start(); recording = true }
+                                        catch (e: Exception) { voiceError = e.message ?: "kunne ikke optage" }
+                                    }
+                                },
+                            ),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(
-                                when {
-                                    voiceBusy -> "⏹"
-                                    recording -> "⏺"
-                                    else -> "🎙"
-                                },
-                                fontSize = 20.sp,
-                            )
+                            if (voiceBusy) {
+                                Box(
+                                    Modifier.size(14.dp)
+                                        .background(KalivTheme.colors.danger, RoundedCornerShape(3.dp)),
+                                )
+                            } else {
+                                Icon(
+                                    painterResource(R.drawable.ic_kaliv_mic),
+                                    contentDescription = null,
+                                    tint = if (recording) KalivTheme.colors.accent else KalivTheme.colors.textMuted,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            }
                         }
-                        Spacer(Modifier.width(2.dp))
-                    }
-                    OutlinedTextField(
-                        value = input, onValueChange = { input = it },
-                        modifier = Modifier.weight(1f), enabled = !busy, maxLines = 5,
-                        placeholder = { Text("Skriv til Kaliv …") },
-                        shape = RoundedCornerShape(24.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    if (busy) {
-                        Box(
-                            Modifier.size(48.dp).clickable(
-                                onClickLabel = "Stop svaret", role = Role.Button,
-                                onClick = { activeCall?.cancel() },
+                    }) else null,
+                    onSend = onSend,
+                    sendEnabled = canSendNow && !busy,
+                    busy = busy,
+                    onStop = { activeCall?.cancel() },
+                    inputField = {
+                        BasicTextField(
+                            value = input,
+                            onValueChange = { input = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !busy,
+                            maxLines = 5,
+                            textStyle = TextStyle(
+                                fontFamily = KalivType.Inter,
+                                fontSize = 17.sp,
+                                color = KalivTheme.colors.textHigh,
                             ),
-                            contentAlignment = Alignment.Center,
-                        ) { StopGlyph(color = KalivTheme.colors.danger, modifier = Modifier.size(20.dp)) }
-                    } else {
-                        // Can send with text OR just an image (vision prompts
-                        // are often "what's in this?" with an image and no text).
-                        val canSend = input.isNotBlank() || pendingImageB64 != null
-                        Box(
-                            Modifier.size(48.dp).clickable(
-                                enabled = canSend, onClickLabel = "Send", role = Role.Button,
-                                onClick = onSend,
-                            ),
-                            contentAlignment = Alignment.Center,
-                        ) { SendGlyph(color = if (canSend) KalivTheme.colors.signal else KalivTheme.colors.textMuted, modifier = Modifier.size(26.dp)) }
-                    }
-                }
+                            cursorBrush = SolidColor(KalivTheme.colors.accent),
+                            decorationBox = { inner ->
+                                if (input.isEmpty()) {
+                                    Text(
+                                        "Skriv til Kaliv …",
+                                        style = TextStyle(fontFamily = KalivType.Inter, fontSize = 17.sp),
+                                        color = KalivTheme.colors.faint,
+                                    )
+                                }
+                                inner()
+                            },
+                        )
+                    },
+                )
             }
         }
     }
