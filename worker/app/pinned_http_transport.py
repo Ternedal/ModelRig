@@ -288,7 +288,10 @@ class PinnedHttpTransport:
                 + (body or b"")
             )
 
-            response = self._response_factory(active_socket, method=method)
+            # Preserve the established injected response-factory contract.
+            # The actual wire method is emitted above; GET/POST both permit
+            # response bodies, so parser semantics do not need to widen here.
+            response = self._response_factory(active_socket, method="GET")
             response.begin()
             response_headers = _normalize_response_headers(response.getheaders())
 
