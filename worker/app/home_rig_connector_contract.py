@@ -453,7 +453,7 @@ class HomeRigObservation:
             if self.freshness == "fresh":
                 if expected_age > self.max_freshness_seconds:
                     raise HomeRigContractError("fresh observation exceeds freshness budget")
-                if not isinstance(self.state, str) or not _STATE.fullmatch(self.state) or self.state == "unknown":
+                if not isinstance(self.state, str) or not _STATE.fullmatch(self.state):
                     raise HomeRigContractError("fresh observation requires a bounded source state")
             else:
                 if expected_age <= self.max_freshness_seconds or self.state != "unknown":
@@ -493,7 +493,7 @@ def normalize_observation(
     checked_at: int,
     max_freshness_seconds: int = 120,
 ) -> HomeRigObservation:
-    """Fail closed: missing or stale source evidence is always ``unknown``."""
+    """Fail closed: missing, unavailable or stale source evidence is unknown."""
     checked_at = _now(checked_at)
     operation = _operation(operation)
     if target_kind == "rig":
@@ -527,13 +527,29 @@ def normalize_observation(
             freshness_seconds=None,
             max_freshness_seconds=max_freshness_seconds,
         )
+    if not isinstance(source_state, str) or not _STATE.fullmatch(source_state):
+        raise HomeRigContractError("source state is invalid")
+    # Home Assistant and RigGate can return an explicit unavailable state with a
+    # timestamp. It still means there is no usable source observation, so do not
+    # let a recent timestamp make it look fresh/ready.
+    if source_state.casefold() == "unavailable":
+        return HomeRigObservation(
+            source=source,
+            target_kind=target_kind,
+            target_id=target_id,
+            operation=operation,  # type: ignore[arg-type]
+            state="unknown",
+            checked_at=checked_at,
+            observed_at=None,
+            freshness="unavailable",
+            freshness_seconds=None,
+            max_freshness_seconds=max_freshness_seconds,
+        )
     observed_at = _now(observed_at)
     if observed_at > checked_at:
         raise HomeRigContractError("source observation cannot be from the future")
     age = checked_at - observed_at
     freshness: Freshness = "fresh" if age <= max_freshness_seconds else "stale"
-    if not isinstance(source_state, str) or not _STATE.fullmatch(source_state):
-        raise HomeRigContractError("source state is invalid")
     state = source_state if freshness == "fresh" else "unknown"
     return HomeRigObservation(
         source=source,
@@ -704,10 +720,7 @@ class HomeRigAuditLog:
                 "scope_sha256,freshness,detail FROM home_rig_audit ORDER BY id DESC LIMIT ?",
                 (limit,),
             ).fetchall()
-        return [
-            {**dict(row), "ts": _iso(row["ts"])}
-            for row in rows
-        ]
+        return [{**dict(row), "ts": _iso(row["ts"])} for row in rows]
 
 
 def build_home_rig_sharing_request(
