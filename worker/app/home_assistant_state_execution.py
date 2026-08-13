@@ -106,6 +106,8 @@ class HomeAssistantStateTransportResult:
                     "failed transport result cannot also contain a provider response"
                 )
             return
+        if self.request_bytes_sent == 0:
+            raise HomeAssistantStateExecutionError("successful transport must report sent request bytes")
         if (
             isinstance(self.status_code, bool)
             or not isinstance(self.status_code, int)
@@ -233,16 +235,11 @@ class HomeAssistantStateExecutor:
             raise HomeAssistantStateExecutionError("execution requires HomeRigReadClaim")
         started_at = _time(now, "execution time")
 
-        # First consume the one-use external-processing authority. This call
-        # itself re-authorizes grant/scope/policy and fails before transport.
         try:
             self._sharing.claim(lease, claim, now=started_at)
         except HomeRigReadLeaseDenied as exc:
             raise HomeAssistantStateExecutionDenied("provider read is not authorized") from exc
 
-        # Re-authorize AGAIN after receipt claim and adjacent to the transport
-        # call. If the operator revoked during the tiny claim->plan interval,
-        # terminalize the already-claimed receipt without contacting provider.
         try:
             plan = build_home_assistant_state_request(
                 self._grants,
@@ -274,9 +271,6 @@ class HomeAssistantStateExecutor:
         try:
             exchange = self._transport.execute(plan)
         except Exception as exc:
-            # Transport implementations are required to return typed failures
-            # once bytes can have left the process. An unexpected exception is
-            # therefore a pre-send contract crash and is accounted as zero.
             self._finish(
                 lease,
                 claim,
@@ -297,8 +291,18 @@ class HomeAssistantStateExecutor:
                 now=started_at,
             )
             raise HomeAssistantStateExecutionError("provider transport returned invalid result")
-        terminal_at = max(started_at, exchange.received_at)
         sent = exchange.request_bytes_sent
+        if exchange.received_at < started_at:
+            self._finish(
+                lease,
+                claim,
+                outcome="failed",
+                bytes_sent=sent,
+                error_code="transport_time",
+                now=started_at,
+            )
+            raise HomeAssistantStateExecutionError("provider transport returned backdated evidence")
+        terminal_at = exchange.received_at
 
         if exchange.request_plan_sha256 != plan.digest or exchange.entity_id != plan.entity_id:
             self._finish(
