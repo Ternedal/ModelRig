@@ -74,6 +74,7 @@ import dk.ternedal.modelrig.ui.chat.UserMessage
 import dk.ternedal.modelrig.ui.chat.SourceModelSheet
 import dk.ternedal.modelrig.ui.chat.ModelRowUi
 import dk.ternedal.modelrig.ui.chat.paramsLabelFor
+import dk.ternedal.modelrig.ui.chat.CapabilitiesSheet
 
 private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, ControlCenter, CloudPicker, VoiceCloudPicker }
 
@@ -737,6 +738,7 @@ private fun ChatScreen(
     var currentModel by remember { mutableStateOf(store.model) }
     var models by remember { mutableStateOf(listOf<String>()) }
     var showSourceSheet by remember { mutableStateOf(false) }
+    var showCapSheet by remember { mutableStateOf(false) }
     var runningModels by remember { mutableStateOf(setOf<String>()) }
     var cloudModel by remember { mutableStateOf(store.cloudModel) }
     var ragMode by remember { mutableStateOf(false) }
@@ -1537,6 +1539,7 @@ private fun ChatScreen(
                                 },
                             )
                         }
+                        DropdownMenuItem(text = { Text("Kapaciteter") }, onClick = { overflow = false; showCapSheet = true })
                         DropdownMenuItem(text = { Text("Indstillinger") }, onClick = { overflow = false; onOpenSettings() })
                         HorizontalDivider(color = KalivTheme.colors.hairline)
                         // Light / dark. A manual choice (TokenStore.darkMode), so it
@@ -1741,6 +1744,40 @@ private fun ChatScreen(
                         }
                     },
                     onDismiss = { showSourceSheet = false },
+                )
+            }
+            if (showCapSheet) {
+                CapabilitiesSheet(
+                    ragOn = ragMode,
+                    ragSubtitle = if (ragMode && ragSources.isNotEmpty())
+                        "${ragSources.size} dokument" + (if (ragSources.size == 1) "" else "er") + " \u00b7 svarer med kilder"
+                    else "Svarer med kilder fra dine dokumenter",
+                    ragSourceLabel = ragSourceFilter?.let { "Kilder: $it" } ?: "Kilder: Alle",
+                    onToggleRag = { on ->
+                        if (mode == "rig") {
+                            ragMode = on
+                            if (on) scope.launch {
+                                val res = withContext(Dispatchers.IO) {
+                                    runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRagSources() }
+                                }
+                                res.onSuccess { ragSources = it }
+                            }
+                        }
+                    },
+                    onSources = { showCapSheet = false; ragSourceMenu = true },
+                    toolsOn = toolsMode,
+                    onToggleTools = { on ->
+                        toolsMode = on
+                        store.toolsMode = on
+                        if (!on) pendingTool = null
+                    },
+                    voiceCloudAvailable = mode == "rig" && store.cloudKey != null,
+                    voiceViaCloud = voiceUsesCloud,
+                    onToggleVoiceCloud = { on ->
+                        voiceUsesCloud = on
+                        store.voiceUsesCloud = on
+                    },
+                    onDismiss = { showCapSheet = false },
                 )
             }
 
