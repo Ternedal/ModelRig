@@ -170,6 +170,9 @@ class PinnedHttpTransport:
         timeout_seconds: float,
         max_wire_bytes: int,
     ) -> TransportResponse:
+        # Explicitly pin the legacy public seam to GET without widening the
+        # private _request call contract used by existing test doubles.
+        _validated_trusted_request(method="GET", body=None)
         return self._request(
             url,
             connect_address=connect_address,
@@ -190,6 +193,9 @@ class PinnedHttpTransport:
         max_wire_bytes: int,
     ) -> TransportResponse:
         bearer = _validated_bearer_token(bearer_token)
+        # T-036 remains an explicit GET-only compatibility seam. T-037 POSTs
+        # use request_with_trusted_bearer_request instead.
+        _validated_trusted_request(method="GET", body=None)
         return self._request(
             url,
             connect_address=connect_address,
