@@ -2703,61 +2703,52 @@ private fun KnowledgeScreen(store: TokenStore, onBack: () -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().background(KalivTheme.colors.background)) {
-        Surface(color = KalivTheme.colors.surface, tonalElevation = 2.dp) {
-            Row(
-                Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // 48dp touch target (design guide minimum)
-                TextButton(onClick = onBack, modifier = Modifier.heightIn(min = 48.dp)) {
-                    Text("‹ Tilbage", color = KalivTheme.colors.signal, fontSize = 16.sp)
-                }
-                Spacer(Modifier.weight(1f))
-                Text("Viden", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
-                Spacer(Modifier.weight(1f))
-                TextButton(
-                    onClick = { pick.launch(arrayOf("*/*")) },
-                    modifier = Modifier.heightIn(min = 48.dp),
-                ) { Text("+ Tilføj", color = KalivTheme.colors.signal, fontSize = 16.sp) }
-            }
+        Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars).padding(horizontal = 8.dp)) {
+            dk.ternedal.modelrig.ui.chat.ConversationsTopBar(
+                title = "Viden",
+                onBack = onBack,
+                onNew = { pick.launch(arrayOf("*/*")) },
+            )
+            dk.ternedal.modelrig.ui.chat.KnowledgeIntroNote(Modifier.padding(bottom = 15.dp))
         }
         status?.let {
             Text(it, color = KalivTheme.colors.signal, fontSize = 14.sp,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
         }
         error?.let {
             Text(it, color = KalivTheme.colors.danger, fontSize = 14.sp,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
         }
         when {
-            loading -> Text("Henter…", color = KalivTheme.colors.textMuted, fontSize = 16.sp,
-                modifier = Modifier.padding(16.dp))
-            sources.isEmpty() -> Column(Modifier.fillMaxWidth().padding(32.dp),
+            loading -> Text("Henter\u2026", color = KalivTheme.colors.textMuted, fontSize = 16.sp,
+                modifier = Modifier.padding(20.dp))
+            sources.isEmpty() -> Column(Modifier.weight(1f).fillMaxWidth().padding(32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Ingen dokumenter endnu.", color = KalivTheme.colors.textHigh, fontSize = 16.sp)
                 Spacer(Modifier.height(6.dp))
-                Text("Tilføj PDF, DOCX, PPTX, HTML eller tekst, så kan Kaliv trække på dem.",
+                Text("Tilf\u00f8j PDF, DOCX, PPTX, HTML eller tekst, s\u00e5 kan Kaliv tr\u00e6kke p\u00e5 dem.",
                     color = KalivTheme.colors.textMuted, fontSize = 16.sp,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Spacer(Modifier.height(20.dp))
+                dk.ternedal.modelrig.ui.chat.KnowledgeList(
+                    docs = emptyList(),
+                    onAdd = { pick.launch(arrayOf("*/*")) },
+                )
             }
-            else -> androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize()) {
-                items(sources.size) { i ->
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("📄", fontSize = 18.sp)
-                        Spacer(Modifier.width(12.dp))
-                        Text(sources[i], color = KalivTheme.colors.textHigh, fontSize = 16.sp)
-                    }
-                    HorizontalDivider(color = KalivTheme.colors.hairline)
-                }
-            }
+            else -> dk.ternedal.modelrig.ui.chat.KnowledgeList(
+                docs = sources.map {
+                    dk.ternedal.modelrig.ui.chat.KnowledgeDocUi(it, dk.ternedal.modelrig.ui.chat.knowledgeBadgeFor(it))
+                },
+                onAdd = { pick.launch(arrayOf("*/*")) },
+                modifier = Modifier.weight(1f).padding(horizontal = 17.dp),
+            )
         }
+        dk.ternedal.modelrig.ui.chat.KnowledgeFooterNote(
+            Modifier.padding(horizontal = 17.dp, vertical = 10.dp),
+        )
     }
 }
+
 
 @Composable
 private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {

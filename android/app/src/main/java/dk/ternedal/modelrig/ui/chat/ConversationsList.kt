@@ -57,6 +57,7 @@ fun ConversationsTopBar(
     onNew: () -> Unit,
     menuContent: (@Composable () -> Unit)? = null,
     onMenu: (() -> Unit)? = null,
+    title: String = "Samtaler",
 ) {
     Row(
         Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 2.dp, bottom = 12.dp),
@@ -71,7 +72,7 @@ fun ConversationsTopBar(
             )
         }
         Spacer(Modifier.weight(1f))
-        Text("Samtaler", style = KalivType.Title, color = KalivTheme.colors.textHigh)
+        Text(title, style = KalivType.Title, color = KalivTheme.colors.textHigh)
         Spacer(Modifier.weight(1f))
         if (onMenu != null) {
             Box {
