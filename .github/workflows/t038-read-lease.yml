@@ -1,0 +1,233 @@
+name: t038-read-lease
+
+on:
+  pull_request:
+    paths:
+      - "worker/app/home_rig_read_lease.py"
+      - ".github/workflows/t038-read-lease.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Qualify exact one-use T-032 read lease
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: worker
+        run: |
+          python3 - <<'PY'
+          import ast
+          import uuid
+
+          from app.data_sharing import DataSharingLedger, DataSharingPolicy
+          from app.home_rig_connector_contract import HomeRigGrantStore, HomeRigScope
+          from app.home_rig_read_boundary import prepare_read
+          from app.home_rig_read_lease import (
+              HomeRigReadLeaseDenied,
+              HomeRigReadSharingBoundary,
+          )
+
+          source = open("worker/app/home_rig_read_lease.py", encoding="utf-8").read()
+          tree = ast.parse(source)
+          imported = set()
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Import):
+                  imported.update(alias.name.split(".", 1)[0] for alias in node.names)
+              elif isinstance(node, ast.ImportFrom) and node.module:
+                  imported.add(node.module.split(".", 1)[0])
+          assert {"socket", "ssl", "http", "urllib", "requests", "httpx", "subprocess", "os"}.isdisjoint(imported)
+          for forbidden in (
+              "REGISTRY[", "FastAPI(", "APIRouter(", "include_router(",
+              "os.getenv(", "os.environ", "urlopen(", "requests.", "httpx.",
+          ):
+              assert forbidden not in source, forbidden
+          assert "PRODUCTION_ACTIVATION = False" in source
+
+          class UUIDs:
+              def __init__(self):
+                  self.value = 0
+              def __call__(self):
+                  self.value += 1
+                  return uuid.UUID(int=self.value)
+
+          grants = HomeRigGrantStore(uuid_factory=UUIDs())
+          ledger = DataSharingLedger(uuid_factory=UUIDs())
+          boundary = HomeRigReadSharingBoundary(grants, ledger)
+
+          scope = HomeRigScope(
+              rig_ids=("modelrig",),
+              entity_ids=("sensor.gpu_temp", "sensor.cpu_temp"),
+              operations=("rig_health", "entity_state"),
+          )
+          grant = grants.create(scope, actor="operator", now=100)
+          entity_claim = prepare_read(
+              grants,
+              grant.grant_id,
+              target_kind="entity",
+              target_id="sensor.gpu_temp",
+              operation="entity_state",
+              now=101,
+          )
+
+          preview = boundary.inspect(entity_claim)
+          assert preview["may_send"] is False
+          assert preview["production_activation"] is False
+          assert preview["request"]["decision"] == "confirmation_required"
+          assert preview["request"]["data_category"] == "private"
+          assert preview["request"]["provider"] == "home_assistant"
+          assert preview["request"]["max_bytes"] == 4096
+          assert preview["request"]["summary"] == "Home Assistant state: sensor.gpu_temp"
+
+          proposal = boundary.propose(entity_claim, now=102)
+          ledger.approve(proposal.permission_id, actor="operator", now=103)
+          lease = boundary.prepare(
+              entity_claim,
+              permission_id=proposal.permission_id,
+              now=104,
+          )
+          assert lease.receipt.authorization == "permission"
+          assert lease.receipt.permission_id == proposal.permission_id
+          assert lease.to_dict()["may_send"] is True
+          boundary.claim(lease, entity_claim, now=105)
+          try:
+              boundary.claim(lease, entity_claim, now=106)
+          except HomeRigReadLeaseDenied:
+              pass
+          else:
+              raise AssertionError("one-use sharing receipt was replayed")
+          boundary.complete(
+              lease,
+              entity_claim,
+              outcome="completed",
+              bytes_sent=128,
+              now=107,
+          )
+
+          # A lease for one exact entity cannot be replayed against another.
+          cpu_claim = prepare_read(
+              grants,
+              grant.grant_id,
+              target_kind="entity",
+              target_id="sensor.cpu_temp",
+              operation="entity_state",
+              now=108,
+          )
+          proposal2 = boundary.propose(entity_claim, now=109)
+          ledger.approve(proposal2.permission_id, actor="operator", now=110)
+          lease2 = boundary.prepare(
+              entity_claim,
+              permission_id=proposal2.permission_id,
+              now=111,
+          )
+          try:
+              boundary.claim(lease2, cpu_claim, now=112)
+          except HomeRigReadLeaseDenied:
+              pass
+          else:
+              raise AssertionError("lease crossed exact read-claim identity")
+
+          # Revocation immediately before I/O wins over an already-issued lease.
+          proposal3 = boundary.propose(entity_claim, now=113)
+          ledger.approve(proposal3.permission_id, actor="operator", now=114)
+          lease3 = boundary.prepare(
+              entity_claim,
+              permission_id=proposal3.permission_id,
+              now=115,
+          )
+          grants.revoke(
+              grant.grant_id,
+              expected_scope_sha256=scope.digest,
+              actor="operator",
+              now=116,
+          )
+          try:
+              boundary.claim(lease3, entity_claim, now=117)
+          except HomeRigReadLeaseDenied:
+              pass
+          else:
+              raise AssertionError("revoked grant crossed provider boundary")
+
+          # Terminal accounting still works if authority disappears after I/O began.
+          grant2 = grants.create(scope, actor="operator", now=120)
+          claim4 = prepare_read(
+              grants,
+              grant2.grant_id,
+              target_kind="entity",
+              target_id="sensor.gpu_temp",
+              operation="entity_state",
+              now=121,
+          )
+          proposal4 = boundary.propose(claim4, now=122)
+          ledger.approve(proposal4.permission_id, actor="operator", now=123)
+          lease4 = boundary.prepare(
+              claim4,
+              permission_id=proposal4.permission_id,
+              now=124,
+          )
+          boundary.claim(lease4, claim4, now=125)
+          grants.revoke(
+              grant2.grant_id,
+              expected_scope_sha256=scope.digest,
+              actor="operator",
+              now=126,
+          )
+          boundary.complete(
+              lease4,
+              claim4,
+              outcome="failed",
+              bytes_sent=64,
+              error_code="revoked_in_flight",
+              now=127,
+          )
+          events = ledger.recent_events(100)
+          finished = [row for row in events if row["receipt_id"] == lease4.receipt.receipt_id and row["event_type"] == "finished"]
+          assert len(finished) == 1
+          assert finished[0]["outcome"] == "failed"
+          assert finished[0]["error_code"] == "revoked_in_flight"
+
+          # A looser custom policy cannot turn T-038 RigGate reads into automatic sharing.
+          grant3 = grants.create(
+              HomeRigScope(rig_ids=("mediaserver",), operations=("rig_health",)),
+              actor="operator",
+              now=130,
+          )
+          rig_claim = prepare_read(
+              grants,
+              grant3.grant_id,
+              target_kind="rig",
+              target_id="mediaserver",
+              operation="rig_health",
+              now=131,
+          )
+          loose = HomeRigReadSharingBoundary(
+              grants,
+              ledger,
+              policy=DataSharingPolicy(operational="automatic"),
+          )
+          try:
+              loose.inspect(rig_claim)
+          except HomeRigReadLeaseDenied:
+              pass
+          else:
+              raise AssertionError("automatic policy weakened T-038 explicit permission")
+
+          grants.close()
+          ledger.close()
+          print("T-038 exact T-032 read lease: PASS")
+          PY
