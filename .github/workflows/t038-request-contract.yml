@@ -1,0 +1,203 @@
+name: t038-request-contract
+
+on:
+  pull_request:
+    paths:
+      - "worker/app/home_assistant_state_request.py"
+      - ".github/workflows/t038-request-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Qualify authorized non-executing Home Assistant request plan
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: worker
+        run: |
+          python3 - <<'PY'
+          import ast
+          import uuid
+          from dataclasses import replace
+
+          from app.data_sharing import DataSharingLedger
+          from app.home_assistant_state_request import (
+              HomeAssistantStateRequestDenied,
+              build_home_assistant_state_request,
+          )
+          from app.home_rig_connector_contract import HomeRigGrantStore, HomeRigScope
+          from app.home_rig_read_boundary import prepare_read
+          from app.home_rig_read_lease import HomeRigReadLease, HomeRigReadSharingBoundary
+
+          source = open("worker/app/home_assistant_state_request.py", encoding="utf-8").read()
+          tree = ast.parse(source)
+          imported = set()
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Import):
+                  imported.update(alias.name.split(".", 1)[0] for alias in node.names)
+              elif isinstance(node, ast.ImportFrom) and node.module:
+                  imported.add(node.module.split(".", 1)[0])
+          assert {"socket", "ssl", "http", "urllib", "requests", "httpx", "subprocess", "os"}.isdisjoint(imported)
+          for forbidden in (
+              "REGISTRY[", "FastAPI(", "APIRouter(", "include_router(",
+              "os.getenv(", "os.environ", "urlopen(", "requests.", "httpx.",
+          ):
+              assert forbidden not in source, forbidden
+          assert "PRODUCTION_ACTIVATION = False" in source
+
+          class UUIDs:
+              def __init__(self):
+                  self.value = 0
+              def __call__(self):
+                  self.value += 1
+                  return uuid.UUID(int=self.value)
+
+          grants = HomeRigGrantStore(uuid_factory=UUIDs())
+          ledger = DataSharingLedger(uuid_factory=UUIDs())
+          sharing = HomeRigReadSharingBoundary(grants, ledger)
+          scope = HomeRigScope(
+              entity_ids=("sensor.gpu_temp", "sensor.cpu_temp"),
+              operations=("entity_state",),
+          )
+          grant = grants.create(scope, actor="operator", now=100)
+          claim = prepare_read(
+              grants,
+              grant.grant_id,
+              target_kind="entity",
+              target_id="sensor.gpu_temp",
+              operation="entity_state",
+              now=101,
+          )
+          proposal = sharing.propose(claim, now=102)
+          ledger.approve(proposal.permission_id, actor="operator", now=103)
+          lease = sharing.prepare(
+              claim,
+              permission_id=proposal.permission_id,
+              now=104,
+              receipt_ttl_seconds=60,
+          )
+
+          plan = build_home_assistant_state_request(grants, lease, claim, now=105)
+          data = plan.to_dict()
+          assert data["method"] == "GET"
+          assert data["service"] == "home_assistant"
+          assert data["path"] == "/api/states/sensor.gpu_temp"
+          assert data["entity_id"] == "sensor.gpu_temp"
+          assert data["max_response_bytes"] == 128 * 1024
+          assert data["max_attempts"] == 1
+          assert data["follow_redirects"] is False
+          assert data["would_execute"] is False
+          assert data["production_activation"] is False
+          assert data["sharing_request_digest"] == lease.request_digest
+          assert data["sharing_receipt_id"] == lease.receipt.receipt_id
+          assert len(data["request_plan_sha256"]) == 64
+          for forbidden_key in ("host", "url", "base_url", "headers", "authorization", "token", "credential"):
+              assert forbidden_key not in data
+          same = build_home_assistant_state_request(grants, lease, claim, now=105)
+          assert same.digest == plan.digest
+
+          try:
+              build_home_assistant_state_request(grants, lease, claim, now=103)
+          except HomeAssistantStateRequestDenied:
+              pass
+          else:
+              raise AssertionError("request plan predates sharing authorization")
+
+          try:
+              build_home_assistant_state_request(
+                  grants,
+                  lease,
+                  claim,
+                  now=lease.receipt.expires_at,
+              )
+          except HomeAssistantStateRequestDenied:
+              pass
+          else:
+              raise AssertionError("expired sharing receipt built request plan")
+
+          other_claim = prepare_read(
+              grants,
+              grant.grant_id,
+              target_kind="entity",
+              target_id="sensor.cpu_temp",
+              operation="entity_state",
+              now=106,
+          )
+          try:
+              build_home_assistant_state_request(grants, lease, other_claim, now=107)
+          except HomeAssistantStateRequestDenied:
+              pass
+          else:
+              raise AssertionError("lease crossed exact entity claim")
+
+          forged_receipt = replace(lease.receipt, request_digest="0" * 64)
+          forged_lease = HomeRigReadLease(
+              claim_sha256=lease.claim_sha256,
+              request_digest="0" * 64,
+              policy_sha256=lease.policy_sha256,
+              receipt=forged_receipt,
+          )
+          try:
+              build_home_assistant_state_request(grants, forged_lease, claim, now=108)
+          except HomeAssistantStateRequestDenied:
+              pass
+          else:
+              raise AssertionError("forged sharing request digest built a request plan")
+
+          grants.revoke(
+              grant.grant_id,
+              expected_scope_sha256=scope.digest,
+              actor="operator",
+              now=109,
+          )
+          try:
+              build_home_assistant_state_request(grants, lease, claim, now=110)
+          except HomeAssistantStateRequestDenied:
+              pass
+          else:
+              raise AssertionError("revoked authority built provider request plan")
+
+          rig_scope = HomeRigScope(rig_ids=("modelrig",), operations=("rig_health",))
+          rig_grant = grants.create(rig_scope, actor="operator", now=120)
+          rig_claim = prepare_read(
+              grants,
+              rig_grant.grant_id,
+              target_kind="rig",
+              target_id="modelrig",
+              operation="rig_health",
+              now=121,
+          )
+          rig_proposal = sharing.propose(rig_claim, now=122)
+          ledger.approve(rig_proposal.permission_id, actor="operator", now=123)
+          rig_lease = sharing.prepare(
+              rig_claim,
+              permission_id=rig_proposal.permission_id,
+              now=124,
+          )
+          try:
+              build_home_assistant_state_request(grants, rig_lease, rig_claim, now=125)
+          except HomeAssistantStateRequestDenied:
+              pass
+          else:
+              raise AssertionError("RigGate claim built Home Assistant request plan")
+
+          grants.close()
+          ledger.close()
+          print("T-038 authorized Home Assistant request contract: PASS")
+          PY
