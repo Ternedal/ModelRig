@@ -1,26 +1,106 @@
 :root {
-  --kaliv-bronze: #9A7136;
-  --kaliv-gold: #C69A4B;
-  --kaliv-gold-highlight: #D8B66B;
-  --kaliv-success: #6F8A63;
-  --kaliv-warning: #B9823F;
-  --kaliv-danger: #9C564C;
-  --kaliv-space-1: 4px; --kaliv-space-2: 8px; --kaliv-space-3: 12px;
-  --kaliv-space-4: 16px; --kaliv-space-5: 20px; --kaliv-space-6: 24px;
-  --kaliv-space-8: 32px; --kaliv-space-10: 40px; --kaliv-space-12: 48px;
-  --kaliv-radius-control: 14px; --kaliv-radius-button: 16px;
-  --kaliv-radius-bubble: 16px; --kaliv-radius-panel: 20px;
-  --kaliv-motion-fast: 140ms; --kaliv-motion-normal: 180ms; --kaliv-motion-panel: 220ms;
+  /* Legacy aliases retained for existing web/design consumers. */
+  --kaliv-bronze: #B08A3E;
+  --kaliv-gold: #D4AB52;
+  --kaliv-gold-highlight: #F2D28B;
+  --kaliv-success: #2ECC71;
+  --kaliv-warning: #F5A623;
+  --kaliv-danger: #FF5A5F;
+  --kaliv-info: #64B5F6;
+
+  /* DDR-001 / token schema v2: shared gold roles. */
+  --kaliv-gold-fill: #B08A3E;
+  --kaliv-gold-on: #2B1C05;
+  --kaliv-gold-accent-dark: #D4AB52;
+  --kaliv-gold-accent-light: #7E621C;
+  --kaliv-gold-outline: #7E621C;
+
+  /* Dark theme color mirror. */
+  --kaliv-dark-canvas: #0B0A09;
+  --kaliv-dark-deep: #0E0B08;
+  --kaliv-dark-surface: #171411;
+  --kaliv-dark-sheet: #120E0A;
+  --kaliv-dark-surface-dim: #14110E;
+  --kaliv-dark-surface-elevated: #211D19;
+  --kaliv-dark-border: #2A2521;
+  --kaliv-dark-drawer-hairline: #312A23;
+  --kaliv-dark-divider: #1C1611;
+  --kaliv-dark-text-primary: #F3EFE6;
+  --kaliv-dark-text-secondary: #A89D90;
+  --kaliv-dark-text-muted: #8A8073;
+  --kaliv-dark-caps: #857A6C;
+  --kaliv-dark-section-label: #B8A691;
+  --kaliv-dark-gold-fill: #B08A3E;
+  --kaliv-dark-gold-accent: #D4AB52;
+  --kaliv-dark-ok: #32C76C;
+  --kaliv-dark-warn: #D8A43A;
+  --kaliv-dark-danger: #F05A54;
+  --kaliv-dark-status-live: #26E48F;
+  --kaliv-dark-status-paused: #F2A33A;
+  --kaliv-dark-status-done: #34D67A;
+  --kaliv-dark-status-blocked: #FF6262;
+  --kaliv-dark-gold-soft: #201A12;
+  --kaliv-dark-warn-soft: #4B2F12;
+  --kaliv-dark-danger-soft: #3B1212;
+
+  /* Light theme color mirror. */
+  --kaliv-light-canvas: #F7F3EC;
+  --kaliv-light-surface: #FFFDF9;
+  --kaliv-light-surface-dim: #EFE8DB;
+  --kaliv-light-surface-elevated: #EDE5D8;
+  --kaliv-light-border: #D8CCBC;
+  --kaliv-light-hairline: #CFC3B3;
+  --kaliv-light-text-primary: #231E19;
+  --kaliv-light-text-secondary: #6F665C;
+  --kaliv-light-text-faint: #776D62;
+  --kaliv-light-caps: #776D62;
+  --kaliv-light-gold-fill: #B08A3E;
+  --kaliv-light-gold-accent: #7E621C;
+  --kaliv-light-accent: #9A7427;
+  --kaliv-light-danger: #B83A3A;
+  --kaliv-light-ok: #1F9E5A;
+  --kaliv-light-warn: #B87618;
+  --kaliv-light-selected: #F7E8C2;
+  --kaliv-light-neutral: #6F665C;
+
+  --kaliv-space-1: 4px;
+  --kaliv-space-2: 8px;
+  --kaliv-space-3: 12px;
+  --kaliv-space-4: 16px;
+  --kaliv-space-5: 20px;
+  --kaliv-space-6: 24px;
+  --kaliv-space-8: 32px;
+  --kaliv-space-10: 40px;
+  --kaliv-space-12: 48px;
+  --kaliv-radius-control: 14px;
+  --kaliv-radius-button: 16px;
+  --kaliv-radius-bubble: 16px;
+  --kaliv-radius-panel: 20px;
+  --kaliv-motion-fast: 140ms;
+  --kaliv-motion-normal: 180ms;
+  --kaliv-motion-panel: 220ms;
 }
 
 [data-theme="dark"] {
-  --kaliv-canvas: #0B0A09; --kaliv-surface: #171411;
-  --kaliv-elevated: #211B16; --kaliv-border: #4B3925;
-  --kaliv-text: #F3EFE6; --kaliv-muted: #A89D90;
+  --kaliv-canvas: var(--kaliv-dark-canvas);
+  --kaliv-surface: var(--kaliv-dark-surface);
+  --kaliv-elevated: var(--kaliv-dark-surface-elevated);
+  --kaliv-border: var(--kaliv-dark-border);
+  --kaliv-text: var(--kaliv-dark-text-primary);
+  --kaliv-muted: var(--kaliv-dark-text-secondary);
+  --kaliv-faint: var(--kaliv-dark-text-muted);
+  --kaliv-caps: var(--kaliv-dark-caps);
+  --kaliv-accent: var(--kaliv-dark-gold-accent);
 }
 
 [data-theme="light"] {
-  --kaliv-canvas: #F7F3EC; --kaliv-surface: #EDE5D8;
-  --kaliv-elevated: #FFFDF9; --kaliv-border: #D7C9B4;
-  --kaliv-text: #231E19; --kaliv-muted: #6F665C;
+  --kaliv-canvas: var(--kaliv-light-canvas);
+  --kaliv-surface: var(--kaliv-light-surface);
+  --kaliv-elevated: var(--kaliv-light-surface-elevated);
+  --kaliv-border: var(--kaliv-light-border);
+  --kaliv-text: var(--kaliv-light-text-primary);
+  --kaliv-muted: var(--kaliv-light-text-secondary);
+  --kaliv-faint: var(--kaliv-light-text-faint);
+  --kaliv-caps: var(--kaliv-light-caps);
+  --kaliv-accent: var(--kaliv-light-gold-accent);
 }
