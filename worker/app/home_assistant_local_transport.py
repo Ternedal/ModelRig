@@ -209,7 +209,7 @@ class HomeAssistantLocalTransport:
             if self._endpoint.scheme == "https":
                 context = self._ssl_context or ssl.create_default_context()
                 wrapped = context.wrap_socket(raw, server_hostname=self._endpoint.address)
-                raw = None  # ownership transferred to SSL socket
+                raw = None
                 return wrapped
             return raw
         except Exception:
@@ -241,6 +241,7 @@ class HomeAssistantLocalTransport:
 
         bearer = ""
         sock = None
+        response = None
         sent = 0
         try:
             bearer = _bearer(self._bearer_provider.bearer_for_execution())
@@ -278,6 +279,11 @@ class HomeAssistantLocalTransport:
             )
         finally:
             bearer = ""
+            if response is not None:
+                try:
+                    response.close()
+                except Exception:
+                    pass
             if sock is not None:
                 try:
                     sock.close()
