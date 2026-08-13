@@ -3105,7 +3105,7 @@ private fun Bubble(m: Msg, onRetry: (() -> Unit)? = null) {
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
     ) {
         Surface(
-            color = if (isUser) KalivTheme.colors.signal else KalivTheme.colors.surfaceHigh,
+            color = if (isUser) KalivTheme.colors.userBubble else KalivTheme.colors.surfaceHigh,
             shape = RoundedCornerShape(
                 topStart = 16.dp, topEnd = 16.dp,
                 bottomStart = if (isUser) 16.dp else 4.dp,

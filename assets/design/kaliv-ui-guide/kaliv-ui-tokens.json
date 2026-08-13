@@ -157,21 +157,23 @@
     "controlHeight": 40,
     "composerMinHeight": 88,
     "assistantMaxWidth": 780,
-    "userMaxWidth": 620
+    "userMaxWidth": 620,
+    "fabSend": 46,
+    "micButton": 90,
+    "ankhEmpty": 78,
+    "ankhTopbar": 40,
+    "switchTrackWidth": 51,
+    "switchTrackHeight": 29,
+    "switchKnob": 24,
+    "dragHandleWidth": 46,
+    "dragHandleHeight": 5,
+    "cursorWidth": 8.5,
+    "cursorHeight": 18,
+    "hairline": 1,
+    "minTouch": 48
   },
   "platformOverrides": {
-    "_note": "Bevidste platform-afvigelser fra tokenet ovenfor. En afvigelse der IKKE staar her er en fejl; en der staar her er en beslutning. Generatoren laeser kun 'color', 'spacing', 'radius' og 'layout', saa denne blok aendrer ingen genereret kode -- den dokumenterer, og tests/workflow_android_palette_divergence.py haandhaever.",
-    "android": {
-      "color.light.muted": {
-        "value": "#5A4831",
-        "tokenValue": "#6F665C",
-        "decidedBy": "Anders",
-        "decidedOn": "2026-07-30",
-        "reason": "Maalt 30/07-2026: Androids vaerdi giver 7,96:1 mod appens lyse baggrund (#F7F4EF); tokenets vaerdi ville give 5,13:1 paa samme baggrund. Begge bestaar AA (4,5), men kun den foerste bestaar AAA (7,0). Telefonen laeses i dagslys, desktoppen sjaeldent. At 'loefte' Android til tokenet er derfor ikke en oprydning men en maalbar tilbagegang i laesbarhed netop der hvor den betyder mest.",
-        "revisit": "Rig-dagen, med begge apps foran sig: loeft tokenet, saenk Android, eller behold divergensen permanent. Indtil da er den en truffet beslutning, ikke et aabent spoergsmaal.",
-        "precedent": "Tokenets egen vaerdi er ikke tilfaeldig: den blev moerknet 27/07-2026 netop for at naa WCAG AA (commit 52769855, 'darken light.muted to reach WCAG AA'). Et loeft til Androids vaerdi ville derfor vaere den ANDEN moerkning i samme retning -- en fortsaettelse af tokenets egen historie, ikke en kursaendring. Det er den oplysning rig-dagens valg mangler, hvis man kun ser de to tal."
-      }
-    }
+    "_note": "Bevidste platform-afvigelser fra tokenet ovenfor. En afvigelse der IKKE staar her er en fejl; en der staar her er en beslutning — dokumentér her FOER en platform afviger, saa haandhaever tests/workflow_android_palette_divergence.py den. Historik: android color.light.muted var pinnet til #5A4831 (Anders 30/07-2026, AAA i dagslys); pinnen blev afloest af DDR-001 13/08-2026 da Theme.kt migrerede til tokens, og listen er tom."
   },
   "conversion": {
     "_note": "DDR-001/B2: mockuppen er tegnet i 322px-bredde ~ 393dp-reference. Alle px-maal i handoffen skaleres uniformt x393/322 (~1,2205) foer de bliver dp/sp: tekst rundes til naermeste 0,5sp, maal til naermeste hele dp. 1px-hairlines skaleres IKKE (forbliver 1dp). Geometri i Compose gaar via navngivne konstanter, aldrig inline.",
