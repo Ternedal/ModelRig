@@ -48,6 +48,8 @@ from .repository import JsonCampaignRepository
 from .resources import InMemoryResourceLeaseManager
 from .retry import CampaignRetryPlanner, RetryPolicy
 from .service import SystemClock
+from .snapshot_publisher import Agent4OperatorSnapshotPublisher
+from .snapshot_store import JsonOperatorSnapshotStore, OperatorRootSnapshot
 from .timeline import JsonCampaignTimelineStore
 from .timeline_batches import CampaignTimelineBatchDeliveryService
 from .timeline_delivery import (
@@ -84,6 +86,7 @@ class Agent4RuntimePaths:
     timeline: Path
     evidence: Path
     delivery_cursors: Path
+    operator_snapshots: Path
 
     @classmethod
     def under(cls, root: Path | str) -> "Agent4RuntimePaths":
@@ -102,6 +105,7 @@ class Agent4RuntimePaths:
             timeline=normalized / "timeline",
             evidence=normalized / "evidence",
             delivery_cursors=normalized / "delivery-cursors",
+            operator_snapshots=normalized / "operator-snapshots",
         )
 
 
@@ -135,6 +139,8 @@ class Agent4RuntimeContext:
     evidence_query: CampaignEvidenceQueryService
     operator: Agent4OperatorReadService
     evidence_operator: Agent4OperatorEvidenceReadService
+    snapshot_store: JsonOperatorSnapshotStore
+    snapshot_publisher: Agent4OperatorSnapshotPublisher
 
     def recover(self) -> CampaignHandoffRecoveryReport:
         """Explicitly run startup recovery; composition never calls it."""
@@ -145,6 +151,16 @@ class Agent4RuntimeContext:
         """Explicitly repair pending audit projections; composition never calls it."""
 
         return self.reconciliation.reconcile()
+
+    def publish_operator_snapshot(self) -> OperatorRootSnapshot:
+        """Explicitly publish one immutable operator read root."""
+
+        return self.snapshot_publisher.publish()
+
+    def prune_operator_snapshots(self) -> tuple[str, ...]:
+        """Explicitly run retention/GC after publication."""
+
+        return self.snapshot_publisher.prune()
 
     def health_intervention(
         self,
@@ -286,6 +302,17 @@ def compose_agent4_runtime(
         records=evidence_records,
         query=evidence_query,
     )
+    snapshot_store = JsonOperatorSnapshotStore(
+        paths.operator_snapshots,
+        clock=runtime_clock.now,
+    )
+    snapshot_publisher = Agent4OperatorSnapshotPublisher(
+        repository=repository,
+        timeline=timeline,
+        evidence=evidence_records,
+        snapshots=snapshot_store,
+        clock=runtime_clock,
+    )
 
     return Agent4RuntimeContext(
         paths=paths,
@@ -314,4 +341,6 @@ def compose_agent4_runtime(
         evidence_query=evidence_query,
         operator=operator,
         evidence_operator=evidence_operator,
+        snapshot_store=snapshot_store,
+        snapshot_publisher=snapshot_publisher,
     )

@@ -58,6 +58,13 @@ func (s *server) routes() {
 	s.mux.HandleFunc("POST /api/v1/pair/start", s.handlePairStart)
 	s.mux.HandleFunc("POST /api/v1/pair/claim", s.handlePairClaim)
 
+	// A4-16 grant administration is not a paired-device capability. Exact opt-in
+	// exposes only one fixed grant on a loopback + separate-admin-key boundary.
+	if os.Getenv(agent4GrantAdminFlag) == "1" {
+		s.mux.HandleFunc("PUT /api/v1/admin/devices/{id}/grants/agent4-read", s.handleAgent4ReadGrantAdmin)
+		s.mux.HandleFunc("DELETE /api/v1/admin/devices/{id}/grants/agent4-read", s.handleAgent4ReadGrantAdmin)
+	}
+
 	// Protected (Bearer token required)
 	s.mux.Handle("GET /api/v1/status", s.authMW(http.HandlerFunc(s.handleStatus)))
 	s.mux.Handle("GET /api/v1/health/deep", s.authMW(http.HandlerFunc(s.handleHealthDeep)))
