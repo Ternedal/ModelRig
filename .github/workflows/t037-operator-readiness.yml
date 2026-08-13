@@ -1,0 +1,154 @@
+name: t037-operator-readiness
+
+on:
+  pull_request:
+    paths:
+      - "worker/app/read_connector_operator.py"
+      - ".github/workflows/t037-operator-readiness.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install worker dependencies
+        run: pip install -r worker/requirements.txt --break-system-packages
+      - name: Qualify dormant operator and readiness boundary
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: worker
+        run: |
+          python3 - <<'PY'
+          from fastapi import FastAPI
+          from fastapi.testclient import TestClient
+
+          from app.read_connector_operator import build_read_connector_operator_router
+          from app.read_connector_package_contract import ReadConnectorAuditLog, ReadConnectorGrantStore
+
+          class UnavailableEvidenceProvider:
+              def __init__(self):
+                  self.calls = 0
+
+              def evidence(self, *, now: int):
+                  self.calls += 1
+                  raise RuntimeError("provider unavailable")
+
+          grants = ReadConnectorGrantStore()
+          audit = ReadConnectorAuditLog()
+          provider = UnavailableEvidenceProvider()
+          app = FastAPI()
+          app.include_router(
+              build_read_connector_operator_router(
+                  grants=grants,
+                  audit=audit,
+                  credential_provider_for=lambda grant: provider,
+                  clock=lambda: 1000,
+              )
+          )
+          client = TestClient(app)
+          scope = {
+              "connector": "google_drive",
+              "account_ref": "google-account-1",
+              "workspace_ref": None,
+              "object_scopes": ["doc-7"],
+              "operations": ["document_read"],
+          }
+
+          preview = client.post("/read-connectors/grants/preview", json=scope)
+          assert preview.status_code == 200, preview.text
+          preview_body = preview.json()
+          assert preview_body["grant_persisted"] is False
+          assert preview_body["production_activation"] is False
+          assert grants.list_grants() == ()
+
+          created = client.post(
+              "/read-connectors/grants",
+              json={**scope, "expected_scope_sha256": preview_body["scope_sha256"]},
+          )
+          assert created.status_code == 200, created.text
+          grant_id = created.json()["grant"]["grant_id"]
+          assert len(grants.list_grants()) == 1
+
+          duplicate = client.post(
+              "/read-connectors/grants",
+              json={**scope, "expected_scope_sha256": preview_body["scope_sha256"]},
+          )
+          assert duplicate.status_code == 409, duplicate.text
+          assert len(grants.list_grants()) == 1
+
+          readiness = client.get(
+              f"/read-connectors/google_drive/grants/{grant_id}/readiness"
+          )
+          assert readiness.status_code == 200, readiness.text
+          assert readiness.json()["state"] == "unavailable"
+          assert readiness.json()["production_activation"] is False
+          assert provider.calls == 1
+
+          stale = client.post(
+              f"/read-connectors/grants/{grant_id}/revoke",
+              json={"expected_scope_sha256": "0" * 64, "confirm_revoke": True},
+          )
+          assert stale.status_code == 409, stale.text
+          assert grants.get_grant(grant_id).active is True
+
+          revoked = client.post(
+              f"/read-connectors/grants/{grant_id}/revoke",
+              json={
+                  "expected_scope_sha256": preview_body["scope_sha256"],
+                  "confirm_revoke": True,
+              },
+          )
+          assert revoked.status_code == 200, revoked.text
+          assert revoked.json()["revoked_now"] is True
+          calls_before = provider.calls
+          after = client.get(
+              f"/read-connectors/google_drive/grants/{grant_id}/readiness"
+          )
+          assert after.status_code == 200, after.text
+          assert after.json()["state"] == "revoked"
+          assert provider.calls == calls_before
+
+          blocked_app = FastAPI()
+          blocked_app.include_router(
+              build_read_connector_operator_router(
+                  grants=grants,
+                  audit=audit,
+                  credential_provider_for=lambda grant: provider,
+                  operator_allowed=lambda request: False,
+              )
+          )
+          blocked = TestClient(blocked_app).get("/read-connectors/grants")
+          assert blocked.status_code == 403, blocked.text
+
+          operator_source = open("worker/app/read_connector_operator.py", encoding="utf-8").read()
+          main_source = open("worker/app/main.py", encoding="utf-8").read()
+          for forbidden in (
+              "os.getenv(",
+              "os.environ",
+              "REGISTRY[",
+              "chat_tools(",
+              "request_with_trusted_bearer(",
+          ):
+              assert forbidden not in operator_source, forbidden
+          assert "read_connector_operator" not in main_source
+          assert "PRODUCTION_ACTIVATION = False" in operator_source
+
+          audit.close()
+          grants.close()
+          print("T-037 operator/readiness contract: PASS")
+          PY
