@@ -191,6 +191,8 @@ def main() -> None:
             executor.execute(lease, claim, now=105)
         except HomeAssistantStateExecutionError as exc:
             assert "provider-canary" not in str(exc)
+            if mode == "raise":
+                assert exc.__cause__ is None
         else:
             raise AssertionError(f"negative transport case was accepted: {mode}")
         assert transport.calls == 1
