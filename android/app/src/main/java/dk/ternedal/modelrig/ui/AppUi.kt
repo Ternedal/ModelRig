@@ -75,6 +75,7 @@ import dk.ternedal.modelrig.ui.chat.SourceModelSheet
 import dk.ternedal.modelrig.ui.chat.ModelRowUi
 import dk.ternedal.modelrig.ui.chat.paramsLabelFor
 import dk.ternedal.modelrig.ui.chat.CapabilitiesSheet
+import androidx.compose.foundation.border
 
 private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, ControlCenter, CloudPicker, VoiceCloudPicker }
 
@@ -2415,140 +2416,180 @@ private fun ConversationsScreen(
         if (query.isBlank()) convos else convos.filter { it.title.contains(query, ignoreCase = true) }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Surface(color = KalivTheme.colors.surface, tonalElevation = 2.dp) {
-            Column(
-                Modifier.fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onBack) { Text("←", color = KalivTheme.colors.textHigh, fontSize = 18.sp) }
-                    Text("Samtaler", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = onNew) { Text("+ Ny", color = KalivTheme.colors.signal) }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = {
-                        val d = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(java.util.Date())
-                        exportLauncher.launch("kaliv-samtaler-$d.json")
-                    }) { Text("⬇ Eksportér alt", color = KalivTheme.colors.signal, fontSize = 12.sp) }
-                    TextButton(onClick = { importLauncher.launch(arrayOf("application/json")) }) {
-                        Text("⬆ Importér", color = KalivTheme.colors.signal, fontSize = 12.sp)
+    // -- Skaerm 7-hjaelpere: preview pr. samtale + tidsmaerker + grupper -----
+    var previews by remember { mutableStateOf(mapOf<Long, String>()) }
+    LaunchedEffect(convos) {
+        val snap = convos
+        val loaded = withContext(Dispatchers.IO) {
+            snap.associate { meta ->
+                val last = runCatching { db.loadMessages(meta.id).lastOrNull()?.second }.getOrNull()
+                meta.id to (last?.replace('\n', ' ')?.trim()?.take(90) ?: "")
+            }
+        }
+        previews = loaded
+    }
+    fun timeLabel(ts: Long): String {
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0); cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0); cal.set(java.util.Calendar.MILLISECOND, 0)
+        val startOfToday = cal.timeInMillis
+        return when {
+            ts >= startOfToday -> SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
+            ts >= startOfToday - 86_400_000L -> "i g\u00e5r"
+            ts >= startOfToday - 6 * 86_400_000L ->
+                SimpleDateFormat("EEE", Locale.getDefault()).format(Date(ts)).trimEnd('.')
+            else -> fmt.format(Date(ts)).substringBefore(' ')
+        }
+    }
+    fun rowOf(c: ChatDb.ConvMeta): dk.ternedal.modelrig.ui.chat.ConvRowUi =
+        dk.ternedal.modelrig.ui.chat.ConvRowUi(
+            id = c.id,
+            title = c.title,
+            preview = previews[c.id] ?: "",
+            timeLabel = timeLabel(c.updatedAt),
+            cloud = c.source == "cloud",
+            active = c.id == activeConvId,
+        )
+    val startOfTodayMs = remember(convos) {
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0); cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0); cal.set(java.util.Calendar.MILLISECOND, 0)
+        cal.timeInMillis
+    }
+    var topMenu by remember { mutableStateOf(false) }
+    var rowMenuFor by remember { mutableStateOf<Long?>(null) }
+
+    Column(Modifier.fillMaxSize().background(KalivTheme.colors.background)) {
+        Column(
+            Modifier.fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .padding(horizontal = 8.dp),
+        ) {
+            dk.ternedal.modelrig.ui.chat.ConversationsTopBar(
+                onBack = onBack,
+                onNew = onNew,
+                onMenu = { topMenu = true },
+                menuContent = {
+                    DropdownMenu(expanded = topMenu, onDismissRequest = { topMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("\u2b07 Eksport\u00e9r alt", fontSize = 13.sp) },
+                            onClick = {
+                                topMenu = false
+                                val d = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(java.util.Date())
+                                exportLauncher.launch("kaliv-samtaler-$d.json")
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("\u2b06 Import\u00e9r", fontSize = 13.sp) },
+                            onClick = { topMenu = false; importLauncher.launch(arrayOf("application/json")) },
+                        )
                     }
-                    ioStatus?.let {
-                        Spacer(Modifier.width(6.dp))
-                        Text(it,
-                            color = if (it.startsWith("✓")) KalivTheme.colors.success
-                                    else if (it.endsWith("…")) KalivTheme.colors.textMuted
-                                    else KalivTheme.colors.danger,
-                            fontSize = 11.sp)
-                    }
-                }
-                OutlinedTextField(
-                    value = query, onValueChange = { query = it },
-                    placeholder = { Text("Søg i titler…", fontSize = 13.sp) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                },
+            )
+            dk.ternedal.modelrig.ui.chat.ConversationsSearchField(
+                query = query,
+                onQuery = { query = it },
+                modifier = Modifier.padding(horizontal = 7.dp),
+            )
+            ioStatus?.let {
+                Text(
+                    it,
+                    color = if (it.startsWith("\u2713")) KalivTheme.colors.success
+                    else if (it.endsWith("\u2026")) KalivTheme.colors.textMuted
+                    else KalivTheme.colors.danger,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(start = 9.dp, top = 6.dp),
                 )
+            }
+            // Inline-omdoebning (aabnes fra raekkens langtryks-menu)
+            renamingId?.let { rid ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 8.dp)
+                        .background(KalivTheme.colors.surface, RoundedCornerShape(KalivTokens.Radius.card))
+                        .border(KalivTokens.Layout.hairline, KalivTheme.colors.hairline, RoundedCornerShape(KalivTokens.Radius.card))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = renameText, onValueChange = { renameText = it },
+                        singleLine = true, modifier = Modifier.weight(1f),
+                        textStyle = TextStyle(fontFamily = KalivType.Inter, fontSize = 16.sp, color = KalivTheme.colors.textHigh),
+                        cursorBrush = SolidColor(KalivTheme.colors.accent),
+                    )
+                    TextButton(
+                        enabled = renameText.isNotBlank(),
+                        onClick = {
+                            db.renameConversation(rid, renameText.trim())
+                            convos = db.listConversations()
+                            renamingId = null
+                        },
+                    ) { Text("Gem", color = if (renameText.isNotBlank()) KalivTheme.colors.signal else KalivTheme.colors.textMuted) }
+                    TextButton(onClick = { renamingId = null }) { Text("\u2715", color = KalivTheme.colors.textMuted) }
+                }
             }
         }
         if (visible.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text(
-                    if (convos.isEmpty()) "Ingen samtaler endnu" else "Ingen match på \"$query\"",
+                    if (convos.isEmpty()) "Ingen samtaler endnu" else "Ingen match p\u00e5 \"$query\"",
                     color = KalivTheme.colors.textMuted, fontSize = 14.sp,
                 )
             }
         } else {
-            LazyColumn(
-                Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            ) {
-                items(visible, key = { it.id }) { c ->
-                    Surface(
-                        color = KalivTheme.colors.surface,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    ) {
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-                            if (renamingId == c.id) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    OutlinedTextField(
-                                        value = renameText, onValueChange = { renameText = it },
-                                        singleLine = true, modifier = Modifier.weight(1f),
-                                    )
-                                    TextButton(
-                                        enabled = renameText.isNotBlank(),
-                                        onClick = {
-                                            db.renameConversation(c.id, renameText.trim())
-                                            convos = db.listConversations()
-                                            renamingId = null
-                                        },
-                                    ) { Text("Gem", color = if (renameText.isNotBlank()) KalivTheme.colors.signal else KalivTheme.colors.textMuted) }
-                                    TextButton(onClick = { renamingId = null }) { Text("✕", color = KalivTheme.colors.textMuted) }
-                                }
-                            } else {
-                                Row(
-                                    Modifier.fillMaxWidth().clickable { onOpen(c.id) },
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            c.title.ifBlank { "(uden titel)" },
-                                            color = KalivTheme.colors.textHigh, fontSize = 14.sp,
-                                            maxLines = 1,
-                                        )
-                                        Spacer(Modifier.height(2.dp))
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            SourceBadge(c.source)
-                                            Spacer(Modifier.width(8.dp))
-                                            Text(fmt.format(Date(c.updatedAt)), color = KalivTheme.colors.textMuted, fontSize = 11.sp)
-                                        }
+            dk.ternedal.modelrig.ui.chat.ConversationsList(
+                today = visible.filter { it.updatedAt >= startOfTodayMs }.map { rowOf(it) },
+                earlier = visible.filter { it.updatedAt < startOfTodayMs }.map { rowOf(it) },
+                onOpen = { onOpen(it) },
+                onLongPress = { rowMenuFor = it },
+                modifier = Modifier.weight(1f).padding(horizontal = 15.dp),
+                rowMenu = { id ->
+                    DropdownMenu(expanded = rowMenuFor == id, onDismissRequest = { rowMenuFor = null }) {
+                        DropdownMenuItem(
+                            text = { Text("\u270e Omd\u00f8b", fontSize = 13.sp) },
+                            onClick = {
+                                rowMenuFor = null
+                                val c = convos.firstOrNull { it.id == id } ?: return@DropdownMenuItem
+                                renamingId = id; renameText = c.title
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Del", fontSize = 13.sp) },
+                            onClick = {
+                                rowMenuFor = null
+                                val c = convos.firstOrNull { it.id == id } ?: return@DropdownMenuItem
+                                val md = buildString {
+                                    appendLine("# ${c.title.ifBlank { "Kaliv-samtale" }}")
+                                    appendLine()
+                                    db.loadMessages(c.id).forEach { (role, content) ->
+                                        appendLine(if (role == "user") "**Du:**" else "**Assistent:**")
+                                        appendLine(content)
+                                        appendLine()
                                     }
                                 }
-                                Row {
-                                    TextButton(onClick = {
-                                        renamingId = c.id
-                                        renameText = c.title
-                                    }) { Text("✎", color = KalivTheme.colors.textMuted, fontSize = 13.sp) }
-                                    TextButton(onClick = {
-                                        val md = buildString {
-                                            appendLine("# ${c.title.ifBlank { "Kaliv-samtale" }}")
-                                            appendLine()
-                                            db.loadMessages(c.id).forEach { (role, content) ->
-                                                appendLine(if (role == "user") "**Du:**" else "**Assistent:**")
-                                                appendLine(content)
-                                                appendLine()
-                                            }
-                                        }
-                                        val intent = Intent(Intent.ACTION_SEND).apply {
-                                            type = "text/plain"
-                                            putExtra(Intent.EXTRA_SUBJECT, c.title.ifBlank { "Kaliv-samtale" })
-                                            putExtra(Intent.EXTRA_TEXT, md)
-                                        }
-                                        context.startActivity(Intent.createChooser(intent, "Del samtale"))
-                                    }) { Text("Del", color = KalivTheme.colors.signal, fontSize = 12.sp) }
-                                    TextButton(onClick = {
-                                        db.deleteConversation(c.id)
-                                        // Deleting the conversation we're in would
-                                        // leave the active convId dangling, so the
-                                        // next send / streaming finalize writes to a
-                                        // gone conversation -> FOREIGN KEY crash
-                                        // (seen on desktop 12/7; same bug here).
-                                        if (activeConvId == c.id) onActiveDeleted()
-                                        convos = db.listConversations()
-                                    }) { Text("Slet", color = KalivTheme.colors.danger, fontSize = 12.sp) }
+                                val intent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, c.title.ifBlank { "Kaliv-samtale" })
+                                    putExtra(Intent.EXTRA_TEXT, md)
                                 }
-                            }
-                        }
+                                context.startActivity(Intent.createChooser(intent, "Del samtale"))
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Slet", color = KalivTheme.colors.danger, fontSize = 13.sp) },
+                            onClick = {
+                                rowMenuFor = null
+                                db.deleteConversation(id)
+                                if (id == activeConvId) onActiveDeleted()
+                                convos = db.listConversations()
+                            },
+                        )
                     }
-                }
-            }
+                },
+            )
         }
-        Spacer(Modifier.windowInsetsPadding(WindowInsets.navigationBars))
     }
 }
+
 
 /**
  * Model administration: installed models (with size + delete), currently
