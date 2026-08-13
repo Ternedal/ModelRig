@@ -187,6 +187,8 @@ def build_home_assistant_state_request(
     if claim.target_kind != "entity" or claim.operation != "entity_state":
         raise HomeAssistantStateRequestDenied("Home Assistant request requires entity_state claim")
     authorized_at = _time(now, "authorized_at")
+    if authorized_at < lease.receipt.authorized_at:
+        raise HomeAssistantStateRequestDenied("request construction predates sharing authorization")
     if authorized_at >= lease.receipt.expires_at:
         raise HomeAssistantStateRequestDenied("sharing receipt expired before request construction")
     exact_claim_digest = claim_digest(claim)
