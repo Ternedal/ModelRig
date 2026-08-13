@@ -1,0 +1,192 @@
+name: t038-read-boundary
+
+on:
+  pull_request:
+    paths:
+      - "worker/app/home_rig_read_boundary.py"
+      - ".github/workflows/t038-read-boundary.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Qualify prepare and fulfill contract
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: worker
+        run: |
+          python3 - <<'PY'
+          import ast
+          import uuid
+
+          from app.home_rig_connector_contract import (
+              HomeRigAuditLog,
+              HomeRigDenied,
+              HomeRigGrantStore,
+              HomeRigScope,
+          )
+          from app.home_rig_read_boundary import fulfill_read, prepare_read
+
+          source = open("worker/app/home_rig_read_boundary.py", encoding="utf-8").read()
+          tree = ast.parse(source)
+          imported = set()
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Import):
+                  imported.update(alias.name.split(".", 1)[0] for alias in node.names)
+              elif isinstance(node, ast.ImportFrom) and node.module:
+                  imported.add(node.module.split(".", 1)[0])
+          assert {"socket", "ssl", "http", "urllib", "requests", "httpx", "subprocess", "os"}.isdisjoint(imported)
+          for forbidden in (
+              "REGISTRY[", "FastAPI(", "APIRouter(", "include_router(",
+              "os.getenv(", "os.environ", "urlopen(", "requests.", "httpx.",
+          ):
+              assert forbidden not in source, forbidden
+          assert "PRODUCTION_ACTIVATION = False" in source
+
+          class UUIDs:
+              def __init__(self): self.value = 0
+              def __call__(self):
+                  self.value += 1
+                  return uuid.UUID(int=self.value)
+
+          grants = HomeRigGrantStore(uuid_factory=UUIDs())
+          audit = HomeRigAuditLog()
+          scope = HomeRigScope(
+              rig_ids=("modelrig",),
+              entity_ids=("sensor.gpu_temp",),
+              operations=("rig_health", "rig_power_readiness", "entity_state"),
+          )
+          grant = grants.create(scope, actor="operator", now=100)
+
+          claim = prepare_read(
+              grants,
+              grant.grant_id,
+              target_kind="rig",
+              target_id="modelrig",
+              operation="rig_power_readiness",
+              now=1000,
+          )
+          assert claim.scope_sha256 == scope.digest
+          assert claim.production_activation is False
+
+          receipt = fulfill_read(
+              grants,
+              audit,
+              claim,
+              source_state="ready",
+              observed_at=990,
+              now=1000,
+              max_freshness_seconds=60,
+          )
+          assert receipt.observation.state == "ready"
+          assert receipt.observation.freshness == "fresh"
+          assert receipt.authority_rechecked is True
+          assert receipt.production_activation is False
+
+          stale_claim = prepare_read(
+              grants,
+              grant.grant_id,
+              target_kind="rig",
+              target_id="modelrig",
+              operation="rig_health",
+              now=1100,
+          )
+          stale = fulfill_read(
+              grants,
+              audit,
+              stale_claim,
+              source_state="ready",
+              observed_at=900,
+              now=1100,
+              max_freshness_seconds=60,
+          )
+          assert stale.observation.state == "unknown"
+          assert stale.observation.freshness == "stale"
+
+          entity_claim = prepare_read(
+              grants,
+              grant.grant_id,
+              target_kind="entity",
+              target_id="sensor.gpu_temp",
+              operation="entity_state",
+              now=1200,
+          )
+          unavailable = fulfill_read(
+              grants,
+              audit,
+              entity_claim,
+              source_state=None,
+              observed_at=None,
+              now=1200,
+          )
+          assert unavailable.observation.state == "unknown"
+          assert unavailable.observation.freshness == "unavailable"
+
+          try:
+              prepare_read(
+                  grants,
+                  grant.grant_id,
+                  target_kind="entity",
+                  target_id="sensor.cpu_temp",
+                  operation="entity_state",
+                  now=1250,
+              )
+          except HomeRigDenied:
+              pass
+          else:
+              raise AssertionError("unscoped entity prepared a read")
+
+          in_flight = prepare_read(
+              grants,
+              grant.grant_id,
+              target_kind="rig",
+              target_id="modelrig",
+              operation="rig_health",
+              now=1300,
+          )
+          grants.revoke(
+              grant.grant_id,
+              expected_scope_sha256=scope.digest,
+              actor="operator",
+              now=1301,
+          )
+          try:
+              fulfill_read(
+                  grants,
+                  audit,
+                  in_flight,
+                  source_state="ready",
+                  observed_at=1300,
+                  now=1302,
+              )
+          except HomeRigDenied:
+              pass
+          else:
+              raise AssertionError("revoked in-flight read produced a receipt")
+
+          rows = audit.recent(limit=20)
+          assert any(row["detail"] == "authority_revoked_in_flight" for row in rows)
+          assert any(row["freshness"] == "stale" for row in rows)
+          assert any(row["freshness"] == "unavailable" for row in rows)
+          assert all("state" not in row for row in rows)
+
+          audit.close()
+          grants.close()
+          print("T-038 read boundary: PASS")
+          PY
