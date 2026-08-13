@@ -115,6 +115,7 @@ fun ChatContextChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     emphasized: Boolean = false,
+    active: Boolean = false,
     leadingIcon: Painter? = null,
     leadingTint: androidx.compose.ui.graphics.Color? = null,
     trailingIcon: Painter? = null,
@@ -123,11 +124,15 @@ fun ChatContextChip(
         onClick = onClick,
         modifier = modifier.height(41.dp),
         shape = RoundedCornerShape(KalivTokens.Radius.round),
-        color = KalivTheme.colors.surface,
-        contentColor = if (emphasized) KalivTheme.colors.textHigh else KalivTheme.colors.textMuted,
+        color = if (active) KalivTheme.colors.goldTint else KalivTheme.colors.surface,
+        contentColor = when {
+            active -> KalivTheme.colors.accentSoft
+            emphasized -> KalivTheme.colors.textHigh
+            else -> KalivTheme.colors.textMuted
+        },
         border = androidx.compose.foundation.BorderStroke(
             KalivTokens.Layout.hairline,
-            KalivTheme.colors.hairline,
+            if (active) KalivTokens.Gold.fill else KalivTheme.colors.hairline,
         ),
     ) {
         Row(
@@ -139,7 +144,7 @@ fun ChatContextChip(
                 Icon(
                     leadingIcon,
                     contentDescription = null,
-                    tint = leadingTint ?: KalivTheme.colors.textMuted,
+                    tint = leadingTint ?: if (active) KalivTheme.colors.accentSoft else KalivTheme.colors.textMuted,
                     modifier = Modifier.size(16.dp),
                 )
             }
@@ -147,8 +152,8 @@ fun ChatContextChip(
                 text,
                 style = TextStyle(
                     fontFamily = KalivType.Inter,
-                    fontWeight = FontWeight(KalivTokens.Typography.Chip.weight),
-                    fontSize = KalivTokens.Typography.Chip.size,
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight(KalivTokens.Typography.Chip.weight),
+                    fontSize = if (active) 14.5.sp else KalivTokens.Typography.Chip.size,
                 ),
             )
             if (trailingIcon != null) {
@@ -171,6 +176,8 @@ fun ChatChipRow(
     onRag: () -> Unit,
     onTools: () -> Unit,
     modifier: Modifier = Modifier,
+    ragActive: Boolean = false,
+    toolsActive: Boolean = false,
 ) {
     ChipRow(
         background = KalivTheme.colors.background,
@@ -187,13 +194,15 @@ fun ChatChipRow(
             trailingIcon = painterResource(R.drawable.ic_kaliv_chevron_down),
         )
         ChatContextChip(
-            text = "RAG",
+            text = if (ragActive) "RAG \u00b7 Til" else "RAG",
             onClick = onRag,
+            active = ragActive,
             leadingIcon = painterResource(R.drawable.ic_kaliv_search),
         )
         ChatContextChip(
             text = "Tools",
             onClick = onTools,
+            active = toolsActive,
             leadingIcon = painterResource(R.drawable.ic_kaliv_tools),
         )
     }

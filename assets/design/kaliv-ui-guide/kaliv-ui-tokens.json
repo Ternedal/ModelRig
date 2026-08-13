@@ -24,7 +24,10 @@
       "warn": "#A08050",
       "danger": "#C96B5D",
       "scrim": "#A3050403",
-      "textSoft": "#E9DFCA"
+      "textSoft": "#E9DFCA",
+      "textBody": "#EEE6D8",
+      "userBubbleText": "#ECE3D5",
+      "accentSoft": "#E2C06A"
     },
     "light": {
       "canvas": "#F7F3EC",
@@ -45,7 +48,10 @@
       "warn": "#957620",
       "danger": "#A8503F",
       "scrim": "#52231E19",
-      "textSoft": "#231E19"
+      "textSoft": "#231E19",
+      "textBody": "#231E19",
+      "userBubbleText": "#231E19",
+      "accentSoft": "#7E621C"
     },
     "brand": {
       "bronze": "#9A7136",

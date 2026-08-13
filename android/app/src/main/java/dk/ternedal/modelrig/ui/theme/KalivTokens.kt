@@ -35,6 +35,9 @@ object KalivTokens {
         val danger: Color = Color(0xFFC96B5D)
         val scrim: Color = Color(0xA3050403)
         val textSoft: Color = Color(0xFFE9DFCA)
+        val textBody: Color = Color(0xFFEEE6D8)
+        val userBubbleText: Color = Color(0xFFECE3D5)
+        val accentSoft: Color = Color(0xFFE2C06A)
     }
 
     object Light {
@@ -57,6 +60,9 @@ object KalivTokens {
         val danger: Color = Color(0xFFA8503F)
         val scrim: Color = Color(0x52231E19)
         val textSoft: Color = Color(0xFF231E19)
+        val textBody: Color = Color(0xFF231E19)
+        val userBubbleText: Color = Color(0xFF231E19)
+        val accentSoft: Color = Color(0xFF7E621C)
     }
 
     object Gold {

@@ -86,9 +86,11 @@ def pairs(color: dict) -> list[tuple[str, str, str, float]]:
         # DDR-001: nye tekstroller maales HVOR DE BRUGES (svag/caps/accent staar
         # paa canvas; statusfarver paa surface). Roller med egen alpha (scrim,
         # gold.tint) kan ikke maales uden kompositering og indgaar ikke.
-        for fg in ("faint", "caps", "accent"):
+        for fg in ("faint", "caps", "accent", "accentSoft"):
             out.append((f"{theme}.{fg} on {theme}.canvas", t[fg], t["canvas"], AA_TEXT))
         out.append((f"{theme}.textSoft on {theme}.surfaceDim", t["textSoft"], t["surfaceDim"], AA_TEXT))
+        out.append((f"{theme}.textBody on {theme}.canvas", t["textBody"], t["canvas"], AA_TEXT))
+        out.append((f"{theme}.userBubbleText on {theme}.userBubble", t["userBubbleText"], t["userBubble"], AA_TEXT))
         for fg in ("ok", "warn", "danger"):
             out.append((f"{theme}.{fg} on {theme}.surface", t[fg], t["surface"], AA_UI))
         out.append((f"gold.fill on {theme}.canvas", color["gold"]["fill"], t["canvas"], AA_UI))

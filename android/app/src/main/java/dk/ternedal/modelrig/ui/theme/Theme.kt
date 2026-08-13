@@ -51,6 +51,9 @@ data class KalivColors(
     val userBubbleBorder: Color,
     val faint: Color,          // svag tekst (tidsstempler, sub)
     val textSoft: Color,       // bloed primaertekst (forslagskort, wordmark moerk)
+    val textBody: Color,       // assistentsvarenes broedtekst
+    val userBubbleText: Color, // tekst i brugerboblen
+    val accentSoft: Color,     // aktiv-chips og markdown-emfase
     val caps: Color,           // caps-sektionslabels
     val goldTint: Color,       // 16 % guld-tint-baggrund
     val warn: Color,
@@ -84,6 +87,9 @@ val KalivDarkColors = KalivColors(
     userBubbleBorder = KalivTokens.Dark.userBubbleBorder,
     faint = KalivTokens.Dark.faint,
     textSoft = KalivTokens.Dark.textSoft,
+    textBody = KalivTokens.Dark.textBody,
+    userBubbleText = KalivTokens.Dark.userBubbleText,
+    accentSoft = KalivTokens.Dark.accentSoft,
     caps = KalivTokens.Dark.caps,
     goldTint = KalivTokens.Gold.tint,
     warn = KalivTokens.Dark.warn,
@@ -113,6 +119,9 @@ val KalivLightColors = KalivColors(
     userBubbleBorder = KalivTokens.Light.userBubbleBorder,
     faint = KalivTokens.Light.faint,
     textSoft = KalivTokens.Light.textSoft,
+    textBody = KalivTokens.Light.textBody,
+    userBubbleText = KalivTokens.Light.userBubbleText,
+    accentSoft = KalivTokens.Light.accentSoft,
     caps = KalivTokens.Light.caps,
     goldTint = KalivTokens.Gold.tint,
     warn = KalivTokens.Light.warn,

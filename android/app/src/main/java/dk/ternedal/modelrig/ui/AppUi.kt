@@ -67,6 +67,10 @@ import dk.ternedal.modelrig.ui.chat.ChatEmptyState
 import dk.ternedal.modelrig.ui.chat.ChatTopBar
 import dk.ternedal.modelrig.ui.components.ChipRow
 import dk.ternedal.modelrig.ui.theme.KalivType
+import dk.ternedal.modelrig.ui.chat.AssistantMessage
+import dk.ternedal.modelrig.ui.chat.ChatConversationTopBar
+import dk.ternedal.modelrig.ui.chat.ChatMessageUi
+import dk.ternedal.modelrig.ui.chat.UserMessage
 
 private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, ControlCenter, CloudPicker, VoiceCloudPicker }
 
@@ -592,6 +596,9 @@ private data class Msg(
     // deliberate choice, not a fallback, and conflating them would mislead.
     val voiceModel: String? = null,
     val voiceViaCloud: Boolean = false,
+    // Epoch-ms for turens oprettelse (capslinjens klokkeslaet). null for
+    // indlaest historik, hvor DB'en ikke gemmer tid pr. besked.
+    val at: Long? = System.currentTimeMillis(),
 )
 
 /**
@@ -1102,7 +1109,7 @@ private fun ChatScreen(
             // strip only cleans new replies; without this, opening a conversation
             // made before the persona/strip landed still shows the old 🌟✨ filler.
             msgs.forEach { (role, content) ->
-                messages.add(Msg(role, if (role == "assistant") stripEmojis(content) else content))
+                messages.add(Msg(role, if (role == "assistant") stripEmojis(content) else content, at = null))
             }
             if (meta != null) {
                 // NB: for cloud we deliberately do NOT restore the model from
@@ -1444,15 +1451,11 @@ private fun ChatScreen(
         // top bar
         Surface(color = KalivTheme.colors.background) {
             Column {
-            // Redesignets topbar (DDR-001 fase 2): ankh-brik + wordmark +
-            // tema-toggle + overflow. Menuen ankres ved prik-knappen via slottet.
-            ChatTopBar(
-                dark = darkMode,
-                onToggleDark = { onToggleDark(!darkMode) },
-                onOverflow = { overflow = true },
-                modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
-                overflowContent = {
-                    DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
+            // Redesignets topbar (DDR-001 fase 2). Tom samtale = brand-baren;
+            // aaben samtale = titel-baren m. tilbage-pil (skaerm 2). Overflow-
+            // menuen deles og ankres ved prik-knappen i begge varianter.
+            val chatOverflowMenu: @Composable () -> Unit = {
+                DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
                         DropdownMenuItem(text = { Text("Ny samtale") }, onClick = {
                             overflow = false; messages.clear(); convId = null; onConvChanged(null)
                         })
@@ -1509,8 +1512,29 @@ private fun ChatScreen(
                             },
                         )
                     }
-                },
-            )
+            }
+            if (messages.isEmpty()) {
+                ChatTopBar(
+                    dark = darkMode,
+                    onToggleDark = { onToggleDark(!darkMode) },
+                    onOverflow = { overflow = true },
+                    modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
+                    overflowContent = chatOverflowMenu,
+                )
+            } else {
+                val convTitle = remember(convId, messages.size) {
+                    convId?.let { id -> db.listConversations().firstOrNull { it.id == id }?.title }
+                        ?: messages.firstOrNull { it.role == "user" }?.text?.take(28)
+                        ?: "Samtale"
+                }
+                ChatConversationTopBar(
+                    title = convTitle,
+                    onBack = { onOpenConversations() },
+                    onOverflow = { overflow = true },
+                    modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
+                    overflowContent = chatOverflowMenu,
+                )
+            }
             // Kontekst-chips: model (+menuen som er appens capability-hub),
             // RAG- og Tools-tilstand. Kilde-badge/Skift-knappen er afloest af
             // routing-strippen nedenfor + Skift-punktet i overflow-menuen.
@@ -1801,8 +1825,8 @@ private fun ChatScreen(
                 }
                 if (mode == "rig") {
                     ChatContextChip(
-                        text = "RAG",
-                        emphasized = ragMode,
+                        text = if (ragMode) "RAG \u00b7 Til" else "RAG",
+                        active = ragMode,
                         leadingIcon = painterResource(R.drawable.ic_kaliv_search),
                         onClick = {
                             val on = !ragMode
@@ -1818,7 +1842,7 @@ private fun ChatScreen(
                 }
                 ChatContextChip(
                     text = "Tools",
-                    emphasized = toolsMode,
+                    active = toolsMode,
                     leadingIcon = painterResource(R.drawable.ic_kaliv_tools),
                     onClick = {
                         toolsMode = !toolsMode
@@ -1886,7 +1910,34 @@ private fun ChatScreen(
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-            ) { itemsIndexed(messages) { i, m -> Bubble(m, onRetry = { retry(i) }) } }
+            ) {
+                itemsIndexed(messages) { i, m ->
+                    if (m.role == "user") {
+                        UserMessage(m.text)
+                    } else {
+                        val pills = buildList {
+                            if (m.voiceModel != null) {
+                                add((if (m.voiceViaCloud) "\u2601 " else "\u25c8 ") + "\ud83c\udf99 ${m.voiceModel}")
+                            }
+                            if (m.fellBackToCloud) add("\u2601 via cloud (rig utilg\u00e6ngelig)")
+                        }
+                        AssistantMessage(
+                            m = ChatMessageUi(
+                                isUser = false,
+                                text = m.text,
+                                streaming = m.streaming,
+                                atMillis = m.at,
+                                sources = m.sources,
+                                error = m.error,
+                                pills = pills,
+                            ),
+                            thinking = { ThinkingIndicator(m.status) },
+                            body = { MarkdownText(m.text, color = KalivTheme.colors.textBody) },
+                            onRetry = if (m.error) ({ retry(i) }) else null,
+                        )
+                    }
+                }
+            }
         }
 
         // input bar — adjustResize + edge-to-edge: the keyboard arrives as the ime
@@ -3098,93 +3149,6 @@ private fun ThinkingIndicator(status: String = TurnStatus.THINKING) {
         )
     } else {
         Text(status, color = KalivTheme.colors.textMuted, fontSize = 15.sp, lineHeight = 21.sp)
-    }
-}
-
-@Composable
-private fun Bubble(m: Msg, onRetry: (() -> Unit)? = null) {
-    val isUser = m.role == "user"
-    val maxW = (LocalConfiguration.current.screenWidthDp * 0.82f).dp
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-    ) {
-        Surface(
-            color = if (isUser) KalivTheme.colors.userBubble else KalivTheme.colors.surfaceHigh,
-            shape = RoundedCornerShape(
-                topStart = 16.dp, topEnd = 16.dp,
-                bottomStart = if (isUser) 16.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 16.dp,
-            ),
-            modifier = Modifier.widthIn(max = maxW),
-        ) {
-            Box(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                Column {
-                    // Spoken replies say which brain answered -- otherwise it's
-                    // invisible whether the rig or a cloud model did the thinking.
-                    if (!isUser && m.voiceModel != null) {
-                        Row(Modifier.padding(bottom = 6.dp)) {
-                            Surface(shape = RoundedCornerShape(999.dp), color = KalivTheme.colors.surfaceHigh) {
-                                Text(
-                                    (if (m.voiceViaCloud) "☁ " else "◈ ") + "🎙 ${m.voiceModel}",
-                                    fontSize = 10.sp,
-                                    color = if (m.voiceViaCloud) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                )
-                            }
-                        }
-                    }
-                    if (!isUser && m.fellBackToCloud) {
-                        Row(Modifier.padding(bottom = 6.dp)) {
-                            Surface(
-                                shape = RoundedCornerShape(999.dp),
-                                color = KalivTheme.colors.surfaceHigh,
-                            ) {
-                                Text(
-                                    "☁ via cloud (rig utilgængelig)",
-                                    fontSize = 10.sp, color = KalivTheme.colors.textMuted,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                )
-                            }
-                        }
-                    }
-                    if (!isUser && m.sources.isNotEmpty()) {
-                        Row(Modifier.padding(bottom = 6.dp)) {
-                            // distinct(): a source split into several chunks is
-                            // still one source -- the RAG answer returns one
-                            // chip per matched chunk, so without this a single
-                            // file cited twice showed as two identical chips
-                            // (seen on-device 7/7: "test" appeared twice).
-                            m.sources.distinct().take(4).forEach { s ->
-                                Surface(
-                                    shape = RoundedCornerShape(999.dp),
-                                    color = KalivTheme.colors.surfaceHigh,
-                                    modifier = Modifier.padding(end = 4.dp),
-                                ) {
-                                    Text(
-                                        s, fontSize = 10.sp, color = KalivTheme.colors.textMuted,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    when {
-                        isUser -> Text(m.text, color = KalivTheme.colors.onSignal, fontSize = 15.sp, lineHeight = 21.sp)
-                        m.error -> Text(m.text, color = KalivTheme.colors.danger, fontSize = 14.sp, lineHeight = 20.sp)
-                        m.streaming && m.text.isEmpty() -> ThinkingIndicator(m.status)
-                        m.streaming -> Text(m.text + "▍", color = KalivTheme.colors.textHigh, fontSize = 15.sp, lineHeight = 21.sp)
-                        else -> MarkdownText(m.text, color = KalivTheme.colors.textHigh)
-                    }
-                    if (m.error && onRetry != null) {
-                        Spacer(Modifier.height(6.dp))
-                        TextButton(onClick = onRetry, contentPadding = PaddingValues(0.dp)) {
-                            Text("↻ Prøv igen", color = KalivTheme.colors.signal, fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
