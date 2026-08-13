@@ -83,7 +83,7 @@ fun KnowledgeList(
 ) {
     LazyColumn(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(11.dp)) {
         items(docs, key = { it.name }) { d -> KnowledgeDocCard(d) }
-        item { AddDocumentCard(onAdd) }
+        item { KalivOutlineActionCard("Tilf\u00f8j dokument", onAdd) }
     }
 }
 
@@ -121,13 +121,13 @@ private fun KnowledgeDocCard(d: KnowledgeDocUi) {
 }
 
 @Composable
-private fun AddDocumentCard(onAdd: () -> Unit) {
+fun KalivOutlineActionCard(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(KalivTokens.Radius.card)
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .border(KalivTokens.Layout.hairline, KalivTheme.colors.hairline, shape)
-            .clickable(onClickLabel = "Tilf\u00f8j dokument") { onAdd() }
+            .clickable(onClickLabel = text) { onClick() }
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
@@ -140,7 +140,7 @@ private fun AddDocumentCard(onAdd: () -> Unit) {
         )
         Spacer(Modifier.width(10.dp))
         Text(
-            "Tilf\u00f8j dokument",
+            text,
             style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 16.sp),
             color = KalivTheme.colors.accent,
         )

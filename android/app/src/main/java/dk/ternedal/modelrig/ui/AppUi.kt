@@ -2780,122 +2780,140 @@ private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
     }
     LaunchedEffect(Unit) { refresh() }
 
-    Column(Modifier.fillMaxSize()) {
-        Surface(color = KalivTheme.colors.surface, tonalElevation = 2.dp) {
-            Row(
-                Modifier.fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = onBack) { Text("←", color = KalivTheme.colors.textHigh, fontSize = 18.sp) }
-                Text("Modeller", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = { refresh() }) { Text(if (loading) "…" else "Genindlæs", color = KalivTheme.colors.signal) }
-            }
+    var pullDone by remember { mutableStateOf(0L) }
+    var pullTotal by remember { mutableStateOf(0L) }
+    var showPull by remember { mutableStateOf(false) }
+    var rowMenuFor by remember { mutableStateOf<String?>(null) }
+
+    Column(Modifier.fillMaxSize().background(KalivTheme.colors.background)) {
+        Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars).padding(horizontal = 8.dp)) {
+            dk.ternedal.modelrig.ui.chat.ConversationsTopBar(
+                title = "Modeller",
+                onBack = onBack,
+                onNew = { showPull = true },
+            )
+            val vramInUse = running.sumOf { it.sizeVramBytes }
+            dk.ternedal.modelrig.ui.chat.ModelsVramLine(
+                text = if (vramInUse > 0)
+                    "Din rig \u00b7 %.1f GB VRAM i brug".format(vramInUse / 1_000_000_000.0)
+                else "Din rig \u00b7 ingen modeller i hukommelsen",
+                onReload = { refresh() },
+                modifier = Modifier.padding(bottom = 13.dp),
+            )
         }
 
         if (!store.hasRig) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("Kræver rig-forbindelse", color = KalivTheme.colors.textMuted, fontSize = 14.sp)
+                Text("Kr\u00e6ver rig-forbindelse", color = KalivTheme.colors.textMuted, fontSize = 14.sp)
             }
-            return@Column
-        }
-
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
-            // ---- pull new model ----
-            Text("Hent ny model", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = pullName, onValueChange = { pullName = it },
-                    placeholder = { Text("fx llama3.2:3b", fontSize = 13.sp) },
-                    singleLine = true, enabled = !pulling,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.width(8.dp))
-                Button(
-                    enabled = !pulling && pullName.isNotBlank(),
-                    onClick = {
-                        val name = pullName.trim()
-                        pulling = true; pullError = null; pullStatus = "Starter…"
-                        scope.launch {
-                            val err = withContext(Dispatchers.IO) {
-                                runCatching {
-                                    client.pullModel(name) { status, completed, total ->
-                                        scope.launch {
-                                            pullStatus = if (total > 0) {
-                                                val pct = (completed * 100 / total)
-                                                "$status ($pct% — ${completed / 1_000_000}MB/${total / 1_000_000}MB)"
-                                            } else status
+        } else {
+            loadError?.let {
+                Text("Fejl: ${friendlyError(it)}", color = KalivTheme.colors.danger, fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+            }
+            pullError?.let {
+                Text("Fejl: ${friendlyError(it)}", color = KalivTheme.colors.danger, fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+            }
+            pullStatus?.let {
+                if (!pulling) Text(it, color = KalivTheme.colors.signal, fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+            }
+            if (showPull && !pulling) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 17.dp, vertical = 6.dp)
+                        .background(KalivTheme.colors.surface, RoundedCornerShape(KalivTokens.Radius.card))
+                        .border(KalivTokens.Layout.hairline, KalivTheme.colors.hairline, RoundedCornerShape(KalivTokens.Radius.card))
+                        .padding(horizontal = 15.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BasicTextField(
+                        value = pullName, onValueChange = { pullName = it },
+                        singleLine = true, modifier = Modifier.weight(1f),
+                        textStyle = TextStyle(fontFamily = KalivType.Inter, fontSize = 16.sp, color = KalivTheme.colors.textHigh),
+                        cursorBrush = SolidColor(KalivTheme.colors.accent),
+                        decorationBox = { inner ->
+                            if (pullName.isEmpty()) Text("fx llama3.2:3b",
+                                style = TextStyle(fontFamily = KalivType.Inter, fontSize = 16.sp),
+                                color = KalivTheme.colors.faint)
+                            inner()
+                        },
+                    )
+                    TextButton(
+                        enabled = pullName.isNotBlank(),
+                        onClick = {
+                            val name = pullName.trim()
+                            pulling = true; pullError = null; pullStatus = null
+                            pullDone = 0L; pullTotal = 0L
+                            scope.launch {
+                                val err = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        client.pullModel(name) { _, completed, total ->
+                                            scope.launch { pullDone = completed; pullTotal = total }
                                         }
-                                    }
-                                }.exceptionOrNull()
+                                    }.exceptionOrNull()
+                                }
+                                pulling = false
+                                if (err != null) { pullError = err.message }
+                                else {
+                                    pullStatus = "F\u00e6rdig og verificeret: $name"
+                                    pullName = ""; showPull = false
+                                    refresh()
+                                }
                             }
-                            pulling = false
-                            if (err != null) {
-                                pullError = err.message; pullStatus = null
-                            } else {
-                                pullStatus = "Færdig og verificeret: $name"; pullName = ""
-                                refresh()
-                            }
-                        }
-                    },
-                ) { Text(if (pulling) "Henter…" else "Hent") }
+                        },
+                    ) { Text("Hent", color = if (pullName.isNotBlank()) KalivTheme.colors.signal else KalivTheme.colors.textMuted) }
+                }
             }
-            pullStatus?.let { Spacer(Modifier.height(6.dp)); Text(it, color = KalivTheme.colors.signal, fontSize = 12.sp) }
-            pullError?.let { Spacer(Modifier.height(6.dp)); Text("Fejl: ${friendlyError(it)}", color = KalivTheme.colors.danger, fontSize = 12.sp) }
-
-            Spacer(Modifier.height(20.dp))
-
-            // ---- running now ----
-            Text("Kører nu", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-            Spacer(Modifier.height(8.dp))
-            if (running.isEmpty()) {
-                Text("Ingen modeller indlæst i hukommelsen lige nu", color = KalivTheme.colors.textMuted, fontSize = 13.sp)
-            } else {
-                running.forEach { m ->
-                    Surface(
-                        color = KalivTheme.colors.surface, shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(m.name, color = KalivTheme.colors.textHigh, fontSize = 13.sp)
-                                Text(
-                                    "${m.sizeVramBytes / 1_000_000_000.0} GB VRAM",
-                                    color = KalivTheme.colors.textMuted, fontSize = 11.sp,
+            androidx.compose.foundation.lazy.LazyColumn(
+                Modifier.weight(1f).padding(horizontal = 17.dp),
+                verticalArrangement = Arrangement.spacedBy(11.dp),
+            ) {
+                if (pulling) {
+                    item {
+                        dk.ternedal.modelrig.ui.chat.PullProgressCard(
+                            name = pullName.trim().ifEmpty { "model" },
+                            progressText = if (pullTotal > 0)
+                                "Henter \u00b7 %.1f af %.1f GB".format(pullDone / 1e9, pullTotal / 1e9)
+                            else "Henter \u2026",
+                            fraction = if (pullTotal > 0) pullDone.toFloat() / pullTotal else 0f,
+                        )
+                    }
+                }
+                items(installed.size, key = { installed[it].name }) { i ->
+                    val m = installed[i]
+                    val loadedVram = running.firstOrNull { it.name == m.name }?.sizeVramBytes
+                    androidx.compose.foundation.layout.Box {
+                        dk.ternedal.modelrig.ui.chat.InstalledModelCard(
+                            m = dk.ternedal.modelrig.ui.chat.InstalledModelUi(
+                                name = m.name,
+                                standard = m.name == store.model,
+                                loaded = loadedVram != null,
+                                metaLabel = buildString {
+                                    append("%.1f GB".format(m.sizeBytes / 1e9))
+                                    val p = dk.ternedal.modelrig.ui.chat.paramsLabelFor(m.name)
+                                    if (p.isNotEmpty()) append(" \u00b7 $p")
+                                    if (loadedVram != null) append(" \u00b7 %.1f GB VRAM".format(loadedVram / 1e9))
+                                },
+                            ),
+                            onLongPress = { rowMenuFor = m.name },
+                        )
+                        DropdownMenu(expanded = rowMenuFor == m.name, onDismissRequest = { rowMenuFor = null }) {
+                            if (m.name != store.model) {
+                                DropdownMenuItem(
+                                    text = { Text("S\u00e6t som standard", fontSize = 13.sp) },
+                                    onClick = { rowMenuFor = null; store.model = m.name },
                                 )
                             }
+                            DropdownMenuItem(
+                                text = { Text("Slet", color = KalivTheme.colors.danger, fontSize = 13.sp) },
+                                onClick = { rowMenuFor = null; confirmDelete = m.name },
+                            )
                         }
                     }
                 }
-            }
-
-            Spacer(Modifier.height(20.dp))
-
-            // ---- installed ----
-            Text("Installeret", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-            Spacer(Modifier.height(8.dp))
-            loadError?.let { Text("Fejl: ${friendlyError(it)}", color = KalivTheme.colors.danger, fontSize = 12.sp); Spacer(Modifier.height(6.dp)) }
-            installed.forEach { m ->
-                Surface(
-                    color = KalivTheme.colors.surface, shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(m.name, color = KalivTheme.colors.textHigh, fontSize = 13.sp)
-                            Text("${m.sizeBytes / 1_000_000_000.0} GB", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
-                        }
-                        TextButton(onClick = { confirmDelete = m.name }) { Text("Slet", color = KalivTheme.colors.danger, fontSize = 12.sp) }
-                    }
+                item {
+                    dk.ternedal.modelrig.ui.chat.KalivOutlineActionCard("Hent ny model", { showPull = true })
                 }
             }
         }
@@ -2906,7 +2924,7 @@ private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
         AlertDialog(
             onDismissRequest = { confirmDelete = null },
             title = { Text("Slet $name?") },
-            text = { Text("Dette kan ikke fortrydes — modellen skal hentes igen for at bruges.", fontSize = 13.sp) },
+            text = { Text("Dette kan ikke fortrydes \u2014 modellen skal hentes igen for at bruges.", fontSize = 13.sp) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = null
@@ -2916,10 +2934,11 @@ private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
                     }
                 }) { Text("Slet", color = KalivTheme.colors.danger) }
             },
-            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Annullér", color = KalivTheme.colors.textMuted) } },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Annull\u00e9r", color = KalivTheme.colors.textMuted) } },
         )
     }
 }
+
 
 /**
  * Fullscreen cloud model picker -- replaces the old cramped dropdown that
