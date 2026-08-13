@@ -2996,25 +2996,6 @@ private fun CloudModelPickerScreen(store: TokenStore, forVoice: Boolean = false,
 }
 
 @Composable
-private fun ModelChip(label: String, onClick: () -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = KalivTheme.colors.surfaceHigh,
-        // 48dp touch target (design guide). heightIn on the Surface gives the
-        // height; the inner Box centres the label WITHOUT fillMaxHeight -- that
-        // was filling the parent Row's unbounded height and stretching the whole
-        // header down the screen (v1.34.0 regression).
-        modifier = Modifier.heightIn(min = 48.dp).clickable(onClick = onClick),
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(label, color = KalivTheme.colors.textHigh, fontSize = 15.sp,
-                maxLines = 1,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
-        }
-    }
-}
-
-@Composable
 private fun SourceBadge(mode: String) {
     val (label, color, onColor) = when (mode) {
         "cloud" -> Triple("☁ Cloud", KalivTheme.colors.amber, KalivTheme.colors.onSignal)
@@ -3027,29 +3008,6 @@ private fun SourceBadge(mode: String) {
             fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
         )
-    }
-}
-
-
-@Composable
-private fun SendGlyph(color: Color, modifier: Modifier) {
-    Canvas(modifier) {
-        val w = size.width; val h = size.height
-        val p = Path().apply {
-            moveTo(w * 0.08f, h * 0.12f)
-            lineTo(w * 0.92f, h * 0.5f)
-            lineTo(w * 0.08f, h * 0.88f)
-            lineTo(w * 0.30f, h * 0.5f)
-            close()
-        }
-        drawPath(p, color)
-    }
-}
-
-@Composable
-private fun StopGlyph(color: Color, modifier: Modifier) {
-    Canvas(modifier) {
-        drawRoundRect(color = color, cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.width * 0.18f))
     }
 }
 
