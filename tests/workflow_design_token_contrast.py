@@ -88,6 +88,7 @@ def pairs(color: dict) -> list[tuple[str, str, str, float]]:
         # gold.tint) kan ikke maales uden kompositering og indgaar ikke.
         for fg in ("faint", "caps", "accent"):
             out.append((f"{theme}.{fg} on {theme}.canvas", t[fg], t["canvas"], AA_TEXT))
+        out.append((f"{theme}.textSoft on {theme}.surfaceDim", t["textSoft"], t["surfaceDim"], AA_TEXT))
         for fg in ("ok", "warn", "danger"):
             out.append((f"{theme}.{fg} on {theme}.surface", t[fg], t["surface"], AA_UI))
         out.append((f"gold.fill on {theme}.canvas", color["gold"]["fill"], t["canvas"], AA_UI))

@@ -34,6 +34,7 @@ object KalivTokens {
         val warn: Color = Color(0xFFA08050)
         val danger: Color = Color(0xFFC96B5D)
         val scrim: Color = Color(0xA3050403)
+        val textSoft: Color = Color(0xFFE9DFCA)
     }
 
     object Light {
@@ -55,6 +56,7 @@ object KalivTokens {
         val warn: Color = Color(0xFF957620)
         val danger: Color = Color(0xFFA8503F)
         val scrim: Color = Color(0x52231E19)
+        val textSoft: Color = Color(0xFF231E19)
     }
 
     object Gold {
@@ -188,6 +190,23 @@ object KalivTokens {
             const val weight: Int = 700
             val size: TextUnit = 12.sp
             const val trackingEm: Float = 0.2f
+        }
+        object Emptytitle {
+            const val family: String = "EB Garamond"
+            const val weight: Int = 600
+            val size: TextUnit = 30.5.sp
+            const val lineHeightSp: Int = 38
+        }
+        object Wordmarkmobile {
+            const val family: String = "EB Garamond"
+            const val weight: Int = 600
+            val size: TextUnit = 23.sp
+            const val trackingEm: Float = 0.22f
+        }
+        object Chip {
+            const val family: String = "Inter"
+            const val weight: Int = 500
+            val size: TextUnit = 15.sp
         }
     }
 }

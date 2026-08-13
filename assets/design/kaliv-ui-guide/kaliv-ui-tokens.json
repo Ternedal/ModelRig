@@ -23,7 +23,8 @@
       "ok": "#77836D",
       "warn": "#A08050",
       "danger": "#C96B5D",
-      "scrim": "#A3050403"
+      "scrim": "#A3050403",
+      "textSoft": "#E9DFCA"
     },
     "light": {
       "canvas": "#F7F3EC",
@@ -43,7 +44,8 @@
       "ok": "#5F6B52",
       "warn": "#957620",
       "danger": "#A8503F",
-      "scrim": "#52231E19"
+      "scrim": "#52231E19",
+      "textSoft": "#231E19"
     },
     "brand": {
       "bronze": "#9A7136",
@@ -143,6 +145,23 @@
       "weight": 700,
       "size": 12,
       "trackingEm": 0.2
+    },
+    "emptyTitle": {
+      "family": "EB Garamond",
+      "weight": 600,
+      "size": 30.5,
+      "lineHeightSp": 38
+    },
+    "wordmarkMobile": {
+      "family": "EB Garamond",
+      "weight": 600,
+      "size": 23,
+      "trackingEm": 0.22
+    },
+    "chip": {
+      "family": "Inter",
+      "weight": 500,
+      "size": 15
     }
   },
   "motion": {
