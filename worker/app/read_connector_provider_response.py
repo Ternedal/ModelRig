@@ -45,12 +45,6 @@ _MAX_JSON_NODES = 50_000
 _PROVIDER_ID = re.compile(r"^[^\x00-\x1f\x7f]{1,512}$")
 _RECEIPT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/=+\-]{0,255}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_SOURCE_PREFIX = {
-    "google_calendar": "gcal",
-    "google_drive": "gdrive",
-    "gmail": "gmail",
-    "notion": "notion",
-}
 
 
 class ProviderResponseError(ReadConnectorContractError):
@@ -101,15 +95,10 @@ def _receipt_object_id(value: str) -> str:
 
 
 def _source_id(connector: str, kind: str, provider_id: str) -> str:
-    # Hash the raw provider id so e-mail-like Calendar ids never need to be made
-    # legal by lossy escaping and do not leak through the privacy-minimized
-    # source receipt identity.  Source-receipt v1 deliberately has a narrower
-    # alphabet than connector ids, so Google connector underscores use fixed
-    # reviewed aliases rather than ad-hoc escaping.
-    prefix = _SOURCE_PREFIX.get(connector)
-    if prefix is None:
-        raise ProviderResponseError("unsupported connector source identity")
-    return f"{prefix}:{kind}:{_sha_text(provider_id)}"
+    # Hash the raw provider id so e-mail-like Calendar ids stay out of the
+    # privacy-minimized receipt identity while the connector/kind remain
+    # human-auditable and stable.
+    return f"{connector}:{kind}:{_sha_text(provider_id)}"
 
 
 def _revision(prefix: str, value: Any, projection: dict[str, Any]) -> str:
