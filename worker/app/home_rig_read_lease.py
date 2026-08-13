@@ -84,12 +84,15 @@ def _grant_for_claim(
     if not isinstance(claim, HomeRigReadClaim):
         raise HomeRigReadLeaseError("sharing lease requires HomeRigReadClaim")
     if require_active:
-        grant = grants.authorize(
-            claim.grant_id,
-            target_kind=claim.target_kind,
-            target_id=claim.target_id,
-            operation=claim.operation,
-        )
+        try:
+            grant = grants.authorize(
+                claim.grant_id,
+                target_kind=claim.target_kind,
+                target_id=claim.target_id,
+                operation=claim.operation,
+            )
+        except HomeRigDenied as exc:
+            raise HomeRigReadLeaseDenied(str(exc)) from exc
     else:
         grant = grants.get(claim.grant_id)
         if grant is None:
