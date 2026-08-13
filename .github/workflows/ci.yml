@@ -205,10 +205,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Run Agent 3 memory protection contract against Windows DPAPI
+      - name: Run Python credential protection contracts against Windows DPAPI
         shell: pwsh
         run: |
           $env:PYTHONDONTWRITEBYTECODE = "1"
           $env:PYTHONPATH = "worker"
           python tests\worker_agent3_memory_protection.py
           python tests\worker_agent3_memory_protection_migration.py
+          python -c "from app.read_connector_credential_vault import WindowsDpapiCredentialProtector as P; p=P(); clear=b't037-dpapi-smoke'; entropy=b't037-dpapi-smoke-entropy'; sealed=p.protect(clear, entropy=entropy); assert sealed != clear; assert p.unprotect(sealed, entropy=entropy) == clear"
