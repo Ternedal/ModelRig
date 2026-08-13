@@ -28,7 +28,7 @@ Mockuppen er tegnet i 322px-bredde ≈ 393dp-reference. Regel: **uniform ×393/3
 
 ## B3 — Rig-status-målere
 
-VRAM pr. model findes allerede via `GET /models/running` (Ollama `/api/ps`). GPU-temp + CPU leveres af en lille ny `GET /system/status` i Go-backenden (egen slice, blokerer først skærm 18/PR-16).
+VRAM pr. model findes allerede via `GET /api/v1/models/running` (Ollama `/api/ps`). GPU-temp + CPU leveres af en lille ny `GET /api/v1/system/status` i Go-backenden (egen slice, blokerer først skærm 18/PR-16).
 
 ## B4 — Version
 
