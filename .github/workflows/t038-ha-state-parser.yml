@@ -1,0 +1,223 @@
+name: t038-ha-state-parser
+
+on:
+  pull_request:
+    paths:
+      - "worker/app/home_assistant_state_contract.py"
+      - ".github/workflows/t038-ha-state-parser.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Qualify exact state response boundary
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: worker
+        run: |
+          python3 - <<'PY'
+          import ast
+          import json
+
+          from app.home_assistant_state_contract import parse_home_assistant_state
+          from app.home_rig_connector_contract import (
+              HomeRigAuditLog,
+              HomeRigContractError,
+              HomeRigGrantStore,
+              HomeRigScope,
+          )
+          from app.home_rig_read_boundary import fulfill_read, prepare_read
+
+          source = open("worker/app/home_assistant_state_contract.py", encoding="utf-8").read()
+          tree = ast.parse(source)
+          imported = set()
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Import):
+                  imported.update(alias.name.split(".", 1)[0] for alias in node.names)
+              elif isinstance(node, ast.ImportFrom) and node.module:
+                  imported.add(node.module.split(".", 1)[0])
+          assert {"socket", "ssl", "http", "urllib", "requests", "httpx", "subprocess", "os"}.isdisjoint(imported)
+          for forbidden in (
+              "REGISTRY[", "FastAPI(", "APIRouter(", "include_router(",
+              "os.getenv(", "os.environ", "urlopen(", "requests.", "httpx.",
+          ):
+              assert forbidden not in source, forbidden
+          assert "PRODUCTION_ACTIVATION = False" in source
+
+          fixture = {
+              "entity_id": "sensor.gpu_temp",
+              "state": "61.0",
+              "attributes": {
+                  "unit_of_measurement": "°C",
+                  "friendly_name": "GPU temperature",
+                  "private_note": "must not cross parser boundary",
+              },
+              "last_changed": "1970-01-01T00:16:20+00:00",
+              "last_updated": "1970-01-01T00:16:30+00:00",
+              "context": {"id": "ctx-1", "parent_id": None, "user_id": None},
+          }
+          raw = json.dumps(fixture).encode("utf-8")
+          evidence = parse_home_assistant_state(
+              raw,
+              expected_entity_id="sensor.gpu_temp",
+              received_at=1000,
+          )
+          assert evidence.entity_id == "sensor.gpu_temp"
+          assert evidence.state == "61.0"
+          assert evidence.entity_last_changed_at == 980
+          assert evidence.entity_last_updated_at == 990
+          assert evidence.observed_at == 1000
+          public = evidence.to_dict()
+          assert "attributes" not in public
+          assert "context" not in public
+          assert "private_note" not in json.dumps(public)
+          assert public["production_activation"] is False
+
+          wrong = dict(fixture)
+          wrong["entity_id"] = "sensor.cpu_temp"
+          try:
+              parse_home_assistant_state(
+                  json.dumps(wrong).encode("utf-8"),
+                  expected_entity_id="sensor.gpu_temp",
+                  received_at=1000,
+              )
+          except HomeRigContractError:
+              pass
+          else:
+              raise AssertionError("wrong entity identity was accepted")
+
+          duplicate = b'{"entity_id":"sensor.gpu_temp","entity_id":"sensor.cpu_temp","state":"1","attributes":{},"last_changed":"1970-01-01T00:16:20+00:00"}'
+          try:
+              parse_home_assistant_state(
+                  duplicate,
+                  expected_entity_id="sensor.gpu_temp",
+                  received_at=1000,
+              )
+          except HomeRigContractError:
+              pass
+          else:
+              raise AssertionError("duplicate JSON key was accepted")
+
+          naive = dict(fixture)
+          naive["last_changed"] = "1970-01-01T00:16:20"
+          try:
+              parse_home_assistant_state(
+                  json.dumps(naive).encode("utf-8"),
+                  expected_entity_id="sensor.gpu_temp",
+                  received_at=1000,
+              )
+          except HomeRigContractError:
+              pass
+          else:
+              raise AssertionError("timezone-less timestamp was accepted")
+
+          future = dict(fixture)
+          future["last_updated"] = "1970-01-01T00:16:50+00:00"
+          try:
+              parse_home_assistant_state(
+                  json.dumps(future).encode("utf-8"),
+                  expected_entity_id="sensor.gpu_temp",
+                  received_at=1000,
+              )
+          except HomeRigContractError:
+              pass
+          else:
+              raise AssertionError("future entity timestamp was accepted")
+
+          bad_attributes = dict(fixture)
+          bad_attributes["attributes"] = []
+          try:
+              parse_home_assistant_state(
+                  json.dumps(bad_attributes).encode("utf-8"),
+                  expected_entity_id="sensor.gpu_temp",
+                  received_at=1000,
+              )
+          except HomeRigContractError:
+              pass
+          else:
+              raise AssertionError("non-object attributes were accepted")
+
+          try:
+              parse_home_assistant_state(
+                  b" " * (128 * 1024 + 1),
+                  expected_entity_id="sensor.gpu_temp",
+                  received_at=1000,
+              )
+          except HomeRigContractError:
+              pass
+          else:
+              raise AssertionError("oversized response was accepted")
+
+          grants = HomeRigGrantStore()
+          audit = HomeRigAuditLog()
+          scope = HomeRigScope(
+              entity_ids=("sensor.gpu_temp",),
+              operations=("entity_state",),
+          )
+          grant = grants.create(scope, actor="operator", now=100)
+          claim = prepare_read(
+              grants,
+              grant.grant_id,
+              target_kind="entity",
+              target_id="sensor.gpu_temp",
+              operation="entity_state",
+              now=1000,
+          )
+          receipt = fulfill_read(
+              grants,
+              audit,
+              claim,
+              source_state=evidence.state,
+              observed_at=evidence.observed_at,
+              now=1000,
+              max_freshness_seconds=60,
+          )
+          assert receipt.observation.state == "61.0"
+          assert receipt.observation.freshness == "fresh"
+
+          unavailable_fixture = dict(fixture)
+          unavailable_fixture["state"] = "unavailable"
+          unavailable_evidence = parse_home_assistant_state(
+              json.dumps(unavailable_fixture).encode("utf-8"),
+              expected_entity_id="sensor.gpu_temp",
+              received_at=1100,
+          )
+          unavailable_claim = prepare_read(
+              grants,
+              grant.grant_id,
+              target_kind="entity",
+              target_id="sensor.gpu_temp",
+              operation="entity_state",
+              now=1100,
+          )
+          unavailable_receipt = fulfill_read(
+              grants,
+              audit,
+              unavailable_claim,
+              source_state=unavailable_evidence.state,
+              observed_at=unavailable_evidence.observed_at,
+              now=1100,
+          )
+          assert unavailable_receipt.observation.state == "unknown"
+          assert unavailable_receipt.observation.freshness == "unavailable"
+
+          audit.close()
+          grants.close()
+          print("T-038 Home Assistant state parser: PASS")
+          PY
