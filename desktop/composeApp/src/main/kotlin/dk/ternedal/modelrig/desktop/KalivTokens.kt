@@ -38,6 +38,7 @@ object KalivTokens {
         val textBody: Color = Color(0xFFEEE6D8)
         val userBubbleText: Color = Color(0xFFECE3D5)
         val accentSoft: Color = Color(0xFFE2C06A)
+        val selectedTint: Color = Color(0xFF191410)
     }
 
     object Light {
@@ -63,6 +64,7 @@ object KalivTokens {
         val textBody: Color = Color(0xFF231E19)
         val userBubbleText: Color = Color(0xFF231E19)
         val accentSoft: Color = Color(0xFF7E621C)
+        val selectedTint: Color = Color(0xFFF5EFE4)
     }
 
     object Gold {

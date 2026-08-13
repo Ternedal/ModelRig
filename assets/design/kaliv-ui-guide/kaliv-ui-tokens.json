@@ -27,7 +27,8 @@
       "textSoft": "#E9DFCA",
       "textBody": "#EEE6D8",
       "userBubbleText": "#ECE3D5",
-      "accentSoft": "#E2C06A"
+      "accentSoft": "#E2C06A",
+      "selectedTint": "#191410"
     },
     "light": {
       "canvas": "#F7F3EC",
@@ -51,7 +52,8 @@
       "textSoft": "#231E19",
       "textBody": "#231E19",
       "userBubbleText": "#231E19",
-      "accentSoft": "#7E621C"
+      "accentSoft": "#7E621C",
+      "selectedTint": "#F5EFE4"
     },
     "brand": {
       "bronze": "#9A7136",

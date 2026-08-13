@@ -71,6 +71,9 @@ import dk.ternedal.modelrig.ui.chat.AssistantMessage
 import dk.ternedal.modelrig.ui.chat.ChatConversationTopBar
 import dk.ternedal.modelrig.ui.chat.ChatMessageUi
 import dk.ternedal.modelrig.ui.chat.UserMessage
+import dk.ternedal.modelrig.ui.chat.SourceModelSheet
+import dk.ternedal.modelrig.ui.chat.ModelRowUi
+import dk.ternedal.modelrig.ui.chat.paramsLabelFor
 
 private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, ControlCenter, CloudPicker, VoiceCloudPicker }
 
@@ -733,7 +736,8 @@ private fun ChatScreen(
     var activeCall by remember { mutableStateOf<okhttp3.Call?>(null) }
     var currentModel by remember { mutableStateOf(store.model) }
     var models by remember { mutableStateOf(listOf<String>()) }
-    var modelMenu by remember { mutableStateOf(false) }
+    var showSourceSheet by remember { mutableStateOf(false) }
+    var runningModels by remember { mutableStateOf(setOf<String>()) }
     var cloudModel by remember { mutableStateOf(store.cloudModel) }
     var ragMode by remember { mutableStateOf(false) }
     // D4 consent, persisted (2a trin 1): may RAG document content be sent to
@@ -1463,14 +1467,73 @@ private fun ChatScreen(
                         DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
                         DropdownMenuItem(text = { Text("Viden") }, onClick = { overflow = false; onOpenKnowledge() })
                         DropdownMenuItem(text = { Text("Planer") }, onClick = { overflow = false; onOpenSchedules() })
-                        if (hasRig && hasCloud) {
+                        if (mode == "rig" && store.cloudKey != null) {
                             DropdownMenuItem(
-                                text = { Text(if (mode == "cloud") "Skift til rig" else "Skift til cloud") },
+                                text = {
+                                    Text(
+                                        (if (voiceUsesCloud) "\u2601 " else "\u25c7 ") + "Stemme svarer via cloud",
+                                        color = if (voiceUsesCloud) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
+                                        fontSize = 13.sp,
+                                    )
+                                },
                                 onClick = {
-                                    overflow = false
-                                    val m = if (mode == "cloud") "rig" else "cloud"
-                                    mode = m; store.chatMode = m
-                                    if (m == "cloud") ragMode = false
+                                    voiceUsesCloud = !voiceUsesCloud
+                                    store.voiceUsesCloud = voiceUsesCloud
+                                },
+                            )
+                        }
+                        if (ragMode) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        ragSourceFilter?.let { "\u2315 Kilde: $it" } ?: "\u2315 Kilder: alle",
+                                        color = KalivTheme.colors.textMuted, fontSize = 13.sp,
+                                    )
+                                },
+                                onClick = { overflow = false; ragSourceMenu = true },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("\u2699 Tool-styring", color = KalivTheme.colors.textMuted, fontSize = 13.sp) },
+                            onClick = {
+                                overflow = false
+                                registryError = null
+                                showToolCtl = true
+                                loadRegistry()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("\ud83d\udcdc Handlingslog", color = KalivTheme.colors.textMuted, fontSize = 13.sp) },
+                            onClick = {
+                                overflow = false
+                                auditError = null
+                                showAudit = true
+                                scope.launch {
+                                    val r = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            ModelRigClient(store.baseUrl ?: "", store.token).toolsAudit(50)
+                                        }
+                                    }
+                                    auditRows = r.getOrDefault(emptyList())
+                                    auditError = r.exceptionOrNull()?.let { friendlyError(it) }
+                                }
+                            },
+                        )
+                        if (bargeInEnabled) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "Barge-in f\u00f8lsomhed: $bargeInThreshold" +
+                                            if (peakRms > 0) "  (sidste top ${peakRms.toInt()})" else "",
+                                        color = KalivTheme.colors.textMuted,
+                                        fontSize = 13.sp,
+                                    )
+                                },
+                                onClick = {
+                                    val steps = listOf(500, 800, 1200, 1500, 2000, 3000, 4500)
+                                    val next = steps.firstOrNull { it > bargeInThreshold } ?: steps.first()
+                                    bargeInThreshold = next
+                                    store.bargeInThreshold = next
                                 },
                             )
                         }
@@ -1549,7 +1612,7 @@ private fun ChatScreen(
                         leadingIcon = painterResource(R.drawable.ic_kaliv_model),
                         leadingTint = KalivTheme.colors.accent,
                         trailingIcon = painterResource(R.drawable.ic_kaliv_chevron_down),
-                        onClick = { onOpenCloudPicker() },
+                        onClick = { showSourceSheet = true },
                     )
                 } else {
                     Box {
@@ -1559,246 +1622,30 @@ private fun ChatScreen(
                             leadingIcon = painterResource(R.drawable.ic_kaliv_model),
                             leadingTint = KalivTheme.colors.accent,
                             trailingIcon = painterResource(R.drawable.ic_kaliv_chevron_down),
-                            onClick = { modelMenu = true },
+                            onClick = { showSourceSheet = true },
                         )
                         // Auto-load the installed rig models the first time the menu
                         // opens (and whenever it reopens empty), so there's an actual
                         // list to pick from -- previously the list only appeared after
                         // tapping "Genindlæs modeller", so rig mode looked like it had
                         // no model switcher at all.
-                        LaunchedEffect(modelMenu) {
-                            if (modelMenu && models.isEmpty() && store.baseUrl != null) {
+                        LaunchedEffect(showSourceSheet) {
+                            if (showSourceSheet && store.baseUrl != null) {
                                 val res = withContext(Dispatchers.IO) {
                                     runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listModels() }
                                 }
-                                res.onSuccess { models = it }
-                                    .onFailure { modelError = "Kan ikke hente modeller: rig'en svarer ikke" }
+                                if (models.isEmpty()) {
+                                    res.onSuccess { models = it }
+                                        .onFailure { modelError = "Kan ikke hente modeller: rig'en svarer ikke" }
+                                }
+                                val run = withContext(Dispatchers.IO) {
+                                    runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRunningModels() }
+                                }
+                                run.onSuccess { rm -> runningModels = rm.map { it.name }.toSet() }
                             }
                         }
-                        DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
-                            // The installed rig models, at the TOP where a model
-                            // picker belongs. Tap one to switch the rig model.
-                            if (models.isEmpty()) {
-                                DropdownMenuItem(
-                                    enabled = false,
-                                    text = { Text("Henter modeller…", color = KalivTheme.colors.textMuted, fontSize = 13.sp) },
-                                    onClick = {},
-                                )
-                            } else {
-                                models.forEach { m ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                (if (m == currentModel) "◈  " else "     ") + m,
-                                                color = if (m == currentModel) KalivTheme.colors.signal else KalivTheme.colors.textHigh,
-                                                fontSize = 14.sp,
-                                            )
-                                        },
-                                        onClick = { currentModel = m; store.model = m; modelMenu = false },
-                                    )
-                                }
-                            }
-                            HorizontalDivider()
-                            // Voice: ASR/TTS always run on the rig, but the LLM
-                            // step can go to a big cloud model. Only meaningful
-                            // in rig mode with a cloud key configured.
-                            if (mode == "rig" && store.cloudKey != null) {
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            (if (voiceUsesCloud) "☁ " else "◇ ") +
-                                                "Stemme svarer via cloud",
-                                            color = if (voiceUsesCloud) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
-                                            fontSize = 13.sp,
-                                        )
-                                    },
-                                    onClick = {
-                                        voiceUsesCloud = !voiceUsesCloud
-                                        store.voiceUsesCloud = voiceUsesCloud
-                                        modelMenu = false
-                                    },
-                                )
-                                // Pick WHICH cloud model the voice chain uses --
-                                // separate from the text cloud model, reachable from
-                                // rig mode (where voice lives). Only useful when the
-                                // toggle above is on.
-                                if (voiceUsesCloud) {
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                "     ☁ Cloud-model til tale: ${store.voiceCloudModel}",
-                                                color = KalivTheme.colors.amber,
-                                                fontSize = 12.sp,
-                                            )
-                                        },
-                                        onClick = { modelMenu = false; onOpenVoiceCloudPicker() },
-                                    )
-                                }
-                            }
-                            // Barge-in: speak to cut Kaliv off mid-reply. Needs the
-                            // mic while she talks, hence the permission check.
-                            if (mode == "rig") {
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            (if (bargeInEnabled) "✋ " else "◇ ") +
-                                                "Afbryd Kaliv ved at tale",
-                                            color = if (bargeInEnabled) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
-                                            fontSize = 13.sp,
-                                        )
-                                    },
-                                    onClick = {
-                                        bargeInEnabled = !bargeInEnabled
-                                        store.bargeInEnabled = bargeInEnabled
-                                        modelMenu = false
-                                    },
-                                )
-                                // RAG: a capability toggle, grouped here with
-                                // Tools and Voice (all "what can this model do")
-                                // rather than crammed into the header, where it
-                                // did not fit on a phone and got scrolled out of
-                                // sight. Rig mode only -- cloud has no RAG.
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            if (ragMode) "⌕ RAG: til" else "⌕ RAG: fra",
-                                            color = if (ragMode) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
-                                            fontSize = 13.sp,
-                                        )
-                                    },
-                                    onClick = {
-                                        val on = !ragMode
-                                        ragMode = on
-                                        if (on) scope.launch {
-                                            val res = withContext(Dispatchers.IO) {
-                                                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRagSources() }
-                                            }
-                                            res.onSuccess { ragSources = it }
-                                        }
-                                        modelMenu = false
-                                    },
-                                )
-                                // D4 consent: allow RAG document content to reach a
-                                // CLOUD model this session. Shown in cloud mode, where
-                                // the choice applies; default is blocked (kept local).
-                                if (mode == "cloud") {
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                if (allowRagCloud) "☁ RAG→cloud: tilladt" else "☁ RAG→cloud: blokeret",
-                                                color = if (allowRagCloud) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
-                                                fontSize = 13.sp,
-                                            )
-                                        },
-                                        onClick = {
-                                            allowRagCloud = !allowRagCloud
-                                            modelMenu = false
-                                        },
-                                    )
-                                }
-                                // Source filter + add-document, shown only when RAG
-                                // is on. Opens the same source menu the header chip
-                                // used to.
-                                if (ragMode) {
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                ragSourceFilter?.let { "⌕ Kilde: $it" } ?: "⌕ Kilder: alle",
-                                                color = KalivTheme.colors.textMuted, fontSize = 13.sp,
-                                            )
-                                        },
-                                        onClick = { modelMenu = false; ragSourceMenu = true },
-                                    )
-                                }
-                                // Kaliv Tools. Off by default, and the rig has its
-                                // own kill switch on top: two locks, both opt-in.
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            if (toolsMode) "🛠 Tools: til" else "🛠 Tools: fra",
-                                            color = if (toolsMode) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
-                                            fontSize = 13.sp,
-                                        )
-                                    },
-                                    onClick = {
-                                        toolsMode = !toolsMode
-                                        store.toolsMode = toolsMode
-                                        if (!toolsMode) pendingTool = null
-                                        modelMenu = false
-                                    },
-                                )
-                                // Audit log: readable whether or not tools mode is
-                                // currently on -- past actions matter regardless.
-                                DropdownMenuItem(
-                                    text = { Text("⚙ Tool-styring", color = KalivTheme.colors.textMuted, fontSize = 13.sp) },
-                                    onClick = {
-                                        modelMenu = false
-                                        registryError = null
-                                        showToolCtl = true
-                                        loadRegistry()
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("📜 Handlingslog", color = KalivTheme.colors.textMuted, fontSize = 13.sp) },
-                                    onClick = {
-                                        modelMenu = false
-                                        auditError = null
-                                        showAudit = true
-                                        scope.launch {
-                                            val r = withContext(Dispatchers.IO) {
-                                                runCatching {
-                                                    ModelRigClient(store.baseUrl ?: "", store.token).toolsAudit(50)
-                                                }
-                                            }
-                                            auditRows = r.getOrDefault(emptyList())
-                                            auditError = r.exceptionOrNull()?.let { friendlyError(it) }
-                                        }
-                                    },
-                                )
-                                if (bargeInEnabled) {
-                                    // Step through sensible thresholds rather than
-                                    // a slider: this is a calibration dial used a
-                                    // handful of times, not a daily control.
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                "Barge-in følsomhed: $bargeInThreshold" +
-                                                    if (peakRms > 0) "  (sidste top ${peakRms.toInt()})" else "",
-                                                color = KalivTheme.colors.textMuted,
-                                                fontSize = 13.sp,
-                                            )
-                                        },
-                                        onClick = {
-                                            val steps = listOf(500, 800, 1200, 1500, 2000, 3000, 4500)
-                                            val next = steps.firstOrNull { it > bargeInThreshold } ?: steps.first()
-                                            bargeInThreshold = next
-                                            store.bargeInThreshold = next
-                                        },
-                                    )
-                                }
-                            }
-                            if (mode == "rig") HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text("↻  Genindlæs modeller", color = KalivTheme.colors.signal) },
-                                onClick = {
-                                    modelMenu = false
-                                    scope.launch {
-                                        modelError = null
-                                        val res = withContext(Dispatchers.IO) {
-                                            runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listModels() }
-                                        }
-                                        res.onSuccess {
-                                            models = it
-                                            if (it.isEmpty()) modelError = "Rig'en svarede, men har ingen modeller"
-                                        }.onFailure {
-                                            // Don't fail silently -- the user just
-                                            // sees a dead button otherwise.
-                                            modelError = "Kan ikke hente modeller: rig'en svarer ikke"
-                                        }
-                                    }
-                                },
-                            )
-                        }
+                        // Model-/kildevalg bor nu i Kilde & model-sheetet (skaerm 3);
+                        // resten af den gamle menu er flyttet til \u22ee-menuen.
                     }
                 }
                 // RAG moved into the model menu (above). The source menu still
@@ -1849,6 +1696,51 @@ private fun ChatScreen(
                         store.toolsMode = toolsMode
                         if (!toolsMode) pendingTool = null
                     },
+                )
+            }
+            if (showSourceSheet) {
+                val host = store.baseUrl?.removePrefix("https://")?.removePrefix("http://")?.trimEnd('/')
+                SourceModelSheet(
+                    rigSelected = mode == "rig",
+                    rigStatus = host?.let { "Forbundet \u00b7 $it" } ?: "Ikke parret",
+                    rigConnected = store.hasRig,
+                    cloudAvailable = hasCloud,
+                    cloudStatus = if (hasCloud) "$cloudModel \u00b7 forlader enheden" else "Ingen n\u00f8gle",
+                    models = models.map {
+                        ModelRowUi(
+                            name = it,
+                            selected = it == currentModel,
+                            loaded = it in runningModels,
+                            paramsLabel = paramsLabelFor(it),
+                        )
+                    },
+                    onSelectRig = { mode = "rig"; store.chatMode = "rig" },
+                    onSelectCloud = {
+                        if (mode == "cloud") {
+                            showSourceSheet = false
+                            onOpenCloudPicker()
+                        } else {
+                            mode = "cloud"; store.chatMode = "cloud"; ragMode = false
+                        }
+                    },
+                    onSelectModel = { currentModel = it; store.model = it },
+                    onReload = {
+                        scope.launch {
+                            modelError = null
+                            val res = withContext(Dispatchers.IO) {
+                                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listModels() }
+                            }
+                            res.onSuccess {
+                                models = it
+                                if (it.isEmpty()) modelError = "Rig'en svarede, men har ingen modeller"
+                            }.onFailure { modelError = "Kan ikke hente modeller: rig'en svarer ikke" }
+                            val run = withContext(Dispatchers.IO) {
+                                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRunningModels() }
+                            }
+                            run.onSuccess { rm -> runningModels = rm.map { it.name }.toSet() }
+                        }
+                    },
+                    onDismiss = { showSourceSheet = false },
                 )
             }
 
