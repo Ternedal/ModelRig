@@ -172,8 +172,6 @@ class PinnedHttpTransport:
     ) -> TransportResponse:
         return self._request(
             url,
-            method="GET",
-            body=None,
             connect_address=connect_address,
             headers=headers,
             timeout_seconds=timeout_seconds,
@@ -194,8 +192,6 @@ class PinnedHttpTransport:
         bearer = _validated_bearer_token(bearer_token)
         return self._request(
             url,
-            method="GET",
-            body=None,
             connect_address=connect_address,
             headers=headers,
             timeout_seconds=timeout_seconds,
@@ -232,13 +228,13 @@ class PinnedHttpTransport:
         self,
         url: str,
         *,
-        method: str,
-        body: bytes | None,
         connect_address: str,
         headers: Mapping[str, str],
         timeout_seconds: float,
         max_wire_bytes: int,
         trusted_bearer: str | None,
+        method: str = "GET",
+        body: bytes | None = None,
     ) -> TransportResponse:
         if not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool) or timeout_seconds <= 0:
             raise WebFetchError("transport timeout must be positive")
