@@ -1,0 +1,144 @@
+name: t038-operator-router
+
+on:
+  pull_request:
+    paths:
+      - "worker/app/home_rig_operator.py"
+      - ".github/workflows/t038-operator-router.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install worker dependencies
+        run: pip install -r worker/requirements.txt --break-system-packages
+      - name: Qualify loopback authority administration
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: worker
+        run: |
+          python3 - <<'PY'
+          import ast
+          from fastapi import FastAPI
+          from fastapi.testclient import TestClient
+
+          from app.home_rig_connector_contract import HomeRigAuditLog, HomeRigGrantStore
+          from app.home_rig_operator import build_home_rig_operator_router
+
+          source = open("worker/app/home_rig_operator.py", encoding="utf-8").read()
+          main_source = open("worker/app/main.py", encoding="utf-8").read()
+          tree = ast.parse(source)
+          imported = set()
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Import):
+                  imported.update(alias.name.split(".", 1)[0] for alias in node.names)
+              elif isinstance(node, ast.ImportFrom) and node.module:
+                  imported.add(node.module.split(".", 1)[0])
+          assert {"socket", "ssl", "http", "urllib", "requests", "httpx", "subprocess", "os"}.isdisjoint(imported)
+          for forbidden in (
+              "REGISTRY[", "chat_tools(", "os.getenv(", "os.environ",
+              "urlopen(", "requests.", "httpx.", "build_control_preview(",
+          ):
+              assert forbidden not in source, forbidden
+          assert "home_rig_operator" not in main_source
+          assert "PRODUCTION_ACTIVATION = False" in source
+
+          grants = HomeRigGrantStore()
+          audit = HomeRigAuditLog()
+          app = FastAPI()
+          app.include_router(build_home_rig_operator_router(grants=grants, audit=audit))
+          client = TestClient(app)
+
+          scope = {
+              "rig_ids": ["modelrig"],
+              "entity_ids": ["sensor.gpu_temp"],
+              "operations": ["rig_health", "entity_state", "wake_preview"],
+          }
+          preview = client.post("/home-rig/grants/preview", json=scope)
+          assert preview.status_code == 200, preview.text
+          body = preview.json()
+          assert body["grant_persisted"] is False
+          assert body["production_activation"] is False
+          assert grants.list_grants() == ()
+
+          created = client.post(
+              "/home-rig/grants",
+              json={**scope, "expected_scope_sha256": body["scope_sha256"]},
+          )
+          assert created.status_code == 200, created.text
+          grant_id = created.json()["grant"]["grant_id"]
+          assert len(grants.list_grants()) == 1
+
+          duplicate = client.post(
+              "/home-rig/grants",
+              json={**scope, "expected_scope_sha256": body["scope_sha256"]},
+          )
+          assert duplicate.status_code == 409, duplicate.text
+          assert len(grants.list_grants()) == 1
+
+          disjoint = {
+              "rig_ids": ["modelrig"],
+              "entity_ids": [],
+              "operations": ["rig_power_readiness"],
+          }
+          disjoint_preview = client.post("/home-rig/grants/preview", json=disjoint).json()
+          disjoint_create = client.post(
+              "/home-rig/grants",
+              json={**disjoint, "expected_scope_sha256": disjoint_preview["scope_sha256"]},
+          )
+          assert disjoint_create.status_code == 200, disjoint_create.text
+          assert len(grants.list_grants()) == 2
+
+          stale = client.post(
+              f"/home-rig/grants/{grant_id}/revoke",
+              json={"expected_scope_sha256": "0" * 64, "confirm_revoke": True},
+          )
+          assert stale.status_code == 409, stale.text
+          assert grants.get(grant_id).active is True
+
+          revoked = client.post(
+              f"/home-rig/grants/{grant_id}/revoke",
+              json={"expected_scope_sha256": body["scope_sha256"], "confirm_revoke": True},
+          )
+          assert revoked.status_code == 200, revoked.text
+          assert revoked.json()["revoked_now"] is True
+          listed = client.get("/home-rig/grants?include_revoked=true")
+          assert listed.status_code == 200, listed.text
+          assert len(listed.json()["grants"]) == 2
+          assert any(item["status"] == "revoked" for item in listed.json()["grants"])
+
+          blocked_app = FastAPI()
+          blocked_app.include_router(
+              build_home_rig_operator_router(
+                  grants=grants,
+                  audit=audit,
+                  operator_allowed=lambda request: False,
+              )
+          )
+          blocked = TestClient(blocked_app).get("/home-rig/grants")
+          assert blocked.status_code == 403, blocked.text
+
+          audit_view = client.get("/home-rig/audit")
+          assert audit_view.status_code == 200, audit_view.text
+          assert audit_view.json()["production_activation"] is False
+
+          audit.close()
+          grants.close()
+          print("T-038 operator router: PASS")
+          PY
