@@ -157,7 +157,20 @@
     "controlHeight": 40,
     "composerMinHeight": 88,
     "assistantMaxWidth": 780,
-    "userMaxWidth": 620
+    "userMaxWidth": 620,
+    "fabSend": 46,
+    "micButton": 90,
+    "ankhEmpty": 78,
+    "ankhTopbar": 40,
+    "switchTrackWidth": 51,
+    "switchTrackHeight": 29,
+    "switchKnob": 24,
+    "dragHandleWidth": 46,
+    "dragHandleHeight": 5,
+    "cursorWidth": 8.5,
+    "cursorHeight": 18,
+    "hairline": 1,
+    "minTouch": 48
   },
   "platformOverrides": {
     "_note": "Bevidste platform-afvigelser fra tokenet ovenfor. En afvigelse der IKKE staar her er en fejl; en der staar her er en beslutning. Generatoren laeser kun 'color', 'spacing', 'radius' og 'layout', saa denne blok aendrer ingen genereret kode -- den dokumenterer, og tests/workflow_android_palette_divergence.py haandhaever.",

@@ -107,6 +107,19 @@ object KalivTokens {
         val composerMinHeight: Dp = 88.dp
         val assistantMaxWidth: Dp = 780.dp
         val userMaxWidth: Dp = 620.dp
+        val fabSend: Dp = 46.dp
+        val micButton: Dp = 90.dp
+        val ankhEmpty: Dp = 78.dp
+        val ankhTopbar: Dp = 40.dp
+        val switchTrackWidth: Dp = 51.dp
+        val switchTrackHeight: Dp = 29.dp
+        val switchKnob: Dp = 24.dp
+        val dragHandleWidth: Dp = 46.dp
+        val dragHandleHeight: Dp = 5.dp
+        val cursorWidth: Dp = 8.5.dp
+        val cursorHeight: Dp = 18.dp
+        val hairline: Dp = 1.dp
+        val minTouch: Dp = 48.dp
     }
 
     object Motion {
