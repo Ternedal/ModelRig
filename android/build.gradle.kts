@@ -6,4 +6,7 @@ plugins {
     id("com.android.application") version "8.9.1" apply false
     kotlin("android") version "2.4.10" apply false
     kotlin("plugin.compose") version "2.4.10" apply false
+    // Screenshot-regression (DDR-001 fase 1): Roborazzi paa Robolectric — JVM,
+    // ingen emulator. Version verificeret mod AGP 8.9/Kotlin 2.4 13/08-2026.
+    id("io.github.takahirom.roborazzi") version "1.70.0" apply false
 }

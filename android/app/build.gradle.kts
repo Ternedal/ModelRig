@@ -6,6 +6,7 @@ plugins {
     id("com.android.application")
     kotlin("android")
     kotlin("plugin.compose")
+    id("io.github.takahirom.roborazzi")
 }
 
 // Stable signing identity across build machines/sessions. Keystore + properties
@@ -75,8 +76,28 @@ kotlin {
     }
 }
 
+android.testOptions {
+    unitTests {
+        // Robolectric skal bruge rigtige ressourcer (temaer, fonte) til screenshots.
+        isIncludeAndroidResources = true
+    }
+}
+
+roborazzi {
+    // Baselines bor i traeet og reviewes som enhver anden diff.
+    outputDir.set(layout.projectDirectory.dir("src/test/screenshots"))
+}
+
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    // Screenshot-regression: Robolectric 4.16 (SDK 36 + JDK 21) + Roborazzi.
+    testImplementation("org.robolectric:robolectric:4.16.1")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.70.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.70.0")
+    testImplementation(platform("androidx.compose:compose-bom:2026.06.01"))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("androidx.test.ext:junit:1.3.0")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     // org.json lives in the Android framework; the unit-test stub throws on
     // every call. StreamContract parses real NDJSON, so the tests need a real
     // implementation on the JVM test classpath.
