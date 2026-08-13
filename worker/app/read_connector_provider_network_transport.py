@@ -19,7 +19,7 @@ Security properties:
 * response bytes remain bounded by the request plan and are returned to the
   already-qualified provider response validator via ``ProviderTransportResponse``.
 
-No OAuth, credential storage, ToolGate/FastAPI registration or production
+No OAuth, credential storage, runtime/API registration or production
 activation is implemented here. ``PRODUCTION_ACTIVATION`` remains false.
 """
 from __future__ import annotations
