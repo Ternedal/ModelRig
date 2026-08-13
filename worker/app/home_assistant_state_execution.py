@@ -270,7 +270,7 @@ class HomeAssistantStateExecutor:
 
         try:
             exchange = self._transport.execute(plan)
-        except Exception as exc:
+        except Exception:
             self._finish(
                 lease,
                 claim,
@@ -279,7 +279,7 @@ class HomeAssistantStateExecutor:
                 error_code="transport_contract",
                 now=started_at,
             )
-            raise HomeAssistantStateExecutionError("provider transport execution failed") from exc
+            raise HomeAssistantStateExecutionError("provider transport execution failed") from None
 
         if not isinstance(exchange, HomeAssistantStateTransportResult):
             self._finish(
