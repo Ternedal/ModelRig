@@ -13,7 +13,6 @@
 Blokerende:
 
 - **Fysisk rig-validering:** ingen rapport på disken — fysisk validering er ikke kørt
-- kunne ikke læse plan-autoriteten: No module named 'httpx'
 
 Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet uden evidens. Koden kan være korrekt i tests og fejle på Windows, Ollama, Tailscale eller en Pixel 6a — det er dét fysisk validering er til for, og det er ikke noget CI kan gøre for dig.
 
@@ -21,9 +20,9 @@ Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet
 
 ## Kan scheduleren aktiveres nu? **NEJ**
 
-**Kunne ikke afprøve godkendelsen.** Gaten nægter at gætte: den spurgte tidligere kildekoden om der stod "Bearer" et sted, og en kommentar kunne svare ja
+Ingen blokerende fund specifikke for scheduleren.
 
-- **Beviser en godkendelse et menneske:** NEJ
+- **Beviser en godkendelse et menneske:** ja
 - **Leveringsmodellen består alle durability-prober:** ja
 - **Fysisk validering gælder også her:** scheduleren kører på den samme rig, så rapporten er en forudsætning for begge.
 
@@ -47,8 +46,8 @@ Hver probe bygger de RIGTIGE komponenter mod engangs-databaser og injicerer fejl
 
 ## Planautoritet (Agent 3)
 
-- **Serverbygget plan:** NEJ
-- **Detalje:** kunne ikke læse plan-autoriteten: No module named 'httpx'
+- **Serverbygget plan:** ja
+- **Detalje:** planen bygges og gemmes på serveren; klienten kan kun starte den via et kortlivet single-use plan-id, mens retry kloner den gemte plan
 
 ---
 
