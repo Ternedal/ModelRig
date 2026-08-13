@@ -1,24 +1,31 @@
 """Concrete but unmounted local Home Assistant transport for T-038.
 
-The transport accepts no URL/host from a model or request plan.  Its endpoint is
+The transport accepts no URL/host from a model or request plan. Its endpoint is
 operator-owned construction-time configuration and v1 requires an IP literal in
 an explicitly local address range, eliminating DNS/rebinding from this boundary.
-Redirects and retries are not implemented.  The bearer is acquired just-in-time
+Redirects and retries are not implemented. The bearer is acquired just-in-time
 from an injected provider, used for one GET, never returned/logged/persisted,
 and the local reference is discarded in ``finally``.
 
-Plain HTTP is allowed by default only for loopback.  Using HTTP for another
-allowed local address requires the operator to set ``allow_insecure_http=True``
-when constructing the endpoint.  HTTPS uses the standard validating SSL context
-unless the host explicitly injects another context for a controlled fixture.
+Plain HTTP is allowed by default only for loopback. Using HTTP for another
+allowed local address requires the operator to set ``allow_insecure_http=True``.
+HTTPS uses the standard validating SSL context unless a controlled host injects
+another context.
+
+T-032 accounting is exact rather than estimated: this module builds the one
+HTTP/1.1 request itself and sends it in a counted ``socket.send`` loop. If a
+send fails midway, ``request_bytes_sent`` is the number of bytes the socket
+actually accepted before the failure. There is no DNS lookup because the socket
+family and literal peer are selected directly from ``ipaddress``.
 
 This module is not imported by ToolGate/routes/startup and has no env/config
-lookup, so merely shipping it does not activate Home Assistant access.
+lookup, so shipping it alone does not activate Home Assistant access.
 """
 from __future__ import annotations
 
 import http.client
 import ipaddress
+import socket
 import ssl
 import time
 from dataclasses import dataclass
@@ -46,13 +53,14 @@ _LOCAL_NETWORKS = tuple(
 )
 _MAX_BEARER_CHARS = 8192
 _MAX_TIMEOUT_SECONDS = 30.0
+_MAX_REQUEST_BYTES = 4096
 
 
 class HomeAssistantLocalTransportError(HomeRigContractError):
     pass
 
 
-def _local_ip(value: str) -> tuple[str, bool]:
+def _local_ip(value: str) -> tuple[str, bool, int]:
     if not isinstance(value, str) or not value.strip():
         raise HomeAssistantLocalTransportError("Home Assistant endpoint address must be an IP literal")
     try:
@@ -63,7 +71,7 @@ def _local_ip(value: str) -> tuple[str, bool]:
         raise HomeAssistantLocalTransportError("IPv4-mapped IPv6 endpoints are not accepted")
     if not any(parsed in network for network in _LOCAL_NETWORKS):
         raise HomeAssistantLocalTransportError("Home Assistant endpoint must be explicitly local")
-    return parsed.compressed, parsed.is_loopback
+    return parsed.compressed, parsed.is_loopback, parsed.version
 
 
 def _port(value: int) -> int:
@@ -107,9 +115,10 @@ class HomeAssistantLocalEndpoint:
             raise HomeAssistantLocalTransportError("Home Assistant endpoint scheme must be http or https")
         if not isinstance(self.allow_insecure_http, bool):
             raise HomeAssistantLocalTransportError("allow_insecure_http must be boolean")
-        address, loopback = _local_ip(self.address)
+        address, loopback, version = _local_ip(self.address)
         object.__setattr__(self, "address", address)
         object.__setattr__(self, "port", _port(self.port))
+        object.__setattr__(self, "_ip_version", version)
         if self.scheme == "http" and not loopback and not self.allow_insecure_http:
             raise HomeAssistantLocalTransportError(
                 "plain HTTP outside loopback requires explicit operator opt-in"
@@ -119,6 +128,10 @@ class HomeAssistantLocalEndpoint:
     def authority(self) -> str:
         address = f"[{self.address}]" if ":" in self.address else self.address
         return f"{address}:{self.port}"
+
+    @property
+    def socket_family(self) -> int:
+        return socket.AF_INET6 if self._ip_version == 6 else socket.AF_INET
 
     def to_dict(self) -> dict:
         return {
@@ -133,14 +146,14 @@ class HomeAssistantLocalEndpoint:
 
 
 class HomeAssistantBearerProvider(Protocol):
-    """Host-owned credential seam; implementations own secure token storage."""
+    """Host-owned credential seam; implementations own protected token storage."""
 
     def bearer_for_execution(self) -> str:
         ...
 
 
 class HomeAssistantLocalTransport:
-    """One-shot stdlib transport to one operator-pinned local IP endpoint."""
+    """One-shot raw HTTP/1.1 transport to one operator-pinned local IP peer."""
 
     def __init__(
         self,
@@ -167,32 +180,56 @@ class HomeAssistantLocalTransport:
     def endpoint(self) -> HomeAssistantLocalEndpoint:
         return self._endpoint
 
-    @staticmethod
-    def _shared_request_bytes(plan: HomeAssistantStateRequestPlan) -> int:
-        """Logical T-032 payload size: exact externally disclosed request path.
+    def _request_bytes(self, plan: HomeAssistantStateRequestPlan, bearer: str) -> bytes:
+        try:
+            request = (
+                f"GET {plan.path} HTTP/1.1\r\n"
+                f"Host: {self._endpoint.authority}\r\n"
+                f"Authorization: Bearer {bearer}\r\n"
+                "Accept: application/json\r\n"
+                "Connection: close\r\n"
+                "\r\n"
+            ).encode("ascii")
+        except UnicodeEncodeError as exc:
+            raise HomeAssistantLocalTransportError("Home Assistant request is not ASCII-safe") from exc
+        if not 1 <= len(request) <= _MAX_REQUEST_BYTES:
+            raise HomeAssistantLocalTransportError("Home Assistant request exceeds T-032 byte budget")
+        return request
 
-        Credential bytes are deliberately not counted into data-sharing content;
-        their value/length belongs to the credential boundary, not connector data.
-        """
-        size = len(plan.path.encode("utf-8"))
-        if not 1 <= size <= 4096:
-            raise HomeAssistantLocalTransportError("Home Assistant request path byte size is invalid")
-        return size
-
-    def _connection(self):
-        if self._endpoint.scheme == "https":
-            context = self._ssl_context or ssl.create_default_context()
-            return http.client.HTTPSConnection(
-                self._endpoint.address,
-                self._endpoint.port,
-                timeout=self._timeout_seconds,
-                context=context,
-            )
-        return http.client.HTTPConnection(
-            self._endpoint.address,
-            self._endpoint.port,
-            timeout=self._timeout_seconds,
+    def _connect(self):
+        peer = (
+            (self._endpoint.address, self._endpoint.port, 0, 0)
+            if self._endpoint.socket_family == socket.AF_INET6
+            else (self._endpoint.address, self._endpoint.port)
         )
+        raw = socket.socket(self._endpoint.socket_family, socket.SOCK_STREAM)
+        raw.settimeout(self._timeout_seconds)
+        try:
+            raw.connect(peer)
+            if self._endpoint.scheme == "https":
+                context = self._ssl_context or ssl.create_default_context()
+                wrapped = context.wrap_socket(raw, server_hostname=self._endpoint.address)
+                raw = None  # ownership transferred to SSL socket
+                return wrapped
+            return raw
+        except Exception:
+            try:
+                if raw is not None:
+                    raw.close()
+            finally:
+                pass
+            raise
+
+    @staticmethod
+    def _send_counted(sock, payload: bytes) -> int:
+        sent = 0
+        view = memoryview(payload)
+        while sent < len(payload):
+            count = sock.send(view[sent:])
+            if not count:
+                raise OSError("socket closed while sending request")
+            sent += count
+        return sent
 
     def execute(self, plan: HomeAssistantStateRequestPlan) -> HomeAssistantStateTransportResult:
         if not isinstance(plan, HomeAssistantStateRequestPlan):
@@ -202,35 +239,30 @@ class HomeAssistantLocalTransport:
         if plan.method != "GET" or plan.service != "home_assistant":
             raise HomeAssistantLocalTransportError("transport accepts Home Assistant GET plans only")
 
-        shared_bytes = self._shared_request_bytes(plan)
         bearer = ""
-        connection = None
+        sock = None
+        sent = 0
         try:
             bearer = _bearer(self._bearer_provider.bearer_for_execution())
-            connection = self._connection()
-            connection.request(
-                "GET",
-                plan.path,
-                headers={
-                    "Authorization": f"Bearer {bearer}",
-                    "Accept": "application/json",
-                },
-            )
-            response = connection.getresponse()
+            wire_request = self._request_bytes(plan, bearer)
+            sock = self._connect()
+            sent = self._send_counted(sock, wire_request)
+            response = http.client.HTTPResponse(sock)
+            response.begin()
             body = response.read(plan.max_response_bytes + 1)
             received_at = int(time.time())
             if len(body) > plan.max_response_bytes:
                 return HomeAssistantStateTransportResult(
                     request_plan_sha256=plan.digest,
                     entity_id=plan.entity_id,
-                    request_bytes_sent=shared_bytes,
+                    request_bytes_sent=sent,
                     received_at=received_at,
                     error_code="response_too_large",
                 )
             return HomeAssistantStateTransportResult(
                 request_plan_sha256=plan.digest,
                 entity_id=plan.entity_id,
-                request_bytes_sent=shared_bytes,
+                request_bytes_sent=sent,
                 received_at=received_at,
                 status_code=response.status,
                 content_type=response.getheader("Content-Type") or "application/octet-stream",
@@ -240,14 +272,14 @@ class HomeAssistantLocalTransport:
             return HomeAssistantStateTransportResult(
                 request_plan_sha256=plan.digest,
                 entity_id=plan.entity_id,
-                request_bytes_sent=shared_bytes,
+                request_bytes_sent=sent,
                 received_at=int(time.time()),
                 error_code="transport_io",
             )
         finally:
             bearer = ""
-            if connection is not None:
+            if sock is not None:
                 try:
-                    connection.close()
+                    sock.close()
                 except Exception:
                     pass
