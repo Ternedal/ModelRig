@@ -3,7 +3,7 @@
 // (no Android SDK there) — build locally. Bump versions if your installed
 // Android Studio / SDK requires it.
 plugins {
-    id("com.android.application") version "8.9.1" apply false
+    id("com.android.application") version "9.3.1" apply false
     kotlin("android") version "2.4.10" apply false
     kotlin("plugin.compose") version "2.4.10" apply false
     // Screenshot-regression (DDR-001 fase 1): Roborazzi paa Robolectric — JVM,
