@@ -285,6 +285,30 @@ expect_error(
     "malformed model output is rejected",
 )
 
+for duplicate_json, name in (
+    (
+        '{"steps":[],"steps":[{"tool":"rig_status","args":{}}],"rationale":"bad"}',
+        "duplicate top-level replanner key is rejected",
+    ),
+    (
+        '{"steps":[{"tool":"rig_status","tool":"current_datetime","args":{}}],"rationale":"bad"}',
+        "duplicate step replanner key is rejected",
+    ),
+    (
+        '{"steps":[{"tool":"rig_status","args":{"detail":true,"detail":false}}],"rationale":"bad"}',
+        "duplicate nested replanner arg key is rejected",
+    ),
+):
+    async def duplicate_chat(_messages, _model, payload=duplicate_json):
+        return payload
+
+    expect_error(
+        lambda chat_fn=duplicate_chat: TypedReadReplanPlanner(
+            adapter, policy, chat_fn=chat_fn
+        ).preview(make_run(), replan_count=0),
+        name,
+    )
+
 
 async def blank_reason_chat(_messages, _model):
     return '{"steps":[],"rationale":"   "}'
