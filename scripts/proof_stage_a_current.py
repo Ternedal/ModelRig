@@ -18,7 +18,6 @@ def ensure_current() -> str:
     if dirty: raise stage.WizardError("Working tree er ikke ren:\n" + dirty)
     branch = cap("git", "branch", "--show-current")
     if not branch: raise stage.WizardError("Detached HEAD afvises; brug en navngivet branch")
-    # Never switch branch. Update exactly the checkout the operator selected.
     cap("git", "fetch", "--quiet", "origin", branch)
     cap("git", "pull", "--ff-only", "origin", branch)
     sha = cap("git", "rev-parse", "HEAD")
@@ -28,6 +27,19 @@ def ensure_current() -> str:
     if version != stage.VERSION: raise stage.WizardError(f"VERSION er {version}, forventede {stage.VERSION}")
     stage.ok(f"Aktuel kandidat {version} på {sha}")
     return sha
+
+def strict_stage_current(action: str, sha: str, url: str | None = None) -> None:
+    args = [
+        sys.executable,
+        str(ROOT / "scripts" / "proof_stage_a_operator_current.py"),
+        action.lower(),
+        "--expected-sha", sha,
+        "--max-age-hours", "168",
+        "--min-model-exact", "1.0",
+    ]
+    if url:
+        args += ["--url", url]
+    stage.run(args)
 
 def voice_current(planner: str) -> None:
     stage.heading("Fysisk voice-bevis — guidet og automatisk")
@@ -45,6 +57,7 @@ def main() -> int:
     version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
     stage.BRANCH, stage.VERSION = branch, version
     stage.ensure_candidate = ensure_current
+    stage.strict_stage = strict_stage_current
     stage.run_voice = voice_current
     stage.run_scheduler = scheduler_current
     return int(stage.main())
