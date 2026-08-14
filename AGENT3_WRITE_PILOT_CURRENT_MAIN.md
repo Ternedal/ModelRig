@@ -7,7 +7,7 @@ produktionsaktivering.
 ## Autoritativ kandidat
 
 - branch: `agent/t022-final-gate-current-main`
-- version: `2.0.0`
+- version: `2.0.1`
 - launcher: `START_AGENT3_WRITE_PILOT.cmd`
 - entrypoint: `scripts/agent3_write_pilot_current_main.py`
 
