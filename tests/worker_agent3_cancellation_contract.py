@@ -43,6 +43,16 @@ def run_with(step: AgentStep, state: RunState = RunState.RUNNING) -> AgentRun:
     return AgentRun(TurnRequest("test", tools=True), route(), [step], state=state)
 
 
+def caps() -> CapabilitySnapshot:
+    return CapabilitySnapshot(
+        rig_reachable=True,
+        worker_ready=True,
+        tools_ready=True,
+        cloud_ready=False,
+        rag_ready=False,
+    )
+
+
 def test_executing_none_tool_exposes_plan_only_stop() -> None:
     step = AgentStep(
         "note_append",
@@ -153,12 +163,12 @@ def test_http_contract_is_attached_only_to_agent3_run_envelopes() -> None:
 
 def _waiting_write_run(
     orch: Agent3Orchestrator,
-    caps: CapabilitySnapshot,
+    snapshot: CapabilitySnapshot,
     label: str,
 ) -> AgentRun:
     return orch.start_with_steps(
         TurnRequest(label, mode="rig", tools=True),
-        caps,
+        snapshot,
         [AgentStep("write_once", {"label": label}, RiskClass.WRITE)],
     )
 
@@ -173,14 +183,7 @@ def test_cancel_wins_before_confirmation_approval_commit() -> None:
         return {"ok": True}
 
     orch = Agent3Orchestrator(store=store, executor=executor, confirmation_ttl_seconds=30)
-    caps = CapabilitySnapshot(
-        rig_reachable=True,
-        worker_ready=True,
-        tools_ready=True,
-        cloud_ready=False,
-        rag_ready=False,
-    )
-    run = _waiting_write_run(orch, caps, "cancel-before-approval-commit")
+    run = _waiting_write_run(orch, caps(), "cancel-before-approval-commit")
     assert run.state == RunState.WAITING_CONFIRMATION
     step = run.steps[0]
     real_cas = store.save_with_event_if_unchanged
@@ -223,14 +226,7 @@ def test_cancel_wins_before_execution_start() -> None:
         return {"ok": True}
 
     orch = Agent3Orchestrator(store=store, executor=executor, confirmation_ttl_seconds=30)
-    caps = CapabilitySnapshot(
-        rig_reachable=True,
-        worker_ready=True,
-        tools_ready=True,
-        cloud_ready=False,
-        rag_ready=False,
-    )
-    run = _waiting_write_run(orch, caps, "cancel-before-step-start")
+    run = _waiting_write_run(orch, caps(), "cancel-before-step-start")
     step = run.steps[0]
     real_cas = store.save_with_event_if_unchanged
     fired = {"value": False}
@@ -256,6 +252,158 @@ def test_cancel_wins_before_execution_start() -> None:
     assert "confirmation_approved" in kinds
     assert "run_cancelled" in kinds
     assert "step_started" not in kinds
+
+
+def test_cancel_wins_before_confirmation_required_commit() -> None:
+    temp = tempfile.mkdtemp(prefix="kaliv-agent3-confirm-required-race-")
+    store = AgentRunStore(os.path.join(temp, "agent3.db"))
+    executed = []
+
+    def executor(step):
+        executed.append(step.tool)
+        return {"ok": True}
+
+    orch = Agent3Orchestrator(store=store, executor=executor, confirmation_ttl_seconds=30)
+    real_cas = store.save_with_event_if_unchanged
+    fired = {"value": False}
+
+    def cancel_before_required(run_arg, **kwargs):
+        if kwargs.get("kind") == "confirmation_required" and not fired["value"]:
+            fired["value"] = True
+            orch.cancel(run_arg.id)
+        return real_cas(run_arg, **kwargs)
+
+    store.save_with_event_if_unchanged = cancel_before_required  # type: ignore[method-assign]
+    try:
+        result = orch.start_with_steps(
+            TurnRequest("confirm race", mode="rig", tools=True),
+            caps(),
+            [AgentStep("write_once", {"label": "confirm-race"}, RiskClass.WRITE)],
+        )
+    finally:
+        store.save_with_event_if_unchanged = real_cas  # type: ignore[method-assign]
+
+    fresh = store.load(result.id)
+    kinds = [event["kind"] for event in store.events(result.id)]
+    assert fired["value"]
+    assert result.state == RunState.CANCELLED
+    assert fresh is not None and fresh.state == RunState.CANCELLED
+    assert executed == []
+    assert "run_cancelled" in kinds
+    assert "confirmation_required" not in kinds
+
+
+def test_cancel_wins_before_policy_block_commit() -> None:
+    temp = tempfile.mkdtemp(prefix="kaliv-agent3-policy-block-race-")
+    store = AgentRunStore(os.path.join(temp, "agent3.db"))
+    orch = Agent3Orchestrator(store=store, executor=lambda _step: {"ok": True})
+    real_cas = store.save_with_event_if_unchanged
+    fired = {"value": False}
+
+    def cancel_before_block(run_arg, **kwargs):
+        payload = kwargs.get("payload") or {}
+        if (
+            kwargs.get("kind") == "policy_decision"
+            and payload.get("action") == "block"
+            and not fired["value"]
+        ):
+            fired["value"] = True
+            orch.cancel(run_arg.id)
+        return real_cas(run_arg, **kwargs)
+
+    store.save_with_event_if_unchanged = cancel_before_block  # type: ignore[method-assign]
+    try:
+        result = orch.start_with_steps(
+            TurnRequest("proactive write", mode="rig", tools=True),
+            caps(),
+            [AgentStep("write_once", {"label": "blocked"}, RiskClass.WRITE)],
+            proactive=True,
+        )
+    finally:
+        store.save_with_event_if_unchanged = real_cas  # type: ignore[method-assign]
+
+    fresh = store.load(result.id)
+    kinds = [event["kind"] for event in store.events(result.id)]
+    assert fired["value"]
+    assert result.state == RunState.CANCELLED
+    assert fresh is not None and fresh.state == RunState.CANCELLED
+    assert "run_cancelled" in kinds
+    assert "policy_decision" not in kinds
+
+
+def test_cancel_wins_before_interrupted_replay_commit() -> None:
+    temp = tempfile.mkdtemp(prefix="kaliv-agent3-replay-race-")
+    store = AgentRunStore(os.path.join(temp, "agent3.db"))
+    executed = []
+    step = AgentStep(
+        "rig_status",
+        {},
+        RiskClass.READ,
+        state=StepState.EXECUTING,
+        idempotent=True,
+    )
+    run = run_with(step)
+    store.save(run)
+
+    def executor(step_arg):
+        executed.append(step_arg.tool)
+        return {"ok": True}
+
+    orch = Agent3Orchestrator(store=store, executor=executor)
+    real_cas = store.save_with_event_if_unchanged
+    fired = {"value": False}
+
+    def cancel_before_replay(run_arg, **kwargs):
+        if kwargs.get("kind") == "interrupted_execution_replayable" and not fired["value"]:
+            fired["value"] = True
+            orch.cancel(run_arg.id)
+        return real_cas(run_arg, **kwargs)
+
+    store.save_with_event_if_unchanged = cancel_before_replay  # type: ignore[method-assign]
+    try:
+        result = orch.advance(run.id)
+    finally:
+        store.save_with_event_if_unchanged = real_cas  # type: ignore[method-assign]
+
+    fresh = store.load(run.id)
+    kinds = [event["kind"] for event in store.events(run.id)]
+    assert fired["value"]
+    assert result.state == RunState.CANCELLED
+    assert fresh is not None and fresh.state == RunState.CANCELLED
+    assert executed == []
+    assert "run_cancelled" in kinds
+    assert "interrupted_execution_replayable" not in kinds
+
+
+def test_completed_run_wins_if_it_linearizes_before_cancel_commit() -> None:
+    temp = tempfile.mkdtemp(prefix="kaliv-agent3-cancel-complete-race-")
+    store = AgentRunStore(os.path.join(temp, "agent3.db"))
+    run = AgentRun(TurnRequest("done", tools=True), route(), [], state=RunState.RUNNING)
+    store.save(run)
+    orch = Agent3Orchestrator(store=store, executor=lambda _step: None)
+    real_cas = store.save_with_event_if_unchanged
+    fired = {"value": False}
+
+    def complete_before_cancel_commit(run_arg, **kwargs):
+        if kwargs.get("kind") == "run_cancelled" and not fired["value"]:
+            fired["value"] = True
+            completed = orch.advance(run_arg.id)
+            assert completed.state == RunState.COMPLETED
+        return real_cas(run_arg, **kwargs)
+
+    store.save_with_event_if_unchanged = complete_before_cancel_commit  # type: ignore[method-assign]
+    try:
+        result = orch.cancel(run.id)
+    finally:
+        store.save_with_event_if_unchanged = real_cas  # type: ignore[method-assign]
+
+    fresh = store.load(run.id)
+    kinds = [event["kind"] for event in store.events(run.id)]
+    assert fired["value"]
+    assert result.state == RunState.COMPLETED
+    assert fresh is not None and fresh.state == RunState.COMPLETED
+    assert "run_completed" in kinds
+    assert "run_cancelled" not in kinds
 
 
 TESTS = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
