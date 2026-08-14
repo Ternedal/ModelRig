@@ -70,6 +70,7 @@ fun EqualizerBars(
     barCount: Int = 12,
     color: androidx.compose.ui.graphics.Color? = null,
     barHeight: androidx.compose.ui.unit.Dp? = null,
+    profile: List<Float>? = null,
 ) {
     val barColor = color ?: KalivTheme.colors.accent
     val h = barHeight ?: KalivTokens.Spacing.s6
@@ -93,7 +94,7 @@ fun EqualizerBars(
             Box(
                 Modifier
                     .width(3.dp)
-                    .height(h)
+                    .height(if (profile != null) h * profile[index % profile.size] else h)
                     .graphicsLayer { scaleY = scale }
                     .background(
                         barColor,

@@ -1932,6 +1932,21 @@ private fun ChatScreen(
                     },
                     properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
                 ) {
+                    // Pixel-feedback 14/08: Dialog-vinduet skal SELV fylde skaermen —
+                    // ellers staar overlayet som en svaevende boks med dim omkring
+                    // (indholdets fillMaxSize kan ikke straekke vinduet).
+                    val dialogWindow = (androidx.compose.ui.platform.LocalView.current.parent
+                        as? androidx.compose.ui.window.DialogWindowProvider)?.window
+                    androidx.compose.runtime.SideEffect {
+                        dialogWindow?.setLayout(
+                            android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                            android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                        )
+                        dialogWindow?.setBackgroundDrawable(
+                            android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT),
+                        )
+                        dialogWindow?.setDimAmount(0f)
+                    }
                     dk.ternedal.modelrig.ui.chat.VoiceOverlayContent(
                         modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
                         pillText = if (voiceUsesCloud && store.cloudKey != null) "Via cloud" else "Lokalt",

@@ -107,7 +107,13 @@ fun VoiceOverlayContent(
                 alpha = 0.9f,
             )
             Spacer(Modifier.height(41.dp))
-            EqualizerBars(barCount = 15, color = barsColor, barHeight = 54.dp)
+            EqualizerBars(
+                barCount = 15,
+                color = barsColor,
+                barHeight = 54.dp,
+                // Referencens eksakte boelgeform (bar-hoejder / 44px-max).
+                profile = listOf(0.20f, 0.34f, 0.55f, 0.77f, 1.00f, 0.73f, 0.45f, 0.30f, 0.59f, 0.91f, 0.68f, 0.41f, 0.25f, 0.50f, 0.32f),
+            )
             Spacer(Modifier.height(41.dp))
             Text(
                 stateText,
