@@ -179,34 +179,26 @@ private fun SetupScreen(
             .verticalScroll(rememberScrollState()),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "Kaliv",
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
-                fontSize = 28.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh,
-                letterSpacing = 2.sp,
+            dk.ternedal.modelrig.ui.chat.PairingHeader(
+                subtitle = "Vælg mindst én kilde for at starte",
+                modifier = Modifier.weight(1f),
             )
-            Spacer(Modifier.weight(1f))
             if (canChat) TextButton(onClick = onDone) { Text("Til chat →", color = KalivTheme.colors.signal) }
         }
-        Text("Vælg mindst én kilde", fontSize = 14.sp, color = KalivTheme.colors.textMuted)
+        Spacer(Modifier.height(22.dp))
+        RigCard(store, db) { refresh++; onDone() }
+        Spacer(Modifier.height(13.dp))
+        CloudCard(store, db) { refresh++; onDone() }
         if (store.hasRig) {
-            Spacer(Modifier.height(10.dp))
-            OutlinedButton(
-                onClick = onOpenControlCenter,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Åbn Control Center")
-            }
+            Spacer(Modifier.height(13.dp))
+            dk.ternedal.modelrig.ui.chat.KalivOutlineActionCard("Åbn Control Center", onOpenControlCenter)
             Text(
                 "Read-only drift, routing og freshness fra riggen.",
                 color = KalivTheme.colors.textMuted,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 6.dp, start = 4.dp),
             )
         }
-        Spacer(Modifier.height(16.dp))
-        CloudCard(store, db) { refresh++; onDone() }
-        Spacer(Modifier.height(16.dp))
-        RigCard(store, db) { refresh++; onDone() }
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -219,11 +211,34 @@ private fun CloudCard(store: TokenStore, db: ChatDb, onSaved: () -> Unit) {
     var configured by remember { mutableStateOf(store.hasCloud) }
     var msg by remember { mutableStateOf<String?>(null) }
 
-    Surface(color = KalivTheme.colors.surface, shape = RoundedCornerShape(14.dp)) {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-            Text("Ollama Cloud", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
-            Text("Chat uden at rig'en kører. Modeller i skyen.", fontSize = 12.sp, color = KalivTheme.colors.textMuted)
-            if (configured) { Spacer(Modifier.height(4.dp)); Text("✓ konfigureret", color = KalivTheme.colors.signal, fontSize = 13.sp) }
+    var expanded by remember { mutableStateOf(false) }
+    Surface(
+        color = KalivTheme.colors.surface,
+        shape = RoundedCornerShape(17.dp),
+        border = androidx.compose.foundation.BorderStroke(KalivTokens.Layout.hairline, KalivTheme.colors.hairline),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(18.dp)) {
+            // Kollapset som mockuppen: hoved m. status-sub; indholdet foldes ud.
+            Box(Modifier.clickable(onClickLabel = if (expanded) "Fold sammen" else "Fold ud") { expanded = !expanded }) {
+                dk.ternedal.modelrig.ui.chat.PairingCardHeader(
+                    icon = R.drawable.ic_kaliv_cloud,
+                    iconTint = KalivTheme.colors.textMuted,
+                    title = "Ollama Cloud",
+                    subtitle = if (configured) "${store.cloudModel} · ingen rig påkrævet"
+                               else "Chat uden rig · kræver API-nøgle",
+                    trailing = {
+                        Icon(
+                            painterResource(if (expanded) R.drawable.ic_kaliv_chevron_down else R.drawable.ic_kaliv_chevron_right),
+                            contentDescription = null,
+                            tint = KalivTheme.colors.faint,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
+                )
+            }
+            if (expanded) {
+            Spacer(Modifier.height(12.dp))
+            if (configured) { Text("✓ konfigureret", color = KalivTheme.colors.signal, fontSize = 13.sp); Spacer(Modifier.height(4.dp)) }
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = key, onValueChange = { key = it },
@@ -284,6 +299,7 @@ private fun CloudCard(store: TokenStore, db: ChatDb, onSaved: () -> Unit) {
                 }
             }
             msg?.let { Spacer(Modifier.height(6.dp)); Text(it, color = KalivTheme.colors.danger, fontSize = 12.sp) }
+            }
         }
     }
 }
@@ -314,10 +330,19 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
         }
     }
 
-    Surface(color = KalivTheme.colors.surface, shape = RoundedCornerShape(14.dp)) {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-            Text("Din rig (backend)", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
-            Text("Lokale modeller + RAG. Kræver at rig'en kører.", fontSize = 12.sp, color = KalivTheme.colors.textMuted)
+    Surface(
+        color = KalivTheme.colors.surface,
+        shape = RoundedCornerShape(17.dp),
+        border = androidx.compose.foundation.BorderStroke(2.dp, KalivTheme.colors.hairline),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(18.dp)) {
+            dk.ternedal.modelrig.ui.chat.PairingCardHeader(
+                icon = R.drawable.ic_kaliv_rig,
+                iconTint = KalivTheme.colors.accent,
+                title = "Din rig",
+                subtitle = "Lokale modeller + Viden (RAG)",
+                modifier = Modifier.padding(bottom = 14.dp),
+            )
             if (connected) {
                 Spacer(Modifier.height(4.dp))
                 when (reachable) {
@@ -346,12 +371,13 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
                 },
             )
             Spacer(Modifier.height(8.dp))
-            Field("Server-URL", baseUrl) { baseUrl = it }
-            Field("Parringskode (XXXX-XXXX)", code) { code = it }
-            Field("Enhedsnavn", deviceName) { deviceName = it }
-            Text("Serveren skal binde 0.0.0.0 / Tailscale-IP — ikke 127.0.0.1. Brug LAN-IP.",
-                color = KalivTheme.colors.textMuted, fontSize = 11.sp, lineHeight = 15.sp)
-            Spacer(Modifier.height(8.dp))
+            dk.ternedal.modelrig.ui.chat.PairingField("Server-URL", baseUrl, { baseUrl = it })
+            dk.ternedal.modelrig.ui.chat.PairingField(
+                "Parringskode", code, { code = it },
+                letterSpacingEm = 0.16f, placeholder = "XXXX-XXXX",
+            )
+            dk.ternedal.modelrig.ui.chat.PairingField("Enhedsnavn", deviceName, { deviceName = it })
+            dk.ternedal.modelrig.ui.chat.PairingBindNote()
             OutlinedTextField(
                 value = system, onValueChange = { system = it; store.rigSystem = it },
                 label = { Text("System-instruktion (valgfri)", fontSize = 12.sp) },
@@ -367,7 +393,9 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
                 // this on 2026-07-09: the button stayed disabled with an empty
                 // code, forcing an unnecessary re-pair.
                 val hasToken = store.token != null
-                Button(
+                dk.ternedal.modelrig.ui.components.KalivPrimaryButton(
+                    text = if (busy) "Forbinder\u2026" else "Forbind",
+                    modifier = Modifier.fillMaxWidth(),
                     enabled = !busy && baseUrl.isNotBlank() && (code.isNotBlank() || hasToken),
                     onClick = {
                         busy = true; msg = null
@@ -407,7 +435,7 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
                             }
                         }
                     },
-                ) { Text(if (busy) "Forbinder…" else "Forbind") }
+                )
                 if (connected) {
                     Spacer(Modifier.width(8.dp))
                     TextButton(
