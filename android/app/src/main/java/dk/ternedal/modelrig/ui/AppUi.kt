@@ -2373,46 +2373,20 @@ private fun ChatScreen(
                 // status skal kunne vises som separat card/state"), not a bare
                 // line of text. The card colour signals the state: an error is
                 // danger-tinted, an active turn is bronze.
-                if (recording || voiceBusy || voiceError != null) {
-                    val isError = voiceError != null && !recording && !voiceBusy
-                    val vt = when {
-                        recording -> "🎙  Optager… tryk igen for at sende"
-                        speaking && bargeInEnabled && hasMicPermission ->
-                            "🔊  Kaliv taler… ⏹ afbryder · mik %.0f (top %.0f, grænse %d)"
-                                .format(liveRms, peakRms, bargeInThreshold)
-                        speaking -> "🔊  Kaliv taler… tryk ⏹ for at afbryde"
-                        voiceBusy -> "🔊  Kaliv lytter og svarer… tryk ⏹ for at afbryde"
-                        else -> "Stemme-fejl: ${voiceError.orEmpty()}"
-                    }
-                    val accent = if (isError) KalivTheme.colors.danger else KalivTheme.colors.signal
-                    Surface(
-                        color = KalivTheme.colors.surfaceHigh,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp)
-                            .padding(bottom = 8.dp),
-                    ) {
-                        Row(
-                            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            // a small state dot in the accent colour
-                            Box(
-                                Modifier.size(8.dp)
-                                    .background(accent, RoundedCornerShape(4.dp)),
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Text(vt, color = accent, fontSize = 16.sp, lineHeight = 22.sp)
-                        }
-                    }
+                voiceError?.takeIf { !recording && !voiceBusy }?.let { err ->
+                    Text(
+                        "Stemme-fejl: $err",
+                        color = KalivTheme.colors.danger,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(horizontal = 14.dp).padding(bottom = 6.dp),
+                    )
                 }
                 modelError?.let {
                     Text(it, color = KalivTheme.colors.danger, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
                 }
                 if (wasInterrupted && !voiceBusy && !recording) {
                     Text(
-                        "✋ Du afbrød Kaliv — tryk 🎙 for at sige noget",
+                        "Du afbrød Kaliv — tryk på mikrofonen for at sige noget",
                         color = KalivTheme.colors.textMuted, fontSize = 12.sp,
                         modifier = Modifier.padding(bottom = 6.dp),
                     )
@@ -2431,23 +2405,27 @@ private fun ChatScreen(
                     micSlot = if (mode == "rig") ({
                         Box(
                             Modifier.size(37.dp).clickable(
-                                enabled = !busy || voiceBusy,
+                                // Stemme kraever riggen: ASR koerer rig-side, ogsaa
+                                // naar svaret gaar via cloud (voiceConverseStream
+                                // rammer altid store.baseUrl).
+                                enabled = (!busy || voiceBusy) && !rigOffline,
                                 onClickLabel = if (recording) "Stop optagelse" else "Optag tale",
                                 role = Role.Button,
                                 onClick = {
+                                    // Al stemmeinteraktion bor i skaerm 6-overlayet;
+                                    // mic-tap aabner det (og starter optagelsen naar
+                                    // mikrofonen er givet). Under en igangvaerende
+                                    // tur aabnes overlayet i Taenker/Taler-tilstand.
                                     voiceError = null
-                                    if (voiceBusy) {
-                                        stopVoiceTurn()
-                                    } else if (!hasMicPermission) {
-                                        micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                                    } else if (recording) {
-                                        recording = false
-                                        val wav = voiceCapture.stopToWav()
-                                        if (wav != null) runVoiceTurn(wav) else voiceError = "ingen lyd optaget"
-                                    } else {
-                                        wasInterrupted = false
-                                        try { voiceCapture.start(); recording = true }
-                                        catch (e: Exception) { voiceError = e.message ?: "kunne ikke optage" }
+                                    showVoice = true
+                                    if (!voiceBusy && !recording) {
+                                        if (hasMicPermission) {
+                                            wasInterrupted = false
+                                            try { voiceCapture.start(); recording = true }
+                                            catch (e: Exception) { voiceError = e.message ?: "kunne ikke optage" }
+                                        } else {
+                                            micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                        }
                                     }
                                 },
                             ),
@@ -2488,7 +2466,10 @@ private fun ChatScreen(
                             decorationBox = { inner ->
                                 if (input.isEmpty()) {
                                     Text(
-                                        "Skriv til Kaliv …",
+                                        // Skal spejle placeholder-param'en — den custom
+                                        // inputField forbigaar ChatComposers default
+                                        // (fund B fra Anders' screenshot 14/08).
+                                        if (rigOffline) "Afventer forbindelse til din rig …" else "Skriv til Kaliv …",
                                         style = TextStyle(fontFamily = KalivType.Inter, fontSize = 17.sp),
                                         color = KalivTheme.colors.faint,
                                     )
