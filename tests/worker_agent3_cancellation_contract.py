@@ -20,8 +20,12 @@ from app.agent3.cancellation_status import (
     termination_view,
 )
 from app.agent3.core import (
+    Agent3Orchestrator,
     AgentRun,
+    AgentRunStore,
     AgentStep,
+    CapabilitySnapshot,
+    ConfirmationError,
     RiskClass,
     RouteKind,
     RoutePlan,
@@ -145,6 +149,113 @@ def test_http_contract_is_attached_only_to_agent3_run_envelopes() -> None:
     assert agent3.json()["termination"]["schema"] == SCHEMA
     assert agent3.json()["termination"]["active_tool"]["can_request"] is False
     assert "termination" not in client.get("/ordinary").json()
+
+
+def _waiting_write_run(
+    orch: Agent3Orchestrator,
+    caps: CapabilitySnapshot,
+    label: str,
+) -> AgentRun:
+    return orch.start_with_steps(
+        TurnRequest(label, mode="rig", tools=True),
+        caps,
+        [AgentStep("write_once", {"label": label}, RiskClass.WRITE)],
+    )
+
+
+def test_cancel_wins_before_confirmation_approval_commit() -> None:
+    temp = tempfile.mkdtemp(prefix="kaliv-agent3-confirm-race-")
+    store = AgentRunStore(os.path.join(temp, "agent3.db"))
+    executed = []
+
+    def executor(step):
+        executed.append((step.tool, dict(step.args)))
+        return {"ok": True}
+
+    orch = Agent3Orchestrator(store=store, executor=executor, confirmation_ttl_seconds=30)
+    caps = CapabilitySnapshot(
+        rig_reachable=True,
+        worker_ready=True,
+        tools_ready=True,
+        cloud_ready=False,
+        rag_ready=False,
+    )
+    run = _waiting_write_run(orch, caps, "cancel-before-approval-commit")
+    assert run.state == RunState.WAITING_CONFIRMATION
+    step = run.steps[0]
+    real_cas = store.save_with_event_if_unchanged
+    fired = {"value": False}
+
+    def cancel_before_approval(run_arg, **kwargs):
+        if kwargs.get("kind") == "confirmation_approved" and not fired["value"]:
+            fired["value"] = True
+            orch.cancel(run_arg.id)
+        return real_cas(run_arg, **kwargs)
+
+    store.save_with_event_if_unchanged = cancel_before_approval  # type: ignore[method-assign]
+    try:
+        try:
+            orch.confirm(run.id, step.id, "approve", step.confirmation_digest)
+        except ConfirmationError:
+            blocked = True
+        else:
+            blocked = False
+    finally:
+        store.save_with_event_if_unchanged = real_cas  # type: ignore[method-assign]
+
+    fresh = store.load(run.id)
+    assert fired["value"]
+    assert blocked
+    assert fresh is not None and fresh.state == RunState.CANCELLED
+    assert executed == []
+    kinds = [event["kind"] for event in store.events(run.id)]
+    assert "run_cancelled" in kinds
+    assert "confirmation_approved" not in kinds
+
+
+def test_cancel_wins_before_execution_start() -> None:
+    temp = tempfile.mkdtemp(prefix="kaliv-agent3-step-start-race-")
+    store = AgentRunStore(os.path.join(temp, "agent3.db"))
+    executed = []
+
+    def executor(step):
+        executed.append((step.tool, dict(step.args)))
+        return {"ok": True}
+
+    orch = Agent3Orchestrator(store=store, executor=executor, confirmation_ttl_seconds=30)
+    caps = CapabilitySnapshot(
+        rig_reachable=True,
+        worker_ready=True,
+        tools_ready=True,
+        cloud_ready=False,
+        rag_ready=False,
+    )
+    run = _waiting_write_run(orch, caps, "cancel-before-step-start")
+    step = run.steps[0]
+    real_cas = store.save_with_event_if_unchanged
+    fired = {"value": False}
+
+    def cancel_before_step_started(run_arg, **kwargs):
+        if kwargs.get("kind") == "step_started" and not fired["value"]:
+            fired["value"] = True
+            orch.cancel(run_arg.id)
+        return real_cas(run_arg, **kwargs)
+
+    store.save_with_event_if_unchanged = cancel_before_step_started  # type: ignore[method-assign]
+    try:
+        result = orch.confirm(run.id, step.id, "approve", step.confirmation_digest)
+    finally:
+        store.save_with_event_if_unchanged = real_cas  # type: ignore[method-assign]
+
+    fresh = store.load(run.id)
+    assert fired["value"]
+    assert result.state == RunState.CANCELLED
+    assert fresh is not None and fresh.state == RunState.CANCELLED
+    assert executed == []
+    kinds = [event["kind"] for event in store.events(run.id)]
+    assert "confirmation_approved" in kinds
+    assert "run_cancelled" in kinds
+    assert "step_started" not in kinds
 
 
 TESTS = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
