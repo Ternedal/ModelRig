@@ -187,5 +187,24 @@ for answerer, label in cases:
     except OutcomeAnswerError:
         check(True, label)
 
+for duplicate_json, label in (
+    (
+        '{"answer":"safe","answer":"changed","limitations":[]}',
+        "duplicate top-level answer key fails closed",
+    ),
+    (
+        '{"answer":"ok","limitations":[],"limitations":["changed"]}',
+        "duplicate top-level limitations key fails closed",
+    ),
+):
+    async def duplicate_chat(_messages, _model, payload=duplicate_json):
+        return payload
+
+    try:
+        asyncio.run(TypedOutcomeAnswerer(chat_fn=duplicate_chat).preview(run))
+        check(False, label)
+    except OutcomeAnswerError:
+        check(True, label)
+
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)

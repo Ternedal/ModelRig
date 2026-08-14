@@ -33,6 +33,10 @@ class PlannerError(RuntimeError):
     pass
 
 
+class _DuplicateJsonKeyError(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class PlanProposal:
     calls: list[PlannedToolCall]
@@ -61,6 +65,16 @@ def _strip_code_fence(text: str) -> str:
     value = text.strip()
     match = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", value, flags=re.DOTALL | re.IGNORECASE)
     return match.group(1).strip() if match else value
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject ambiguous model-owned JSON at every object depth."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJsonKeyError("duplicate JSON key in planner output")
+        result[key] = value
+    return result
 
 
 def _clone_steps(run: AgentRun) -> list[AgentStep]:
@@ -149,8 +163,11 @@ class TypedPlanner:
             model,
         )
         try:
-            payload = json.loads(_strip_code_fence(raw))
-        except (json.JSONDecodeError, TypeError) as exc:
+            payload = json.loads(
+                _strip_code_fence(raw),
+                object_pairs_hook=_reject_duplicate_json_keys,
+            )
+        except (json.JSONDecodeError, TypeError, _DuplicateJsonKeyError) as exc:
             raise PlannerError("planner did not return valid JSON") from exc
         if not isinstance(payload, dict) or set(payload) - {"steps", "rationale"}:
             raise PlannerError("planner response has unsupported top-level fields")
