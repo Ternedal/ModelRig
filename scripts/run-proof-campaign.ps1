@@ -56,6 +56,7 @@ $out = Join-Path $root "validation\proof-campaign\$stamp-$($sha.Substring(0,12))
 $logs = Join-Path $out 'logs'; New-Item -ItemType Directory -Force $logs | Out-Null
 Write-Host "`nModelRig $version | $sha | $branch | planner=$PlannerModel" -ForegroundColor Green
 Run 'Stage A: samlet fysisk kampagne' { python scripts\proof_stage_a_current.py }
+Run 'T-006: ægte hard-process recovery og lease recovery' { python scripts\forced_recovery_test.py }
 Run 'Ryd runtime før workflow-bevis' { python scripts\stage_a_resume_cleanup.py }
 Run 'Start exact-head stack til workflows' { powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\start-stage-a-validation-stack.ps1 -PlannerModel $PlannerModel -ValidationReport validation\agent3-rig-validation-latest.json -BackendHost 127.0.0.1 -HeadlessWorker }
 $rates = @(); $workflowFailures = 0
@@ -107,11 +108,12 @@ if (-not $SkipT033) {
   }
 }
 $passed = $workflowPass -and $t23pass -and $t33pass
-$summary=@{schema='modelrig-proof-day/v1';generated_at=(Get-Date).ToUniversalTime().ToString('o');candidate=@{version=$version;sha=$sha;branch=$branch};planner=$PlannerModel;stage_a=$true;workflow=@{passed=$workflowPass;rounds=$WorkflowRounds;executions=$WorkflowRounds*14;mean=$mean};t023=$t23pass;t033=@{passed=$t33pass;pending_second_sid=$t33pending};passed=$passed;production_activation=$false}
+$summary=@{schema='modelrig-proof-day/v1';generated_at=(Get-Date).ToUniversalTime().ToString('o');candidate=@{version=$version;sha=$sha;branch=$branch};planner=$PlannerModel;stage_a=$true;forced_recovery=$true;workflow=@{passed=$workflowPass;rounds=$WorkflowRounds;executions=$WorkflowRounds*14;mean=$mean};t023=$t23pass;t033=@{passed=$t33pass;pending_second_sid=$t33pending};stage_b_release_lifecycle=@{included=$false;reason='requires exact candidate to exist as a published release and rig to start on previous release; never inferred from source-only run'};passed=$passed;production_activation=$false}
 $summary|ConvertTo-Json -Depth 8|Set-Content (Join-Path $out 'summary.json') -Encoding UTF8
 Write-Host "`n============================================================================" -ForegroundColor Cyan
 Write-Host "  RESULTAT: $(if($passed){'PASS'}else{'IKKE FULDT BEVIST ENDNU'})" -ForegroundColor $(if($passed){'Green'}else{'Yellow'})
 Write-Host "  Evidence: $out"
 Write-Host "  Workflow: $($WorkflowRounds*14) executioner, mean=$mean"
+Write-Host "  Stage B updater/reboot: separat release-bound gate; bliver aldrig fake-grøn her."
 Write-Host "============================================================================"
 if ($passed) { exit 0 }; if ($t33pending -and $workflowPass -and $t23pass) { exit 3 }; exit 1
