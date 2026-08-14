@@ -14,6 +14,14 @@ import dk.ternedal.modelrig.logic.StoredCredentialReader
 class TokenStore(context: Context) {
     private val prefs = context.getSharedPreferences("modelrig", Context.MODE_PRIVATE)
 
+    // ---- in-app-opdatering ----
+    var lastUpdateCheckAt: Long
+        get() = prefs.getLong("last_update_check_at", 0L)
+        set(v) { prefs.edit().putLong("last_update_check_at", v).apply() }
+    var dismissedUpdateVersion: String?
+        get() = prefs.getString("dismissed_update_version", null)
+        set(v) { prefs.edit().putString("dismissed_update_version", v).apply() }
+
     // ---- rig (backend) ----
     var baseUrl: String?
         get() = prefs.getString("base_url", null)

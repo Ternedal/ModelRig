@@ -824,6 +824,9 @@ private fun ChatScreen(
     var rigOnline by remember { mutableStateOf<Boolean?>(null) }
     var lastOnlineAt by remember { mutableStateOf<Long?>(null) }
     var pingBusy by remember { mutableStateOf(false) }
+    var availableUpdate by remember { mutableStateOf<String?>(null) }
+    var updDownloading by remember { mutableStateOf(false) }
+    var updProgress by remember { mutableStateOf(0) }
     var voiceTranscript by remember { mutableStateOf("") }
     LaunchedEffect(mode, store.hasRig) {
         while (true) {
@@ -838,6 +841,78 @@ private fun ChatScreen(
                 rigOnline = null
                 kotlinx.coroutines.delay(30_000)
             }
+        }
+    }
+    fun checkForUpdate(manual: Boolean) {
+        scope.launch {
+            val latest = withContext(Dispatchers.IO) { dk.ternedal.modelrig.net.UpdateChecker.latestVersion() }
+            val cur = dk.ternedal.modelrig.BuildConfig.VERSION_NAME
+            when {
+                latest == null -> if (manual) {
+                    android.widget.Toast.makeText(context, "Kunne ikke tjekke for opdatering", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                dk.ternedal.modelrig.net.UpdateChecker.isNewer(cur, latest) -> {
+                    if (manual || latest != store.dismissedUpdateVersion) {
+                        if (manual) store.dismissedUpdateVersion = null
+                        availableUpdate = latest
+                    }
+                }
+                else -> if (manual) {
+                    android.widget.Toast.makeText(context, "Du k\u00f8rer nyeste ($cur)", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+    fun startUpdateDownload() {
+        updDownloading = true; updProgress = 0
+        val dm = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+        val dest = java.io.File(context.getExternalFilesDir(null), "kaliv-latest.apk")
+        if (dest.exists()) dest.delete()
+        val req = android.app.DownloadManager.Request(android.net.Uri.parse(dk.ternedal.modelrig.net.UpdateChecker.APK_URL))
+            .setTitle("Kaliv-opdatering")
+            .setDestinationInExternalFilesDir(context, null, "kaliv-latest.apk")
+            .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE)
+        val id = dm.enqueue(req)
+        scope.launch {
+            var running = true
+            while (running) {
+                kotlinx.coroutines.delay(500)
+                val cur = dm.query(android.app.DownloadManager.Query().setFilterById(id))
+                if (cur == null || !cur.moveToFirst()) { running = false; updDownloading = false; cur?.close(); break }
+                val status = cur.getInt(cur.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS))
+                val done = cur.getLong(cur.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+                val total = cur.getLong(cur.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                cur.close()
+                if (total > 0) updProgress = ((done * 100) / total).toInt()
+                when (status) {
+                    android.app.DownloadManager.STATUS_SUCCESSFUL -> {
+                        running = false
+                        updDownloading = false
+                        val uri = androidx.core.content.FileProvider.getUriForFile(
+                            context, context.packageName + ".fileprovider", dest,
+                        )
+                        val i = Intent(Intent.ACTION_VIEW)
+                            .setDataAndType(uri, "application/vnd.android.package-archive")
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                        runCatching { context.startActivity(i) }
+                            .onFailure {
+                                android.widget.Toast.makeText(context, "Kunne ikke starte installationen", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                    }
+                    android.app.DownloadManager.STATUS_FAILED -> {
+                        running = false
+                        updDownloading = false
+                        android.widget.Toast.makeText(context, "Hentning fejlede \u2014 pr\u00f8v igen", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
+        val now = System.currentTimeMillis()
+        if (now - store.lastUpdateCheckAt > 12 * 3_600_000L) {
+            store.lastUpdateCheckAt = now
+            checkForUpdate(manual = false)
         }
     }
     // Model-list load failures used to be swallowed silently: "Genindlæs
@@ -1578,6 +1653,7 @@ private fun ChatScreen(
                                 },
                             )
                         }
+                        DropdownMenuItem(text = { Text("S\u00f8g efter opdatering") }, onClick = { overflow = false; checkForUpdate(manual = true) })
                         DropdownMenuItem(text = { Text("Kapaciteter") }, onClick = { overflow = false; showCapSheet = true })
                         DropdownMenuItem(text = { Text("Indstillinger") }, onClick = { overflow = false; onOpenSettings() })
                         HorizontalDivider(color = KalivTheme.colors.hairline)
@@ -1945,6 +2021,20 @@ private fun ChatScreen(
                     }
                 },
                 onSwitchCloud = { mode = "cloud"; store.chatMode = "cloud"; ragMode = false },
+                modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
+            )
+        }
+        availableUpdate?.let { v ->
+            dk.ternedal.modelrig.ui.chat.UpdateCard(
+                newVersion = v,
+                currentVersion = dk.ternedal.modelrig.BuildConfig.VERSION_NAME,
+                downloading = updDownloading,
+                progressPct = updProgress,
+                onInstall = { startUpdateDownload() },
+                onLater = {
+                    store.dismissedUpdateVersion = v
+                    availableUpdate = null
+                },
                 modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
             )
         }
