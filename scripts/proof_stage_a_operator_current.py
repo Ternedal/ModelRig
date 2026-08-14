@@ -4,6 +4,7 @@
 This is deliberately only a version/branch shim. The retained operator owns all
 freeze, evidence, browser and promotion semantics unchanged.
 """
+# ruff: noqa: F821 -- main() is defined by the retained operator through exec().
 from __future__ import annotations
 import subprocess
 from pathlib import Path
