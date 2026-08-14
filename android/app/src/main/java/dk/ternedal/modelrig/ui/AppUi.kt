@@ -76,6 +76,7 @@ import dk.ternedal.modelrig.ui.chat.ModelRowUi
 import dk.ternedal.modelrig.ui.chat.paramsLabelFor
 import dk.ternedal.modelrig.ui.chat.CapabilitiesSheet
 import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.graphicsLayer
 
 private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, Audit, ControlCenter, CloudPicker, VoiceCloudPicker }
 
@@ -818,7 +819,27 @@ private fun ChatScreen(
     val playbackStop = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     var speaking by remember { mutableStateOf(false) }
     var showVoice by remember { mutableStateOf(false) }
+    // Skaerm 13: rig-liveness. null = ukendt endnu; loekken auto-retry'er
+    // (hurtigere naar offline) og driver banner, sheet-prik og composer.
+    var rigOnline by remember { mutableStateOf<Boolean?>(null) }
+    var lastOnlineAt by remember { mutableStateOf<Long?>(null) }
+    var pingBusy by remember { mutableStateOf(false) }
     var voiceTranscript by remember { mutableStateOf("") }
+    LaunchedEffect(mode, store.hasRig) {
+        while (true) {
+            if (mode == "rig" && store.hasRig) {
+                val ok = withContext(Dispatchers.IO) {
+                    runCatching { ModelRigClient(store.baseUrl ?: "", store.token).ping() }.getOrDefault(false)
+                }
+                rigOnline = ok
+                if (ok) lastOnlineAt = System.currentTimeMillis()
+                kotlinx.coroutines.delay(if (ok) 30_000 else 12_000)
+            } else {
+                rigOnline = null
+                kotlinx.coroutines.delay(30_000)
+            }
+        }
+    }
     // Model-list load failures used to be swallowed silently: "Genindlæs
     // modeller" looked dead when the rig was unreachable. Surface the reason.
     var modelError by remember { mutableStateOf<String?>(null) }
@@ -1723,8 +1744,13 @@ private fun ChatScreen(
                 val host = store.baseUrl?.removePrefix("https://")?.removePrefix("http://")?.trimEnd('/')
                 SourceModelSheet(
                     rigSelected = mode == "rig",
-                    rigStatus = host?.let { "Forbundet \u00b7 $it" } ?: "Ikke parret",
-                    rigConnected = store.hasRig,
+                    rigStatus = when {
+                        host == null -> "Ikke parret"
+                        rigOnline == true -> "Forbundet \u00b7 $host"
+                        rigOnline == false -> "Svarer ikke \u00b7 $host"
+                        else -> "Parret \u00b7 $host"
+                    },
+                    rigConnected = rigOnline ?: store.hasRig,
                     cloudAvailable = hasCloud,
                     cloudStatus = if (hasCloud) "$cloudModel \u00b7 forlader enheden" else "Ingen n\u00f8gle",
                     models = models.map {
@@ -1899,6 +1925,29 @@ private fun ChatScreen(
             }
         }
 
+        val rigOffline = mode == "rig" && store.hasRig && rigOnline == false
+        if (rigOffline) {
+            dk.ternedal.modelrig.ui.chat.RigOfflineBanner(
+                lastSeenLabel = lastOnlineAt?.let {
+                    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it))
+                },
+                showCloudSwitch = hasCloud,
+                retryBusy = pingBusy,
+                onRetry = {
+                    pingBusy = true
+                    scope.launch {
+                        val ok = withContext(Dispatchers.IO) {
+                            runCatching { ModelRigClient(store.baseUrl ?: "", store.token).ping() }.getOrDefault(false)
+                        }
+                        rigOnline = ok
+                        if (ok) lastOnlineAt = System.currentTimeMillis()
+                        pingBusy = false
+                    }
+                },
+                onSwitchCloud = { mode = "cloud"; store.chatMode = "cloud"; ragMode = false },
+                modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
+            )
+        }
         // messages
         if (messages.isEmpty()) {
             Column(
@@ -1920,7 +1969,8 @@ private fun ChatScreen(
         } else {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+                modifier = Modifier.weight(1f).fillMaxWidth()
+                    .graphicsLayer { alpha = if (rigOffline) 0.45f else 1f },
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
             ) {
                 itemsIndexed(messages) { i, m ->
@@ -2255,7 +2305,7 @@ private fun ChatScreen(
                 val canSendNow = input.isNotBlank() || pendingImageB64 != null
                 ChatComposer(
                     text = input,
-                    placeholder = "Skriv til Kaliv …",
+                    placeholder = if (rigOffline) "Afventer forbindelse til din rig …" else "Skriv til Kaliv …",
                     onAttach = if (mode != "rig" || !ragMode) ({
                         if (!busy) {
                             pendingImageError = null
@@ -2304,7 +2354,7 @@ private fun ChatScreen(
                         }
                     }) else null,
                     onSend = onSend,
-                    sendEnabled = canSendNow && !busy,
+                    sendEnabled = canSendNow && !busy && !rigOffline,
                     busy = busy,
                     onStop = { activeCall?.cancel() },
                     inputField = {
