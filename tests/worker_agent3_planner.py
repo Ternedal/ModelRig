@@ -158,6 +158,27 @@ except PlannerError:
     malformed = True
 check(malformed, "malformed planner output is rejected")
 
+for duplicate_json, name in (
+    (
+        '{"steps":[],"steps":[{"tool":"rig_status","args":{}}]}',
+        "duplicate top-level planner key is rejected",
+    ),
+    (
+        '{"steps":[{"tool":"rig_status","tool":"note_append","args":{}}]}',
+        "duplicate step planner key is rejected",
+    ),
+    (
+        '{"steps":[{"tool":"note_append","args":{"text":"safe","text":"changed"}}]}',
+        "duplicate nested planner arg key is rejected",
+    ),
+):
+    try:
+        asyncio.run(response(duplicate_json))
+        duplicate_blocked = False
+    except PlannerError:
+        duplicate_blocked = True
+    check(duplicate_blocked, name)
+
 unknown = asyncio.run(response('{"steps":[{"tool":"shell","args":{"cmd":"whoami"}}]}'))
 route = StrictTurnRouter().route(
     TurnRequest("x", mode="rig", tools=True),
