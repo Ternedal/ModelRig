@@ -817,6 +817,8 @@ private fun ChatScreen(
     var voiceJob by remember { mutableStateOf<Job?>(null) }
     val playbackStop = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     var speaking by remember { mutableStateOf(false) }
+    var showVoice by remember { mutableStateOf(false) }
+    var voiceTranscript by remember { mutableStateOf("") }
     // Model-list load failures used to be swallowed silently: "Genindlæs
     // modeller" looked dead when the rig was unreachable. Surface the reason.
     var modelError by remember { mutableStateOf<String?>(null) }
@@ -955,6 +957,7 @@ private fun ChatScreen(
                             if (tt.isNotEmpty() && !transcriptShown) {
                                 transcriptShown = true
                                 transcriptText = tt
+                                voiceTranscript = tt
                                 // messages is a SnapshotStateList -- safe to mutate
                                 // from this IO thread; the recomposer picks it up.
                                 // Set replyIdx synchronously (the callbacks run in
@@ -1792,8 +1795,73 @@ private fun ChatScreen(
                         voiceUsesCloud = on
                         store.voiceUsesCloud = on
                     },
+                    onOpenVoice = {
+                        showCapSheet = false
+                        showVoice = true
+                        voiceError = null
+                        if (!recording && !voiceBusy) {
+                            if (hasMicPermission) {
+                                try { voiceCapture.start(); recording = true }
+                                catch (e: Exception) { voiceError = "Optagelse fejlede: ${e.message}" }
+                            } else {
+                                micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                            }
+                        }
+                    },
                     onDismiss = { showCapSheet = false },
                 )
+            }
+            if (showVoice) {
+                androidx.compose.ui.window.Dialog(
+                    onDismissRequest = {
+                        if (recording) { runCatching { voiceCapture.stopToWav() } }
+                        recording = false
+                        stopVoiceTurn()
+                        showVoice = false
+                    },
+                    properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+                ) {
+                    dk.ternedal.modelrig.ui.chat.VoiceOverlayContent(
+                        pillText = if (voiceUsesCloud && store.cloudKey != null) "Via cloud" else "Lokalt",
+                        pillDot = if (voiceUsesCloud && store.cloudKey != null) KalivTheme.colors.signal else KalivTheme.colors.success,
+                        stateText = when {
+                            recording -> "Lytter \u2026"
+                            voiceBusy && !speaking -> "T\u00e6nker \u2026"
+                            speaking -> "Taler \u2026"
+                            else -> "Klar"
+                        },
+                        transcript = voiceTranscript,
+                        buttonLabel = when {
+                            recording -> "Tryk for at sende"
+                            voiceBusy || speaking -> "Tryk for at afbryde"
+                            else -> "Tryk for at tale"
+                        },
+                        onMainTap = {
+                            when {
+                                recording -> {
+                                    recording = false
+                                    val wav = voiceCapture.stopToWav()
+                                    if (wav != null) runVoiceTurn(wav) else voiceError = "ingen lyd optaget"
+                                }
+                                voiceBusy || speaking -> stopVoiceTurn()
+                                else -> {
+                                    voiceTranscript = ""
+                                    if (hasMicPermission) {
+                                        try { voiceCapture.start(); recording = true }
+                                        catch (e: Exception) { voiceError = "Optagelse fejlede: ${e.message}" }
+                                    } else {
+                                        micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                    }
+                                }
+                            }
+                        },
+                        onClose = {
+                            if (recording) { runCatching { voiceCapture.stopToWav() }; recording = false }
+                            stopVoiceTurn()
+                            showVoice = false
+                        },
+                    )
+                }
             }
 
             // Persistent routing strip: always shows, at a glance, WHICH model

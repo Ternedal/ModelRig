@@ -68,10 +68,14 @@ fun StreamingCursor(modifier: Modifier = Modifier) {
 fun EqualizerBars(
     modifier: Modifier = Modifier,
     barCount: Int = 12,
+    color: androidx.compose.ui.graphics.Color? = null,
+    barHeight: androidx.compose.ui.unit.Dp? = null,
 ) {
+    val barColor = color ?: KalivTheme.colors.accent
+    val h = barHeight ?: KalivTokens.Spacing.s6
     val transition = rememberInfiniteTransition(label = "equalizer")
     Row(
-        modifier = modifier.height(KalivTokens.Spacing.s6),
+        modifier = modifier.height(h),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -89,10 +93,10 @@ fun EqualizerBars(
             Box(
                 Modifier
                     .width(3.dp)
-                    .height(KalivTokens.Spacing.s6)
+                    .height(h)
                     .graphicsLayer { scaleY = scale }
                     .background(
-                        KalivTheme.colors.accent,
+                        barColor,
                         RoundedCornerShape(KalivTokens.Radius.round),
                     ),
             )
