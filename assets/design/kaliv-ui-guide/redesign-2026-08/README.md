@@ -1,7 +1,7 @@
 # Handoff: Kaliv Android App — designoverhaling
 
 ## Overview
-Komplet visuel og strukturel overhaling af Kaliv (Android-appen i ModelRig-repoet, `android/app`): 26 mobilskærme i mørkt + lyst tema. Kernen er to UX-greb: (1) kilde-skift lokal/cloud samlet i ét ark bag en model-chip, (2) RAG/værktøjer/agent samlet i ét "Kapaciteter"-ark. Dertil skærme for hele produktfladen: chat, samtaler, Viden, modeller, Handlingslog, Agent 3, Agent 4, stemme, onboarding m.fl.
+Komplet visuel og strukturel overhaling af Kaliv (Android-appen i ModelRig-repoet, `android/app`): 27 mobilskærme i mørkt + lyst tema. Kernen er to UX-greb: (1) kilde-skift lokal/cloud samlet i ét ark bag en model-chip, (2) RAG/værktøjer/agent samlet i ét "Kapaciteter"-ark. Dertil skærme for hele produktfladen: chat, samtaler, Viden, modeller, Handlingslog, Agent 3, Agent 4, stemme, onboarding m.fl.
 
 ## About the Design Files
 Filerne i denne pakke er **designreferencer bygget i HTML** (`Kaliv Redesign.dc.html` + `assets/ankh_gold.png` + kontaktark-PNG'er). De er prototyper der viser tilsigtet udseende og adfærd — ikke produktionskode. Opgaven er at **genskabe designet i den eksisterende Kotlin/Jetpack Compose-app** (`android/app/src/main/java/dk/ternedal/modelrig/ui/`, Material 3, dark-first) med appens etablerede mønstre: Compose `ModalBottomSheet`, `LazyColumn`, eksisterende ViewModels og API-klienter.
@@ -10,8 +10,7 @@ Filerne i denne pakke er **designreferencer bygget i HTML** (`Kaliv Redesign.dc.
 **High-fidelity.** Farver, typografi, spacing, radier og copy er endelige og skal genskabes præcist med værdierne nedenfor. Skærme mærket **"designforslag"** i mockup-filens billedtekster har ingen API-flade endnu — implementér dem kun efter separat beslutning.
 
 ## Kilde-sandhed i repoet
-- Autoritative tokens: `assets/design/kaliv-ui-guide/kaliv-ui-tokens.json` (skema v2; eneste komplette tokenautoritet)
-- CSS-farvemirror: `assets/design/kaliv-ui-guide/kaliv-ui-tokens.css` (web/design-reference; må ikke divergere fra JSON-farverne)
+- Tokens: `assets/design/kaliv-ui-guide/kaliv-ui-tokens.json` (+ `.css`)
 - Target-mockup (desktop): `assets/design/kaliv-ui-guide/Kaliv_UI_Target_Mockup.png`
 - Mærke: `android/app/src/main/res/drawable-nodpi/ic_launcher_monochrome.png` (ankh — genfarves til guld, se Assets)
 - API: `backend/internal/httpapi/server.go` · Agent 3: `AGENT3_READ_REVIEW.md`, `AGENT3_CANCELLATION_CONTRACT.md` · Agent 4: `docs/AGENT_4_A4_10_OPERATOR_READ.md` · KalivDev: `devcontrol/`
@@ -28,12 +27,12 @@ Filerne i denne pakke er **designreferencer bygget i HTML** (`Kaliv Redesign.dc.
 | userBubble | #211D18, kant #2F2A24 |
 | hairline | #2A2521 · #2A2119 · listedeler #1C1611 |
 | tekst primær | #F3EFE6 · #E9DFCA · brød #EEE6D8 |
-| tekst sekundær | #A89D90 · svag **#8A8073** · caps **#857A6C** |
+| tekst sekundær | #A89D90 · svag #776D62 · svagest #6A6156 |
 | **guld fyld** (primærknap, aktiv toggle, valgt kant, KALIV-capslinje) | **#B08A3E** |
 | **guld accent** (tekst/ikon, links) | **#D4AB52** |
 | guld tint-bg (badges) | rgba(212,171,82,.16) |
 | status ok | #77836D · advarsel #A08050 · destruktiv #C96B5D |
-| tekst på guld fyld | **#2B1C05** |
+| tekst på guld fyld | #F6EFE2 |
 
 ### Farver — lyst tema
 | Rolle | Værdi |
@@ -42,21 +41,21 @@ Filerne i denne pakke er **designreferencer bygget i HTML** (`Kaliv Redesign.dc.
 | surface | #FFFDF9 · surfaceDim #F1EADC/#EFE8DB · elevated #EDE5D8 |
 | userBubble | #EDE5D8, kant #DCD2C2 |
 | hairline | #D7C9B4 · deler #E3DACB |
-| tekst primær | #231E19 · sekundær **#6F665C** · svag **#776D62** |
-| guld fyld | #B08A3E (samme som mørk) · guld accent-tekst **#7E621C** |
+| tekst primær | #231E19 · sekundær #776D62 · svag #9A9084 |
+| guld fyld | #B08A3E (samme som mørk) · guld accent-tekst **#9C7A28** |
 | status ok #5F6B52 · advarsel #957620 · destruktiv #A8503F |
 | toggle-knop | #FFFDF9 i begge temaer |
 
 ### Typografi
 - **EB Garamond** (Google Fonts) weight 500: wordmark (caps, tracking .22em; splash .42em) og skærmtitler 21px (sheets 19–20px), tracking .01em
-- **Inter** alt andet: brød 13.5px/1.6 · rækketitel 600 13–13.5px · sekundær 11–11.5px · sub 10.5px · caps-labels 700 9.5px tracking .18em farve #857A6C i mørkt tema
+- **Inter** alt andet: brød 13.5px/1.6 · rækketitel 600 13–13.5px · sekundær 11–11.5px · sub 10.5px · caps-labels 700 9.5px tracking .18em farve #6A6156
 - Assistent-svar: **flad tekst på canvas** (ingen boks), KALIV-capslinje 700 10px tracking .2em i #B08A3E ovenover + tid i svag
 - Minimum interaktiv højde 44dp-ækvivalent (mockup bruger 322px-bredde ~ 393dp reference)
 
 ### Form
 - Radier: kort/rækker 12 · popovers 13 · komposer 16 · bottom-sheets 18 18 0 0 · brugerboble 14 14 5 14 · chips/piller 999
 - Kontakter: 42×24, spor guld-fyld (til) / elevated (fra), knop 20px hvid
-- Primærknap: fyldt #B08A3E, tekst **#2B1C05**, radius 12–14. Sekundær: transparent + hairline-kant. Ingen gradients, ingen glød, ingen skygger på statusdots.
+- Primærknap: fyldt #B08A3E, tekst #F6EFE2, radius 12–14. Sekundær: transparent + hairline-kant. Ingen gradients, ingen glød, ingen skygger på statusdots.
 - Bezel/mockup-ramme er kun til præsentation — implementeres ikke.
 
 ## Screens (struktur + nøglekomponenter)
@@ -87,6 +86,8 @@ Alle skærme findes i begge temaer i `Kaliv Redesign.dc.html`; rækkefølgen her
 23. **KalivDev · pipeline** (designforslag som mobilflade; kontrakter i `devcontrol/`) — task-kort m. REVIEW-badge; lodret evidenskæde: Task-kontrakt → Tier A → Semantisk review (aktiv) → Draft-PR → Publisher (todo m. connector-linjer); bundnote "Merge kræver altid dig."
 24. **KalivDev · review** — verdiktliste pr. acceptkriterium (ok/afventer/mangler), EVIDENS-kort (Tier A-kvittering, workspace-snapshot, Ed25519-signatur), knapper Godkend verdikt (guld) / Afvis med begrundelse.
 25. **Agent 3 · read-checkpoint** (fra `AGENT3_READ_REVIEW.md`; API `/experimental/agent3/*`) — run pauser efter hvert read: udført read m. resultatkort, pending read-window, "KAN FJERNES"-badges på removable reads, låst write-tail (hængelås, "kræver separat bekræftelse"), knapper "Fortsæt (ét read)" (guld) / "Replan-preview", note "Fortsætter aldrig automatisk", "Stop plan" destruktiv. Stop = plan-scope (cancellation-kontrakt).
+27. **Scheduler** (API: `/schedules` — preview/create/renew m. godkendelses-token pr. enhed, `/enabled`, `/status`; worker `schedule_api.py`) — skjold-note "Oprettelse og fornyelse kræver din godkendelse — hver gang." Fornyelseskort øverst (surfaceDim): UDLØBER-badge (advarselsfarve), aftale-detaljer + kvitteringslinje "Godkendt fra denne enhed · 2/8 14:02", knapper "Forny (preview)" (guld) / "Lad udløbe". Aftalekort: ur-ikonbrik, titel, `tool · cadence · tidszone`, "Næste: …" (guld ved aktiv), kontakt til/fra; pause-kort viser "fornyelse bevarer pausen"; meta-række Kørsler x af y / Udløber. Maks 1 banner + 2-3 kort synlige — listen scroller. "Ny planlagt kørsel (preview)"-række. Bundkort: runtime-status (kører · aktive · ticks · overlap afvist).
+
 26. **Agent 4 · kampagner** (fra `A4-10 operator read`; API `/experimental/agent4/operator/*`) — read-only, nyeste først: kampagnekort m. statusbadge KØRER (guld tint)/I KØ (elevated)/FEJLET (destruktiv tint), sub-linje (lease/retry), meta-række Timeline/Evidens/Forsøg; bundkort: timeline-hash (monospace) + "Efter genstart: Intet antages kørende."
 
 ## Interactions & Behavior
@@ -113,9 +114,9 @@ Alle skærme findes i begge temaer i `Kaliv Redesign.dc.html`; rækkefølgen her
 - Fonts: EB Garamond + Inter fra Google Fonts (bundl som ressourcer).
 
 ## Kendte huller (reelle features uden skærm endnu)
-Schedules (`/schedules` preview/approve/renew) · Enheder (`/devices` + revoke, token-rotation) · RAG-kilde-sletning.
+Enheder (`/devices` + revoke, token-rotation) · RAG-kilde-sletning.
 
 ## Files
-- `Kaliv Redesign.dc.html` — alle 26 skærme × 2 temaer (åbn i browser; mørk sektion øverst, lys nederst)
+- `Kaliv Redesign.dc.html` — alle 27 skærme × 2 temaer (åbn i browser; mørk sektion øverst, lys nederst)
 - `kaliv-dark.png` / `kaliv-light.png` — kontaktark
 - `assets/ankh_gold.png` — guld ankh
