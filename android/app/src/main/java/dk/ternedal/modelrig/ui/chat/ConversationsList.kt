@@ -54,10 +54,11 @@ data class ConvRowUi(
 @Composable
 fun ConversationsTopBar(
     onBack: () -> Unit,
-    onNew: () -> Unit,
+    onNew: (() -> Unit)? = null,
     menuContent: (@Composable () -> Unit)? = null,
     onMenu: (() -> Unit)? = null,
     title: String = "Samtaler",
+    menuIcon: Int = R.drawable.ic_kaliv_more_vert,
 ) {
     Row(
         Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 2.dp, bottom = 12.dp),
@@ -78,7 +79,7 @@ fun ConversationsTopBar(
             Box {
                 IconButton(onClick = onMenu) {
                     Icon(
-                        painterResource(R.drawable.ic_kaliv_more_vert),
+                        painterResource(menuIcon),
                         contentDescription = "Mere",
                         tint = KalivTheme.colors.textMuted,
                         modifier = Modifier.size(22.dp),
@@ -87,13 +88,15 @@ fun ConversationsTopBar(
                 menuContent?.invoke()
             }
         }
-        IconButton(onClick = onNew) {
-            Icon(
-                painterResource(R.drawable.ic_kaliv_plus),
-                contentDescription = "Ny samtale",
-                tint = KalivTheme.colors.accent,
-                modifier = Modifier.size(24.dp),
-            )
+        if (onNew != null) {
+            IconButton(onClick = onNew) {
+                Icon(
+                    painterResource(R.drawable.ic_kaliv_plus),
+                    contentDescription = "Ny samtale",
+                    tint = KalivTheme.colors.accent,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
         }
     }
 }

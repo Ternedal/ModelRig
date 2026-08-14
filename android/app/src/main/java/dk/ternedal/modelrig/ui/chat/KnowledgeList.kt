@@ -58,7 +58,10 @@ fun knowledgeBadgeFor(name: String): String {
 }
 
 @Composable
-fun KnowledgeIntroNote(modifier: Modifier = Modifier) {
+fun KnowledgeIntroNote(
+    modifier: Modifier = Modifier,
+    text: String = "Dokumenter Kaliv kan sl\u00e5 op i. Alt indekseres og bliver p\u00e5 din rig.",
+) {
     Row(modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.Top) {
         Icon(
             painterResource(R.drawable.ic_kaliv_shield),
@@ -68,7 +71,7 @@ fun KnowledgeIntroNote(modifier: Modifier = Modifier) {
         )
         Spacer(Modifier.width(9.dp))
         Text(
-            "Dokumenter Kaliv kan sl\u00e5 op i. Alt indekseres og bliver p\u00e5 din rig.",
+            text,
             style = TextStyle(fontFamily = KalivType.Inter, fontSize = 14.sp, lineHeight = 20.sp),
             color = KalivTheme.colors.textMuted,
         )

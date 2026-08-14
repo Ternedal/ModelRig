@@ -77,7 +77,7 @@ import dk.ternedal.modelrig.ui.chat.paramsLabelFor
 import dk.ternedal.modelrig.ui.chat.CapabilitiesSheet
 import androidx.compose.foundation.border
 
-private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, ControlCenter, CloudPicker, VoiceCloudPicker }
+private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, Audit, ControlCenter, CloudPicker, VoiceCloudPicker }
 
 @Composable
 fun AppUi() {
@@ -117,6 +117,7 @@ fun AppUi() {
                     onOpenConversations = { screen = Screen.Convos },
                     onOpenModels = { screen = Screen.Models },
                     onOpenKnowledge = { screen = Screen.Knowledge },
+                    onOpenAudit = { screen = Screen.Audit },
                     onOpenSchedules = { screen = Screen.Schedules },
                     onOpenCloudPicker = { screen = Screen.CloudPicker },
                     onOpenVoiceCloudPicker = { screen = Screen.VoiceCloudPicker },
@@ -132,6 +133,7 @@ fun AppUi() {
                 )
                 Screen.Models -> ModelsScreen(store, onBack = { screen = Screen.Chat })
                 Screen.Knowledge -> KnowledgeScreen(store, onBack = { screen = Screen.Chat })
+                Screen.Audit -> AuditScreen(store, onBack = { screen = Screen.Chat })
                 Screen.Schedules -> ScheduleScreen(store = store, onClose = { screen = Screen.Chat })
                 Screen.ControlCenter -> ControlCenterScreen(
                     store = store,
@@ -714,6 +716,7 @@ private fun ChatScreen(
     onOpenConversations: () -> Unit,
     onOpenModels: () -> Unit,
     onOpenKnowledge: () -> Unit,
+    onOpenAudit: () -> Unit,
     onOpenSchedules: () -> Unit,
     onOpenCloudPicker: () -> Unit,
     onOpenVoiceCloudPicker: () -> Unit,
@@ -814,9 +817,6 @@ private fun ChatScreen(
     var toolBusy by remember { mutableStateOf(false) }
     // Audit log viewer. An append-only log nobody can read is only half a
     // safeguard: the point is to SEE what was proposed, approved and refused.
-    var showAudit by remember { mutableStateOf(false) }
-    var auditRows by remember { mutableStateOf<List<dk.ternedal.modelrig.net.AuditEntry>>(emptyList()) }
-    var auditError by remember { mutableStateOf<String?>(null) }
     // Rig-side tool control. The kill switch used to be an env var only, so
     // stopping a misbehaving tool meant restarting the worker. Now it is a tap.
     var showToolCtl by remember { mutableStateOf(false) }
@@ -1104,7 +1104,6 @@ private fun ChatScreen(
         // wrong context -- the confirmation_id still points at the old thread.
         // The rig would happily execute it: it parked the arguments, not the UI.
         pendingTool = null
-        showAudit = false
         showToolCtl = false
         convId = openConvId
         if (openConvId != null) {
@@ -1507,20 +1506,7 @@ private fun ChatScreen(
                         )
                         DropdownMenuItem(
                             text = { Text("\ud83d\udcdc Handlingslog", color = KalivTheme.colors.textMuted, fontSize = 13.sp) },
-                            onClick = {
-                                overflow = false
-                                auditError = null
-                                showAudit = true
-                                scope.launch {
-                                    val r = withContext(Dispatchers.IO) {
-                                        runCatching {
-                                            ModelRigClient(store.baseUrl ?: "", store.token).toolsAudit(50)
-                                        }
-                                    }
-                                    auditRows = r.getOrDefault(emptyList())
-                                    auditError = r.exceptionOrNull()?.let { friendlyError(it) }
-                                }
-                            },
+                            onClick = { overflow = false; onOpenAudit() },
                         )
                         if (bargeInEnabled) {
                             DropdownMenuItem(
@@ -2005,55 +1991,6 @@ private fun ChatScreen(
                                             )
                                         }
                                     }
-                                }
-                            }
-                        },
-                        containerColor = KalivTheme.colors.surfaceHigh,
-                    )
-                }
-
-                if (showAudit) {
-                    AlertDialog(
-                        onDismissRequest = { showAudit = false },
-                        confirmButton = {
-                            TextButton(onClick = { showAudit = false }) {
-                                Text("Luk", color = KalivTheme.colors.signal)
-                            }
-                        },
-                        title = { Text("Handlingslog", color = KalivTheme.colors.textHigh, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif) },
-                        text = {
-                            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                                auditError?.let {
-                                    Text(it, color = KalivTheme.colors.danger, fontSize = 13.sp)
-                                }
-                                if (auditError == null && auditRows.isEmpty()) {
-                                    Text("Ingen handlinger registreret endnu.", color = KalivTheme.colors.textMuted, fontSize = 13.sp)
-                                }
-                                auditRows.forEach { e ->
-                                    // Colour by outcome: a refusal or a failure should
-                                    // catch the eye, an ordinary success should not.
-                                    val c = when (e.outcome) {
-                                        "executed" -> KalivTheme.colors.success
-                                        "denied", "expired", "blocked" -> KalivTheme.colors.amber
-                                        "error" -> KalivTheme.colors.danger
-                                        else -> KalivTheme.colors.textMuted
-                                    }
-                                    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                                        Row {
-                                            Text(e.outcome.uppercase(), color = c, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                            Spacer(Modifier.width(6.dp))
-                                            Text(e.tool, color = KalivTheme.colors.textHigh, fontSize = 12.sp)
-                                            if (e.origin == "cloud") {
-                                                Spacer(Modifier.width(6.dp))
-                                                Text("☁", fontSize = 12.sp)
-                                            }
-                                        }
-                                        Text(
-                                            "${e.ts} · ${e.risk}" + if (e.summary.isNotBlank()) " · ${e.summary.take(80)}" else "",
-                                            color = KalivTheme.colors.textMuted, fontSize = 11.sp, lineHeight = 15.sp,
-                                        )
-                                    }
-                                    HorizontalDivider(color = KalivTheme.colors.hairline)
                                 }
                             }
                         },
@@ -2749,6 +2686,127 @@ private fun KnowledgeScreen(store: TokenStore, onBack: () -> Unit) {
     }
 }
 
+
+@Composable
+private fun AuditScreen(store: TokenStore, onBack: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var rows by remember { mutableStateOf<List<dk.ternedal.modelrig.net.AuditEntry>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    var filter by remember { mutableStateOf<String?>(null) }  // null = alle
+    var filterMenu by remember { mutableStateOf(false) }
+
+    fun refresh() {
+        loading = true; error = null
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).toolsAudit(100) }
+            }
+            rows = r.getOrDefault(emptyList())
+            error = r.exceptionOrNull()?.let { friendlyError(it) }
+            loading = false
+        }
+    }
+    LaunchedEffect(Unit) { refresh() }
+
+    fun parseTs(ts: String): Long =
+        runCatching { java.time.OffsetDateTime.parse(ts).toInstant().toEpochMilli() }
+            .getOrElse {
+                runCatching {
+                    java.time.LocalDateTime.parse(ts.replace(" ", "T"))
+                        .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                }.getOrElse { 0L }
+            }
+    fun badgeFor(outcome: String): Pair<String, dk.ternedal.modelrig.ui.chat.AuditBadgeKind> = when (outcome) {
+        "executed" -> "Udf\u00f8rt" to dk.ternedal.modelrig.ui.chat.AuditBadgeKind.Ok
+        "denied" -> "Afvist" to dk.ternedal.modelrig.ui.chat.AuditBadgeKind.Warn
+        "blocked" -> "Blokeret" to dk.ternedal.modelrig.ui.chat.AuditBadgeKind.Warn
+        "expired" -> "Udl\u00f8bet" to dk.ternedal.modelrig.ui.chat.AuditBadgeKind.Warn
+        "error" -> "Fejl" to dk.ternedal.modelrig.ui.chat.AuditBadgeKind.Error
+        else -> outcome to dk.ternedal.modelrig.ui.chat.AuditBadgeKind.Neutral
+    }
+    fun rowOf(e: dk.ternedal.modelrig.net.AuditEntry): dk.ternedal.modelrig.ui.chat.AuditRowUi {
+        val ms = parseTs(e.ts)
+        val time = if (ms > 0L) SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ms)) else e.ts
+        val (b, k) = badgeFor(e.outcome)
+        return dk.ternedal.modelrig.ui.chat.AuditRowUi(
+            title = e.summary.ifBlank { e.tool },
+            sub = buildString {
+                append("V\u00e6rkt\u00f8j: ${e.tool} \u00b7 $time")
+                if (e.risk.isNotBlank()) append(" \u00b7 ${e.risk}")
+            },
+            badge = b,
+            kind = k,
+            cloud = e.origin == "cloud",
+        )
+    }
+
+    val startOfToday = remember {
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0); cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0); cal.set(java.util.Calendar.MILLISECOND, 0)
+        cal.timeInMillis
+    }
+    val visible = rows.filter { e ->
+        when (filter) {
+            "ok" -> e.outcome == "executed"
+            "warn" -> e.outcome in setOf("denied", "blocked", "expired")
+            "error" -> e.outcome == "error"
+            else -> true
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(KalivTheme.colors.background)) {
+        Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars).padding(horizontal = 8.dp)) {
+            dk.ternedal.modelrig.ui.chat.ConversationsTopBar(
+                title = "Handlingslog",
+                onBack = onBack,
+                onMenu = { filterMenu = true },
+                menuIcon = R.drawable.ic_kaliv_filter,
+                menuContent = {
+                    DropdownMenu(expanded = filterMenu, onDismissRequest = { filterMenu = false }) {
+                        listOf(
+                            null to "Alle",
+                            "ok" to "Udf\u00f8rt",
+                            "warn" to "Afvist / blokeret / udl\u00f8bet",
+                            "error" to "Fejl",
+                        ).forEach { (key, label) ->
+                            DropdownMenuItem(
+                                text = { Text(if (filter == key) "\u2713 $label" else label, fontSize = 13.sp) },
+                                onClick = { filter = key; filterMenu = false },
+                            )
+                        }
+                    }
+                },
+            )
+            dk.ternedal.modelrig.ui.chat.KnowledgeIntroNote(
+                Modifier.padding(bottom = 13.dp),
+                text = "Alt hvad v\u00e6rkt\u00f8jer og agent udf\u00f8rer, logges her. Kun p\u00e5 din rig.",
+            )
+        }
+        error?.let {
+            Text(it, color = KalivTheme.colors.danger, fontSize = 14.sp,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+        }
+        when {
+            loading -> Text("Henter\u2026", color = KalivTheme.colors.textMuted, fontSize = 16.sp,
+                modifier = Modifier.padding(20.dp))
+            visible.isEmpty() -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text(
+                    if (rows.isEmpty()) "Ingen handlinger registreret endnu"
+                    else "Ingen handlinger matcher filtret",
+                    color = KalivTheme.colors.textMuted, fontSize = 14.sp,
+                )
+            }
+            else -> dk.ternedal.modelrig.ui.chat.AuditGroupedList(
+                today = visible.filter { parseTs(it.ts) >= startOfToday }.map { rowOf(it) },
+                earlier = visible.filter { parseTs(it.ts) < startOfToday }.map { rowOf(it) },
+                modifier = Modifier.weight(1f).padding(horizontal = 20.dp),
+            )
+        }
+        Spacer(Modifier.windowInsetsPadding(WindowInsets.navigationBars))
+    }
+}
 
 @Composable
 private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
