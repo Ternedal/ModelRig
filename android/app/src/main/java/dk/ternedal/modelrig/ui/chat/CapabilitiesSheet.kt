@@ -57,12 +57,14 @@ fun CapabilitiesSheet(
     voiceCloudAvailable: Boolean,
     voiceViaCloud: Boolean,
     onToggleVoiceCloud: (Boolean) -> Unit,
+    onOpenVoice: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     KalivSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         CapabilitiesSheetContent(
             ragOn, ragSubtitle, ragSourceLabel, onToggleRag, onSources,
             toolsOn, onToggleTools, voiceCloudAvailable, voiceViaCloud, onToggleVoiceCloud,
+            onOpenVoice,
         )
     }
 }
@@ -79,6 +81,7 @@ fun CapabilitiesSheetContent(
     voiceCloudAvailable: Boolean,
     voiceViaCloud: Boolean,
     onToggleVoiceCloud: (Boolean) -> Unit,
+    onOpenVoice: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.padding(start = 22.dp, end = 22.dp, bottom = 18.dp)) {
@@ -158,6 +161,7 @@ fun CapabilitiesSheetContent(
             icon = R.drawable.ic_kaliv_mic,
             iconTint = KalivTheme.colors.textMuted,
             title = "Stemme",
+            onClick = onOpenVoice,
             subtitle = if (voiceViaCloud && voiceCloudAvailable) "Tal med Kaliv \u00b7 svar via cloud"
                        else "Tal med Kaliv \u00b7 ASR/TTS lokalt",
             trailing = if (voiceCloudAvailable) ({
@@ -204,8 +208,10 @@ private fun CapRow(
     subtitle: String,
     trailing: (@Composable () -> Unit)?,
     extra: (@Composable () -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
 ) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
+    val base = if (onClick != null) Modifier.fillMaxWidth().clickable(onClickLabel = title) { onClick() } else Modifier.fillMaxWidth()
+    Row(base.padding(vertical = 16.dp)) {
         Box(
             Modifier
                 .size(46.dp)
