@@ -302,7 +302,13 @@ fun ChatComposer(
         modifier = modifier
             .fillMaxWidth()
             .padding(start = 15.dp, end = 15.dp, top = 7.dp, bottom = 5.dp)
-            .background(KalivTheme.colors.surface, RoundedCornerShape(KalivTokens.Radius.composer))
+            .background(
+                // Ejerbeslutning (Anders, 14/08): composer-fladen skal vaere sort
+                // som canvas i moerkt tema — mockuppen viste surface (brun-varm).
+                // Lys tilstand beholder surface.
+                if (KalivTheme.colors.isDark) KalivTheme.colors.background else KalivTheme.colors.surface,
+                RoundedCornerShape(KalivTokens.Radius.composer),
+            )
             .border(
                 KalivTokens.Layout.hairline,
                 KalivTheme.colors.hairline,

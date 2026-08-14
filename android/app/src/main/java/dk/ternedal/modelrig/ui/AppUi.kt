@@ -986,7 +986,16 @@ private fun ChatScreen(
     }
     val micPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { granted -> hasMicPermission = granted; if (!granted) voiceError = "Mikrofon-adgang nægtet" }
+    ) { granted ->
+        hasMicPermission = granted
+        if (!granted) {
+            voiceError = "Mikrofon-adgang nægtet"
+        } else if (showVoice && !recording && !voiceBusy) {
+            // Fortsaettelse: overlayet blev aabnet uden permission — start nu.
+            runCatching { voiceCapture.start(); recording = true }
+                .onFailure { voiceError = "Optagelse fejlede: ${it.message}" }
+        }
+    }
 
     // One spoken turn, STREAMING: stop recording -> upload WAV -> the rig streams
     // back the transcript, then each sentence's audio as it's synthesized. We play
@@ -1921,9 +1930,10 @@ private fun ChatScreen(
                         stopVoiceTurn()
                         showVoice = false
                     },
-                    properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+                    properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
                 ) {
                     dk.ternedal.modelrig.ui.chat.VoiceOverlayContent(
+                        modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
                         pillText = if (voiceUsesCloud && store.cloudKey != null) "Via cloud" else "Lokalt",
                         pillDot = if (voiceUsesCloud && store.cloudKey != null) KalivTheme.colors.signal else KalivTheme.colors.success,
                         stateText = when {
