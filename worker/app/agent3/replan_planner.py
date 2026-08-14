@@ -17,6 +17,10 @@ class ReplanPlannerError(RuntimeError):
     pass
 
 
+class _DuplicateJsonKeyError(ValueError):
+    pass
+
+
 ReplanChatFn = Callable[[list[dict[str, str]], str | None], Awaitable[str]]
 
 
@@ -33,6 +37,16 @@ def _strip_code_fence(text: str) -> str:
     value = text.strip()
     match = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", value, flags=re.DOTALL | re.IGNORECASE)
     return match.group(1).strip() if match else value
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject ambiguous model-owned JSON at every object depth."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJsonKeyError("duplicate JSON key in replanner output")
+        result[key] = value
+    return result
 
 
 def _bounded_json(value: Any, max_chars: int) -> str:
@@ -199,8 +213,11 @@ class TypedReadReplanPlanner:
         raw = await self.chat_fn(messages, model)
 
         try:
-            payload = json.loads(_strip_code_fence(raw))
-        except (json.JSONDecodeError, TypeError) as exc:
+            payload = json.loads(
+                _strip_code_fence(raw),
+                object_pairs_hook=_reject_duplicate_json_keys,
+            )
+        except (json.JSONDecodeError, TypeError, _DuplicateJsonKeyError) as exc:
             raise ReplanPlannerError("replanner did not return valid JSON") from exc
         if not isinstance(payload, dict) or set(payload) - {"steps", "rationale"}:
             raise ReplanPlannerError("replanner response has unsupported top-level fields")
