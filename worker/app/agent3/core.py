@@ -430,6 +430,53 @@ class AgentRunStore:
                 self._conn.rollback()
                 raise
 
+    def save_with_event_if_unchanged(
+        self,
+        run: AgentRun,
+        *,
+        expected_state: RunState,
+        expected_payload: str,
+        kind: str,
+        payload: Any,
+    ) -> bool:
+        """Atomically write state+event only if nobody changed the run first.
+
+        Confirmation and execution-start are security boundaries. A stale
+        in-memory run must not overwrite a concurrent cancel (or any other
+        mutation) between load and save. Binding both the persisted state and
+        exact payload makes this a compare-and-swap over the decision snapshot.
+        """
+        run.updated_at = time.time()
+        encoded = payload if isinstance(payload, str) else json.dumps(
+            payload, ensure_ascii=False, sort_keys=True)
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                changed = self._conn.execute(
+                    "UPDATE agent_runs SET state=?,payload=?,updated_at=? "
+                    "WHERE id=? AND state=? AND payload=?",
+                    (
+                        run.state.value,
+                        run.to_json(),
+                        run.updated_at,
+                        run.id,
+                        expected_state.value,
+                        expected_payload,
+                    ),
+                ).rowcount
+                if changed != 1:
+                    self._conn.rollback()
+                    return False
+                self._conn.execute(
+                    "INSERT INTO agent_events(run_id,ts,kind,payload) VALUES(?,?,?,?)",
+                    (run.id, time.time(), kind, encoded[:8000]),
+                )
+                self._conn.commit()
+                return True
+            except Exception:
+                self._conn.rollback()
+                raise
+
     def event(self, run_id: str, kind: str, payload: Any) -> None:
         encoded = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, sort_keys=True)
         with self._lock:
@@ -676,7 +723,7 @@ class Agent3Orchestrator:
                 return run
 
             self._execute(run, step)
-            if run.state == RunState.FAILED:
+            if run.state in {RunState.FAILED, RunState.CANCELLED, RunState.BLOCKED}:
                 return run
             run.current_step += 1
             run.state = RunState.RUNNING
@@ -697,12 +744,20 @@ class Agent3Orchestrator:
         expected = self._digest(step)
         if step.id != step_id or digest != expected or step.confirmation_digest != expected:
             raise ConfirmationError("confirmation no longer matches the immutable step")
+        expected_payload = run.to_json()
         if step.confirmation_expires_at is None or time.time() > step.confirmation_expires_at:
             step.state = StepState.DENIED
             step.error = "Confirmation expired"
             run.state = RunState.CANCELLED
             run.error = step.error
-            self.store.save_with_event(run, "confirmation_expired", {"step_id": step.id})
+            if not self.store.save_with_event_if_unchanged(
+                run,
+                expected_state=RunState.WAITING_CONFIRMATION,
+                expected_payload=expected_payload,
+                kind="confirmation_expired",
+                payload={"step_id": step.id},
+            ):
+                raise ConfirmationError("run changed while confirmation was being decided")
             raise ConfirmationError("confirmation expired")
         if decision not in {"approve", "deny"}:
             raise ConfirmationError("decision must be approve or deny")
@@ -712,20 +767,30 @@ class Agent3Orchestrator:
             run.state = RunState.CANCELLED
             run.error = step.error
             step.confirmation_digest = None
-            self.store.save_with_event(run, "confirmation_denied", {"step_id": step.id})
+            if not self.store.save_with_event_if_unchanged(
+                run,
+                expected_state=RunState.WAITING_CONFIRMATION,
+                expected_payload=expected_payload,
+                kind="confirmation_denied",
+                payload={"step_id": step.id},
+            ):
+                raise ConfirmationError("run changed while confirmation was being decided")
             return run
 
-        # Persist approval before executing. If the process dies after this write,
-        # the run can resume without asking again; if it dies during execution,
-        # the EXECUTING state fails closed rather than replaying the side effect.
+        # Persist approval before executing. This write is compare-and-swap
+        # against the exact WAITING_CONFIRMATION payload: a concurrent cancel or
+        # mutation wins instead of being overwritten by this stale copy.
         step.state = StepState.APPROVED
         step.confirmation_digest = None
         run.state = RunState.RUNNING
-        # The most consequential pair in the file: this is the record that a
-        # human said yes. State without the event is an approval nobody can
-        # attribute; the event without the state is a yes the run never heard.
-        self.store.save_with_event(
-            run, "confirmation_approved", {"step_id": step.id, "tool": step.tool})
+        if not self.store.save_with_event_if_unchanged(
+            run,
+            expected_state=RunState.WAITING_CONFIRMATION,
+            expected_payload=expected_payload,
+            kind="confirmation_approved",
+            payload={"step_id": step.id, "tool": step.tool},
+        ):
+            raise ConfirmationError("run changed while confirmation was being decided")
         return self.advance(run.id)
 
     def cancel(self, run_id: str) -> AgentRun:
@@ -739,12 +804,30 @@ class Agent3Orchestrator:
         return run
 
     def _execute(self, run: AgentRun, step: AgentStep) -> None:
+        # The execution boundary itself must be atomic with respect to cancel.
+        # Approval can be persisted and a cancel can arrive before advance()
+        # reaches this point. Without a CAS, step_started would resurrect the
+        # stale RUNNING copy and then execute the side effect anyway.
+        expected_payload = run.to_json()
         step.state = StepState.EXECUTING
-        # EXECUTING is the state that makes a resume fail closed rather than
-        # replay a side effect. If it lands without its event, the timeline
-        # cannot say what the rig was doing when it died.
-        self.store.save_with_event(
-            run, "step_started", {"step_id": step.id, "tool": step.tool})
+        if not self.store.save_with_event_if_unchanged(
+            run,
+            expected_state=RunState.RUNNING,
+            expected_payload=expected_payload,
+            kind="step_started",
+            payload={"step_id": step.id, "tool": step.tool},
+        ):
+            fresh = self.store.load(run.id)
+            if fresh is not None and fresh.state == RunState.CANCELLED:
+                run.state = RunState.CANCELLED
+                run.error = fresh.error or "Cancelled by user"
+                step.state = StepState.APPROVED
+                return
+            run.state = RunState.BLOCKED
+            run.error = "Run changed before execution could start"
+            step.state = StepState.BLOCKED
+            step.error = run.error
+            return
         try:
             step.result = self.executor(step)
             # The executor is synchronous and has no cancellation handle, so a
