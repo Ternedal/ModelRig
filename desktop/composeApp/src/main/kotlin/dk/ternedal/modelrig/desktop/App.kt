@@ -84,6 +84,7 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.ui.graphics.toComposeImageBitmap
 
 private object KalivStatus {
     const val THINKING = "Kaliv tænker …"
@@ -1226,6 +1227,8 @@ private fun SettingsCard(
                 TextButton(onClick = onPair) { Text("Par med rig (dev-mode)", color = KalivTheme.colors.Signal, fontSize = 12.sp) }
                 pairStatus?.let { Spacer(Modifier.width(8.dp)); Text(it, color = KalivTheme.colors.TextMuted, fontSize = 11.sp) }
             }
+            Spacer(Modifier.height(8.dp))
+            PhonePairingQrRow(localUrl)
             Field("System-instruktion, lokal (valgfri)", localSystem, onLocalSystem)
             PresetRow(db, "rig", localSystem, onLocalSystem)
             Spacer(Modifier.height(8.dp))
@@ -1500,6 +1503,87 @@ private fun ModelsPanel(baseUrl: String, isBackend: Boolean, bearer: String?, on
             },
             dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Annullér", color = KalivTheme.colors.TextMuted) } },
         )
+    }
+}
+
+/**
+ * QR til telefonen. Riggen minter EN kode og tegner den; telefonen laeser den
+ * og faar felterne udfyldt — men parrer stadig ikke af sig selv.
+ *
+ * Adressen er det svaere: desktop'ens egen base-URL er tit 127.0.0.1, og den
+ * kan telefonen ALDRIG naa. Derfor foreslaas maskinens LAN-adresser, og
+ * loopback/link-local sorteres fra frem for at havne i en QR der sender
+ * telefonen ingen steder.
+ */
+@Composable
+private fun PhonePairingQrRow(localUrl: String) {
+    val scope = rememberCoroutineScope()
+    val port = remember(localUrl) {
+        runCatching { java.net.URI(localUrl.trim()).port.takeIf { it > 0 } }.getOrNull() ?: 8080
+    }
+    val hosts = remember { PairingQr.localAddresses() }
+    var host by remember { mutableStateOf(hosts.firstOrNull() ?: "") }
+    var link by remember { mutableStateOf<String?>(null) }
+    var status by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+
+    Column {
+        Text("Par en telefon", color = KalivTheme.colors.TextHigh, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        if (hosts.isEmpty()) {
+            Text(
+                "Fandt ingen netvaerksadresse telefonen kan naa. Kun loopback er tilgaengelig \u2014 " +
+                    "indtast koden i haanden i stedet.",
+                color = KalivTheme.colors.TextMuted, fontSize = 11.sp,
+            )
+            return
+        }
+        Text(
+            "Telefonen skal bruge en adresse den kan naa \u2014 ikke 127.0.0.1.",
+            color = KalivTheme.colors.TextMuted, fontSize = 11.sp,
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            hosts.forEach { h ->
+                PillToggle(h == host, label = "$h:$port") { host = h; link = null }
+                Spacer(Modifier.width(6.dp))
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(
+                onClick = {
+                    if (busy) return@TextButton
+                    busy = true
+                    status = null
+                    scope.launch {
+                        val res = withContext(Dispatchers.IO) {
+                            runCatching { ToolsClient(localUrl, null).mintPairingCode() }
+                        }
+                        busy = false
+                        res.onSuccess { code ->
+                            link = PairingQr.buildLink("http://$host:$port", code)
+                            status = "Kode: $code \u2014 engangsbrug, udloeber af sig selv"
+                        }.onFailure { status = "Kunne ikke lave kode: ${apiErrorHint(it.message)}" }
+                    }
+                },
+            ) {
+                Text(
+                    if (busy) "Laver kode\u2026" else "Vis QR til telefonen",
+                    color = KalivTheme.colors.Signal, fontSize = 12.sp,
+                )
+            }
+            status?.let { Spacer(Modifier.width(8.dp)); Text(it, color = KalivTheme.colors.TextMuted, fontSize = 11.sp) }
+        }
+        link?.let { text ->
+            Spacer(Modifier.height(8.dp))
+            val bitmap = remember(text) { PairingQr.image(text, 320).toComposeImageBitmap() }
+            Image(bitmap = bitmap, contentDescription = "QR til parring", modifier = Modifier.size(200.dp))
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Skan i Kaliv > Par med rig > Skan QR fra riggen. Telefonen viser vaerten og venter paa dit tryk.",
+                color = KalivTheme.colors.TextMuted, fontSize = 11.sp,
+            )
+        }
     }
 }
 

@@ -99,6 +99,24 @@ class ToolsClient(baseUrl: String, private val bearer: String?) {
         return b
     }
 
+    /**
+     * Minter EN parringskode uden at bruge den — koden er til en ANDEN enhed
+     * (telefonen), som selv claimer den. Desktop'en maa altsaa ikke gaa videre
+     * til /pair/claim her; goer den det, er koden brugt op inden telefonen ser
+     * den.
+     */
+    fun mintPairingCode(): String {
+        val startReq = builder("/api/v1/pair/start")
+            .POST(HttpRequest.BodyPublishers.ofString("{}"))
+            .build()
+        val resp = http.send(startReq, HttpResponse.BodyHandlers.ofString())
+        if (resp.statusCode() !in 200..299)
+            throw ToolsException("pair/start failed (${resp.statusCode()}): ${resp.body().take(200)}")
+        val code = json.decodeFromString<PairStartResponse>(resp.body()).code
+        if (code.isEmpty()) throw ToolsException("pair/start returned no code")
+        return code
+    }
+
     /** Dev-mode pairing: start -> code -> claim -> token, in one call.
      *  Mirrors the phone flow; MODELRIG_ADMIN_KEY-protected rigs will reject
      *  the open start, which surfaces as the thrown error text. */
