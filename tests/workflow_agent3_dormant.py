@@ -61,6 +61,32 @@ CHAT_FORBIDDEN = ("Agent3Client", "Agent3ReplanClient", "experimental/agent3")
 AGENT_SURFACE_DIR = "android/app/src/main/java/dk/ternedal/modelrig/ui/agent"
 
 
+def panel_never_resumes(text: str) -> bool:
+    """ADR-A3-001 kontrakttest 6: intet i chatfladen genoptager en koersel.
+
+    Genoptagelse er en menneskehandling paa checkpoint-skaermen. Kunne
+    panelet resume'e, ville "fortsaetter aldrig automatisk" vaere en loegn.
+    """
+    return ".resume(" not in text
+
+
+START_GUARD_FILE = "AgentStartGuard.kt"
+
+
+def start_goes_through_the_policy(name: str, text: str) -> bool:
+    """ADR-A3-001 D2: kun vagten maa starte, og vagten skal spoerge politikken.
+
+    Foerste udgave af denne detektor spurgte kun om filen NAeVNTE politikken.
+    Sabotagetjekket viste at et fjernet tjek saa slap igennem — derfor er
+    starten flyttet til én fil, og reglen er nu strukturel.
+    """
+    if "startPlan(" not in text:
+        return True
+    if name != START_GUARD_FILE:
+        return False
+    return "AgentStartPolicy.verdictForPlan(" in text
+
+
 def chat_surface_has_no_agent_client(text: str) -> bool:
     """Chatskaermen maa ikke selv kalde Agent 3."""
     return not any(mark in text for mark in CHAT_FORBIDDEN)
@@ -130,6 +156,19 @@ check(go_routes_are_flag_gated(gated), "go detector accepts a mount inside the g
 check(not go_routes_are_flag_gated(ungated), "go detector fires on a mount OUTSIDE the guard")
 check(not go_routes_are_flag_gated(noguard), "go detector fires when no guard exists at all")
 
+check(panel_never_resumes("client.cancel(id)\n"), "resume detector accepts a panel without resume")
+check(not panel_never_resumes("client.resume(runId)\n"), "resume detector fires on a resume call")
+check(start_goes_through_the_policy("AnyFile.kt", "no starts here\n"),
+      "start detector accepts a file that never starts")
+check(not start_goes_through_the_policy("AgentStartSheet.kt", "client.startPlan(planId)\n"),
+      "start detector fires on a start outside the guard")
+check(not start_goes_through_the_policy(START_GUARD_FILE, "client.startPlan(planId)\n"),
+      "start detector fires when the guard skips the policy")
+check(start_goes_through_the_policy(
+    START_GUARD_FILE,
+    "AgentStartPolicy.verdictForPlan(s, m, steps); client.startPlan(planId)\n"),
+    "start detector accepts the guard that asks the policy")
+
 check(chat_surface_has_no_agent_client("val x = ModelRigClient(base, tok)\n"),
       "chat detector accepts a chat screen without the agent client")
 check(not chat_surface_has_no_agent_client("Agent3Client(base, tok).listRuns()\n"),
@@ -175,6 +214,14 @@ check(agent_dir.is_dir() and any(agent_dir.glob("*.kt")),
 check(not any(p.name.startswith("AgentRun") for p in
               (root / "android/app/src/main/java/dk/ternedal/modelrig/ui/chat").glob("*.kt")),
       "no agent surface files left in ui/chat")
+
+# ADR-A3-001 kontrakttest 6 + D2: panelet genoptager aldrig, og enhver start
+# i agent-fladen gaar gennem politikken.
+for f in sorted(agent_dir.glob("*.kt")):
+    check(panel_never_resumes(f.read_text(encoding="utf-8")),
+          f"the chat agent surface never resumes a run: {f.name}")
+    check(start_goes_through_the_policy(f.name, f.read_text(encoding="utf-8")),
+          f"every start in the chat agent surface is gated by the policy: {f.name}")
 
 check(go_routes_are_flag_gated(read("backend/internal/httpapi/server.go")),
       f"every backend agent3 route sits inside the {FLAG} guard")

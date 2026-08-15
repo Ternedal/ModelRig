@@ -833,9 +833,19 @@ private fun ChatScreen(
     var ragSourceFilter by remember { mutableStateOf<String?>(null) }
     var ragSourceMenu by remember { mutableStateOf(false) }
     var overflow by remember { mutableStateOf(false) }
+    // Beskeden der er valgt til en agent-plan (null = ingen). Saettes KUN af
+    // et tryk i Kapaciteter; intet i send-stien roerer den.
+    var agentPlanFor by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val context = LocalContext.current
+    // Én vej til godkendelsesfladen, saa baade panelet og plan-kortet lander
+    // samme sted (ADR-A3-001 D4: godkendelser bor paa agent-skaermen).
+    val openAgentCheckpoint = {
+        val i = Intent(context, dk.ternedal.modelrig.MainActivity::class.java)
+        i.putExtra(dk.ternedal.modelrig.MainActivity.EXTRA_AGENT3_REVIEW, true)
+        context.startActivity(i)
+    }
 
     var ingesting by remember { mutableStateOf(false) }
     var ingestStatus by remember { mutableStateOf<String?>(null) }
@@ -1928,6 +1938,10 @@ private fun ChatScreen(
             }
             if (showCapSheet) {
                 CapabilitiesSheet(
+                    onRunAsAgent = if (mode == "rig" && store.hasRig && input.isNotBlank()) ({
+                        agentPlanFor = input
+                        showCapSheet = false
+                    }) else null,
                     ragOn = ragMode,
                     ragSubtitle = if (ragMode && ragSources.isNotEmpty())
                         "${ragSources.size} dokument" + (if (ragSources.size == 1) "" else "er") + " \u00b7 svarer med kilder"
@@ -2114,6 +2128,19 @@ private fun ChatScreen(
                 modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
             )
         }
+        agentPlanFor?.let { msg ->
+            dk.ternedal.modelrig.ui.agent.AgentStartHost(
+                baseUrl = store.baseUrl,
+                token = store.token,
+                conversationId = openConvId?.toString(),
+                message = msg,
+                // KILDEN er hele pointen: kun en eksplicit handling kommer hertil.
+                source = dk.ternedal.modelrig.ui.agent.AgentStartPolicy.Source.ExplicitUserAction,
+                onOpenApproval = { openAgentCheckpoint() },
+                onDismiss = { agentPlanFor = null },
+                modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
+            )
+        }
         // Agent-panelet (ADR-A3-001). Chatten kender ÉN neutral indgang og
         // ved ellers intet om agenten; alt hvad der taler med riggen bor i
         // ui/agent-pakken, og dvale-gaten haandhaever den arbejdsdeling.
@@ -2121,11 +2148,7 @@ private fun ChatScreen(
             baseUrl = store.baseUrl,
             token = store.token,
             conversationId = openConvId?.toString(),
-            onOpenCheckpoint = {
-                val i = Intent(context, dk.ternedal.modelrig.MainActivity::class.java)
-                i.putExtra(dk.ternedal.modelrig.MainActivity.EXTRA_AGENT3_REVIEW, true)
-                context.startActivity(i)
-            },
+            onOpenCheckpoint = { openAgentCheckpoint() },
             modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
         )
         // messages

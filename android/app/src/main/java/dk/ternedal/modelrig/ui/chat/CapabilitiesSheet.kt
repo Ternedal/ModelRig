@@ -58,6 +58,7 @@ fun CapabilitiesSheet(
     voiceViaCloud: Boolean,
     onToggleVoiceCloud: (Boolean) -> Unit,
     onOpenVoice: () -> Unit,
+    onRunAsAgent: (() -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     KalivSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
@@ -65,6 +66,7 @@ fun CapabilitiesSheet(
             ragOn, ragSubtitle, ragSourceLabel, onToggleRag, onSources,
             toolsOn, onToggleTools, voiceCloudAvailable, voiceViaCloud, onToggleVoiceCloud,
             onOpenVoice,
+            onRunAsAgent,
         )
     }
 }
@@ -82,6 +84,7 @@ fun CapabilitiesSheetContent(
     voiceViaCloud: Boolean,
     onToggleVoiceCloud: (Boolean) -> Unit,
     onOpenVoice: () -> Unit = {},
+    onRunAsAgent: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.padding(start = 22.dp, end = 22.dp, bottom = 18.dp)) {
@@ -152,7 +155,11 @@ fun CapabilitiesSheetContent(
             icon = R.drawable.ic_kaliv_agent,
             iconTint = KalivTheme.colors.textMuted,
             title = "Agent",
-            subtitle = "Planl\u00e6gger og udf\u00f8rer opgaver i trin",
+            // Raekken er KUN en indgang, naar der staar noget i composeren:
+            // agenten planlaegger for en besked, ikke for ingenting.
+            onClick = onRunAsAgent,
+            subtitle = if (onRunAsAgent != null) "Laeg en plan for det, du har skrevet"
+                       else "Planl\u00e6gger og udf\u00f8rer opgaver i trin",
             trailing = null,
         )
         HorizontalDivider(thickness = KalivTokens.Layout.hairline, color = KalivTheme.colors.divider)

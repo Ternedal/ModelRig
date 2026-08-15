@@ -63,6 +63,13 @@ object AgentRunPresentation {
         return runs.firstOrNull { it.id == boundRunId }?.takeUnless { isTerminal(it) }
     }
 
+    /** Trinnene i et PREVIEW: intet er kørt endnu, så intet må se udført ud. */
+    fun previewSteps(steps: List<Agent3Client.Step>): List<AgentStepUi> =
+        steps.map { AgentStepUi(text = it.summary.ifBlank { it.tool }, state = AgentStepState.Pending) }
+
+    fun titleOf(routeKind: String): String =
+        routeKind.trim().ifEmpty { "Plan" }.replaceFirstChar { it.uppercase() }
+
     /** Korttitlen: planens rute hvis riggen navngiver den, ellers bare "Plan". */
     fun title(run: Agent3Client.Run): String =
         run.routeKind.trim().ifEmpty { "Plan" }.replaceFirstChar { it.uppercase() }

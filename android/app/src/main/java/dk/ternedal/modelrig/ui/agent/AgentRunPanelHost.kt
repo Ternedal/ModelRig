@@ -51,6 +51,90 @@ import kotlinx.coroutines.withContext
  *    siger panelet at det ikke længere kan se kørslen. Det VED ikke om den er
  *    stoppet, og må derfor ikke påstå det.
  */
+/**
+ * Start af en kørsel fra chatten — ADR-A3-001 slice 3.
+ *
+ * Kaldes KUN fra en eksplicit menneskehandling; kilden bæres helt ind i
+ * AgentStartPolicy, så reglen kan bevises frem for at loves. Rækkefølgen er
+ * preview → politik → (måske) start: vi spørger altså riggen hvad planen
+ * indeholder, FØR noget køres, og et skrivetrin stopper starten her.
+ */
+@Composable
+fun AgentStartHost(
+    baseUrl: String?,
+    token: String?,
+    conversationId: String?,
+    message: String,
+    source: AgentStartPolicy.Source,
+    onOpenApproval: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val bindings = remember { AgentRunBinding(context) }
+    val scope = rememberCoroutineScope()
+    var preview by remember(message) { mutableStateOf<Agent3Client.PlanPreview?>(null) }
+    var busy by remember(message) { mutableStateOf(false) }
+    var error by remember(message) { mutableStateOf<String?>(null) }
+
+    val gate = AgentStartPolicy.verdict(source, message)
+    if (gate !is AgentStartPolicy.Verdict.Start || baseUrl.isNullOrBlank() || token.isNullOrBlank()) return
+
+    LaunchedEffect(message, baseUrl, token) {
+        val res = withContext(Dispatchers.IO) {
+            runCatching { Agent3Client(baseUrl, token).previewPlan(message = gate.message, conversationId = conversationId) }
+        }
+        res.onSuccess { preview = it }.onFailure { error = "Riggen kunne ikke lægge en plan." }
+    }
+
+    val p = preview
+    Column(modifier.fillMaxWidth()) {
+        when {
+            error != null -> AgentRunUnavailableNote()
+            p == null -> Unit
+            else -> {
+                val writes = p.steps.count { AgentStartPolicy.isWriteStep(it) }
+                AgentPlanPreviewCard(
+                    title = AgentRunPresentation.titleOf(p.routeKind),
+                    steps = AgentRunPresentation.previewSteps(p.steps),
+                    writeSteps = writes,
+                    busy = busy,
+                    onDismiss = onDismiss,
+                    onOpenApproval = onOpenApproval,
+                    onStartReadOnly = {
+                        // Starten går gennem vagten — den ER politikken, og den
+                        // er det eneste sted i fladen der må kalde riggen om
+                        // det. Afvises den, sker der ingenting her.
+                        busy = true
+                        scope.launch {
+                            val res = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    AgentStartGuard.start(
+                                        client = Agent3Client(baseUrl, token),
+                                        source = source,
+                                        message = message,
+                                        steps = p.steps,
+                                        planId = p.planId,
+                                    )
+                                }
+                            }
+                            busy = false
+                            res.onSuccess { run ->
+                                if (run == null) {
+                                    error = "Planen må ikke startes herfra."
+                                } else {
+                                    bindings.bind(conversationId, run.id)
+                                    onDismiss()
+                                }
+                            }.onFailure { error = "Kørslen kunne ikke startes." }
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
 @Composable
 fun AgentRunPanelHost(
     baseUrl: String?,
