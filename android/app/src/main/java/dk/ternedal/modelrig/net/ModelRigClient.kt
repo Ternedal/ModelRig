@@ -451,6 +451,50 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
     }
 
     /**
+     * Rig-side system measurement (B3a: GET /api/v1/system/status).
+     * Every field is nullable on purpose: the endpoint is fail-soft and
+     * reports null for anything it cannot measure (no nvidia-smi, unknown
+     * OS), so the screen can say "ukendt" honestly instead of failing.
+     */
+    data class SystemStatus(
+        val gpuName: String?,
+        val gpuTempC: Int?,
+        val gpuUtilPct: Int?,
+        val vramTotalMb: Int?,
+        val vramUsedMb: Int?,
+        val vramFreeMb: Int?,
+        val cpuPct: Double?,
+    )
+
+    /** Throws when the rig predates the endpoint (404) — caller shows the upgrade hint. */
+    fun systemStatus(): SystemStatus {
+        val rb = Request.Builder().url("$base/api/v1/system/status")
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        http.newCall(rb.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("system status failed (${resp.code}): $text")
+            val root = JSONObject(text)
+            val gpu = root.optJSONObject("gpu")
+            val cpu = root.optJSONObject("cpu")
+            fun JSONObject?.intOrNull(key: String): Int? =
+                if (this == null || !has(key) || isNull(key)) null else optInt(key)
+            return SystemStatus(
+                gpuName = gpu?.optString("name")?.takeIf { it.isNotEmpty() },
+                gpuTempC = gpu.intOrNull("temperature_c"),
+                gpuUtilPct = gpu.intOrNull("utilization_pct"),
+                vramTotalMb = gpu.intOrNull("vram_total_mb"),
+                vramUsedMb = gpu.intOrNull("vram_used_mb"),
+                vramFreeMb = gpu.intOrNull("vram_free_mb"),
+                cpuPct = if (cpu == null || !cpu.has("utilization_pct") || cpu.isNull("utilization_pct")) {
+                    null
+                } else {
+                    cpu.optDouble("utilization_pct")
+                },
+            )
+        }
+    }
+
+    /**
      * Pulls (downloads) a model, streaming Ollama's NDJSON progress lines back
      * via [onProgress] (status text, bytes completed, bytes total — total/
      * completed are 0 until the download phase reports them). Can take minutes

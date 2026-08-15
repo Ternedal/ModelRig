@@ -78,7 +78,7 @@ import dk.ternedal.modelrig.ui.chat.CapabilitiesSheet
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.graphicsLayer
 
-private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, Audit, ControlCenter, CloudPicker, VoiceCloudPicker }
+private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, Audit, ControlCenter, CloudPicker, VoiceCloudPicker, RigStatus }
 
 @Composable
 fun AppUi() {
@@ -117,6 +117,7 @@ fun AppUi() {
                     onOpenSettings = { screen = Screen.Setup },
                     onOpenConversations = { screen = Screen.Convos },
                     onOpenModels = { screen = Screen.Models },
+                    onOpenRigStatus = { screen = Screen.RigStatus },
                     onOpenKnowledge = { screen = Screen.Knowledge },
                     onOpenAudit = { screen = Screen.Audit },
                     onOpenSchedules = { screen = Screen.Schedules },
@@ -133,6 +134,7 @@ fun AppUi() {
                     onBack = { screen = Screen.Chat },
                 )
                 Screen.Models -> ModelsScreen(store, onBack = { screen = Screen.Chat })
+                Screen.RigStatus -> RigStatusScreen(store, onBack = { screen = Screen.Chat })
                 Screen.Knowledge -> KnowledgeScreen(store, onBack = { screen = Screen.Chat })
                 Screen.Audit -> AuditScreen(store, onBack = { screen = Screen.Chat })
                 Screen.Schedules -> ScheduleScreen(store = store, onClose = { screen = Screen.Chat })
@@ -744,6 +746,7 @@ private fun ChatScreen(
     onOpenSettings: () -> Unit,
     onOpenConversations: () -> Unit,
     onOpenModels: () -> Unit,
+    onOpenRigStatus: () -> Unit,
     onOpenKnowledge: () -> Unit,
     onOpenAudit: () -> Unit,
     onOpenSchedules: () -> Unit,
@@ -1603,6 +1606,7 @@ private fun ChatScreen(
                         })
                         DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
                         DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
+                        DropdownMenuItem(text = { Text("Rig-status") }, onClick = { overflow = false; onOpenRigStatus() })
                         DropdownMenuItem(text = { Text("Viden") }, onClick = { overflow = false; onOpenKnowledge() })
                         DropdownMenuItem(text = { Text("Planer") }, onClick = { overflow = false; onOpenSchedules() })
                         if (mode == "rig" && store.cloudKey != null) {
