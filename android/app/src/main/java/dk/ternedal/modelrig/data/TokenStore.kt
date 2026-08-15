@@ -14,6 +14,11 @@ import dk.ternedal.modelrig.logic.StoredCredentialReader
 class TokenStore(context: Context) {
     private val prefs = context.getSharedPreferences("modelrig", Context.MODE_PRIVATE)
 
+    /** Denne enheds id fra parringssvaret — bruges til at markere "Denne enhed". */
+    var deviceId: String?
+        get() = prefs.getString("device_id", null)
+        set(v) { prefs.edit().putString("device_id", v).apply() }
+
     // ---- in-app-opdatering ----
     var lastUpdateCheckAt: Long
         get() = prefs.getLong("last_update_check_at", 0L)

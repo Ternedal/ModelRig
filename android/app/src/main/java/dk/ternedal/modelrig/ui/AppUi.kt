@@ -78,7 +78,7 @@ import dk.ternedal.modelrig.ui.chat.CapabilitiesSheet
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.graphicsLayer
 
-private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, Audit, ControlCenter, CloudPicker, VoiceCloudPicker, RigStatus }
+private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, Audit, ControlCenter, CloudPicker, VoiceCloudPicker, RigStatus, Devices }
 
 @Composable
 fun AppUi() {
@@ -118,6 +118,7 @@ fun AppUi() {
                     onOpenConversations = { screen = Screen.Convos },
                     onOpenModels = { screen = Screen.Models },
                     onOpenRigStatus = { screen = Screen.RigStatus },
+                    onOpenDevices = { screen = Screen.Devices },
                     onOpenKnowledge = { screen = Screen.Knowledge },
                     onOpenAudit = { screen = Screen.Audit },
                     onOpenSchedules = { screen = Screen.Schedules },
@@ -135,6 +136,16 @@ fun AppUi() {
                 )
                 Screen.Models -> ModelsScreen(store, onBack = { screen = Screen.Chat })
                 Screen.RigStatus -> RigStatusScreen(store, onBack = { screen = Screen.Chat })
+                Screen.Devices -> DevicesScreen(
+                    store,
+                    onBack = { screen = Screen.Chat },
+                    onSelfRevoked = {
+                        // Denne telefons adgang er væk — tilbage til parring.
+                        store.clearRig()
+                        store.deviceId = null
+                        screen = Screen.Setup
+                    },
+                )
                 Screen.Knowledge -> KnowledgeScreen(store, onBack = { screen = Screen.Chat })
                 Screen.Audit -> AuditScreen(store, onBack = { screen = Screen.Chat })
                 Screen.Schedules -> ScheduleScreen(store = store, onClose = { screen = Screen.Chat })
@@ -425,7 +436,10 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
                                 }
                             } else {
                                 val res = withContext(Dispatchers.IO) { runCatching { ModelRigClient(url).claimPairing(n, c) } }
-                                res.onSuccess { claimedToken ->
+                                res.onSuccess { pairing ->
+                                    val claimedToken = pairing.token
+                                    // Enhedens id gemmes, så enhedslisten kan markere DENNE enhed.
+                                    store.deviceId = pairing.deviceId
                                     val saved = store.saveRigConnection(url, claimedToken)
                                     busy = false
                                     if (saved) {
@@ -747,6 +761,7 @@ private fun ChatScreen(
     onOpenConversations: () -> Unit,
     onOpenModels: () -> Unit,
     onOpenRigStatus: () -> Unit,
+    onOpenDevices: () -> Unit,
     onOpenKnowledge: () -> Unit,
     onOpenAudit: () -> Unit,
     onOpenSchedules: () -> Unit,
@@ -1607,6 +1622,7 @@ private fun ChatScreen(
                         DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
                         DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
                         DropdownMenuItem(text = { Text("Rig-status") }, onClick = { overflow = false; onOpenRigStatus() })
+                        DropdownMenuItem(text = { Text("Enheder") }, onClick = { overflow = false; onOpenDevices() })
                         DropdownMenuItem(text = { Text("Viden") }, onClick = { overflow = false; onOpenKnowledge() })
                         DropdownMenuItem(text = { Text("Planer") }, onClick = { overflow = false; onOpenSchedules() })
                         if (mode == "rig" && store.cloudKey != null) {

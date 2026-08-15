@@ -61,7 +61,18 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
 
     private val jsonType = "application/json".toMediaType()
 
-    fun claimPairing(deviceName: String, code: String): String {
+    /** Parringssvaret bærer også enhedens id — det bruges til at kende DENNE enhed i enhedslisten. */
+    data class Pairing(val token: String, val deviceId: String?)
+
+    /** En parret enhed set fra /api/v1/devices (uden token-hash — den forlader aldrig riggen). */
+    data class PairedDevice(
+        val id: String,
+        val name: String,
+        val createdAt: String?,
+        val lastSeen: String?,
+    )
+
+    fun claimPairing(deviceName: String, code: String): Pairing {
         val body = JSONObject()
             .put("device_name", deviceName)
             .put("code", code)
@@ -78,9 +89,10 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
             if (!resp.isSuccessful) {
                 throw ModelRigException("pairing failed (${resp.code}): $text")
             }
-            val tok = JSONObject(text).optString("token")
+            val root = JSONObject(text)
+            val tok = root.optString("token")
             if (tok.isEmpty()) throw ModelRigException("pairing response missing token")
-            return tok
+            return Pairing(tok, root.optString("device_id").takeIf { it.isNotEmpty() })
         }
     }
 
@@ -447,6 +459,47 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
                 if (name.isNotEmpty()) out.add(RunningModel(name, o.optLong("size_vram", 0L), o.optString("expires_at")))
             }
             return out
+        }
+    }
+
+    /** Parrede enheder. Riggen udleverer aldrig token-hashes — kun id, navn og tidsstempler. */
+    fun listDevices(): List<PairedDevice> {
+        val rb = Request.Builder().url("$base/api/v1/devices")
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        http.newCall(rb.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("devices failed (${resp.code}): $text")
+            val arr = JSONObject(text).optJSONArray("devices") ?: return emptyList()
+            val out = ArrayList<PairedDevice>(arr.length())
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val id = o.optString("id")
+                if (id.isEmpty()) continue
+                out.add(
+                    PairedDevice(
+                        id = id,
+                        name = o.optString("name").ifEmpty { "Uden navn" },
+                        createdAt = o.optString("created_at").takeIf { it.isNotEmpty() },
+                        lastSeen = o.optString("last_seen").takeIf { it.isNotEmpty() },
+                    ),
+                )
+            }
+            return out
+        }
+    }
+
+    /**
+     * Fjerner en enheds adgang. Riggen slår enheden op i sit live-lager ved
+     * HVERT kald, så et tilbagekaldt token holder op med at virke med det samme
+     * — også midt i en igangværende session.
+     */
+    fun revokeDevice(deviceId: String) {
+        val rb = Request.Builder().url("$base/api/v1/devices/$deviceId").delete()
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        http.newCall(rb.build()).execute().use { resp ->
+            if (!resp.isSuccessful) {
+                throw ModelRigException("revoke failed (${resp.code}): ${resp.body?.string().orEmpty()}")
+            }
         }
     }
 
