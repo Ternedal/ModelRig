@@ -91,7 +91,6 @@ function Prepare-T033SecondUser([string]$Sha, [string]$Branch) {
   & git -C $publicRepo checkout --quiet -B $Branch $Sha
   if ($LASTEXITCODE -ne 0) { throw 'Kunne ikke låse T-033-kandidatkopien til exact SHA.' }
 
-  $python = (Get-Command python -ErrorAction Stop).Source
   $desktop = Join-Path $env:PUBLIC 'Desktop'
   New-Item -ItemType Directory -Path $desktop -Force | Out-Null
   $launcher = Join-Path $desktop 'MODELRIG_T033_ANDEN_BRUGER.cmd'
@@ -103,9 +102,22 @@ echo ==============================================================
 echo   MODELRIG T-033 - KUN DET UUNDGAAELIGE ANDEN-BRUGER-TRIN
 echo ==============================================================
 echo.
-echo Du er nu paa den ANDEN Windows-konto. Tryk en tast for at koere DPAPI-proben.
-pause >nul
-"$python" "$publicRepo\scripts\proof_t033_current.py" probe --request "$request" --output "$probe"
+echo Denne fil bruger den ANDEN brugers egen Python via py.exe eller PATH.
+echo Den bruger ingen GitHub-login og kandidaten er allerede laast til exact SHA.
+echo.
+where py >nul 2>&1
+if "%ERRORLEVEL%"=="0" (
+  py -3 "$publicRepo\scripts\proof_t033_current.py" probe --request "$request" --output "$probe"
+) else (
+  where python >nul 2>&1
+  if not "%ERRORLEVEL%"=="0" (
+    echo FEJL: Python findes ikke for denne Windows-bruger.
+    echo Installer/aktiver Python for brugeren og dobbeltklik denne fil igen.
+    pause
+    exit /b 2
+  )
+  python "$publicRepo\scripts\proof_t033_current.py" probe --request "$request" --output "$probe"
+)
 set "RC=%ERRORLEVEL%"
 echo.
 if "%RC%"=="0" echo PASS: Gaa tilbage til din normale Windows-konto og dobbeltklik START_PROOF_CAMPAIGN.cmd igen.
