@@ -9,6 +9,8 @@ Set-StrictMode -Version Latest
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $phoneScript = Join-Path $PSScriptRoot "stage-a-phone-test.ps1"
 $stackScript = Join-Path $PSScriptRoot "start-stage-a-validation-stack.ps1"
+$knownCleanupScript = Join-Path $PSScriptRoot "stop-stage-a-known-processes.ps1"
+$pairingQrScript = Join-Path $PSScriptRoot "show_pairing_qr.py"
 $phoneStatePath = Join-Path $repoRoot "validation\stage-a-runtime\phone-test-state.json"
 $manualPath = Join-Path $repoRoot "validation\voice-manual-observations.json"
 $reportPath = Join-Path $repoRoot "validation\voice-baseline-latest.json"
@@ -109,7 +111,23 @@ try {
     Write-Host "  Ingen JSON skal redigeres manuelt."
     Write-Host ""
 
+    # Preflight/Agent3 kan have efterladt den kendte exact-head stack på 8080/8099.
+    # Stop kun processer, vi kan bevise er Stage A-processer; ukendte listeners røres aldrig.
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $knownCleanupScript
+    if ($LASTEXITCODE -ne 0) { throw "Den tidligere kendte Stage A-stack kunne ikke ryddes sikkert." }
+
     & $phoneScript -PlannerModel $model
+
+    # QR er kun ergonomi. Hvis lokal QR-generering ikke kan installeres/køre,
+    # fortsætter proof-gaten med den eksisterende URL+engangskode som fallback.
+    & python $pairingQrScript --state $phoneStatePath --open
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host ""
+        Write-Host "  TELEFON: Åbn Kaliv -> Rig -> Skan QR, scan billedet og tryk Forbind efter host-check." -ForegroundColor Green
+        Write-Host "  Du skal ikke taste IP-adresse eller parringskode." -ForegroundColor Green
+    } else {
+        Write-Warning "QR kunne ikke genereres. Brug Server-URL + parringskode fra vinduet som fallback."
+    }
 
     & python (Join-Path $PSScriptRoot "stage_a_voice_observations.py") `
         --phone-state $phoneStatePath `
