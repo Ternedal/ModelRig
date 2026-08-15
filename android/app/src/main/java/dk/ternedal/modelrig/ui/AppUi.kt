@@ -78,7 +78,7 @@ import dk.ternedal.modelrig.ui.chat.CapabilitiesSheet
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.graphicsLayer
 
-private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, Audit, ControlCenter, CloudPicker, VoiceCloudPicker, RigStatus, Devices }
+private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, Audit, ControlCenter, CloudPicker, VoiceCloudPicker, RigStatus, Devices, QrScan }
 
 @Composable
 fun AppUi(pairingLink: dk.ternedal.modelrig.net.PairingLink? = null) {
@@ -95,6 +95,9 @@ fun AppUi(pairingLink: dk.ternedal.modelrig.net.PairingLink? = null) {
         var screen by remember { mutableStateOf(Screen.Splash) }
         // conversation to open in ChatScreen; null = start fresh / latest
         var openConvId by remember { mutableStateOf(db.latestConversationId()) }
+        // Et scannet link lever her, så det overlever navigationen tilbage
+        // fra skanneren til parringskortet.
+        var scannedLink by remember { mutableStateOf<dk.ternedal.modelrig.net.PairingLink?>(null) }
         // bumped when the cloud model is changed elsewhere (picker), so
         // ChatScreen re-reads store.cloudModel when it comes back into view.
         var cloudModelTick by remember { mutableStateOf(0) }
@@ -104,10 +107,15 @@ fun AppUi(pairingLink: dk.ternedal.modelrig.net.PairingLink? = null) {
                 Screen.Splash -> SplashScreen(onDone = {
                     screen = if (store.hasRig || store.hasCloud) Screen.Chat else Screen.Setup
                 })
+                Screen.QrScan -> QrScanScreen(
+                    onBack = { screen = Screen.Setup },
+                    onLink = { link -> scannedLink = link; screen = Screen.Setup },
+                )
                 Screen.Setup -> SetupScreen(
                     store,
                     db,
-                    pairingLink = pairingLink,
+                    pairingLink = scannedLink ?: pairingLink,
+                    onScanQr = { screen = Screen.QrScan },
                     onDone = { screen = Screen.Chat },
                     onOpenControlCenter = { screen = Screen.ControlCenter },
                 )
@@ -183,6 +191,7 @@ private fun SetupScreen(
     onDone: () -> Unit,
     onOpenControlCenter: () -> Unit,
     pairingLink: dk.ternedal.modelrig.net.PairingLink? = null,
+    onScanQr: (() -> Unit)? = null,
 ) {
     var refresh by remember { mutableStateOf(0) }
     val canChat = remember(refresh) { store.hasRig || store.hasCloud }
@@ -202,7 +211,7 @@ private fun SetupScreen(
             if (canChat) TextButton(onClick = onDone) { Text("Til chat →", color = KalivTheme.colors.signal) }
         }
         Spacer(Modifier.height(22.dp))
-        RigCard(store, db, onConnected = { refresh++; onDone() }, pairingLink = pairingLink)
+        RigCard(store, db, onConnected = { refresh++; onDone() }, pairingLink = pairingLink, onScanQr = onScanQr)
         Spacer(Modifier.height(13.dp))
         CloudCard(store, db) { refresh++; onDone() }
         if (store.hasRig) {
@@ -326,6 +335,7 @@ private fun RigCard(
     db: ChatDb,
     onConnected: () -> Unit,
     pairingLink: dk.ternedal.modelrig.net.PairingLink? = null,
+    onScanQr: (() -> Unit)? = null,
 ) {
     // Et parringslink UDFYLDER felterne — det parrer ikke. Kortet nedenfor
     // viser værten, og først et tryk bruger koden.
@@ -408,6 +418,10 @@ private fun RigCard(
                 letterSpacingEm = 0.16f, placeholder = "XXXX-XXXX",
             )
             dk.ternedal.modelrig.ui.chat.PairingField("Enhedsnavn", deviceName, { deviceName = it })
+            onScanQr?.let { scan ->
+                Spacer(Modifier.height(9.dp))
+                dk.ternedal.modelrig.ui.chat.KalivOutlineActionCard("Skan QR fra riggen", scan)
+            }
             dk.ternedal.modelrig.ui.chat.PairingBindNote()
             OutlinedTextField(
                 value = system, onValueChange = { system = it; store.rigSystem = it },

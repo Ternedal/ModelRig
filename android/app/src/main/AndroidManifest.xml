@@ -4,6 +4,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Kaliv Voice: microphone capture for push-to-talk. Requested at runtime. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- QR-parring: kameraet bruges KUN paa skanne-skaermen. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <!-- In-app-opdatering: installer-intent for hentet APK (sideload-flowet). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
