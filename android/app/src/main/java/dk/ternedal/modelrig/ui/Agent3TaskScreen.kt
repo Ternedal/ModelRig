@@ -43,6 +43,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 
 /**
  * Human-facing, server-routed read-only task surface.
@@ -234,6 +235,7 @@ fun Agent3TaskScreen(
         Column(
             Modifier
                 .fillMaxSize()
+                .kalivScreenInsets()
                 .padding(horizontal = 18.dp, vertical = 14.dp)
                 .verticalScroll(rememberScrollState()),
         ) {

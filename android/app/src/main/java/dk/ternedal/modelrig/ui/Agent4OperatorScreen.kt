@@ -36,6 +36,7 @@ import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 
 private const val AGENT4_CAMPAIGN_PAGE_SIZE = 25
 
@@ -177,6 +178,7 @@ fun Agent4OperatorScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .kalivScreenInsets()
             .padding(20.dp),
     ) {
         Row(

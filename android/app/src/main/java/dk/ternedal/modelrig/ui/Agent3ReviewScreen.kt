@@ -34,6 +34,7 @@ import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 
 /** Developer-only reviewed-read UI. It never resumes or replans automatically. */
 @Composable
@@ -101,6 +102,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
         Column(
             Modifier
                 .fillMaxSize()
+                .kalivScreenInsets()
                 .padding(horizontal = 18.dp, vertical = 14.dp)
                 .verticalScroll(rememberScrollState()),
         ) {

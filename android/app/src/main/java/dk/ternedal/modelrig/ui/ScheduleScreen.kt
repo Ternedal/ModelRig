@@ -51,6 +51,7 @@ import java.util.Locale
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 
 /**
  * Human-only schedule administration.
@@ -273,6 +274,7 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
         Column(
             Modifier
                 .fillMaxSize()
+                .kalivScreenInsets()
                 .padding(horizontal = 18.dp, vertical = 14.dp)
                 .verticalScroll(rememberScrollState()),
         ) {

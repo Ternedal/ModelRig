@@ -45,6 +45,7 @@ import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
+import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 
 private val CONTROL_CENTER_COMPONENT_ORDER = listOf("backend", "worker", "models", "agent3")
 
@@ -191,6 +192,7 @@ fun ControlCenterScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .kalivScreenInsets()
                 .padding(20.dp),
         ) {
             Row(

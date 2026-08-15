@@ -37,6 +37,7 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
+import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 
 /**
  * Enheder — hvem har adgang til riggen, og fjernelse af adgang.
@@ -77,6 +78,7 @@ fun DevicesScreen(store: TokenStore, onBack: () -> Unit, onSelfRevoked: () -> Un
         Modifier
             .fillMaxSize()
             .background(KalivTheme.colors.background)
+            .kalivScreenInsets()
             .verticalScroll(rememberScrollState()),
     ) {
         ConversationsTopBar(

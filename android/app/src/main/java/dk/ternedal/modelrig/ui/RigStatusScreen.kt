@@ -36,6 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 
 /**
  * Rig-status (skærm 18) mod B3a-endpointet GET /api/v1/system/status.
@@ -85,6 +86,7 @@ fun RigStatusScreen(store: TokenStore, onBack: () -> Unit) {
         Modifier
             .fillMaxSize()
             .background(KalivTheme.colors.background)
+            .kalivScreenInsets()
             .verticalScroll(rememberScrollState()),
     ) {
         ConversationsTopBar(
