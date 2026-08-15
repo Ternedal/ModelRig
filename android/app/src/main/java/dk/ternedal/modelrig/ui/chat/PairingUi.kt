@@ -35,6 +35,7 @@ import dk.ternedal.modelrig.R
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import dk.ternedal.modelrig.ui.theme.KalivTokens
 import dk.ternedal.modelrig.ui.theme.KalivType
+import androidx.compose.foundation.clickable
 
 /**
  * Skaerm 5 (Opsaetning/parring) — statsloese byggesten, 1:1 mod HTML-
@@ -200,5 +201,64 @@ fun PairingCardHeader(
             )
         }
         trailing?.invoke()
+    }
+}
+
+/**
+ * Kortet et parringslink lander i.
+ *
+ * Linket har udfyldt felterne — men det er MENNESKET der parrer. Derfor står
+ * værten skrevet ud med store bogstaver i sin egen linje: det er den ene ting
+ * man skal genkende, før koden bruges. En QR kan man ikke læse med øjnene, og
+ * et link kan pege hvor som helst; uden dette skridt kunne en fremmed kode
+ * binde telefonen til en fremmed rig.
+ */
+@Composable
+fun PairingLinkNotice(
+    host: String,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(KalivTokens.Radius.card)
+    Column(
+        modifier
+            .fillMaxWidth()
+            .background(KalivTheme.colors.surfaceDim, shape)
+            .border(KalivTokens.Layout.hairline, KalivTheme.colors.hairline, shape)
+            .padding(horizontal = 15.dp, vertical = 13.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                painterResource(R.drawable.ic_kaliv_shield),
+                contentDescription = null,
+                tint = KalivTheme.colors.accent,
+                modifier = Modifier.size(15.dp),
+            )
+            Spacer(Modifier.width(9.dp))
+            Text(
+                "Felterne er udfyldt fra et link",
+                style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 14.5.sp),
+                color = KalivTheme.colors.textHigh,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "Ryd",
+                style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp),
+                color = KalivTheme.colors.textMuted,
+                modifier = Modifier.clickable(onClickLabel = "Ryd") { onDismiss() },
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            host,
+            style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 16.sp),
+            color = KalivTheme.colors.accent,
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            "Tjek at det er din egen rig, og tryk så Forbind. Intet er parret endnu.",
+            style = TextStyle(fontFamily = KalivType.Inter, fontSize = 13.5.sp),
+            color = KalivTheme.colors.textMuted,
+        )
     }
 }

@@ -30,6 +30,15 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Parringslink (og senere QR): kaliv://pair?url=...&code=...
+                 Linket PARRER ALDRIG af sig selv — det udfylder felterne og
+                 beder om en bekraeftelse med vaerten skrevet ud. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="kaliv" android:host="pair" />
+            </intent-filter>
             <!-- Long-press Kaliv's launcher icon -> Opgaver or Planer. Each
                  explicit shortcut lands in MainActivity's authenticated rig UI. -->
             <meta-data

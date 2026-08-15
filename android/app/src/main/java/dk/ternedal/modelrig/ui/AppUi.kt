@@ -81,7 +81,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, Audit, ControlCenter, CloudPicker, VoiceCloudPicker, RigStatus, Devices }
 
 @Composable
-fun AppUi() {
+fun AppUi(pairingLink: dk.ternedal.modelrig.net.PairingLink? = null) {
     val context = LocalContext.current
     val store = remember { TokenStore(context) }
     val db = remember { ChatDb(context) }
@@ -107,6 +107,7 @@ fun AppUi() {
                 Screen.Setup -> SetupScreen(
                     store,
                     db,
+                    pairingLink = pairingLink,
                     onDone = { screen = Screen.Chat },
                     onOpenControlCenter = { screen = Screen.ControlCenter },
                 )
@@ -181,6 +182,7 @@ private fun SetupScreen(
     db: ChatDb,
     onDone: () -> Unit,
     onOpenControlCenter: () -> Unit,
+    pairingLink: dk.ternedal.modelrig.net.PairingLink? = null,
 ) {
     var refresh by remember { mutableStateOf(0) }
     val canChat = remember(refresh) { store.hasRig || store.hasCloud }
@@ -200,7 +202,7 @@ private fun SetupScreen(
             if (canChat) TextButton(onClick = onDone) { Text("Til chat →", color = KalivTheme.colors.signal) }
         }
         Spacer(Modifier.height(22.dp))
-        RigCard(store, db) { refresh++; onDone() }
+        RigCard(store, db, onConnected = { refresh++; onDone() }, pairingLink = pairingLink)
         Spacer(Modifier.height(13.dp))
         CloudCard(store, db) { refresh++; onDone() }
         if (store.hasRig) {
@@ -319,9 +321,17 @@ private fun CloudCard(store: TokenStore, db: ChatDb, onSaved: () -> Unit) {
 }
 
 @Composable
-private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
-    var baseUrl by remember { mutableStateOf(store.baseUrl ?: "http://192.168.1.10:8080") }
-    var code by remember { mutableStateOf("") }
+private fun RigCard(
+    store: TokenStore,
+    db: ChatDb,
+    onConnected: () -> Unit,
+    pairingLink: dk.ternedal.modelrig.net.PairingLink? = null,
+) {
+    // Et parringslink UDFYLDER felterne — det parrer ikke. Kortet nedenfor
+    // viser værten, og først et tryk bruger koden.
+    var baseUrl by remember { mutableStateOf(pairingLink?.baseUrl ?: store.baseUrl ?: "http://192.168.1.10:8080") }
+    var code by remember { mutableStateOf(pairingLink?.code ?: "") }
+    var linkNotice by remember { mutableStateOf(pairingLink) }
     var deviceName by remember { mutableStateOf(android.os.Build.MODEL ?: "android") }
     // "connected" = a pairing is stored. That is NOT the same as the rig being
     // reachable -- Anders' rig changed IP and the app still claimed "forbundet"
@@ -385,6 +395,13 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
                 },
             )
             Spacer(Modifier.height(8.dp))
+            linkNotice?.let { link ->
+                dk.ternedal.modelrig.ui.chat.PairingLinkNotice(
+                    host = link.host,
+                    onDismiss = { linkNotice = null; code = "" },
+                    modifier = Modifier.padding(bottom = 9.dp),
+                )
+            }
             dk.ternedal.modelrig.ui.chat.PairingField("Server-URL", baseUrl, { baseUrl = it })
             dk.ternedal.modelrig.ui.chat.PairingField(
                 "Parringskode", code, { code = it },

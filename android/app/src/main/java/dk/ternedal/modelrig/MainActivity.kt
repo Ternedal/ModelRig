@@ -45,6 +45,9 @@ class MainActivity : ComponentActivity() {
         val openAgent3Capabilities = intent?.getBooleanExtra(EXTRA_AGENT3_CAPABILITIES, false) == true
         val openAgent3Replan = intent?.getBooleanExtra(EXTRA_AGENT3_REPLAN, false) == true
         val openAgent3Review = intent?.getBooleanExtra(EXTRA_AGENT3_REVIEW, false) == true
+        // kaliv://pair?url=...&code=... — parseren er fail-closed; et ugyldigt
+        // link giver null og dermed helt almindelig opstart.
+        val pairingLink = dk.ternedal.modelrig.net.PairingLink.parse(intent?.data?.toString())
         setContent {
             when {
                 openSchedules -> {
@@ -107,7 +110,7 @@ class MainActivity : ComponentActivity() {
                 }
                 else -> {
                     val store = remember { TokenStore(this) }
-                    AppEntryUi(store)
+                    AppEntryUi(store, pairingLink)
                 }
             }
         }
