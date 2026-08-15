@@ -7,10 +7,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import stage_a_scheduler_pilot_easy as pilot  # noqa: E402
 
+
 def capture(*args: str) -> str:
     p = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, check=False)
     if p.returncode: raise RuntimeError((p.stderr or p.stdout).strip())
     return p.stdout.strip()
+
 
 def main() -> int:
     os.chdir(ROOT)
@@ -20,7 +22,35 @@ def main() -> int:
     # Compatibility only: all underlying read/revoke/crash/report gates remain unchanged.
     pilot.CANDIDATE_BRANCH_PREFIX = branch
     pilot.EXPECTED_VERSION = version
+
+    original_refresh_pairing = pilot.refresh_pairing
+
+    def refresh_pairing_current() -> dict:
+        pairing = original_refresh_pairing()
+        qr = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "show_pairing_qr.py"),
+                "--state",
+                str(pilot.PHONE_STATE),
+                "--open",
+            ],
+            cwd=ROOT,
+            text=True,
+            check=False,
+        )
+        if qr.returncode == 0:
+            print("\n  TELEFON: Kaliv -> Rig -> Skan QR -> kontrollér host -> Forbind.")
+            print("  Ingen IP-adresse eller parringskode skal tastes.")
+        else:
+            print("\n  ADVARSEL: QR kunne ikke vises; brug LAN-URL + frisk kode ovenfor som fallback.")
+        return pairing
+
+    # QR is only an ergonomic adapter around the pilot's freshly minted one-use
+    # pairing code. It never changes the scheduler proof or Android approval gate.
+    pilot.refresh_pairing = refresh_pairing_current
     return int(pilot.main())
+
 
 if __name__ == "__main__":
     try: raise SystemExit(main())
