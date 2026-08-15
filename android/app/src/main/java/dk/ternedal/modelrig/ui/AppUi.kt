@@ -2606,7 +2606,7 @@ private fun ConversationsScreen(
         val loaded = withContext(Dispatchers.IO) {
             snap.associate { meta ->
                 val last = runCatching { db.loadMessages(meta.id).lastOrNull()?.second }.getOrNull()
-                meta.id to (last?.replace('\n', ' ')?.trim()?.take(90) ?: "")
+                meta.id to (last?.let { dk.ternedal.modelrig.ui.chat.previewFromMarkdown(it).take(90) } ?: "")
             }
         }
         previews = loaded

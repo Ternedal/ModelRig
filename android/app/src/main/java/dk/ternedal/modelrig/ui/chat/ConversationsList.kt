@@ -227,3 +227,27 @@ private fun ConvRow(
         rowMenu?.invoke(r.id)
     }
 }
+
+/**
+ * Rå markdown hører ikke hjemme i samtalelistens preview: referencen viser
+ * ren prosa, men modellernes svar er fulde af **fed**, overskrifter og
+ * kodehegn, som lækkede direkte ind i listen (Anders' Pixel, 15/08).
+ *
+ * Konservativ oversættelse — kun det der ellers står som støj:
+ * kodehegn og backticks, fed/kursiv, overskrifter, citater, listetegn og
+ * link-syntaks (teksten beholdes, URL'en droppes). Alt andet står urørt.
+ */
+fun previewFromMarkdown(raw: String): String {
+    var s = raw
+    s = s.replace(Regex("```[a-zA-Z0-9_+-]*"), " ")
+    s = s.replace(Regex("!\\[([^\\]]*)\\]\\([^)]*\\)"), "$1")
+    s = s.replace(Regex("\\[([^\\]]+)\\]\\([^)]*\\)"), "$1")
+    s = s.replace(Regex("(?m)^\\s{0,3}#{1,6}\\s+"), "")
+    s = s.replace(Regex("(?m)^\\s{0,3}>\\s?"), "")
+    s = s.replace(Regex("(?m)^\\s{0,3}[-*+]\\s+"), "")
+    s = s.replace(Regex("\\*\\*([^*]+)\\*\\*"), "$1")
+    s = s.replace(Regex("__([^_]+)__"), "$1")
+    s = s.replace(Regex("(?<![*\\w])\\*([^*\\n]+)\\*(?![*\\w])"), "$1")
+    s = s.replace("`", "")
+    return s.replace('\n', ' ').replace(Regex("\\s{2,}"), " ").trim()
+}
