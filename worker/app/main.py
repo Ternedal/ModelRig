@@ -17,7 +17,7 @@ import sys as _sys
 
 from . import main_impl as _impl
 
-VERSION = "2.0.6"
+VERSION = "2.0.7"
 _impl.VERSION = VERSION
 _impl.app.version = VERSION
 
