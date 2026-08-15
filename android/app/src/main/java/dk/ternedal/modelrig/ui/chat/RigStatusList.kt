@@ -45,6 +45,23 @@ import dk.ternedal.modelrig.ui.theme.KalivType
  *  - Målerens spor bruger hairline-tokenet (referencens #2a2119 ligger
  *    to kanaltrin fra #2a2521 — intet nyt token for den forskel).
  */
+/**
+ * Formaterer oppetid som referencen ("6 t 12 m"). Sekunder vises kun under
+ * et minut, så tallet ikke flimrer; over et døgn skifter den til "2 d 3 t".
+ * Bemærk: dette er BACKEND-processens levetid — ikke maskinens.
+ */
+fun formatUptime(seconds: Long): String {
+    if (seconds < 60) return "$seconds s"
+    val minutes = seconds / 60
+    val hours = minutes / 60
+    val days = hours / 24
+    return when {
+        days > 0 -> "$days d ${hours % 24} t"
+        hours > 0 -> "$hours t ${minutes % 60} m"
+        else -> "$minutes m"
+    }
+}
+
 @Composable
 fun RigEndpointCard(
     host: String,

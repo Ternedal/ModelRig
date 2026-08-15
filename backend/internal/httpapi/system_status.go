@@ -27,12 +27,25 @@ var readProcStat = func() ([]byte, error) { return os.ReadFile("/proc/stat") }
 // cpuSampleInterval er afstanden mellem de to /proc/stat-maalinger.
 var cpuSampleInterval = 150 * time.Millisecond
 
+// processStart saettes naar pakken indlaeses, altsaa naar backenden starter.
+// Oppetiden er DERFOR backend-processens levetid — ikke maskinens og ikke
+// modelserverens. Skaermen skal sige det samme, saa tallet ikke overfortolkes.
+var processStart = time.Now()
+
+// nowFunc er et soem for tests.
+var nowFunc = time.Now
+
 func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
+	uptime := nowFunc().Sub(processStart).Seconds()
+	if uptime < 0 {
+		uptime = 0
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"schema": "kaliv-system-status/v1",
-		"os":     runtime.GOOS,
-		"gpu":    collectGPUStatus(),
-		"cpu":    collectCPUStatus(),
+		"schema":         "kaliv-system-status/v1",
+		"os":             runtime.GOOS,
+		"uptime_seconds": int64(uptime),
+		"gpu":            collectGPUStatus(),
+		"cpu":            collectCPUStatus(),
 	})
 }
 

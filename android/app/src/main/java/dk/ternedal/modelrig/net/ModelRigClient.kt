@@ -464,6 +464,8 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         val vramUsedMb: Int?,
         val vramFreeMb: Int?,
         val cpuPct: Double?,
+        /** Backend-processens levetid i sekunder; null på rigge uden feltet. */
+        val uptimeSeconds: Long?,
     )
 
     /** Throws when the rig predates the endpoint (404) — caller shows the upgrade hint. */
@@ -489,6 +491,11 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
                     null
                 } else {
                     cpu.optDouble("utilization_pct")
+                },
+                uptimeSeconds = if (!root.has("uptime_seconds") || root.isNull("uptime_seconds")) {
+                    null
+                } else {
+                    root.optLong("uptime_seconds")
                 },
             )
         }

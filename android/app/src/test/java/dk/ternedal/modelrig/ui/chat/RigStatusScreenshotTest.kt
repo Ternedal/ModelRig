@@ -37,7 +37,11 @@ class RigStatusScreenshotTest {
             Spacer(Modifier.height(10.dp))
             ConversationsTopBar(title = "Rig-status", onBack = {}, onMenu = {}, menuIcon = dk.ternedal.modelrig.R.drawable.ic_kaliv_retry)
             Column(Modifier.padding(horizontal = 15.dp)) {
-                RigEndpointCard(host = "192.168.1.10:8080", stateText = "Forbundet", online = true)
+                RigEndpointCard(
+                    host = "192.168.1.10:8080",
+                    stateText = "Forbundet \u00b7 rig-oppetid " + formatUptime(6 * 3600L + 12 * 60L),
+                    online = true,
+                )
                 Spacer(Modifier.height(19.dp))
                 RigSectionCaps("BELASTNING")
                 Spacer(Modifier.height(12.dp))

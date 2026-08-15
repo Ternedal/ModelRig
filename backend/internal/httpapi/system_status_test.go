@@ -158,6 +158,43 @@ func TestHandleSystemStatusFailSoftJSON(t *testing.T) {
 	}
 }
 
+func TestSystemStatusReportsBackendUptime(t *testing.T) {
+	oldExec, oldProc, oldInt, oldNow, oldStart := execOutput, readProcStat, cpuSampleInterval, nowFunc, processStart
+	defer func() {
+		execOutput, readProcStat, cpuSampleInterval, nowFunc, processStart = oldExec, oldProc, oldInt, oldNow, oldStart
+	}()
+	cpuSampleInterval = time.Millisecond
+	execOutput = func(string, ...string) ([]byte, error) { return nil, errors.New("ingen gpu i test") }
+	readProcStat = func() ([]byte, error) { return nil, errors.New("ingen proc i test") }
+	processStart = time.Unix(1_700_000_000, 0)
+	nowFunc = func() time.Time { return processStart.Add(6*time.Hour + 12*time.Minute + 30*time.Second) }
+
+	s := &server{}
+	rec := httptest.NewRecorder()
+	s.handleSystemStatus(rec, httptest.NewRequest(http.MethodGet, "/api/v1/system/status", nil))
+
+	var body struct {
+		Uptime int64 `json:"uptime_seconds"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Uptime != 22350 {
+		t.Errorf("uptime_seconds = %d, want 22350", body.Uptime)
+	}
+
+	// En baglaens klokke maa aldrig give negativ oppetid.
+	nowFunc = func() time.Time { return processStart.Add(-time.Hour) }
+	rec = httptest.NewRecorder()
+	s.handleSystemStatus(rec, httptest.NewRequest(http.MethodGet, "/api/v1/system/status", nil))
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Uptime != 0 {
+		t.Errorf("negativ oppetid = %d, want 0", body.Uptime)
+	}
+}
+
 func TestSystemStatusRouteRequiresBearerToken(t *testing.T) {
 	oldExec, oldProc, oldInt := execOutput, readProcStat, cpuSampleInterval
 	defer func() { execOutput, readProcStat, cpuSampleInterval = oldExec, oldProc, oldInt }()

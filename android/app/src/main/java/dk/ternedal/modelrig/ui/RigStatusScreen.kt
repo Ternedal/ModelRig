@@ -96,6 +96,10 @@ fun RigStatusScreen(store: TokenStore, onBack: () -> Unit) {
                     ?: "Ingen rig parret",
                 stateText = when {
                     loading && online == null -> "Tjekker forbindelsen …"
+                    // Oppetiden er backendens egen levetid — derfor står den
+                    // som "rig-oppetid", ikke som maskinens driftstid.
+                    online == true && sys?.uptimeSeconds != null ->
+                        "Forbundet · rig-oppetid " + dk.ternedal.modelrig.ui.chat.formatUptime(sys!!.uptimeSeconds!!)
                     online == true -> "Forbundet"
                     online == false -> "Svarer ikke"
                     else -> "Ukendt"
