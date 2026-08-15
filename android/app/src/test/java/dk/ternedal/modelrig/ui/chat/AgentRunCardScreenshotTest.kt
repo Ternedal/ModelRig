@@ -76,6 +76,18 @@ class AgentRunCardScreenshotTest {
     }
 
     @Test
+    fun agentRunStopConfirmDark() {
+        compose.setContent {
+            ModelRigTheme(dark = true) {
+                Column(Modifier.fillMaxWidth().background(KalivTheme.colors.background).padding(15.dp)) {
+                    AgentRunStopConfirm(busy = false, onConfirm = {}, onCancel = {})
+                }
+            }
+        }
+        compose.onRoot().captureRoboImage()
+    }
+
+    @Test
     fun screen12Dark() {
         compose.setContent { ModelRigTheme(dark = true) { Screen12() } }
         compose.onRoot().captureRoboImage()

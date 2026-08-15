@@ -28,6 +28,7 @@ import dk.ternedal.modelrig.R
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import dk.ternedal.modelrig.ui.theme.KalivTokens
 import dk.ternedal.modelrig.ui.theme.KalivType
+import androidx.compose.foundation.layout.height
 
 /**
  * Skaerm 12 (Agent-koersel) — plan-/trinkortet, 1:1 mod HTML-referencen
@@ -121,5 +122,73 @@ private fun AgentStepRow(s: AgentStepUi) {
                 AgentStepState.Pending -> KalivTheme.colors.faint
             },
         )
+    }
+}
+
+/**
+ * Bekræftelsen før en kørsel stoppes.
+ *
+ * At stoppe er en rigtig handling mod riggen, ikke en visning — og et
+ * fejltryk i en chat er let. Derfor to skridt, og teksten siger hvad der
+ * FAKTISK sker: allerede udførte trin ruller ikke tilbage. Alt andet ville
+ * være et løfte Agent 3 ikke kan holde.
+ */
+@Composable
+fun AgentRunStopConfirm(
+    busy: Boolean,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(KalivTokens.Radius.card)
+    Column(
+        modifier
+            .fillMaxWidth()
+            .background(KalivTheme.colors.surfaceDim, shape)
+            .border(KalivTokens.Layout.hairline, KalivTheme.colors.danger, shape)
+            .padding(horizontal = 15.dp, vertical = 13.dp),
+    ) {
+        Text(
+            "Stop planen?",
+            style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 15.sp),
+            color = KalivTheme.colors.textHigh,
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            "Resten af trinnene køres ikke. Det der allerede er udført, rulles ikke tilbage.",
+            style = TextStyle(fontFamily = KalivType.Inter, fontSize = 13.sp),
+            color = KalivTheme.colors.textMuted,
+        )
+        Spacer(Modifier.height(11.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .border(KalivTokens.Layout.hairline, KalivTheme.colors.hairline, RoundedCornerShape(11.dp))
+                    .clickable(enabled = !busy, onClickLabel = "Lad den køre") { onCancel() }
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "Lad den køre",
+                    style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
+                    color = KalivTheme.colors.textSoft,
+                )
+            }
+            Box(
+                Modifier
+                    .weight(1f)
+                    .border(KalivTokens.Layout.hairline, KalivTheme.colors.danger, RoundedCornerShape(11.dp))
+                    .clickable(enabled = !busy, onClickLabel = "Stop") { onConfirm() }
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    if (busy) "Stopper …" else "Stop planen",
+                    style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
+                    color = KalivTheme.colors.danger,
+                )
+            }
+        }
     }
 }
