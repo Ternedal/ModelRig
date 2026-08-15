@@ -38,17 +38,39 @@ class KnowledgeListScreenshotTest {
             KnowledgeIntroNote(Modifier.padding(bottom = 15.dp))
             KnowledgeList(
                 docs = listOf(
-                    KnowledgeDocUi("Brygning_Guide.pdf", "PDF"),
-                    KnowledgeDocUi("Enzymer_i_brygning.md", "MD"),
-                    KnowledgeDocUi("Underventil_noter.txt", "TXT"),
+                    KnowledgeDocUi("Brygning_Guide.pdf", "PDF", knowledgeStatsLine(24, 1_783_000_000.0)),
+                    KnowledgeDocUi("Enzymer_i_brygning.md", "MD", knowledgeStatsLine(12, 1_781_000_000.0)),
+                    KnowledgeDocUi("Underventil_noter.txt", "TXT", knowledgeStatsLine(3, null)),
                     KnowledgeDocUi("G\u00e6r_datablad.pdf", "PDF"),
                 ),
                 onAdd = {},
                 modifier = Modifier.padding(horizontal = 17.dp),
             )
+            KnowledgeCorpusFooter(
+                sourceCount = 4,
+                chunkCount = 39,
+                modifier = Modifier.padding(horizontal = 17.dp, vertical = 6.dp),
+            )
             KnowledgeFooterNote(Modifier.padding(horizontal = 17.dp, vertical = 10.dp))
             Spacer(Modifier.height(12.dp))
         }
+    }
+
+    @Test
+    fun screen8DeleteConfirmDark() {
+        compose.setContent {
+            ModelRigTheme(dark = true) {
+                Column(Modifier.fillMaxWidth().background(KalivTheme.colors.background).padding(17.dp)) {
+                    KnowledgeDeleteConfirm(
+                        name = "Brygning_Guide.pdf",
+                        chunks = 24,
+                        busy = false,
+                        onConfirm = {}, onCancel = {},
+                    )
+                }
+            }
+        }
+        compose.onRoot().captureRoboImage()
     }
 
     @Test

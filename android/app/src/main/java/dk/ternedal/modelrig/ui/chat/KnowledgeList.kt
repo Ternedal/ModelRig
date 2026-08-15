@@ -30,6 +30,9 @@ import dk.ternedal.modelrig.R
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import dk.ternedal.modelrig.ui.theme.KalivTokens
 import dk.ternedal.modelrig.ui.theme.KalivType
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.unit.em
 
 /**
  * Skaerm 8 (Viden/RAG) — 1:1 mod HTML-referencen, x393/322 jf. DDR-001/B2.
@@ -43,7 +46,29 @@ import dk.ternedal.modelrig.ui.theme.KalivType
  * sandheden vinder over mockup-teksten; chevron'en er droppet (ingen
  * destination = doed affordance).
  */
-data class KnowledgeDocUi(val name: String, val badge: String)
+data class KnowledgeDocUi(
+    val name: String,
+    val badge: String,
+    /** Rigens egne tal: "12 udsnit · 8/7 2026" — tom når de ikke findes. */
+    val statsLine: String = "",
+)
+
+/**
+ * Kildens tal-linje. Antal udsnit kommer fra riggen; datoen udelades hvis
+ * tidsstemplet mangler, i stedet for at fylde med noget opdigtet.
+ */
+fun knowledgeStatsLine(chunks: Int, lastIngestedAt: Double?): String {
+    val chunkPart = if (chunks == 1) "1 udsnit" else "$chunks udsnit"
+    val stamp = formatIngestDate(lastIngestedAt) ?: return chunkPart
+    return "$chunkPart \u00b7 $stamp"
+}
+
+/** Unix-sekunder -> "8/7 2026"; null/ugyldigt -> null (ingen dato vises). */
+fun formatIngestDate(epochSeconds: Double?): String? {
+    if (epochSeconds == null || !epochSeconds.isFinite() || epochSeconds <= 0.0) return null
+    return java.text.SimpleDateFormat("d/M yyyy", java.util.Locale("da", "DK"))
+        .format(java.util.Date((epochSeconds * 1000.0).toLong()))
+}
 
 /** Filendelse -> caps-badge ("PDF", "MD", ...); ukendt -> "DOK". */
 fun knowledgeBadgeFor(name: String): String {
@@ -83,21 +108,31 @@ fun KnowledgeList(
     docs: List<KnowledgeDocUi>,
     onAdd: () -> Unit,
     modifier: Modifier = Modifier,
+    onDelete: ((KnowledgeDocUi) -> Unit)? = null,
 ) {
     LazyColumn(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(11.dp)) {
-        items(docs, key = { it.name }) { d -> KnowledgeDocCard(d) }
+        items(docs, key = { it.name }) { d -> KnowledgeDocCard(d, onDelete) }
         item { KalivOutlineActionCard("Tilf\u00f8j dokument", onAdd) }
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun KnowledgeDocCard(d: KnowledgeDocUi) {
+private fun KnowledgeDocCard(d: KnowledgeDocUi, onDelete: ((KnowledgeDocUi) -> Unit)? = null) {
     val shape = RoundedCornerShape(KalivTokens.Radius.card)
     Row(
         Modifier
             .fillMaxWidth()
             .background(KalivTheme.colors.surface, shape)
             .border(KalivTokens.Layout.hairline, KalivTheme.colors.hairline, shape)
+            .then(
+                if (onDelete == null) {
+                    Modifier
+                } else {
+                    // Langtryk = fjern kilden, samme mønster som Samtaler.
+                    Modifier.combinedClickable(onClick = {}, onLongClick = { onDelete(d) })
+                },
+            )
             .padding(15.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -112,14 +147,23 @@ private fun KnowledgeDocCard(d: KnowledgeDocUi) {
             )
         }
         Spacer(Modifier.width(15.dp))
-        Text(
-            d.name,
-            style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 16.sp),
-            color = KalivTheme.colors.textHigh,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                d.name,
+                style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 16.sp),
+                color = KalivTheme.colors.textHigh,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (d.statsLine.isNotEmpty()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    d.statsLine,
+                    style = TextStyle(fontFamily = KalivType.Inter, fontSize = 13.5.sp),
+                    color = KalivTheme.colors.textMuted,
+                )
+            }
+        }
     }
 }
 
@@ -165,5 +209,99 @@ fun KnowledgeFooterNote(modifier: Modifier = Modifier) {
             style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.Medium, fontSize = 14.sp),
             color = KalivTheme.colors.textMuted,
         )
+    }
+}
+
+/**
+ * Korpus-foden: rigens totaler under listen. Tallene er summeret af
+ * kildernes egne udsnitstal — ikke et separat estimat.
+ */
+@Composable
+fun KnowledgeCorpusFooter(
+    sourceCount: Int,
+    chunkCount: Int,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        (if (sourceCount == 1) "1 kilde" else "$sourceCount kilder") + " \u00b7 " +
+            (if (chunkCount == 1) "1 udsnit" else "$chunkCount udsnit") + " i indekset",
+        style = TextStyle(
+            fontFamily = KalivType.Inter,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.5.sp,
+            letterSpacing = 0.18.em,
+        ),
+        color = KalivTheme.colors.caps,
+        modifier = modifier.fillMaxWidth(),
+    )
+}
+
+/**
+ * Bekræftelse før en kilde fjernes. Sletningen er ægte og uigenkaldelig:
+ * alle udsnit forsvinder fra indekset, og dokumentet skal indekseres forfra
+ * for at komme igen. Derfor står tallet i teksten.
+ */
+@Composable
+fun KnowledgeDeleteConfirm(
+    name: String,
+    chunks: Int,
+    busy: Boolean,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(KalivTokens.Radius.card)
+    Column(
+        modifier
+            .fillMaxWidth()
+            .background(KalivTheme.colors.surfaceDim, shape)
+            .border(KalivTokens.Layout.hairline, KalivTheme.colors.danger, shape)
+            .padding(horizontal = 16.dp, vertical = 15.dp),
+    ) {
+        Text(
+            "Fjern $name fra viden?",
+            style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 16.sp),
+            color = KalivTheme.colors.textHigh,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            (if (chunks == 1) "1 udsnit" else "$chunks udsnit") +
+                " slettes fra indekset. Kaliv kan ikke trække på dokumentet igen, før det indekseres forfra.",
+            style = TextStyle(fontFamily = KalivType.Inter, fontSize = 13.5.sp),
+            color = KalivTheme.colors.textMuted,
+        )
+        Spacer(Modifier.height(13.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .border(KalivTokens.Layout.hairline, KalivTheme.colors.hairline, RoundedCornerShape(12.dp))
+                    .clickable(enabled = !busy, onClickLabel = "Behold") { onCancel() }
+                    .padding(vertical = 11.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "Behold",
+                    style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 14.5.sp),
+                    color = KalivTheme.colors.textSoft,
+                )
+            }
+            Box(
+                Modifier
+                    .weight(1f)
+                    .border(KalivTokens.Layout.hairline, KalivTheme.colors.danger, RoundedCornerShape(12.dp))
+                    .clickable(enabled = !busy, onClickLabel = "Fjern") { onConfirm() }
+                    .padding(vertical = 11.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "Fjern",
+                    style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 14.5.sp),
+                    color = KalivTheme.colors.danger,
+                )
+            }
+        }
     }
 }

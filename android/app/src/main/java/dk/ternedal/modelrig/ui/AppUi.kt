@@ -2851,19 +2851,21 @@ private fun KnowledgeScreen(store: TokenStore, onBack: () -> Unit) {
     // with the same ingest contract the chat composer uses.
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var sources by remember { mutableStateOf<List<String>>(emptyList()) }
+    var details by remember { mutableStateOf<List<ModelRigClient.RagSource>>(emptyList()) }
+    val sources = details.map { it.name }
     var loading by remember { mutableStateOf(true) }
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var deleting by remember { mutableStateOf<ModelRigClient.RagSource?>(null) }
 
     fun refresh() {
         loading = true
         scope.launch {
             val r = withContext(Dispatchers.IO) {
-                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRagSources() }
+                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRagSourceDetails() }
             }
             loading = false
-            sources = r.getOrDefault(emptyList())
+            details = r.getOrDefault(emptyList())
             error = r.exceptionOrNull()?.let { friendlyError(it) }
         }
     }
@@ -2935,11 +2937,47 @@ private fun KnowledgeScreen(store: TokenStore, onBack: () -> Unit) {
                 )
             }
             else -> dk.ternedal.modelrig.ui.chat.KnowledgeList(
-                docs = sources.map {
-                    dk.ternedal.modelrig.ui.chat.KnowledgeDocUi(it, dk.ternedal.modelrig.ui.chat.knowledgeBadgeFor(it))
+                docs = details.map {
+                    dk.ternedal.modelrig.ui.chat.KnowledgeDocUi(
+                        name = it.name,
+                        badge = dk.ternedal.modelrig.ui.chat.knowledgeBadgeFor(it.name),
+                        statsLine = dk.ternedal.modelrig.ui.chat.knowledgeStatsLine(it.chunks, it.lastIngestedAt),
+                    )
                 },
                 onAdd = { pick.launch(arrayOf("*/*")) },
+                onDelete = { doc -> deleting = details.firstOrNull { it.name == doc.name } },
                 modifier = Modifier.weight(1f).padding(horizontal = 17.dp),
+            )
+        }
+        deleting?.let { target ->
+            dk.ternedal.modelrig.ui.chat.KnowledgeDeleteConfirm(
+                name = target.name,
+                chunks = target.chunks,
+                busy = loading,
+                onConfirm = {
+                    scope.launch {
+                        val r = withContext(Dispatchers.IO) {
+                            runCatching {
+                                ModelRigClient(store.baseUrl ?: "", store.token).deleteRagSource(target.name)
+                            }
+                        }
+                        deleting = null
+                        r.onSuccess { removed ->
+                            status = "Fjernet \u00b7 $removed udsnit slettet"
+                            error = null
+                            refresh()
+                        }.onFailure { error = friendlyError(it) }
+                    }
+                },
+                onCancel = { deleting = null },
+                modifier = Modifier.padding(horizontal = 17.dp, vertical = 8.dp),
+            )
+        }
+        if (details.isNotEmpty()) {
+            dk.ternedal.modelrig.ui.chat.KnowledgeCorpusFooter(
+                sourceCount = details.size,
+                chunkCount = details.sumOf { it.chunks },
+                modifier = Modifier.padding(horizontal = 17.dp, vertical = 6.dp),
             )
         }
         dk.ternedal.modelrig.ui.chat.KnowledgeFooterNote(

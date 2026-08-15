@@ -366,6 +366,54 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         }
     }
 
+    /**
+     * En RAG-kilde med rigens egne tal: antal udsnit og hvornår den sidst
+     * blev indekseret. Begge felter HAR ligget i /rag/sources hele tiden —
+     * klienten smed dem bare væk før nu.
+     */
+    data class RagSource(val name: String, val chunks: Int, val lastIngestedAt: Double?)
+
+    /** Kilder med tal. Rækkefølgen er rigens: nyest indekseret først. */
+    fun listRagSourceDetails(): List<RagSource> {
+        val rb = Request.Builder().url("$base/api/v1/rag/sources")
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        http.newCall(rb.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("rag sources failed (${resp.code}): $text")
+            val arr = JSONObject(text).optJSONArray("sources") ?: return emptyList()
+            val out = ArrayList<RagSource>(arr.length())
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val name = o.optString("source")
+                if (name.isEmpty()) continue
+                out.add(
+                    RagSource(
+                        name = name,
+                        chunks = o.optInt("chunks", 0),
+                        lastIngestedAt = if (o.isNull("last_ingested_at")) null else o.optDouble("last_ingested_at"),
+                    ),
+                )
+            }
+            return out
+        }
+    }
+
+    /**
+     * Fjerner ALLE udsnit for en kilde og returnerer hvor mange der blev slettet.
+     * Riggen svarer 404 hvis kilden ikke har nogen udsnit — det er ikke en
+     * stille succes, og kaldet kaster derfor også dér.
+     */
+    fun deleteRagSource(source: String): Int {
+        val encoded = java.net.URLEncoder.encode(source, "UTF-8")
+        val rb = Request.Builder().url("$base/api/v1/rag/source?source=$encoded").delete()
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        http.newCall(rb.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("rag delete failed (${resp.code}): $text")
+            return JSONObject(text).optInt("removed", 0)
+        }
+    }
+
     /** Lists ingested RAG source names (for the source-filter picker). */
     fun listRagSources(): List<String> {
         val rb = Request.Builder().url("$base/api/v1/rag/sources")
