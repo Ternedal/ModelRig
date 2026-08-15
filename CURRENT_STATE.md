@@ -6,7 +6,7 @@
 > code, so it cannot quietly become untrue. If a fact belongs here, teach
 > the generator to read it -- do not type it in.
 
-**Version:** 2.0.7
+**Version:** 2.0.8
 
 ## Tools the model can see
 
