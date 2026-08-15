@@ -246,3 +246,116 @@ fun RigMeasurementNote(text: String, onRetry: (() -> Unit)? = null, modifier: Mo
         }
     }
 }
+
+/**
+ * "Frigør VRAM" — den ene af mockuppens to handlingsknapper der KAN bygges
+ * ærligt. Den beder riggen slippe modellerne fra hukommelsen (Ollamas eget
+ * keep_alive=0); intet genstartes, og næste prompt indlæser modellen igen.
+ *
+ * Mockuppens anden knap, "Genstart model-server", er BEVIDST IKKE bygget:
+ * at dræbe og starte model-serveren udefra kræver en supervisor-kontrakt på
+ * riggen, og fejler genstarten står telefonen uden nogen vej til at rette op.
+ * Unload giver samme VRAM-gevinst uden den fælde.
+ */
+@Composable
+fun RigFreeVramAction(
+    busy: Boolean,
+    confirming: Boolean,
+    resultLine: String?,
+    onAsk: () -> Unit,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(KalivTokens.Radius.card)
+    Column(modifier.fillMaxWidth()) {
+        if (confirming) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(KalivTheme.colors.surfaceDim, shape)
+                    .border(KalivTokens.Layout.hairline, KalivTheme.colors.hairline, shape)
+                    .padding(horizontal = 16.dp, vertical = 15.dp),
+            ) {
+                Text(
+                    "Frigør VRAM nu?",
+                    style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 16.sp),
+                    color = KalivTheme.colors.textHigh,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Modellerne slippes fra hukommelsen. Intet genstartes — men næste svar bliver langsommere, fordi modellen skal indlæses igen.",
+                    style = TextStyle(fontFamily = KalivType.Inter, fontSize = 13.5.sp),
+                    color = KalivTheme.colors.textMuted,
+                )
+                Spacer(Modifier.height(13.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .border(KalivTokens.Layout.hairline, KalivTheme.colors.hairline, RoundedCornerShape(12.dp))
+                            .clickable(enabled = !busy, onClickLabel = "Behold") { onCancel() }
+                            .padding(vertical = 11.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "Behold",
+                            style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 14.5.sp),
+                            color = KalivTheme.colors.textSoft,
+                        )
+                    }
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .background(KalivTokens.Gold.fill, RoundedCornerShape(12.dp))
+                            .clickable(enabled = !busy, onClickLabel = "Frigør nu") { onConfirm() }
+                            .padding(vertical = 11.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            if (busy) "Frigør …" else "Frigør nu",
+                            style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 14.5.sp),
+                            color = KalivTokens.Gold.on,
+                        )
+                    }
+                }
+            }
+        } else {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .border(KalivTokens.Layout.hairline, KalivTheme.colors.hairline, shape)
+                    .clickable(enabled = !busy, onClickLabel = "Frigør VRAM") { onAsk() }
+                    .padding(vertical = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "Frigør VRAM",
+                    style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 14.5.sp),
+                    color = KalivTheme.colors.textSoft,
+                )
+            }
+        }
+        resultLine?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                it,
+                style = TextStyle(fontFamily = KalivType.Inter, fontSize = 13.5.sp),
+                color = KalivTheme.colors.textMuted,
+            )
+        }
+    }
+}
+
+/** "9,0 GB frigjort" / "0 modeller var indlæst" — rigens eget svar, aldrig et estimat. */
+fun unloadResultLine(unloaded: Int, freedBytes: Long, failed: Int): String {
+    val base = when {
+        unloaded == 0 && failed == 0 -> "Ingen modeller var indlæst"
+        else -> {
+            val gb = freedBytes / 1_073_741_824.0
+            val model = if (unloaded == 1) "1 model" else "$unloaded modeller"
+            "$model sluppet \u00b7 " + String.format(java.util.Locale("da", "DK"), "%.1f GB", gb) + " frigjort"
+        }
+    }
+    return if (failed > 0) "$base \u00b7 $failed kunne ikke slippes" else base
+}

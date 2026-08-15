@@ -51,6 +51,13 @@ class RigStatusScreenshotTest {
                 Spacer(Modifier.height(16.dp))
                 RigMeterRow("CPU", "23 %", 0.23f)
                 Spacer(Modifier.height(19.dp))
+                RigFreeVramAction(
+                    busy = false,
+                    confirming = false,
+                    resultLine = null,
+                    onAsk = {}, onConfirm = {}, onCancel = {},
+                )
+                Spacer(Modifier.height(19.dp))
                 RigSectionCaps("INDLÆST")
                 Spacer(Modifier.height(4.dp))
                 RigLoadedModelRow("qwen3:14b", "9.0 GB")
@@ -87,6 +94,30 @@ class RigStatusScreenshotTest {
     @Test
     fun rigStatusLight() {
         compose.setContent { ModelRigTheme(dark = false) { RigStatusMeasured() } }
+        compose.onRoot().captureRoboImage()
+    }
+
+    @Test
+    fun rigStatusFreeVramConfirmDark() {
+        compose.setContent {
+            ModelRigTheme(dark = true) {
+                Column(Modifier.fillMaxWidth().background(KalivTheme.colors.background).padding(15.dp)) {
+                    RigFreeVramAction(
+                        busy = false,
+                        confirming = true,
+                        resultLine = null,
+                        onAsk = {}, onConfirm = {}, onCancel = {},
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    RigFreeVramAction(
+                        busy = false,
+                        confirming = false,
+                        resultLine = unloadResultLine(1, 9_663_676_416L, 0),
+                        onAsk = {}, onConfirm = {}, onCancel = {},
+                    )
+                }
+            }
+        }
         compose.onRoot().captureRoboImage()
     }
 

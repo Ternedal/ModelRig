@@ -51,6 +51,9 @@ fun RigStatusScreen(store: TokenStore, onBack: () -> Unit) {
     var running by remember { mutableStateOf<List<ModelRigClient.RunningModel>>(emptyList()) }
     var sysFailed by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
+    var freeing by remember { mutableStateOf(false) }
+    var confirmFree by remember { mutableStateOf(false) }
+    var freeResult by remember { mutableStateOf<String?>(null) }
 
     fun load() {
         if (loading) return
@@ -136,6 +139,36 @@ fun RigStatusScreen(store: TokenStore, onBack: () -> Unit) {
                 value = cpu?.let { String.format(Locale.US, "%.0f %%", it) } ?: "ukendt",
                 fraction = cpu?.let { (it / 100.0).toFloat() },
             )
+
+            if (online == true) {
+                Spacer(Modifier.height(16.dp))
+                dk.ternedal.modelrig.ui.chat.RigFreeVramAction(
+                    busy = freeing,
+                    confirming = confirmFree,
+                    resultLine = freeResult,
+                    onAsk = { confirmFree = true; freeResult = null },
+                    onCancel = { confirmFree = false },
+                    onConfirm = {
+                        val base = store.baseUrl
+                        if (base.isNullOrEmpty()) return@RigFreeVramAction
+                        freeing = true
+                        scope.launch {
+                            val client = ModelRigClient(base, store.token)
+                            val res = withContext(Dispatchers.IO) { runCatching { client.unloadModels() } }
+                            freeing = false
+                            confirmFree = false
+                            res.onSuccess { r ->
+                                freeResult = dk.ternedal.modelrig.ui.chat.unloadResultLine(
+                                    r.unloaded.size, r.freedBytes, r.failed.size,
+                                )
+                                load()
+                            }.onFailure {
+                                freeResult = "Kunne ikke frigøre VRAM \u2014 kræver rig-version 2.0.5"
+                            }
+                        }
+                    },
+                )
+            }
 
             if (online == true && sysFailed) {
                 Spacer(Modifier.height(14.dp))

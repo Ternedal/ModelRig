@@ -569,6 +569,39 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         val uptimeSeconds: Long?,
     )
 
+    /** Resultatet af en VRAM-frigørelse: hvad riggen FAKTISK slap. */
+    data class UnloadResult(val unloaded: List<String>, val freedBytes: Long, val failed: List<String>)
+
+    /**
+     * Beder riggen slippe alle indlæste modeller (Ollamas keep_alive=0).
+     * Ingen processer genstartes; næste prompt indlæser modellen igen.
+     * Kaster ved 404 fra ældre rigge — kalderen viser opgraderingsnoten.
+     */
+    fun unloadModels(): UnloadResult {
+        val rb = Request.Builder()
+            .url("$base/api/v1/models/unload")
+            .post(ByteArray(0).toRequestBody(jsonType))
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        http.newCall(rb.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("unload failed (${resp.code}): $text")
+            val root = JSONObject(text)
+            val names = ArrayList<String>()
+            root.optJSONArray("unloaded")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    arr.optJSONObject(i)?.optString("name")?.takeIf { it.isNotEmpty() }?.let(names::add)
+                }
+            }
+            val failed = ArrayList<String>()
+            root.optJSONArray("failed")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    arr.optString(i).takeIf { it.isNotEmpty() }?.let(failed::add)
+                }
+            }
+            return UnloadResult(names, root.optLong("freed_bytes", 0L), failed)
+        }
+    }
+
     /** Throws when the rig predates the endpoint (404) — caller shows the upgrade hint. */
     fun systemStatus(): SystemStatus {
         val rb = Request.Builder().url("$base/api/v1/system/status")
