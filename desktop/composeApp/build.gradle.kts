@@ -21,7 +21,7 @@ dependencies {
     // LAESE koden — her bruges den til at SKRIVE den. Ren Java, ingen
     // Android/Play Services-binding.
     implementation("com.google.zxing:core:3.5.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
     // SQLite-first, per project convention. Android uses its built-in SQLite;
     // plain JVM needs an explicit embedded driver -- this is that driver, not a
     // server (no network, single file, no separate process). Version verified
