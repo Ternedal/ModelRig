@@ -4,7 +4,7 @@
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
 **Version på main:** `2.0.7`
-**Genereret:** 2026-08-15 20:18 UTC
+**Genereret:** 2026-08-15 20:31 UTC
 
 ---
 
@@ -63,7 +63,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Dormans
 
-- **CI-gaten siger:** `===== AGENT3 DORMANCY: 16 passed, 0 failed =====`
+- **CI-gaten siger:** `===== AGENT3 DORMANCY: 21 passed, 0 failed =====`
 - **Status:** Agent 3 sover
 
 ---

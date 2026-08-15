@@ -1,4 +1,4 @@
-package dk.ternedal.modelrig.ui.chat
+package dk.ternedal.modelrig.ui.agent
 
 import dk.ternedal.modelrig.net.Agent3Client
 

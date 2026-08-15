@@ -1,4 +1,4 @@
-package dk.ternedal.modelrig.ui.chat
+package dk.ternedal.modelrig.ui.agent
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
