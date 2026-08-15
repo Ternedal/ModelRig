@@ -77,19 +77,27 @@ $mean = if ($rates.Count) { ($rates | Measure-Object -Average).Average } else { 
 $workflowPass = ($rates.Count -eq $WorkflowRounds -and $workflowFailures -eq 0 -and $mean -ge $WorkflowThreshold)
 @{schema='modelrig-workflow-proof/v1';sha=$sha;rounds=$WorkflowRounds;executions=$WorkflowRounds*14;mean_completion_rate=$mean;threshold=$WorkflowThreshold;runner_failures=$workflowFailures;passed=$workflowPass} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'workflow-aggregate.json') -Encoding UTF8
 if (-not $workflowPass) { Write-Warning "Workflow-gaten er rød: mean=$mean failures=$workflowFailures" }
-$t23pass=$true
+
+# Diagnostic skip switches may shorten a troubleshooting rerun, but absent
+# physical evidence is never evidence that passed. Keep both gates fail-closed.
+$t23pass=$false; $t23skipped=[bool]$SkipT023
 if (-not $SkipT023) {
   Run 'Cleanup før T-023' { python scripts\stage_a_resume_cleanup.py }
   & python scripts\proof_t023_current.py
   $t23pass = ($LASTEXITCODE -eq 0)
   if (-not $t23pass) { Write-Warning 'T-023 er ikke grønt.' }
+} else {
+  Write-Warning 'T-023 blev sprunget over; fuld beviskampagne kan derfor ikke blive grøn.'
 }
-$t33pass=$true; $t33pending=$false
+
+$t33pass=$false; $t33pending=$false; $t33skipped=[bool]$SkipT033
 if (-not $SkipT033) {
   $latest='validation\agent3-memory-protected-backup-physical-latest.json'
   $validLatest=$false
   if (Test-Path $latest) { try { $lj=Get-Content $latest -Raw|ConvertFrom-Json; $validLatest=($lj.success -eq $true -and $lj.candidate.git_sha -eq $sha) } catch {} }
-  if (-not $validLatest) {
+  if ($validLatest) {
+    $t33pass=$true
+  } else {
     $states=Get-ChildItem 'validation\agent3-memory-protected-backup-physical' -Filter state.json -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
     $state=$null
     foreach($s in $states){ try{$sj=Get-Content $s.FullName -Raw|ConvertFrom-Json;if($sj.candidate.git_sha -eq $sha){$state=$s;$stateJson=$sj;break}}catch{} }
@@ -106,9 +114,11 @@ if (-not $SkipT033) {
       if ($LASTEXITCODE -eq 0) { $t33pending=$true; $t33pass=$false } else { $t33pass=$false }
     }
   }
+} else {
+  Write-Warning 'T-033 blev sprunget over; fuld beviskampagne kan derfor ikke blive grøn.'
 }
 $passed = $workflowPass -and $t23pass -and $t33pass
-$summary=@{schema='modelrig-proof-day/v1';generated_at=(Get-Date).ToUniversalTime().ToString('o');candidate=@{version=$version;sha=$sha;branch=$branch};planner=$PlannerModel;stage_a=$true;forced_recovery=$true;workflow=@{passed=$workflowPass;rounds=$WorkflowRounds;executions=$WorkflowRounds*14;mean=$mean};t023=$t23pass;t033=@{passed=$t33pass;pending_second_sid=$t33pending};stage_b_release_lifecycle=@{included=$false;reason='requires exact candidate to exist as a published release and rig to start on previous release; never inferred from source-only run'};passed=$passed;production_activation=$false}
+$summary=@{schema='modelrig-proof-day/v1';generated_at=(Get-Date).ToUniversalTime().ToString('o');candidate=@{version=$version;sha=$sha;branch=$branch};planner=$PlannerModel;stage_a=$true;forced_recovery=$true;workflow=@{passed=$workflowPass;rounds=$WorkflowRounds;executions=$WorkflowRounds*14;mean=$mean};t023=$t23pass;t023_skipped=$t23skipped;t033=@{passed=$t33pass;pending_second_sid=$t33pending;skipped=$t33skipped};stage_b_release_lifecycle=@{included=$false;reason='requires exact candidate to exist as a published release and rig to start on previous release; never inferred from source-only run'};passed=$passed;production_activation=$false}
 $summary|ConvertTo-Json -Depth 8|Set-Content (Join-Path $out 'summary.json') -Encoding UTF8
 Write-Host "`n============================================================================" -ForegroundColor Cyan
 Write-Host "  RESULTAT: $(if($passed){'PASS'}else{'IKKE FULDT BEVIST ENDNU'})" -ForegroundColor $(if($passed){'Green'}else{'Yellow'})
