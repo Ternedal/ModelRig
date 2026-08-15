@@ -307,70 +307,86 @@ private fun CampaignListState(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "${page.campaigns.size} kampagner indlæst",
-            color = KalivTheme.colors.textHigh,
-            fontWeight = FontWeight.Bold,
+            text = "Skrivebeskyttet oversigt \u00b7 nyeste f\u00f8rst \u00b7 hash-verificeret timeline",
+            color = KalivTheme.colors.textMuted,
+            fontSize = 13.5.sp,
             modifier = Modifier.weight(1f),
         )
-        OutlinedButton(onClick = refresh, enabled = !paging) { Text("Opdatér") }
+        OutlinedButton(onClick = refresh, enabled = !paging) { Text("Opdat\u00e9r") }
     }
-    Spacer(Modifier.height(8.dp))
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Spacer(Modifier.height(12.dp))
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(11.dp)) {
         items(page.campaigns, key = { it.campaignId }) { campaign ->
-            Surface(
-                color = KalivTheme.colors.surface,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(Modifier.padding(14.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = campaign.name,
-                            color = KalivTheme.colors.textHigh,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            text = campaign.status.wireValue,
-                            color = KalivTheme.colors.signal,
-                            fontSize = 12.sp,
-                        )
-                    }
-                    Text(
-                        text = campaign.campaignId,
-                        color = KalivTheme.colors.textMuted,
-                        fontSize = 11.sp,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    HorizontalDivider()
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = "Tidslinje ${campaign.timelineEntries} · events ${campaign.eventEntries} · evidens ${campaign.evidenceEntries}",
-                        color = KalivTheme.colors.textMuted,
-                        fontSize = 12.sp,
-                    )
-                    campaign.latestTimelineHash?.let {
-                        Text(
-                            text = it,
-                            color = KalivTheme.colors.textMuted,
-                            fontSize = 10.sp,
-                            maxLines = 1,
-                        )
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    OutlinedButton(onClick = { openCampaign(campaign.campaignId) }) {
-                        Text("Se detail, tidslinje og evidens")
-                    }
-                }
-            }
+            dk.ternedal.modelrig.ui.chat.Agent4CampaignCard(
+                ui = campaignCardUi(campaign),
+                onOpen = { openCampaign(campaign.campaignId) },
+            )
+        }
+        item {
+            dk.ternedal.modelrig.ui.chat.Agent4FooterFacts(
+                latestHashShort = page.campaigns.firstNotNullOfOrNull { it.latestTimelineHash }?.let { dk.ternedal.modelrig.ui.chat.shortCampaignHash(it) },
+            )
         }
         if (page.hasMore) {
             item {
                 OutlinedButton(onClick = loadMore, enabled = !paging) {
-                    Text(if (paging) "Henter…" else "Hent næste kampagneside")
+                    Text(if (paging) "Henter\u2026" else "Hent n\u00e6ste kampagneside")
                 }
             }
         }
         item { Spacer(Modifier.height(18.dp)) }
     }
+}
+
+/**
+ * Oversaetter en kampagne til kortets felter. Alt er MAALT: status fra
+ * riggen, tidslinje-/evidenstal fra oversigten, forsoeg fra kampagnens
+ * eget record (samme parser som detaljeskaermen). Under-linjen siger kun
+ * hvad vi ved: hvorfor en koe venter rapporterer riggen ikke, saa den
+ * paastand fra mockuppen er udeladt.
+ */
+private fun campaignCardUi(
+    campaign: Agent4OperatorClient.CampaignOverview,
+): dk.ternedal.modelrig.ui.chat.Agent4CampaignCardUi {
+    val detail = runCatching { Agent4OperatorPresentation.campaignDetail(campaign.record) }.getOrNull()
+    val attemptLabel = detail?.let { "${it.attempt} af ${it.maxAttempts}" } ?: "ukendt"
+    val budgetSpent = detail != null && detail.attempt >= detail.maxAttempts
+    val kind = when (campaign.status) {
+        Agent4OperatorClient.CampaignStatus.RUNNING -> dk.ternedal.modelrig.ui.chat.Agent4StatusKind.Running
+        Agent4OperatorClient.CampaignStatus.FAILED,
+        Agent4OperatorClient.CampaignStatus.CANCELLED,
+        -> dk.ternedal.modelrig.ui.chat.Agent4StatusKind.Failed
+        Agent4OperatorClient.CampaignStatus.SUCCEEDED -> dk.ternedal.modelrig.ui.chat.Agent4StatusKind.Done
+        else -> dk.ternedal.modelrig.ui.chat.Agent4StatusKind.Waiting
+    }
+    val label = when (campaign.status) {
+        Agent4OperatorClient.CampaignStatus.QUEUED -> "I K\u00d8"
+        Agent4OperatorClient.CampaignStatus.SCHEDULED -> "PLANLAGT"
+        Agent4OperatorClient.CampaignStatus.RUNNING -> "K\u00d8RER"
+        Agent4OperatorClient.CampaignStatus.PAUSING -> "PAUSER"
+        Agent4OperatorClient.CampaignStatus.PAUSED -> "PAUSET"
+        Agent4OperatorClient.CampaignStatus.CANCELLING -> "ANNULLERER"
+        Agent4OperatorClient.CampaignStatus.CANCELLED -> "ANNULLERET"
+        Agent4OperatorClient.CampaignStatus.SUCCEEDED -> "F\u00c6RDIG"
+        Agent4OperatorClient.CampaignStatus.FAILED -> "FEJLET"
+    }
+    val sub = when {
+        campaign.status == Agent4OperatorClient.CampaignStatus.FAILED && budgetSpent ->
+            "Retry-policy udt\u00f8mt \u00b7 kr\u00e6ver din beslutning"
+        detail?.lastError?.isNotBlank() == true -> detail.lastError
+        campaign.status == Agent4OperatorClient.CampaignStatus.RUNNING ->
+            "Uddelegeret til Agent 3 \u00b7 fors\u00f8g $attemptLabel"
+        detail != null -> "Arbejdsgang ${detail.workflow}"
+        else -> campaign.campaignId
+    }
+    return dk.ternedal.modelrig.ui.chat.Agent4CampaignCardUi(
+        id = campaign.campaignId,
+        name = campaign.name,
+        statusLabel = label,
+        statusKind = kind,
+        subLine = sub,
+        timelineCount = campaign.timelineEntries,
+        evidenceCount = campaign.evidenceEntries,
+        attemptLabel = attemptLabel,
+    )
 }
