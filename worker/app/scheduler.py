@@ -249,6 +249,12 @@ class Schedule:
     enabled: bool
     timezone: str = DEFAULT_TIMEZONE
     misfire_policy: str = MISFIRE_POLICY
+    # Et menneskenavn til planen. BEVIDST UDEN FOR fingerprint(): navnet
+    # beskriver planen for mennesket, mens godkendelsen daekker hvad der
+    # KOERER. Kunne et navn aendre fingerprintet, ville en omdoebning enten
+    # ugyldiggoere en gyldig godkendelse eller -- vaerre -- kunne bruges til
+    # at flytte en godkendelse hen paa noget andet.
+    label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -314,6 +320,14 @@ class ScheduleStore:
                        misfire_policy TEXT NOT NULL DEFAULT 'run_once',
                        created REAL NOT NULL)"""
             )
+            # Navnekolonnen kom til senere. Eksisterende planer faar NULL og
+            # vises fortsat ved deres tool-navn -- praecis som foer.
+            columns = {
+                r["name"]
+                for r in self._conn.execute("PRAGMA table_info(schedules)")
+            }
+            if "label" not in columns:
+                self._conn.execute("ALTER TABLE schedules ADD COLUMN label TEXT")
             # The occurrence-ledger (F-902/F-903). Before this, a claim advanced
             # due_at and lived only in memory: a crash between the claim commit
             # and job creation left an invisible skip -- due_at already past it,
@@ -411,6 +425,7 @@ class ScheduleStore:
             self._conn.close()
 
     def create(self, tool: str, args: dict, cadence: str, *,
+               label: str | None = None,
                approve_write: bool = False, ttl_days: int = DEFAULT_TTL_DAYS,
                max_runs: int = DEFAULT_MAX_RUNS, now: float | None = None,
                receipt: dict | None = None,
@@ -440,8 +455,12 @@ class ScheduleStore:
         if receipt is not None and fp is None:
             raise ScheduleError(
                 "en approval-receipt uden en godkendt write giver ikke mening")
+        clean_label = (label or "").strip() or None
+        if clean_label is not None and len(clean_label) > 80:
+            raise ScheduleError("navnet er for langt (max 80 tegn)")
         sched = Schedule(
             schedule_id=uuid.uuid4().hex[:12],
+            label=clean_label,
             tool=tool, args=args, cadence=cadence,
             approved_fingerprint=fp,
             expires_at=now + ttl_days * 86400,
@@ -453,11 +472,11 @@ class ScheduleStore:
             self._conn.execute(
                 "INSERT INTO schedules (id, tool, args, cadence, approved_fingerprint,"
                 " expires_at, max_runs, runs_used, due_at, missed, enabled,"
-                " timezone, misfire_policy, created)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?,?)",
+                " timezone, misfire_policy, created, label)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)",
                 (sched.schedule_id, tool, json.dumps(args, ensure_ascii=False), cadence,
                  fp, sched.expires_at, max_runs, 0, sched.due_at, 0,
-                 sched.timezone, sched.misfire_policy, now),
+                 sched.timezone, sched.misfire_policy, now, sched.label),
             )
             try:
                 if receipt is not None:
@@ -974,4 +993,5 @@ class ScheduleStore:
             runs_used=row["runs_used"], due_at=row["due_at"], missed=row["missed"],
             enabled=bool(row["enabled"]), timezone=row["timezone"],
             misfire_policy=row["misfire_policy"],
+            label=(row["label"] if "label" in row.keys() else None),
         )

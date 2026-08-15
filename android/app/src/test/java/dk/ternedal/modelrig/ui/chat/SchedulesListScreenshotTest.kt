@@ -55,7 +55,7 @@ class SchedulesListScreenshotTest {
                 )
                 NormalScheduleCard(
                     ui = ScheduleCardUi(
-                        id = "s2", title = "rag.reindex", sub = "s\u00f8ndage 04:00",
+                        id = "s2", title = "Ugentlig genindeksering", sub = "rag.reindex \u00b7 s\u00f8ndage 04:00",
                         nextLabel = "N\u00e6ste: s\u00f8n 04:00", pausedLine = null,
                         runsLabel = "3 af 12", expiresLabel = "30/8",
                         expiresBadge = null, approvedLine = null, blockedLine = null, enabled = true,

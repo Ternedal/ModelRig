@@ -298,6 +298,7 @@ class ScheduleAdmin:
         misfire_policy: str = MISFIRE_POLICY,
         approved_fingerprint: str | None = None,
         receipt: dict[str, Any] | None = None,
+        label: str | None = None,
     ) -> dict[str, Any]:
         preview = self.preview(
             tool, args, cadence, ttl_days=ttl_days, max_runs=max_runs,
@@ -316,6 +317,7 @@ class ScheduleAdmin:
                 receipt=receipt,
                 timezone_name=preview.timezone,
                 misfire_policy=preview.misfire_policy,
+                label=label,
             )
         return self.describe(schedule)
 
@@ -451,6 +453,9 @@ class ScheduleAdmin:
         )
         return {
             "schedule_id": schedule.schedule_id,
+            # Navnet er null for planer oprettet foer feltet fandtes; klienten
+            # falder tilbage til tool-navnet, praecis som foer.
+            "label": schedule.label,
             "tool": schedule.tool,
             "args": schedule.args,
             "cadence": schedule.cadence,

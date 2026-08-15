@@ -72,6 +72,8 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
     var notice by remember { mutableStateOf<String?>(null) }
 
     var tool by remember { mutableStateOf("") }
+    // Menneskenavnet. Frivilligt: uden navn hedder planen sit tool, som før.
+    var label by remember { mutableStateOf("") }
     var argsJson by remember { mutableStateOf("{}") }
     var cadence by remember { mutableStateOf("daily:08:00") }
     var timezone by remember { mutableStateOf(ScheduleClient.DEFAULT_TIMEZONE) }
@@ -195,10 +197,11 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
     fun createFromPreview() {
         val approved = preview ?: return
         execute(
-            action = { client().create(approved) },
+            action = { client().create(approved, label) },
             success = {
                 schedules = listOf(it) + schedules.filterNot { row -> row.id == it.id }
                 preview = null
+                label = ""
                 notice = "Planen er gemt. Der er ikke kørt noget nu."
             },
             fallback = "Planen kunne ikke oprettes",
@@ -331,6 +334,15 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
                                 ?: "Vælg et aktiveret tool ovenfor; fri tekst er bevidst slået fra.",
                         )
                     },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(7.dp))
+                OutlinedTextField(
+                    value = label,
+                    onValueChange = { label = it.take(80) },
+                    label = { Text("Navn (valgfrit)") },
+                    supportingText = { Text("Uden navn hedder planen sit tool. Navnet ændrer ikke hvad der godkendes.") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -490,7 +502,13 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
                 val ui = dk.ternedal.modelrig.ui.chat.ScheduleCardUi(
                     id = schedule.id,
                     title = schedule.tool,
-                    sub = if (expiringSoon) "${schedule.cadence} · $runsLabel kørsler brugt" else schedule.cadence,
+                    sub = buildString {
+                        // Står navnet øverst, skal værktøjet stadig kunne læses:
+                        // det er DET der kører.
+                        if (schedule.label != null) append("${schedule.tool} · ")
+                        append(schedule.cadence)
+                        if (expiringSoon) append(" · $runsLabel kørsler brugt")
+                    },
                     nextLabel = if (schedule.enabled) "Næste: ${authoritativeScheduleTime(schedule.dueAtLocal, schedule.timezone)}" else null,
                     pausedLine = if (!schedule.enabled) "På pause · fornyelse bevarer pausen" else null,
                     runsLabel = runsLabel,
