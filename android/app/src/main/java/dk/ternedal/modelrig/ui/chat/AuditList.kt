@@ -50,6 +50,8 @@ data class AuditRowUi(
     val badge: String,
     val kind: AuditBadgeKind,
     val cloud: Boolean,
+    /** Værktøjets navn fra riggen; styrer ikon-brikken. */
+    val tool: String = "",
 )
 
 @Composable
@@ -81,6 +83,21 @@ private fun AuditRow(r: AuditRowUi) {
         Modifier.fillMaxWidth().padding(vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Referencens brik: 32px flade, 9px radius, 15px glyf (×1,2205).
+        Box(
+            Modifier
+                .size(39.dp)
+                .background(KalivTheme.colors.surfaceHigh, RoundedCornerShape(11.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painterResource(auditToolIcon(r.tool)),
+                contentDescription = null,
+                tint = KalivTheme.colors.textMuted,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Spacer(Modifier.width(13.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 r.title,
@@ -134,4 +151,37 @@ private fun AuditBadge(text: String, kind: AuditBadgeKind) {
         style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 13.sp),
         color = color,
     )
+}
+
+/**
+ * Værktøjs-ikonet i Handlingsloggen (referencens 32px-brik med 15px glyf).
+ *
+ * Da skærmen landede, udelod jeg brikken med begrundelsen "ukendt
+ * navnerum". Den begrundelse holder ikke længere: riggens REGISTRY er
+ * en kendt, lukket liste (ni faste værktøjer plus fire der registreres
+ * dynamisk: desktop_screenshot, desktop_action_preview, github_read og
+ * web_research). Hvert af dem får sit eget ikon.
+ *
+ * ALT ANDET får værktøjs-glyffen. Det er ikke et pænt fallback, det er
+ * et ÆRLIGT et: et ukendt værktøjsnavn skal ligne "et værktøj jeg ikke
+ * kender", ikke lade som om det er en fil eller en model.
+ *
+ * Mockuppens egne rækker viser "Filer" og "Terminal" — værktøjer der
+ * ikke findes på riggen. Derfor er navnene IKKE oversat til pæne danske
+ * etiketter her: under-linjen viser fortsat det rigtige værktøjsnavn.
+ */
+fun auditToolIcon(tool: String): Int = when (tool.trim().lowercase()) {
+    "note_append" -> R.drawable.ic_kaliv_doc
+    "list_documents" -> R.drawable.ic_kaliv_book
+    "rig_status" -> R.drawable.ic_kaliv_rack
+    "list_models" -> R.drawable.ic_kaliv_model
+    "pull_model" -> R.drawable.ic_kaliv_download
+    "delete_model" -> R.drawable.ic_kaliv_trash
+    "current_datetime" -> R.drawable.ic_kaliv_clock
+    "job_status" -> R.drawable.ic_kaliv_info
+    "cancel_job" -> R.drawable.ic_kaliv_stop_circle
+    "web_research" -> R.drawable.ic_kaliv_globe
+    "github_read" -> R.drawable.ic_kaliv_branch
+    "desktop_screenshot", "desktop_action_preview" -> R.drawable.ic_kaliv_screen
+    else -> R.drawable.ic_kaliv_tools
 }

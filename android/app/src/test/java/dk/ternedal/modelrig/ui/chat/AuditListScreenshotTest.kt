@@ -46,12 +46,12 @@ class AuditListScreenshotTest {
             )
             AuditGroupedList(
                 today = listOf(
-                    AuditRowUi("L\u00e6ste brygning/m\u00e6skning.md", "V\u00e6rkt\u00f8j: Filer \u00b7 10:41 \u00b7 lav", "Udf\u00f8rt", AuditBadgeKind.Ok, cloud = false),
-                    AuditRowUi("K\u00f8rte docker compose up -d", "V\u00e6rkt\u00f8j: Terminal \u00b7 09:12 \u00b7 h\u00f8j", "Udf\u00f8rt", AuditBadgeKind.Ok, cloud = false),
-                    AuditRowUi("Slette build-cache", "V\u00e6rkt\u00f8j: Filer \u00b7 09:10 \u00b7 h\u00f8j", "Afvist", AuditBadgeKind.Warn, cloud = false),
+                    AuditRowUi("L\u00e6ste brygning/m\u00e6skning.md", "V\u00e6rkt\u00f8j: list_documents \u00b7 10:41 \u00b7 lav", "Udf\u00f8rt", AuditBadgeKind.Ok, cloud = false, tool = "list_documents"),
+                    AuditRowUi("K\u00f8rte docker compose up -d", "V\u00e6rkt\u00f8j: note_append \u00b7 09:12 \u00b7 h\u00f8j", "Udf\u00f8rt", AuditBadgeKind.Ok, cloud = false, tool = "note_append"),
+                    AuditRowUi("Slette build-cache", "V\u00e6rkt\u00f8j: delete_model \u00b7 09:10 \u00b7 h\u00f8j", "Afvist", AuditBadgeKind.Warn, cloud = false, tool = "delete_model"),
                 ),
                 earlier = listOf(
-                    AuditRowUi("Hentede vejrdata", "V\u00e6rkt\u00f8j: Web \u00b7 i g\u00e5r \u00b7 lav", "Fejl", AuditBadgeKind.Error, cloud = true),
+                    AuditRowUi("Hentede vejrdata", "V\u00e6rkt\u00f8j: web_research \u00b7 i g\u00e5r \u00b7 lav", "Fejl", AuditBadgeKind.Error, cloud = true, tool = "web_research"),
                 ),
                 modifier = Modifier.padding(horizontal = 20.dp),
             )

@@ -3038,6 +3038,7 @@ private fun AuditScreen(store: TokenStore, onBack: () -> Unit) {
             badge = b,
             kind = k,
             cloud = e.origin == "cloud",
+            tool = e.tool,
         )
     }
 
