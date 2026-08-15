@@ -2114,6 +2114,20 @@ private fun ChatScreen(
                 modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
             )
         }
+        // Agent-panelet (ADR-A3-001). Chatten kender ÉN neutral indgang og
+        // ved ellers intet om agenten; alt hvad der taler med riggen bor i
+        // ui/agent-pakken, og dvale-gaten haandhaever den arbejdsdeling.
+        dk.ternedal.modelrig.ui.agent.AgentRunPanelHost(
+            baseUrl = store.baseUrl,
+            token = store.token,
+            conversationId = openConvId?.toString(),
+            onOpenCheckpoint = {
+                val i = Intent(context, dk.ternedal.modelrig.MainActivity::class.java)
+                i.putExtra(dk.ternedal.modelrig.MainActivity.EXTRA_AGENT3_REVIEW, true)
+                context.startActivity(i)
+            },
+            modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
+        )
         // messages
         if (messages.isEmpty()) {
             Column(

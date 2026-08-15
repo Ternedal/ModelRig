@@ -96,4 +96,20 @@ class AgentRunPresentationTest {
             ),
         )
     }
+
+    @Test
+    fun `kun den koersel der er bundet til samtalen vises`() {
+        val runs = listOf(run(id = "mit-run", state = "running"), run(id = "andres", state = "running"))
+        assertEquals("mit-run", AgentRunPresentation.visibleRun(runs, "mit-run")?.id)
+        // Et run startet et andet sted hoerer til paa agent-skaermen.
+        assertNull(AgentRunPresentation.visibleRun(runs, "et-tredje"))
+        assertNull(AgentRunPresentation.visibleRun(runs, null))
+        assertNull(AgentRunPresentation.visibleRun(runs, ""))
+    }
+
+    @Test
+    fun `en bundet men afsluttet koersel vises heller ikke`() {
+        val runs = listOf(run(id = "mit-run", state = "completed"))
+        assertNull(AgentRunPresentation.visibleRun(runs, "mit-run"))
+    }
 }

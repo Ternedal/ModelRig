@@ -51,10 +51,14 @@ fun AgentRunCard(
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
     title: String = "Plan",
+    onOpen: (() -> Unit)? = null,
 ) {
     val shape = RoundedCornerShape(KalivTokens.Radius.card)
     Column(
-        modifier
+        // Tap paa kortet aabner checkpoint-skaermen. Selve godkendelserne
+        // bor DER, ikke her (ADR-A3-001 D4) — kortet er en indgang, ikke en
+        // genvej udenom.
+        (if (onOpen != null) modifier.clickable(onClickLabel = "Aabn plan") { onOpen() } else modifier)
             .fillMaxWidth()
             .background(KalivTheme.colors.surface, shape)
             .border(KalivTokens.Layout.hairline, KalivTheme.colors.hairline, shape)

@@ -50,6 +50,19 @@ object AgentRunPresentation {
             AgentStepUi(text = step.summary.ifBlank { step.tool }, state = state)
         }
 
+    /**
+     * Kørslen chatten må vise: den aktive, og KUN hvis den er bundet til
+     * netop denne samtale (ADR-A3-001). Et run startet et andet sted hører
+     * til på agent-skærmen — ikke i en tilfældig tråd.
+     */
+    fun visibleRun(runs: List<Agent3Client.Run>, boundRunId: String?): Agent3Client.Run? {
+        if (boundRunId.isNullOrBlank()) return null
+        // Vi slår MIN kørsel op — ikke "den nyeste, hvis den tilfældigvis er
+        // min". Kører riggen to planer, skal chatten stadig vise samtalens
+        // egen, også når den ikke er den seneste.
+        return runs.firstOrNull { it.id == boundRunId }?.takeUnless { isTerminal(it) }
+    }
+
     /** Korttitlen: planens rute hvis riggen navngiver den, ellers bare "Plan". */
     fun title(run: Agent3Client.Run): String =
         run.routeKind.trim().ifEmpty { "Plan" }.replaceFirstChar { it.uppercase() }
