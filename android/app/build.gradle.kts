@@ -90,6 +90,17 @@ roborazzi {
 }
 
 dependencies {
+    // QR-parring. To afhaengigheder, begge bevidst valgt smaa:
+    //  * zxing core er ren Java uden Android- eller Play Services-binding, og
+    //    SAMME artefakt kan baade laese og skrive QR — rig-siden kan bruge den
+    //    til at TEGNE koden, telefonen til at laese den.
+    //  * CameraX giver et livscyklus-bundet kamera uden at vi skal skrive
+    //    Camera2-state selv. Vi tager kun de fire moduler vi bruger.
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("androidx.camera:camera-core:1.4.2")
+    implementation("androidx.camera:camera-camera2:1.4.2")
+    implementation("androidx.camera:camera-lifecycle:1.4.2")
+    implementation("androidx.camera:camera-view:1.4.2")
     testImplementation("junit:junit:4.13.2")
     // Screenshot-regression: Robolectric 4.16 (SDK 36 + JDK 21) + Roborazzi.
     testImplementation("org.robolectric:robolectric:4.16.1")
