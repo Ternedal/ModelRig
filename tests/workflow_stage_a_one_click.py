@@ -69,7 +69,9 @@ print("PASS: normal ModelRig runtime is restored after proof and unknown port ow
 
 assert "def stop_exact_head_stack_for_voice()" in _current_adapter
 assert "stop-stage-a-known-processes.ps1" in _current_adapter
-assert _current_adapter.index("stop_exact_head_stack_for_voice()") < _current_adapter.index("stage-a-voice-test.ps1")
+_voice_call = "    stop_exact_head_stack_for_voice()\n    stage.run([\"powershell.exe\""
+assert _voice_call in _current_adapter
+assert _current_adapter.index(_voice_call) < _current_adapter.index("stage-a-voice-test.ps1")
 assert "Voice-handoff: stopper den kendte loopback Stage A-stack" in _current_adapter
 print("PASS: current-head voice flow hands 8080/8099 off from loopback stack before LAN/Pixel stack")
 
