@@ -48,6 +48,28 @@ class MainActivity : ComponentActivity() {
         // kaliv://pair?url=...&code=... — parseren er fail-closed; et ugyldigt
         // link giver null og dermed helt almindelig opstart.
         val pairingLink = dk.ternedal.modelrig.net.PairingLink.parse(intent?.data?.toString())
+        // Del til Kaliv: en anden app har sendt tekst eller en fil hertil. Vi
+        // laeser KUN hvad der blev delt; hvad der skal ske med det, bestemmer
+        // mennesket i kortet inde i appen.
+        val sharedText = intent?.getStringExtra(Intent.EXTRA_TEXT)
+        val sharedUri = if (intent?.action == Intent.ACTION_SEND) {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)?.toString()
+        } else {
+            null
+        }
+        val shared = if (intent?.action == Intent.ACTION_SEND) {
+            dk.ternedal.modelrig.net.SharedPayload.from(
+                text = sharedText,
+                subject = intent.getStringExtra(Intent.EXTRA_SUBJECT),
+                uri = sharedUri,
+                mimeType = intent.type,
+                displayName = sharedUri?.let { displayNameOf(android.net.Uri.parse(it)) },
+            )
+        } else {
+            null
+        }
+        val sharedTruncated = dk.ternedal.modelrig.net.SharedPayload.wasTruncated(sharedText)
         setContent {
             when {
                 openSchedules -> {
@@ -110,11 +132,19 @@ class MainActivity : ComponentActivity() {
                 }
                 else -> {
                     val store = remember { TokenStore(this) }
-                    AppEntryUi(store, pairingLink)
+                    AppEntryUi(store, pairingLink, shared, sharedTruncated)
                 }
             }
         }
     }
+
+    /** Filens visningsnavn, hvis udbyderen oplyser det. Ellers null — vi gætter ikke. */
+    private fun displayNameOf(uri: android.net.Uri): String? = runCatching {
+        contentResolver.query(uri, null, null, null, null)?.use { c ->
+            val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            if (i >= 0 && c.moveToFirst()) c.getString(i) else null
+        }
+    }.getOrNull()
 
     companion object {
         const val EXTRA_SCHEDULES = "dk.ternedal.modelrig.extra.SCHEDULES"

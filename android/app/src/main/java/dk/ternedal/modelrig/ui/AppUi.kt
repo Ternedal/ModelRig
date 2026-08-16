@@ -81,7 +81,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, Audit, ControlCenter, CloudPicker, VoiceCloudPicker, RigStatus, Devices, QrScan }
 
 @Composable
-fun AppUi(pairingLink: dk.ternedal.modelrig.net.PairingLink? = null) {
+fun AppUi(
+    pairingLink: dk.ternedal.modelrig.net.PairingLink? = null,
+    shared: dk.ternedal.modelrig.net.SharedPayload? = null,
+    sharedTruncated: Boolean = false,
+) {
     val context = LocalContext.current
     val store = remember { TokenStore(context) }
     val db = remember { ChatDb(context) }
@@ -120,7 +124,10 @@ fun AppUi(pairingLink: dk.ternedal.modelrig.net.PairingLink? = null) {
                     onOpenControlCenter = { screen = Screen.ControlCenter },
                 )
                 Screen.Chat -> ChatScreen(
-                    store, db, openConvId, cloudModelTick,
+                    store, db, openConvId,
+                    shared = shared,
+                    sharedTruncated = sharedTruncated,
+                    cloudModelTick = cloudModelTick,
                     darkMode = darkMode,
                     onToggleDark = { store.darkMode = it; darkMode = it },
                     onOpenSettings = { screen = Screen.Setup },
@@ -785,6 +792,8 @@ private fun ChatScreen(
     store: TokenStore,
     db: ChatDb,
     openConvId: Long?,
+    shared: dk.ternedal.modelrig.net.SharedPayload? = null,
+    sharedTruncated: Boolean = false,
     cloudModelTick: Int,
     darkMode: Boolean,
     onToggleDark: (Boolean) -> Unit,
@@ -836,6 +845,10 @@ private fun ChatScreen(
     // Beskeden der er valgt til en agent-plan (null = ingen). Saettes KUN af
     // et tryk i Kapaciteter; intet i send-stien roerer den.
     var agentPlanFor by remember { mutableStateOf<String?>(null) }
+    // Del til Kaliv: hvad en anden app sendte. Kortet nedenfor er det ENESTE
+    // sted der handler på det — intet indekseres eller sendes af sig selv.
+    var sharePayload by remember { mutableStateOf(shared) }
+    var shareBusy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val context = LocalContext.current
@@ -2124,6 +2137,89 @@ private fun ChatScreen(
                 onLater = {
                     store.dismissedUpdateVersion = v
                     availableUpdate = null
+                },
+                modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
+            )
+        }
+        sharePayload?.let { payload ->
+            val isDoc = payload is dk.ternedal.modelrig.net.SharedPayload.Document
+            val title = when (payload) {
+                is dk.ternedal.modelrig.net.SharedPayload.Text -> payload.suggestedName
+                is dk.ternedal.modelrig.net.SharedPayload.Document -> payload.suggestedName
+            }
+            val preview = when (payload) {
+                is dk.ternedal.modelrig.net.SharedPayload.Text -> payload.text.take(300)
+                is dk.ternedal.modelrig.net.SharedPayload.Document ->
+                    payload.mimeType ?: "Filen læses først når du vælger noget"
+            }
+            dk.ternedal.modelrig.ui.chat.ShareLandingCard(
+                title = title,
+                preview = preview,
+                isDocument = isDoc,
+                truncated = sharedTruncated,
+                rigAvailable = store.hasRig,
+                busy = shareBusy,
+                onDismiss = { sharePayload = null },
+                onAsk = {
+                    when (payload) {
+                        is dk.ternedal.modelrig.net.SharedPayload.Text -> {
+                            // Teksten lander i composeren — den sendes IKKE
+                            // automatisk. Du skriver selv hvad du vil vide.
+                            input = if (input.isBlank()) payload.text else input + "\n\n" + payload.text
+                            sharePayload = null
+                        }
+                        is dk.ternedal.modelrig.net.SharedPayload.Document -> {
+                            input = if (input.isBlank()) {
+                                "Om dokumentet \u201c${payload.suggestedName}\u201d: "
+                            } else {
+                                input
+                            }
+                            sharePayload = null
+                        }
+                    }
+                },
+                onSaveToKnowledge = {
+                    val base = store.baseUrl
+                    val tok = store.token
+                    if (base != null && tok != null) {
+                        shareBusy = true
+                        scope.launch {
+                            val res = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    val c = ModelRigClient(base, tok)
+                                    when (payload) {
+                                        is dk.ternedal.modelrig.net.SharedPayload.Text ->
+                                            c.ingestText(payload.suggestedName, payload.text)
+                                        is dk.ternedal.modelrig.net.SharedPayload.Document -> {
+                                            // Samme veje som filvælgeren bruger — delt fil og
+                                            // valgt fil skal indekseres ens, ellers får man to
+                                            // forskellige korpusser af samme dokument.
+                                            val u = android.net.Uri.parse(payload.uri)
+                                            val bytes = context.contentResolver.openInputStream(u)?.use { it.readBytes() }
+                                                ?: throw IllegalStateException("kunne ikke laese filen")
+                                            val n = payload.suggestedName
+                                            val mime = payload.mimeType.orEmpty().lowercase()
+                                            when {
+                                                mime.contains("pdf") -> c.ingestPdf(n, bytes)
+                                                mime.contains("wordprocessingml") -> c.ingestDocx(n, bytes)
+                                                mime.contains("presentationml") -> c.ingestPptx(n, bytes)
+                                                mime.contains("html") -> c.ingestHtml(n, bytes)
+                                                else -> c.ingestText(n, String(bytes, Charsets.UTF_8))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            shareBusy = false
+                            res.onSuccess { r ->
+                                sharePayload = null
+                                // Rigens EGET tal, ikke vores forventning.
+                                ingestStatus = "Gemt i Viden \u00b7 ${r.chunksAdded} udsnit"
+                            }.onFailure {
+                                ingestError = "Kunne ikke gemme i Viden."
+                            }
+                        }
+                    }
                 },
                 modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
             )
