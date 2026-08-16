@@ -11,6 +11,8 @@ _exit_guard = (ROOT / "scripts" / "proof_campaign_exit_guard.py").read_text(enco
 _runtime_manager = (ROOT / "scripts" / "proof-runtime-manager.ps1").read_text(encoding="utf-8")
 _current_adapter = (ROOT / "scripts" / "proof_stage_a_current.py").read_text(encoding="utf-8")
 _voice_test = (ROOT / "scripts" / "stage-a-voice-test.ps1").read_text(encoding="utf-8")
+_physical_app = (ROOT / "scripts" / "ensure-stage-a-physical-app.ps1").read_text(encoding="utf-8")
+_a425f_workflow = (ROOT / ".github" / "workflows" / "agent4-a4-25f-harness.yml").read_text(encoding="utf-8")
 
 assert "function Git(" in _proof_launcher
 assert "& git.exe @A" in _proof_launcher
@@ -89,6 +91,19 @@ assert 'observations.PHONE_STATE_SCHEMA = "kaliv-stage-a-phone-test-state/v2"' i
 assert "python $currentAdapter voice-observations" in _voice_test
 assert '& python (Join-Path $PSScriptRoot "stage_a_voice_observations.py")' not in _voice_test
 print("PASS: guided voice collector consumes the phone stack's current v2 state schema")
+
+assert "ensure-stage-a-physical-app.ps1" in _voice_test
+assert _voice_test.index("& $physicalAppScript") < _voice_test.index("& $phoneScript -PlannerModel $model")
+assert "agent4-a4-25f-harness.yml" in _physical_app
+assert "kaliv-physical-candidate-$sha" in _physical_app
+assert '"dk.ternedal.modelrig.a425f"' in _physical_app
+assert '"install", "-r"' in _physical_app
+assert "normal_version_before" in _physical_app and "normal_version_after" in _physical_app
+assert ":app:assembleA425f" in _a425f_workflow
+assert "actions/upload-artifact@" in _a425f_workflow
+assert "kaliv-physical-candidate-${{" in _a425f_workflow
+print("PASS: voice proof bootstraps an exact-SHA side-by-side Android physical candidate before pairing")
+print("PASS: normal Kaliv is not overwritten and the CI artifact is SHA/version/hash bound")
 
 assert 'proof_campaign_exit_guard.py" mark' in _cmd_launcher
 assert 'proof_campaign_exit_guard.py" check' in _cmd_launcher
