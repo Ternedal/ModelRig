@@ -14,6 +14,7 @@ $manualPath = Join-Path $repoRoot "validation\voice-manual-observations.json"
 $reportPath = Join-Path $repoRoot "validation\voice-baseline-latest.json"
 $fixtureReportPath = Join-Path $repoRoot "validation\voice-baseline-fixture-check.json"
 $agent3ReportPath = Join-Path $repoRoot "validation\agent3-rig-validation-latest.json"
+$currentAdapter = Join-Path $PSScriptRoot "proof_stage_a_current.py"
 
 function Resolve-PlannerModel {
     if (-not [string]::IsNullOrWhiteSpace($PlannerModel)) { return $PlannerModel.Trim() }
@@ -111,7 +112,7 @@ try {
 
     & $phoneScript -PlannerModel $model
 
-    & python (Join-Path $PSScriptRoot "stage_a_voice_observations.py") `
+    & python $currentAdapter voice-observations `
         --phone-state $phoneStatePath `
         --output $manualPath
     if ($LASTEXITCODE -ne 0) {
