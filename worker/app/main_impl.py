@@ -687,7 +687,7 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
                          cloud_base_url: "str | None", cloud_key: "str | None",
                          conversation_id: "str | None", origin: str,
                          sources: list, tools_used: list,
-                         on_phase=None) -> dict:
+                         on_phase=None, context: "list | None" = None) -> dict:
     """One agent turn's tool loop. The model may chain READ tools -- each result
     fed back -- until it answers or the step budget runs out. A WRITE stops the
     loop and returns a confirmation card; the invariant never moves. Reused by
@@ -723,7 +723,13 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
         if not calls:
             return {"status": "answered", "answer": msg.get("content", ""),
                     "tool": tools_used[-1] if tools_used else None,
-                    "tools_used": tools_used, "sources": sources, "origin": origin}
+                    "tools_used": tools_used, "sources": sources,
+                    # De udsnit der FAKTISK laa i konteksten. "sources" er
+                    # navnene; dette er hvad der blev laest. Vi paastaar IKKE
+                    # hvilken saetning i svaret der brugte hvilket udsnit --
+                    # det ved ingen her, og et gaet ville se ud som et bevis.
+                    "context": context or [],
+                    "origin": origin}
         fn = (calls[0] or {}).get("function", {}) or {}
         name = fn.get("name", "")
         args = fn.get("arguments") or {}
@@ -754,7 +760,8 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
             raise HTTPException(status_code=503, detail=str(e))
         if result["status"] == "confirmation_required":
             return {**result, "extra_tool_calls_ignored": len(calls) - 1,
-                    "tools_used": tools_used, "sources": sources}
+                    "tools_used": tools_used, "sources": sources,
+                    "context": context or []}
         tools_used.append(name)
         last_result = result["result"]
         messages.append({"role": "tool", "content": result["result"]})
@@ -816,6 +823,7 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
     messages.extend(m.model_dump() for m in trimmed)
 
     sources: list[str] = []
+    context_used: list[dict] = []
     if req.rag:
         # Retrieval only -- no synthesis. The tool-calling turn below does the
         # answering, and asking a second model to summarise first would hide
@@ -827,6 +835,18 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
             raise HTTPException(status_code=502, detail=str(e))
         matches = res.get("matches", [])
         sources = sorted({m["source"] or str(m["id"]) for m in matches})
+        # Citat-grundlaget: hvilke udsnit blev hentet, hvor godt matchede de,
+        # og hvad stod der. Uddraget klippes -- det skal kunne genkendes, ikke
+        # erstatte dokumentet.
+        context_used = [
+            {
+                "source": m["source"] or str(m["id"]),
+                "chunk_index": m.get("chunk_index"),
+                "score": round(float(m.get("score", 0.0)), 4),
+                "excerpt": (m.get("text") or "")[:240],
+            }
+            for m in matches
+        ]
         # PRIVACY (D4): the retrieved chunks are the content of your own
         # documents. If the answering model is in the cloud, that content would
         # leave the rig. Retrieval is local, so nothing has left yet -- we simply
@@ -866,6 +886,7 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
     return await _run_tool_loop(
         messages, req.model, req.cloud_base_url, req.cloud_key,
         req.conversation_id, origin, sources, [], on_phase=on_phase,
+        context=context_used,
     )
 
 

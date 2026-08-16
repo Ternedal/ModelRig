@@ -1038,6 +1038,19 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         sources = o.optJSONArray("sources")?.let { a ->
             (0 until a.length()).map { a.getString(it) }
         } ?: emptyList(),
+        context = o.optJSONArray("context")?.let { a ->
+            (0 until a.length()).mapNotNull { i ->
+                val c = a.optJSONObject(i) ?: return@mapNotNull null
+                val src = c.optString("source")
+                if (src.isEmpty()) return@mapNotNull null
+                UsedChunk(
+                    source = src,
+                    chunkIndex = if (c.isNull("chunk_index")) null else c.optInt("chunk_index"),
+                    score = c.optDouble("score", 0.0),
+                    excerpt = c.optString("excerpt"),
+                )
+            }
+        } ?: emptyList(),
     )
 
     fun ingestPdf(source: String, pdfBytes: ByteArray, chunkSize: Int = 800, overlap: Int = 150): IngestResult {
@@ -1211,4 +1224,21 @@ data class ToolTurn(
     val expiresInSeconds: Int,
     /** RAG sources that grounded this turn, if document context was used. */
     val sources: List<String> = emptyList(),
+    /**
+     * De udsnit der FAKTISK lå i konteksten. Tom på ældre rigge, som kun
+     * sender navnene — så viser fladen chips som hidtil frem for at gætte.
+     */
+    val context: List<UsedChunk> = emptyList(),
+)
+
+/**
+ * Ét hentet udsnit: hvor det kom fra, hvor godt det matchede, og hvad der
+ * stod. Bevidst UDEN nogen kobling til en bestemt sætning i svaret — den
+ * kobling findes ikke i riggen, og et gæt ville se ud som et bevis.
+ */
+data class UsedChunk(
+    val source: String,
+    val chunkIndex: Int?,
+    val score: Double,
+    val excerpt: String,
 )
