@@ -8,6 +8,7 @@ _easy_launcher = (ROOT / "scripts" / "run-proof-campaign-easy.ps1").read_text(en
 _cmd_launcher = (ROOT / "START_PROOF_CAMPAIGN.cmd").read_text(encoding="utf-8")
 _cleanup = (ROOT / "scripts" / "stop-stage-a-known-processes.ps1").read_text(encoding="utf-8")
 _exit_guard = (ROOT / "scripts" / "proof_campaign_exit_guard.py").read_text(encoding="utf-8")
+_runtime_manager = (ROOT / "scripts" / "proof-runtime-manager.ps1").read_text(encoding="utf-8")
 
 assert "function Git(" in _proof_launcher
 assert "& git.exe @A" in _proof_launcher
@@ -47,6 +48,23 @@ print("PASS: START_PROOF_CAMPAIGN self-elevates through normal Windows UAC")
 print("PASS: proof token is minted automatically through local pair/start + pair/claim")
 print("PASS: proof token stays process-local and is removed after the core run")
 print("PASS: automatic bootstrap cleanup refuses unknown listeners")
+
+assert "proof-runtime-manager.ps1" in _easy_launcher
+assert "proof-campaign-suspended-runtime.json" in _easy_launcher
+assert "-Action suspend -StatePath $runtimeState" in _easy_launcher
+assert "-Action resume -StatePath $runtimeState" in _easy_launcher
+assert "$restoreFailed" in _easy_launcher
+assert "KalivSupervisor" in _runtime_manager
+assert "Stop-ScheduledTask -TaskName 'KalivSupervisor'" in _runtime_manager
+assert "Start-ScheduledTask -TaskName ([string]$state.task)" in _runtime_manager
+assert "scripts\\modelrig-server-windows-x64.exe" in _runtime_manager
+assert "Desktop\\modelrig-server-windows-x64.exe" in _runtime_manager
+assert "Classify every occupied proof port BEFORE stopping anything" in _runtime_manager
+assert "Den stoppes ikke automatisk" in _runtime_manager
+assert "scheduled-supervisor" in _runtime_manager
+assert "manual-known-runtime" in _runtime_manager
+print("PASS: proof campaign suspends the known Kaliv supervisor instead of racing its child restart loop")
+print("PASS: normal ModelRig runtime is restored after proof and unknown port owners remain fail-closed")
 
 assert 'proof_campaign_exit_guard.py" mark' in _cmd_launcher
 assert 'proof_campaign_exit_guard.py" check' in _cmd_launcher
