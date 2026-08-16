@@ -19,6 +19,16 @@ assert "if ($code -ne 0) { throw $v }" in _proof_launcher
 print("PASS: physical proof launcher Git helper cannot recurse into itself")
 print("PASS: physical proof launcher accepts successful Git stderr and still fails on nonzero exit")
 
+assert "function Git(" in _easy_launcher
+assert "& git.exe @A" in _easy_launcher
+assert "& git @A" not in _easy_launcher
+assert "$previousErrorActionPreference = $ErrorActionPreference" in _easy_launcher
+assert "$ErrorActionPreference = 'Continue'" in _easy_launcher
+assert "$code = $LASTEXITCODE" in _easy_launcher
+assert "$ErrorActionPreference = $previousErrorActionPreference" in _easy_launcher
+assert "if ($code -ne 0) { throw $v }" in _easy_launcher
+print("PASS: automatic proof wrapper preserves robust Windows Git stderr handling")
+
 assert "run-proof-campaign-easy.ps1" in _cmd_launcher
 assert "-Verb RunAs" in _cmd_launcher
 assert "/api/v1/pair/start" in _easy_launcher
