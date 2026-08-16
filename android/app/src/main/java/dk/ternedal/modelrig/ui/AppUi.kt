@@ -77,8 +77,9 @@ import dk.ternedal.modelrig.ui.chat.paramsLabelFor
 import dk.ternedal.modelrig.ui.chat.CapabilitiesSheet
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.graphicsLayer
+import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 
-private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, Audit, ControlCenter, CloudPicker, VoiceCloudPicker, RigStatus, Devices, QrScan }
+private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, Audit, ControlCenter, CloudPicker, VoiceCloudPicker, RigStatus, Devices, QrScan, Onboarding }
 
 @Composable
 fun AppUi(
@@ -109,8 +110,28 @@ fun AppUi(
         Surface(color = KalivTheme.colors.background, modifier = Modifier.fillMaxSize()) {
             when (screen) {
                 Screen.Splash -> SplashScreen(onDone = {
-                    screen = if (store.hasRig || store.hasCloud) Screen.Chat else Screen.Setup
+                    // Velkomsten vises KUN første gang og kun når der hverken
+                    // er rig eller cloud. Har man allerede en kilde, er den
+                    // en forhindring frem for en introduktion.
+                    screen = when {
+                        store.hasRig || store.hasCloud -> Screen.Chat
+                        !store.onboardingSeen -> Screen.Onboarding
+                        else -> Screen.Setup
+                    }
                 })
+                Screen.Onboarding -> Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(KalivTheme.colors.background)
+                        .kalivScreenInsets()
+                        .padding(horizontal = 24.dp, vertical = 32.dp),
+                ) {
+                    dk.ternedal.modelrig.ui.chat.OnboardingCard(
+                        onScanQr = { store.onboardingSeen = true; screen = Screen.QrScan },
+                        onEnterCode = { store.onboardingSeen = true; screen = Screen.Setup },
+                        onSkip = { store.onboardingSeen = true; screen = Screen.Setup },
+                    )
+                }
                 Screen.QrScan -> QrScanScreen(
                     onBack = { screen = Screen.Setup },
                     onLink = { link -> scannedLink = link; screen = Screen.Setup },
@@ -680,6 +701,9 @@ private data class Msg(
     val status: String = TurnStatus.THINKING,
     val error: Boolean = false, // shown in UI, but never persisted or sent as history
     val sources: List<String> = emptyList(), // RAG source names, if this reply used RAG
+    // De udsnit riggen FAKTISK hentede til svaret. Tom på ældre rigge —
+    // så viser fladen kun kildechips, som hidtil.
+    val context: List<dk.ternedal.modelrig.net.UsedChunk> = emptyList(),
     val fellBackToCloud: Boolean = false, // rig was unreachable -> answered via cloud
     // For a spoken turn: which model answered, and whether it was a cloud model.
     // Deliberately separate from fellBackToCloud -- using cloud for voice is a
@@ -1388,6 +1412,12 @@ private fun ChatScreen(
                     messages[idx] = cur.copy(text = cur.text + delta)
                 }
             }
+            val onContext: (List<dk.ternedal.modelrig.net.UsedChunk>) -> Unit = { cs ->
+                scope.launch {
+                    val i = messages.lastIndex
+                    if (i >= 0) messages[i] = messages[i].copy(context = cs)
+                }
+            }
             val onSources: (List<String>) -> Unit = { srcs ->
                 scope.launch {
                     val cur = messages[idx]
@@ -1472,6 +1502,7 @@ private fun ChatScreen(
                                     onPhase = onPhase,
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
+                            if (turn.context.isNotEmpty()) onContext(turn.context)
                             if (turn.status == "confirmation_required") {
                                 proposal = turn
                             } else {
@@ -1570,6 +1601,12 @@ private fun ChatScreen(
             val onDelta: (String) -> Unit = { delta ->
                 scope.launch { val cur = messages[i]; messages[i] = cur.copy(text = cur.text + delta) }
             }
+            val onContext: (List<dk.ternedal.modelrig.net.UsedChunk>) -> Unit = { cs ->
+                scope.launch {
+                    val i = messages.lastIndex
+                    if (i >= 0) messages[i] = messages[i].copy(context = cs)
+                }
+            }
             val onSources: (List<String>) -> Unit = { srcs ->
                 scope.launch { val cur = messages[i]; messages[i] = cur.copy(sources = srcs) }
             }
@@ -1607,6 +1644,7 @@ private fun ChatScreen(
                                     onPhase = onPhase,
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
+                            if (turn.context.isNotEmpty()) onContext(turn.context)
                             if (turn.status == "confirmation_required") {
                                 proposal = turn
                             } else {
@@ -2296,6 +2334,24 @@ private fun ChatScreen(
                             body = { MarkdownText(m.text, color = KalivTheme.colors.textBody) },
                             onRetry = if (m.error) ({ retry(i) }) else null,
                         )
+                        if (m.context.isNotEmpty() && !m.streaming) {
+                            var showCitations by remember(m.at) { mutableStateOf(false) }
+                            Text(
+                                if (showCitations) "Skjul hvad der blev l\u00e6st"
+                                else "Vis hvad der blev l\u00e6st (${m.context.size})",
+                                color = KalivTheme.colors.textMuted,
+                                fontSize = 13.sp,
+                                modifier = Modifier
+                                    .padding(start = 15.dp, top = 4.dp, bottom = 4.dp)
+                                    .clickable { showCitations = !showCitations },
+                            )
+                            if (showCitations) {
+                                dk.ternedal.modelrig.ui.chat.CitationsList(
+                                    chunks = m.context,
+                                    modifier = Modifier.padding(horizontal = 15.dp, vertical = 4.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }
