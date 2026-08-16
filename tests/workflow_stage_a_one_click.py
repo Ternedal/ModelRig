@@ -10,6 +10,7 @@ _cleanup = (ROOT / "scripts" / "stop-stage-a-known-processes.ps1").read_text(enc
 _exit_guard = (ROOT / "scripts" / "proof_campaign_exit_guard.py").read_text(encoding="utf-8")
 _runtime_manager = (ROOT / "scripts" / "proof-runtime-manager.ps1").read_text(encoding="utf-8")
 _current_adapter = (ROOT / "scripts" / "proof_stage_a_current.py").read_text(encoding="utf-8")
+_voice_test = (ROOT / "scripts" / "stage-a-voice-test.ps1").read_text(encoding="utf-8")
 
 assert "function Git(" in _proof_launcher
 assert "& git.exe @A" in _proof_launcher
@@ -69,11 +70,25 @@ print("PASS: normal ModelRig runtime is restored after proof and unknown port ow
 
 assert "def stop_exact_head_stack_for_voice()" in _current_adapter
 assert "stop-stage-a-known-processes.ps1" in _current_adapter
-_voice_call = "    stop_exact_head_stack_for_voice()\n    stage.run([\"powershell.exe\""
-assert _voice_call in _current_adapter
-assert _current_adapter.index(_voice_call) < _current_adapter.index("stage-a-voice-test.ps1")
+_voice_fn = _current_adapter.split("def voice_current", 1)[1].split("def scheduler_current", 1)[0]
+assert "stop_exact_head_stack_for_voice()" in _voice_fn
+assert _voice_fn.index("stop_exact_head_stack_for_voice()") < _voice_fn.index("stage-a-voice-test.ps1")
 assert "Voice-handoff: stopper den kendte loopback Stage A-stack" in _current_adapter
 print("PASS: current-head voice flow hands 8080/8099 off from loopback stack before LAN/Pixel stack")
+
+assert "def archive_previous_evidence_current" in _current_adapter
+assert "campaign.validate_evidence(" in _current_adapter
+assert 'result.get("status") == "pass"' in _current_adapter
+assert 'state["carried_forward_proofs"] = sorted(carried)' in _current_adapter
+assert "stage.archive_previous_evidence = archive_previous_evidence_current" in _current_adapter
+assert "Kun invaliderede rolling reports" in _current_adapter
+print("PASS: new candidate SHA does not blanket-delete physical evidence that still passes the authoritative validator")
+
+assert "def voice_observations_current" in _current_adapter
+assert 'observations.PHONE_STATE_SCHEMA = "kaliv-stage-a-phone-test-state/v2"' in _current_adapter
+assert "python $currentAdapter voice-observations" in _voice_test
+assert "stage_a_voice_observations.py" not in _voice_test
+print("PASS: guided voice collector consumes the phone stack's current v2 state schema")
 
 assert 'proof_campaign_exit_guard.py" mark' in _cmd_launcher
 assert 'proof_campaign_exit_guard.py" check' in _cmd_launcher
