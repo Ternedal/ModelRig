@@ -93,6 +93,10 @@ if (-not [string]::IsNullOrWhiteSpace($dirty)) {
 $gh = Resolve-CommandPath -Names @("gh.exe", "gh")
 if (-not $gh) { throw "GitHub CLI (gh) blev ikke fundet på PATH." }
 $adb = Resolve-Adb
+$adbDir = Split-Path -Parent $adb
+if (-not (($env:PATH -split ";") -contains $adbDir)) {
+    $env:PATH = "$adbDir;$env:PATH"
+}
 
 $devicesText = Invoke-Native $adb @("devices")
 $authorized = @()
