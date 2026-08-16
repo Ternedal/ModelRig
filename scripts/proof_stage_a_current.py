@@ -42,8 +42,24 @@ def strict_stage_current(action: str, sha: str, url: str | None = None) -> None:
         args += ["--url", url]
     stage.run(args)
 
+def stop_exact_head_stack_for_voice() -> None:
+    """Release 8080/8099 only when they are owned by the known Stage-A stack.
+
+    The retained one-click flow starts a loopback exact-head stack for preflight,
+    Agent 3 and RAG.  The physical voice flow must replace that stack with its
+    LAN-bound phone stack.  Hand the ports over explicitly instead of asking the
+    operator to kill a process.  The cleanup script is fail-closed and refuses
+    unknown listeners.
+    """
+    stage.note("Voice-handoff: stopper den kendte loopback Stage A-stack før LAN/Pixel-testen.")
+    stage.run([
+        "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+        str(ROOT / "scripts" / "stop-stage-a-known-processes.ps1"),
+    ])
+
 def voice_current(planner: str) -> None:
     stage.heading("Fysisk voice-bevis — guidet og automatisk")
+    stop_exact_head_stack_for_voice()
     stage.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                str(ROOT / "scripts" / "stage-a-voice-test.ps1"), "-PlannerModel", planner])
 
