@@ -3010,10 +3010,30 @@ private fun KnowledgeScreen(store: TokenStore, onBack: () -> Unit) {
                         name = it.name,
                         badge = dk.ternedal.modelrig.ui.chat.knowledgeBadgeFor(it.name),
                         statsLine = dk.ternedal.modelrig.ui.chat.knowledgeStatsLine(it.chunks, it.lastIngestedAt),
+                        enabled = it.enabled,
                     )
                 },
                 onAdd = { pick.launch(arrayOf("*/*")) },
                 onDelete = { doc -> deleting = details.firstOrNull { it.name == doc.name } },
+                onToggle = { doc, want ->
+                    val base = store.baseUrl
+                    val tok = store.token
+                    if (base != null && tok != null) {
+                        scope.launch {
+                            val res = withContext(Dispatchers.IO) {
+                                runCatching { ModelRigClient(base, tok).setRagSourceEnabled(doc.name, want) }
+                            }
+                            res.onSuccess { actual ->
+                                // RIGGENS svar vinder — ikke det vi håbede på.
+                                details = details.map { d ->
+                                    if (d.name == doc.name) d.copy(enabled = actual) else d
+                                }
+                                status = if (actual) "\u201c${doc.name}\u201d bruges igen"
+                                         else "\u201c${doc.name}\u201d bruges ikke l\u00e6ngere \u2014 teksten er der stadig"
+                            }.onFailure { error = "Kunne ikke \u00e6ndre kilden." }
+                        }
+                    }
+                },
                 modifier = Modifier.weight(1f).padding(horizontal = 17.dp),
             )
         }

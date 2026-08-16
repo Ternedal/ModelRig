@@ -246,6 +246,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_rag_cloud.py`
 - `tests/worker_rag_corpus_contract.py`
 - `tests/worker_rag_pdf_lifecycle.py`
+- `tests/worker_rag_source_toggle.py`
 - `tests/worker_read_connector_data_sharing_identity.py`
 - `tests/worker_read_connector_eval.py`
 - `tests/worker_read_connector_package_contract.py`

@@ -57,6 +57,25 @@ class KnowledgeListScreenshotTest {
     }
 
     @Test
+    fun knowledgeDisabledSourceDark() {
+        compose.setContent {
+            ModelRigTheme(dark = true) {
+                Column(Modifier.fillMaxWidth().background(KalivTheme.colors.background).padding(15.dp)) {
+                    KnowledgeList(
+                        docs = listOf(
+                            KnowledgeDocUi("noter.md", "MD", "24 udsnit \u00b7 2/7 2026", enabled = true),
+                            KnowledgeDocUi("regnskab.pdf", "PDF", "8 udsnit \u00b7 1/7 2026", enabled = false),
+                        ),
+                        onAdd = {},
+                        onToggle = { _, _ -> },
+                    )
+                }
+            }
+        }
+        compose.onRoot().captureRoboImage()
+    }
+
+    @Test
     fun screen8DeleteConfirmDark() {
         compose.setContent {
             ModelRigTheme(dark = true) {

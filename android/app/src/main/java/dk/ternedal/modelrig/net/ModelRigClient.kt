@@ -371,7 +371,16 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
      * blev indekseret. Begge felter HAR ligget i /rag/sources hele tiden —
      * klienten smed dem bare væk før nu.
      */
-    data class RagSource(val name: String, val chunks: Int, val lastIngestedAt: Double?)
+    data class RagSource(
+        val name: String,
+        val chunks: Int,
+        val lastIngestedAt: Double?,
+        /**
+         * Om kilden må hentes fra. Ældre rigge kender ikke feltet — så regnes
+         * kilden som TÆNDT, hvilket er præcis den adfærd de faktisk har.
+         */
+        val enabled: Boolean = true,
+    )
 
     /** Kilder med tal. Rækkefølgen er rigens: nyest indekseret først. */
     fun listRagSourceDetails(): List<RagSource> {
@@ -391,10 +400,31 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
                         name = name,
                         chunks = o.optInt("chunks", 0),
                         lastIngestedAt = if (o.isNull("last_ingested_at")) null else o.optDouble("last_ingested_at"),
+                        enabled = o.optBoolean("enabled", true),
                     ),
                 )
             }
             return out
+        }
+    }
+
+    /**
+     * Tænder eller slukker for hentning fra én kilde.
+     *
+     * Sletter intet: chunksene bliver, og kontakten kan vippes tilbage.
+     * Returnerer RIGGENS tilstand bagefter — klienten antager aldrig at dens
+     * egen skrivning lykkedes.
+     */
+    fun setRagSourceEnabled(source: String, enabled: Boolean): Boolean {
+        val payload = JSONObject().put("source", source).put("enabled", enabled)
+        val rb = Request.Builder()
+            .url("$base/api/v1/rag/source/enabled")
+            .post(payload.toString().toRequestBody(jsonType))
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        http.newCall(rb.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("rag source toggle failed (${resp.code}): $text")
+            return JSONObject(text).optBoolean("enabled", enabled)
         }
     }
 

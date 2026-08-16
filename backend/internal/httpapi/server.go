@@ -128,6 +128,7 @@ func (s *server) routes() {
 	s.mux.Handle("POST /api/v1/rag/ingest/html", s.authMW(http.HandlerFunc(s.handleRagIngestHtml)))
 	s.mux.Handle("POST /api/v1/rag/chat", s.authMW(http.HandlerFunc(s.handleRagChat)))
 	s.mux.Handle("GET /api/v1/rag/sources", s.authMW(http.HandlerFunc(s.handleRagSources)))
+	s.mux.Handle("POST /api/v1/rag/source/enabled", s.authMW(http.HandlerFunc(s.handleRagSourceEnabled)))
 	s.mux.Handle("GET /api/v1/rag/stats", s.authMW(http.HandlerFunc(s.handleRagStats)))
 	s.mux.Handle("DELETE /api/v1/rag/source", s.authMW(http.HandlerFunc(s.handleRagSourceDelete)))
 	s.mux.Handle("GET /api/v1/voice/status", s.authMW(http.HandlerFunc(s.handleVoiceStatus)))

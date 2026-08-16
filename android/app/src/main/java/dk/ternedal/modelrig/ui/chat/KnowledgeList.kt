@@ -33,6 +33,7 @@ import dk.ternedal.modelrig.ui.theme.KalivType
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.unit.em
+import dk.ternedal.modelrig.ui.components.KalivSwitch
 
 /**
  * Skaerm 8 (Viden/RAG) — 1:1 mod HTML-referencen, x393/322 jf. DDR-001/B2.
@@ -51,6 +52,8 @@ data class KnowledgeDocUi(
     val badge: String,
     /** Rigens egne tal: "12 udsnit · 8/7 2026" — tom når de ikke findes. */
     val statsLine: String = "",
+    /** Om kilden må hentes fra. Slukket = teksten bliver, men bruges ikke. */
+    val enabled: Boolean = true,
 )
 
 /**
@@ -109,16 +112,21 @@ fun KnowledgeList(
     onAdd: () -> Unit,
     modifier: Modifier = Modifier,
     onDelete: ((KnowledgeDocUi) -> Unit)? = null,
+    onToggle: ((KnowledgeDocUi, Boolean) -> Unit)? = null,
 ) {
     LazyColumn(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(11.dp)) {
-        items(docs, key = { it.name }) { d -> KnowledgeDocCard(d, onDelete) }
+        items(docs, key = { it.name }) { d -> KnowledgeDocCard(d, onDelete, onToggle) }
         item { KalivOutlineActionCard("Tilf\u00f8j dokument", onAdd) }
     }
 }
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun KnowledgeDocCard(d: KnowledgeDocUi, onDelete: ((KnowledgeDocUi) -> Unit)? = null) {
+private fun KnowledgeDocCard(
+    d: KnowledgeDocUi,
+    onDelete: ((KnowledgeDocUi) -> Unit)? = null,
+    onToggle: ((KnowledgeDocUi, Boolean) -> Unit)? = null,
+) {
     val shape = RoundedCornerShape(KalivTokens.Radius.card)
     Row(
         Modifier
@@ -151,18 +159,27 @@ private fun KnowledgeDocCard(d: KnowledgeDocUi, onDelete: ((KnowledgeDocUi) -> U
             Text(
                 d.name,
                 style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 16.sp),
-                color = KalivTheme.colors.textHigh,
+                color = if (d.enabled) KalivTheme.colors.textHigh else KalivTheme.colors.textMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (d.statsLine.isNotEmpty()) {
+            val stats = if (d.enabled) d.statsLine else {
+                // Slukket kilde: sig hvad der FAKTISK gælder — teksten er der
+                // stadig, den bliver bare ikke hentet.
+                listOf(d.statsLine, "bruges ikke").filter { it.isNotEmpty() }.joinToString(" · ")
+            }
+            if (stats.isNotEmpty()) {
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    d.statsLine,
+                    stats,
                     style = TextStyle(fontFamily = KalivType.Inter, fontSize = 13.5.sp),
                     color = KalivTheme.colors.textMuted,
                 )
             }
+        }
+        onToggle?.let { toggle ->
+            Spacer(Modifier.width(11.dp))
+            KalivSwitch(checked = d.enabled, onCheckedChange = { toggle(d, it) })
         }
     }
 }

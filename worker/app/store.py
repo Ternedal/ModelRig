@@ -55,6 +55,18 @@ class DocStore:
             )
             """
         )
+        # Sources the user has switched OFF. A row here means "do not retrieve
+        # from this source"; the chunks stay in the index untouched, so the
+        # switch is reversible and costs no re-ingest. Absence = enabled, so
+        # every source predating this table keeps working exactly as before.
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS disabled_sources (
+                source      TEXT PRIMARY KEY,
+                disabled_at REAL NOT NULL
+            )
+            """
+        )
         self._conn.commit()
         self._backfill_measured_dimension()
 
@@ -169,7 +181,17 @@ class DocStore:
             self._conn.commit()
             return int(cur.lastrowid)
 
-    def all(self, source: str | None = None) -> list[tuple[int, str, str | None, int, list[float]]]:
+    def all(
+        self,
+        source: str | None = None,
+        include_disabled: bool = True,
+    ) -> list[tuple[int, str, str | None, int, list[float]]]:
+        """Every chunk, optionally narrowed to one source.
+
+        include_disabled=False drops chunks whose source the user switched
+        off. Retrieval passes False; administrative counts pass True, so the
+        Viden-screen can still say how large a switched-off source is.
+        """
         with self._lock:
             if source is None:
                 rows = self._conn.execute(
@@ -185,11 +207,43 @@ class DocStore:
                     "SELECT id, text, source, chunk_index, embedding FROM documents "
                     "WHERE source = ?", (source,)
                 ).fetchall()
-        return [(r[0], r[1], r[2], r[3], json.loads(r[4])) for r in rows]
+        out = [(r[0], r[1], r[2], r[3], json.loads(r[4])) for r in rows]
+        if include_disabled:
+            return out
+        off = self.disabled_sources()
+        # NULL source is reported as '(none)' everywhere else, so it can be
+        # switched off under that name too.
+        return [row for row in out if (row[2] or "(none)") not in off]
 
     def count(self) -> int:
         with self._lock:
             return int(self._conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0])
+
+    # ---- per-source retrieval switch -------------------------------------
+
+    def disabled_sources(self) -> set[str]:
+        with self._lock:
+            rows = self._conn.execute("SELECT source FROM disabled_sources").fetchall()
+        return {r[0] for r in rows}
+
+    def set_source_enabled(self, source: str, enabled: bool) -> bool:
+        """Turn retrieval for one source on or off. Returns the new state.
+
+        Deliberately does NOT check that the source exists: a source can be
+        switched off, re-ingested later, and keep its setting. The opposite
+        (dropping the row on re-ingest) would silently re-enable a source the
+        user turned off, which is the failure worth avoiding.
+        """
+        with self._lock:
+            if enabled:
+                self._conn.execute("DELETE FROM disabled_sources WHERE source = ?", (source,))
+            else:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO disabled_sources (source, disabled_at) VALUES (?, ?)",
+                    (source, time.time()),
+                )
+            self._conn.commit()
+        return enabled
 
     def sources(self) -> list[tuple[str, int, float]]:
         """Return (source, chunk_count, last_ingested_at) grouped by source,

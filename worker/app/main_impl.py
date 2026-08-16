@@ -1130,10 +1130,31 @@ async def rag_chat(req: QueryReq):
 
 @app.get("/rag/sources")
 def sources() -> dict:
+    off = store.disabled_sources()
     return {"sources": [
-        {"source": s, "chunks": n, "last_ingested_at": ts}
+        {"source": s, "chunks": n, "last_ingested_at": ts, "enabled": s not in off}
         for (s, n, ts) in store.sources()
     ]}
+
+
+class RagSourceEnabledReq(BaseModel):
+    source: str
+    enabled: bool
+
+
+@app.post("/rag/source/enabled")
+def set_source_enabled(req: RagSourceEnabledReq) -> dict:
+    """Switch retrieval for one source on or off.
+
+    Nothing is deleted: the chunks stay, and the switch can be flipped back.
+    The response reports the state the rig actually holds afterwards, so the
+    client never has to assume its own write succeeded.
+    """
+    src = req.source.strip()
+    if not src:
+        raise HTTPException(status_code=400, detail="source is required")
+    state = store.set_source_enabled(src, req.enabled)
+    return {"source": src, "enabled": state}
 
 
 @app.get("/rag/stats")

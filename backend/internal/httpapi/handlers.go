@@ -343,6 +343,15 @@ func (s *server) handleRagSources(w http.ResponseWriter, r *http.Request) {
 	s.Worker.Forward(w, r, "/rag/sources")
 }
 
+// handleRagSourceEnabled forwards the per-source retrieval switch.
+//
+// The switch deletes nothing: it decides whether a source may be RETRIEVED
+// from. The worker owns that state, so the backend only carries the call --
+// no local mirror that could drift from what the rig actually holds.
+func (s *server) handleRagSourceEnabled(w http.ResponseWriter, r *http.Request) {
+	s.Worker.Forward(w, r, "/rag/source/enabled")
+}
+
 func (s *server) handleRagStats(w http.ResponseWriter, r *http.Request) {
 	s.Worker.Forward(w, r, "/rag/stats")
 }

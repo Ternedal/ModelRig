@@ -6,9 +6,9 @@ Aflæst fra appens OpenAPI-overflade, ikke fra importgrafer eller grep.
 En importgraf beviser at et *modul* kan nås; den siger intet om hvorvidt
 en *rute* serveres. En router kan bygges og aldrig inkluderes.
 
-- **Host-overflade (Agent 3 slukket): 44 ruter**
+- **Host-overflade (Agent 3 slukket): 45 ruter**
 - **Agent 3 tilføjer, når `KALIV_AGENT3_ENABLED=1`: 29 ruter**
-- I alt tændt: 73
+- I alt tændt: 74
 
 ## Dormans-invariant
 
@@ -38,6 +38,7 @@ og ingen af dem findes i host-overfladen.
 - `/rag/ingest/pptx/status`
 - `/rag/query`
 - `/rag/source`
+- `/rag/source/enabled`
 - `/rag/sources`
 - `/rag/stats`
 - `/schedules`
