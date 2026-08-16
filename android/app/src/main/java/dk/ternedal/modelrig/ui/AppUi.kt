@@ -876,6 +876,14 @@ private fun ChatScreen(
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val context = LocalContext.current
+    // Offline-kø: beskeder skrevet mens riggen var væk. Telefonens eget
+    // regnskab — riggen kender den ikke, og INTET herfra sendes af sig selv.
+    val queueStore = remember {
+        dk.ternedal.modelrig.data.OfflineQueue(
+            context.getSharedPreferences("kaliv_queue", android.content.Context.MODE_PRIVATE),
+        )
+    }
+    var queued by remember { mutableStateOf(queueStore.all()) }
     // Én vej til godkendelsesfladen, saa baade panelet og plan-kortet lander
     // samme sted (ADR-A3-001 D4: godkendelser bor paa agent-skaermen).
     val openAgentCheckpoint = {
@@ -2179,6 +2187,26 @@ private fun ChatScreen(
                 modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
             )
         }
+        if (queued.isNotEmpty()) {
+            dk.ternedal.modelrig.ui.chat.OfflineQueueCard(
+                items = queued,
+                nowMillis = System.currentTimeMillis(),
+                rigBack = !rigOffline,
+                onSend = { item ->
+                    // Ét tryk = én besked. Vi tømmer ALDRIG køen i ét hug,
+                    // og vi sender kun den du valgte.
+                    queued = queueStore.remove(item)
+                    input = item.text
+                    onSend()
+                },
+                onEdit = { item ->
+                    queued = queueStore.remove(item)
+                    input = if (input.isBlank()) item.text else input + "\n" + item.text
+                },
+                onDiscard = { item -> queued = queueStore.remove(item) },
+                modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
+            )
+        }
         sharePayload?.let { payload ->
             val isDoc = payload is dk.ternedal.modelrig.net.SharedPayload.Document
             val title = when (payload) {
@@ -2634,7 +2662,7 @@ private fun ChatScreen(
                 val canSendNow = input.isNotBlank() || pendingImageB64 != null
                 ChatComposer(
                     text = input,
-                    placeholder = if (rigOffline) "Afventer forbindelse til din rig …" else "Skriv til Kaliv …",
+                    placeholder = if (rigOffline) "Skriv — den lægges i kø" else "Skriv til Kaliv …",
                     onAttach = if (mode != "rig" || !ragMode) ({
                         if (!busy) {
                             pendingImageError = null
@@ -2686,8 +2714,18 @@ private fun ChatScreen(
                             }
                         }
                     }) else null,
-                    onSend = onSend,
-                    sendEnabled = canSendNow && !busy && !rigOffline,
+                    onSend = {
+                        if (rigOffline) {
+                            // Riggen er væk: beskeden LÆGGES i kø. Den sendes
+                            // først når du selv trykker Send nu bagefter —
+                            // se OfflineQueueCard for hvorfor.
+                            queued = queueStore.add(input, System.currentTimeMillis())
+                            input = ""
+                        } else {
+                            onSend()
+                        }
+                    },
+                    sendEnabled = canSendNow && !busy,
                     busy = busy,
                     onStop = { activeCall?.cancel() },
                     inputField = {
@@ -2709,7 +2747,7 @@ private fun ChatScreen(
                                         // Skal spejle placeholder-param'en — den custom
                                         // inputField forbigaar ChatComposers default
                                         // (fund B fra Anders' screenshot 14/08).
-                                        if (rigOffline) "Afventer forbindelse til din rig …" else "Skriv til Kaliv …",
+                                        if (rigOffline) "Skriv — den lægges i kø" else "Skriv til Kaliv …",
                                         style = TextStyle(fontFamily = KalivType.Inter, fontSize = 17.sp),
                                         color = KalivTheme.colors.faint,
                                     )
