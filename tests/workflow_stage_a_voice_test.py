@@ -108,7 +108,13 @@ try:
     manual = {
         "schema": module.MANUAL_SCHEMA,
         "candidate": candidate,
-        "device": {"model": "Pixel 6a", "os_version": "17", "app_version": "1.58.147"},
+        "device": {
+            "model": "Pixel 6a",
+            "os_version": "17",
+            "app_version": "1.58.147-a425f",
+            "app_package": module.PHYSICAL_APP_PACKAGE,
+            "build_variant": "a425f",
+        },
         "trials": good_trials,
         "operator": {"method": "guided-stage-a-launcher", "production_activation": False},
     }
@@ -136,13 +142,19 @@ check("input(\"  Tryk Enter her, når Kaliv viser at forbindelsen virker" in obs
       "the helper waits for the operator before accepting phone pairing")
 check("new_devices" in observation_source and "paired_device_id" in observation_source,
       "a new pairing is verified in the isolated backend store")
-check("app_version != candidate[\"version\"]" in observation_source,
-      "a different Android app version blocks exact-head evidence")
+check('PHYSICAL_APP_PACKAGE = "dk.ternedal.modelrig.a425f"' in observation_source and
+      'PHYSICAL_APP_VERSION_SUFFIX = "-a425f"' in observation_source,
+      "the guided proof is bound to the isolated physical Android package")
+check("dumpsys" in observation_source and "app_version != expected_app_version" in observation_source,
+      "a different physical Android app version blocks exact-head evidence")
+check('_prompt("Kaliv-appens version"' not in observation_source,
+      "physical app version cannot be self-attested when ADB verification is required")
 check("return 0 if summary[\"passed\"] else 1" in observation_source,
       "failed physical observations cannot produce a green exit")
 
 orchestrator = ORCHESTRATOR.read_text(encoding="utf-8")
 order = [
+    orchestrator.index("& $physicalAppScript"),
     orchestrator.index("& $phoneScript -PlannerModel $model"),
     orchestrator.index("stage_a_voice_observations.py"),
     orchestrator.index("--validate-only"),
@@ -151,7 +163,9 @@ order = [
     orchestrator.index("--cold-start-confirmed"),
 ]
 check(order == sorted(order),
-      "phone pairing, observations, fixtures, cold reset and baseline execute in order")
+      "candidate app, phone pairing, observations, fixtures, cold reset and baseline execute in order")
+check("ensure-stage-a-physical-app.ps1" in orchestrator,
+      "voice flow bootstraps the exact physical Android candidate before pairing")
 check("Assert-ExpectedWorker" in orchestrator and "recordedWorkerPid" in orchestrator,
       "the cold reset stops only the recorded Stage A worker")
 check("finally" in orchestrator and "& $phoneScript -Stop" in orchestrator,
