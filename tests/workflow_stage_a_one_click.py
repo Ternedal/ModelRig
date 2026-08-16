@@ -7,7 +7,13 @@ _proof_launcher = (ROOT / "scripts" / "run-proof-campaign.ps1").read_text(encodi
 assert "function Git(" in _proof_launcher
 assert "& git.exe @A" in _proof_launcher
 assert "& git @A" not in _proof_launcher
+assert "$previousErrorActionPreference = $ErrorActionPreference" in _proof_launcher
+assert "$ErrorActionPreference = 'Continue'" in _proof_launcher
+assert "$code = $LASTEXITCODE" in _proof_launcher
+assert "$ErrorActionPreference = $previousErrorActionPreference" in _proof_launcher
+assert "if ($code -ne 0) { throw $v }" in _proof_launcher
 print("PASS: physical proof launcher Git helper cannot recurse into itself")
+print("PASS: physical proof launcher accepts successful Git stderr and still fails on nonzero exit")
 
 _source_path = Path(__file__).with_name("workflow_stage_a_one_click.retained")
 _source = _source_path.read_text(encoding="utf-8")
