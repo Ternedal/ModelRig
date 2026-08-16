@@ -19,7 +19,22 @@ function Run([string]$Label, [scriptblock]$Action) {
   if ($LASTEXITCODE -ne 0) { throw "$Label fejlede med exitkode $LASTEXITCODE" }
 }
 function Git([Parameter(ValueFromRemainingArguments=$true)][string[]]$A) {
-  $v = (& git.exe @A 2>&1) -join "`n"; if ($LASTEXITCODE -ne 0) { throw $v }; return $v.Trim()
+  $previousErrorActionPreference = $ErrorActionPreference
+  $v = ''
+  $code = -1
+  try {
+    # Windows PowerShell surfaces a native process' stderr as ErrorRecord objects.
+    # Git legitimately writes fetch/pull status to stderr even when exit code is 0,
+    # so capture that stream without letting the global fail-fast preference turn a
+    # successful Git command into a terminating NativeCommandError.
+    $ErrorActionPreference = 'Continue'
+    $v = (& git.exe @A 2>&1 | ForEach-Object { $_.ToString() }) -join "`n"
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+  if ($code -ne 0) { throw $v }
+  return $v.Trim()
 }
 if ($env:OS -ne 'Windows_NT') { throw 'Beviskampagnen må kun køres på Windows-riggen.' }
 foreach ($cmd in @('git','python','powershell.exe','go','ollama')) {
