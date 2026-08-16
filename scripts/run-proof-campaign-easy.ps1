@@ -99,50 +99,85 @@ $env:KALIV_AGENT3_PLANNER_MODEL = $PlannerModel
 $runtime = Join-Path $root 'validation\stage-a-runtime'
 New-Item -ItemType Directory -Path $runtime -Force | Out-Null
 $pairingData = Join-Path $runtime 'proof-campaign-pairing-data.json'
+$runtimeState = Join-Path $runtime 'proof-campaign-suspended-runtime.json'
 $env:MODELRIG_DATA = $pairingData
 $cleanup = Join-Path $PSScriptRoot 'stop-stage-a-known-processes.ps1'
+$runtimeManager = Join-Path $PSScriptRoot 'proof-runtime-manager.ps1'
 $stack = Join-Path $PSScriptRoot 'start-stage-a-validation-stack.ps1'
 $bootstrapStarted = $false
+$rc = 1
+$restoreFailed = $false
 
 Write-Host "`n============================================================================" -ForegroundColor Cyan
 Write-Host '  AUTOMATISK KLARGØRING — INGEN MANUEL TOKEN' -ForegroundColor Cyan
 Write-Host '============================================================================' -ForegroundColor Cyan
+
 try {
+  Remove-Item -LiteralPath $runtimeState -Force -ErrorAction SilentlyContinue
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runtimeManager -Action suspend -StatePath $runtimeState
+  if ($LASTEXITCODE -ne 0) { throw 'Kunne ikke suspendere den normale ModelRig-runtime sikkert.' }
+
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cleanup
   if ($LASTEXITCODE -ne 0) { throw 'Kunne ikke rydde en kendt Stage A-teststack.' }
 
   Remove-Item -LiteralPath $pairingData -Force -ErrorAction SilentlyContinue
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $stack `
-      -PlannerModel $PlannerModel `
-      -ValidationReport (Join-Path $root 'validation\agent3-rig-validation-latest.json') `
-      -BackendHost 127.0.0.1 `
-      -PairingData $pairingData `
-      -HeadlessWorker
-  if ($LASTEXITCODE -ne 0) { throw 'Kunne ikke starte bootstrap-stacken til lokal pairing.' }
-  $bootstrapStarted = $true
+  try {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $stack `
+        -PlannerModel $PlannerModel `
+        -ValidationReport (Join-Path $root 'validation\agent3-rig-validation-latest.json') `
+        -BackendHost 127.0.0.1 `
+        -PairingData $pairingData `
+        -HeadlessWorker
+    if ($LASTEXITCODE -ne 0) { throw 'Kunne ikke starte bootstrap-stacken til lokal pairing.' }
+    $bootstrapStarted = $true
 
-  New-LocalProofToken -ExpectedVersion $version
-} finally {
-  if ($bootstrapStarted) {
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cleanup
-    if ($LASTEXITCODE -ne 0) { throw 'Kunne ikke lukke bootstrap-stacken igen.' }
+    New-LocalProofToken -ExpectedVersion $version
+  } finally {
+    if ($bootstrapStarted) {
+      & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cleanup
+      if ($LASTEXITCODE -ne 0) { throw 'Kunne ikke lukke bootstrap-stacken igen.' }
+      $bootstrapStarted = $false
+    }
   }
-}
 
-$coreArgs = @(
-  '-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'run-proof-campaign.ps1'),
-  '-PlannerModel',$PlannerModel,
-  '-WorkflowRounds',[string]$WorkflowRounds,
-  '-WorkflowThreshold',[string]$WorkflowThreshold
-)
-if ($SkipT023) { $coreArgs += '-SkipT023' }
-if ($SkipT033) { $coreArgs += '-SkipT033' }
+  $coreArgs = @(
+    '-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'run-proof-campaign.ps1'),
+    '-PlannerModel',$PlannerModel,
+    '-WorkflowRounds',[string]$WorkflowRounds,
+    '-WorkflowThreshold',[string]$WorkflowThreshold
+  )
+  if ($SkipT023) { $coreArgs += '-SkipT023' }
+  if ($SkipT033) { $coreArgs += '-SkipT033' }
 
-try {
   & powershell.exe @coreArgs
   $rc = $LASTEXITCODE
 } finally {
   # Tokenet lever kun i denne procesfamilie. Det vises aldrig og gemmes ikke af wrapperen.
   Remove-Item Env:MODELRIG_TOKEN -ErrorAction SilentlyContinue
+
+  # Core/Stage-A kan efterlade sin egen exact-head stack. Stop kun processer,
+  # cleanup-scriptet kan bevise er proof-processer, før normal runtime gendannes.
+  try {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cleanup
+    if ($LASTEXITCODE -ne 0) { $restoreFailed = $true; Write-Warning 'Proof-runtime kunne ikke ryddes helt før normal runtime skulle gendannes.' }
+  } catch {
+    $restoreFailed = $true
+    Write-Warning "Proof-runtime cleanup fejlede: $($_.Exception.Message)"
+  }
+
+  if (Test-Path -LiteralPath $runtimeState -PathType Leaf) {
+    try {
+      & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runtimeManager -Action resume -StatePath $runtimeState
+      if ($LASTEXITCODE -ne 0) { $restoreFailed = $true; Write-Warning 'Normal ModelRig-runtime kunne ikke gendannes automatisk.' }
+    } catch {
+      $restoreFailed = $true
+      Write-Warning "Normal ModelRig-runtime restore fejlede: $($_.Exception.Message)"
+    }
+  }
+}
+
+if ($restoreFailed -and $rc -eq 0) {
+  Write-Warning 'Proof-resultatet var grønt, men normal rig-runtime blev ikke gendannet sikkert; wrapperen returnerer derfor fejl.'
+  $rc = 1
 }
 exit $rc
