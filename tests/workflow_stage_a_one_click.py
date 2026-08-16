@@ -7,6 +7,7 @@ _proof_launcher = (ROOT / "scripts" / "run-proof-campaign.ps1").read_text(encodi
 _easy_launcher = (ROOT / "scripts" / "run-proof-campaign-easy.ps1").read_text(encoding="utf-8")
 _cmd_launcher = (ROOT / "START_PROOF_CAMPAIGN.cmd").read_text(encoding="utf-8")
 _cleanup = (ROOT / "scripts" / "stop-stage-a-known-processes.ps1").read_text(encoding="utf-8")
+_exit_guard = (ROOT / "scripts" / "proof_campaign_exit_guard.py").read_text(encoding="utf-8")
 
 assert "function Git(" in _proof_launcher
 assert "& git.exe @A" in _proof_launcher
@@ -46,6 +47,21 @@ print("PASS: START_PROOF_CAMPAIGN self-elevates through normal Windows UAC")
 print("PASS: proof token is minted automatically through local pair/start + pair/claim")
 print("PASS: proof token stays process-local and is removed after the core run")
 print("PASS: automatic bootstrap cleanup refuses unknown listeners")
+
+assert 'proof_campaign_exit_guard.py" mark' in _cmd_launcher
+assert 'proof_campaign_exit_guard.py" check' in _cmd_launcher
+assert 'if "%EXIT_CODE%"=="0" (' in _cmd_launcher
+assert 'if not "%ERRORLEVEL%"=="0" set "EXIT_CODE=1"' in _cmd_launcher
+assert 'summary.get("passed") is True' in _exit_guard
+assert 'summary.get("t023") is True' in _exit_guard
+assert 't033.get("passed") is True' in _exit_guard
+assert 'int(workflow.get("rounds") or 0) == 22' in _exit_guard
+assert 'int(workflow.get("executions") or 0) == 308' in _exit_guard
+assert 'path.stat().st_mtime_ns >= started_ns' in _exit_guard
+assert 'candidate.get("sha") == sha' in _exit_guard
+assert 'summary.get("production_activation") is False' in _exit_guard
+print("PASS: launcher cannot report green from Ctrl+C or exit code 0 alone")
+print("PASS: launcher requires a fresh exact-SHA full-gate summary before PASS")
 
 _source_path = Path(__file__).with_name("workflow_stage_a_one_click.retained")
 _source = _source_path.read_text(encoding="utf-8")
