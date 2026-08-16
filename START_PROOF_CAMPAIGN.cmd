@@ -38,12 +38,27 @@ echo pairing og vises eller kopieres ikke. Ingen branch-skift, merge, release el
 echo produktionsaktivering foretages af kampagnen.
 echo.
 
+python "%~dp0scripts\proof_campaign_exit_guard.py" mark
+if not "%ERRORLEVEL%"=="0" (
+  set "EXIT_CODE=2"
+  goto :result
+)
+
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\run-proof-campaign-easy.ps1" %*
 set "EXIT_CODE=%ERRORLEVEL%"
+
+rem Windows/PowerShell kan i visse afbrydelsessituationer returnere 0 efter Ctrl+C.
+rem Exitkode 0 er derfor kun et signal om at kontrollere beviset, aldrig selve beviset.
+if "%EXIT_CODE%"=="0" (
+  python "%~dp0scripts\proof_campaign_exit_guard.py" check
+  if not "%ERRORLEVEL%"=="0" set "EXIT_CODE=1"
+)
+
+:result
 echo.
-if "%EXIT_CODE%"=="0" echo HELE DEN SOURCE-BOUND BEVISKAMPAGNE ER GROEN. Se summary.json for Stage B-boundary.
+if "%EXIT_CODE%"=="0" echo HELE DEN SOURCE-BOUND BEVISKAMPAGNE ER GROEN. Frisk exact-SHA summary.json er verificeret.
 if "%EXIT_CODE%"=="3" echo KAMPAGNEN MANGLER KUN ET EKSPPLICIT FYSISK/TRUST-BOUND TRIN. Foelg instruktionen ovenfor og koer igen.
-if not "%EXIT_CODE%"=="0" if not "%EXIT_CODE%"=="3" echo KAMPAGNEN STOPPEDE SIKKERT. Logs og delbeviser er bevaret.
+if not "%EXIT_CODE%"=="0" if not "%EXIT_CODE%"=="3" echo KAMPAGNEN STOPPEDE SIKKERT. Ingen falsk PASS; logs og delbeviser er bevaret.
 echo.
 pause
 exit /b %EXIT_CODE%
