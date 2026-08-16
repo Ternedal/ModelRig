@@ -4,7 +4,7 @@
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
 **Version på main:** `2.0.9`
-**Genereret:** 2026-08-16 08:26 UTC
+**Genereret:** 2026-08-16 09:16 UTC
 
 ---
 
@@ -35,7 +35,7 @@ Hver probe bygger de RIGTIGE komponenter mod engangs-databaser og injicerer fejl
 | Claim er durable + budget reserveres atomisk | ✅ | claim skriver durable occurrence og reserverer budget i samme transaktion |
 | Samme occurrence kan ikke claimes to gange | ✅ | samme occurrence kan ikke claimes to gange |
 | Crash før kørsel: opgives og refunderes | ✅ | crash før kørsel: occurrence opgives og slot refunderes |
-| Crash efter kørsel: evidens holder budgettet brugt | ✅ | crash efter kørsel: audit-evidens holder budgettet brugt |
+| Crash efter kørsel: evidens holder budgettet brugt | ✅ | audit-evidens holder budgettet brugt |
 | Pause efter claim stopper in-flight occurrence | ✅ | pause efter claim stopper in-flight occurrence og refunderer |
 | Budgetloft holder på tværs af claims | ✅ | max_runs kan ikke overskrides på tværs af claims |
 | Ukendt udfald: slot beholdes og granten pauses | ✅ | ukendt udfald: slot beholdes og granten pauses — max_runs kan ikke blive N+1 via crash |
