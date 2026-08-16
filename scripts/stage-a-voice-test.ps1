@@ -112,6 +112,8 @@ try {
 
     & $phoneScript -PlannerModel $model
 
+    # stage_a_voice_observations.py koeres gennem current-head adapteren, saa
+    # phone-stack v2-schemaet accepteres uden at svaekke den retained collector.
     & python $currentAdapter voice-observations `
         --phone-state $phoneStatePath `
         --output $manualPath
