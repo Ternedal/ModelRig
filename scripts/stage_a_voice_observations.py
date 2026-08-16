@@ -29,6 +29,8 @@ PHONE_STATE_SCHEMA = "kaliv-stage-a-phone-test-state/v1"
 DEFAULT_PHONE_STATE = Path("validation/stage-a-runtime/phone-test-state.json")
 DEFAULT_RESUME = Path("validation/stage-a-voice-observations-state.json")
 DEFAULT_OUTPUT = Path("validation/voice-manual-observations.json")
+PHYSICAL_APP_PACKAGE = "dk.ternedal.modelrig.a425f"
+PHYSICAL_APP_VERSION_SUFFIX = "-a425f"
 
 TRIALS: tuple[dict[str, str], ...] = (
     {
@@ -243,32 +245,37 @@ def _adb(*args: str) -> str | None:
 
 
 def _device_metadata(candidate: dict[str, str]) -> dict[str, str]:
-    model = _adb("shell", "getprop", "ro.product.model") or "Pixel 6a"
+    expected_app_version = f"{candidate['version']}{PHYSICAL_APP_VERSION_SUFFIX}"
+    model = _adb("shell", "getprop", "ro.product.model")
     os_version = _adb("shell", "getprop", "ro.build.version.release")
-    package = _adb("shell", "dumpsys", "package", "dk.ternedal.modelrig") or ""
+    package = _adb("shell", "dumpsys", "package", PHYSICAL_APP_PACKAGE)
+    if not model or not os_version or not package:
+        raise ObservationError(
+            "ADB kan ikke verificere den isolerede fysiske kandidatapp; "
+            "USB-fejlfinding og præcis én godkendt telefon er obligatorisk for voice-beviset"
+        )
     match = re.search(r"\bversionName=([^\s]+)", package)
     app_version = match.group(1) if match else None
+    if not app_version:
+        raise ObservationError("ADB kunne ikke læse versionName for den fysiske kandidatapp")
 
     print("\nEnhedsoplysninger")
     print("-----------------")
-    print(f"  Model: {model}")
-    if os_version:
-        print(f"  Android: {os_version} (læst automatisk)")
-    else:
-        os_version = _prompt("Android-version, fx 17")
-    if app_version:
-        print(f"  Kaliv-app: {app_version} (læst automatisk)")
-    else:
-        app_version = _prompt("Kaliv-appens version", candidate["version"])
-    if app_version != candidate["version"]:
+    print(f"  Model: {model} (læst via ADB)")
+    print(f"  Android: {os_version} (læst via ADB)")
+    print(f"  Fysisk Kaliv-package: {PHYSICAL_APP_PACKAGE}")
+    print(f"  Fysisk Kaliv-app: {app_version} (læst via ADB)")
+    if app_version != expected_app_version:
         raise ObservationError(
-            f"Kaliv-appen er {app_version}, men kandidaten er {candidate['version']}; "
-            "installér den eksakte kandidatapp før voice-beviset"
+            f"Den isolerede kandidatapp er {app_version}, men exact kandidat kræver "
+            f"{expected_app_version}; proof-bootstrap skal installere exact CI-artifact først"
         )
     return {
         "model": model,
         "os_version": os_version,
         "app_version": app_version,
+        "app_package": PHYSICAL_APP_PACKAGE,
+        "build_variant": "a425f",
     }
 
 
@@ -322,7 +329,8 @@ def _ensure_new_pairing(state: dict[str, Any], store: Path, state_path: Path) ->
     print("\nPar telefonen nu")
     print("----------------")
     print("  Brug Server-URL og parringskode fra det grønne telefon-testvindue.")
-    print("  Indtast koden, også hvis Kaliv allerede siger 'parret'.")
+    print("  Brug den isolerede fysisk-kandidatapp, som proof-launcheren åbnede via ADB.")
+    print("  Indtast koden, også hvis appen allerede siger 'parret'.")
     while True:
         input("  Tryk Enter her, når Kaliv viser at forbindelsen virker ... ")
         current = _devices(store)
