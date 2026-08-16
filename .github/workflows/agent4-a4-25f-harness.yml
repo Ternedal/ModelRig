@@ -8,7 +8,12 @@ on:
       - "backend/cmd/modelrig-a4-25f-backend/**"
       - "scripts/agent4_a4_25f_*.py"
       - "scripts/agent4_a4_25f_*.ps1"
+      - "scripts/ensure-stage-a-physical-app.ps1"
+      - "scripts/stage-a-voice-test.ps1"
+      - "scripts/stage_a_voice_observations.py"
       - "tests/workflow_agent4_a4_25f_*.py"
+      - "tests/workflow_stage_a_one_click.py"
+      - "tests/workflow_stage_a_voice_test.py"
       - "docs/AGENT_4_A4_25_SERVER_SNAPSHOT_AUTHORITY.md"
       - "docs/agent4/A4-25F_PHYSICAL_QUALIFICATION_RUNBOOK.md"
       - "CURRENT_STATE.md"
@@ -67,7 +72,8 @@ jobs:
           @(
             "scripts/agent4_a4_25f_physical_operator.ps1",
             "scripts/agent4_a4_25f_cursor_matrix.ps1",
-            "scripts/agent4_a4_25f_cleanup_verify.ps1"
+            "scripts/agent4_a4_25f_cleanup_verify.ps1",
+            "scripts/ensure-stage-a-physical-app.ps1"
           ) | ForEach-Object {
             [void][scriptblock]::Create((Get-Content -LiteralPath $_ -Raw))
             Write-Host "parsed $_"
@@ -93,8 +99,47 @@ jobs:
       - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
       - name: Install platform + build-tools
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - name: Compile isolated A4-25f Android source and merged manifest
+      - name: Compile and assemble isolated A4-25f Android candidate
         working-directory: android
         run: |
           echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
-          ./gradlew :app:compileA425fKotlin :app:processA425fMainManifest --no-daemon --console=plain
+          ./gradlew :app:compileA425fKotlin :app:processA425fMainManifest :app:assembleA425f --no-daemon --console=plain
+      - name: Package exact-head physical APK receipt
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/kaliv-physical-candidate"
+          mkdir -p "$out"
+          cp android/app/build/outputs/apk/a425f/app-a425f.apk "$out/kaliv-physical-candidate.apk"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          out = Path(os.environ["RUNNER_TEMP"]) / "kaliv-physical-candidate"
+          apk = out / "kaliv-physical-candidate.apk"
+          version = Path("VERSION").read_text(encoding="utf-8").strip()
+          receipt = {
+              "schema": "kaliv-physical-candidate-apk/v1",
+              "git_sha": os.environ["EXPECTED_SHA"],
+              "candidate_version": version,
+              "app_version": f"{version}-a425f",
+              "package": "dk.ternedal.modelrig.a425f",
+              "sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
+              "production_activation": False,
+          }
+          (out / "receipt.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+      - name: Upload exact-head physical candidate APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kaliv-physical-candidate-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/kaliv-physical-candidate/
+          if-no-files-found: error
+          retention-days: 7
