@@ -19,7 +19,7 @@ function Run([string]$Label, [scriptblock]$Action) {
   if ($LASTEXITCODE -ne 0) { throw "$Label fejlede med exitkode $LASTEXITCODE" }
 }
 function Git([Parameter(ValueFromRemainingArguments=$true)][string[]]$A) {
-  $v = (& git @A 2>&1) -join "`n"; if ($LASTEXITCODE -ne 0) { throw $v }; return $v.Trim()
+  $v = (& git.exe @A 2>&1) -join "`n"; if ($LASTEXITCODE -ne 0) { throw $v }; return $v.Trim()
 }
 if ($env:OS -ne 'Windows_NT') { throw 'Beviskampagnen må kun køres på Windows-riggen.' }
 foreach ($cmd in @('git','python','powershell.exe','go','ollama')) {
