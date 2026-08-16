@@ -9,6 +9,7 @@ _cmd_launcher = (ROOT / "START_PROOF_CAMPAIGN.cmd").read_text(encoding="utf-8")
 _cleanup = (ROOT / "scripts" / "stop-stage-a-known-processes.ps1").read_text(encoding="utf-8")
 _exit_guard = (ROOT / "scripts" / "proof_campaign_exit_guard.py").read_text(encoding="utf-8")
 _runtime_manager = (ROOT / "scripts" / "proof-runtime-manager.ps1").read_text(encoding="utf-8")
+_current_adapter = (ROOT / "scripts" / "proof_stage_a_current.py").read_text(encoding="utf-8")
 
 assert "function Git(" in _proof_launcher
 assert "& git.exe @A" in _proof_launcher
@@ -65,6 +66,12 @@ assert "scheduled-supervisor" in _runtime_manager
 assert "manual-known-runtime" in _runtime_manager
 print("PASS: proof campaign suspends the known Kaliv supervisor instead of racing its child restart loop")
 print("PASS: normal ModelRig runtime is restored after proof and unknown port owners remain fail-closed")
+
+assert "def stop_exact_head_stack_for_voice()" in _current_adapter
+assert "stop-stage-a-known-processes.ps1" in _current_adapter
+assert _current_adapter.index("stop_exact_head_stack_for_voice()") < _current_adapter.index("stage-a-voice-test.ps1")
+assert "Voice-handoff: stopper den kendte loopback Stage A-stack" in _current_adapter
+print("PASS: current-head voice flow hands 8080/8099 off from loopback stack before LAN/Pixel stack")
 
 assert 'proof_campaign_exit_guard.py" mark' in _cmd_launcher
 assert 'proof_campaign_exit_guard.py" check' in _cmd_launcher
