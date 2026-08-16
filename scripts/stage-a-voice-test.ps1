@@ -8,6 +8,7 @@ Set-StrictMode -Version Latest
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $phoneScript = Join-Path $PSScriptRoot "stage-a-phone-test.ps1"
+$physicalAppScript = Join-Path $PSScriptRoot "ensure-stage-a-physical-app.ps1"
 $stackScript = Join-Path $PSScriptRoot "start-stage-a-validation-stack.ps1"
 $phoneStatePath = Join-Path $repoRoot "validation\stage-a-runtime\phone-test-state.json"
 $manualPath = Join-Path $repoRoot "validation\voice-manual-observations.json"
@@ -108,6 +109,11 @@ try {
     Write-Host "===============================================================" -ForegroundColor Cyan
     Write-Host "  Model: $model"
     Write-Host "  Ingen JSON skal redigeres manuelt."
+    Write-Host ""
+
+    Write-Host "  Klargør exact-head fysisk Android-kandidat..." -ForegroundColor Cyan
+    & $physicalAppScript
+    Write-Host "  Brug den isolerede kandidatapp, som netop blev åbnet på telefonen — ikke normal Kaliv." -ForegroundColor Yellow
     Write-Host ""
 
     & $phoneScript -PlannerModel $model
