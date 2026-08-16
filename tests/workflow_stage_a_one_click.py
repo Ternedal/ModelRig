@@ -87,7 +87,7 @@ print("PASS: new candidate SHA does not blanket-delete physical evidence that st
 assert "def voice_observations_current" in _current_adapter
 assert 'observations.PHONE_STATE_SCHEMA = "kaliv-stage-a-phone-test-state/v2"' in _current_adapter
 assert "python $currentAdapter voice-observations" in _voice_test
-assert "stage_a_voice_observations.py" not in _voice_test
+assert '& python (Join-Path $PSScriptRoot "stage_a_voice_observations.py")' not in _voice_test
 print("PASS: guided voice collector consumes the phone stack's current v2 state schema")
 
 assert 'proof_campaign_exit_guard.py" mark' in _cmd_launcher
