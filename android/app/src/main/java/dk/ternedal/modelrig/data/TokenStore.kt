@@ -241,6 +241,14 @@ class TokenStore(context: Context) {
      * so it stays put when Android auto-switches at sunset. Defaults to dark:
      * that is what every build before light mode looked like.
      */
+    /**
+     * Har velkomsten været vist? Sættes når den lukkes — også hvis man går
+     * direkte til opsætningen. Den skal introducere én gang, ikke stå i vejen.
+     */
+    var onboardingSeen: Boolean
+        get() = prefs.getBoolean("onboarding_seen", false)
+        set(v) { prefs.edit().putBoolean("onboarding_seen", v).apply() }
+
     var darkMode: Boolean
         get() = prefs.getBoolean("dark_mode", true)
         set(v) { prefs.edit().putBoolean("dark_mode", v).apply() }

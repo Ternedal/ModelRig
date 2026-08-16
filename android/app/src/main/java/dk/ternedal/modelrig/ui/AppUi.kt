@@ -77,8 +77,9 @@ import dk.ternedal.modelrig.ui.chat.paramsLabelFor
 import dk.ternedal.modelrig.ui.chat.CapabilitiesSheet
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.graphicsLayer
+import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 
-private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, Audit, ControlCenter, CloudPicker, VoiceCloudPicker, RigStatus, Devices, QrScan }
+private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, Audit, ControlCenter, CloudPicker, VoiceCloudPicker, RigStatus, Devices, QrScan, Onboarding }
 
 @Composable
 fun AppUi(
@@ -109,8 +110,28 @@ fun AppUi(
         Surface(color = KalivTheme.colors.background, modifier = Modifier.fillMaxSize()) {
             when (screen) {
                 Screen.Splash -> SplashScreen(onDone = {
-                    screen = if (store.hasRig || store.hasCloud) Screen.Chat else Screen.Setup
+                    // Velkomsten vises KUN første gang og kun når der hverken
+                    // er rig eller cloud. Har man allerede en kilde, er den
+                    // en forhindring frem for en introduktion.
+                    screen = when {
+                        store.hasRig || store.hasCloud -> Screen.Chat
+                        !store.onboardingSeen -> Screen.Onboarding
+                        else -> Screen.Setup
+                    }
                 })
+                Screen.Onboarding -> Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(KalivTheme.colors.background)
+                        .kalivScreenInsets()
+                        .padding(horizontal = 24.dp, vertical = 32.dp),
+                ) {
+                    dk.ternedal.modelrig.ui.chat.OnboardingCard(
+                        onScanQr = { store.onboardingSeen = true; screen = Screen.QrScan },
+                        onEnterCode = { store.onboardingSeen = true; screen = Screen.Setup },
+                        onSkip = { store.onboardingSeen = true; screen = Screen.Setup },
+                    )
+                }
                 Screen.QrScan -> QrScanScreen(
                     onBack = { screen = Screen.Setup },
                     onLink = { link -> scannedLink = link; screen = Screen.Setup },
