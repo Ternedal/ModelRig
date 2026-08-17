@@ -101,6 +101,35 @@ når du skal LÆSE tool-output** — ellers redigerer du din egen evidens væk.
 
 ---
 
+**Truffet af Anders 1.–16./8 — genåbn dem ikke.** ADR'erne er autoritet;
+de gengives IKKE her (A4-005's stopregel gælder ogsaa for denne fil):
+
+11. **ADR-A4-007** (1/8, #319) — Agent 4's operator-read: worker-hostet,
+    KUN backend-proxied, paired-device Bearer + eksplicit `agent4:read`-grant
+    pr. enhed, fraværende by default. Implementeret i baade worker og backend.
+12. **ADR-A4-008** (1/8, #324, præciseret i #329/#330) — side-effect handoff.
+    Fuldt implementeret 2/8 i fem slices (#331–335), alt fortsat DORMANT.
+13. **ADR-DC-001** (5/8, #349) — DevControl: fail-closed autoritetskæde for
+    kontrolleret selvudvikling. Menneskelig terminal autoritet kan ikke
+    delegeres; dvale BEVISES af gate; aktiveringsport kræver sin egen ADR.
+    **Sol ejer `devcontrol/`** (5/8, #350).
+14. **ADR-A3-001** (15/8, #598, `docs/agent3/`) — chattens adgang til Agent 3.
+    Smal åbning: kun eksplicit igangsættelse, kun READ-planer, godkendelser
+    og checkpoints bliver paa den dedikerede skærm. Aktiverer ingenting.
+15. **Redesign-rammen** (12/8, issue #518) — fire kontrastroller til AA;
+    px→dp uniform x1,2205; `GET /api/v1/system/status` i Go-backenden;
+    2.0.0 tagges når fase 3 er komplet; M3-komponenter med tokens.
+    DDR-001 i `docs/design/` er designautoritet efter ADR-mønsteret.
+16. **1.0.0 er udelukket som version** — updaterens `isNewer` afviser et fald
+    fra 1.58.x. Derfor gik vejen til 2.0.0.
+17. **De ti "designforslag"-skærme er vurderet** (16/8). Bygget: Del til
+    Kaliv, Svar-citater, Onboarding, Offline-kø. Droppet: Splash,
+    Model-hurtigskift, Tænke-tilstand (riggen har FASER, ikke modellens
+    tanker — en tankestrøm ville være attrap). Afventer: Eksport & backup,
+    KalivDev.
+
+---
+
 ## 1. Hvad projektet er
 
 Anders' personlige, selv-hostede AI-platform ("Local AI Control Surface"):
@@ -271,16 +300,41 @@ matchede nogen fil).
 tom release som CI derefter fyldte progressivt: hvis noget fejlede, stod der en
 halv release og lignede en hel. Flowet nu:
 
+0. **FØR noget som helst: tjek om arbejdet allerede er gjort.**
+   `git reflog` + `git ls-remote --tags origin`. FEM af 2.0.x-releasene var
+   allerede fuldført af et timeout't tvillingeforsøg da en session begyndte
+   paa dem. Der er EEN session — uventet arbejde er typisk dit eget.
 1. `git fetch` FØRST og vælg version over origins `VERSION` (parallelle
-   sessioner!) → `python3 scripts/version_tool.py set X.Y.Z` (synker alle fire
-   sites) → **`versionCode` = origins + 1** (slå det op i origins
+   sessioner!) → `python3 scripts/version_tool.py set X.Y.Z` (synker de fire
+   KODE-sites) → **`versionCode` = origins + 1** (slå det op i origins
    build.gradle.kts — skriv ALDRIG et fast tal her, F-008) →
    `python3 scripts/version_tool.py check`.
+   **`version_tool.py` er ikke hele bumpet.** Versionen står OGSAA i
+   `CURRENT_STATE.md`, `ACTIVATION_READINESS.md`,
+   `scripts/agent3_write_pilot_current_main.py` og
+   `AGENT3_WRITE_PILOT_CURRENT_MAIN.md`. Regenerér med
+   `python3 scripts/current_state.py`, `scripts/activation_readiness.py` og
+   `scripts/route_inventory.py` (sidstnævnte prober WORKERENS OpenAPI — nye
+   backend-ruter alene drifter den ikke). Springes de over, står bumpet rødt
+   paa test/exact-head, ikke paa selve versionen.
 2. Kør ALT lokalt: `(cd worker && PYTHONPATH=. python3 ../tests/worker_*.py)` ·
    `(cd backend && go build ./... && go vet ./... && go test ./...)` ·
    `python3 tests/workflow_*.py` · `ruff check --select E9,F63,F7,F82`.
    **Kotlin kan IKKE kompileres her — CI er den eneste verifikation.**
-3. `git add -A && git -c commit.gpgsign=false commit -q -F /tmp/m.txt` →
+3. **Alt landes gennem CI — ikke ved push til main.** Arbejdet ligger paa
+   en gren, får sin PR, og landingen er et fast-forward af
+   `refs/heads/main` EFTER grønt run paa den NYESTE sha. Verdiktet er en
+   HAARD betingelse INDE i landingsscriptet: check-runs paa præcis den sha,
+   alle `completed`, nul `failure` — ellers exit FØR patch. Verdikter
+   håndhæves, aldrig kun rapporteres (#315 landede paa rød CI med en falsk
+   grøn kommentar). **CHECK-RUNS ≠ WORKFLOW-RUNS:** fire grønne workflows
+   kan staa ved siden af et rødt CodeQL-check-run. Gate paa BEGGE.
+   Bekræft ad TO veje (`ls-remote` + REST med retry) FØR PR'en lukkes, og
+   lad lukningen ligge INDE i den bekræftede gren af scriptet — en
+   ';'-kædet lukning fyrer på falsk bekræftelse. `scripts/stale_check.py`
+   før enhver merge. Først når main står paa din sha gælder resten:
+
+   `git add -A && git -c commit.gpgsign=false commit -q -F /tmp/m.txt` →
    `git fetch -q origin main && git rebase origin/main` → **STRAM PROTOKOL
    (indført 18/7 efter to fejlplacerede tags):** tjek
    `[ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]` — står rebasen åben,
@@ -309,15 +363,17 @@ halv release og lignede en hel. Flowet nu:
 8. **Docs/CI-only = commit uden bump/tag/release.**
 9. **Efter hver release: post status til Notion** (side
    `389e6b11-bf7b-812f-89ba-fc17e3c2dcda`, dateret entry + Version-property).
-   Stående ordre, spørg ikke først. **Connectoren har været nede siden 16/7;
-   genbekræftet 19/7 (tool_search finder ingen Notion-tools i sessionen).
-   UDESTÅENDE (genbekræftet 4× d. 19/7 — tool_search finder fortsat ingen
-   Notion-tools): samlet status for 1.58.116→130 (durability-kæden
-   T-010→T-015 + T-014, to analyse-drops lukket samme dag inkl. Gate A
-   F-1202→F-1206, forensic pilot-slot, generalprøven af §1.6-kæden +
-   logging-fixet i 130) — post den som det FØRSTE når connectoren er
-   tilbage. Ét-tryks-artifact med den fulde tekst (→130) ligger hos
-   Anders.**
+   Stående ordre, spørg ikke først. *(Rettelse 17/8: den tidligere note her
+   sagde at connectoren havde været nede siden 16/7 og bad en fremtidig
+   session om at poste en samlet 1.58.116→130-status "som det første".
+   Connectoren virker, og den backlog er for længst overhalet af 2.0.x.
+   Noten er fjernet frem for at staa og pege paa et arbejde ingen skal lave.)*
+10. **En dårlig release når telefonen af sig selv nu.** Fra v2.0.2 har
+    appen en in-app-updater: den læser `/releases/latest`-redirectens
+    `Location`-header (ingen API, intet token), henter `kaliv-latest.apk`,
+    sammenligner strengt semver og tilbyder opdateringen.
+    Publicér derfor aldrig en release du ikke har verificeret — der er ikke
+    længere et manuelt sideload-trin imellem dig og enheden.
 
 ---
 
@@ -668,7 +724,36 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     `#250`/`#251` (blot gamle, gik rigtigt af sig selv) — samme syv filer,
     modsat udfald. Kør tjekket; gæt det ikke.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 30/7)
+## 9. Kø — hvem har bolden (16/7, opdateret 17/8)
+
+**[17/8 — status. main = `377c1370`, VERSION 2.0.8, seneste tag v2.0.8.]**
+
+**Fem landinger står paa main uden at være udsendt:** per-kilde til/fra
+(#604), Del til Kaliv (#606), Svar-citater (#607), Onboarding (#608),
+Offline-kø (#609). Næste naturlige skridt er **2.0.9** — se §4 for hvad et
+bump rent faktisk rører.
+
+**Hos Claude:** de resterende docs efter denne omgang (§2's hardware-liste er
+fra 12/7; `ROADMAP.md`, `STATUS.md`, `CAPABILITIES.md` og `TESTGUIDE.md` er
+alle fra før 2.0-æraen). `ROADMAP.md` skrives ikke om uden en retningsbeslutning
+fra Anders — det er hans dokument at disponere.
+
+**Hos Sol:** v2-analysens tre #296-fund (grant delvist request-bound,
+query-validation uden om faste fejlbodyer, write-modeller ikke strict);
+protected writer accepterer ikke-finite timestamps; weak-reference
+ownership-lifecycle; attempt-semantik + timeline-metrics; agent3-flaken i
+`worker_agent3_task_surface.py` (KeyError 'run' — grøn lokalt med
+`PYTHONPATH=.` fra `worker/`). Dertil opdelingen af #338 i slices mod
+ADR-DC-001.
+
+**Kræver riggen:** #230's okhttp-major (een chat-tur + een stemme-tur fra
+Pixel'en), T-016's Pixel-bekræftelse + første workflow-baseline, og
+bekræftelse af CodeQL-alertens lukning i code-scanning-visningen (PAT-scopet
+kan ikke læse alerts-API'et).
+
+**Aabent æstetisk valg:** paletten (#6F665C mod #5A4831) står stadig
+tosidet gated og træffes med begge apps foran sig.
+
 
 **[30/7, aften — Android-palettens divergens PINNET. claim: Claude 30/7
 23:20 — scope: token-JSON'ens `platformOverrides`, `Theme.kt`-kommentar,
@@ -1251,3 +1336,13 @@ preflight alene · `brand/05_handoff-docs/` = **OVERHALET**, ModelRig-era med
 safirblå; læs den ikke som gældende · Historiske (bannered): TESTGUIDE,
 PLAN_v1.13.0,
 ALVA_VOICE_ROADMAP_DELTA, CLIENT_BUILD_AND_TEST, KRAVSPEC_V5 (leveret).
+
+**Tilføjet i 2.0-æraen:** `docs/design/DDR-001*` = designbeslutning efter
+ADR-mønsteret, og `assets/design/kaliv-ui-tokens.json` er fortsat eneste
+tokenkilde · `docs/agent3/ADR-A3-001_CHAT_AGENT_SURFACE.md` = chattens
+adgang til Agent 3 · `AGENT_4_ARCHITECTURE_DECISIONS.md` = det KOMPLETTE
+ADR-indeks for Agent 4 · `ROUTE_INVENTORY.md` = genereret ruteliste (prober
+workerens OpenAPI) · `docs/devcontrol/dc-l*/` = evidens pr. DevControl-slice.
+**Advarsel:** `ROADMAP.md`, `STATUS.md`, `CAPABILITIES.md` og `TESTGUIDE.md`
+er ikke opdateret siden før redesignet — læs dem som historik, ikke som
+gældende.
